@@ -11,7 +11,7 @@ mod filters;
 
 pub use context::{
     CURRENT_PAIR_GROUND, IntegrationCoefficients, VerilogAEvaluationMode, VmContext,
-    terminal_pair_current_endpoints, terminal_pair_current_index,
+    terminal_pair_current_endpoints, terminal_pair_current_index, terminal_pair_current_len,
 };
 pub use error::VmError;
 pub use executor::Vm;

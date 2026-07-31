@@ -13,6 +13,7 @@
 //! `extern "C"` pointers, with no shim to absorb a mistake.
 
 use super::encoder::{ConditionCode, Gpr, X64Encoder, Xmm};
+use super::{CompiledX64Function, WindowsX64UnwindInfo, WindowsX64UnwindOperation};
 use crate::native::abi::{
     rspice_above_state_native, rspice_absdelay_state_native, rspice_acos, rspice_acosh,
     rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh, rspice_ceil, rspice_cos,
@@ -88,6 +89,7 @@ const LOCAL_SLOT_BYTES: i32 = 8;
 const LOCAL_FRAME_ALIGN_BYTES: i32 = 16;
 const INDEXED_ASSIGNMENT_SLOT_PTR_DISP: i32 = 0;
 const MAX_RUNTIME_LOOP_ITERATIONS: i32 = 100_000;
+const MAX_EXPRESSION_STACK_DEPTH: usize = 4096;
 #[cfg(windows)]
 const CALLER_SAVED_XMM_COUNT: usize = 6;
 #[cfg(not(windows))]
@@ -112,18 +114,34 @@ const XMM_STACK: [Xmm; 16] = [
 ];
 #[allow(dead_code)]
 pub(crate) fn compile_value_function(program: &NativeProgram) -> JitResult<Vec<u8>> {
+    Ok(compile_value_function_artifact(program)?.bytes)
+}
+
+pub(super) fn compile_value_function_artifact(
+    program: &NativeProgram,
+) -> JitResult<CompiledX64Function> {
+    validate_expression_stack_depth(program.max_stack_depth())?;
     let callee_saved_xmm_count = callee_saved_xmm_count_for_depth(program.max_stack_depth());
-    let local_frame_bytes = align_local_frame(callee_saved_xmm_frame_bytes(callee_saved_xmm_count));
+    let expression_spill_bytes = expression_spill_frame_bytes(program.max_stack_depth())?;
+    let local_frame_bytes = align_local_frame(
+        expression_spill_bytes + callee_saved_xmm_frame_bytes(callee_saved_xmm_count),
+    );
     let mut compiler = FunctionCompiler::new(
         program_uses_helper_calls(program),
         value_program_needs_saved_entry_args(program),
+        program_uses_helper_calls(program) || program.max_stack_depth() >= XMM_STACK.len(),
         local_frame_bytes,
         None,
-        None,
+        (expression_spill_bytes > 0).then_some(0),
         callee_saved_xmm_count,
     );
     compiler.emit_program(program)?;
-    compiler.finish_value_function()
+    let windows_unwind = compiler.windows_unwind_info();
+    let bytes = compiler.finish_value_function()?;
+    Ok(CompiledX64Function {
+        bytes,
+        windows_unwind,
+    })
 }
 
 #[allow(dead_code)]
@@ -131,18 +149,35 @@ pub(crate) fn compile_assignment_function(
     var_index: usize,
     program: &NativeProgram,
 ) -> JitResult<Vec<u8>> {
+    Ok(compile_assignment_function_artifact(var_index, program)?.bytes)
+}
+
+fn compile_assignment_function_artifact(
+    var_index: usize,
+    program: &NativeProgram,
+) -> JitResult<CompiledX64Function> {
+    validate_expression_stack_depth(program.max_stack_depth())?;
     let callee_saved_xmm_count = callee_saved_xmm_count_for_depth(program.max_stack_depth());
-    let local_frame_bytes = align_local_frame(callee_saved_xmm_frame_bytes(callee_saved_xmm_count));
+    let expression_spill_bytes = expression_spill_frame_bytes(program.max_stack_depth())?;
+    let local_frame_bytes = align_local_frame(
+        expression_spill_bytes + callee_saved_xmm_frame_bytes(callee_saved_xmm_count),
+    );
     let mut compiler = FunctionCompiler::new(
         program_uses_helper_calls(program),
         program_uses_helper_calls(program),
+        program_uses_helper_calls(program) || program.max_stack_depth() >= XMM_STACK.len(),
         local_frame_bytes,
         None,
-        None,
+        (expression_spill_bytes > 0).then_some(0),
         callee_saved_xmm_count,
     );
     compiler.emit_program(program)?;
-    compiler.finish_assignment_function(var_index)
+    let windows_unwind = compiler.windows_unwind_info();
+    let bytes = compiler.finish_assignment_function(var_index)?;
+    Ok(CompiledX64Function {
+        bytes,
+        windows_unwind,
+    })
 }
 
 #[derive(Debug)]
@@ -164,13 +199,21 @@ pub(crate) enum NativeAssignment {
     },
 }
 
+#[allow(dead_code)]
 pub(crate) fn compile_assignment_pass_function(
     assignments: &[NativeAssignment],
 ) -> JitResult<Vec<u8>> {
+    Ok(compile_assignment_pass_function_artifact(assignments)?.bytes)
+}
+
+pub(super) fn compile_assignment_pass_function_artifact(
+    assignments: &[NativeAssignment],
+) -> JitResult<CompiledX64Function> {
     let has_indexed_assignment = assignments.iter().any(assignment_has_indexed);
     let loop_depth = assignment_loop_depth(assignments);
     let uses_helper_calls = assignments.iter().any(assignment_uses_helper_calls);
     let max_stack_depth = assignment_max_stack_depth(assignments);
+    validate_expression_stack_depth(max_stack_depth)?;
     let callee_saved_xmm_count = callee_saved_xmm_count_for_depth(max_stack_depth);
     let indexed_slot_bytes = if has_indexed_assignment {
         LOCAL_SLOT_BYTES
@@ -178,38 +221,54 @@ pub(crate) fn compile_assignment_pass_function(
         0
     };
     let loop_counter_base_disp = (loop_depth > 0).then_some(indexed_slot_bytes);
+    let expression_spill_base_disp = indexed_slot_bytes + loop_depth * LOCAL_SLOT_BYTES;
+    let expression_spill_bytes = expression_spill_frame_bytes(max_stack_depth)?;
     let local_frame_bytes = align_local_frame(
-        indexed_slot_bytes
-            + loop_depth * LOCAL_SLOT_BYTES
+        expression_spill_base_disp
+            + expression_spill_bytes
             + callee_saved_xmm_frame_bytes(callee_saved_xmm_count),
     );
 
     let mut compiler = FunctionCompiler::new(
         uses_helper_calls,
         uses_helper_calls,
+        uses_helper_calls || max_stack_depth >= XMM_STACK.len(),
         local_frame_bytes,
         loop_counter_base_disp,
-        None,
+        (expression_spill_bytes > 0).then_some(expression_spill_base_disp),
         callee_saved_xmm_count,
     );
     for assignment in assignments {
         compiler.emit_assignment_step(assignment, 0)?;
     }
-    compiler.finish_assignment_pass_function()
+    let windows_unwind = compiler.windows_unwind_info();
+    let bytes = compiler.finish_assignment_pass_function()?;
+    Ok(CompiledX64Function {
+        bytes,
+        windows_unwind,
+    })
 }
 
 #[derive(Debug)]
 struct FunctionCompiler {
     encoder: X64Encoder,
+    /// Number of live expression values currently resident in `XMM_STACK`.
     depth: usize,
+    /// Number of older live expression values in the fixed local spill area.
+    spilled_depth: usize,
     literals: Vec<LiteralPatch>,
     vector_literals: Vec<VectorLiteralPatch>,
     uses_helper_calls: bool,
     saves_entry_args: bool,
+    uses_frame_pointer: bool,
     local_frame_bytes: i32,
     loop_counter_base_disp: Option<i32>,
+    expression_spill_base_disp: Option<i32>,
     callee_saved_xmm_count: usize,
     early_return_jumps: Vec<usize>,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    windows_unwind_operations: Vec<WindowsX64UnwindOperation>,
+    windows_unwind_prologue_size: u8,
 }
 
 #[derive(Debug)]
@@ -228,9 +287,10 @@ impl FunctionCompiler {
     fn new(
         uses_helper_calls: bool,
         saves_entry_args: bool,
+        uses_frame_pointer: bool,
         local_frame_bytes: i32,
         loop_counter_base_disp: Option<i32>,
-        _stateful_scratch_base_disp: Option<i32>,
+        expression_spill_base_disp: Option<i32>,
         callee_saved_xmm_count: usize,
     ) -> Self {
         debug_assert_eq!(local_frame_bytes % 16, 0);
@@ -238,14 +298,19 @@ impl FunctionCompiler {
         let mut compiler = Self {
             encoder: X64Encoder::new(),
             depth: 0,
+            spilled_depth: 0,
             literals: Vec::new(),
             vector_literals: Vec::new(),
             uses_helper_calls,
             saves_entry_args,
+            uses_frame_pointer,
             local_frame_bytes,
             loop_counter_base_disp,
+            expression_spill_base_disp,
             callee_saved_xmm_count,
             early_return_jumps: Vec::new(),
+            windows_unwind_operations: Vec::new(),
+            windows_unwind_prologue_size: 0,
         };
         if compiler.has_stack_setup() {
             compiler.emit_prologue();
@@ -254,7 +319,7 @@ impl FunctionCompiler {
     }
 
     fn has_stack_setup(&self) -> bool {
-        self.saves_entry_args || self.local_frame_bytes > 0
+        self.uses_frame_pointer || self.saves_entry_args || self.local_frame_bytes > 0
     }
 
     fn saves_entry_args(&self) -> bool {
@@ -263,15 +328,10 @@ impl FunctionCompiler {
 
     fn emit_program(&mut self, program: &NativeProgram) -> JitResult<()> {
         program.validate_dependency_metadata()?;
-        if program.max_stack_depth() > XMM_STACK.len() {
-            return Err(register_allocation_error(format!(
-                "expression stack depth {} exceeds {} XMM registers",
-                program.max_stack_depth(),
-                XMM_STACK.len()
-            )));
-        }
+        validate_expression_stack_depth(program.max_stack_depth())?;
 
         self.depth = 0;
+        self.spilled_depth = 0;
         let mut context_pointer_cache = None;
         for op in program.ops() {
             match *op {
@@ -426,10 +486,14 @@ impl FunctionCompiler {
             }
         }
 
-        if self.depth != 1 {
+        if self.logical_depth() != 1 {
             return Err(JitError::Encoding {
                 model: MODEL.into(),
-                detail: format!("final expression stack depth {}, expected 1", self.depth).into(),
+                detail: format!(
+                    "final expression stack depth {}, expected 1",
+                    self.logical_depth()
+                )
+                .into(),
             });
         }
 
@@ -456,9 +520,20 @@ impl FunctionCompiler {
     }
 
     fn emit_prologue(&mut self) {
+        if self.uses_frame_pointer {
+            self.encoder.push_r64(Gpr::Rbp);
+            self.record_windows_unwind_push(5);
+            // Preserve the pre-call stack parity expected by the existing
+            // temporary helper/spill frames while giving the unwinder a
+            // stable nonvolatile anchor.
+            self.encoder.push_r64(Gpr::R14);
+            self.record_windows_unwind_push(14);
+        }
         if self.saves_entry_args() {
             self.encoder.push_r64(Gpr::R12);
+            self.record_windows_unwind_push(12);
             self.encoder.push_r64(Gpr::R13);
+            self.record_windows_unwind_push(13);
             self.encoder
                 .mov_r64_r64(saved_ctx_arg_reg(), entry_ctx_arg_reg());
             self.encoder
@@ -466,8 +541,14 @@ impl FunctionCompiler {
         }
         if self.local_frame_bytes > 0 {
             self.encoder.sub_rsp_imm32(self.local_frame_bytes);
+            self.record_windows_unwind_stack_allocation(self.local_frame_bytes as u32);
         }
         self.emit_callee_saved_xmm_stores();
+        if self.uses_frame_pointer {
+            self.encoder.mov_r64_r64(Gpr::Rbp, Gpr::Rsp);
+            self.record_windows_unwind_set_frame_pointer();
+        }
+        self.windows_unwind_prologue_size = self.current_windows_unwind_code_offset();
     }
 
     fn emit_return(&mut self) {
@@ -479,6 +560,10 @@ impl FunctionCompiler {
             self.encoder.pop_r64(Gpr::R13);
             self.encoder.pop_r64(Gpr::R12);
         }
+        if self.uses_frame_pointer {
+            self.encoder.pop_r64(Gpr::R14);
+            self.encoder.pop_r64(Gpr::Rbp);
+        }
         self.encoder.ret();
     }
 
@@ -488,7 +573,74 @@ impl FunctionCompiler {
             let disp = self.callee_saved_xmm_disp(index);
             self.encoder
                 .movdqu_m128_base_disp32_xmm(Gpr::Rsp, disp, register);
+            self.record_windows_unwind_xmm_save(xmm_unwind_register(register), disp as u32);
         }
+    }
+
+    fn windows_unwind_info(&self) -> Option<WindowsX64UnwindInfo> {
+        #[cfg(windows)]
+        {
+            (!self.windows_unwind_operations.is_empty()).then(|| WindowsX64UnwindInfo {
+                prologue_size: self.windows_unwind_prologue_size,
+                frame_register: if self.uses_frame_pointer { 5 } else { 0 },
+                operations: self.windows_unwind_operations.clone(),
+            })
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
+    }
+
+    fn current_windows_unwind_code_offset(&self) -> u8 {
+        let offset = self.encoder.position();
+        debug_assert!(
+            u8::try_from(offset).is_ok(),
+            "fixed native x64 prologue must fit the Windows unwind u8 offset"
+        );
+        offset as u8
+    }
+
+    fn record_windows_unwind_push(&mut self, register: u8) {
+        #[cfg(windows)]
+        self.windows_unwind_operations
+            .push(WindowsX64UnwindOperation::PushNonvolatile {
+                code_offset: self.current_windows_unwind_code_offset(),
+                register,
+            });
+        #[cfg(not(windows))]
+        let _ = register;
+    }
+
+    fn record_windows_unwind_stack_allocation(&mut self, size: u32) {
+        #[cfg(windows)]
+        self.windows_unwind_operations
+            .push(WindowsX64UnwindOperation::AllocateStack {
+                code_offset: self.current_windows_unwind_code_offset(),
+                size,
+            });
+        #[cfg(not(windows))]
+        let _ = size;
+    }
+
+    fn record_windows_unwind_xmm_save(&mut self, register: u8, stack_offset: u32) {
+        #[cfg(windows)]
+        self.windows_unwind_operations
+            .push(WindowsX64UnwindOperation::SaveXmm128 {
+                code_offset: self.current_windows_unwind_code_offset(),
+                register,
+                stack_offset,
+            });
+        #[cfg(not(windows))]
+        let _ = (register, stack_offset);
+    }
+
+    fn record_windows_unwind_set_frame_pointer(&mut self) {
+        #[cfg(windows)]
+        self.windows_unwind_operations
+            .push(WindowsX64UnwindOperation::SetFramePointer {
+                code_offset: self.current_windows_unwind_code_offset(),
+            });
     }
 
     fn emit_callee_saved_xmm_loads(&mut self) {
@@ -523,12 +675,12 @@ impl FunctionCompiler {
     }
 
     fn emit_assignment_store(&mut self, var_index: usize) -> JitResult<()> {
-        if self.depth != 1 {
+        if self.logical_depth() != 1 {
             return Err(JitError::Encoding {
                 model: MODEL.into(),
                 detail: format!(
                     "assignment expression stack depth {}, expected 1",
-                    self.depth
+                    self.logical_depth()
                 )
                 .into(),
             });
@@ -539,6 +691,7 @@ impl FunctionCompiler {
             Xmm::Xmm0,
         );
         self.depth = 0;
+        self.spilled_depth = 0;
         Ok(())
     }
 
@@ -614,10 +767,14 @@ impl FunctionCompiler {
     }
 
     fn emit_loop_exit_if_zero(&mut self) -> JitResult<usize> {
-        if self.depth != 1 {
+        if self.logical_depth() != 1 {
             return Err(JitError::Encoding {
                 model: MODEL.into(),
-                detail: format!("loop condition stack depth {}, expected 1", self.depth).into(),
+                detail: format!(
+                    "loop condition stack depth {}, expected 1",
+                    self.logical_depth()
+                )
+                .into(),
             });
         }
 
@@ -626,6 +783,7 @@ impl FunctionCompiler {
         self.encoder.test_r64_r64(Gpr::R10, Gpr::R10);
         let loop_exit = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
         self.depth = 0;
+        self.spilled_depth = 0;
         Ok(loop_exit)
     }
 
@@ -652,12 +810,12 @@ impl FunctionCompiler {
         }
 
         self.emit_program(value)?;
-        if self.depth != 1 {
+        if self.logical_depth() != 1 {
             return Err(JitError::Encoding {
                 model: MODEL.into(),
                 detail: format!(
                     "indexed assignment value stack depth {}, expected 1",
-                    self.depth
+                    self.logical_depth()
                 )
                 .into(),
             });
@@ -667,20 +825,77 @@ impl FunctionCompiler {
         self.encoder
             .movsd_m64_base_disp32_xmm(Gpr::Rax, 0, Xmm::Xmm0);
         self.depth = 0;
+        self.spilled_depth = 0;
         Ok(())
     }
 
     fn push_register(&mut self) -> JitResult<Xmm> {
         if self.depth >= XMM_STACK.len() {
-            return Err(register_allocation_error(format!(
-                "expression stack requires more than {} XMM registers",
-                XMM_STACK.len()
-            )));
+            let spill_disp = self.expression_spill_disp(self.spilled_depth)?;
+            self.encoder
+                .movsd_m64_base_disp32_xmm(Gpr::Rsp, spill_disp, XMM_STACK[0]);
+            for index in 0..XMM_STACK.len() - 1 {
+                self.encoder
+                    .movsd_xmm_xmm(XMM_STACK[index], XMM_STACK[index + 1]);
+            }
+            self.depth -= 1;
+            self.spilled_depth += 1;
         }
 
         let register = XMM_STACK[self.depth];
         self.depth += 1;
         Ok(register)
+    }
+
+    fn logical_depth(&self) -> usize {
+        self.spilled_depth + self.depth
+    }
+
+    fn expression_spill_disp(&self, index: usize) -> JitResult<i32> {
+        let base = self.expression_spill_base_disp.ok_or_else(|| {
+            register_allocation_error(
+                "expression spill requested without reserved local-frame storage".to_string(),
+            )
+        })?;
+        index
+            .checked_mul(WORD_BYTES)
+            .and_then(|offset| i32::try_from(offset).ok())
+            .and_then(|offset| base.checked_add(offset))
+            .ok_or_else(|| {
+                register_allocation_error(
+                    "expression spill slot exceeds the x64 frame displacement range".to_string(),
+                )
+            })
+    }
+
+    /// Drops values already consumed by an operation, then refills the bottom
+    /// of the register window from the fixed spill area. The top of the
+    /// logical expression stack therefore remains in XMM registers.
+    fn drop_stack_values(&mut self, count: usize) -> JitResult<()> {
+        if count > self.depth {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!(
+                    "expression stack drop {count} exceeds resident depth {}",
+                    self.depth
+                )
+                .into(),
+            });
+        }
+        self.depth -= count;
+        while self.spilled_depth > 0 && self.depth < XMM_STACK.len() {
+            for index in (0..self.depth).rev() {
+                self.encoder
+                    .movsd_xmm_xmm(XMM_STACK[index + 1], XMM_STACK[index]);
+            }
+            let spill_index = self.spilled_depth - 1;
+            let spill_disp = self.expression_spill_disp(spill_index)?;
+            self.encoder
+                .movsd_xmm_m64_base_disp32(XMM_STACK[0], Gpr::Rsp, spill_disp);
+            self.spilled_depth -= 1;
+            self.depth += 1;
+        }
+        Ok(())
     }
 
     fn scratch_register(&self) -> JitResult<Xmm> {
@@ -709,7 +924,7 @@ impl FunctionCompiler {
             BinaryOp::Mul => self.encoder.mulsd_xmm_xmm(left, right),
             BinaryOp::Div => self.encoder.divsd_xmm_xmm(left, right),
         }
-        self.depth -= 1;
+        self.drop_stack_values(1)?;
         Ok(())
     }
 
@@ -1149,6 +1364,7 @@ impl FunctionCompiler {
         self.emit_dynamic_variable_slot_slow_return(len, lower);
         self.patch_rel32_to_current(fast_done)?;
         self.depth = 0;
+        self.spilled_depth = 0;
         Ok(())
     }
 
@@ -1348,6 +1564,7 @@ impl FunctionCompiler {
 
         self.patch_rel32_to_current(done)?;
         self.depth = 0;
+        self.spilled_depth = 0;
         Ok(())
     }
 
@@ -1374,7 +1591,7 @@ impl FunctionCompiler {
         let left = XMM_STACK[self.depth - 2];
         let right = XMM_STACK[self.depth - 1];
         self.emit_binary_helper_call(left, right, binary_math_helper(op));
-        self.depth -= 1;
+        self.drop_stack_values(1)?;
         Ok(())
     }
 
@@ -1400,7 +1617,7 @@ impl FunctionCompiler {
                 self.emit_integer_bitwise_op(left, right, op)?
             }
         }
-        self.depth -= 1;
+        self.drop_stack_values(1)?;
         Ok(())
     }
 
@@ -1788,7 +2005,7 @@ impl FunctionCompiler {
         self.emit_limit_state_error_return(rspice_native_limit_state_values_error);
 
         self.patch_rel32_to_current(done_after_initialized_store)?;
-        self.depth -= 1;
+        self.drop_stack_values(1)?;
         Ok(())
     }
 
@@ -1825,7 +2042,7 @@ impl FunctionCompiler {
             state_index,
             rspice_limiter_store_native,
         );
-        self.depth -= 1;
+        self.drop_stack_values(1)?;
         Ok(())
     }
 
@@ -1879,7 +2096,7 @@ impl FunctionCompiler {
 
         let target = XMM_STACK[self.depth - 2];
         self.encoder.xorpd_xmm_xmm(target, target);
-        self.depth -= 1;
+        self.drop_stack_values(1)?;
         Ok(())
     }
 
@@ -1917,7 +2134,7 @@ impl FunctionCompiler {
 
         let start = XMM_STACK[self.depth - 4];
         self.emit_operand_context_filter_helper_call(start, 4, timer_id, rspice_timer_state_native);
-        self.depth -= 3;
+        self.drop_stack_values(3)?;
         Ok(())
     }
 
@@ -1940,7 +2157,7 @@ impl FunctionCompiler {
             filter_id,
             rspice_transition_state_native,
         );
-        self.depth -= 3;
+        self.drop_stack_values(3)?;
         Ok(())
     }
 
@@ -1954,7 +2171,7 @@ impl FunctionCompiler {
 
         let input = XMM_STACK[self.depth - 3];
         self.emit_operand_context_filter_helper_call(input, 3, filter_id, rspice_slew_state_native);
-        self.depth -= 2;
+        self.drop_stack_values(2)?;
         Ok(())
     }
 
@@ -1977,7 +2194,7 @@ impl FunctionCompiler {
             buffer_id,
             rspice_absdelay_state_native,
         );
-        self.depth -= 1;
+        self.drop_stack_values(1)?;
         Ok(())
     }
 
@@ -1996,7 +2213,7 @@ impl FunctionCompiler {
             detector_id,
             rspice_cross_state_native,
         );
-        self.depth -= 4;
+        self.drop_stack_values(4)?;
         Ok(())
     }
 
@@ -2015,7 +2232,7 @@ impl FunctionCompiler {
             detector_id,
             rspice_above_state_native,
         );
-        self.depth -= 3;
+        self.drop_stack_values(3)?;
         Ok(())
     }
 
@@ -2038,7 +2255,7 @@ impl FunctionCompiler {
             detector_id,
             rspice_last_crossing_state_native,
         );
-        self.depth -= 1;
+        self.drop_stack_values(1)?;
         Ok(())
     }
 
@@ -2087,7 +2304,7 @@ impl FunctionCompiler {
             state_index,
             rspice_idt_state_native,
         );
-        self.depth -= 1;
+        self.drop_stack_values(1)?;
         Ok(())
     }
 
@@ -2119,7 +2336,7 @@ impl FunctionCompiler {
             state_index,
             rspice_idtmod_state_native,
         );
-        self.depth -= 3;
+        self.drop_stack_values(3)?;
         Ok(())
     }
 
@@ -2238,7 +2455,7 @@ impl FunctionCompiler {
                 self.emit_unordered_or_condition_result(left, ConditionCode::NotEqual);
             }
         }
-        self.depth -= 1;
+        self.drop_stack_values(1)?;
         Ok(())
     }
 
@@ -2328,7 +2545,7 @@ impl FunctionCompiler {
         }
         self.encoder.movzx_r32_r8(Gpr::R10, Gpr::R10);
         self.encoder.cvtsi2sd_xmm_r32(left, Gpr::R10);
-        self.depth -= 1;
+        self.drop_stack_values(1)?;
         Ok(())
     }
 
@@ -2412,7 +2629,7 @@ impl FunctionCompiler {
         self.encoder.test_r8_r8(Gpr::R10, Gpr::R10);
         self.encoder.cmovne_r64_r64(Gpr::R8, Gpr::R11);
         self.encoder.movq_xmm_r64(cond, Gpr::R8);
-        self.depth -= 2;
+        self.drop_stack_values(2)?;
         Ok(())
     }
 
@@ -2429,7 +2646,7 @@ impl FunctionCompiler {
         self.emit_extremum_left_prelude(left);
         self.emit_extremum_register_op(left, right, op);
         self.emit_extremum_select_left_fixup(left, right);
-        self.depth -= 1;
+        self.drop_stack_values(1)?;
         Ok(())
     }
 
@@ -2911,6 +3128,7 @@ impl FunctionCompiler {
 
     fn finish_with_literals(self) -> JitResult<Vec<u8>> {
         let mut bytes = self.encoder.into_bytes();
+        super::verify_x64_function_code(&bytes, "generated function")?;
         let mut literal_offsets: Vec<(u64, usize)> = Vec::new();
         if !self.literals.is_empty() {
             let padding = (LITERAL_POOL_ALIGNMENT - (bytes.len() % LITERAL_POOL_ALIGNMENT))
@@ -3096,6 +3314,27 @@ fn align_local_frame(bytes: i32) -> i32 {
     }
 }
 
+fn validate_expression_stack_depth(max_stack_depth: usize) -> JitResult<()> {
+    if max_stack_depth > MAX_EXPRESSION_STACK_DEPTH {
+        return Err(register_allocation_error(format!(
+            "expression stack depth {max_stack_depth} exceeds the {MAX_EXPRESSION_STACK_DEPTH}-value safety limit"
+        )));
+    }
+    Ok(())
+}
+
+fn expression_spill_frame_bytes(max_stack_depth: usize) -> JitResult<i32> {
+    max_stack_depth
+        .saturating_sub(XMM_STACK.len())
+        .checked_mul(WORD_BYTES)
+        .and_then(|bytes| i32::try_from(bytes).ok())
+        .ok_or_else(|| {
+            register_allocation_error(
+                "expression spill frame exceeds the x64 frame displacement range".to_string(),
+            )
+        })
+}
+
 fn callee_saved_xmm_count_for_depth(max_stack_depth: usize) -> usize {
     max_stack_depth
         .min(XMM_STACK.len())
@@ -3108,6 +3347,27 @@ fn callee_saved_xmm_frame_bytes(count: usize) -> i32 {
 
 fn callee_saved_xmm_register(index: usize) -> Xmm {
     XMM_STACK[CALLER_SAVED_XMM_COUNT + index]
+}
+
+fn xmm_unwind_register(register: Xmm) -> u8 {
+    match register {
+        Xmm::Xmm0 => 0,
+        Xmm::Xmm1 => 1,
+        Xmm::Xmm2 => 2,
+        Xmm::Xmm3 => 3,
+        Xmm::Xmm4 => 4,
+        Xmm::Xmm5 => 5,
+        Xmm::Xmm6 => 6,
+        Xmm::Xmm7 => 7,
+        Xmm::Xmm8 => 8,
+        Xmm::Xmm9 => 9,
+        Xmm::Xmm10 => 10,
+        Xmm::Xmm11 => 11,
+        Xmm::Xmm12 => 12,
+        Xmm::Xmm13 => 13,
+        Xmm::Xmm14 => 14,
+        Xmm::Xmm15 => 15,
+    }
 }
 
 fn unary_math_helper(op: UnaryMathOp) -> UnaryHelper {
@@ -3514,11 +3774,11 @@ mod tests {
 
     #[test]
     fn literal_pool_reuses_identical_bit_patterns() {
-        let mut compiler = FunctionCompiler::new(false, false, 0, None, None, 0);
-        compiler.encoder.ret();
+        let mut compiler = FunctionCompiler::new(false, false, false, 0, None, None, 0);
         compiler.emit_literal_load(Xmm::Xmm0, 2.0);
         compiler.emit_literal_load(Xmm::Xmm1, 2.0);
         compiler.emit_literal_load(Xmm::Xmm2, 3.0);
+        compiler.encoder.ret();
 
         let bytes = compiler
             .finish_with_literals()
@@ -3552,10 +3812,10 @@ mod tests {
 
     #[test]
     fn vector_literal_pool_reuses_abs_masks_and_aligns_to_16_bytes() {
-        let mut compiler = FunctionCompiler::new(false, false, 0, None, None, 0);
-        compiler.encoder.ret();
+        let mut compiler = FunctionCompiler::new(false, false, false, 0, None, None, 0);
         compiler.emit_abs_register(Xmm::Xmm0);
         compiler.emit_abs_register(Xmm::Xmm1);
+        compiler.encoder.ret();
 
         let bytes = compiler
             .finish_with_literals()
@@ -3998,7 +4258,7 @@ mod tests {
             compile_value_function(&program).expect("compile terminal idtmod value function");
 
         assert!(
-            bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+            contains_bytes(&bytes, &[0x41, 0x54, 0x41, 0x55]),
             "terminal idtmod must preserve context and vars pointers across its internal helper call"
         );
 
@@ -4053,7 +4313,7 @@ mod tests {
         let bytes = compile_value_function(&program).expect("compile helper-call value function");
 
         assert!(
-            bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+            contains_bytes(&bytes, &[0x41, 0x54, 0x41, 0x55]),
             "helper calls before later context loads must preserve context and vars pointers"
         );
 
@@ -4199,7 +4459,7 @@ mod tests {
         let bytes =
             compile_value_function(&program).expect("compile pure-helper before table-helper leaf");
         assert!(
-            bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+            contains_bytes(&bytes, &[0x41, 0x54, 0x41, 0x55]),
             "table helper after an earlier helper must use saved ctx/vars registers"
         );
 
@@ -5883,7 +6143,7 @@ mod tests {
             .expect("compile huge indexed range assignment pass");
 
         assert!(
-            bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+            contains_bytes(&bytes, &[0x41, 0x54, 0x41, 0x55]),
             "huge indexed ranges must keep the helper-call prologue"
         );
     }
@@ -10697,6 +10957,48 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_spills_deep_expression_across_helper_call() {
+        let stack_depth = 64;
+        let mut ops = (0..stack_depth)
+            .map(NativeOp::LoadVariable)
+            .collect::<Vec<_>>();
+        ops.push(NativeOp::UnaryMath(UnaryMathOp::Exp));
+        ops.extend(std::iter::repeat_n(NativeOp::Add, stack_depth - 1));
+        let program = NativeProgram::from_ops_for_test(ops, stack_depth, Vec::new(), Vec::new());
+        let bytes =
+            compile_value_function(&program).expect("compile deep expression-spilling leaf");
+        let memory =
+            ExecutableMemory::allocate(&bytes).expect("allocate deep expression-spilling leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let ctx = eval_context(&[], &[], &[], &[]);
+        let mut variables = (1..=stack_depth)
+            .map(|value| value as f64)
+            .collect::<Vec<_>>();
+        variables[stack_depth - 1] = 0.25;
+        let mut expected = runtime_exp(variables[stack_depth - 1]);
+        for value in variables[..stack_depth - 1].iter().rev() {
+            expected += *value;
+        }
+
+        assert_eq!(f(&ctx, variables.as_ptr()).to_bits(), expected.to_bits());
+    }
+
+    #[test]
+    fn generated_value_leaf_rejects_unbounded_expression_stack() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![NativeOp::Const(1.0)],
+            super::MAX_EXPRESSION_STACK_DEPTH + 1,
+            Vec::new(),
+            Vec::new(),
+        );
+        let error =
+            compile_value_function(&program).expect_err("unbounded expression stack must fail");
+        assert!(error.to_string().contains("4096-value safety limit"));
+    }
+
+    #[test]
     fn generated_value_leaf_runs_from_nonzero_concatenated_image_offset() {
         let program = native_program(
             EntryKind::StampValue,
@@ -11182,7 +11484,7 @@ mod tests {
     }
 
     fn abi_sentinel_compiler() -> FunctionCompiler {
-        FunctionCompiler::new(true, false, 0, None, None, 0)
+        FunctionCompiler::new(true, false, true, 0, None, None, 0)
     }
 
     fn push_abi_sentinel_const(compiler: &mut FunctionCompiler, value: f64) -> Xmm {

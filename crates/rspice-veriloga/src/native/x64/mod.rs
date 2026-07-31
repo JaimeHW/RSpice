@@ -25,6 +25,8 @@ use super::model::{
     NativeRequiredStorage,
 };
 use super::runtime::ExecutableMemory;
+#[cfg(windows)]
+use super::runtime::WindowsX64RuntimeFunction;
 use super::{JitError, JitResult};
 use crate::canonical_ir::{
     CanonicalIrArtifact, EquationId, ExprId, HirAnalogOperator, HirAssignment, HirExprKind,
@@ -42,6 +44,49 @@ use std::collections::HashMap;
 
 const ENTRY_ALIGNMENT: usize = 16;
 const X64_NOP: u8 = 0x90;
+
+#[derive(Debug)]
+struct CompiledX64Function {
+    bytes: Vec<u8>,
+    windows_unwind: Option<WindowsX64UnwindInfo>,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(not(windows), allow(dead_code))]
+struct WindowsX64UnwindInfo {
+    prologue_size: u8,
+    frame_register: u8,
+    operations: Vec<WindowsX64UnwindOperation>,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(not(windows), allow(dead_code))]
+enum WindowsX64UnwindOperation {
+    PushNonvolatile {
+        code_offset: u8,
+        register: u8,
+    },
+    AllocateStack {
+        code_offset: u8,
+        size: u32,
+    },
+    SaveXmm128 {
+        code_offset: u8,
+        register: u8,
+        stack_offset: u32,
+    },
+    SetFramePointer {
+        code_offset: u8,
+    },
+}
+
+#[derive(Debug)]
+#[cfg_attr(not(windows), allow(dead_code))]
+struct PendingWindowsX64UnwindFunction {
+    begin: CodeOffset,
+    end: CodeOffset,
+    info: WindowsX64UnwindInfo,
+}
 
 #[cfg(feature = "native-bytecode-contract-tests")]
 pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
@@ -102,6 +147,7 @@ fn compile_model_inner(
 
     let mut image = Vec::new();
     let mut entry_starts = Vec::new();
+    let mut windows_unwind_functions = Vec::new();
     let (assignment, post_assignment, assignment_dependencies, post_assignment_dependencies) =
         append_assignment_entries(
             model,
@@ -109,6 +155,7 @@ fn compile_model_inner(
             base_limits.with_prior_current_probes(&assignment_prior_current_probes),
             &mut image,
             &mut entry_starts,
+            &mut windows_unwind_functions,
         )?;
 
     let mut parameter_defaults = Vec::with_capacity(model.parameters.len());
@@ -121,7 +168,12 @@ fn compile_model_inner(
                 program,
                 base_limits,
             )?;
-            Some(append_value_entry(&mut image, &mut entry_starts, &program)?)
+            Some(append_value_entry(
+                &mut image,
+                &mut entry_starts,
+                &mut windows_unwind_functions,
+                &program,
+            )?)
         } else {
             None
         };
@@ -170,7 +222,12 @@ fn compile_model_inner(
             )?;
             static_condition_branch_unknown_dependencies
                 .push(program.branch_unknown_dependencies().to_vec());
-            Some(append_value_entry(&mut image, &mut entry_starts, &program)?)
+            Some(append_value_entry(
+                &mut image,
+                &mut entry_starts,
+                &mut windows_unwind_functions,
+                &program,
+            )?)
         } else {
             static_condition_branch_unknown_dependencies.push(Vec::new());
             None
@@ -191,7 +248,12 @@ fn compile_model_inner(
         stamp_value_prior_current_dependencies.push(program.prior_current_dependencies().to_vec());
         stamp_value_branch_unknown_dependencies
             .push(program.branch_unknown_dependencies().to_vec());
-        stamp_values.push(append_value_entry(&mut image, &mut entry_starts, &program)?);
+        stamp_values.push(append_value_entry(
+            &mut image,
+            &mut entry_starts,
+            &mut windows_unwind_functions,
+            &program,
+        )?);
 
         let mut jacobian_current_pairs = available_current_pairs.clone();
         if let Some((pos, neg)) = infer_current_terminal_pair(stamp) {
@@ -248,7 +310,12 @@ fn compile_model_inner(
                 .push(program.prior_current_dependencies().to_vec());
             stamp_jacobian_branch_unknown_dependencies
                 .push(program.branch_unknown_dependencies().to_vec());
-            stamp_jacobians.push(append_value_entry(&mut image, &mut entry_starts, &program)?);
+            stamp_jacobians.push(append_value_entry(
+                &mut image,
+                &mut entry_starts,
+                &mut windows_unwind_functions,
+                &program,
+            )?);
         }
         jacobians.push(stamp_jacobians);
         jacobian_current_dependencies.push(stamp_jacobian_current_dependencies);
@@ -287,6 +354,7 @@ fn compile_model_inner(
             stamp_reactive_jacobians.push(append_value_entry(
                 &mut image,
                 &mut entry_starts,
+                &mut windows_unwind_functions,
                 &program,
             )?);
         }
@@ -333,6 +401,7 @@ fn compile_model_inner(
         noise_psd.push(append_value_entry(
             &mut image,
             &mut entry_starts,
+            &mut windows_unwind_functions,
             &psd_program,
         )?);
 
@@ -354,6 +423,7 @@ fn compile_model_inner(
             Some(append_value_entry(
                 &mut image,
                 &mut entry_starts,
+                &mut windows_unwind_functions,
                 &exponent_program,
             )?)
         } else {
@@ -383,19 +453,39 @@ fn compile_model_inner(
         })
         .collect::<JitResult<Vec<_>>>()?;
 
+    let evaluation_kernel = align_image_for_entry(&mut image, &mut entry_starts);
+    let evaluation_kernel_artifact = driver::compile_evaluation_kernel_artifact(
+        evaluation_kernel.as_usize(),
+        assignment,
+        &stamp_values,
+        &published_current_pairs,
+    )?;
+    append_compiled_function_at_offset(
+        &mut image,
+        evaluation_kernel,
+        &mut windows_unwind_functions,
+        evaluation_kernel_artifact,
+    )?;
+
     let stamp_kernel = align_image_for_entry(&mut image, &mut entry_starts);
-    let stamp_kernel_bytes = driver::compile_stamp_kernel(
+    let stamp_kernel_artifact = driver::compile_stamp_kernel_artifact(
         stamp_kernel.as_usize(),
         assignment,
         &stamp_values,
         &jacobians,
         &published_current_pairs,
     )?;
-    image.extend_from_slice(&stamp_kernel_bytes);
+    append_compiled_function_at_offset(
+        &mut image,
+        stamp_kernel,
+        &mut windows_unwind_functions,
+        stamp_kernel_artifact,
+    )?;
 
     let entries = NativeEntryOffsets {
         assignment,
         post_assignment,
+        evaluation_kernel: Some(evaluation_kernel),
         stamp_kernel: Some(stamp_kernel),
         parameter_defaults,
         static_conditions,
@@ -430,7 +520,15 @@ fn compile_model_inner(
         noise_exponent_branch_unknowns: noise_exponent_branch_unknown_dependencies,
     };
     validate_compiled_entry_shape(model, &entries, &current_dependencies)?;
+    verify_x64_image_layout(model, &image, &entry_starts)?;
 
+    #[cfg(windows)]
+    let executable = {
+        let runtime_functions =
+            append_windows_x64_unwind_metadata(&mut image, &windows_unwind_functions)?;
+        ExecutableMemory::allocate_with_windows_unwind(&image, &runtime_functions)?
+    };
+    #[cfg(not(windows))]
     let executable = ExecutableMemory::allocate(&image)?;
     NativeModel::from_executable_image_with_dependencies(
         model.num_terminals,
@@ -444,6 +542,260 @@ fn compile_model_inner(
         current_dependencies,
         NativeRequiredStorage::for_model(model),
     )
+}
+
+fn verify_x64_function_code(bytes: &[u8], entry_kind: &str) -> JitResult<()> {
+    if bytes.last() != Some(&0xC3) {
+        return Err(JitError::Verifier {
+            model: "native-x64".into(),
+            detail: format!(
+                "compiled {entry_kind} does not end in RET at its compiler-known code boundary"
+            )
+            .into(),
+        });
+    }
+    Ok(())
+}
+
+fn verify_x64_image_layout(
+    model: &CompiledModel,
+    image: &[u8],
+    entry_starts: &[CodeOffset],
+) -> JitResult<()> {
+    if entry_starts.is_empty() {
+        return Err(JitError::Verifier {
+            model: model.name.clone(),
+            detail: "emitted x64 image has no entry points".into(),
+        });
+    }
+    if entry_starts[0].as_usize() != 0 {
+        return Err(JitError::Verifier {
+            model: model.name.clone(),
+            detail: format!(
+                "first x64 entry starts at byte {}, expected byte 0",
+                entry_starts[0].as_usize()
+            )
+            .into(),
+        });
+    }
+    for (index, start) in entry_starts.iter().copied().enumerate() {
+        let start = start.as_usize();
+        if start % ENTRY_ALIGNMENT != 0 {
+            return Err(JitError::Verifier {
+                model: model.name.clone(),
+                detail: format!(
+                    "x64 entry {index} starts at unaligned byte {start}; required alignment is {ENTRY_ALIGNMENT}"
+                )
+                .into(),
+            });
+        }
+        let end = entry_starts
+            .get(index + 1)
+            .map_or(image.len(), |offset| offset.as_usize());
+        if end <= start || end > image.len() {
+            return Err(JitError::Verifier {
+                model: model.name.clone(),
+                detail: format!(
+                    "x64 entry {index} has invalid byte range {start}..{end} for image length {}",
+                    image.len()
+                )
+                .into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn append_windows_x64_unwind_metadata(
+    image: &mut Vec<u8>,
+    functions: &[PendingWindowsX64UnwindFunction],
+) -> JitResult<Vec<WindowsX64RuntimeFunction>> {
+    let code_image_len = image.len();
+    let mut runtime_functions = Vec::with_capacity(functions.len());
+    let mut previous_begin = None;
+    for function in functions {
+        let begin = function.begin.as_usize();
+        let end = function.end.as_usize();
+        if begin >= end || end > code_image_len {
+            return Err(JitError::Encoding {
+                model: "native-x64".into(),
+                detail: format!(
+                    "Windows unwind function range {begin}..{end} is outside code image length {code_image_len}"
+                )
+                .into(),
+            });
+        }
+        if previous_begin.is_some_and(|previous| previous >= begin) {
+            return Err(JitError::Encoding {
+                model: "native-x64".into(),
+                detail: "Windows unwind function ranges are not strictly ordered".into(),
+            });
+        }
+        previous_begin = Some(begin);
+
+        let function_len = end - begin;
+        if usize::from(function.info.prologue_size) > function_len {
+            return Err(JitError::Encoding {
+                model: "native-x64".into(),
+                detail: format!(
+                    "Windows unwind prologue length {} exceeds function length {function_len}",
+                    function.info.prologue_size
+                )
+                .into(),
+            });
+        }
+        let encoded = encode_windows_x64_unwind_info(&function.info)?;
+        let padding = (4 - (image.len() % 4)) % 4;
+        image.resize(image.len() + padding, 0);
+        let unwind_info_address = u32::try_from(image.len()).map_err(|_| JitError::Encoding {
+            model: "native-x64".into(),
+            detail: "Windows unwind-info address exceeds u32 RVA range".into(),
+        })?;
+        image.extend_from_slice(&encoded);
+        runtime_functions.push(WindowsX64RuntimeFunction {
+            begin_address: u32::try_from(begin).map_err(|_| JitError::Encoding {
+                model: "native-x64".into(),
+                detail: "Windows runtime-function begin address exceeds u32 RVA range".into(),
+            })?,
+            end_address: u32::try_from(end).map_err(|_| JitError::Encoding {
+                model: "native-x64".into(),
+                detail: "Windows runtime-function end address exceeds u32 RVA range".into(),
+            })?,
+            unwind_info_address,
+        });
+    }
+    Ok(runtime_functions)
+}
+
+#[cfg(windows)]
+fn encode_windows_x64_unwind_info(info: &WindowsX64UnwindInfo) -> JitResult<Vec<u8>> {
+    const UWOP_PUSH_NONVOL: u8 = 0;
+    const UWOP_ALLOC_LARGE: u8 = 1;
+    const UWOP_ALLOC_SMALL: u8 = 2;
+    const UWOP_SET_FPREG: u8 = 3;
+    const UWOP_SAVE_XMM128: u8 = 8;
+
+    let mut operations = info.operations.clone();
+    operations.sort_by_key(|operation| {
+        std::cmp::Reverse(match operation {
+            WindowsX64UnwindOperation::PushNonvolatile { code_offset, .. }
+            | WindowsX64UnwindOperation::AllocateStack { code_offset, .. }
+            | WindowsX64UnwindOperation::SaveXmm128 { code_offset, .. }
+            | WindowsX64UnwindOperation::SetFramePointer { code_offset } => *code_offset,
+        })
+    });
+    let mut codes = Vec::new();
+    let mut code_slots = 0usize;
+    for operation in operations {
+        let code_offset = match operation {
+            WindowsX64UnwindOperation::PushNonvolatile {
+                code_offset,
+                register,
+            } => {
+                if register > 15 {
+                    return Err(JitError::Encoding {
+                        model: "native-x64".into(),
+                        detail: format!(
+                            "Windows unwind nonvolatile register {register} is outside x64 range"
+                        )
+                        .into(),
+                    });
+                }
+                codes.extend_from_slice(&[code_offset, (register << 4) | UWOP_PUSH_NONVOL]);
+                code_slots += 1;
+                code_offset
+            }
+            WindowsX64UnwindOperation::AllocateStack { code_offset, size } => {
+                if size == 0 || size % 8 != 0 {
+                    return Err(JitError::Encoding {
+                        model: "native-x64".into(),
+                        detail: format!(
+                            "Windows unwind stack allocation {size} is not a positive multiple of 8"
+                        )
+                        .into(),
+                    });
+                }
+                if size <= 128 {
+                    let op_info = u8::try_from(size / 8 - 1).map_err(|_| JitError::Encoding {
+                        model: "native-x64".into(),
+                        detail: "Windows small stack allocation op-info exceeds u8".into(),
+                    })?;
+                    codes.extend_from_slice(&[code_offset, (op_info << 4) | UWOP_ALLOC_SMALL]);
+                    code_slots += 1;
+                } else {
+                    let scaled = u16::try_from(size / 8).map_err(|_| JitError::Encoding {
+                        model: "native-x64".into(),
+                        detail: format!(
+                            "Windows x64 unwind stack allocation {size} exceeds UWOP_ALLOC_LARGE range"
+                        )
+                        .into(),
+                    })?;
+                    codes.extend_from_slice(&[code_offset, UWOP_ALLOC_LARGE]);
+                    codes.extend_from_slice(&scaled.to_le_bytes());
+                    code_slots += 2;
+                }
+                code_offset
+            }
+            WindowsX64UnwindOperation::SaveXmm128 {
+                code_offset,
+                register,
+                stack_offset,
+            } => {
+                if register > 15 || stack_offset % 16 != 0 {
+                    return Err(JitError::Encoding {
+                        model: "native-x64".into(),
+                        detail: format!(
+                            "invalid Windows unwind XMM{register} save offset {stack_offset}"
+                        )
+                        .into(),
+                    });
+                }
+                let scaled =
+                    u16::try_from(stack_offset / 16).map_err(|_| JitError::Encoding {
+                        model: "native-x64".into(),
+                        detail: format!(
+                            "XMM{register} unwind save offset {stack_offset} exceeds UWOP_SAVE_XMM128 range"
+                        )
+                        .into(),
+                    })?;
+                codes.extend_from_slice(&[code_offset, (register << 4) | UWOP_SAVE_XMM128]);
+                codes.extend_from_slice(&scaled.to_le_bytes());
+                code_slots += 2;
+                code_offset
+            }
+            WindowsX64UnwindOperation::SetFramePointer { code_offset } => {
+                codes.extend_from_slice(&[code_offset, UWOP_SET_FPREG]);
+                code_slots += 1;
+                code_offset
+            }
+        };
+        if code_offset == 0 || code_offset > info.prologue_size {
+            return Err(JitError::Encoding {
+                model: "native-x64".into(),
+                detail: format!(
+                    "Windows unwind code offset {code_offset} is outside prologue length {}",
+                    info.prologue_size
+                )
+                .into(),
+            });
+        }
+    }
+    let code_slots = u8::try_from(code_slots).map_err(|_| JitError::Encoding {
+        model: "native-x64".into(),
+        detail: "Windows x64 unwind-code count exceeds u8".into(),
+    })?;
+    let mut encoded = vec![
+        1, // UNW_VERSION=1, no exception/unwind handler flags
+        info.prologue_size,
+        code_slots,
+        info.frame_register,
+    ];
+    encoded.extend_from_slice(&codes);
+    if code_slots % 2 != 0 {
+        encoded.extend_from_slice(&[0, 0]);
+    }
+    Ok(encoded)
 }
 
 fn lower_parameter_default_program(
@@ -3000,6 +3352,7 @@ fn append_assignment_entries(
     limits: NativeLoweringLimits<'_>,
     image: &mut Vec<u8>,
     entry_starts: &mut Vec<CodeOffset>,
+    windows_unwind_functions: &mut Vec<PendingWindowsX64UnwindFunction>,
 ) -> JitResult<(
     CodeOffset,
     Option<CodeOffset>,
@@ -3026,11 +3379,16 @@ fn append_assignment_entries(
         }
     };
     let (assignment, assignment_dependencies) =
-        append_assignment_pass(&assignments, image, entry_starts)?;
+        append_assignment_pass(&assignments, image, entry_starts, windows_unwind_functions)?;
     let (post_assignment, post_assignment_dependencies) = if post_assignments.is_empty() {
         (None, AssignmentDependencies::default())
     } else {
-        let (entry, dependencies) = append_assignment_pass(&post_assignments, image, entry_starts)?;
+        let (entry, dependencies) = append_assignment_pass(
+            &post_assignments,
+            image,
+            entry_starts,
+            windows_unwind_functions,
+        )?;
         (Some(entry), dependencies)
     };
     Ok((
@@ -3045,16 +3403,20 @@ fn append_assignment_pass(
     assignments: &[NativeAssignment],
     image: &mut Vec<u8>,
     entry_starts: &mut Vec<CodeOffset>,
+    windows_unwind_functions: &mut Vec<PendingWindowsX64UnwindFunction>,
 ) -> JitResult<(CodeOffset, AssignmentDependencies)> {
     let mut dependencies = AssignmentDependencies::default();
     collect_assignment_dependencies(assignments, &mut dependencies);
-    let bytes = if assignments.is_empty() {
-        vec![0xC3]
+    let artifact = if assignments.is_empty() {
+        CompiledX64Function {
+            bytes: vec![0xC3],
+            windows_unwind: None,
+        }
     } else {
-        codegen::compile_assignment_pass_function(assignments)?
+        codegen::compile_assignment_pass_function_artifact(assignments)?
     };
     let offset = align_image_for_entry(image, entry_starts);
-    image.extend_from_slice(&bytes);
+    append_compiled_function_at_offset(image, offset, windows_unwind_functions, artifact)?;
     Ok((offset, dependencies))
 }
 
@@ -4617,12 +4979,48 @@ fn constant_indexed_assignment_slot(
 fn append_value_entry(
     image: &mut Vec<u8>,
     entry_starts: &mut Vec<CodeOffset>,
+    windows_unwind_functions: &mut Vec<PendingWindowsX64UnwindFunction>,
     program: &NativeProgram,
 ) -> JitResult<CodeOffset> {
-    let bytes = codegen::compile_value_function(program)?;
+    let artifact = codegen::compile_value_function_artifact(program)?;
     let offset = align_image_for_entry(image, entry_starts);
-    image.extend_from_slice(&bytes);
+    append_compiled_function_at_offset(image, offset, windows_unwind_functions, artifact)?;
     Ok(offset)
+}
+
+fn append_compiled_function_at_offset(
+    image: &mut Vec<u8>,
+    offset: CodeOffset,
+    windows_unwind_functions: &mut Vec<PendingWindowsX64UnwindFunction>,
+    artifact: CompiledX64Function,
+) -> JitResult<()> {
+    if offset.as_usize() != image.len() {
+        return Err(JitError::InternalCompilerError {
+            model: "native-x64".into(),
+            detail: format!(
+                "compiled function offset {} does not match image length {}",
+                offset.as_usize(),
+                image.len()
+            )
+            .into(),
+        });
+    }
+    let end = offset
+        .as_usize()
+        .checked_add(artifact.bytes.len())
+        .ok_or_else(|| JitError::Encoding {
+            model: "native-x64".into(),
+            detail: "compiled function image range overflow".into(),
+        })?;
+    if let Some(info) = artifact.windows_unwind {
+        windows_unwind_functions.push(PendingWindowsX64UnwindFunction {
+            begin: offset,
+            end: CodeOffset::new(end),
+            info,
+        });
+    }
+    image.extend_from_slice(&artifact.bytes);
+    Ok(())
 }
 
 fn align_image_for_entry(image: &mut Vec<u8>, entry_starts: &mut Vec<CodeOffset>) -> CodeOffset {
@@ -4834,7 +5232,8 @@ mod tests {
         NativeModel, canonical_branch_unknown_runtime_map, compile_model_with_canonical_ir,
         derivative_shadow_axes_from_suffix, live_canonical_assignment_slots,
         live_native_assignment_steps, lower_assignment_step, lower_static_condition_program,
-        native_assignment_roots, validate_compiled_entry_shape,
+        native_assignment_roots, validate_compiled_entry_shape, verify_x64_function_code,
+        verify_x64_image_layout,
     };
     use crate::canonical_ir::hir::HirRegion;
     use crate::canonical_ir::{
@@ -4909,9 +5308,15 @@ mod tests {
         .expect("variable ifelse lowers to native program");
         let mut image = vec![0xC3];
         let mut entry_starts = Vec::new();
+        let mut windows_unwind_functions = Vec::new();
 
-        let offset = super::append_value_entry(&mut image, &mut entry_starts, &program)
-            .expect("append aligned value entry");
+        let offset = super::append_value_entry(
+            &mut image,
+            &mut entry_starts,
+            &mut windows_unwind_functions,
+            &program,
+        )
+        .expect("append aligned value entry");
 
         assert_eq!(offset.as_usize(), super::ENTRY_ALIGNMENT);
         assert!(entry_starts.contains(&offset));
@@ -4933,6 +5338,73 @@ mod tests {
         let vars = [2.0];
 
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 1.0_f64.to_bits());
+    }
+
+    #[test]
+    fn x64_structural_verifiers_reject_missing_ret_and_unaligned_entries() {
+        let missing_ret = verify_x64_function_code(&[0x31, 0xC0], "test entry")
+            .expect_err("function without RET must fail verification");
+        assert!(
+            missing_ret
+                .to_string()
+                .contains("does not end in RET at its compiler-known code boundary")
+        );
+
+        let model = compiled_model_with_variables(0);
+        let unaligned = verify_x64_image_layout(
+            &model,
+            &[0xC3, super::X64_NOP, 0xC3],
+            &[CodeOffset::new(0), CodeOffset::new(2)],
+        )
+        .expect_err("unaligned entry must fail verification");
+        assert!(unaligned.to_string().contains("unaligned byte 2"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_registers_unwind_metadata_for_driver_and_helper_entries() {
+        use windows_sys::Win32::System::Diagnostics::Debug::RtlLookupFunctionEntry;
+
+        let source = r#"
+module native_windows_unwind(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    I(p, n) <+ exp(V(p, n)) + V(p, n);
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("compile Windows-unwind native model");
+
+        let assert_registered = |address: *const u8, expected_frame_register: u8| {
+            let control_pc = address as usize as u64 + 1;
+            let mut image_base = 0_u64;
+            let function = unsafe {
+                RtlLookupFunctionEntry(control_pc, &mut image_base, std::ptr::null_mut())
+            };
+            assert!(
+                !function.is_null(),
+                "RtlLookupFunctionEntry must find generated entry {address:p}"
+            );
+            let unwind_info_address = unsafe { (*function).Anonymous.UnwindInfoAddress };
+            let unwind_info = (image_base as usize + unwind_info_address as usize) as *const u8;
+            let header = unsafe { std::slice::from_raw_parts(unwind_info, 4) };
+            assert_eq!(header[0] & 0x07, 1, "Windows unwind version must be 1");
+            assert_eq!(
+                header[3] & 0x0f,
+                expected_frame_register,
+                "unexpected Windows unwind frame register"
+            );
+        };
+
+        assert_registered(native.stamp_kernel_address_for_test(), 0);
+        assert_registered(native.stamp_value_address_for_test(0), 5);
     }
 
     #[test]
@@ -7439,6 +7911,7 @@ endmodule
         let entries = NativeEntryOffsets {
             assignment: offset,
             post_assignment: None,
+            evaluation_kernel: None,
             stamp_kernel: None,
             parameter_defaults: model
                 .parameters
