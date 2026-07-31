@@ -202,63 +202,8 @@ impl HbFft {
         spectrum
     }
 
-    /// Compute derivative spectrum (multiply by jω)
-    ///
-    /// For a signal x(t), if X(ω) is its spectrum, then dx/dt has spectrum jωX(ω)
-    ///
-    /// # Arguments
-    /// * `spectrum` - Input spectral coefficients
-    /// * `fundamental_freq` - Fundamental frequency in Hz
-    pub fn derivative_spectrum(
-        &self,
-        spectrum: &[Complex64],
-        fundamental_freq: Value,
-    ) -> Vec<Complex64> {
-        use std::f64::consts::PI;
 
-        spectrum
-            .iter()
-            .enumerate()
-            .map(|(k, &coeff)| {
-                let omega = 2.0 * PI * (k as f64) * fundamental_freq;
-                Complex64::new(0.0, omega) * coeff
-            })
-            .collect()
-    }
 
-    /// Compute integral spectrum (divide by jω)
-    ///
-    /// For a signal x(t), if X(ω) is its spectrum, then ∫x dt has spectrum X(ω)/(jω)
-    /// Note: DC component remains unchanged
-    ///
-    /// # Arguments
-    /// * `spectrum` - Input spectral coefficients
-    /// * `fundamental_freq` - Fundamental frequency in Hz
-    pub fn integral_spectrum(
-        &self,
-        spectrum: &[Complex64],
-        fundamental_freq: Value,
-    ) -> Vec<Complex64> {
-        use std::f64::consts::PI;
-
-        spectrum
-            .iter()
-            .enumerate()
-            .map(|(k, &coeff)| {
-                if k == 0 {
-                    coeff // DC unchanged
-                } else {
-                    let omega = 2.0 * PI * (k as f64) * fundamental_freq;
-                    coeff / Complex64::new(0.0, omega)
-                }
-            })
-            .collect()
-    }
-
-    /// Compute spectral power (|X|²) for each harmonic
-    pub fn spectral_power(&self, spectrum: &[Complex64]) -> Vec<Value> {
-        spectrum.iter().map(|c| c.norm_sqr()).collect()
-    }
 
     /// Compute total signal power via Parseval's theorem
     pub fn total_power(&self, spectrum: &[Complex64]) -> Value {

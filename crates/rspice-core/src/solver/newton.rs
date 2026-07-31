@@ -130,45 +130,6 @@ impl NewtonSolver {
         self.converged
     }
 
-    /// Apply damping to the Newton update
-    ///
-    /// Computes `x_new = x_old + alpha * delta` where alpha is adaptively
-    /// reduced for large updates to improve convergence stability.
-    ///
-    /// When compiled with the `simd` feature, uses SIMD acceleration.
-    pub fn apply_damping(&self, x_old: &[Value], delta: &[Value]) -> Vec<Value> {
-        if !self.config.damping {
-            let mut result = x_old.to_vec();
-            #[cfg(feature = "simd")]
-            crate::simd::add(&mut result, delta);
-            #[cfg(not(feature = "simd"))]
-            for (r, d) in result.iter_mut().zip(delta.iter()) {
-                *r += *d;
-            }
-            return result;
-        }
-
-        let mut alpha = self.config.damping_factor;
-
-        // Reduce damping factor if update is very large
-        #[cfg(feature = "simd")]
-        let max_delta = crate::simd::max_abs(delta);
-        #[cfg(not(feature = "simd"))]
-        let max_delta = delta.iter().map(|d| d.abs()).fold(0.0, f64::max);
-
-        if max_delta > 1.0 {
-            alpha = (1.0 / max_delta).max(0.1);
-        }
-
-        let mut result = x_old.to_vec();
-        #[cfg(feature = "simd")]
-        crate::simd::axpy(&mut result, delta, alpha);
-        #[cfg(not(feature = "simd"))]
-        for (r, d) in result.iter_mut().zip(delta.iter()) {
-            *r += alpha * *d;
-        }
-        result
-    }
 
     /// Get current iteration count
     pub fn iterations(&self) -> usize {

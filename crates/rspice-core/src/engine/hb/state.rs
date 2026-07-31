@@ -2,11 +2,11 @@
 
 use super::*;
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::analysis::LteEstimator;
+use crate::numerics::integration::LteEstimator;
 use crate::analysis::harmonic_balance::{
     DC_SHORT_CONDUCTANCE, HbContinuationLimitation, HbReactiveKind, HbReactiveSpectrum,
 };
-use crate::circuit::Circuit;
+use crate::circuit::CircuitData;
 use crate::engine::transient::{
     netlist_checkpoint_identity, netlist_fingerprint, simulation_checkpoint_identity,
 };
@@ -169,7 +169,7 @@ impl Engine {
     }
 
     fn hb_envelope_freeze_selected_sources(
-        circuit: &mut Circuit,
+        circuit: &mut CircuitData,
         requested: &BTreeSet<String>,
     ) -> Result<Vec<String>, SimulationError> {
         let mut canonical_names = Vec::with_capacity(requested.len());
@@ -237,7 +237,7 @@ impl Engine {
         Ok(canonical_names)
     }
 
-    fn ensure_hb_envelope_linear_subset(circuit: &Circuit) -> Result<(), SimulationError> {
+    fn ensure_hb_envelope_linear_subset(circuit: &CircuitData) -> Result<(), SimulationError> {
         let mut blockers = Vec::new();
         if !circuit.resistor_branches.is_empty() {
             blockers.push("zero-resistance MNA branches");
@@ -335,7 +335,7 @@ impl Engine {
     }
 
     fn hb_envelope_solution_at_phase(
-        circuit: &Circuit,
+        circuit: &CircuitData,
         phase: &crate::analysis::HbPhaseState,
     ) -> Result<Vec<Value>, SimulationError> {
         let mut solution = vec![0.0; circuit.matrix_size()];
@@ -394,7 +394,7 @@ impl Engine {
         &self,
         netlist: &Netlist,
         authenticated_netlist_identity: &str,
-        mut circuit: Circuit,
+        mut circuit: CircuitData,
         config: &HbConfig,
         result: &HbResult,
     ) -> Result<(TransientCheckpoint, Value), SimulationError> {
@@ -459,7 +459,7 @@ impl Engine {
             let _ = reactive_at(oldest)?;
             circuit.capacitors.i_prev[index] = latest_reactive.1;
             let coefficients =
-                crate::analysis::CompanionCoefficients::for_method(self.config.integration_method);
+                crate::numerics::integration::CompanionCoefficients::for_method(self.config.integration_method);
             circuit.capacitors.i_eq[index] = coefficients.capacitor_ieq(
                 circuit.capacitors.capacitances[index],
                 history_step,

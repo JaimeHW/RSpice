@@ -53,30 +53,8 @@ impl TransferFunction {
         }
     }
 
-    /// Create first-order low-pass: H(s) = 1 / (1 + s*tau)
-    pub fn lowpass_1st(tau: Value) -> Self {
-        Self {
-            numerator: vec![1.0],
-            denominator: vec![1.0, tau],
-        }
-    }
 
-    /// Create first-order high-pass: H(s) = s*tau / (1 + s*tau)
-    pub fn highpass_1st(tau: Value) -> Self {
-        Self {
-            numerator: vec![0.0, tau],
-            denominator: vec![1.0, tau],
-        }
-    }
 
-    /// Create second-order low-pass: H(s) = wn² / (s² + 2*zeta*wn*s + wn²)
-    pub fn lowpass_2nd(omega_n: Value, zeta: Value) -> Self {
-        let wn2 = omega_n * omega_n;
-        Self {
-            numerator: vec![wn2],
-            denominator: vec![wn2, 2.0 * zeta * omega_n, 1.0],
-        }
-    }
 
     /// Create integrator: H(s) = k / s
     pub fn integrator(k: Value) -> Self {
@@ -162,86 +140,7 @@ pub struct DiscreteFilter {
 }
 
 impl DiscreteFilter {
-    /// Create a discrete filter from transfer function H(s)
-    ///
-    /// Uses bilinear transform: s = (2/T) * (z-1)/(z+1)
-    pub fn from_tf(tf: TransferFunction, sample_period: Value) -> Self {
-        let order = tf.order();
-        let (b, a) = Self::bilinear_transform(&tf, sample_period);
 
-        Self {
-            sample_period,
-            b,
-            a,
-            x_history: VecDeque::from(vec![0.0; order + 1]),
-            y_history: VecDeque::from(vec![0.0; order + 1]),
-        }
-    }
-
-    /// Apply bilinear (Tustin) transform to convert H(s) to H(z)
-    ///
-    /// Substitutes s = (2/T) * (1-z^-1) / (1+z^-1)
-    fn bilinear_transform(tf: &TransferFunction, t: Value) -> (Vec<Value>, Vec<Value>) {
-        let k = 2.0 / t;
-        let order = tf.order();
-
-        // For simplicity, handle up to second order directly
-        // Higher orders would need proper polynomial transformation
-
-        match order {
-            0 => {
-                // Zero-order: H(s) = n0/d0 => H(z) = n0/d0
-                let gain = tf.numerator.first().copied().unwrap_or(1.0)
-                    / tf.denominator.first().copied().unwrap_or(1.0);
-                (vec![gain], vec![1.0])
-            }
-            1 => {
-                // First-order: H(s) = (n0 + n1*s) / (d0 + d1*s)
-                let n0 = tf.numerator.first().copied().unwrap_or(0.0);
-                let n1 = tf.numerator.get(1).copied().unwrap_or(0.0);
-                let d0 = tf.denominator.first().copied().unwrap_or(1.0);
-                let d1 = tf.denominator.get(1).copied().unwrap_or(0.0);
-
-                // s = k * (1-z^-1)/(1+z^-1) = k * (z-1)/(z+1)
-                // Multiply through by (z+1) / (z+1)
-                // Numerator: n0 + n1*k*(z-1)/(z+1) => (n0*(z+1) + n1*k*(z-1)) / (z+1)
-                //          = ((n0+n1*k)*z + (n0-n1*k)) / (z+1)
-                // Denominator: (d0*(z+1) + d1*k*(z-1)) / (z+1)
-                //            = ((d0+d1*k)*z + (d0-d1*k)) / (z+1)
-
-                let b0 = n0 + n1 * k;
-                let b1 = n0 - n1 * k;
-                let a0 = d0 + d1 * k;
-                let a1 = d0 - d1 * k;
-
-                // Normalize so a[0] = 1
-                (vec![b0 / a0, b1 / a0], vec![1.0, a1 / a0])
-            }
-            _ => {
-                // Second order and higher - use simplified approximation
-                // For proper implementation, would need polynomial convolution
-                let n0 = tf.numerator.first().copied().unwrap_or(0.0);
-                let n1 = tf.numerator.get(1).copied().unwrap_or(0.0);
-                let n2 = tf.numerator.get(2).copied().unwrap_or(0.0);
-                let d0 = tf.denominator.first().copied().unwrap_or(1.0);
-                let d1 = tf.denominator.get(1).copied().unwrap_or(0.0);
-                let d2 = tf.denominator.get(2).copied().unwrap_or(0.0);
-
-                let k2 = k * k;
-
-                // Bilinear transform for second order
-                let b0 = n0 + n1 * k + n2 * k2;
-                let b1 = 2.0 * n0 - 2.0 * n2 * k2;
-                let b2 = n0 - n1 * k + n2 * k2;
-
-                let a0 = d0 + d1 * k + d2 * k2;
-                let a1 = 2.0 * d0 - 2.0 * d2 * k2;
-                let a2 = d0 - d1 * k + d2 * k2;
-
-                (vec![b0 / a0, b1 / a0, b2 / a0], vec![1.0, a1 / a0, a2 / a0])
-            }
-        }
-    }
 
     /// Process a single input sample and return the output
     pub fn process(&mut self, x: Value) -> Value {

@@ -1,7 +1,7 @@
 //! Resistor device model
 
 use crate::device::traits::{LinearDevice, MatrixStamper};
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 
 /// Linear resistor
 #[derive(Debug, Clone)]

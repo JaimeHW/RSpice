@@ -2105,8 +2105,43 @@ impl XyceTestRunner {
         tran: &XyceTranAnalysis,
         reference: &XycePrnTable,
     ) -> Result<Value, String> {
+        // A nonlinear Xyce Core's PRN cadence is an output contract, not its
+        // accepted solver cadence. The native MutIndNonLin device carries
+        // hidden M/R history across the adaptive TrapGear path; constraining
+        // DELMAX to the smallest printed interval changes that history and
+        // produces a different physical trajectory. Keep the native solver
+        // ceiling for these devices and interpolate the output at PRN times.
+        if Self::netlist_has_xyce_nonlinear_core(netlist) {
+            return Self::transient_max_step_with_solver_ceiling(
+                netlist,
+                tran,
+                None,
+                Self::transient_oracle_solver_max_step_for_netlist(netlist, tran),
+                false,
+            );
+        }
+
         let reference_step = Self::reference_min_positive_time_step(reference)?;
         Self::transient_max_step_with_optional_reference(netlist, tran, reference_step)
+    }
+
+    pub(super) fn netlist_has_xyce_nonlinear_core(netlist: &Netlist) -> bool {
+        let contains_core = |elements: &[rspice_core::netlist::Element]| {
+            elements.iter().any(|element| {
+                match &element.kind {
+                    ElementKind::JilesAthertonInductor { .. } => true,
+                    ElementKind::Coupling {
+                        model: Some(_),
+                        inductors,
+                        ..
+                    } => !inductors.is_empty(),
+                    _ => false,
+                }
+            })
+        };
+        contains_core(&netlist.elements)
+            || flatten_netlist_with_models(netlist)
+                .is_ok_and(|flattened| contains_core(&flattened.elements))
     }
 
     pub(super) fn transient_max_step_with_optional_reference(

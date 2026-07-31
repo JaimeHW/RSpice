@@ -5596,7 +5596,7 @@ fn node_lookup_candidates_follow_effective_ground_policy() {
     );
 
     let xyce_options = rspice_core::netlist::NetlistParseOptions {
-        expression_dialect: rspice_core::netlist::ExpressionDialect::Xyce,
+        expression_dialect: rspice_core::config::ExpressionDialect::Xyce,
         ..Default::default()
     };
     let xyce = Netlist::parse_with_options("Xyce ordinary GND\nR1 GND 0 1k\n.END\n", xyce_options)
@@ -17471,7 +17471,7 @@ fn xyce_runner_engine_uses_xyce_device_dialect() {
     assert_eq!(engine.config().spice_dialect, SpiceDialect::Xyce);
     assert_eq!(
         engine.config().integration_method,
-        rspice_core::analysis::IntegrationMethod::TrapGear
+        rspice_core::numerics::integration::IntegrationMethod::TrapGear
     );
     assert_eq!(
         engine.config().resolved_jfet_level2_model(),

@@ -77,15 +77,6 @@ impl CompressionConfig {
         }
     }
 
-    /// High-fidelity compression (minimal loss)
-    pub fn high_fidelity() -> Self {
-        Self {
-            abs_tol: 1e-9,
-            rel_tol: 1e-4, // 0.01%
-            enabled: true,
-            min_interval: 0.0,
-        }
-    }
 }
 
 //=============================================================================
@@ -324,10 +315,6 @@ impl WaveformRecorder {
         &self.times
     }
 
-    /// Get the stored values for a channel
-    pub fn channel_values(&self, channel: usize) -> &[Value] {
-        &self.values[channel]
-    }
 
     /// Get all stored values, indexed `[channel][point]`.
     pub fn all_values(&self) -> &[Vec<Value>] {
@@ -349,18 +336,6 @@ impl WaveformRecorder {
         self.input_count as Value / self.stored_count() as Value
     }
 
-    /// Convert to TransientResult structure (for compatibility)
-    pub fn to_transient_result(&self) -> TransientResultCompressed {
-        TransientResultCompressed {
-            time: self.times.clone(),
-            voltages: self.values.clone(),
-            num_nodes: self.num_channels,
-            node_names: (1..=self.num_channels).map(|i| i.to_string()).collect(),
-            store_traces: Vec::new(),
-            compression_ratio: self.compression_ratio(),
-            input_points: self.input_count,
-        }
-    }
 }
 
 //=============================================================================

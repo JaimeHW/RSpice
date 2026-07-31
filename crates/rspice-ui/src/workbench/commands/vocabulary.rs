@@ -196,6 +196,7 @@ pub enum Command {
     ProjectPage(ProjectPage),
     ModelsPage(ModelsPage),
     ModelBrowser,
+    ModelCreateProjectCopy,
     ModelEditor,
     ModelCorrelation,
     ModelSaveRevision,
@@ -203,6 +204,7 @@ pub enum Command {
     ModelRunQualificationTests,
     ModelCompareRelease,
     PdkSettings,
+    RescanModelLibraries,
     CompileVerilogA,
     AutomationConsole,
     CommandPalette,
@@ -732,6 +734,11 @@ impl Command {
                 spec("model-qualification", "Model qualification", "Models")
             }
             Self::ModelBrowser => spec("model-browser", "Model browser…", "Models"),
+            Self::ModelCreateProjectCopy => spec(
+                "model-create-project-copy",
+                "Create editable project copy",
+                "Models",
+            ),
             Self::ModelEditor => spec(
                 "model-editor",
                 "Device model and parameter editor…",
@@ -747,7 +754,10 @@ impl Command {
             }
             Self::ModelCompareRelease => spec("model-compare", "Compare with release", "Models"),
             Self::PdkSettings => spec("pdk-settings", "PDK and model paths…", "Models"),
-            Self::CompileVerilogA => spec("veriloga", "Verilog-A/AMS compiler", "Models"),
+            Self::RescanModelLibraries => {
+                spec("rescan-model-libraries", "Rescan model libraries", "Models")
+            }
+            Self::CompileVerilogA => spec("veriloga", "Compile Verilog-A", "Models"),
             Self::AutomationConsole => spec("automation", "Automation workspace", "Automation"),
             Self::CommandPalette => spec("command-palette", "Command palette", "Navigate"),
             Self::KeyboardShortcuts => spec("command-reference", "Command reference", "Help"),
@@ -899,6 +909,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ResultViewer(crate::workbench::ResultViewer::Waves),
     Command::VerificationPage(VerificationPage::Yield),
     Command::ModelsPage(ModelsPage::Models),
+    Command::ModelCreateProjectCopy,
     Command::ModelEditor,
     Command::ModelCorrelation,
     Command::ModelSaveRevision,
@@ -1041,6 +1052,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ModelsPage(ModelsPage::Qualification),
     Command::ModelBrowser,
     Command::PdkSettings,
+    Command::RescanModelLibraries,
     Command::CompileVerilogA,
     Command::AutomationConsole,
     Command::CommandPalette,

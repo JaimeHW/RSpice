@@ -153,11 +153,6 @@ impl PxfConfig {
         self
     }
 
-    /// Enable noise transfer computation
-    pub fn with_noise(mut self, enable: bool) -> Self {
-        self.include_noise = enable;
-        self
-    }
 
     /// Generate frequency points based on sweep type
     pub fn frequency_points(&self) -> Vec<Value> {
@@ -399,10 +394,6 @@ impl PxfResult {
         self.points.len()
     }
 
-    /// Get input frequencies
-    pub fn input_frequencies(&self) -> Vec<Value> {
-        self.points.iter().map(|p| p.freq_in).collect()
-    }
 
     /// Get magnitude curve (frequency, magnitude_db)
     pub fn magnitude_curve(&self) -> Vec<(Value, Value)> {
@@ -510,119 +501,6 @@ impl PxfResult {
         {
             self.dc_gain = Some(first.transfer);
         }
-    }
-}
-
-//=============================================================================
-// PXF Analyzer
-//=============================================================================
-
-/// Periodic Transfer Function Analyzer
-#[derive(Debug)]
-pub struct PxfAnalyzer {
-    /// Configuration
-    config: PxfConfig,
-}
-
-impl PxfAnalyzer {
-    /// Create new PXF analyzer
-    pub fn new(config: PxfConfig) -> Self {
-        Self { config }
-    }
-
-    /// Analyze transfer function using conversion matrix from PAC
-    ///
-    /// The conversion matrix `H[n,m]` gives the transfer from input sideband
-    /// `m` to output sideband `n`.
-    pub fn analyze_from_conversion_matrix(
-        &self,
-        frequencies: &[Value],
-        conversion_matrix: &[Vec<Vec<Complex64>>], // [freq_idx][output_sb][input_sb]
-        fundamental_freq: Value,
-    ) -> Result<PxfResult, PxfError> {
-        if frequencies.is_empty() {
-            return Err(PxfError::InvalidConfiguration("No frequency points".into()));
-        }
-
-        if conversion_matrix.len() != frequencies.len() {
-            return Err(PxfError::InvalidConfiguration(
-                "Frequency/matrix size mismatch".into(),
-            ));
-        }
-
-        let mut result = PxfResult::new(
-            fundamental_freq,
-            self.config.input_sideband,
-            self.config.output_sideband,
-        );
-
-        for (i, &freq) in frequencies.iter().enumerate() {
-            let matrix = &conversion_matrix[i];
-
-            // Map sideband indices to matrix indices
-            // Assuming matrix is indexed from 0 with offset
-            let num_sidebands = matrix.len();
-            let offset = (num_sidebands as i32 - 1) / 2;
-
-            let out_idx = (self.config.output_sideband + offset) as usize;
-            let in_idx = (self.config.input_sideband + offset) as usize;
-
-            if out_idx >= num_sidebands || in_idx >= matrix[0].len() {
-                continue; // Skip if sideband out of range
-            }
-
-            let transfer = matrix[out_idx][in_idx];
-
-            // Compute output frequency based on sideband relationship
-            let freq_out = freq
-                + (self.config.output_sideband - self.config.input_sideband) as f64
-                    * fundamental_freq;
-
-            let point = TransferPoint {
-                freq_in: freq,
-                freq_out,
-                transfer,
-                sideband_in: self.config.input_sideband,
-                sideband_out: self.config.output_sideband,
-            };
-
-            result.add_point(point);
-        }
-
-        result.compute_metrics();
-        Ok(result)
-    }
-
-    /// Create a simple test transfer function (for testing)
-    pub fn create_test_transfer(&self, gain_db: Value, pole_freq: Value) -> PxfResult {
-        let frequencies = self.config.frequency_points();
-        let mut result = PxfResult::new(
-            self.config.fundamental_freq,
-            self.config.input_sideband,
-            self.config.output_sideband,
-        );
-
-        let gain_lin = 10.0_f64.powf(gain_db / 20.0);
-
-        for freq in frequencies {
-            // Single-pole transfer function: H(s) = gain / (1 + s/ω_p)
-            let s = Complex64::new(0.0, 2.0 * PI * freq);
-            let wp = 2.0 * PI * pole_freq;
-            let transfer = Complex64::new(gain_lin, 0.0) / (1.0 + s / wp);
-
-            let point = TransferPoint {
-                freq_in: freq,
-                freq_out: freq, // Same frequency for this test
-                transfer,
-                sideband_in: self.config.input_sideband,
-                sideband_out: self.config.output_sideband,
-            };
-
-            result.add_point(point);
-        }
-
-        result.compute_metrics();
-        result
     }
 }
 

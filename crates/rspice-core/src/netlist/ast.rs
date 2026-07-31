@@ -6,6 +6,8 @@
 //! - Controlled sources (VCVS, VCCS, CCVS, CCCS)
 //! - Advanced components (switches, transmission lines, coupled inductors)
 //! - Analysis commands (DC, AC, transient, parametric, noise)
+use crate::config::NonlinearContinuationMode;
+use crate::numerics::integration::TransientLteReference;
 
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
@@ -57,10 +59,6 @@ impl ParametricValue {
         ParametricValue::Resolved(v)
     }
 
-    /// Create from an expression string
-    pub fn from_expr(s: &str) -> Self {
-        ParametricValue::Expression(s.to_string())
-    }
 
     /// Try to get the resolved value
     pub fn as_value(&self) -> Option<Value> {
@@ -949,33 +947,14 @@ impl XspicePort {
         XspicePort::Digital(node.into())
     }
 
-    /// Create an explicitly typed single digital port
-    pub fn explicit_digital(node: impl Into<String>) -> Self {
-        XspicePort::ExplicitDigital(node.into())
-    }
 
-    /// Create a single inverted digital port
-    pub fn digital_inverted(node: impl Into<String>) -> Self {
-        XspicePort::DigitalInverted(node.into())
-    }
 
     /// Create a digital vector from node names
     pub fn digital_vector(nodes: Vec<String>) -> Self {
         XspicePort::DigitalVector(nodes)
     }
 
-    /// Create a digital vector with explicit per-node inversion flags
-    pub fn digital_vector_mixed(nodes: Vec<XspiceDigitalNode>) -> Self {
-        XspicePort::DigitalVectorMixed(nodes)
-    }
 
-    /// Create a differential voltage port
-    pub fn diff_voltage(pos: impl Into<String>, neg: impl Into<String>) -> Self {
-        XspicePort::DifferentialVoltage {
-            pos: pos.into(),
-            neg: neg.into(),
-        }
-    }
 
     /// Check if this is an analog port
     pub fn is_analog(&self) -> bool {
@@ -2388,9 +2367,6 @@ impl StartupDirectiveEntry {
         self.voltage
     }
 
-    pub fn voltage_expression(&self) -> Option<&str> {
-        self.voltage_expr.as_deref()
-    }
 }
 
 /// One physical `.IC` or `.NODESET` card with its ordered assignments.
@@ -2654,96 +2630,6 @@ pub struct XspiceAutoBridgeParamName {
     pub param_name: String,
 }
 
-/// Reference magnitude used to normalize transient local-truncation error.
-///
-/// Four policies correspond exactly to Xyce's `.OPTIONS TIMEINT NEWLTE`
-/// selectors; `PredictorLocal` preserves RSpice's non-Xyce adaptive default.
-/// Historical modes retain only accepted solution magnitudes, so a rejected
-/// candidate cannot relax future error weights.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum TransientLteReference {
-    /// RSpice legacy policy: scale by the larger candidate/predictor magnitude.
-    #[default]
-    PredictorLocal,
-    /// Scale each state by its magnitude at the prior accepted point (`NEWLTE=0`).
-    PointLocal,
-    /// Scale every state by the prior accepted point's infinity norm (`NEWLTE=1`).
-    PointGlobal,
-    /// Scale every state by the largest magnitude seen over the transient (`NEWLTE=2`).
-    SignalGlobal,
-    /// Scale each state by its own largest magnitude seen over the transient (`NEWLTE=3`).
-    SignalLocal,
-}
-
-impl TransientLteReference {
-    /// Convert a Xyce `NEWLTE` selector to its reference policy.
-    pub fn from_xyce_selector(selector: u8) -> Option<Self> {
-        match selector {
-            0 => Some(Self::PointLocal),
-            1 => Some(Self::PointGlobal),
-            2 => Some(Self::SignalGlobal),
-            3 => Some(Self::SignalLocal),
-            _ => None,
-        }
-    }
-
-    /// Return the corresponding Xyce `NEWLTE` selector.
-    pub fn xyce_selector(self) -> Option<u8> {
-        match self {
-            Self::PredictorLocal => None,
-            Self::PointLocal => Some(0),
-            Self::PointGlobal => Some(1),
-            Self::SignalGlobal => Some(2),
-            Self::SignalLocal => Some(3),
-        }
-    }
-}
-
-/// Xyce nonlinear solve/continuation policy selected by
-/// `.OPTIONS NONLIN CONTINUATION=...`.
-///
-/// The variants preserve the canonical Xyce selectors so configuration
-/// resolution never silently turns an unsupported continuation algorithm into
-/// a different solve. Execution sites must explicitly match the modes they
-/// implement.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NonlinearContinuationMode {
-    Standard,
-    Natural,
-    Mosfet,
-    Gmin,
-    PseudoTransient,
-    SimultaneousSourceStep,
-    SequentialSourceStep,
-}
-
-impl NonlinearContinuationMode {
-    /// Canonical numeric selector accepted by Xyce 7.10.
-    pub fn xyce_selector(self) -> i64 {
-        match self {
-            Self::Standard => 0,
-            Self::Natural => 1,
-            Self::Mosfet => 2,
-            Self::Gmin => 3,
-            Self::PseudoTransient => 9,
-            Self::SimultaneousSourceStep => 34,
-            Self::SequentialSourceStep => 35,
-        }
-    }
-
-    pub fn from_xyce_selector(selector: i64) -> Option<Self> {
-        match selector {
-            0 => Some(Self::Standard),
-            1 => Some(Self::Natural),
-            2 => Some(Self::Mosfet),
-            3 => Some(Self::Gmin),
-            9 => Some(Self::PseudoTransient),
-            34 => Some(Self::SimultaneousSourceStep),
-            35 => Some(Self::SequentialSourceStep),
-            _ => None,
-        }
-    }
-}
 
 /// Simulation options from .OPTIONS command
 ///

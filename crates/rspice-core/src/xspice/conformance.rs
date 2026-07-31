@@ -87,17 +87,8 @@ pub struct XspiceCatalogCoverageReport {
 }
 
 impl XspiceCatalogCoverageReport {
-    pub fn covered_count(&self) -> usize {
-        self.covered_models.len()
-    }
 
-    pub fn uncovered_count(&self) -> usize {
-        self.uncovered_models.len()
-    }
 
-    pub fn has_uncovered_models(&self) -> bool {
-        !self.uncovered_models.is_empty()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -123,10 +123,6 @@ impl AcAnalysis {
         self.frequencies = ac_sweep_frequencies(FreqVariation::Dec, points_per_decade, start, stop);
     }
 
-    /// Set up octave frequency sweep
-    pub fn octave_sweep(&mut self, start: Value, stop: Value, points_per_octave: usize) {
-        self.frequencies = ac_sweep_frequencies(FreqVariation::Oct, points_per_octave, start, stop);
-    }
 
     /// Get frequency points
     pub fn frequencies(&self) -> &[Value] {

@@ -57,7 +57,7 @@ pub enum BenchError {
         message: String,
     },
     /// Generated built-in stamp-throughput measurement failed.
-    #[cfg(feature = "generated-stamp")]
+    #[cfg(feature = "generated-stamp-base")]
     GeneratedStamp {
         /// Actionable measurement or reporting failure.
         message: String,
@@ -101,7 +101,7 @@ impl fmt::Display for BenchError {
             Self::NativeJit { message } => write!(f, "{message}"),
             Self::Klu { message } => write!(f, "{message}"),
             Self::GeneratedRust { message } => write!(f, "{message}"),
-            #[cfg(feature = "generated-stamp")]
+            #[cfg(feature = "generated-stamp-base")]
             Self::GeneratedStamp { message } => write!(f, "{message}"),
             Self::BenchmarkPolicy { message } => write!(f, "{message}"),
             Self::Internal(message) => write!(f, "internal error: {message}"),

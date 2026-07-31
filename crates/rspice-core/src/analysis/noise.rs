@@ -1361,17 +1361,6 @@ impl IntegratedNoise {
         total.sqrt()
     }
 
-    /// Get the frequency with maximum noise density
-    pub fn peak_noise_frequency(&self) -> Option<Value> {
-        self.results
-            .iter()
-            .max_by(|a, b| {
-                a.output_noise_density
-                    .partial_cmp(&b.output_noise_density)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .map(|r| r.frequency)
-    }
 
     /// Get all results
     pub fn results(&self) -> &[NoiseResult] {
@@ -1383,39 +1372,10 @@ impl IntegratedNoise {
 // Helper Functions
 //=============================================================================
 
-/// Calculate thermal noise voltage spectral density for a resistor (V²/Hz)
-#[inline]
-pub fn thermal_voltage_noise(resistance: Value, temperature: Value) -> Value {
-    4.0 * K_BOLTZMANN * temperature * resistance
-}
 
-/// Calculate thermal noise current spectral density for a resistor (A²/Hz)
-#[inline]
-pub fn thermal_current_noise(resistance: Value, temperature: Value) -> Value {
-    if resistance > 0.0 {
-        4.0 * K_BOLTZMANN * temperature / resistance
-    } else {
-        0.0
-    }
-}
 
-/// Calculate shot noise current spectral density (A²/Hz)
-#[inline]
-pub fn shot_noise(current: Value) -> Value {
-    2.0 * Q_ELECTRON * current.abs()
-}
 
-/// Calculate equivalent noise bandwidth for a first-order lowpass filter
-#[inline]
-pub fn noise_bandwidth_first_order(f3db: Value) -> Value {
-    std::f64::consts::FRAC_PI_2 * f3db
-}
 
-/// Calculate equivalent noise bandwidth for a second-order lowpass filter (Q=0.707)
-#[inline]
-pub fn noise_bandwidth_second_order_butterworth(f3db: Value) -> Value {
-    1.11 * f3db
-}
 
 //=============================================================================
 // Tests

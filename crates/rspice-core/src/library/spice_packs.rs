@@ -703,6 +703,25 @@ impl SpiceLibraryIndex {
         })
     }
 
+    /// A bounded, deterministic first page of addressable definitions.
+    ///
+    /// Catalog UIs use this when no query or class facet is active. Streaming
+    /// stops at `limit`, so opening a parts browser never materializes the
+    /// complete multi-megabyte index.
+    pub fn browse_parts(&self, limit: usize) -> io::Result<Vec<CatalogEntry>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let mut found = Vec::new();
+        self.for_each_catalog_entry(|entry| {
+            if entry.scope.is_addressable() {
+                found.push(entry);
+            }
+            found.len() < limit
+        })?;
+        Ok(found)
+    }
+
     /// Every addressable definition of a given canonical device class.
     pub fn parts_by_device(&self, device: &str, limit: usize) -> io::Result<Vec<CatalogEntry>> {
         Ok(self
@@ -1225,6 +1244,19 @@ mod tests {
             .find(|entry| entry.kind == "model")
             .expect("model entry exists");
         assert!(index.subcircuit_interface(&model).is_err());
+    }
+
+    #[test]
+    fn browse_parts_is_bounded_and_only_returns_addressable_cards() {
+        let index = SpiceLibraryIndex::open(repo_models_root()).expect("index opens");
+        let parts = index.browse_parts(25).expect("catalog readable");
+        assert_eq!(parts.len(), 25);
+        assert!(
+            parts
+                .iter()
+                .all(|entry| entry.scope == DefinitionScope::TopLevel)
+        );
+        assert!(index.browse_parts(0).expect("catalog readable").is_empty());
     }
 
     #[test]

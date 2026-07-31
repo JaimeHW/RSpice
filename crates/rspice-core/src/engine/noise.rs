@@ -2299,7 +2299,7 @@ mod tests {
         Netlist::parse_with_options(
             body,
             crate::netlist::NetlistParseOptions {
-                expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
                 ..crate::netlist::NetlistParseOptions::default()
             },
         )

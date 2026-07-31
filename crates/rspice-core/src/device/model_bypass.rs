@@ -126,10 +126,6 @@ impl CachedStamp {
         self.capacitances.push((row, col, value));
     }
 
-    /// Add a charge entry
-    pub fn add_charge(&mut self, node: usize, value: Value) {
-        self.charges.push((node, value));
-    }
 
     /// Clear all cached values
     pub fn clear(&mut self) {
@@ -188,14 +184,6 @@ pub struct BypassStats {
 }
 
 impl BypassStats {
-    /// Calculate bypass ratio (percentage of evaluations skipped)
-    pub fn bypass_ratio(&self) -> f64 {
-        if self.total_evaluations == 0 {
-            0.0
-        } else {
-            self.bypassed as f64 / self.total_evaluations as f64
-        }
-    }
 
     /// Reset statistics
     pub fn reset(&mut self) {
@@ -319,10 +307,6 @@ impl ModelBypassManager {
         self.cached_stamps.get(&device_id)
     }
 
-    /// Get mutable reference to cached stamp
-    pub fn get_cached_mut(&mut self, device_id: DeviceId) -> Option<&mut CachedStamp> {
-        self.cached_stamps.get_mut(&device_id)
-    }
 
     /// Invalidate cache for a specific device
     ///
@@ -332,34 +316,14 @@ impl ModelBypassManager {
         self.cached_stamps.remove(&device_id);
     }
 
-    /// Invalidate all cached data
-    ///
-    /// Use at start of new analysis or when global state changes.
-    pub fn invalidate_all(&mut self) {
-        self.prev_voltages.clear();
-        self.cached_stamps.clear();
-    }
 
     /// Get bypass statistics
     pub fn stats(&self) -> &BypassStats {
         &self.stats
     }
 
-    /// Reset bypass statistics
-    pub fn reset_stats(&mut self) {
-        self.stats.reset();
-    }
 
-    /// Get the number of devices with cached stamps
-    pub fn cached_device_count(&self) -> usize {
-        self.cached_stamps.len()
-    }
 
-    /// Update tolerances
-    pub fn set_tolerances(&mut self, reltol: Value, abstol: Value) {
-        self.reltol = reltol;
-        self.abstol = abstol;
-    }
 
     /// Get current relative tolerance
     pub fn reltol(&self) -> Value {

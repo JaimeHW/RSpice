@@ -276,23 +276,8 @@ impl HbConfig {
         self.num_harmonics.checked_mul(2)?.checked_add(1)
     }
 
-    /// Set maximum mixing order for multi-tone
-    pub fn with_max_mixing_order(mut self, order: usize) -> Self {
-        self.max_mixing_order = order;
-        self
-    }
 
-    /// Enable Krylov subspace solver
-    pub fn with_krylov(mut self, enable: bool) -> Self {
-        self.use_krylov = enable;
-        self
-    }
 
-    /// Enable source stepping
-    pub fn with_source_stepping(mut self, enable: bool) -> Self {
-        self.source_stepping = enable;
-        self
-    }
 
     /// Enable verbose logging
     pub fn with_verbose(mut self, verbose: bool) -> Self {

@@ -23,7 +23,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::manager::{ModelDefinition, ModelType, SubcircuitDefinition};
+use super::manager::{ModelDefinition, ModelType};
 
 //=============================================================================
 // Library Section (Corner)
@@ -242,14 +242,6 @@ impl ParsedSubcircuit {
         }
     }
 
-    /// Convert to SubcircuitDefinition for library manager
-    pub fn to_subcircuit_definition(&self, library: impl Into<Arc<str>>) -> SubcircuitDefinition {
-        let mut def = SubcircuitDefinition::new(self.name.clone(), self.pins.clone(), library);
-        if let Some(ref desc) = self.description {
-            def = def.with_description(desc.clone());
-        }
-        def
-    }
 }
 
 //=============================================================================
@@ -325,7 +317,7 @@ impl LibParser {
             base_dir,
             current_file: None,
             include_depth: 0,
-            max_include_depth: crate::netlist::DEFAULT_MAX_INCLUDE_DEPTH,
+            max_include_depth: crate::resource::DEFAULT_MAX_INCLUDE_DEPTH,
             include_stack: Vec::new(),
             resolved_sources: Vec::new(),
             resolved_source_paths: HashSet::new(),
@@ -1556,21 +1548,7 @@ impl LibParseResult {
             .find(|s| s.name.eq_ignore_ascii_case(name))
     }
 
-    /// Get all models from a specific section
-    pub fn models_in_section(&self, section_name: &str) -> Vec<&ParsedModel> {
-        self.get_section(section_name)
-            .map(|s| s.models.iter().collect())
-            .unwrap_or_default()
-    }
 
-    /// Get all models (top-level + all sections)
-    pub fn all_models(&self) -> Vec<&ParsedModel> {
-        let mut models: Vec<_> = self.top_level_models.iter().collect();
-        for section in &self.sections {
-            models.extend(section.models.iter());
-        }
-        models
-    }
 
     /// Find a model by name (searches all sections)
     pub fn find_model(&self, name: &str) -> Option<&ParsedModel> {
@@ -1910,7 +1888,7 @@ mod tests {
     fn dependency_capture_matches_the_64_frame_execution_boundary() {
         let accepted_dir = unique_lib_parser_temp_dir("depth-accepted");
         let accepted_root =
-            write_depth_fixture(&accepted_dir, crate::netlist::DEFAULT_MAX_INCLUDE_DEPTH);
+            write_depth_fixture(&accepted_dir, crate::resource::DEFAULT_MAX_INCLUDE_DEPTH);
         let mut accepted_parser = LibParser::new(&accepted_dir);
         let accepted = accepted_parser
             .parse_file(&accepted_root)
@@ -1918,16 +1896,16 @@ mod tests {
         assert!(accepted.is_ok(), "{:?}", accepted.errors);
         assert_eq!(
             accepted.resolved_sources.len(),
-            crate::netlist::DEFAULT_MAX_INCLUDE_DEPTH
+            crate::resource::DEFAULT_MAX_INCLUDE_DEPTH
         );
         assert_eq!(
             accepted.resolved_dependencies.len(),
-            crate::netlist::DEFAULT_MAX_INCLUDE_DEPTH - 1
+            crate::resource::DEFAULT_MAX_INCLUDE_DEPTH - 1
         );
 
         let rejected_dir = unique_lib_parser_temp_dir("depth-rejected");
         let rejected_root =
-            write_depth_fixture(&rejected_dir, crate::netlist::DEFAULT_MAX_INCLUDE_DEPTH + 1);
+            write_depth_fixture(&rejected_dir, crate::resource::DEFAULT_MAX_INCLUDE_DEPTH + 1);
         let mut rejected_parser = LibParser::new(&rejected_dir);
         let rejected = rejected_parser
             .parse_file(&rejected_root)

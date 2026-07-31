@@ -380,27 +380,7 @@ impl HbResult {
         self.spectral_voltages.len()
     }
 
-    /// Get harmonic data for a specific node
-    pub fn get_harmonics(&self, node_index: usize) -> Vec<HarmonicData> {
-        if let Some(sv) = self.spectral_voltages.get(node_index) {
-            sv.coefficients
-                .iter()
-                .enumerate()
-                .map(|(k, &coeff)| {
-                    let freq = self.harmonic_frequencies.get(k).copied().unwrap_or(0.0);
-                    HarmonicData::from_coefficient(k, freq, coeff)
-                })
-                .collect()
-        } else {
-            Vec::new()
-        }
-    }
 
-    /// Get voltage at a node by name
-    pub fn get_node_voltage(&self, name: &str) -> Option<&SpectralVoltage> {
-        let idx = self.node_names.iter().position(|n| n == name)?;
-        self.spectral_voltages.get(idx)
-    }
 
     /// Get DC operating point for all nodes
     pub fn dc_operating_point(&self) -> Vec<(String, Value)> {
@@ -411,23 +391,7 @@ impl HbResult {
             .collect()
     }
 
-    /// Get fundamental amplitude for all nodes
-    pub fn fundamental_amplitudes(&self) -> Vec<(String, Value)> {
-        self.spectral_voltages
-            .iter()
-            .zip(self.node_names.iter())
-            .map(|(sv, name)| (name.clone(), sv.magnitude(1)))
-            .collect()
-    }
 
-    /// Get THD for all nodes
-    pub fn thd_all(&self) -> Vec<(String, Value)> {
-        self.spectral_voltages
-            .iter()
-            .zip(self.node_names.iter())
-            .map(|(sv, name)| (name.clone(), sv.thd_percent()))
-            .collect()
-    }
 
     /// Check if solution is valid (converged with reasonable values)
     pub fn is_valid(&self) -> bool {

@@ -344,7 +344,7 @@ pub(super) fn bound_model_section_choices(
     choices
 }
 
-pub(super) fn apply_bound_model_choice(
+pub(crate) fn apply_bound_model_choice(
     app: &mut RSpiceApp,
     component_id: u64,
     selected_model: &str,

@@ -119,11 +119,6 @@ impl Jfet {
         self
     }
 
-    /// Set device multiplier
-    pub fn with_multiplier(mut self, m: Value) -> Self {
-        self.m = m;
-        self
-    }
 
     /// Set area factor
     pub fn with_area(mut self, area: Value) -> Self {

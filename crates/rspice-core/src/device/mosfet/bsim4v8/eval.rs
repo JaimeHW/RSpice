@@ -273,10 +273,6 @@ impl Bsim4v8Charge {
     pub fn qd_state(&self) -> Value {
         self.qd_node - self.qbd
     }
-    /// State-vector source charge (`CKTstate0 qs = qsrc - qbs`).
-    pub fn qs_state(&self) -> Value {
-        self.qs_node - self.qbs
-    }
     /// State-vector bulk charge (`CKTstate0 qb = qbulk + qbd + qbs`).
     pub fn qb_state(&self) -> Value {
         self.qb_node + self.qbd + self.qbs

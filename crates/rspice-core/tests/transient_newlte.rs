@@ -2,9 +2,10 @@
 
 use std::sync::Arc;
 
-use rspice_core::analysis::IntegrationMethod;
+use rspice_core::numerics::integration::IntegrationMethod;
 use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
-use rspice_core::netlist::{Netlist, TransientLteReference};
+use rspice_core::numerics::integration::TransientLteReference;
+use rspice_core::netlist::Netlist;
 
 fn rc_deck(options: &str) -> String {
     format!(

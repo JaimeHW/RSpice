@@ -149,7 +149,7 @@ impl Engine {
     #[inline]
     pub(in crate::engine::transient) fn transient_static_device_convergence_met(
         &self,
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
     ) -> bool {
         let criteria = self.device_convergence_criteria();
         #[cfg(feature = "veriloga-builtins-base")]

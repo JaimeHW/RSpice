@@ -14,10 +14,12 @@ name = "rspice-bench"
 path = "src/main.rs"
 
 [features]
-# Opt-in: pulls the whole generated built-in corpus into this binary, which
-# costs roughly 40 minutes of build time and peaks near 10 GB in one `rustc`.
-# Off by default so the process-level benchmarks stay cheap to build.
-generated-stamp = ["dep:rspice-core", "dep:rspice-conformance", "corpus-all"]
+# Opt-in: pulls the whole generated built-in corpus into this binary. The
+# models are independent packages so Cargo can cache and compile them in
+# parallel, but the complete corpus remains inappropriate for the default
+# process-level benchmark build.
+generated-stamp-base = ["dep:rspice-core", "dep:rspice-conformance"]
+generated-stamp = ["generated-stamp-base", "corpus-all"]
 
 # The same rig over five models instead of forty-two, for iterating.
 #
@@ -36,7 +38,7 @@ generated-stamp = ["dep:rspice-core", "dep:rspice-conformance", "corpus-all"]
 # `juncap200` for their parameter-processing prologues, and `epfl_hemt_10a`
 # because its complex-step evaluation overflows and has caught measurement
 # bugs before.
-generated-stamp-subset = ["dep:rspice-core", "dep:rspice-conformance", "corpus-five"]
+generated-stamp-subset = ["generated-stamp-base", "corpus-five"]
 
 corpus-all = ["rspice-core/veriloga-builtins-models"]
 corpus-five = [

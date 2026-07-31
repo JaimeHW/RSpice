@@ -90,6 +90,17 @@ const SYMBOL_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, SymbolTool); 8] 
     ),
 ];
 
+const MODELS_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, Option<&str>); 4] = [
+    (Command::Save, WorkbenchIcon::Save, None),
+    (
+        Command::PdkSettings,
+        WorkbenchIcon::Add,
+        Some("Add library"),
+    ),
+    (Command::RescanModelLibraries, WorkbenchIcon::Refresh, None),
+    (Command::CompileVerilogA, WorkbenchIcon::Netlist, None),
+];
+
 pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
@@ -1078,13 +1089,16 @@ fn verification_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
 }
 
 fn models_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    toolbar_icon_command(
-        ui,
-        app,
-        Command::CompileVerilogA,
-        WorkbenchIcon::Netlist,
-        layout,
-    );
+    for (index, (command, icon, label)) in MODELS_TOOLBAR_COMMANDS.into_iter().enumerate() {
+        if matches!(index, 1 | 3) {
+            context_separator(ui, layout);
+        }
+        if let Some(label) = label {
+            toolbar_text_command(ui, app, command, icon, label, layout);
+        } else {
+            toolbar_icon_command(ui, app, command, icon, layout);
+        }
+    }
 }
 
 fn netlist_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
@@ -1282,7 +1296,7 @@ fn toolbar_command(
         });
     }
     if response.clicked() {
-        command.execute(app);
+        command.execute_with_feedback(app, ui.ctx());
     }
 }
 
@@ -1958,6 +1972,20 @@ mod tests {
             Tool::DesignNote,
             Command::PlaceText,
         ));
+    fn models_toolbar_projects_the_mockup_command_order_and_icons() {
+        assert_eq!(
+            MODELS_TOOLBAR_COMMANDS,
+            [
+                (Command::Save, WorkbenchIcon::Save, None),
+                (
+                    Command::PdkSettings,
+                    WorkbenchIcon::Add,
+                    Some("Add library"),
+                ),
+                (Command::RescanModelLibraries, WorkbenchIcon::Refresh, None,),
+                (Command::CompileVerilogA, WorkbenchIcon::Netlist, None),
+            ]
+        );
     }
 
     #[test]

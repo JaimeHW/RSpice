@@ -5,7 +5,6 @@
 
 use super::conversion_matrix::{ConversionMatrix, SidebandTransfer};
 use crate::{Complex64, Value};
-use std::collections::HashMap;
 
 //=============================================================================
 // Per-Sideband Data
@@ -241,12 +240,6 @@ impl PacResult {
             .unwrap_or(Complex64::new(0.0, 0.0))
     }
 
-    /// Get voltage by node name
-    pub fn voltage_by_name(&self, node_name: &str, freq_idx: usize, sideband: i32) -> Complex64 {
-        self.node_index(node_name)
-            .map(|idx| self.voltage(idx, freq_idx, sideband))
-            .unwrap_or(Complex64::new(0.0, 0.0))
-    }
 
     /// Get conversion gain from input sideband to output sideband
     ///
@@ -288,15 +281,6 @@ impl PacResult {
         self.conversion_matrix.image_rejection_db(freq_idx)
     }
 
-    /// Extract voltage spectrum at a node (all sidebands) for a frequency
-    pub fn voltage_spectrum(&self, node: usize, freq_idx: usize) -> HashMap<i32, Complex64> {
-        let mut spectrum = HashMap::new();
-        for sb in self.sideband_min..=self.sideband_max {
-            let v = self.voltage(node, freq_idx, sb);
-            spectrum.insert(sb, v);
-        }
-        spectrum
-    }
 
     /// Get magnitude vs frequency at a specific node and sideband
     pub fn magnitude_vs_frequency(&self, node: usize, sideband: i32) -> Vec<(Value, Value)> {
@@ -310,32 +294,7 @@ impl PacResult {
             .collect()
     }
 
-    /// Get magnitude in dB vs frequency
-    pub fn magnitude_db_vs_frequency(&self, node: usize, sideband: i32) -> Vec<(Value, Value)> {
-        self.magnitude_vs_frequency(node, sideband)
-            .into_iter()
-            .map(|(f, mag)| {
-                let db = if mag > 0.0 {
-                    20.0 * mag.log10()
-                } else {
-                    f64::NEG_INFINITY
-                };
-                (f, db)
-            })
-            .collect()
-    }
 
-    /// Get phase vs frequency at a specific node and sideband (radians)
-    pub fn phase_vs_frequency(&self, node: usize, sideband: i32) -> Vec<(Value, Value)> {
-        self.frequencies
-            .iter()
-            .enumerate()
-            .map(|(idx, &freq)| {
-                let phase = self.voltage(node, idx, sideband).arg();
-                (freq, phase)
-            })
-            .collect()
-    }
 
     /// Set the input source name
     pub fn set_input_source(&mut self, name: &str) {

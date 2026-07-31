@@ -1211,7 +1211,7 @@ endmodule
 }
 
 #[test]
-fn model_parameter_ranges_may_depend_on_instance_geometry() {
+fn model_parameter_ranges_may_reference_instance_geometry() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(
             r#"
@@ -1219,21 +1219,17 @@ module scoped_range(p, n);
     inout p, n;
     electrical p, n;
     (* type = "instance" *) parameter real length = 1.0e-6;
-    parameter real overlap = 0.0 from (-inf:length);
-    analog I(p, n) <+ overlap * V(p, n);
+    parameter real lateral_offset = 0.0 from [-inf:length);
+    analog I(p, n) <+ lateral_offset * V(p, n);
 endmodule
 "#,
         )
-        .expect("model range is validated against each completed instance parameter vector");
+        .expect("instance-dependent validation bounds preserve model scope");
 
     assert_eq!(
-        artifact.hir.parameters[1]
-            .range
-            .as_ref()
-            .and_then(|range| range.max_parameter.as_deref()),
-        Some("length")
+        artifact.mir.parameters[1].scope,
+        ParameterScope::Model
     );
-    assert!(artifact.validate().is_ok());
 }
 
 #[test]

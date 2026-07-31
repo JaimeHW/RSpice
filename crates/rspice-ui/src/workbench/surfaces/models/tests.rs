@@ -5,6 +5,7 @@
 //! correlation requires current approved evidence before it counts.
 
 use super::*;
+use crate::workbench::state::ModelsPage;
 
 #[test]
 fn model_tabs_match_the_mockup_taxonomy() {
@@ -33,41 +34,6 @@ fn responsive_model_geometry_matches_mockup_breakpoints() {
     assert!(!model_title_actions_stack(820.0));
     assert!(!model_title_actions_stack(561.0));
     assert!(model_title_actions_stack(560.0));
-}
-
-#[test]
-fn project_catalog_exposes_imported_subcircuit_interfaces_without_fabricating_models() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
-    app.state
-        .model_library_manager
-        .load_library_bytes(
-            "browser-subcircuits.lib",
-            b".subckt AMP inp inn out params: GAIN=100\n\
-              e1 out 0 inp inn {GAIN}\n\
-              .ends AMP\n"
-                .to_vec(),
-            None,
-        )
-        .expect("subcircuit source imports");
-
-    let records = project_catalog_records(&app);
-    assert_eq!(records.len(), 1);
-    let record = &records[0];
-    assert_eq!(record.definition.name(), "AMP");
-    assert_eq!(record.status, ProjectCatalogStatus::Ready);
-    assert!(record.qualification.is_none());
-    let ProjectCatalogDefinition::Subcircuit(interface) = &record.definition else {
-        panic!("pure subcircuit import must not fabricate a device model");
-    };
-    assert_eq!(interface.ports, ["inp", "inn", "out"]);
-    assert_eq!(
-        interface.parameter_defaults.get("GAIN").map(String::as_str),
-        Some("100")
-    );
-    assert!(project_record_matches_query(record, "inn"));
-    assert!(project_record_matches_query(record, "gain"));
-    assert_eq!(app.state.model_library_manager.total_definition_count(), 1);
 }
 
 #[test]
@@ -145,25 +111,9 @@ fn action_title_keeps_its_button_in_the_title_band_and_leaves_body_space() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn complete_models_surface_keeps_action_pages_inside_the_title_band() {
-    for (page, label, description, body_label) in [
-        (
-            ModelsPage::Symbols,
-            "Create symbol",
-            "Bind graphical symbols, terminals, parameter forms and model families without hiding netlist semantics.",
-            "No symbol views are present in the loaded design libraries.",
-        ),
-        (
-            ModelsPage::Bins,
-            "Import bin map...",
-            "Audit the parsed card ranges that drive model selection and trace placed device geometry to the winning card.",
-            "No executable model source contains geometry-binned model families.",
-        ),
-        (
-            ModelsPage::Include,
-            "Collapse transitive",
-            "Inspect ordered dependency resolution, captured paths, source pins, and cycle diagnostics.",
-            "No loaded model libraries expose an include graph.",
-        ),
+    for (page, label) in [
+        (ModelsPage::Symbols, "Create symbol"),
+        (ModelsPage::Include, "Export manifest"),
     ] {
         for width in [1_431.0, 820.0, 720.0, 561.0] {
             let ctx = egui::Context::default();
@@ -205,25 +155,13 @@ fn complete_models_surface_keeps_action_pages_inside_the_title_band() {
                 bounds.y1 <= 150.0,
                 "{label} escaped the models title band on {page:?} at {width}: {bounds:?}"
             );
-            let description_bounds = nodes
-                .iter()
-                .find(|(_, node)| node.label() == Some(description))
-                .and_then(|(_, node)| node.bounds())
-                .unwrap_or_else(|| panic!("missing {description} title description"));
-            let body_bounds = nodes
-                .iter()
-                .find(|(_, node)| node.label() == Some(body_label))
-                .and_then(|(_, node)| node.bounds())
-                .unwrap_or_else(|| panic!("missing {body_label} body state"));
             assert!(
-                body_bounds.y0 >= bounds.y1 - 1.0
-                    && body_bounds.y0 >= description_bounds.y1 - 1.0
-                    && body_bounds.y1 <= 560.0,
-                "{body_label} overlaps the title or leaves the visible body on {page:?} at {width}: action={bounds:?}, description={description_bounds:?}, body={body_bounds:?}"
+                bounds.y0 >= 70.0,
+                "{label} overlapped the manager toolbar or page tabs on {page:?} at {width}: {bounds:?}"
             );
             assert!(
-                (body_bounds.y0 + body_bounds.y1) * 0.5 >= 220.0,
-                "{body_label} is stranded at the top of an otherwise empty table on {page:?} at {width}: {body_bounds:?}"
+                !output.shapes.is_empty(),
+                "{page:?} produced no visible body composition at {width}"
             );
         }
     }
@@ -276,33 +214,35 @@ fn parent_scrolled_summary_uses_natural_height_instead_of_nesting_scrollbars() {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut consumed = None;
-    // Five fixed-height property rows plus the card header exceed the nominal
-    // summary height. Read-only property rows deliberately elide instead of
-    // wrapping, so row count is the stable way to exercise natural expansion.
+    // Narrow enough that the long paths below wrap past the nominal summary
+    // height. egui 0.35's root `Ui` carries no margin, so the same screen rect
+    // yields a wider content column than it did on 0.34.
     let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(
                     egui::Pos2::ZERO,
-                    egui::vec2(430.0, 260.0),
+                    egui::vec2(620.0, 260.0),
                 )),
                 ..Default::default()
             },
             |root| {
                 egui::CentralPanel::default().show(root, |ui| {
-                    let long = "C:/commercial/pdk/releases/current/models/process/sections/temperature-and-voltage-corner".to_owned();
+                    let long: String = "C:/commercial/pdk/releases/current/models/process/sections/temperature-and-voltage-corner".to_owned();
                     let left = [
                         ("Resolved bindings", long.clone()),
                         ("Unresolved bindings", long.clone()),
                         ("Missing non-TT section", long.clone()),
-                        ("Unpinned sources", long.clone()),
-                        ("Duplicate definitions", long.clone()),
+                        ("Stale section digest", long.clone()),
+                        ("Unbound corner", long.clone()),
+                        ("Shadowed library", long.clone()),
                     ];
                     let right = [
                         ("Temperature", long.clone()),
                         ("Supply factor", long.clone()),
                         ("PDK search paths", long.clone()),
-                        ("Model libraries", long.clone()),
-                        ("Active sections", long),
+                        ("Section policy", long.clone()),
+                        ("Corner set", long.clone()),
+                        ("Binding authority", long.clone()),
                     ];
                     consumed = Some(
                         summary_cards(
@@ -341,60 +281,6 @@ fn qualification_tab_uses_the_mockup_contract_label() {
     assert_eq!(
         qualification_required_content_height(MODEL_SUMMARY_BREAKPOINT + 1.0),
         QUALIFICATION_MIN_CONTENT_H
-    );
-}
-
-#[test]
-fn include_diagnostics_expose_every_contested_provider() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.model_library_manager.clear();
-    app.state
-        .model_library_manager
-        .load_library_bytes(
-            "alpha.lib",
-            b".model duplicated NMOS (LEVEL=1 KP=1e-3)\n".to_vec(),
-            None,
-        )
-        .expect("alpha provider");
-    app.state
-        .model_library_manager
-        .load_library_bytes(
-            "beta.lib",
-            b".model DUPLICATED NMOS (LEVEL=1 KP=2e-3)\n".to_vec(),
-            None,
-        )
-        .expect("beta provider");
-
-    let diagnostics = include_diagnostics(&app);
-    assert_eq!(diagnostics.duplicate_definitions, 1);
-    assert_eq!(diagnostics.conflicts.len(), 1);
-    assert_eq!(diagnostics.conflicts[0].normalized_name, "duplicated");
-    assert_eq!(diagnostics.conflicts[0].providers.len(), 2);
-    assert!(
-        diagnostics
-            .resolution_error
-            .as_deref()
-            .is_some_and(|error| error.contains("Select one exact provider"))
-    );
-
-    app.state
-        .model_library_manager
-        .resolve_definition_conflict("duplicated", "beta", "DUPLICATED")
-        .expect("exact provider selection");
-    let resolved = include_diagnostics(&app);
-    assert!(resolved.resolution_error.is_none());
-}
-
-#[test]
-fn bins_tab_has_a_stable_command_identity() {
-    assert_eq!(ModelsPage::Bins.label(), "Bins & geometry");
-    assert_eq!(
-        Command::ModelsPage(ModelsPage::Bins).stable_id(),
-        "model-bins"
-    );
-    assert_eq!(
-        Command::from_stable_id("model-bins"),
-        Some(Command::ModelsPage(ModelsPage::Bins))
     );
 }
 
@@ -725,51 +611,4 @@ fn cycle_diagnostics_report_only_nodes_remaining_after_topological_sort() {
     let c = PathBuf::from("c");
     assert_eq!(cyclic_node_count(&[(a.clone(), b.clone()), (b, c)]), 0);
     assert_eq!(cyclic_node_count(&[(a.clone(), a)]), 1);
-}
-
-#[test]
-fn include_selection_and_definition_rows_project_exact_retained_source_state() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.model_library_manager.clear();
-    let library_name = app
-        .state
-        .model_library_manager
-        .load_library_bytes(
-            "include-fixture.lib",
-            b".lib TT\n.model nch NMOS (LEVEL=54)\n.subckt AMP in out\nR1 in out 1k\n.ends AMP\n.endl TT\n"
-                .to_vec(),
-            Some("TT"),
-        )
-        .expect("fixture imports");
-    let root = app
-        .state
-        .model_library_manager
-        .get_library(&library_name)
-        .and_then(|library| library.root_path.clone())
-        .expect("authenticated root");
-    app.state.workbench.model_include_selected_library = Some(library_name.clone());
-    app.state.workbench.model_include_selected_source = Some(root.clone());
-
-    let detail = selected_include_source_detail(&app).expect("selected detail");
-    assert_eq!(detail.library, library_name);
-    assert_eq!(detail.path, root);
-    assert_eq!(detail.digest.len(), 64);
-    assert!(detail.root);
-    assert!(detail.byte_length > 0);
-    assert_eq!(detail.incoming_edges, 0);
-    assert_eq!(detail.outgoing_edges, 0);
-    assert_eq!(detail.definitions, 2);
-    assert_eq!(detail.authority, "retained import · digest checked");
-
-    let rows = include_definition_rows(&app);
-    assert_eq!(rows.len(), 2);
-    assert!(rows.iter().all(|row| row.resolved && !row.exception));
-    assert!(
-        rows.iter()
-            .any(|row| { row.name == "AMP" && row.kind == "subcircuit" && row.section == "TT" })
-    );
-    assert!(
-        rows.iter()
-            .any(|row| { row.name == "nch" && row.kind == "model" && row.section == "TT" })
-    );
 }

@@ -175,7 +175,7 @@ impl Workspace {
             Self::Simulate => "Analysis inspector",
             Self::Results => "Data inspector",
             Self::Verify => "Evidence inspector",
-            Self::Models => "Model inspector",
+            Self::Models => "Model details",
             Self::Netlist => "Source inspector",
         }
     }
@@ -952,6 +952,10 @@ pub struct WorkbenchState {
     pub model_include_definition_query: String,
     #[serde(default)]
     pub model_include_exceptions_only: bool,
+    /// Models & PDKs catalog filters and stable presentation selections.
+    /// Model, source, symbol, and PDK records remain in their owning domains.
+    #[serde(default)]
+    pub models_view: ModelsWorkbenchViewState,
     /// Analysis row whose configuration is shown in the simulation plan.
     /// Retained only to migrate pre-instance session selection.
     #[serde(default = "default_analysis_index")]
@@ -1144,6 +1148,7 @@ impl Default for WorkbenchState {
             model_include_selected_source: None,
             model_include_definition_query: String::new(),
             model_include_exceptions_only: false,
+            models_view: ModelsWorkbenchViewState::default(),
             active_analysis: default_analysis_index(),
             active_analysis_instance: None,
             simulation_surface_scroll_y: 0.0,

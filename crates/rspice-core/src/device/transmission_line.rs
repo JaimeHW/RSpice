@@ -24,7 +24,7 @@
 //! The transmission line is modeled as dependent sources with delay.
 
 #![allow(clippy::too_many_arguments)]
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 use std::cell::Cell;
 use std::collections::VecDeque;
 
@@ -164,115 +164,6 @@ mod ltra_oracle_replay {
             worst.0,
             worst.1,
             first_bad
-        );
-    }
-
-    /// Diagnostic probe: run the gate-isolated ltra2 deck on ngspice's exact
-    /// accepted grid and diff our committed (v1, i1, v2) trajectory for o1
-    /// against the gdb-extracted oracle history, printing where the engines
-    /// drift. The LTRA response replay above proves the line algebra is
-    /// faithful given identical history, so any drift printed here enters
-    /// through the rest of the circuit (driver stage companions).
-    #[test]
-    #[ignore]
-    fn locked_history_drift_ltra2_o1() {
-        let acc_text = include_str!("transmission_line/testdata/ltra2_o1_acc.dat");
-        let acc: Vec<(Value, Value, Value, Value, Value)> = acc_text
-            .lines()
-            .map(|line| {
-                let f: Vec<&str> = line.split_whitespace().collect();
-                (
-                    f[0].parse().unwrap(),
-                    f[2].parse().unwrap(),
-                    f[3].parse().unwrap(),
-                    f[4].parse().unwrap(),
-                    f[5].parse().unwrap(),
-                )
-            })
-            .collect();
-
-        let deck = r#"MOSdriver -- 2 lossy lines LTRA model -- C load -- isolated gates
-m5     0     168    2     0  mn0p9  w = 18.0u l=0.9u
-m6     1     168    2     1  mp1p0  w = 36.0u l=1.0u
-m1     0     ncopy    4     0  mn0p9  w = 18.0u l=0.9u
-m2     1     ncopy    4     1  mp1p0  w = 36.0u l=1.0u
-e1   ncopy  0  3 0 1.0
-CN2  2   0  0.025398e-12
-CN3  3   0  0.007398e-12
-CN4  4   0  0.025398e-12
-CN5  5   0  0.007398e-12
-o1  2 0 3 0  lline
-o2  4 0 5 0  lline
-vdd    1    0   dc 	5.0
-VS 168  0  PULSE (0 5 15.9NS 0.2NS 0.2NS 15.8NS 32NS )
-.OPTION NOACCT
-.TRAN 0.2N 47N 0 0.1N
-.MODEL mn0p9 NMOS VTO=0.8 KP=48U GAMMA=0.30 PHI=0.55
-+LAMBDA=0.00 CGSO=0 CGDO=0 CJ=0 CJSW=0 TOX=18000N LD=0.0U
-.MODEL mp1p0 PMOS VTO=-0.8 KP=21U GAMMA=0.45 PHI=0.61
-+LAMBDA=0.00 CGSO=0 CGDO=0 CJ=0 CJSW=0 TOX=18000N LD=0.0U
-.model lline ltra rel=1 r=12.45 g=0 l=8.972e-9 c=0.468e-12
-+len=16 steplimit compactrel=1.0e-3 compactabs=1.0e-14
-.end
-"#;
-        let netlist = crate::Netlist::parse(deck).expect("deck parses");
-        let config = crate::engine::SimulationConfig {
-            integration_method: crate::analysis::IntegrationMethod::Trapezoidal,
-            temperature: 300.15,
-            min_timestep: 1e-12,
-            locked_time_grid: Some(std::sync::Arc::new(
-                acc.iter().map(|a| a.0).filter(|&t| t > 0.0).collect(),
-            )),
-            ..Default::default()
-        };
-        let engine = crate::engine::Engine::new(config);
-        let result = engine
-            .run_tran_with_abort(&netlist, 47e-9, 0.1e-9, &crate::abort_signal::NoAbort)
-            .expect("locked transient runs");
-
-        let v2_idx = result
-            .node_names
-            .iter()
-            .position(|n| n == "2")
-            .expect("node 2");
-        let v3_idx = result
-            .node_names
-            .iter()
-            .position(|n| n == "3")
-            .expect("node 3");
-
-        let mut printed = 0usize;
-        let mut worst_v2: (Value, Value) = (0.0, 0.0);
-        let mut worst_v3: (Value, Value) = (0.0, 0.0);
-        for (k, &(t, v1_ng, _i1_ng, v2_ng, _i2_ng)) in acc.iter().enumerate() {
-            let Some(pos) = result
-                .time
-                .iter()
-                .position(|&rt| (rt - t).abs() <= 1e-22 + 5e-13 * t.abs())
-            else {
-                continue;
-            };
-            let v2_ours = result.voltages[v2_idx][pos];
-            let v3_ours = result.voltages[v3_idx][pos];
-            let d2 = (v2_ours - v1_ng).abs();
-            let d3 = (v3_ours - v2_ng).abs();
-            if d2 > worst_v2.0 {
-                worst_v2 = (d2, t);
-            }
-            if d3 > worst_v3.0 {
-                worst_v3 = (d3, t);
-            }
-            if (d2 > 2e-3 || d3 > 2e-3) && printed < 25 && k % 5 == 0 {
-                println!(
-                    "t={:.6e}  v(2): ours={:.9e} ng={:.9e} d={:.3e}   v(3): ours={:.9e} ng={:.9e} d={:.3e}",
-                    t, v2_ours, v1_ng, d2, v3_ours, v2_ng, d3
-                );
-                printed += 1;
-            }
-        }
-        println!(
-            "worst |v2 drift|={:.3e} at t={:.6e}; worst |v3 drift|={:.3e} at t={:.6e}",
-            worst_v2.0, worst_v2.1, worst_v3.0, worst_v3.1
         );
     }
 }

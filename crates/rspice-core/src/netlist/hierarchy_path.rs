@@ -54,23 +54,7 @@ impl Default for HierarchyPathConfig {
 }
 
 impl HierarchyPathConfig {
-    /// SPICE-style configuration (underscore separator)
-    pub fn spice_style() -> Self {
-        Self {
-            separator: '_',
-            max_depth: 100,
-            preserve_full_path: true,
-        }
-    }
 
-    /// Standard style configuration (dot separator)
-    pub fn spectre_style() -> Self {
-        Self {
-            separator: '.',
-            max_depth: 256,
-            preserve_full_path: true,
-        }
-    }
 }
 
 //=============================================================================
@@ -132,29 +116,8 @@ impl HierarchyPath {
         }
     }
 
-    /// Create a path from a single instance name
-    pub fn from_instance(name: impl Into<String>) -> Self {
-        Self {
-            segments: vec![name.into()],
-            separator: '.',
-        }
-    }
 
-    /// Create a path from a vector of segments
-    pub fn from_segments(segments: Vec<String>) -> Self {
-        Self {
-            segments,
-            separator: '.',
-        }
-    }
 
-    /// Create a path from segments with custom separator
-    pub fn from_segments_with_separator(segments: Vec<String>, separator: char) -> Self {
-        Self {
-            segments,
-            separator,
-        }
-    }
 
     /// Parse a path from a string representation
     ///
@@ -274,11 +237,6 @@ impl HierarchyPath {
         self.separator
     }
 
-    /// Set the separator character
-    pub fn with_separator(mut self, separator: char) -> Self {
-        self.separator = separator;
-        self
-    }
 
     /// Check if this path is an ancestor of another path
     pub fn is_ancestor_of(&self, other: &Self) -> bool {
@@ -292,10 +250,6 @@ impl HierarchyPath {
             .all(|(a, b)| a == b)
     }
 
-    /// Check if this path is a descendant of another path
-    pub fn is_descendant_of(&self, other: &Self) -> bool {
-        other.is_ancestor_of(self)
-    }
 
     /// Check if this path starts with another path (is equal or descendant)
     pub fn starts_with(&self, prefix: &Self) -> bool {
@@ -310,20 +264,6 @@ impl HierarchyPath {
             .all(|(a, b)| a == b)
     }
 
-    /// Get the relative path from an ancestor to this path
-    ///
-    /// Returns None if `ancestor` is not actually an ancestor.
-    pub fn relative_to(&self, ancestor: &Self) -> Option<Self> {
-        if !self.starts_with(ancestor) {
-            return None;
-        }
-
-        let relative_segments = self.segments[ancestor.depth()..].to_vec();
-        Some(Self {
-            segments: relative_segments,
-            separator: self.separator,
-        })
-    }
 
     //-------------------------------------------------------------------------
     // Name Generation
@@ -354,21 +294,6 @@ impl HierarchyPath {
             || node.starts_with('!')
     }
 
-    /// Qualify a node name with this hierarchy path
-    ///
-    /// Global nodes are returned unchanged; local nodes get the full path prefix.
-    pub fn qualify_node(&self, node: &str) -> String {
-        if Self::is_global_node(node) || self.is_root() {
-            // Ground is never renamed, global power rails preserved
-            if crate::naming::is_spice_ground_name(node) {
-                "0".to_string()
-            } else {
-                node.to_string()
-            }
-        } else {
-            format!("{}{}{}", self, self.separator, node)
-        }
-    }
 }
 
 impl fmt::Display for HierarchyPath {

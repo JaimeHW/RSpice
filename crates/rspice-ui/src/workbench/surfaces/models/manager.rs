@@ -1,0 +1,2472 @@
+//! Mounted Models & PDKs manager composition.
+//!
+//! The legacy surface remains in the parent module only as reusable rendering
+//! and qualification code. This module owns the current six-page workbench,
+//! corpus scopes, guarded source/pack actions, and model detail composition.
+
+mod specialist_pages;
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
+
+use egui::{Align, Color32, Layout, RichText, ScrollArea, Sense, Stroke, Ui, Vec2};
+
+use crate::state::model_library::{
+    DeviceModel, ModelLibrary, ModelSourceAuthority, PackModelHit, ProcessCorner,
+};
+use crate::state::{
+    CellViewRef, Component, ComponentType, ModelBoundSymbolDefinition, SymbolDocument, ViewType,
+};
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
+use crate::workbench::app_state::design_history::publish_model_library_candidate;
+use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::state::{
+    ModelPackFacet, ModelsCatalogScope, ModelsOperationalState, ModelsPage, ModelsWorkbenchDialog,
+    ProjectModelFacet, RSpicePartFacet,
+};
+use crate::workbench::{AppState, RSpiceApp};
+
+const ROW_H: f32 = 24.0;
+const HEADER_H: f32 = 27.0;
+const CATALOG_FOOT_H: f32 = 26.0;
+const CATALOG_LIMIT: usize = 160;
+const PAGE_TABS_H: f32 = 38.0;
+const CATALOG_BAR_H: f32 = 34.0;
+
+enum ManagerAction {
+    Command(Command),
+    BindComponentModel {
+        component_id: u64,
+        library: String,
+        model: String,
+    },
+}
+
+struct ManagerRenderContext<'a> {
+    state: &'a mut AppState,
+    pending_actions: &'a mut Vec<ManagerAction>,
+}
+
+impl ManagerRenderContext<'_> {
+    fn queue_command(&mut self, command: Command) {
+        self.pending_actions.push(ManagerAction::Command(command));
+    }
+
+    fn queue_model_binding(&mut self, component_id: u64, library: &str, model: &str) {
+        self.pending_actions
+            .push(ManagerAction::BindComponentModel {
+                component_id,
+                library: library.to_owned(),
+                model: model.to_owned(),
+            });
+    }
+}
+
+pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+    let t = Tokens::get(ui.ctx());
+    // The approved manager is one continuous document surface. Individual
+    // panes own their padding; the composition itself uses one-pixel dividers.
+    ui.spacing_mut().item_spacing = Vec2::ZERO;
+    ui.visuals_mut().widgets.noninteractive.bg_fill = t.color.bg_panel;
+
+    let mut pending_actions = Vec::new();
+    {
+        let mut render = ManagerRenderContext {
+            state: &mut app.state,
+            pending_actions: &mut pending_actions,
+        };
+        page_tabs(ui, &mut render);
+    }
+
+    let page = app.state.workbench.models_page;
+    let include_diagnostics =
+        (page == ModelsPage::Include).then(|| super::include_diagnostics(app));
+    if page == ModelsPage::Qualification {
+        super::qualification(ui, app);
+    } else {
+        let mut render = ManagerRenderContext {
+            state: &mut app.state,
+            pending_actions: &mut pending_actions,
+        };
+        match page {
+            ModelsPage::Models => catalog_page(ui, &mut render),
+            ModelsPage::Symbols => specialist_pages::symbols_page(ui, &mut render),
+            ModelsPage::Corners => specialist_pages::corners_page(ui, &mut render),
+            ModelsPage::Bins => specialist_pages::bins_page(ui, &mut render),
+            ModelsPage::Include => specialist_pages::include_page(
+                ui,
+                &mut render,
+                include_diagnostics
+                    .as_ref()
+                    .expect("include diagnostics are prepared for the include page"),
+            ),
+            ModelsPage::Qualification => unreachable!("qualification renders above"),
+        }
+    }
+
+    {
+        let mut render = ManagerRenderContext {
+            state: &mut app.state,
+            pending_actions: &mut pending_actions,
+        };
+        render_dialog(ui, &mut render);
+    }
+    for action in pending_actions {
+        match action {
+            ManagerAction::Command(command) => command.execute(app),
+            ManagerAction::BindComponentModel {
+                component_id,
+                library,
+                model,
+            } => {
+                let result = crate::workbench::docks::bind_component_model_from_catalog(
+                    app,
+                    component_id,
+                    &library,
+                    &model,
+                )
+                .map(|()| format!("Bound selected instance to model '{library} / {model}'."));
+                apply_receipt(&mut app.state, result);
+            }
+        }
+    }
+}
+
+fn page_tabs(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::NONE
+        .fill(t.color.bg_panel)
+        .inner_margin(egui::Margin::ZERO)
+        .show(ui, |ui| {
+            ui.set_height(PAGE_TABS_H);
+            ui.painter().hline(
+                ui.max_rect().x_range(),
+                ui.max_rect().bottom() - 0.5,
+                Stroke::new(1.0, t.color.border),
+            );
+            ScrollArea::horizontal()
+                .id_salt("models-pdks-page-tabs")
+                .max_height(PAGE_TABS_H)
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = Vec2::ZERO;
+                        for page in ModelsPage::ALL {
+                            let selected = app.state.workbench.models_page == page;
+                            let font = theme::sans(tokens::FS_1, FontWeight::Regular);
+                            let text_width = ui
+                                .painter()
+                                .layout_no_wrap(page.label().to_owned(), font.clone(), t.color.text)
+                                .size()
+                                .x;
+                            let response = ui.add_sized(
+                                [text_width + 24.0, PAGE_TABS_H - 1.0],
+                                egui::Button::new(RichText::new(page.label()).font(font).color(
+                                    if selected {
+                                        t.color.text
+                                    } else {
+                                        t.color.text_dim
+                                    },
+                                ))
+                                .frame(false),
+                            );
+                            if selected {
+                                ui.painter().hline(
+                                    (response.rect.left() + 9.0)..=(response.rect.right() - 9.0),
+                                    response.rect.bottom() - 1.0,
+                                    Stroke::new(2.0, t.color.accent),
+                                );
+                            }
+                            if response.clicked() {
+                                app.state.workbench.models_page = page;
+                            }
+                        }
+                    });
+                });
+        });
+}
+
+fn catalog_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
+    catalog_bar(ui, app);
+    match app.state.workbench.models_view.catalog_scope {
+        ModelsCatalogScope::Project => project_catalog(ui, app),
+        ModelsCatalogScope::InstalledPacks => pack_catalog(ui, app),
+        ModelsCatalogScope::RSpiceLibrary => parts_catalog(ui, app),
+    }
+}
+
+fn catalog_bar(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
+    let loaded = app.state.model_library_manager.total_model_count();
+    let pack_rows = app
+        .state
+        .model_library_manager
+        .spice_packs()
+        .map(|index| index.packs().to_vec())
+        .unwrap_or_default();
+    let packs = pack_rows.len();
+    let parts = app.state.model_library_manager.pack_definition_count();
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::NONE
+        .fill(t.color.bg_panel)
+        .inner_margin(egui::Margin::symmetric(7, 0))
+        .show(ui, |ui| {
+            ui.set_height(CATALOG_BAR_H);
+            ui.horizontal_centered(|ui| {
+                ui.spacing_mut().item_spacing.x = 10.0;
+                egui::Frame::NONE
+                    .stroke(Stroke::new(1.0, t.color.border))
+                    .corner_radius(5.0)
+                    .inner_margin(egui::Margin::ZERO)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing = Vec2::ZERO;
+                            for (scope, count) in [
+                                (ModelsCatalogScope::Project, loaded),
+                                (ModelsCatalogScope::InstalledPacks, packs),
+                                (ModelsCatalogScope::RSpiceLibrary, parts),
+                            ] {
+                                let selected =
+                                    app.state.workbench.models_view.catalog_scope == scope;
+                                let response = ui.add_sized(
+                                    [scope_segment_width(scope), 20.0],
+                                    egui::Button::new(
+                                        RichText::new(format!("{}  {count}", scope.label()))
+                                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                            .color(if selected {
+                                                t.color.text
+                                            } else {
+                                                t.color.text_dim
+                                            }),
+                                    )
+                                    .fill(if selected {
+                                        t.color.bg_active
+                                    } else {
+                                        Color32::TRANSPARENT
+                                    })
+                                    .stroke(Stroke::NONE)
+                                    .corner_radius(4.0),
+                                );
+                                if response.clicked() {
+                                    app.state.workbench.models_view.catalog_scope = scope;
+                                    app.state.workbench.models_view.catalog_query.clear();
+                                }
+                            }
+                        });
+                    });
+
+                // The source mockup drops the facet rail before it can squeeze
+                // the scope switcher or search field in the document column.
+                if ui.available_width() >= 560.0 {
+                    ScrollArea::horizontal()
+                        .id_salt("models-catalog-facets")
+                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                        .show(ui, |ui| {
+                            match app.state.workbench.models_view.catalog_scope {
+                                ModelsCatalogScope::Project => {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 4.0;
+                                        for facet in ProjectModelFacet::ALL {
+                                            let count = project_facet_count(app, facet);
+                                            if facet_button(
+                                                ui,
+                                                app.state.workbench.models_view.project_facet
+                                                    == facet,
+                                                facet.label(),
+                                                Some(count),
+                                            )
+                                            .clicked()
+                                            {
+                                                app.state.workbench.models_view.project_facet =
+                                                    facet;
+                                            }
+                                        }
+                                    });
+                                }
+                                ModelsCatalogScope::InstalledPacks => {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 4.0;
+                                        for facet in ModelPackFacet::ALL {
+                                            let count = pack_facet_count(app, &pack_rows, facet);
+                                            if facet_button(
+                                                ui,
+                                                app.state.workbench.models_view.pack_facet == facet,
+                                                facet.label(),
+                                                Some(count),
+                                            )
+                                            .clicked()
+                                            {
+                                                app.state.workbench.models_view.pack_facet = facet;
+                                            }
+                                        }
+                                    });
+                                }
+                                ModelsCatalogScope::RSpiceLibrary => {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 4.0;
+                                        for facet in RSpicePartFacet::ALL {
+                                            if facet_button(
+                                                ui,
+                                                app.state.workbench.models_view.part_facet == facet,
+                                                facet.label(),
+                                                None,
+                                            )
+                                            .clicked()
+                                            {
+                                                app.state.workbench.models_view.part_facet = facet;
+                                                app.state.workbench.models_view.selected_part =
+                                                    None;
+                                            }
+                                        }
+                                    });
+                                }
+                            }
+                        });
+                }
+
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let hint = match app.state.workbench.models_view.catalog_scope {
+                        ModelsCatalogScope::Project => {
+                            "Search models, parameters or consumers…".to_owned()
+                        }
+                        ModelsCatalogScope::InstalledPacks => "Search installed packs…".to_owned(),
+                        ModelsCatalogScope::RSpiceLibrary => {
+                            format!("Search {} parts by name, class or pack…", parts)
+                        }
+                    };
+                    ui.add_sized(
+                        [ui.available_width().clamp(170.0, 340.0), 24.0],
+                        egui::TextEdit::singleline(
+                            &mut app.state.workbench.models_view.catalog_query,
+                        )
+                        .hint_text(hint),
+                    );
+                });
+            });
+            ui.painter().hline(
+                ui.max_rect().x_range(),
+                ui.max_rect().bottom() - 0.5,
+                Stroke::new(1.0, t.color.border),
+            );
+        });
+}
+
+fn scope_segment_width(scope: ModelsCatalogScope) -> f32 {
+    match scope {
+        ModelsCatalogScope::Project => 74.0,
+        ModelsCatalogScope::InstalledPacks => 112.0,
+        ModelsCatalogScope::RSpiceLibrary => 108.0,
+    }
+}
+
+fn facet_button(ui: &mut Ui, selected: bool, label: &str, count: Option<usize>) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
+    let label = count.map_or_else(|| label.to_owned(), |count| format!("{label}  {count}"));
+    ui.add_sized(
+        [
+            (ui.painter()
+                .layout_no_wrap(
+                    label.clone(),
+                    theme::sans(tokens::FS_0, FontWeight::Regular),
+                    t.color.text_dim,
+                )
+                .size()
+                .x
+                + 16.0)
+                .max(44.0),
+            22.0,
+        ],
+        egui::Button::new(
+            RichText::new(label)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(if selected {
+                    t.color.text
+                } else {
+                    t.color.text_dim
+                }),
+        )
+        .fill(Color32::TRANSPARENT)
+        .stroke(Stroke::new(
+            1.0,
+            if selected {
+                t.color.accent
+            } else {
+                t.color.border
+            },
+        ))
+        .corner_radius(11.0),
+    )
+}
+
+#[derive(Clone)]
+struct ProjectModelRow {
+    library: String,
+    model: DeviceModel,
+    source: String,
+    pinned: bool,
+    review: bool,
+    usages: Vec<String>,
+    vectors: usize,
+}
+
+fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
+    let query = app
+        .state
+        .workbench
+        .models_view
+        .catalog_query
+        .trim()
+        .to_ascii_lowercase();
+    let facet = app.state.workbench.models_view.project_facet;
+    let mut rows = Vec::new();
+    for library in app.state.model_library_manager.libraries_sorted() {
+        for model in library.models.values() {
+            let usages = model_consumers(app, &model.name);
+            let pinned =
+                !library.source_closure.is_empty() || library.source_authority.is_project_owned();
+            let review = model_geometry_invalid(model)
+                || (library.root_path.is_some() && library.source_closure.is_empty())
+                || model.description.trim().is_empty();
+            let protected = matches!(library.source_authority, ModelSourceAuthority::BuiltIn);
+            let vectors = library
+                .model_qualification
+                .get(&model.name)
+                .map_or(0, |qualification| {
+                    qualification
+                        .suites
+                        .iter()
+                        .map(|suite| suite.vectors.len())
+                        .sum()
+                });
+            let source = model
+                .file_path
+                .as_deref()
+                .or(library.root_path.as_deref())
+                .map(path_label)
+                .unwrap_or_else(|| match library.source_authority {
+                    ModelSourceAuthority::BuiltIn => "RSpice built-in".to_owned(),
+                    ModelSourceAuthority::External => "external source".to_owned(),
+                    ModelSourceAuthority::ProjectOwned { .. } => "project source".to_owned(),
+                });
+            let haystack = format!(
+                "{} {} {} {} {}",
+                model.name,
+                model.description,
+                model.model_type.display_name(),
+                library.name,
+                model
+                    .parameters
+                    .iter()
+                    .map(|(name, value)| format!("{name}={value}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+            .to_ascii_lowercase();
+            let facet_match = match facet {
+                ProjectModelFacet::All => true,
+                ProjectModelFacet::Bound => !usages.is_empty(),
+                ProjectModelFacet::Pinned => pinned,
+                ProjectModelFacet::Review => review,
+                ProjectModelFacet::Protected => protected,
+            };
+            if facet_match && (query.is_empty() || haystack.contains(&query)) {
+                rows.push(ProjectModelRow {
+                    library: library.name.clone(),
+                    model: model.clone(),
+                    source,
+                    pinned,
+                    review,
+                    usages,
+                    vectors,
+                });
+            }
+        }
+    }
+    rows.sort_by(|left, right| {
+        left.model
+            .name
+            .to_ascii_lowercase()
+            .cmp(&right.model.name.to_ascii_lowercase())
+            .then_with(|| left.library.cmp(&right.library))
+    });
+
+    let selected_visible = rows.iter().any(|row| {
+        app.state.model_library_manager.selected_library.as_deref() == Some(row.library.as_str())
+            && app.state.workbench.selected_model.as_deref() == Some(row.model.name.as_str())
+    });
+    if !selected_visible && let Some(row) = rows.first() {
+        app.state.model_library_manager.select_library(&row.library);
+        app.state.workbench.selected_model = Some(row.model.name.clone());
+    }
+
+    let table_h = (ui.available_height() * 0.36).max(120.0);
+    egui::Frame::NONE
+        .fill(Tokens::get(ui.ctx()).color.bg_panel)
+        .show(ui, |ui| {
+        table_header(
+            ui,
+            &[
+                ("MODEL", 0.20),
+                ("FAMILY", 0.17),
+                ("SOURCE", 0.22),
+                ("USED BY", 0.16),
+                ("VECTORS", 0.10),
+                ("STATUS", 0.15),
+            ],
+        );
+        ScrollArea::vertical()
+            .id_salt("models-project-table")
+            .max_height(table_h)
+            .show(ui, |ui| {
+                if rows.is_empty() {
+                    empty_state(
+                        ui,
+                        "No models match the current catalog filter.",
+                        "Search covers names, families, sources, libraries, consumers and resolved parameters.",
+                    );
+                    if ui.button("Clear filter").clicked() {
+                        app.state.workbench.models_view.catalog_query.clear();
+                        app.state.workbench.models_view.project_facet = ProjectModelFacet::All;
+                    }
+                } else {
+                    for row in &rows {
+                        project_model_row(ui, app, row);
+                    }
+                }
+            });
+        });
+    catalog_footer(
+        ui,
+        rows.len(),
+        app.state.model_library_manager.total_model_count(),
+        rows.iter().filter(|row| row.review).count(),
+        "project models",
+    );
+
+    selected_model_detail(ui, app);
+}
+
+fn project_facet_count(app: &ManagerRenderContext<'_>, facet: ProjectModelFacet) -> usize {
+    app.state
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .flat_map(|library| {
+            library.models.values().map(move |model| {
+                let bound = !model_consumers(app, &model.name).is_empty();
+                let pinned = !library.source_closure.is_empty()
+                    || library.source_authority.is_project_owned();
+                let review = model_geometry_invalid(model)
+                    || (library.root_path.is_some() && library.source_closure.is_empty())
+                    || model.description.trim().is_empty();
+                let protected = matches!(library.source_authority, ModelSourceAuthority::BuiltIn);
+                match facet {
+                    ProjectModelFacet::All => true,
+                    ProjectModelFacet::Bound => bound,
+                    ProjectModelFacet::Pinned => pinned,
+                    ProjectModelFacet::Review => review,
+                    ProjectModelFacet::Protected => protected,
+                }
+            })
+        })
+        .filter(|matches| *matches)
+        .count()
+}
+
+fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &ProjectModelRow) {
+    let selected = app.state.model_library_manager.selected_library.as_deref()
+        == Some(row.library.as_str())
+        && app.state.workbench.selected_model.as_deref() == Some(row.model.name.as_str());
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_H), Sense::click());
+    if selected {
+        ui.painter()
+            .rect_filled(rect, 0.0, t.color.accent.linear_multiply(0.14));
+        ui.painter().vline(
+            rect.left(),
+            rect.y_range(),
+            Stroke::new(2.0, t.color.accent),
+        );
+    } else if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+    }
+    if response.clicked() {
+        app.state.model_library_manager.select_library(&row.library);
+        app.state.workbench.selected_model = Some(row.model.name.clone());
+    }
+    let status = if row.review {
+        "review"
+    } else if row.pinned {
+        "pinned"
+    } else {
+        ""
+    };
+    paint_columns(
+        ui,
+        rect,
+        &[
+            (&row.model.name, 0.20, true),
+            (row.model.model_type.display_name(), 0.17, false),
+            (&row.source, 0.22, false),
+            (
+                if row.usages.is_empty() {
+                    ""
+                } else {
+                    row.usages[0].as_str()
+                },
+                0.16,
+                false,
+            ),
+            (&row.vectors.to_string(), 0.10, true),
+            (status, 0.15, true),
+        ],
+    );
+}
+
+fn catalog_footer(ui: &mut Ui, shown: usize, total: usize, review: usize, noun: &str) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), CATALOG_FOOT_H),
+        Sense::hover(),
+    );
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
+    ui.painter().hline(
+        rect.x_range(),
+        rect.top() + 0.5,
+        Stroke::new(1.0, t.color.border),
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + 12.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        format!("{shown} shown · {total} {noun}"),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_faint,
+    );
+    let state = if review == 0 {
+        "No open review"
+    } else if review == 1 {
+        "1 item needs review"
+    } else {
+        ""
+    };
+    let state = if state.is_empty() {
+        format!("{review} items need review")
+    } else {
+        state.to_owned()
+    };
+    ui.painter().text(
+        egui::pos2(rect.right() - 12.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        state,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        if review == 0 {
+            t.color.ok
+        } else {
+            t.color.warn
+        },
+    );
+}
+
+fn compact_button(label: &str) -> egui::Button<'_> {
+    egui::Button::new(RichText::new(label).font(theme::sans(tokens::FS_0, FontWeight::Regular)))
+        .min_size(egui::vec2(0.0, 24.0))
+}
+
+fn selected_model_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
+    let Some(library_name) = app.state.model_library_manager.selected_library.clone() else {
+        empty_state(
+            ui,
+            "Select a model to inspect its exact source and resolved contract.",
+            "The detail area never invents a model when the catalog selection is empty.",
+        );
+        return;
+    };
+    let Some(model_name) = app.state.workbench.selected_model.clone() else {
+        empty_state(
+            ui,
+            "Select a model to inspect its exact source and resolved contract.",
+            "Use the table above or choose a model source in the Navigator.",
+        );
+        return;
+    };
+    let Some((library, model)) = app
+        .state
+        .model_library_manager
+        .get_library(&library_name)
+        .and_then(|library| library.get_model(&model_name).map(|model| (library, model)))
+        .map(|(library, model)| (library.clone(), model.clone()))
+    else {
+        empty_state(
+            ui,
+            "The selected model no longer resolves.",
+            "Rescan or clear the selection; stale identities are never retargeted automatically.",
+        );
+        return;
+    };
+    let usages = model_consumers(app, &model.name);
+    let selected_component = exactly_one_selected_component(app);
+    let source_available = !library.source_contents.is_empty() || model.file_path.is_some();
+
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::NONE
+        .fill(t.color.bg_inset)
+        .inner_margin(egui::Margin::symmetric(12, 7))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 4.0;
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                ui.label(
+                    RichText::new(&model.name)
+                        .monospace()
+                        .font(theme::mono(tokens::FS_2, FontWeight::SemiBold))
+                        .color(t.color.text),
+                );
+                ui.label(
+                    RichText::new(format!(
+                        "{} · {} · {}",
+                        model.model_type.display_name(),
+                        model.level.display_name(),
+                        library.name
+                    ))
+                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                    .color(t.color.text_dim),
+                );
+            });
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                if ui
+                    .add_enabled(
+                        library.root_path.is_some(),
+                        compact_button(if library.source_closure.is_empty() {
+                            "Pin source"
+                        } else {
+                            "Refresh pin"
+                        }),
+                    )
+                    .on_disabled_hover_text("Built-in sources do not have an external file to pin.")
+                    .clicked()
+                {
+                    refresh_library(app, &library);
+                }
+                if ui
+                    .add_enabled(source_available, compact_button("Open source"))
+                    .on_disabled_hover_text("This built-in definition has no source document.")
+                    .clicked()
+                {
+                    open_model_source(app, &library, &model);
+                }
+                if ui.add(compact_button("Compare…")).clicked() {
+                    open_model_compare(app, &library.name, &model.name);
+                }
+                let project_owned = library.source_authority.is_project_owned();
+                if ui
+                    .add(compact_button(if project_owned {
+                        "Model editor…"
+                    } else {
+                        "Author project copy…"
+                    }))
+                    .clicked()
+                {
+                    if project_owned {
+                        app.queue_command(Command::ModelEditor);
+                    } else {
+                        app.queue_command(Command::ModelCreateProjectCopy);
+                    }
+                }
+                if ui.add(compact_button("Qualification")).clicked() {
+                    app.state.workbench.models_page = ModelsPage::Qualification;
+                }
+                if ui
+                    .add_enabled(
+                        selected_component.is_some(),
+                        compact_button("Bind to selection…"),
+                    )
+                    .on_disabled_hover_text(
+                        "Select exactly one compatible schematic instance first.",
+                    )
+                    .clicked()
+                    && let Some(component_id) = selected_component
+                {
+                    app.queue_model_binding(component_id, &library.name, &model.name);
+                }
+            });
+        });
+    ui.painter().hline(
+        ui.min_rect().x_range(),
+        ui.min_rect().bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+
+    ScrollArea::vertical()
+        .id_salt("models-selected-detail")
+        .show(ui, |ui| {
+            let detail_width = ui.available_width();
+            if detail_width > 1100.0 {
+                ui.columns(4, |columns| {
+                    parameter_card(&mut columns[0], &library, &model);
+                    characteristic_card(&mut columns[1], &model);
+                    qualification_card(&mut columns[2], &library, &model);
+                    usage_card(&mut columns[3], &model, &usages, app);
+                });
+            } else if detail_width > 650.0 {
+                ui.columns(2, |columns| {
+                    parameter_card(&mut columns[0], &library, &model);
+                    characteristic_card(&mut columns[1], &model);
+                });
+                ui.columns(2, |columns| {
+                    qualification_card(&mut columns[0], &library, &model);
+                    usage_card(&mut columns[1], &model, &usages, app);
+                });
+            } else {
+                parameter_card(ui, &library, &model);
+                characteristic_card(ui, &model);
+                qualification_card(ui, &library, &model);
+                usage_card(ui, &model, &usages, app);
+            }
+        });
+}
+
+fn parameter_card(ui: &mut Ui, library: &ModelLibrary, model: &DeviceModel) {
+    detail_pane(
+        ui,
+        "RESOLVED PARAMETERS",
+        Some(&format!("{} values", model.parameters.len())),
+        |ui| {
+            let mut values = model
+                .parameters
+                .iter()
+                .map(|(name, value)| (name.clone(), value.to_string(), "source card"))
+                .collect::<Vec<_>>();
+            values.extend(
+                model
+                    .string_parameters
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.clone(), "source string")),
+            );
+            values.sort_by(|left, right| left.0.cmp(&right.0));
+            if values.is_empty() {
+                empty_state(
+                    ui,
+                    "No parameter card is attached to this model.",
+                    "Built-in equation defaults remain owned by the engine.",
+                );
+            } else {
+                for (name, value, origin) in values.into_iter().take(24) {
+                    property(ui, &name, &value, origin);
+                }
+            }
+            if let Some(metadata) = library.model_definition_metadata.get(&model.name) {
+                ui.separator();
+                property(
+                    ui,
+                    "Schema",
+                    &format!("{} typed fields", metadata.parameters.len()),
+                    "project definition",
+                );
+            }
+        },
+    );
+}
+
+fn characteristic_card(ui: &mut Ui, model: &DeviceModel) {
+    detail_pane(ui, "CHARACTERISTIC", Some("analytic preview"), |ui| {
+        let Some(vth) = model.vth0.or_else(|| model.parameters.get("vth0").copied()) else {
+            empty_state(
+                ui,
+                "No function-defined characteristic is available.",
+                "Open Model Editor or attach qualification vectors to add an evidence-backed plot.",
+            );
+            return;
+        };
+        let vmax = model.vdd.unwrap_or(1.8).max(vth + 0.2);
+        let desired = egui::vec2(ui.available_width().max(120.0), 112.0);
+        let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
+        let t = Tokens::get(ui.ctx());
+        ui.painter().rect(
+            rect,
+            2.0,
+            t.color.bg_inset,
+            Stroke::new(1.0, t.color.border),
+            egui::StrokeKind::Inside,
+        );
+        let plot = rect.shrink2(egui::vec2(10.0, 9.0));
+        ui.painter().line_segment(
+            [plot.left_bottom(), plot.right_bottom()],
+            Stroke::new(1.0, t.color.border_strong),
+        );
+        ui.painter().line_segment(
+            [plot.left_bottom(), plot.left_top()],
+            Stroke::new(1.0, t.color.border_strong),
+        );
+        let points = (0..=48)
+            .map(|index| {
+                let voltage = vmax * f64::from(index) / 48.0;
+                let current = (voltage - vth).max(0.0).powi(2);
+                let max_current = (vmax - vth).max(0.01).powi(2);
+                egui::pos2(
+                    plot.left() + plot.width() * index as f32 / 48.0,
+                    plot.bottom() - plot.height() * (current / max_current) as f32,
+                )
+            })
+            .collect::<Vec<_>>();
+        ui.painter()
+            .add(egui::Shape::line(points, Stroke::new(1.8, t.color.accent)));
+        ui.label(
+            RichText::new(format!(
+                "Square-law preview from retained VTH0={vth:.4} V · range 0…{vmax:.3} V"
+            ))
+            .small()
+            .color(t.color.text_dim),
+        );
+    });
+}
+
+fn qualification_card(ui: &mut Ui, library: &ModelLibrary, model: &DeviceModel) {
+    detail_pane(ui, "QUALIFICATION", Some("source-owned evidence"), |ui| {
+        if let Some(state) = library.model_qualification.get(&model.name) {
+            property(ui, "Suites", &state.suites.len().to_string(), "retained");
+            property(
+                ui,
+                "Vectors",
+                &state
+                    .suites
+                    .iter()
+                    .map(|suite| suite.vectors.len())
+                    .sum::<usize>()
+                    .to_string(),
+                "declared",
+            );
+            property(
+                ui,
+                "Evidence",
+                &state.evidence.len().to_string(),
+                "immutable",
+            );
+            property(
+                ui,
+                "Releases",
+                &state.releases.len().to_string(),
+                "promoted",
+            );
+            let open = state
+                .vector_dispositions
+                .iter()
+                .filter(|disposition| disposition.is_open())
+                .count();
+            property(
+                ui,
+                "Open dispositions",
+                &open.to_string(),
+                if open == 0 {
+                    "clean"
+                } else {
+                    "review required"
+                },
+            );
+        } else {
+            empty_state(
+                ui,
+                "This model has no qualification suite.",
+                "Qualification claims remain empty until a retained suite and exact-source evidence exist.",
+            );
+        }
+    });
+}
+
+fn usage_card(
+    ui: &mut Ui,
+    model: &DeviceModel,
+    usages: &[String],
+    app: &mut ManagerRenderContext<'_>,
+) {
+    detail_pane(
+        ui,
+        "WHERE USED",
+        Some(&format!("{} consumers", usages.len())),
+        |ui| {
+            if usages.is_empty() {
+                empty_state(
+                    ui,
+                    "Not bound in the active project.",
+                    "Place an instance or select one and use Bind to selection.",
+                );
+            } else {
+                for usage in usages.iter().take(12) {
+                    if ui.link(usage).clicked() {
+                        app.state.workbench.models_view.dialog =
+                            Some(ModelsWorkbenchDialog::BindingTrace {
+                                model: model.name.clone(),
+                                consumers: usages.to_vec(),
+                            });
+                    }
+                }
+            }
+        },
+    );
+}
+
+fn pack_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
+    let packs = app
+        .state
+        .model_library_manager
+        .spice_packs()
+        .map(|index| index.packs().to_vec())
+        .unwrap_or_default();
+    let facet = app.state.workbench.models_view.pack_facet;
+    let query = app
+        .state
+        .workbench
+        .models_view
+        .catalog_query
+        .trim()
+        .to_ascii_lowercase();
+    let visible = packs
+        .iter()
+        .filter(|pack| {
+            let attached = attached_library_for_pack(app, &pack.id).is_some();
+            let facet_match = match facet {
+                ModelPackFacet::All => true,
+                ModelPackFacet::NeedsAttention => pack.entry.is_none() || !pack.redistributable,
+                ModelPackFacet::Attached => attached,
+                ModelPackFacet::Foundry => pack.category.eq_ignore_ascii_case("foundry"),
+                ModelPackFacet::Vendor => pack.category.eq_ignore_ascii_case("vendor"),
+                ModelPackFacet::Community => pack.category.eq_ignore_ascii_case("community"),
+                ModelPackFacet::Redistributable => pack.redistributable,
+            };
+            let haystack = format!("{} {} {} {}", pack.id, pack.name, pack.category, pack.spdx)
+                .to_ascii_lowercase();
+            facet_match && (query.is_empty() || haystack.contains(&query))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let table_h = (ui.available_height() * 0.42).max(120.0);
+    egui::Frame::NONE
+        .fill(Tokens::get(ui.ctx()).color.bg_panel)
+        .show(ui, |ui| {
+        table_header(
+            ui,
+            &[
+                ("PACK", 0.25),
+                ("CONTENTS", 0.18),
+                ("ORIGIN", 0.12),
+                ("PARTS", 0.11),
+                ("LICENSE", 0.17),
+                ("STATE", 0.17),
+            ],
+        );
+        ScrollArea::vertical()
+            .id_salt("models-pack-table")
+            .max_height(table_h)
+            .show(ui, |ui| {
+                if visible.is_empty() {
+                    empty_state(
+                        ui,
+                        "No pack matches this facet.",
+                        "Facets derive from the installed corpus manifest and live project attachments.",
+                    );
+                    if ui.button("Clear filter").clicked() {
+                        app.state.workbench.models_view.pack_facet = ModelPackFacet::All;
+                        app.state.workbench.models_view.catalog_query.clear();
+                    }
+                }
+                for pack in &visible {
+                    let selected = app.state.workbench.models_view.selected_pack.as_deref()
+                        == Some(pack.id.as_str());
+                    let attached = attached_library_for_pack(app, &pack.id).is_some();
+                    let state = if attached {
+                        "attached"
+                    } else if pack.entry.is_none() {
+                        "no entry"
+                    } else if !pack.redistributable {
+                        "license review"
+                    } else {
+                        "available"
+                    };
+                    selectable_data_row(
+                        ui,
+                        selected,
+                        &[
+                            (&pack.name, 0.25, false),
+                            (
+                                &format!("{} models · {} subckts", pack.models, pack.subcircuits),
+                                0.18,
+                                false,
+                            ),
+                            (&pack.category, 0.12, false),
+                            (
+                                &(pack.models_top + pack.subcircuits_top).to_string(),
+                                0.11,
+                                true,
+                            ),
+                            (&pack.spdx, 0.17, true),
+                            (state, 0.17, true),
+                        ],
+                    )
+                    .clicked()
+                    .then(|| {
+                        app.state.workbench.models_view.selected_pack = Some(pack.id.clone())
+                    });
+                }
+            });
+        });
+    catalog_footer(
+        ui,
+        visible.len(),
+        packs.len(),
+        visible
+            .iter()
+            .filter(|pack| pack.entry.is_none() || !pack.redistributable)
+            .count(),
+        "installed packs",
+    );
+    pack_detail(ui, app, &packs);
+}
+
+fn pack_facet_count(
+    app: &ManagerRenderContext<'_>,
+    packs: &[rspice_core::library::SpicePack],
+    facet: ModelPackFacet,
+) -> usize {
+    packs
+        .iter()
+        .filter(|pack| match facet {
+            ModelPackFacet::All => true,
+            ModelPackFacet::NeedsAttention => pack.entry.is_none() || !pack.redistributable,
+            ModelPackFacet::Attached => attached_library_for_pack(app, &pack.id).is_some(),
+            ModelPackFacet::Foundry => pack.category.eq_ignore_ascii_case("foundry"),
+            ModelPackFacet::Vendor => pack.category.eq_ignore_ascii_case("vendor"),
+            ModelPackFacet::Community => pack.category.eq_ignore_ascii_case("community"),
+            ModelPackFacet::Redistributable => pack.redistributable,
+        })
+        .count()
+}
+
+fn pack_detail(
+    ui: &mut Ui,
+    app: &mut ManagerRenderContext<'_>,
+    packs: &[rspice_core::library::SpicePack],
+) {
+    let selected = app
+        .state
+        .workbench
+        .models_view
+        .selected_pack
+        .as_deref()
+        .and_then(|id| packs.iter().find(|pack| pack.id == id))
+        .cloned()
+        .or_else(|| packs.first().cloned());
+    let Some(pack) = selected else {
+        empty_state(
+            ui,
+            "No shipped model corpus is installed.",
+            "Set RSPICE_MODELS_DIR or install the versioned model-pack tree, then rescan.",
+        );
+        return;
+    };
+    app.state.workbench.models_view.selected_pack = Some(pack.id.clone());
+    let attached = attached_library_for_pack(app, &pack.id);
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new(&pack.name).strong());
+        ui.label(RichText::new(&pack.id).monospace().small());
+        if ui.button("Browse parts").clicked() {
+            app.state.workbench.models_view.catalog_scope = ModelsCatalogScope::RSpiceLibrary;
+            app.state.workbench.models_view.catalog_query.clear();
+            app.state.workbench.models_view.selected_pack = Some(pack.id.clone());
+        }
+        if let Some(library) = attached.as_deref() {
+            if ui.button("Refresh snapshot").clicked()
+                && let Some(library) = app
+                    .state
+                    .model_library_manager
+                    .get_library(library)
+                    .cloned()
+            {
+                refresh_library(app, &library);
+            }
+            if ui.button("Detach…").clicked() {
+                app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
+                    pack_id: pack.id.clone(),
+                    attach: false,
+                });
+            }
+        } else if ui
+            .add_enabled(
+                pack.entry.is_some() && pack.redistributable,
+                egui::Button::new("Attach…"),
+            )
+            .on_disabled_hover_text(if !pack.redistributable {
+                "This pack has no established redistribution grant."
+            } else {
+                "The pack manifest has no attachable entry file."
+            })
+            .clicked()
+        {
+            app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
+                pack_id: pack.id.clone(),
+                attach: true,
+            });
+        }
+    });
+    card(ui, |ui| {
+        card_title(ui, "PACK CONTRACT", Some(&pack.category));
+        property(
+            ui,
+            "Contents",
+            &format!(
+                "{} addressable · {} total definitions · {} files",
+                pack.models_top + pack.subcircuits_top,
+                pack.models + pack.subcircuits,
+                pack.files
+            ),
+            "manifest",
+        );
+        property(ui, "License", &pack.spdx, pack.tier.display_name());
+        property(
+            ui,
+            "Redistributable",
+            if pack.redistributable { "yes" } else { "no" },
+            "enforced before project embedding",
+        );
+        property(
+            ui,
+            "Attachment",
+            attached.as_deref().unwrap_or("not attached"),
+            if attached.is_some() {
+                "authenticated project source"
+            } else {
+                "corpus only"
+            },
+        );
+        property(
+            ui,
+            "Entry",
+            pack.entry
+                .as_deref()
+                .map(path_label)
+                .as_deref()
+                .unwrap_or("not declared"),
+            "pack manifest",
+        );
+    });
+}
+
+fn parts_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
+    let facet = app.state.workbench.models_view.part_facet;
+    let mut hits = app
+        .state
+        .model_library_manager
+        .browse_pack_models(
+            &app.state.workbench.models_view.catalog_query,
+            facet.device_filter(),
+            CATALOG_LIMIT,
+        )
+        .unwrap_or_else(|error| {
+            receipt(app, Err(error));
+            Vec::new()
+        });
+    if let Some(pack_id) = app.state.workbench.models_view.selected_pack.as_deref() {
+        hits.retain(|hit| hit.pack == pack_id);
+    }
+    let table_h = (ui.available_height() * 0.40).max(120.0);
+    egui::Frame::NONE
+        .fill(Tokens::get(ui.ctx()).color.bg_panel)
+        .show(ui, |ui| {
+        table_header(
+            ui,
+            &[
+                ("PART", 0.20),
+                ("DESCRIPTION", 0.22),
+                ("CLASS", 0.14),
+                ("KIND", 0.10),
+                ("PACK", 0.19),
+                ("AVAILABILITY", 0.15),
+            ],
+        );
+        ScrollArea::vertical()
+            .id_salt("models-parts-table")
+            .max_height(table_h)
+            .show(ui, |ui| {
+                if hits.is_empty() {
+                    empty_state(
+                        ui,
+                        "No addressable part matches the current search and class.",
+                        "Private helper models declared inside macromodel bodies are intentionally excluded.",
+                    );
+                    if ui.button("Clear search").clicked() {
+                        app.state.workbench.models_view.catalog_query.clear();
+                        app.state.workbench.models_view.part_facet = RSpicePartFacet::All;
+                        app.state.workbench.models_view.selected_pack = None;
+                    }
+                }
+                for hit in &hits {
+                    let key = part_key(hit);
+                    let selected = app.state.workbench.models_view.selected_part.as_deref()
+                        == Some(key.as_str());
+                    let availability = if hit.restricted {
+                        "restricted"
+                    } else if hit.source.as_ref().is_some_and(|path| path.is_file()) {
+                        "on disk"
+                    } else {
+                        "sync required"
+                    };
+                    if selectable_data_row(
+                        ui,
+                        selected,
+                        &[
+                            (&hit.name, 0.20, true),
+                            (&hit.pack_name, 0.22, false),
+                            (&hit.device, 0.14, false),
+                            (&hit.kind, 0.10, true),
+                            (&hit.pack, 0.19, true),
+                            (availability, 0.15, true),
+                        ],
+                    )
+                    .clicked()
+                    {
+                        app.state.workbench.models_view.selected_part = Some(key);
+                    }
+                }
+            });
+        });
+    catalog_footer(
+        ui,
+        hits.len(),
+        app.state.model_library_manager.pack_definition_count(),
+        hits.iter()
+            .filter(|hit| hit.restricted || !hit.redistributable)
+            .count(),
+        "addressable parts",
+    );
+    selected_part_detail(ui, app, &hits);
+}
+
+fn selected_part_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hits: &[PackModelHit]) {
+    let selected = app
+        .state
+        .workbench
+        .models_view
+        .selected_part
+        .as_deref()
+        .and_then(|key| hits.iter().find(|hit| part_key(hit) == key))
+        .cloned()
+        .or_else(|| hits.first().cloned());
+    let Some(hit) = selected else {
+        return;
+    };
+    app.state.workbench.models_view.selected_part = Some(part_key(&hit));
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new(&hit.name).monospace().strong());
+        ui.label(format!("{} · {} · {}", hit.device, hit.kind, hit.pack_name));
+        if ui.button("Show pack").clicked() {
+            app.state.workbench.models_view.catalog_scope = ModelsCatalogScope::InstalledPacks;
+            app.state.workbench.models_view.selected_pack = Some(hit.pack.clone());
+            app.state.workbench.models_view.catalog_query.clear();
+        }
+        if ui
+            .add_enabled(
+                hit.source.as_ref().is_some_and(|path| path.is_file())
+                    && hit.redistributable
+                    && !hit.restricted,
+                egui::Button::new("Add to project…"),
+            )
+            .on_disabled_hover_text(if hit.restricted || !hit.redistributable {
+                "The source is not licensed for embedding in a project."
+            } else {
+                "The card is not present on disk; rescan or sync the corpus."
+            })
+            .clicked()
+        {
+            app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPart {
+                pack_id: hit.pack.clone(),
+                part_name: hit.name.clone(),
+            });
+        }
+        if ui.button("Open qualification").clicked() {
+            app.state.workbench.models_page = ModelsPage::Qualification;
+        }
+        if ui
+            .add_enabled(
+                hit.source.as_ref().is_some_and(|path| path.is_file()),
+                egui::Button::new("Open card"),
+            )
+            .clicked()
+            && let Some(source) = hit.source.as_ref()
+        {
+            match std::fs::read_to_string(source) {
+                Ok(body) => {
+                    app.state.workbench.models_view.dialog =
+                        Some(ModelsWorkbenchDialog::SourcePreview {
+                            title: hit.name.clone(),
+                            subtitle: format!(
+                                "{}:{} · read-only corpus source",
+                                source.display(),
+                                hit.line
+                            ),
+                            source: body,
+                            read_only: true,
+                        });
+                }
+                Err(error) => receipt(
+                    app,
+                    Err(format!("Could not open '{}': {error}", source.display())),
+                ),
+            }
+        }
+    });
+    card(ui, |ui| {
+        card_title(ui, "DEFINITION", Some(&hit.kind));
+        property(ui, "Name", &hit.name, "catalog identity");
+        property(ui, "Device class", &hit.device, "canonical");
+        property(ui, "Pack", &hit.pack_name, &hit.pack);
+        property(
+            ui,
+            "Source",
+            hit.source
+                .as_deref()
+                .map(path_label)
+                .as_deref()
+                .unwrap_or("not on disk"),
+            &format!("line {}", hit.line),
+        );
+        property(
+            ui,
+            "Project eligibility",
+            if hit.redistributable && !hit.restricted {
+                "eligible"
+            } else {
+                "blocked"
+            },
+            "license policy",
+        );
+    });
+}
+
+fn render_dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
+    let Some(dialog) = app.state.workbench.models_view.dialog.clone() else {
+        return;
+    };
+    match dialog {
+        ModelsWorkbenchDialog::SourcePreview {
+            title,
+            subtitle,
+            source,
+            read_only,
+        } => {
+            let mut open = true;
+            egui::Window::new(title)
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(true)
+                .default_size(egui::vec2(760.0, 520.0))
+                .show(ui.ctx(), |ui| {
+                    ui.label(RichText::new(subtitle).monospace().small());
+                    ui.separator();
+                    let mut body = source;
+                    ScrollArea::both().show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut body)
+                                .font(egui::TextStyle::Monospace)
+                                .interactive(!read_only)
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(26),
+                        );
+                    });
+                    if !read_only {
+                        ui.label(
+                            "Editable project definitions must be saved through Model Editor so validation and revision history remain atomic.",
+                        );
+                    }
+                });
+            if !open {
+                app.state.workbench.models_view.dialog = None;
+            }
+        }
+        ModelsWorkbenchDialog::CompareModels {
+            left_library,
+            left_model,
+            right_library,
+            right_model,
+        } => {
+            let mut open = true;
+            egui::Window::new("Compare model definitions")
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(true)
+                .default_size(egui::vec2(760.0, 500.0))
+                .show(ui.ctx(), |ui| {
+                    compare_models(
+                        ui,
+                        app,
+                        &left_library,
+                        &left_model,
+                        &right_library,
+                        &right_model,
+                    );
+                });
+            if !open {
+                app.state.workbench.models_view.dialog = None;
+            }
+        }
+        ModelsWorkbenchDialog::ConfirmPack { pack_id, attach } => {
+            let mut open = true;
+            let mut decision = None;
+            egui::Window::new(if attach {
+                "Attach model pack"
+            } else {
+                "Detach model pack"
+            })
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .show(ui.ctx(), |ui| {
+                ui.label(if attach {
+                    "RSpice will authenticate the pack entry and publish its retained include closure as one undoable project revision."
+                } else {
+                    "RSpice will remove the attached source as one undoable project revision. Existing instance references may become unresolved."
+                });
+                ui.label(RichText::new(&pack_id).monospace().strong());
+                ui.horizontal(|ui| {
+                    if ui.button("Cancel").clicked() {
+                        decision = Some(false);
+                    }
+                    if ui
+                        .button(if attach { "Attach pack" } else { "Detach pack" })
+                        .clicked()
+                    {
+                        decision = Some(true);
+                    }
+                });
+            });
+            if decision == Some(true) {
+                if attach {
+                    attach_pack(app, &pack_id);
+                } else {
+                    detach_pack(app, &pack_id);
+                }
+                app.state.workbench.models_view.dialog = None;
+            } else if decision == Some(false) || !open {
+                app.state.workbench.models_view.dialog = None;
+                app.state.workbench.models_view.operational_state =
+                    ModelsOperationalState::Cancelled;
+            }
+        }
+        ModelsWorkbenchDialog::ConfirmPart { pack_id, part_name } => {
+            let mut open = true;
+            let mut decision = None;
+            egui::Window::new("Add shipped part to project")
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .show(ui.ctx(), |ui| {
+                    ui.label(
+                        "The exact installed source file will be parsed, license-checked, pinned by digest, and published as one undoable project revision.",
+                    );
+                    ui.label(
+                        RichText::new(format!("{part_name} · {pack_id}"))
+                            .monospace()
+                            .strong(),
+                    );
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            decision = Some(false);
+                        }
+                        if ui.button("Add to project").clicked() {
+                            decision = Some(true);
+                        }
+                    });
+                });
+            if decision == Some(true) {
+                add_part(app, &pack_id, &part_name);
+                app.state.workbench.models_view.dialog = None;
+            } else if decision == Some(false) || !open {
+                app.state.workbench.models_view.dialog = None;
+                app.state.workbench.models_view.operational_state =
+                    ModelsOperationalState::Cancelled;
+            }
+        }
+        ModelsWorkbenchDialog::DefinitionConflict {
+            definition,
+            providers,
+        } => {
+            let mut open = true;
+            egui::Window::new("Contested model definition")
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .show(ui.ctx(), |ui| {
+                    ui.label(format!(
+                        "'{definition}' is provided by {} loaded libraries. Primitive SPICE instances cannot safely bind until the duplicate is removed or renamed.",
+                        providers.len()
+                    ));
+                    for provider in &providers {
+                        ui.label(RichText::new(provider).monospace());
+                    }
+                    if ui.button("Open Model Editor").clicked() {
+                        app.queue_command(Command::ModelEditor);
+                        app.state.workbench.models_view.dialog = None;
+                    }
+                });
+            if !open {
+                app.state.workbench.models_view.dialog = None;
+            }
+        }
+        ModelsWorkbenchDialog::BindingTrace { model, consumers } => {
+            let mut open = true;
+            egui::Window::new("Model binding trace")
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(true)
+                .show(ui.ctx(), |ui| {
+                    ui.label(RichText::new(model).monospace().strong());
+                    if consumers.is_empty() {
+                        empty_state(
+                            ui,
+                            "No consumer resolves to this model.",
+                            "The trace was derived from the active schematic.",
+                        );
+                    } else {
+                        for consumer in consumers {
+                            ui.label(consumer);
+                        }
+                    }
+                });
+            if !open {
+                app.state.workbench.models_view.dialog = None;
+            }
+        }
+        ModelsWorkbenchDialog::AddCorner {
+            library,
+            mut name,
+            mut temperature_c,
+            mut supply_factor,
+        } => {
+            let mut open = true;
+            let mut decision = None;
+            egui::Window::new("Add process corner")
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .show(ui.ctx(), |ui| {
+                    ui.label(
+                        "The corner definition is published as one guarded project revision. A source-backed library must still resolve an exact section with the same name before execution.",
+                    );
+                    ui.label(RichText::new(&library).monospace().strong());
+                    ui.horizontal(|ui| {
+                        ui.label("Section name");
+                        ui.text_edit_singleline(&mut name);
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Temperature °C");
+                        ui.text_edit_singleline(&mut temperature_c);
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Supply factor");
+                        ui.text_edit_singleline(&mut supply_factor);
+                    });
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            decision = Some(false);
+                        }
+                        if ui.button("Add corner").clicked() {
+                            decision = Some(true);
+                        }
+                    });
+                });
+            if decision == Some(true) {
+                add_corner(app, &library, &name, &temperature_c, &supply_factor);
+                app.state.workbench.models_view.dialog = None;
+            } else if decision == Some(false) || !open {
+                app.state.workbench.models_view.dialog = None;
+                app.state.workbench.models_view.operational_state =
+                    ModelsOperationalState::Cancelled;
+            } else {
+                app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::AddCorner {
+                    library,
+                    name,
+                    temperature_c,
+                    supply_factor,
+                });
+            }
+        }
+    }
+}
+
+fn compare_models(
+    ui: &mut Ui,
+    app: &ManagerRenderContext<'_>,
+    left_library: &str,
+    left_model: &str,
+    right_library: &str,
+    right_model: &str,
+) {
+    let left = app
+        .state
+        .model_library_manager
+        .get_library(left_library)
+        .and_then(|library| library.get_model(left_model));
+    let right = app
+        .state
+        .model_library_manager
+        .get_library(right_library)
+        .and_then(|library| library.get_model(right_model));
+    let (Some(left), Some(right)) = (left, right) else {
+        empty_state(
+            ui,
+            "One comparison definition no longer resolves.",
+            "Close this comparison and select live catalog rows again.",
+        );
+        return;
+    };
+    ui.label(
+        RichText::new(format!(
+            "{left_library}/{left_model}  ↔  {right_library}/{right_model}"
+        ))
+        .monospace(),
+    );
+    let keys = left
+        .parameters
+        .keys()
+        .chain(right.parameters.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    table_header(
+        ui,
+        &[
+            ("PARAMETER", 0.30),
+            ("LEFT", 0.27),
+            ("RIGHT", 0.27),
+            ("STATE", 0.16),
+        ],
+    );
+    ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+        for key in keys {
+            let left_value = left.parameters.get(&key).map(ToString::to_string);
+            let right_value = right.parameters.get(&key).map(ToString::to_string);
+            let state = if left_value == right_value {
+                "same"
+            } else if left_value.is_none() {
+                "right only"
+            } else if right_value.is_none() {
+                "left only"
+            } else {
+                "changed"
+            };
+            selectable_data_row(
+                ui,
+                false,
+                &[
+                    (&key, 0.30, true),
+                    (left_value.as_deref().unwrap_or("not set"), 0.27, true),
+                    (right_value.as_deref().unwrap_or("not set"), 0.27, true),
+                    (state, 0.16, true),
+                ],
+            );
+        }
+    });
+}
+
+fn open_model_compare(app: &mut ManagerRenderContext<'_>, left_library: &str, left_model: &str) {
+    let right = app
+        .state
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .flat_map(|library| {
+            library
+                .models
+                .values()
+                .map(move |model| (library.name.clone(), model.name.clone()))
+        })
+        .find(|(library, model)| library != left_library || model != left_model);
+    if let Some((right_library, right_model)) = right {
+        app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::CompareModels {
+            left_library: left_library.to_owned(),
+            left_model: left_model.to_owned(),
+            right_library,
+            right_model,
+        });
+    } else {
+        receipt(
+            app,
+            Err("A comparison requires at least two loaded model definitions.".to_owned()),
+        );
+    }
+}
+
+fn open_model_source(
+    app: &mut ManagerRenderContext<'_>,
+    library: &ModelLibrary,
+    model: &DeviceModel,
+) {
+    let content = model
+        .file_path
+        .as_ref()
+        .and_then(|path| {
+            library
+                .source_contents
+                .iter()
+                .find(|source| source.path == *path)
+        })
+        .or_else(|| library.source_contents.first());
+    if let Some(content) = content {
+        app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::SourcePreview {
+            title: model.name.clone(),
+            subtitle: format!(
+                "{} · {}",
+                content.path.display(),
+                match library.source_authority {
+                    ModelSourceAuthority::ProjectOwned { .. } => "project revision",
+                    ModelSourceAuthority::External => "pinned external bytes",
+                    ModelSourceAuthority::BuiltIn => "built-in",
+                }
+            ),
+            source: String::from_utf8_lossy(&content.bytes).into_owned(),
+            read_only: !library.source_authority.is_project_owned(),
+        });
+    } else if let Some(path) = model.file_path.as_ref().or(library.root_path.as_ref()) {
+        match std::fs::read_to_string(path) {
+            Ok(source) => {
+                app.state.workbench.models_view.dialog =
+                    Some(ModelsWorkbenchDialog::SourcePreview {
+                        title: model.name.clone(),
+                        subtitle: format!("{} · live unpinned source", path.display()),
+                        source,
+                        read_only: true,
+                    });
+            }
+            Err(error) => receipt(
+                app,
+                Err(format!(
+                    "Could not read model source '{}': {error}",
+                    path.display()
+                )),
+            ),
+        }
+    }
+}
+
+fn refresh_library(app: &mut ManagerRenderContext<'_>, library: &ModelLibrary) {
+    let Some(root) = library.root_path.clone() else {
+        receipt(
+            app,
+            Err(format!(
+                "Library '{}' has no external root to refresh.",
+                library.name
+            )),
+        );
+        return;
+    };
+    let mut candidate = app.state.model_library_manager.clone();
+    let section = library.selected_corner.as_deref();
+    let result = candidate
+        .load_library_file(&root, section)
+        .and_then(|loaded| {
+            if loaded != library.name {
+                return Err(format!(
+                    "Refresh resolved library '{loaded}' instead of expected '{}'.",
+                    library.name
+                ));
+            }
+            publish_model_library_candidate(
+                &mut app.state,
+                candidate,
+                &library.name,
+                format!("refresh model library {}", library.name),
+            )
+            .map(|revision| {
+                format!(
+                    "Refreshed and pinned '{}' at project revision {}.",
+                    library.name,
+                    revision.get()
+                )
+            })
+        });
+    receipt(app, result);
+}
+
+fn attach_pack(app: &mut ManagerRenderContext<'_>, pack_id: &str) {
+    let mut candidate = app.state.model_library_manager.clone();
+    let result = candidate.attach_spice_pack(pack_id).and_then(|library| {
+        publish_model_library_candidate(
+            &mut app.state,
+            candidate,
+            &library,
+            format!("attach model pack {pack_id}"),
+        )
+        .map(|revision| {
+            format!(
+                "Attached pack '{pack_id}' as library '{library}' at project revision {}.",
+                revision.get()
+            )
+        })
+    });
+    receipt(app, result);
+}
+
+fn detach_pack(app: &mut ManagerRenderContext<'_>, pack_id: &str) {
+    let Some(library) = attached_library_for_pack(app, pack_id) else {
+        receipt(
+            app,
+            Err(format!("Pack '{pack_id}' is not attached to this project.")),
+        );
+        return;
+    };
+    let mut candidate = app.state.model_library_manager.clone();
+    candidate.remove_library(&library);
+    let result = publish_model_library_candidate(
+        &mut app.state,
+        candidate,
+        &library,
+        format!("detach model pack {pack_id}"),
+    )
+    .map(|revision| {
+        format!(
+            "Detached pack '{pack_id}' from library '{library}' at project revision {}.",
+            revision.get()
+        )
+    });
+    receipt(app, result);
+}
+
+fn add_part(app: &mut ManagerRenderContext<'_>, pack_id: &str, part_name: &str) {
+    let mut candidate = app.state.model_library_manager.clone();
+    let result = candidate
+        .add_spice_part(pack_id, part_name)
+        .and_then(|library| {
+            if app
+                .state
+                .model_library_manager
+                .get_library(&library)
+                .is_some()
+            {
+                return Ok(format!(
+                    "Part '{part_name}' is already available through library '{library}'."
+                ));
+            }
+            publish_model_library_candidate(
+                &mut app.state,
+                candidate,
+                &library,
+                format!("add shipped model part {part_name}"),
+            )
+            .map(|revision| {
+                format!(
+                    "Added '{part_name}' from pack '{pack_id}' at project revision {}.",
+                    revision.get()
+                )
+            })
+        });
+    receipt(app, result);
+}
+
+fn add_corner(
+    app: &mut ManagerRenderContext<'_>,
+    library_name: &str,
+    name: &str,
+    temperature_c: &str,
+    supply_factor: &str,
+) {
+    let name = name.trim();
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    {
+        receipt(
+            app,
+            Err("Corner name must use ASCII letters, digits, or underscore.".to_owned()),
+        );
+        return;
+    }
+    let temperature = match temperature_c.trim().parse::<f64>() {
+        Ok(value) if value.is_finite() && (-273.15..=1000.0).contains(&value) => value,
+        _ => {
+            receipt(
+                app,
+                Err("Corner temperature must be finite and at least absolute zero.".to_owned()),
+            );
+            return;
+        }
+    };
+    let supply = match supply_factor.trim().parse::<f64>() {
+        Ok(value) if value.is_finite() && value > 0.0 && value <= 10.0 => value,
+        _ => {
+            receipt(
+                app,
+                Err(
+                    "Supply factor must be a finite value greater than 0 and no more than 10."
+                        .to_owned(),
+                ),
+            );
+            return;
+        }
+    };
+    let Some(source) = app
+        .state
+        .model_library_manager
+        .get_library(library_name)
+        .cloned()
+    else {
+        receipt(
+            app,
+            Err(format!("Library '{library_name}' no longer exists.")),
+        );
+        return;
+    };
+    if source
+        .corners
+        .keys()
+        .any(|existing| existing.eq_ignore_ascii_case(name))
+    {
+        receipt(
+            app,
+            Err(format!(
+                "Corner '{name}' already exists in library '{library_name}'."
+            )),
+        );
+        return;
+    }
+    let mut candidate = app.state.model_library_manager.clone();
+    let library = candidate
+        .get_library_mut(library_name)
+        .expect("the source library was resolved above");
+    let mut corner = ProcessCorner::new(name);
+    corner.description = format!("Project corner {name}");
+    corner.nmos_corner = name.to_owned();
+    corner.pmos_corner = name.to_owned();
+    corner.temperature = temperature;
+    corner.vdd_factor = supply;
+    library.corners.insert(name.to_owned(), corner);
+    let result = publish_model_library_candidate(
+        &mut app.state,
+        candidate,
+        library_name,
+        format!("add model corner {name}"),
+    )
+    .map(|revision| {
+        format!(
+            "Added corner '{name}' to '{library_name}' at project revision {}.",
+            revision.get()
+        )
+    });
+    receipt(app, result);
+}
+
+fn attached_library_for_pack(app: &ManagerRenderContext<'_>, pack_id: &str) -> Option<String> {
+    let index = app.state.model_library_manager.spice_packs()?;
+    let pack = index.pack(pack_id)?;
+    let directory = index.root().join(&pack.path);
+    app.state
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .find(|library| {
+            library
+                .root_path
+                .as_deref()
+                .is_some_and(|root| root.starts_with(&directory))
+        })
+        .map(|library| library.name.clone())
+}
+
+fn export_include_manifest(app: &mut ManagerRenderContext<'_>) {
+    let manifest = build_include_manifest(app);
+    let result = crate::workbench::workflows::export_workflow::publish_generated_bytes(
+        "model closure manifest",
+        crate::workbench::workflows::export_workflow::SaveDialogConfig {
+            title: "Export model closure manifest",
+            default_name: "rspice-model-closure.json",
+            filter_name: "JSON",
+            filter_extensions: &["json"],
+        },
+        manifest.as_bytes(),
+        "application/json;charset=utf-8",
+    );
+    match result {
+        Ok(Some(message)) => receipt(app, Ok(message)),
+        Ok(None) => {}
+        Err(error) => receipt(
+            app,
+            Err(format!(
+                "Could not export the model closure manifest: {error}"
+            )),
+        ),
+    }
+}
+
+fn build_include_manifest(app: &ManagerRenderContext<'_>) -> String {
+    let libraries = app
+        .state
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .map(|library| {
+            serde_json::json!({
+                "library": library.name,
+                "authority": match library.source_authority {
+                    ModelSourceAuthority::BuiltIn => "built-in",
+                    ModelSourceAuthority::External => "external",
+                    ModelSourceAuthority::ProjectOwned { .. } => "project-owned",
+                },
+                "root": library.root_path.as_ref().map(|path| path.to_string_lossy()),
+                "selected_section": library.selected_corner,
+                "sources": library.source_closure.iter().map(|source| serde_json::json!({
+                    "path": source.path.to_string_lossy(),
+                    "digest": source.digest.to_string(),
+                })).collect::<Vec<_>>(),
+                "edges": library.source_edges.iter().map(|edge| serde_json::json!({
+                    "owner": edge.owner.to_string_lossy(),
+                    "requested": edge.requested_path,
+                    "target": edge.target.to_string_lossy(),
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::to_string_pretty(&serde_json::json!({
+        "schema": 1,
+        "project_revision": app.state.workspace.project.revision(),
+        "libraries": libraries,
+    }))
+    .unwrap_or_else(|error| format!("{{\"error\":\"{error}\"}}"))
+}
+
+fn model_consumers(app: &ManagerRenderContext<'_>, model_name: &str) -> Vec<String> {
+    let Some(schematic) = app.state.workspace.active_schematic() else {
+        return Vec::new();
+    };
+    let mut consumers = schematic
+        .components
+        .iter()
+        .filter(|component| component_uses_model(component, model_name))
+        .map(|component| {
+            format!(
+                "{} · {} · ({}, {})",
+                component.name,
+                component.kind.display_name(),
+                component.pos.x,
+                component.pos.y
+            )
+        })
+        .collect::<Vec<_>>();
+    consumers.sort();
+    consumers
+}
+
+fn component_uses_model(component: &Component, model_name: &str) -> bool {
+    component
+        .library_cell
+        .as_ref()
+        .and_then(|binding| binding.module_name.as_deref())
+        .is_some_and(|model| model.eq_ignore_ascii_case(model_name))
+        || explicit_component_model(component)
+            .is_some_and(|model| model.eq_ignore_ascii_case(model_name))
+}
+
+fn explicit_component_model(component: &Component) -> Option<String> {
+    let params = crate::state::parse_params_string(&component.params);
+    let parameter = params
+        .get("model")
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|model| !model.is_empty());
+    let value = component.value.trim();
+    match component.kind {
+        ComponentType::NpnBjt
+        | ComponentType::PnpBjt
+        | ComponentType::NpnBjt4
+        | ComponentType::PnpBjt4
+        | ComponentType::NpnBjt5
+        | ComponentType::PnpBjt5
+        | ComponentType::VSwitch
+        | ComponentType::ISwitch
+        | ComponentType::Diode
+        | ComponentType::Nmos
+        | ComponentType::Pmos
+        | ComponentType::NVdmos
+        | ComponentType::PVdmos
+        | ComponentType::NmosSoi
+        | ComponentType::PmosSoi
+        | ComponentType::Njfet
+        | ComponentType::Pjfet
+        | ComponentType::Nmesfet
+        | ComponentType::Pmesfet
+        | ComponentType::Memristor
+        | ComponentType::LossyTransmissionLine
+        | ComponentType::CoupledTransmissionLine => parameter
+            .or((!value.is_empty()).then_some(value))
+            .map(str::to_owned),
+        ComponentType::SaturableInductor => parameter.map(str::to_owned),
+        _ => None,
+    }
+}
+
+fn exactly_one_selected_component(app: &ManagerRenderContext<'_>) -> Option<u64> {
+    let selection = &app.state.schematic.selection.components;
+    (selection.len() == 1).then(|| *selection.iter().next().expect("one selected component"))
+}
+
+fn model_geometry_invalid(model: &DeviceModel) -> bool {
+    model
+        .l_min
+        .zip(model.l_max)
+        .is_some_and(|(min, max)| min > max)
+        || model
+            .w_min
+            .zip(model.w_max)
+            .is_some_and(|(min, max)| min > max)
+}
+
+fn path_label(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+fn short_digest(digest: &str) -> String {
+    digest.chars().take(12).collect()
+}
+
+fn part_key(hit: &PackModelHit) -> String {
+    format!("{}\u{1f}{}\u{1f}{}", hit.pack, hit.name, hit.line)
+}
+
+fn receipt(app: &mut ManagerRenderContext<'_>, result: Result<String, String>) {
+    apply_receipt(app.state, result);
+}
+
+fn apply_receipt(state: &mut AppState, result: Result<String, String>) {
+    match &result {
+        Ok(message) => {
+            state.push_user_message(crate::diagnostics::ConsoleMessage::info(message.clone()))
+        }
+        Err(message) => {
+            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(message.clone()))
+        }
+    }
+    state.workbench.models_view.operational_state = match &result {
+        Ok(message) if message.to_ascii_lowercase().contains("recover") => {
+            ModelsOperationalState::Recovered
+        }
+        Ok(_) => ModelsOperationalState::Ready,
+        Err(message) => ModelsOperationalState::from_failure(message),
+    };
+    state.workbench.models_view.action_receipt = Some(result);
+}
+
+fn navigate_specialist(app: &mut ManagerRenderContext<'_>, surface: crate::workbench::SurfaceId) {
+    if let Err(error) = app.state.workbench.navigate(
+        crate::workbench::SurfaceRoute::surface(surface),
+        crate::workbench::RouteTransitionSource::User,
+    ) {
+        receipt(
+            app,
+            Err(format!("Cannot open {}: {error}", surface.label())),
+        );
+    }
+}
+
+fn section_title(ui: &mut Ui, title: &str, subtitle: &str, actions: impl FnOnce(&mut Ui)) {
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::NONE
+        .fill(t.color.bg_panel)
+        .inner_margin(egui::Margin::symmetric(12, 0))
+        .show(ui, |ui| {
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), 30.0),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    ui.spacing_mut().item_spacing.x = 12.0;
+                    ui.label(
+                        RichText::new(title)
+                            .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
+                            .color(t.color.text),
+                    );
+                    ui.label(
+                        RichText::new(subtitle)
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_faint),
+                    );
+                },
+            );
+        });
+    egui::Frame::NONE
+        .fill(t.color.bg_panel)
+        .inner_margin(egui::Margin::symmetric(12, 2))
+        .show(ui, |ui| {
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), 32.0),
+                Layout::left_to_right(Align::Center),
+                actions,
+            );
+            ui.painter().hline(
+                ui.max_rect().x_range(),
+                ui.max_rect().bottom() - 0.5,
+                Stroke::new(1.0, t.color.border),
+            );
+        });
+}
+
+fn card(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::NONE
+        .fill(t.color.bg_panel)
+        .stroke(Stroke::new(1.0, t.color.border))
+        .inner_margin(egui::Margin::same(7))
+        .show(ui, content);
+}
+
+fn detail_pane(ui: &mut Ui, title: &str, meta: Option<&str>, content: impl FnOnce(&mut Ui)) {
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::NONE
+        .fill(t.color.bg_panel)
+        .stroke(Stroke::new(1.0, t.color.border))
+        .inner_margin(egui::Margin::ZERO)
+        .show(ui, |ui| {
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::symmetric(12, 6))
+                .show(ui, |ui| card_title(ui, title, meta));
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::symmetric(12, 8))
+                .show(ui, content);
+        });
+}
+
+fn card_title(ui: &mut Ui, title: &str, meta: Option<&str>) {
+    let t = Tokens::get(ui.ctx());
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(title)
+                .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                .color(t.color.text_dim),
+        );
+        if let Some(meta) = meta {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.label(
+                    RichText::new(meta)
+                        .small()
+                        .monospace()
+                        .color(t.color.text_faint),
+                );
+            });
+        }
+    });
+    ui.separator();
+}
+
+fn property(ui: &mut Ui, name: &str, value: &str, origin: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(name).small().color(t.color.text_dim));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.label(RichText::new(origin).small().color(t.color.text_faint));
+            ui.label(RichText::new(value).small().monospace().color(t.color.text));
+        });
+    });
+}
+
+fn empty_state(ui: &mut Ui, title: &str, detail: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.add_space(10.0);
+    ui.vertical_centered(|ui| {
+        ui.label(RichText::new(title).strong().color(t.color.text_dim));
+        ui.label(RichText::new(detail).small().color(t.color.text_faint));
+    });
+    ui.add_space(10.0);
+}
+
+fn table_header(ui: &mut Ui, columns: &[(&str, f32)]) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), HEADER_H), Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_inset);
+    let mut x = rect.left() + 5.0;
+    for (label, fraction) in columns {
+        let width = rect.width() * fraction;
+        ui.painter().text(
+            egui::pos2(x, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            *label,
+            theme::sans(tokens::FS_0, FontWeight::SemiBold),
+            t.color.text_faint,
+        );
+        x += width;
+    }
+}
+
+fn selectable_data_row(
+    ui: &mut Ui,
+    selected: bool,
+    columns: &[(&str, f32, bool)],
+) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_H), Sense::click());
+    if selected {
+        ui.painter()
+            .rect_filled(rect, 0.0, t.color.accent.linear_multiply(0.14));
+        ui.painter().vline(
+            rect.left(),
+            rect.y_range(),
+            Stroke::new(2.0, t.color.accent),
+        );
+    } else if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+    }
+    paint_columns(ui, rect, columns);
+    response
+}
+
+fn paint_columns(ui: &Ui, rect: egui::Rect, columns: &[(&str, f32, bool)]) {
+    let t = Tokens::get(ui.ctx());
+    let mut x = rect.left() + 5.0;
+    for (value, fraction, mono) in columns {
+        let width = rect.width() * fraction;
+        let clipped = elide(ui, value, width - 9.0, *mono);
+        ui.painter().text(
+            egui::pos2(x, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            clipped,
+            if *mono {
+                theme::mono(tokens::FS_0, FontWeight::Regular)
+            } else {
+                theme::sans(tokens::FS_0, FontWeight::Regular)
+            },
+            t.color.text_dim,
+        );
+        x += width;
+    }
+}
+
+fn elide(ui: &Ui, value: &str, max_width: f32, mono: bool) -> String {
+    let font = if mono {
+        theme::mono(tokens::FS_0, FontWeight::Regular)
+    } else {
+        theme::sans(tokens::FS_0, FontWeight::Regular)
+    };
+    if ui
+        .painter()
+        .layout_no_wrap(value.to_owned(), font.clone(), Color32::WHITE)
+        .size()
+        .x
+        <= max_width
+    {
+        return value.to_owned();
+    }
+    let mut output = value.to_owned();
+    while output.chars().count() > 1 {
+        output.pop();
+        let candidate = format!("{output}…");
+        if ui
+            .painter()
+            .layout_no_wrap(candidate.clone(), font.clone(), Color32::WHITE)
+            .size()
+            .x
+            <= max_width
+        {
+            return candidate;
+        }
+    }
+    "…".to_owned()
+}

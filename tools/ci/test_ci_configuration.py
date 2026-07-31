@@ -249,11 +249,17 @@ class CiConfigurationTests(unittest.TestCase):
             "cargo run --locked -p rspice-bench -- generated-rust",
             workflow,
         )
+        self.assertIn(
+            "--features generated-stamp-subset -- generated-stamp",
+            workflow,
+        )
+        self.assertIn("--max-corpus-median-reference-ratio 1.25", workflow)
+        self.assertIn("--max-model-reference-ratio 4.25", workflow)
         for budget in [
             "--max-source-bytes 56000000",
             "--max-noise-source-bytes 17000000",
             "--max-model-source-bytes 4700000",
-            "--max-file-count 240",
+            "--max-file-count 380",
             "--max-pooled-workspace-payload-bytes 0",
             "--max-stamp-state-payload-bytes 6200",
         ]:
@@ -355,6 +361,28 @@ class CiConfigurationTests(unittest.TestCase):
             3,
             "all full-corpus Verilog-A gates need the raised test-thread stack",
         )
+        self.assertIn("--features generated-stamp -- generated-stamp", nightly_workflow)
+        self.assertIn("--max-corpus-median-reference-ratio 5.75", nightly_workflow)
+        self.assertIn("--max-model-reference-ratio 16.50", nightly_workflow)
+        self.assertIn("target/veriloga-stamp-qualification.json", nightly_workflow)
+
+    def test_generated_veriloga_has_desktop_browser_and_mobile_portability_rows(self) -> None:
+        workflow = read_text(".github/workflows/ci.yml")
+
+        self.assertGreaterEqual(
+            workflow.count(
+                "--no-default-features --features veriloga-model-diode-cmc,veriloga-builtins-noise"
+            ),
+            3,
+            "Linux, Windows, and macOS must compile the direct portable shard",
+        )
+        for target in [
+            "wasm32-unknown-unknown",
+            "aarch64-linux-android",
+            "aarch64-apple-ios",
+        ]:
+            self.assertIn(target, workflow)
+        self.assertIn("veriloga-mobile:", workflow)
 
     def test_linux_ci_runs_clippy_warning_clean(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")

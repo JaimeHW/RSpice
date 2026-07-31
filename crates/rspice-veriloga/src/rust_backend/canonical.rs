@@ -561,13 +561,14 @@ impl ModelPlan {
             structural_guards.iter().fold(0_u64, |total, guard| {
                 total.saturating_add(crate::metrics::usize_to_u64(guard.newton_values))
             });
+        // Stage splitting is an optimization only. Some irreducible-looking
+        // projections cannot discard a volatile branch test while preserving
+        // a unique route through coarser blocks. The original direct CFG is
+        // still fully valid and semantically authoritative, so declining that
+        // split is the safe result rather than rejecting the model.
         let stages = match split(&function, &schedule, &outputs) {
             Ok(stages) => stages,
-            Err(_) => {
-                // Staging is an optional caching optimization. The unsplit
-                // function remains the authoritative semantic representation,
-                // so an unsafe control-flow projection must disable the split
-                // rather than reject an otherwise supported production model.
+            Err(_error) => {
                 measurements.metrics_mut().invalidation_split_fallback_count += 1;
                 Vec::new()
             }

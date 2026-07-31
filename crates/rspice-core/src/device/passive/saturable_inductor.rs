@@ -30,7 +30,7 @@
 use crate::device::traits::{
     DynamicDevice, MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice,
 };
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 
 //=============================================================================
 // Saturable Inductor
@@ -130,13 +130,6 @@ impl SaturableInductor {
         self
     }
 
-    /// Set saturation parameters
-    pub fn with_saturation(mut self, i_sat: Value, l_min: Value, n_sat: Value) -> Self {
-        self.i_sat = i_sat;
-        self.l_min = l_min;
-        self.n_sat = n_sat;
-        self
-    }
 
     /// Set initial current
     pub fn set_initial_current(&mut self, current: Value) {
@@ -210,14 +203,6 @@ impl SaturableInductor {
         self.l_eff
     }
 
-    /// Get saturation ratio (0 = unsaturated, 1 = fully saturated)  
-    pub fn saturation_ratio(&self) -> Value {
-        let l_range = self.l0 - self.l_min;
-        if l_range < 1e-15 {
-            return 0.0;
-        }
-        1.0 - (self.l_eff - self.l_min) / l_range
-    }
 
     /// Stamp this inductor after verifying its MNA branch has been assigned.
     ///

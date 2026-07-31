@@ -175,22 +175,6 @@ impl Engine {
         self.config_error.as_ref()
     }
 
-    /// Replace the transient replay grid used by conformance runners.
-    ///
-    /// The grid is part of the validated simulation configuration, so callers
-    /// receive the same structured error as any other configuration boundary
-    /// instead of mutating engine internals directly.
-    pub fn set_locked_time_grid(
-        &mut self,
-        grid: std::sync::Arc<Vec<Value>>,
-    ) -> Result<(), SimulationConfigError> {
-        let mut candidate = self.config.clone();
-        candidate.locked_time_grid = Some(grid);
-        candidate.validate()?;
-        self.config = candidate;
-        self.config_error = None;
-        Ok(())
-    }
 
     pub(crate) fn ensure_valid_configuration(&self) -> Result<(), SimulationError> {
         match &self.config_error {
@@ -928,7 +912,7 @@ C1 mid b 1u
             .expect("permissive-mode circuit builds");
         netlist
             .params
-            .set_expression_dialect(crate::netlist::ExpressionDialect::Xyce);
+            .set_expression_dialect(crate::config::ExpressionDialect::Xyce);
 
         assert!(
             engine

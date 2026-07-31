@@ -7,7 +7,7 @@
 
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::solver::{CscIndex, StaticMatrix};
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 use std::cell::{Cell, RefCell};
 
 mod dynamic;

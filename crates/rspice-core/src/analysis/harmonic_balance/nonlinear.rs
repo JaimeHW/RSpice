@@ -84,17 +84,7 @@ impl HbDiode {
         }
     }
 
-    /// Set saturation current
-    pub fn with_is(mut self, is: Value) -> Self {
-        self.is = is;
-        self
-    }
 
-    /// Set ideality factor
-    pub fn with_n(mut self, n: Value) -> Self {
-        self.n = n;
-        self
-    }
 
     /// Compute diode current using Shockley equation
     ///
@@ -159,10 +149,6 @@ impl HbDiode {
         v_waveform.iter().map(|&vd| self.current(vd)).collect()
     }
 
-    /// Evaluate Jacobian (dI/dV) for all time samples
-    pub fn jacobian_time_domain(&self, v_waveform: &[Value]) -> Vec<Value> {
-        v_waveform.iter().map(|&vd| self.conductance(vd)).collect()
-    }
 }
 
 //=============================================================================
@@ -395,10 +381,6 @@ impl HbBjt {
         self.diode_conductance(vbe, self.nf) / self.bf
     }
 
-    /// Get base-collector junction conductance
-    pub fn gbc(&self, vbc: Value) -> Value {
-        self.diode_conductance(vbc, self.nr) / self.br
-    }
 
     /// Evaluate BJT currents for all time samples
     ///
@@ -701,15 +683,7 @@ impl HbDeviceCollection {
         self.diodes.push(diode);
     }
 
-    /// Add a BJT
-    pub fn add_bjt(&mut self, bjt: HbBjt) {
-        self.bjts.push(bjt);
-    }
 
-    /// Add a MOSFET
-    pub fn add_mosfet(&mut self, mosfet: HbMosfet) {
-        self.mosfets.push(mosfet);
-    }
 
     /// Check if collection is empty
     pub fn is_empty(&self) -> bool {
@@ -721,20 +695,6 @@ impl HbDeviceCollection {
         self.diodes.len() + self.bjts.len() + self.mosfets.len()
     }
 
-    /// Convert to unified device vector
-    pub fn to_devices(&self) -> Vec<HbDevice> {
-        let mut devices = Vec::with_capacity(self.len());
-        for d in &self.diodes {
-            devices.push(HbDevice::Diode(d.clone()));
-        }
-        for b in &self.bjts {
-            devices.push(HbDevice::Bjt(b.clone()));
-        }
-        for m in &self.mosfets {
-            devices.push(HbDevice::Mosfet(m.clone()));
-        }
-        devices
-    }
 }
 
 //=============================================================================

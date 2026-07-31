@@ -26,7 +26,7 @@
 use super::eval::{Bsim3v3Bias, Bsim3v3Charge, Bsim3v3Op};
 use super::{Bsim3v3, eval};
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
-use crate::{Complex64, Value, circuit::NodeId};
+use crate::{Complex64, NodeId, Value};
 
 const TRNQS_SCALING: Value = 1.0e-9;
 

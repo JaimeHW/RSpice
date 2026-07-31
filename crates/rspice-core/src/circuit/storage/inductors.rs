@@ -272,24 +272,6 @@ impl Inductors {
         self.stamp_transient_companion_where(matrix, rhs, dt, coeff, num_nodes, |_| false);
     }
 
-    /// Stamp transient companions while leaving selected inductor branches to
-    /// a device-specific DAE implementation.  Xyce nonlinear Core branches
-    /// own both their KCL incidence and constitutive branch equation, so they
-    /// must not be superimposed on this generic linear companion.
-    #[inline]
-    pub fn stamp_transient_companion_excluding(
-        &self,
-        matrix: &mut StaticMatrix,
-        rhs: &mut [Value],
-        dt: Value,
-        coeff: &CompanionCoefficients,
-        num_nodes: usize,
-        excluded_indices: &[usize],
-    ) {
-        self.stamp_transient_companion_where(matrix, rhs, dt, coeff, num_nodes, |index| {
-            excluded_indices.binary_search(&index).is_ok()
-        });
-    }
 
     /// Stamp transient companions with a zero-allocation branch-selection
     /// predicate.  Circuit-level device families use this form to leave

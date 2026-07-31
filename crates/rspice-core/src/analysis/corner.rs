@@ -60,25 +60,7 @@ impl ProcessCorner {
         vec![Self::SS, Self::TT, Self::FF]
     }
 
-    /// Get NMOS speed factor (1.0 = nominal)
-    pub fn nmos_factor(&self) -> Value {
-        match self {
-            Self::TT => 1.0,
-            Self::SS | Self::SF => 0.9, // Slow NMOS
-            Self::FF | Self::FS => 1.1, // Fast NMOS
-            Self::Custom(_) => 1.0,
-        }
-    }
 
-    /// Get PMOS speed factor (1.0 = nominal)
-    pub fn pmos_factor(&self) -> Value {
-        match self {
-            Self::TT => 1.0,
-            Self::SS | Self::FS => 0.9, // Slow PMOS
-            Self::FF | Self::SF => 1.1, // Fast PMOS
-            Self::Custom(_) => 1.0,
-        }
-    }
 
     /// Get display name
     pub fn name(&self) -> &'static str {
@@ -205,11 +187,6 @@ impl CornerConfig {
         }
     }
 
-    /// Use standard 5 process corners
-    pub fn with_standard_corners(mut self) -> Self {
-        self.process_corners = ProcessCorner::standard_five();
-        self
-    }
 
     /// Set process corners
     pub fn with_process_corners(mut self, corners: Vec<ProcessCorner>) -> Self {
@@ -229,23 +206,8 @@ impl CornerConfig {
         self
     }
 
-    /// Use Kelvin for temperature
-    pub fn with_kelvin(mut self) -> Self {
-        self.temp_in_kelvin = true;
-        self
-    }
 
-    /// Add custom corner
-    pub fn add_corner(mut self, corner: CornerPoint) -> Self {
-        self.custom_corners.push(corner);
-        self
-    }
 
-    /// Set to diagonal sweep (matched corners, not full matrix)
-    pub fn diagonal_only(mut self) -> Self {
-        self.full_matrix = false;
-        self
-    }
 
     /// Generate all corner points based on configuration
     pub fn generate_corners(&self) -> Vec<CornerPoint> {
@@ -458,10 +420,6 @@ impl CornerResult {
         }
     }
 
-    /// Get summary for an output
-    pub fn get_summary(&self, name: &str) -> Option<&CornerSummary> {
-        self.summary.get(name)
-    }
 
     /// Get worst-case (min or max based on direction) corner for an output
     pub fn worst_case(&self, name: &str, minimize: bool) -> Option<&CornerSimResult> {

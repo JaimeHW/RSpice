@@ -38,7 +38,7 @@ use super::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice
 use crate::expr::{
     BinaryOp, CompiledExpr, Context, Expr, Function, UnaryOp, Vm, compile, parse_expression_strict,
 };
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 
 //=============================================================================
 // Switch State
@@ -1127,7 +1127,7 @@ pub struct GenericSwitch {
     time_breakpoints: Vec<Value>,
     temperature: Value,
     gmin: Value,
-    expression_dialect: crate::netlist::ExpressionDialect,
+    expression_dialect: crate::config::ExpressionDialect,
 
     /// On resistance
     pub ron: Value,
@@ -1190,7 +1190,7 @@ impl GenericSwitch {
             time_breakpoints,
             temperature: crate::constants::kelvin_to_celsius(crate::constants::TEMP_REFERENCE),
             gmin: crate::constants::GMIN,
-            expression_dialect: crate::netlist::ExpressionDialect::Ngspice,
+            expression_dialect: crate::config::ExpressionDialect::Ngspice,
             ron: 1.0,
             roff: 1.0e6,
             on: 1.0,
@@ -1205,10 +1205,6 @@ impl GenericSwitch {
         })
     }
 
-    /// Return true when the expression needs solution-vector Jacobian support.
-    pub fn has_solution_references(&self) -> bool {
-        !self.program.node_map.is_empty() || !self.program.branch_map.is_empty()
-    }
 
     /// Resolve expression references against the final circuit topology.
     ///
@@ -1272,125 +1268,7 @@ impl GenericSwitch {
         &self.time_breakpoints
     }
 
-    /// Time instants where a time-only control expression crosses switch
-    /// thresholds.
-    pub fn threshold_breakpoints(&self, tstop: Value, scan_step: Value) -> Vec<Value> {
-        if !(tstop.is_finite() && tstop > 0.0) {
-            return Vec::new();
-        }
 
-        let mut thresholds = vec![self.off, self.on];
-        if self.hysteresis_enabled {
-            thresholds.push(self.offh);
-            thresholds.push(self.onh);
-        }
-        thresholds.retain(|value| value.is_finite());
-        thresholds.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        thresholds.dedup_by(|a, b| {
-            let scale = a.abs().max(b.abs()).max(1.0);
-            (*a - *b).abs() <= scale * 1.0e-12
-        });
-        if thresholds.is_empty() {
-            return Vec::new();
-        }
-
-        let mut step = if scan_step.is_finite() && scan_step > 0.0 {
-            scan_step
-        } else {
-            tstop / 1000.0
-        };
-        step = step.clamp(tstop / 1.0e6, tstop.max(f64::MIN_POSITIVE));
-        let time_tolerance = (step.abs() * 1.0e-9)
-            .max(tstop.abs() * 1.0e-14)
-            .max(1.0e-18);
-
-        let mut vm = Vm::new();
-        let mut breakpoints = Vec::new();
-        let mut t0 = 0.0;
-        let mut y0 = self.evaluate_control_at(t0, &mut vm);
-
-        while t0 < tstop {
-            let t1 = (t0 + step).min(tstop);
-            let y1 = self.evaluate_control_at(t1, &mut vm);
-            for &threshold in &thresholds {
-                self.push_threshold_crossing(
-                    threshold,
-                    t0,
-                    y0,
-                    t1,
-                    y1,
-                    time_tolerance,
-                    &mut breakpoints,
-                );
-            }
-            t0 = t1;
-            y0 = y1;
-        }
-
-        breakpoints.retain(|time| time.is_finite() && *time >= 0.0 && *time <= tstop);
-        breakpoints.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        breakpoints.dedup_by(|a, b| {
-            let scale = a.abs().max(b.abs()).max(1.0);
-            (*a - *b).abs() <= scale * 1.0e-12
-        });
-        breakpoints
-    }
-
-    fn push_threshold_crossing(
-        &self,
-        threshold: Value,
-        t0: Value,
-        y0: Value,
-        t1: Value,
-        y1: Value,
-        time_tolerance: Value,
-        breakpoints: &mut Vec<Value>,
-    ) {
-        let f0 = y0 - threshold;
-        let f1 = y1 - threshold;
-        if !f0.is_finite() || !f1.is_finite() {
-            return;
-        }
-        let value_tolerance = threshold.abs().max(y0.abs()).max(y1.abs()).max(1.0) * 1.0e-12;
-        if f0.abs() <= value_tolerance {
-            breakpoints.push(t0);
-            return;
-        }
-        if f1.abs() <= value_tolerance {
-            breakpoints.push(t1);
-            return;
-        }
-        if f0.signum() == f1.signum() {
-            return;
-        }
-
-        let mut left = t0;
-        let mut right = t1;
-        let mut left_value = f0;
-        let mut vm = Vm::new();
-        for _ in 0..64 {
-            let mid = 0.5 * (left + right);
-            if (right - left).abs() <= time_tolerance {
-                break;
-            }
-            let mid_value = self.evaluate_control_at(mid, &mut vm) - threshold;
-            if !mid_value.is_finite() {
-                return;
-            }
-            if mid_value.abs() <= value_tolerance {
-                left = mid;
-                right = mid;
-                break;
-            }
-            if left_value.signum() == mid_value.signum() {
-                left = mid;
-                left_value = mid_value;
-            } else {
-                right = mid;
-            }
-        }
-        breakpoints.push(0.5 * (left + right));
-    }
 
     fn collect_time_breakpoints(expr: &Expr) -> Vec<Value> {
         let mut breakpoints = Vec::new();
@@ -1587,7 +1465,7 @@ impl GenericSwitch {
         &mut self,
         temperature: Value,
         gmin: Value,
-        expression_dialect: crate::netlist::ExpressionDialect,
+        expression_dialect: crate::config::ExpressionDialect,
     ) {
         self.temperature = temperature;
         self.gmin = gmin;
@@ -1599,14 +1477,6 @@ impl GenericSwitch {
         self.current_conductance
     }
 
-    fn evaluate_control_at(&self, time: Value, vm: &mut Vm) -> Value {
-        let ctx = Context::transient(&[], &[], time)
-            .with_temperature(self.temperature)
-            .with_gmin(self.gmin)
-            .with_expression_dialect(self.expression_dialect);
-        let value = vm.execute(&self.program, &ctx);
-        if value.is_finite() { value } else { self.off }
-    }
 
     fn refresh_expression_inputs(&mut self, solution: &[Value]) {
         for (idx, binding) in self.node_bindings.iter().enumerate() {
@@ -1955,7 +1825,7 @@ impl GenericSwitch {
 #[cfg(test)]
 mod tests {
     use crate::device::traits::NonlinearDevice;
-    use crate::netlist::ExpressionDialect;
+    use crate::config::ExpressionDialect;
 
     use super::{CurrentSwitch, GenericSwitch, SwitchState, VoltageSwitch};
 

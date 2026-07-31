@@ -29,7 +29,7 @@
 //! The other exponents determine amplitude stability.
 
 #![allow(clippy::needless_range_loop)]
-use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::abort_signal::AbortSignal;
 use crate::{SimulationError, Value};
 use num_complex::Complex64;
 use std::f64::consts::PI;
@@ -256,15 +256,6 @@ impl StabilityType {
         matches!(self, StabilityType::Stable)
     }
 
-    /// Check if this indicates a bifurcation
-    pub fn is_bifurcation(&self) -> bool {
-        matches!(
-            self,
-            StabilityType::PeriodDoubling
-                | StabilityType::NeimarkSacker
-                | StabilityType::SaddleNode
-        )
-    }
 }
 
 //=============================================================================
@@ -309,39 +300,15 @@ pub struct PstbResult {
 }
 
 impl PstbResult {
-    /// Get the most unstable (or least stable) multiplier
-    pub fn dominant_multiplier(&self) -> Option<&FloquetMultiplier> {
-        self.multipliers.first()
-    }
 
-    /// Get all unstable multipliers
-    pub fn unstable_multipliers(&self) -> Vec<&FloquetMultiplier> {
-        self.multipliers.iter().filter(|m| m.is_unstable).collect()
-    }
 
-    /// Get the trivial multiplier (should be ≈ 1)
-    pub fn trivial_multiplier(&self) -> Option<&FloquetMultiplier> {
-        self.multipliers.iter().find(|m| m.is_trivial)
-    }
 
     /// Check if the periodic orbit is stable
     pub fn is_stable(&self) -> bool {
         self.stability.is_stable()
     }
 
-    /// Get stability margin in dB (positive = stable)
-    pub fn stability_margin(&self) -> Value {
-        self.min_stability_margin_db
-    }
 
-    /// Get natural frequencies of all oscillatory modes
-    pub fn mode_frequencies(&self) -> Vec<Value> {
-        self.multipliers
-            .iter()
-            .filter(|m| !m.is_trivial && m.exponent.im.abs() > 1e-10)
-            .map(|m| m.natural_frequency())
-            .collect()
-    }
 }
 
 //=============================================================================
@@ -369,11 +336,6 @@ impl PstbAnalyzer {
         }
     }
 
-    /// Analyze stability from a pre-computed Monodromy matrix
-    pub fn analyze_monodromy(&mut self, monodromy: &[Vec<Value>], period: Value) -> PstbResult {
-        self.analyze_monodromy_with_abort(monodromy, period, &NoAbort)
-            .expect("NoAbort cannot cancel PSTB eigen-analysis")
-    }
 
     /// Analyze stability from a pre-computed Monodromy matrix, cooperatively
     /// returning [`SimulationError::Aborted`] when cancellation is requested.

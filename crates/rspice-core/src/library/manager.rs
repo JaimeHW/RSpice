@@ -345,125 +345,9 @@ impl LibraryManager {
             .find(|m| m.name.to_uppercase() == upper)
     }
 
-    /// Legacy catalogue-only geometry lookup.
-    ///
-    /// This method predates executable-netlist model resolution and cannot
-    /// represent declaration order, expression-valued bounds, NFIN, scoped
-    /// models, or fail-closed ambiguity/uncovered errors. It must never be used
-    /// to predict or select a simulation model. Parse the executable
-    /// [`crate::Netlist`] and use [`crate::Engine::inspect_model_bins`] for an
-    /// authoritative decision receipt.
-    ///
-    /// # Arguments
-    /// * `prefix` - Model name prefix to search for (e.g., "nch", "pch_hvt")
-    /// * `width` - Device width in meters
-    /// * `length` - Device length in meters
-    /// * `model_type` - Expected model type (e.g., Nmos, Pmos)
-    ///
-    /// # Returns
-    /// * `Some(&ModelDefinition)` - Catalogue heuristic result
-    /// * `None` - No matching bin found
-    ///
-    /// # Legacy selection algorithm
-    /// 1. Find all models with matching prefix and type
-    /// 2. Filter to those whose binning range contains (W, L)
-    /// 3. If multiple match, prefer the one with tightest bounds (smallest bin)
-    /// 4. If no binned models match, fall back to unbinned model with same prefix
-    #[deprecated(
-        since = "0.1.0",
-        note = "catalogue heuristic only; use Engine::inspect_model_bins on the executable Netlist"
-    )]
-    pub fn select_model_for_geometry(
-        &self,
-        prefix: &str,
-        width: f64,
-        length: f64,
-        model_type: ModelType,
-    ) -> Option<&ModelDefinition> {
-        let prefix_lower = prefix.to_lowercase();
 
-        // Collect all candidate models matching prefix and type
-        let candidates: Vec<_> = self
-            .models
-            .values()
-            .filter(|m| {
-                m.model_type == model_type && {
-                    // Match by explicit bin_prefix or by name prefix
-                    if let Some(ref bp) = m.bin_prefix {
-                        bp.to_lowercase() == prefix_lower
-                    } else {
-                        m.name.to_lowercase().starts_with(&prefix_lower)
-                    }
-                }
-            })
-            .collect();
 
-        if candidates.is_empty() {
-            return None;
-        }
 
-        // Find binned models that match the geometry
-        let binned_matches: Vec<_> = candidates
-            .iter()
-            .filter(|m| m.has_binning() && m.matches_geometry(width, length))
-            .collect();
-
-        if !binned_matches.is_empty() {
-            // If multiple binned models match, prefer the one with tightest bounds
-            // (smallest difference between max and min for both L and W)
-            return binned_matches
-                .into_iter()
-                .min_by(|a, b| {
-                    let a_range = Self::bin_range_size(a);
-                    let b_range = Self::bin_range_size(b);
-                    a_range
-                        .partial_cmp(&b_range)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
-                .copied();
-        }
-
-        // Fall back to unbinned model with exact prefix match
-        candidates
-            .iter()
-            .find(|m| !m.has_binning() && m.name.to_lowercase() == prefix_lower)
-            .copied()
-            // Or any unbinned model with matching prefix
-            .or_else(|| candidates.iter().find(|m| !m.has_binning()).copied())
-    }
-
-    /// Calculate total bin range size for prioritizing tighter bins
-    fn bin_range_size(model: &ModelDefinition) -> f64 {
-        let l_range = match (model.lmin, model.lmax) {
-            (Some(min), Some(max)) => max - min,
-            _ => f64::MAX,
-        };
-        let w_range = match (model.wmin, model.wmax) {
-            (Some(min), Some(max)) => max - min,
-            _ => f64::MAX,
-        };
-        l_range + w_range
-    }
-
-    /// Get all subcircuits
-    pub fn all_subcircuits(&self) -> Vec<&SubcircuitDefinition> {
-        let mut subcircuits: Vec<_> = self.subcircuits.values().collect();
-        subcircuits.sort_by(|a, b| a.name.cmp(&b.name));
-        subcircuits
-    }
-
-    /// Get a specific subcircuit by name
-    pub fn get_subcircuit(&self, name: &str) -> Option<&SubcircuitDefinition> {
-        // Try exact match first
-        if let Some(subckt) = self.subcircuits.get(name) {
-            return Some(subckt);
-        }
-        // Try case-insensitive match
-        let upper = name.to_uppercase();
-        self.subcircuits
-            .values()
-            .find(|s| s.name.to_uppercase() == upper)
-    }
 
     /// Get the library file content by name
     pub fn get_library_content(&self, library_name: &str) -> Option<&'static str> {
@@ -570,25 +454,6 @@ impl LibraryManager {
         Ok(count)
     }
 
-    /// Get available sections/corners from a .lib file without loading
-    pub fn peek_lib_sections(path: impl AsRef<std::path::Path>) -> Result<Vec<String>, String> {
-        use super::lib_parser::LibParser;
-
-        let path = path.as_ref();
-        let base_dir = path.parent().unwrap_or(std::path::Path::new("."));
-
-        let mut parser = LibParser::new(base_dir);
-        let result = parser.parse_file(path).map_err(|e| e.to_string())?;
-        if !result.errors.is_empty() {
-            return Err(format_lib_parse_errors(&result.errors));
-        }
-
-        Ok(result
-            .section_names()
-            .into_iter()
-            .map(|s| s.to_string())
-            .collect())
-    }
 }
 
 fn format_lib_parse_errors(errors: &[super::lib_parser::ParseError]) -> String {

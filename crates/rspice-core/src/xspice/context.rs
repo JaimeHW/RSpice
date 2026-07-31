@@ -4,7 +4,7 @@
 //! Handles port value access, parameter lookup, and state management.
 
 use super::{CmError, CmResult, DigitalValue, PortType};
-use crate::analysis::CompanionCoefficients;
+use crate::numerics::integration::CompanionCoefficients;
 use crate::{Complex64, Value};
 use std::any::Any;
 use std::borrow::Cow;
@@ -402,29 +402,9 @@ impl OutputValue {
         OutputValue::Real(0.0)
     }
 
-    /// Set analog output value
-    pub fn set_analog(&mut self, value: Value) {
-        if let OutputValue::Analog(v) = self {
-            v.value = value;
-        }
-    }
 
-    /// Set analog partial derivative
-    pub fn set_partial(&mut self, partial: Value) {
-        if let OutputValue::Analog(v) = self {
-            v.partial = partial;
-        }
-    }
 
-    /// Set digital output value
-    pub fn set_digital(&mut self, value: DigitalValue) {
-        *self = OutputValue::Digital(value);
-    }
 
-    /// Set real output value
-    pub fn set_real(&mut self, value: Value) {
-        *self = OutputValue::Real(value);
-    }
 }
 
 //=============================================================================
@@ -871,16 +851,6 @@ impl CmContext {
             .and_then(|transitions| transitions.get(index).copied().flatten())
     }
 
-    /// Get digital input vector
-    pub fn input_digital_vector(&self, name: &str) -> Vec<DigitalValue> {
-        self.inputs
-            .get(name)
-            .map(|v| match v {
-                InputValue::DigitalVector(vec) => vec.clone(),
-                _ => Vec::new(),
-            })
-            .unwrap_or_default()
-    }
 
     /// Borrow a digital input vector without allocating.
     pub fn input_digital_vector_values(&self, name: &str) -> Option<&[DigitalValue]> {
@@ -889,16 +859,6 @@ impl CmContext {
             .and_then(InputValue::try_digital_vector)
     }
 
-    /// Get real input vector
-    pub fn input_real_vector(&self, name: &str) -> Vec<Value> {
-        self.inputs
-            .get(name)
-            .map(|v| match v {
-                InputValue::RealVector(vec) => vec.clone(),
-                _ => Vec::new(),
-            })
-            .unwrap_or_default()
-    }
 
     /// Borrow a real input vector without allocating.
     pub fn input_real_vector_values(&self, name: &str) -> Option<&[Value]> {
@@ -2380,9 +2340,8 @@ impl CmContext {
 
     /// Get thermal voltage (kT/q)
     pub fn thermal_voltage(&self) -> Value {
-        const BOLTZMANN: Value = 1.380649e-23;
-        const CHARGE: Value = 1.602176634e-19;
-        BOLTZMANN * self.temperature / CHARGE
+        use crate::constants::{K_BOLTZMANN, Q_ELECTRON};
+        K_BOLTZMANN * self.temperature / Q_ELECTRON
     }
 
     /// Check if this is the first call (initialization)

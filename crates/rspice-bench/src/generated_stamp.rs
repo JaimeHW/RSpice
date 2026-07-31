@@ -38,6 +38,16 @@ pub struct GeneratedStampArgs {
     #[arg(long, value_name = "NS")]
     pub max_median_ns_per_stamp: Option<f64>,
 
+    /// Fail if the corpus median exceeds this multiple of the same-run
+    /// hand-written compact-model reference.
+    #[arg(long, value_name = "RATIO")]
+    pub max_corpus_median_reference_ratio: Option<f64>,
+
+    /// Fail if any measured model exceeds this multiple of the same-run
+    /// hand-written compact-model reference.
+    #[arg(long, value_name = "RATIO")]
+    pub max_model_reference_ratio: Option<f64>,
+
     /// Optional JSON report path.
     #[arg(long, value_name = "PATH")]
     pub out: Option<PathBuf>,
@@ -52,10 +62,11 @@ struct ModelReport {
     ns_per_stamp_median: f64,
     ns_per_stamp_p95: f64,
     ns_per_stamp_min: f64,
+    ratio_vs_reference: Option<f64>,
 }
 
-impl From<&GeneratedStampBenchResult> for ModelReport {
-    fn from(result: &GeneratedStampBenchResult) -> Self {
+impl ModelReport {
+    fn from_result(result: &GeneratedStampBenchResult, reference_ns: Option<f64>) -> Self {
         Self {
             model_name: result.model_name.to_string(),
             node_count: result.node_count,
@@ -64,6 +75,8 @@ impl From<&GeneratedStampBenchResult> for ModelReport {
             ns_per_stamp_median: result.ns_per_stamp_median,
             ns_per_stamp_p95: result.ns_per_stamp_p95,
             ns_per_stamp_min: result.ns_per_stamp_min,
+            ratio_vs_reference: reference_ns
+                .map(|reference| result.ns_per_stamp_median / reference.max(f64::MIN_POSITIVE)),
         }
     }
 }
@@ -79,11 +92,18 @@ struct ReferenceReport {
 
 #[derive(Serialize)]
 struct StampReport {
+    schema_version: u32,
     iterations: usize,
     samples: usize,
     measured: Vec<ModelReport>,
     /// Hand-written model measured in the same run, when available.
     reference: Option<ReferenceReport>,
+    corpus_median_ns: f64,
+    corpus_median_reference_ratio: Option<f64>,
+    max_median_ns_per_stamp: Option<f64>,
+    max_corpus_median_reference_ratio: Option<f64>,
+    max_model_reference_ratio: Option<f64>,
+    passed: bool,
     failed: Vec<String>,
 }
 
@@ -97,10 +117,25 @@ fn median_of(measured: &[GeneratedStampBenchResult]) -> f64 {
         .map(|result| result.ns_per_stamp_median)
         .collect();
     medians.sort_by(f64::total_cmp);
-    medians[medians.len() / 2]
+    let middle = medians.len() / 2;
+    if medians.len().is_multiple_of(2) {
+        (medians[middle - 1] + medians[middle]) * 0.5
+    } else {
+        medians[middle]
+    }
 }
 
 pub fn run(args: &GeneratedStampArgs) -> Result<ExitCode, BenchError> {
+    validate_positive_budget("--max-median-ns-per-stamp", args.max_median_ns_per_stamp)?;
+    validate_positive_budget(
+        "--max-corpus-median-reference-ratio",
+        args.max_corpus_median_reference_ratio,
+    )?;
+    validate_positive_budget(
+        "--max-model-reference-ratio",
+        args.max_model_reference_ratio,
+    )?;
+
     let config = GeneratedStampBenchConfig {
         iterations: args.iterations,
         samples: args.samples,
@@ -146,6 +181,13 @@ pub fn run(args: &GeneratedStampArgs) -> Result<ExitCode, BenchError> {
         iterations: args.iterations,
         samples: args.samples,
     });
+    let reference_ns = reference
+        .as_ref()
+        .ok()
+        .map(|result| result.ns_per_stamp_median);
+    let corpus_median_ns = median_of(&measured);
+    let corpus_median_reference_ratio =
+        reference_ns.map(|reference| corpus_median_ns / reference.max(f64::MIN_POSITIVE));
     match &reference {
         Ok(result) => {
             println!(
@@ -157,12 +199,11 @@ pub fn run(args: &GeneratedStampArgs) -> Result<ExitCode, BenchError> {
                 result.ns_per_stamp_median,
                 result.ns_per_stamp_p95,
             );
-            let median = median_of(&measured);
-            if median > 0.0 && result.ns_per_stamp_median > 0.0 {
+            if corpus_median_ns > 0.0 && result.ns_per_stamp_median > 0.0 {
                 println!(
                     "\ncorpus median {:.1} ns is {:.2}x the hand-written reference ({:.1} ns)",
-                    median,
-                    median / result.ns_per_stamp_median,
+                    corpus_median_ns,
+                    corpus_median_ns / result.ns_per_stamp_median,
                     result.ns_per_stamp_median,
                 );
             }
@@ -170,14 +211,55 @@ pub fn run(args: &GeneratedStampArgs) -> Result<ExitCode, BenchError> {
         Err(error) => eprintln!("reference measurement unavailable: {error}"),
     }
 
-    for failure in &failed {
-        eprintln!("skipped: {failure}");
+    if let Some(budget) = args.max_median_ns_per_stamp {
+        for result in &measured {
+            if result.ns_per_stamp_median > budget {
+                failed.push(format!(
+                    "{} median {:.1} ns exceeds {:.1} ns",
+                    result.model_name, result.ns_per_stamp_median, budget
+                ));
+            }
+        }
+    }
+    if args.max_corpus_median_reference_ratio.is_some() || args.max_model_reference_ratio.is_some()
+    {
+        match reference_ns {
+            Some(reference_ns) => {
+                if let Some(budget) = args.max_corpus_median_reference_ratio {
+                    let ratio = corpus_median_ns / reference_ns.max(f64::MIN_POSITIVE);
+                    if ratio > budget {
+                        failed.push(format!(
+                            "corpus median/reference ratio {ratio:.3} exceeds {budget:.3}"
+                        ));
+                    }
+                }
+                if let Some(budget) = args.max_model_reference_ratio {
+                    for result in &measured {
+                        let ratio =
+                            result.ns_per_stamp_median / reference_ns.max(f64::MIN_POSITIVE);
+                        if ratio > budget {
+                            failed.push(format!(
+                                "{} median/reference ratio {:.3} exceeds {:.3}",
+                                result.model_name, ratio, budget
+                            ));
+                        }
+                    }
+                }
+            }
+            None => failed.push(
+                "a hand-written reference is required by the configured ratio budget".to_string(),
+            ),
+        }
     }
 
     let report = StampReport {
+        schema_version: 1,
         iterations: args.iterations,
         samples: args.samples,
-        measured: measured.iter().map(ModelReport::from).collect(),
+        measured: measured
+            .iter()
+            .map(|result| ModelReport::from_result(result, reference_ns))
+            .collect(),
         reference: reference.as_ref().ok().map(|result| ReferenceReport {
             model_name: result.model_name.to_string(),
             node_count: result.node_count,
@@ -185,6 +267,12 @@ pub fn run(args: &GeneratedStampArgs) -> Result<ExitCode, BenchError> {
             ns_per_stamp_p95: result.ns_per_stamp_p95,
             ns_per_stamp_min: result.ns_per_stamp_min,
         }),
+        corpus_median_ns,
+        corpus_median_reference_ratio,
+        max_median_ns_per_stamp: args.max_median_ns_per_stamp,
+        max_corpus_median_reference_ratio: args.max_corpus_median_reference_ratio,
+        max_model_reference_ratio: args.max_model_reference_ratio,
+        passed: failed.is_empty(),
         failed: failed.clone(),
     };
     if let Some(path) = &args.out {
@@ -197,25 +285,59 @@ pub fn run(args: &GeneratedStampArgs) -> Result<ExitCode, BenchError> {
         })?;
     }
 
-    // A model that could not be measured is a gate failure, not a footnote:
-    // silently dropping it would let a device regress to unbenchmarkable.
-    if !failed.is_empty() {
-        return Ok(ExitCode::FAILURE);
+    for failure in &failed {
+        eprintln!("FAIL {failure}");
     }
-    if let Some(budget) = args.max_median_ns_per_stamp {
-        let over: Vec<&GeneratedStampBenchResult> = measured
-            .iter()
-            .filter(|result| result.ns_per_stamp_median > budget)
-            .collect();
-        if !over.is_empty() {
-            for result in over {
-                eprintln!(
-                    "over budget: {} median {:.1} ns > {:.1} ns",
-                    result.model_name, result.ns_per_stamp_median, budget
-                );
-            }
-            return Ok(ExitCode::FAILURE);
+    Ok(if report.passed {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
+}
+
+fn validate_positive_budget(label: &str, value: Option<f64>) -> Result<(), BenchError> {
+    if value.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+        return Err(BenchError::BenchmarkPolicy {
+            message: format!("{label} must be finite and greater than zero"),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn result(median: f64) -> GeneratedStampBenchResult {
+        GeneratedStampBenchResult {
+            model_name: "fixture",
+            node_count: 2,
+            branch_count: 0,
+            linked_slot_count: 4,
+            ns_per_stamp_median: median,
+            ns_per_stamp_p95: median,
+            ns_per_stamp_min: median,
         }
     }
-    Ok(ExitCode::SUCCESS)
+
+    #[test]
+    fn corpus_median_averages_the_middle_pair() {
+        assert_eq!(median_of(&[result(40.0), result(10.0)]), 25.0);
+        assert_eq!(median_of(&[result(30.0), result(10.0), result(20.0)]), 20.0);
+    }
+
+    #[test]
+    fn ratio_reports_use_the_same_run_reference() {
+        let report = ModelReport::from_result(&result(750.0), Some(500.0));
+        assert_eq!(report.ratio_vs_reference, Some(1.5));
+    }
+
+    #[test]
+    fn performance_budgets_reject_non_positive_or_non_finite_values() {
+        for value in [0.0, -1.0, f64::INFINITY, f64::NAN] {
+            assert!(validate_positive_budget("--fixture", Some(value)).is_err());
+        }
+        validate_positive_budget("--fixture", None).expect("an unset budget is valid");
+        validate_positive_budget("--fixture", Some(1.0)).expect("a positive budget is valid");
+    }
 }

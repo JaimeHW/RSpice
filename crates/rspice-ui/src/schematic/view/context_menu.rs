@@ -25,13 +25,12 @@ use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::Workspace;
 
 use super::SchematicSymbolContext;
-use super::coordinates::screen_to_schematic;
+use super::coordinates::{screen_to_grid, screen_to_schematic};
 use super::interaction::{PointerHit, PointerTarget, pointer_target};
 use super::sheet_visibility::{
     object_is_on_active_sheet, retain_selection_on_active_sheet,
     selection_filtered_to_active_sheet, with_hidden_wire_topology_preserved,
 };
-use super::snap_resolution::{resolve_grid_pointer, target_acquisition_radius};
 use super::viewport::Viewport;
 
 const DESKTOP_WIDTH: f32 = 286.0;
@@ -70,9 +69,6 @@ enum ContextAction {
     Delete,
     Probe,
     OperatingPoint,
-    PageSetup,
-    FitDrawingSheet,
-    FitSchematicContent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,14 +80,11 @@ enum ContextIcon {
     Trash,
     Probe,
     Waveform,
-    File,
-    Fit,
 }
 
 #[derive(Debug, Clone, Copy)]
 struct ContextCommand {
     action: ContextAction,
-    stable_id: &'static str,
     icon: ContextIcon,
     label: &'static str,
     shortcut_command: Option<Command>,
@@ -106,21 +99,18 @@ enum ContextEntry {
 const CONTEXT_ENTRIES: &[ContextEntry] = &[
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Properties,
-        stable_id: "object-properties",
         icon: ContextIcon::Sliders,
         label: "Object properties…",
         shortcut_command: Some(Command::ObjectProperties),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Rotate,
-        stable_id: "rotate-selection",
         icon: ContextIcon::Rotate,
         label: "Rotate 90°",
         shortcut_command: Some(Command::RotateSelection),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Mirror,
-        stable_id: "mirror-selection",
         icon: ContextIcon::Mirror,
         label: "Mirror",
         shortcut_command: Some(Command::MirrorSelectionHorizontal),
@@ -128,21 +118,18 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
     ContextEntry::Separator,
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Copy,
-        stable_id: "copy-selection",
         icon: ContextIcon::Copy,
         label: "Copy selection",
         shortcut_command: Some(Command::Copy),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Duplicate,
-        stable_id: "duplicate-selection",
         icon: ContextIcon::Copy,
         label: "Duplicate and place",
         shortcut_command: Some(Command::Duplicate),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Delete,
-        stable_id: "delete-selection",
         icon: ContextIcon::Trash,
         label: "Delete selection…",
         shortcut_command: Some(Command::Delete),
@@ -150,39 +137,15 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
     ContextEntry::Separator,
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Probe,
-        stable_id: "place-probe",
         icon: ContextIcon::Probe,
         label: "Add voltage or current probe…",
         shortcut_command: Some(Command::PlaceProbe),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::OperatingPoint,
-        stable_id: "open-operating-point",
         icon: ContextIcon::Waveform,
         label: "Open operating point",
         shortcut_command: Some(Command::ResultViewer(ResultViewer::Op)),
-    }),
-    ContextEntry::Separator,
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::PageSetup,
-        stable_id: "page-setup",
-        icon: ContextIcon::File,
-        label: "Page setup\u{2026}",
-        shortcut_command: Some(Command::PageSetup),
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::FitDrawingSheet,
-        stable_id: "canvas-fit-sheet",
-        icon: ContextIcon::Fit,
-        label: "Fit drawing sheet",
-        shortcut_command: Some(Command::ZoomFit),
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::FitSchematicContent,
-        stable_id: "canvas-fit-content",
-        icon: ContextIcon::Fit,
-        label: "Fit schematic content",
-        shortcut_command: Some(Command::FitSchematicContent),
     }),
 ];
 
@@ -340,9 +303,9 @@ fn capture_pointer_target(
     symbol_context: &SchematicSymbolContext,
 ) -> Option<egui::Pos2> {
     let pos = response.interact_pointer_pos()?;
-    let grid_pos = resolve_grid_pointer(state, viewport, pos).snapped_position;
+    let grid_pos = screen_to_grid(viewport, state.schematic.grid_size, pos);
     let hit_pos = screen_to_schematic(viewport, pos);
-    let hit_radius = target_acquisition_radius(viewport);
+    let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
     let target = select_pointer_target(
         state,
         PointerHit::new(grid_pos, hit_pos),
@@ -396,12 +359,6 @@ fn select_pointer_target(
                     .schematic
                     .selection
                     .select_only_documentation_shape(id);
-            }
-            ContextTarget::Canvas
-        }
-        PointerTarget::Probe(id) => {
-            if !state.schematic.selection.has_probe(id) {
-                state.schematic.selection.select_only_probe(id);
             }
             ContextTarget::Canvas
         }
@@ -474,11 +431,6 @@ fn keyboard_target(
     viewport: &Viewport,
     fallback_screen_pos: egui::Pos2,
 ) -> (ContextTarget, Point) {
-    if let Some(id) = state.schematic.selection.single_probe()
-        && let Some(probe) = state.schematic.probes.iter().find(|item| item.id == id)
-    {
-        return (ContextTarget::Canvas, probe.position);
-    }
     if let Some(id) = state.schematic.selection.single_bus_tap()
         && let Some(tap) = state.schematic.bus_taps.iter().find(|item| item.id == id)
     {
@@ -519,7 +471,7 @@ fn keyboard_target(
     }
     (
         ContextTarget::Canvas,
-        resolve_grid_pointer(state, viewport, fallback_screen_pos).snapped_position,
+        screen_to_grid(viewport, state.schematic.grid_size, fallback_screen_pos),
     )
 }
 
@@ -538,7 +490,7 @@ fn render_context_contents(
     let summary = selection_summary(state, target);
     menu_header(ui, &summary);
 
-    let mut rows = Vec::with_capacity(CONTEXT_ENTRIES.len());
+    let mut rows = Vec::with_capacity(8);
     let mut keyboard_or_pointer_action = None;
     for entry in CONTEXT_ENTRIES {
         match *entry {
@@ -556,7 +508,7 @@ fn render_context_contents(
                             )
                         });
                 let response = ui
-                    .push_id(("schematic-context-command", command.stable_id), |ui| {
+                    .push_id(("schematic-context-command", command.label), |ui| {
                         menu_item(ui, command, &shortcut, enabled, reason, row_height)
                     })
                     .inner;
@@ -598,8 +550,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
         + selection.bus_taps.len()
         + selection.net_labels.len()
         + selection.design_notes.len()
-        + selection.documentation_shapes.len()
-        + selection.probes.len();
+        + selection.documentation_shapes.len();
     let path = format!("/{}", state.workspace.active_view.display_path());
     if count > 1 {
         return format!("{count} selected objects · {path}");
@@ -655,11 +606,6 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
             "{} \u{b7} drawing / documentation \u{b7} {path}",
             shape.kind().label()
         );
-    }
-    if let Some(id) = selection.single_probe()
-        && let Some(probe) = state.schematic.probes.iter().find(|probe| probe.id == id)
-    {
-        return format!("probe \u{b7} {} \u{b7} {path}", probe.reference);
     }
     let target = selection
         .single_component()
@@ -966,11 +912,6 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         .documentation_shapes
         .iter()
         .any(|shape| selection.has_documentation_shape(shape.id));
-    let has_live_probe = state
-        .schematic
-        .probes
-        .iter()
-        .any(|probe| selection.has_probe(probe.id));
     let has_copyable_object = has_live_component
         || has_live_wire
         || has_live_junction
@@ -978,8 +919,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         || has_live_bus_tap
         || has_live_net_label
         || has_live_design_note
-        || has_live_documentation_shape
-        || has_live_probe;
+        || has_live_documentation_shape;
     let all_whole_object_ids_are_live = selection.components.iter().all(|id| {
         state
             .schematic
@@ -1018,11 +958,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
                 .documentation_shapes
                 .iter()
                 .any(|shape| shape.id == *id)
-        })
-        && selection
-            .probes
-            .iter()
-            .all(|id| state.schematic.probes.iter().any(|probe| probe.id == *id));
+        });
     let all_junctions_are_live = selection.junctions.iter().all(|selected| {
         state
             .schematic
@@ -1030,23 +966,6 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             .iter()
             .any(|junction| junction.pos == selected.pos)
     });
-    let has_live_wire_sub_object = state.schematic.wires.iter().any(|wire| {
-        selection.wire_segments.iter().any(|selected| {
-            selected.wire_id == wire.id && selected.segment_index < wire.segment_count()
-        }) || selection.wire_vertices.iter().any(|selected| {
-            selected.wire_id == wire.id && selected.vertex_index < wire.vertex_count()
-        })
-    });
-    let all_wire_sub_objects_are_live =
-        selection.wire_segments.iter().all(|selected| {
-            state.schematic.wires.iter().any(|wire| {
-                wire.id == selected.wire_id && selected.segment_index < wire.segment_count()
-            })
-        }) && selection.wire_vertices.iter().all(|selected| {
-            state.schematic.wires.iter().any(|wire| {
-                wire.id == selected.wire_id && selected.vertex_index < wire.vertex_count()
-            })
-        });
     let has_wire_sub_object =
         !selection.wire_segments.is_empty() || !selection.wire_vertices.is_empty();
     let copyable_objects_only = has_copyable_object
@@ -1061,22 +980,20 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         || has_live_bus_tap
         || has_live_net_label
         || has_live_design_note
-        || has_live_documentation_shape
-        || has_live_probe)
+        || has_live_documentation_shape)
         && all_whole_object_ids_are_live
         && all_junctions_are_live
         && !has_wire_sub_object;
-    let deletable_objects_only =
-        (has_copyable_object || has_live_junction || has_live_wire_sub_object)
-            && all_whole_object_ids_are_live
-            && all_junctions_are_live
-            && all_wire_sub_objects_are_live;
+    let deletable_objects_only = (has_copyable_object || has_live_junction)
+        && all_whole_object_ids_are_live
+        && all_junctions_are_live
+        && !has_wire_sub_object;
     let has_component = has_live_component;
-    let writable = !state.schematic_edit_read_only();
+    let writable = !state.schematic.read_only && !state.active_view_read_only();
     match action {
         ContextAction::Properties => (
             crate::workbench::app::selected_object_properties_available(state),
-            "Select one inspectable component, bus, bus tap, net label, design note, documentation shape, or probe",
+            "Select one editable component, bus, bus tap, net label, design note, or documentation shape to open its properties",
         ),
         ContextAction::Rotate | ContextAction::Mirror => (
             writable && has_component,
@@ -1084,15 +1001,15 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         ),
         ContextAction::Copy => (
             copyable_objects_only,
-            "Select at least one component, wire, bus, tap, junction, net label, design note, documentation shape, or probe",
+            "Select at least one component, wire, bus, tap, junction, net label, design note, or documentation shape",
         ),
         ContextAction::Duplicate => (
             writable && duplicable_objects_only,
-            "Select at least one editable component, wire, bus, tap, net label, design note, documentation shape, or probe",
+            "Select at least one editable component, wire, bus, tap, net label, design note, or documentation shape",
         ),
         ContextAction::Delete => (
             writable && deletable_objects_only,
-            "Select at least one editable component, wire or wire handle, bus, tap, junction, net label, design note, documentation shape, or probe",
+            "Select at least one editable component, wire, bus, tap, junction, net label, or design note",
         ),
         ContextAction::Probe => (
             writable,
@@ -1102,11 +1019,6 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             operating_point_available(state),
             "Run a DC operating-point analysis with device OP reporting first",
         ),
-        ContextAction::PageSetup => (
-            writable,
-            "The active schematic view is read-only; reopen it in an editable context to change page setup",
-        ),
-        ContextAction::FitDrawingSheet | ContextAction::FitSchematicContent => (true, ""),
     }
 }
 
@@ -1144,17 +1056,6 @@ fn execute_context_action(
         }
         ContextAction::Probe => state.schematic.arm_tool(Tool::Probe),
         ContextAction::OperatingPoint => open_operating_point(state),
-        ContextAction::PageSetup => {
-            crate::workbench::app::open_drawing_sheet_setup_for_state(state);
-        }
-        ContextAction::FitDrawingSheet => {
-            state.schematic.needs_drawing_sheet_fit = true;
-            state.schematic.needs_fit = false;
-        }
-        ContextAction::FitSchematicContent => {
-            state.schematic.needs_fit = true;
-            state.schematic.needs_drawing_sheet_fit = false;
-        }
     }
     ui.close();
 }
@@ -1486,7 +1387,7 @@ fn apply_delete_request(state: &mut AppState, request: DeleteSelectionRequest) {
         ));
         return;
     }
-    if state.schematic_edit_read_only() {
+    if state.schematic.read_only {
         state.push_user_message(ConsoleMessage::warning(
             "The schematic became read-only; nothing was deleted.".to_owned(),
         ));
@@ -1556,8 +1457,6 @@ impl ContextIcon {
             Self::Trash => Icon::Trash.paint(painter, rect, color),
             Self::Probe => WorkbenchIcon::Probe.paint(painter, rect, color),
             Self::Waveform => WorkbenchIcon::Simulate.paint(painter, rect, color),
-            Self::File => WorkbenchIcon::File.paint(painter, rect, color),
-            Self::Fit => WorkbenchIcon::ZoomFit.paint(painter, rect, color),
         }
     }
 }
@@ -1708,64 +1607,26 @@ mod tests {
 
     #[test]
     fn command_catalog_matches_the_mockup_exactly() {
-        let commands: Vec<_> = CONTEXT_ENTRIES
+        let labels: Vec<_> = CONTEXT_ENTRIES
             .iter()
             .filter_map(|entry| match entry {
-                ContextEntry::Command(command) => {
-                    Some((command.stable_id, command.label, command.shortcut_command))
-                }
+                ContextEntry::Command(command) => Some((command.label, command.shortcut_command)),
                 ContextEntry::Separator => None,
             })
             .collect();
         assert_eq!(
-            commands,
+            labels,
             vec![
+                ("Object properties…", Some(Command::ObjectProperties)),
+                ("Rotate 90°", Some(Command::RotateSelection)),
+                ("Mirror", Some(Command::MirrorSelectionHorizontal)),
+                ("Copy selection", Some(Command::Copy)),
+                ("Duplicate and place", Some(Command::Duplicate)),
+                ("Delete selection…", Some(Command::Delete)),
+                ("Add voltage or current probe…", Some(Command::PlaceProbe)),
                 (
-                    "object-properties",
-                    "Object properties…",
-                    Some(Command::ObjectProperties),
-                ),
-                (
-                    "rotate-selection",
-                    "Rotate 90°",
-                    Some(Command::RotateSelection),
-                ),
-                (
-                    "mirror-selection",
-                    "Mirror",
-                    Some(Command::MirrorSelectionHorizontal),
-                ),
-                ("copy-selection", "Copy selection", Some(Command::Copy)),
-                (
-                    "duplicate-selection",
-                    "Duplicate and place",
-                    Some(Command::Duplicate),
-                ),
-                (
-                    "delete-selection",
-                    "Delete selection…",
-                    Some(Command::Delete),
-                ),
-                (
-                    "place-probe",
-                    "Add voltage or current probe…",
-                    Some(Command::PlaceProbe),
-                ),
-                (
-                    "open-operating-point",
                     "Open operating point",
                     Some(Command::ResultViewer(ResultViewer::Op)),
-                ),
-                ("page-setup", "Page setup…", Some(Command::PageSetup)),
-                (
-                    "canvas-fit-sheet",
-                    "Fit drawing sheet",
-                    Some(Command::ZoomFit),
-                ),
-                (
-                    "canvas-fit-content",
-                    "Fit schematic content",
-                    Some(Command::FitSchematicContent),
                 ),
             ]
         );
@@ -1774,7 +1635,7 @@ mod tests {
                 .iter()
                 .filter(|entry| matches!(entry, ContextEntry::Separator))
                 .count(),
-            3
+            2
         );
     }
 
@@ -1803,7 +1664,7 @@ mod tests {
         assert_eq!(desktop.max_height, 520.0);
         assert_eq!(desktop.row_height, 30.0);
         assert_eq!(desktop.radius, 3);
-        assert_eq!(desktop.outer_height(), 406.0);
+        assert_eq!(desktop.outer_height(), 307.0);
 
         let touch =
             SurfaceGeometry::for_viewport(vec2(390.0, 844.0), ContextInvocation::TouchSheet);
@@ -1811,7 +1672,7 @@ mod tests {
         assert_eq!(touch.max_height, 560.0);
         assert_eq!(touch.row_height, 44.0);
         assert_eq!(touch.radius, 7);
-        assert_eq!(touch.outer_height(), 560.0);
+        assert_eq!(touch.outer_height(), 419.0);
 
         let short_touch =
             SurfaceGeometry::for_viewport(vec2(1024.0, 500.0), ContextInvocation::TouchSheet);
@@ -1831,7 +1692,7 @@ mod tests {
         );
         assert_eq!(
             clamp_desktop_surface_origin(screen, pos2(790.0, 590.0), desktop),
-            pos2(508.0, 188.0)
+            pos2(508.0, 287.0)
         );
         assert_eq!(
             keyboard_surface_anchor(Rect::from_min_size(pos2(100.0, 200.0), vec2(1000.0, 500.0),)),
@@ -1872,8 +1733,8 @@ mod tests {
             });
 
             let mut key_still_available = true;
-            let _ = ctx.run_ui(context_key_input(key), |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let _ = ctx.run_ui(context_key_input(key), |root| {
+                egui::CentralPanel::default().show(root, |ui| {
                     render_context_contents(
                         ui,
                         &mut state,
@@ -1882,7 +1743,7 @@ mod tests {
                         false,
                     );
                     key_still_available =
-                        ui.input_mut(|input| input.consume_key(Modifiers::NONE, key));
+                        ui.ctx().input_mut(|input| input.consume_key(Modifiers::NONE, key));
                 });
             });
 
@@ -1945,30 +1806,10 @@ mod tests {
         assert!(!action_availability(ContextAction::Duplicate, &state).0);
         assert!(!action_availability(ContextAction::Delete, &state).0);
 
-        state
-            .schematic
-            .wires
-            .push(Wire::new(17, vec![Point::new(0, 0), Point::new(20, 0)]));
-        assert!(
-            action_availability(ContextAction::Delete, &state).0,
-            "a live wire handle must reach the governed whole-wire delete review"
-        );
-        assert!(!action_availability(ContextAction::Copy, &state).0);
-        assert!(!action_availability(ContextAction::Duplicate, &state).0);
-
         state.schematic.selection.select_component(999);
         assert!(!action_availability(ContextAction::Copy, &state).0);
         state.schematic.read_only = true;
         assert!(!action_availability(ContextAction::Probe, &state).0);
-        assert_eq!(
-            action_availability(ContextAction::PageSetup, &state),
-            (
-                false,
-                "The active schematic view is read-only; reopen it in an editable context to change page setup",
-            )
-        );
-        assert!(action_availability(ContextAction::FitDrawingSheet, &state).0);
-        assert!(action_availability(ContextAction::FitSchematicContent, &state).0);
 
         let mut junction_state = AppState::default();
         let point = Point::new(4, 4);

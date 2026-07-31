@@ -601,7 +601,7 @@ mod tests {
              V2 1 0 1\n\
              .END\n",
             rspice_core::netlist::NetlistParseOptions {
-                expression_dialect: rspice_core::netlist::ExpressionDialect::Xyce,
+                expression_dialect: rspice_core::config::ExpressionDialect::Xyce,
                 ..Default::default()
             },
         )

@@ -8,7 +8,7 @@
 //! - Input bias current
 //! - Common-mode rejection
 
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 
 //=============================================================================
 // OpAmp Model Parameters
@@ -227,7 +227,6 @@ pub struct OpAmpMacromodel {
     pub node_vee: Option<NodeId>, // negative supply
 
     // State for slew rate limiting
-    vout_prev: Value,
 
     // Calculated values
     dominant_pole: Value, // ω_p in rad/s
@@ -245,7 +244,6 @@ impl OpAmpMacromodel {
             node_inm: inm,
             node_vcc: None,
             node_vee: None,
-            vout_prev: 0.0,
             dominant_pole,
         }
     }
@@ -270,12 +268,6 @@ impl OpAmpMacromodel {
         Self::new(name, OpAmpParams::op27(), out, inp, inm)
     }
 
-    /// Add power supply nodes
-    pub fn with_supplies(mut self, vcc: NodeId, vee: NodeId) -> Self {
-        self.node_vcc = Some(vcc);
-        self.node_vee = Some(vee);
-        self
-    }
 
     /// Calculate ideal output voltage (before limiting)
     pub fn calculate_vout(&self, vp: Value, vm: Value) -> Value {
@@ -286,33 +278,7 @@ impl OpAmpMacromodel {
         vout_ideal.clamp(self.params.vout_min, self.params.vout_max)
     }
 
-    /// Calculate output with slew rate limiting
-    pub fn calculate_vout_slewed(&mut self, vp: Value, vm: Value, dt: Value) -> Value {
-        let vout_ideal = self.calculate_vout(vp, vm);
 
-        // Slew rate limiting
-        if dt > 0.0 {
-            let slew_rate_vs = self.params.slew_rate * 1e6; // Convert to V/s
-            let max_change = slew_rate_vs * dt;
-            let delta = vout_ideal - self.vout_prev;
-
-            let vout_slewed = if delta.abs() > max_change {
-                self.vout_prev + max_change * delta.signum()
-            } else {
-                vout_ideal
-            };
-
-            self.vout_prev = vout_slewed;
-            vout_slewed
-        } else {
-            vout_ideal
-        }
-    }
-
-    /// Get equivalent input conductance
-    pub fn input_conductance(&self) -> Value {
-        1.0 / self.params.rin
-    }
 
     /// Get open-loop output conductance
     pub fn output_conductance(&self) -> Value {
@@ -324,12 +290,6 @@ impl OpAmpMacromodel {
         self.dominant_pole / (2.0 * std::f64::consts::PI)
     }
 
-    /// Get frequency response gain at given frequency
-    pub fn gain_at_frequency(&self, freq_hz: Value) -> Value {
-        let omega = 2.0 * std::f64::consts::PI * freq_hz;
-        let aol = self.params.aol;
-        aol / (1.0 + (omega / self.dominant_pole).powi(2)).sqrt()
-    }
 
     /// Get -3dB bandwidth
     pub fn bandwidth_3db(&self) -> Value {
@@ -341,75 +301,12 @@ impl OpAmpMacromodel {
 // SPICE Subcircuit Generation
 //=============================================================================
 
-/// Generate SPICE subcircuit definition for an opamp
-///
-/// This creates a behavioral macromodel that can be used in netlists.
-/// The subcircuit uses a VCVS (E source) for gain and RC for frequency response.
-pub fn generate_spice_subcircuit(name: &str, params: &OpAmpParams) -> String {
-    let tau = params.aol / (2.0 * std::f64::consts::PI * params.gbw);
-
-    format!(
-        r#"* {} OpAmp Macromodel
-* A_OL = {:.0} V/V ({:.1} dB)
-* GBW = {:.2e} Hz
-* Slew Rate = {:.1} V/us
-.SUBCKT {} INP INM OUT VCC VEE
-* Input stage
-RIN INP INM {:.2e}
-* Input offset
-VOS INP 1 {:.2e}
-* Gain stage (single pole)
-E1 2 0 1 INM {:.0}
-R1 2 3 1k
-C1 3 0 {:.6e}
-* Output buffer
-EOUT 4 0 3 0 1
-ROUT 4 OUT {:.1}
-* Output limiting diodes
-DPOS OUT VCC DCLAMP
-DNEG VEE OUT DCLAMP
-.MODEL DCLAMP D(IS=1e-15 BV=0.7)
-.ENDS {}
-"#,
-        name,
-        params.aol,
-        20.0 * params.aol.log10(),
-        params.gbw,
-        params.slew_rate,
-        name,
-        params.rin,
-        params.vos,
-        params.aol,
-        tau / 1e3, // C = tau / R, with R = 1k
-        params.rout,
-        name
-    )
-}
 
 //=============================================================================
 // Common OpAmp Library
 //=============================================================================
 
-/// Get a named opamp from the library
-pub fn get_opamp_params(name: &str) -> Option<OpAmpParams> {
-    match name.to_uppercase().as_str() {
-        "LM741" | "UA741" | "741" => Some(OpAmpParams::lm741()),
-        "TL072" | "TL071" | "TL074" => Some(OpAmpParams::tl072()),
-        "LM324" => Some(OpAmpParams::lm324()),
-        "LM358" => Some(OpAmpParams::lm358()),
-        "OP27" | "OP37" => Some(OpAmpParams::op27()),
-        "OPA2134" | "OPA134" => Some(OpAmpParams::opa2134()),
-        "NE5532" | "SA5532" => Some(OpAmpParams::ne5532()),
-        _ => None,
-    }
-}
 
-/// List available opamp models
-pub fn list_available_opamps() -> Vec<&'static str> {
-    vec![
-        "LM741", "TL072", "TL074", "LM324", "LM358", "OP27", "OPA2134", "NE5532",
-    ]
-}
 
 //=============================================================================
 // Tests

@@ -104,9 +104,6 @@ pub struct ShootingNewtonSolver {
 
     /// Has converged flag
     converged: bool,
-
-    /// Use direct Jacobian computation if available
-    use_direct_jacobian: bool,
 }
 
 impl ShootingNewtonSolver {
@@ -120,7 +117,6 @@ impl ShootingNewtonSolver {
             fd_step: 1e-8,
             iteration: 0,
             converged: false,
-            use_direct_jacobian: false,
         }
     }
 
@@ -142,11 +138,6 @@ impl ShootingNewtonSolver {
         self
     }
 
-    /// Enable direct Jacobian computation (faster if available)
-    pub fn with_direct_jacobian(mut self, enable: bool) -> Self {
-        self.use_direct_jacobian = enable;
-        self
-    }
 
     /// Check if solver has converged
     pub fn has_converged(&self) -> bool {
@@ -259,41 +250,6 @@ impl ShootingNewtonSolver {
         matrix.solve(&neg_rhs)
     }
 
-    /// Compute Monodromy matrix (state transition matrix over one period)
-    ///
-    /// This is the Jacobian dX(T)/dX(0), which is used for:
-    /// - Stability analysis (Floquet multipliers are eigenvalues)
-    /// - PNoise analysis (periodic transfer functions)
-    pub fn compute_monodromy<F>(
-        &self,
-        state: &ShootingState,
-        integrate_period: F,
-    ) -> Vec<Vec<Value>>
-    where
-        F: Fn(&[Value]) -> Vec<Value>,
-    {
-        let n = state.dimension();
-        let mut monodromy = vec![vec![0.0; n]; n];
-
-        for j in 0..n {
-            let mut x0_plus = state.x0.clone();
-            let mut x0_minus = state.x0.clone();
-
-            let h = self.fd_step * (state.x0[j].abs().max(1.0));
-
-            x0_plus[j] += h;
-            x0_minus[j] -= h;
-
-            let x_t_plus = integrate_period(&x0_plus);
-            let x_t_minus = integrate_period(&x0_minus);
-
-            for i in 0..n {
-                monodromy[i][j] = (x_t_plus[i] - x_t_minus[i]) / (2.0 * h);
-            }
-        }
-
-        monodromy
-    }
 
     /// Extract Floquet multipliers from Monodromy matrix
     ///

@@ -1033,7 +1033,7 @@ impl XyceTestRunner {
 
         let period = plan.frequency.recip();
         let mut startup_config = self.xyce_engine_config(None);
-        startup_config.integration_method = rspice_core::analysis::IntegrationMethod::BackwardEuler;
+        startup_config.integration_method = rspice_core::numerics::integration::IntegrationMethod::BackwardEuler;
         startup_config.transient_initial_timestep = Some(period / 1.0e6);
         let startup = match Engine::new(startup_config).run_tran(&netlist, period, period / 1000.0)
         {
@@ -4006,7 +4006,7 @@ impl XyceTestRunner {
             let backward_euler_engine = self
                 .create_xyce_static_tran_engine_with_integration_method(
                     Some(reference_time_grid.clone()),
-                    rspice_core::analysis::IntegrationMethod::BackwardEuler,
+                    rspice_core::numerics::integration::IntegrationMethod::BackwardEuler,
                     initial_step,
                 );
             match backward_euler_engine.run_tran_with_abort(
@@ -4084,7 +4084,7 @@ impl XyceTestRunner {
         if plan.timeint_conststep && !capacitor_branch_print && !has_solution_dependent_capacitor {
             let gear12_engine = self.create_xyce_static_tran_engine_with_integration_method(
                 Some(reference_time_grid),
-                rspice_core::analysis::IntegrationMethod::Gear2,
+                rspice_core::numerics::integration::IntegrationMethod::Gear2,
                 initial_step,
             );
             match gear12_engine.run_tran_with_abort(&netlist, tran.stop, locked_max_step, &abort) {

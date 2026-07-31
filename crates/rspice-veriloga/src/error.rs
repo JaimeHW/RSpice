@@ -41,6 +41,11 @@ pub enum CompileError {
     #[error("Virtual source error: {0}")]
     VirtualSource(#[from] crate::virtual_source::VirtualSourceError),
 
+    /// A caller-required optimized runtime backend was unavailable or rejected
+    /// the compiled model, and interpreter fallback was explicitly disabled.
+    #[error(transparent)]
+    BackendQualification(#[from] crate::runtime_report::BackendQualificationError),
+
     /// An explicitly configured compiler performance budget was exceeded.
     #[error(transparent)]
     PerformanceBudget(#[from] crate::metrics::PerformanceBudgetExceeded),

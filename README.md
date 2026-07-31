@@ -141,7 +141,8 @@ including `RGEOMOD=1..8` implicit geometry when `NRD`/`NRS` are omitted, as are
 CMC compact-model families with redistributable sources under
 [models/veriloga/cmc/](models/veriloga/cmc/) are not hand-ported. They are
 generated to Rust from the upstream Verilog-A and checked in under
-`crates/rspice-core/src/device/veriloga_generated/` — 42 devices today, among
+`crates/rspice-veriloga-models/models/` — one reusable Cargo artifact per
+model, 42 devices today, among
 them ASM-HEMT, BSIM-BULK, BSIM-CMG, BSIM-IMG, BSIM-SOI, DIODE_CMC, HICUM/L0
 and /L2, HiSIM-HV, HiSIM-SOI, JUNCAP200, L-UTSOI, MEXTRAM 505, MVSG-CMC,
 PSP104, and VBIC 1.3.

@@ -217,68 +217,69 @@ impl ModelsPage {
     pub const Catalog: Self = Self::Models;
 }
 
-/// Corpus shown by the Models page. These are deliberately separate scopes:
-/// loaded project models are executable project state, packs are installed
-/// distribution units, and library parts are addressable definitions that may
-/// not yet be parsed or attached.
+/// Corpus projection selected in the Models & PDKs catalog. This is
+/// presentation state only: attaching a source or adding a project model is a
+/// separate guarded engineering transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum ModelCatalogScope {
+#[serde(rename_all = "kebab-case")]
+pub enum ModelsCatalogScope {
     #[default]
     Project,
-    Packs,
-    Library,
+    InstalledPacks,
+    RSpiceLibrary,
 }
 
-impl ModelCatalogScope {
-    pub const ALL: [Self; 3] = [Self::Project, Self::Packs, Self::Library];
+impl ModelsCatalogScope {
+    pub const ALL: [Self; 3] = [Self::Project, Self::InstalledPacks, Self::RSpiceLibrary];
 
+    #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
             Self::Project => "Project",
-            Self::Packs => "Installed packs",
-            Self::Library => "RSpice library",
+            Self::InstalledPacks => "Installed packs",
+            Self::RSpiceLibrary => "RSpice library",
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum ModelProjectFacet {
+#[serde(rename_all = "kebab-case")]
+pub enum ProjectModelFacet {
     #[default]
     All,
     Bound,
     Pinned,
     Review,
-    Preview,
     Protected,
 }
 
-impl ModelProjectFacet {
-    pub const ALL: [Self; 6] = [
+impl ProjectModelFacet {
+    pub const ALL: [Self; 5] = [
         Self::All,
         Self::Bound,
         Self::Pinned,
         Self::Review,
-        Self::Preview,
         Self::Protected,
     ];
 
+    #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
             Self::All => "All",
-            Self::Bound => "Bound in project",
+            Self::Bound => "Bound",
             Self::Pinned => "Pinned",
             Self::Review => "Review",
-            Self::Preview => "Preview",
             Self::Protected => "Protected",
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ModelPackFacet {
     #[default]
     All,
-    Attention,
+    NeedsAttention,
     Attached,
     Foundry,
     Vendor,
@@ -289,7 +290,7 @@ pub enum ModelPackFacet {
 impl ModelPackFacet {
     pub const ALL: [Self; 7] = [
         Self::All,
-        Self::Attention,
+        Self::NeedsAttention,
         Self::Attached,
         Self::Foundry,
         Self::Vendor,
@@ -297,10 +298,11 @@ impl ModelPackFacet {
         Self::Redistributable,
     ];
 
+    #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
             Self::All => "All",
-            Self::Attention => "Needs attention",
+            Self::NeedsAttention => "Needs attention",
             Self::Attached => "Attached",
             Self::Foundry => "Foundry",
             Self::Vendor => "Vendor",
@@ -311,39 +313,273 @@ impl ModelPackFacet {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum ModelLibraryFacet {
+#[serde(rename_all = "kebab-case")]
+pub enum RSpicePartFacet {
     #[default]
     All,
     Mosfet,
     Bipolar,
     Diode,
-    Jfet,
+    JfetAndHemt,
     Passive,
-    Ic,
+    IcAndMacro,
 }
 
-impl ModelLibraryFacet {
+impl RSpicePartFacet {
     pub const ALL: [Self; 7] = [
         Self::All,
         Self::Mosfet,
         Self::Bipolar,
         Self::Diode,
-        Self::Jfet,
+        Self::JfetAndHemt,
         Self::Passive,
-        Self::Ic,
+        Self::IcAndMacro,
     ];
 
+    #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
             Self::All => "All classes",
             Self::Mosfet => "MOSFET",
             Self::Bipolar => "Bipolar",
             Self::Diode => "Diode",
-            Self::Jfet => "JFET & HEMT",
+            Self::JfetAndHemt => "JFET & HEMT",
             Self::Passive => "Passive",
-            Self::Ic => "IC & macro",
+            Self::IcAndMacro => "IC & macro",
         }
     }
+
+    #[must_use]
+    pub const fn device_filter(self) -> Option<&'static str> {
+        match self {
+            Self::All => None,
+            Self::Mosfet => Some("mosfet"),
+            Self::Bipolar => Some("bipolar"),
+            Self::Diode => Some("diode"),
+            Self::JfetAndHemt => Some("jfet"),
+            Self::Passive => Some("passive"),
+            Self::IcAndMacro => Some("subckt"),
+        }
+    }
+}
+
+/// User-visible lifecycle state for the Models & PDKs manager.
+///
+/// Engineering data remains authoritative in the model-library manager. This
+/// runtime-only state describes the last attempted workflow so diagnostics do
+/// not collapse distinct recovery paths into a generic error toast.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ModelsOperationalState {
+    #[default]
+    Ready,
+    Empty,
+    Loading,
+    InvalidInput,
+    ExecutionError,
+    ReadOnly,
+    Offline,
+    Conflict,
+    Stale,
+    Permission,
+    Entitlement,
+    Cancelled,
+    Rollback,
+    Partial,
+    Corrupted,
+    Recovered,
+}
+
+impl ModelsOperationalState {
+    pub const ALL: [Self; 16] = [
+        Self::Ready,
+        Self::Empty,
+        Self::Loading,
+        Self::InvalidInput,
+        Self::ExecutionError,
+        Self::ReadOnly,
+        Self::Offline,
+        Self::Conflict,
+        Self::Stale,
+        Self::Permission,
+        Self::Entitlement,
+        Self::Cancelled,
+        Self::Rollback,
+        Self::Partial,
+        Self::Corrupted,
+        Self::Recovered,
+    ];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Ready => "Ready",
+            Self::Empty => "Empty",
+            Self::Loading => "Loading",
+            Self::InvalidInput => "Invalid input",
+            Self::ExecutionError => "Execution error",
+            Self::ReadOnly => "Read-only",
+            Self::Offline => "Offline",
+            Self::Conflict => "Conflict",
+            Self::Stale => "Stale",
+            Self::Permission => "Permission",
+            Self::Entitlement => "Entitlement",
+            Self::Cancelled => "Cancelled",
+            Self::Rollback => "Rollback",
+            Self::Partial => "Partial",
+            Self::Corrupted => "Corrupted",
+            Self::Recovered => "Recovered",
+        }
+    }
+
+    #[must_use]
+    pub fn from_failure(message: &str) -> Self {
+        let normalized = message.to_ascii_lowercase();
+        if normalized.contains("invalid")
+            || normalized.contains("must ")
+            || normalized.contains("required")
+        {
+            Self::InvalidInput
+        } else if normalized.contains("read-only") || normalized.contains("not open") {
+            Self::ReadOnly
+        } else if normalized.contains("offline") || normalized.contains("unavailable") {
+            Self::Offline
+        } else if normalized.contains("conflict")
+            || normalized.contains("collision")
+            || normalized.contains("duplicate")
+        {
+            Self::Conflict
+        } else if normalized.contains("stale")
+            || normalized.contains("drift")
+            || normalized.contains("changed on disk")
+        {
+            Self::Stale
+        } else if normalized.contains("permission") || normalized.contains("access denied") {
+            Self::Permission
+        } else if normalized.contains("license")
+            || normalized.contains("entitlement")
+            || normalized.contains("restricted")
+        {
+            Self::Entitlement
+        } else if normalized.contains("cancel") {
+            Self::Cancelled
+        } else if normalized.contains("roll back")
+            || normalized.contains("rolled back")
+            || normalized.contains("rollback")
+            || normalized.contains("left unchanged")
+        {
+            Self::Rollback
+        } else if normalized.contains("partial") || normalized.contains("path errors") {
+            Self::Partial
+        } else if normalized.contains("corrupt") || normalized.contains("malformed") {
+            Self::Corrupted
+        } else if normalized.contains("recover") {
+            Self::Recovered
+        } else {
+            Self::ExecutionError
+        }
+    }
+}
+
+/// Models-manager selections and filters that do not own engineering data.
+/// Stable strings are used only for presentation; every mutation re-resolves
+/// the live library/pack/source identity and fails closed if it changed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelsWorkbenchViewState {
+    #[serde(default)]
+    pub catalog_scope: ModelsCatalogScope,
+    #[serde(default)]
+    pub project_facet: ProjectModelFacet,
+    #[serde(default)]
+    pub pack_facet: ModelPackFacet,
+    #[serde(default)]
+    pub part_facet: RSpicePartFacet,
+    #[serde(default)]
+    pub catalog_query: String,
+    #[serde(default)]
+    pub selected_pack: Option<String>,
+    #[serde(default)]
+    pub selected_part: Option<String>,
+    #[serde(default)]
+    pub selected_symbol: Option<String>,
+    #[serde(default)]
+    pub selected_corner: Option<String>,
+    #[serde(default)]
+    pub selected_bin_family: Option<String>,
+    #[serde(default)]
+    pub include_selected_source: Option<String>,
+    #[serde(default)]
+    pub include_direct_only: bool,
+    #[serde(default)]
+    pub include_definition_query: String,
+    /// Last real workflow result. It is deliberately not durable: restored
+    /// sessions must derive health from retained sources, not trust a toast.
+    #[serde(skip)]
+    pub action_receipt: Option<Result<String, String>>,
+    #[serde(skip)]
+    pub operational_state: ModelsOperationalState,
+    #[serde(skip)]
+    pub dialog: Option<ModelsWorkbenchDialog>,
+}
+
+impl Default for ModelsWorkbenchViewState {
+    fn default() -> Self {
+        Self {
+            catalog_scope: ModelsCatalogScope::default(),
+            project_facet: ProjectModelFacet::default(),
+            pack_facet: ModelPackFacet::default(),
+            part_facet: RSpicePartFacet::default(),
+            catalog_query: String::new(),
+            selected_pack: None,
+            selected_part: None,
+            selected_symbol: None,
+            selected_corner: None,
+            selected_bin_family: None,
+            include_selected_source: None,
+            include_direct_only: false,
+            include_definition_query: String::new(),
+            action_receipt: None,
+            operational_state: ModelsOperationalState::Ready,
+            dialog: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelsWorkbenchDialog {
+    SourcePreview {
+        title: String,
+        subtitle: String,
+        source: String,
+        read_only: bool,
+    },
+    CompareModels {
+        left_library: String,
+        left_model: String,
+        right_library: String,
+        right_model: String,
+    },
+    ConfirmPack {
+        pack_id: String,
+        attach: bool,
+    },
+    ConfirmPart {
+        pack_id: String,
+        part_name: String,
+    },
+    DefinitionConflict {
+        definition: String,
+        providers: Vec<String>,
+    },
+    BindingTrace {
+        model: String,
+        consumers: Vec<String>,
+    },
+    AddCorner {
+        library: String,
+        name: String,
+        temperature_c: String,
+        supply_factor: String,
+    },
 }
 
 /// Destination that can resolve a blocking simulation-preflight finding.
@@ -353,7 +589,6 @@ impl ModelLibraryFacet {
 pub enum PreflightRemediation {
     DesignChecks,
     SimulationPlan,
-    ProjectTechnology,
 }
 
 /// One ordered, actionable finding in a simulation-preflight report.
@@ -528,44 +763,6 @@ pub struct ReportAuthoringState {
     pub page_properties_page: Option<crate::results::report_document::ReportPageId>,
     #[serde(skip)]
     pub page_title_draft: String,
-    #[serde(skip)]
-    pub inline_page_settings_page: Option<crate::results::report_document::ReportPageId>,
-    #[serde(skip)]
-    pub inline_page_title_draft: String,
-    #[serde(skip)]
-    pub selected_report_block: Option<crate::results::report_document::ReportBlockId>,
-    #[serde(skip)]
-    pub add_report_element_open: bool,
-    #[serde(skip)]
-    pub add_report_element_kind: usize,
-    #[serde(skip)]
-    pub add_report_element_title: String,
-    #[serde(skip)]
-    pub add_report_element_primary: String,
-    #[serde(skip)]
-    pub add_report_element_secondary: String,
-    #[serde(skip)]
-    pub add_report_element_tertiary: String,
-    #[serde(skip)]
-    pub add_report_element_style: usize,
-    #[serde(skip)]
-    pub add_report_element_status: usize,
-    #[serde(skip)]
-    pub add_report_element_source_run: usize,
-    #[serde(skip)]
-    pub remove_report_block_open: bool,
-    #[serde(skip)]
-    pub insert_result_document_open: bool,
-    #[serde(skip)]
-    pub insert_result_document_index: usize,
-    #[serde(skip)]
-    pub insert_result_caption: String,
-    #[serde(skip)]
-    pub insert_result_alternative_text: String,
-    #[serde(skip)]
-    pub insert_result_sizing: usize,
-    #[serde(skip)]
-    pub insert_result_frozen: bool,
     #[serde(skip)]
     pub report_template_draft: usize,
     #[serde(skip)]
@@ -1025,6 +1222,58 @@ impl InlineEdit {
             (Some((owner, _)), Some(id)) if *owner == id => None,
             (Some(_), _) => self.end(),
             (None, _) => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ModelsOperationalState;
+
+    #[test]
+    fn models_operational_state_registry_matches_the_mockup_contract() {
+        assert_eq!(
+            ModelsOperationalState::ALL.map(ModelsOperationalState::label),
+            [
+                "Ready",
+                "Empty",
+                "Loading",
+                "Invalid input",
+                "Execution error",
+                "Read-only",
+                "Offline",
+                "Conflict",
+                "Stale",
+                "Permission",
+                "Entitlement",
+                "Cancelled",
+                "Rollback",
+                "Partial",
+                "Corrupted",
+                "Recovered",
+            ]
+        );
+    }
+
+    #[test]
+    fn models_failures_map_to_actionable_operational_states() {
+        use ModelsOperationalState as State;
+
+        for (message, expected) in [
+            ("Section name is required", State::InvalidInput),
+            ("Project is read-only", State::ReadOnly),
+            ("Catalog is offline", State::Offline),
+            ("Duplicate model conflict", State::Conflict),
+            ("Source drift detected", State::Stale),
+            ("Access denied by permission policy", State::Permission),
+            ("Pack license is restricted", State::Entitlement),
+            ("Operation cancelled", State::Cancelled),
+            ("Transaction rolled back", State::Rollback),
+            ("Import completed with partial results", State::Partial),
+            ("Metadata is corrupted", State::Corrupted),
+            ("Parser failed", State::ExecutionError),
+        ] {
+            assert_eq!(State::from_failure(message), expected, "{message}");
         }
     }
 }

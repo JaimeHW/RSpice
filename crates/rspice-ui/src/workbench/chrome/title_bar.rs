@@ -88,7 +88,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             ui.painter().hline(
                 rect.x_range(),
                 separator_top,
-                egui::Stroke::new(1.0, t.color.border),
+                egui::Stroke::new(1.0, t.color.border_strong),
             );
             ui.painter().hline(
                 rect.x_range(),
@@ -1447,6 +1447,7 @@ fn view_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     ] {
         command_item(ui, app, command);
     }
+    command_item(ui, app, Command::VisibilityOptions);
     menu_separator(ui);
     command_item_as(
         ui,
@@ -1715,15 +1716,12 @@ fn paint_title_context(
     let t = Tokens::get(ui.ctx());
     let dirty = app.state.schematic.is_dirty || app.state.workspace.any_dirty();
     let cell = active_title_cell(app);
-    let full = title_context_text(app, compact);
-    let font = theme::sans(
-        tokens::FS_1,
-        if compact {
-            FontWeight::Regular
-        } else {
-            FontWeight::Medium
-        },
-    );
+    let full = if compact {
+        cell.clone()
+    } else {
+        app.state.workspace.project.display_name().to_owned()
+    };
+    let font = theme::sans(tokens::FS_1, FontWeight::Regular);
     let clip = bounds.shrink2(egui::vec2(5.0, 0.0));
     let painter = ui.painter().with_clip_rect(clip);
     let text_origin = if left_aligned {
@@ -1845,7 +1843,7 @@ fn active_title_cell(app: &RSpiceApp) -> String {
         Workspace::Simulate => "Simulation plan".to_owned(),
         Workspace::Results => "Results".to_owned(),
         Workspace::Verify => "Verification".to_owned(),
-        Workspace::Models => "Model & Library Manager".to_owned(),
+        Workspace::Models => "Models & PDKs".to_owned(),
         Workspace::Netlist => "top.sp · generated".to_owned(),
     }
 }

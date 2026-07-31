@@ -37,7 +37,7 @@ pub struct VoltageSources {
 struct TransientSourceContext {
     tstep: Value,
     tstop: Value,
-    dialect: crate::engine::SpiceDialect,
+    dialect: crate::config::SpiceDialect,
     resource_limits: crate::resource::ResourceLimits,
 }
 
@@ -185,7 +185,7 @@ impl VoltageSources {
         self.set_transient_context_with_dialect(
             tstep,
             tstop,
-            crate::engine::SpiceDialect::BestAvailable,
+            crate::config::SpiceDialect::BestAvailable,
         );
     }
 
@@ -194,7 +194,7 @@ impl VoltageSources {
         &mut self,
         tstep: Value,
         tstop: Value,
-        dialect: crate::engine::SpiceDialect,
+        dialect: crate::config::SpiceDialect,
     ) {
         self.set_transient_context_with_dialect_and_limits(
             tstep,
@@ -208,7 +208,7 @@ impl VoltageSources {
         &mut self,
         tstep: Value,
         tstop: Value,
-        dialect: crate::engine::SpiceDialect,
+        dialect: crate::config::SpiceDialect,
         resource_limits: crate::resource::ResourceLimits,
     ) {
         let step = if tstep.is_finite() && tstep > 0.0 {
@@ -462,7 +462,7 @@ impl VoltageSources {
     pub(crate) fn xyce_max_timestep_at(&self, time: Value) -> Option<Value> {
         let context = self
             .transient_context
-            .filter(|ctx| ctx.dialect == crate::engine::SpiceDialect::Xyce)?;
+            .filter(|ctx| ctx.dialect == crate::config::SpiceDialect::Xyce)?;
 
         self.source_specs
             .iter()
@@ -618,7 +618,7 @@ impl VoltageSources {
         time: Value,
         tstep: Value,
         tstop: Value,
-        dialect: crate::engine::SpiceDialect,
+        dialect: crate::config::SpiceDialect,
     ) -> Value {
         let step = if tstep.is_finite() && tstep > 0.0 {
             tstep
@@ -653,10 +653,10 @@ impl VoltageSources {
     }
 
     #[inline]
-    fn pulse_dialect(context: Option<TransientSourceContext>) -> crate::engine::SpiceDialect {
+    fn pulse_dialect(context: Option<TransientSourceContext>) -> crate::config::SpiceDialect {
         context
             .map(|ctx| ctx.dialect)
-            .unwrap_or(crate::engine::SpiceDialect::BestAvailable)
+            .unwrap_or(crate::config::SpiceDialect::BestAvailable)
     }
 
     #[inline]
@@ -737,18 +737,16 @@ impl VoltageSources {
         fall: Value,
         width: Value,
         period: Value,
-        _width_defaults_to_zero: bool,
+        width_defaults_to_zero: bool,
         step_default: Value,
         stop_default: Value,
-        dialect: crate::engine::SpiceDialect,
+        dialect: crate::config::SpiceDialect,
     ) -> (Value, Value, Value, Value, Value) {
         let period_was_omitted = period.is_nan();
         let width_was_omitted = width.is_nan();
-        let xyce_defaults = matches!(dialect, crate::engine::SpiceDialect::Xyce);
-        // ngspice 46's vsrc/isrc load paths resolve an omitted PW to zero and
-        // an omitted or non-positive PER to TR + PW + TF. Xyce instead uses
-        // transient-stop defaults for omitted fields.
-        let stop_time_defaults = xyce_defaults;
+        let xyce_defaults = matches!(dialect, crate::config::SpiceDialect::Xyce);
+        let ngspice_defaults = matches!(dialect, crate::config::SpiceDialect::Ngspice);
+        let stop_time_defaults = xyce_defaults || ngspice_defaults;
 
         let td = if delay.is_finite() {
             delay.max(0.0)
@@ -758,6 +756,8 @@ impl VoltageSources {
         let tr = if rise.is_nan() { step_default } else { rise };
         let tf = if fall.is_nan() { step_default } else { fall };
         let pw = if width.is_nan() && xyce_defaults {
+            stop_default
+        } else if width.is_nan() && ngspice_defaults && !width_defaults_to_zero {
             stop_default
         } else if width.is_nan() {
             0.0
@@ -1064,7 +1064,7 @@ impl VoltageSources {
             } => {
                 if matches!(
                     Self::pulse_dialect(context),
-                    crate::engine::SpiceDialect::Xyce
+                    crate::config::SpiceDialect::Xyce
                 ) {
                     let fc = if carrier_freq.is_finite() {
                         *carrier_freq
@@ -1559,25 +1559,6 @@ impl CurrentSources {
         self.pwl_waveforms.push(None);
     }
 
-    /// Add current source with AC parameters
-    pub fn add_with_ac(
-        &mut self,
-        name: String,
-        node_pos: NodeId,
-        node_neg: NodeId,
-        dc_value: Value,
-        ac_magnitude: Value,
-        ac_phase: Value,
-    ) {
-        self.names.push(name);
-        self.node_pos.push(node_pos);
-        self.node_neg.push(node_neg);
-        self.dc_values.push(dc_value);
-        self.ac_magnitudes.push(ac_magnitude);
-        self.ac_phases.push(ac_phase);
-        self.source_specs.push(None);
-        self.pwl_waveforms.push(None);
-    }
 
     /// Add current source with AC and transient specification.
     pub fn add_with_ac_and_spec(
@@ -1628,7 +1609,7 @@ impl CurrentSources {
         self.set_transient_context_with_dialect(
             tstep,
             tstop,
-            crate::engine::SpiceDialect::BestAvailable,
+            crate::config::SpiceDialect::BestAvailable,
         );
     }
 
@@ -1637,7 +1618,7 @@ impl CurrentSources {
         &mut self,
         tstep: Value,
         tstop: Value,
-        dialect: crate::engine::SpiceDialect,
+        dialect: crate::config::SpiceDialect,
     ) {
         self.set_transient_context_with_dialect_and_limits(
             tstep,
@@ -1651,7 +1632,7 @@ impl CurrentSources {
         &mut self,
         tstep: Value,
         tstop: Value,
-        dialect: crate::engine::SpiceDialect,
+        dialect: crate::config::SpiceDialect,
         resource_limits: crate::resource::ResourceLimits,
     ) {
         let step = if tstep.is_finite() && tstep > 0.0 {
@@ -1677,13 +1658,6 @@ impl CurrentSources {
         self.transient_context = None;
     }
 
-    /// Set AC parameters for existing source
-    pub fn set_ac(&mut self, index: usize, magnitude: Value, phase: Value) {
-        if index < self.ac_magnitudes.len() {
-            self.ac_magnitudes[index] = magnitude;
-            self.ac_phases[index] = phase;
-        }
-    }
 
     pub fn len(&self) -> usize {
         self.names.len()
@@ -1917,7 +1891,7 @@ mod tests {
         Some(TransientSourceContext {
             tstep,
             tstop,
-            dialect: crate::engine::SpiceDialect::BestAvailable,
+            dialect: crate::config::SpiceDialect::BestAvailable,
             resource_limits: crate::resource::ResourceLimits::default(),
         })
     }
@@ -1926,7 +1900,7 @@ mod tests {
         Some(TransientSourceContext {
             tstep,
             tstop,
-            dialect: crate::engine::SpiceDialect::Ngspice,
+            dialect: crate::config::SpiceDialect::Ngspice,
             resource_limits: crate::resource::ResourceLimits::default(),
         })
     }
@@ -1935,7 +1909,7 @@ mod tests {
         Some(TransientSourceContext {
             tstep,
             tstop,
-            dialect: crate::engine::SpiceDialect::Xyce,
+            dialect: crate::config::SpiceDialect::Xyce,
             resource_limits: crate::resource::ResourceLimits::default(),
         })
     }
@@ -2001,7 +1975,7 @@ mod tests {
         sources.set_transient_context_with_dialect(
             1.0e-9,
             100.0e-9,
-            crate::engine::SpiceDialect::Xyce,
+            crate::config::SpiceDialect::Xyce,
         );
 
         assert_close(
@@ -2043,7 +2017,7 @@ mod tests {
         sources.set_transient_context_with_dialect(
             1.0e-9,
             100.0e-9,
-            crate::engine::SpiceDialect::Ngspice,
+            crate::config::SpiceDialect::Ngspice,
         );
         assert_eq!(sources.xyce_max_timestep_at(0.0), None);
 
@@ -2074,7 +2048,7 @@ mod tests {
         sources.set_transient_context_with_dialect(
             1.0e-9,
             100.0e-9,
-            crate::engine::SpiceDialect::Xyce,
+            crate::config::SpiceDialect::Xyce,
         );
 
         assert_close(sources.xyce_max_timestep_at(0.0).expect("sine cap"), 5.0e-9);
@@ -2259,7 +2233,7 @@ mod tests {
     }
 
     #[test]
-    fn ngspice_pulse_omitted_period_defaults_to_waveform_duration() {
+    fn ngspice_pulse_omitted_period_defaults_to_transient_stop_time() {
         let spec = SourceSpec::Pulse {
             v1: 0.0,
             v2: 1.0,
@@ -2279,12 +2253,12 @@ mod tests {
         );
         assert_close(
             VoltageSources::evaluate_source_at_time_with_context(&spec, 100.01208e-3, ctx),
-            0.08,
+            0.0,
         );
     }
 
     #[test]
-    fn ngspice_two_level_pulse_omitted_width_defaults_to_zero() {
+    fn ngspice_two_level_pulse_omitted_width_defaults_to_stop_time() {
         let spec = SourceSpec::Pulse {
             v1: 0.0,
             v2: 1.0,
@@ -2303,7 +2277,7 @@ mod tests {
                 7.0,
                 ngspice_transient_context(0.1, 7.0),
             ),
-            0.0,
+            1.0,
         );
     }
 

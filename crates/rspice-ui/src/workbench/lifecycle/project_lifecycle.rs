@@ -119,6 +119,19 @@ impl Default for ProjectLifecycleState {
 }
 
 impl ProjectLifecycleState {
+    pub(crate) fn operation_in_progress(&self) -> bool {
+        self.transaction.is_some() || {
+            #[cfg(target_arch = "wasm32")]
+            {
+                self.browser_restore_pending || self.browser_promotion_pending
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                false
+            }
+        }
+    }
+
     pub(crate) fn accepted(&self) -> Option<&AcceptedProject> {
         self.accepted.as_ref()
     }
@@ -321,17 +334,7 @@ pub(crate) fn has_unsaved_changes(state: &AppState) -> bool {
 }
 
 pub(crate) fn operation_in_progress(state: &AppState) -> bool {
-    state.project_lifecycle.transaction.is_some() || {
-        #[cfg(target_arch = "wasm32")]
-        {
-            state.project_lifecycle.browser_restore_pending
-                || state.project_lifecycle.browser_promotion_pending
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            false
-        }
-    }
+    state.project_lifecycle.operation_in_progress()
 }
 
 pub(crate) fn active_document(state: &AppState) -> ProjectDocumentId {

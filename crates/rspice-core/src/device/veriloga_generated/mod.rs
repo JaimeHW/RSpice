@@ -14,14 +14,11 @@ pub(crate) mod limiting;
 #[cfg(feature = "veriloga-builtins-base")]
 #[allow(clippy::all)]
 pub mod builtins {
-    include!("registry.rs");
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../rspice-veriloga-models/registry.rs"
+    ));
 }
-
-#[cfg(feature = "veriloga-builtins-base")]
-#[rustfmt::skip]
-#[allow(clippy::all)]
-pub(crate) mod kernel_runtime;
-
 
 pub use rspice_veriloga_runtime::*;
 

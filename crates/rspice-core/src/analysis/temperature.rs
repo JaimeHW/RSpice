@@ -56,13 +56,6 @@ pub fn thermal_voltage(temperature_k: Value) -> Value {
     K_BOLTZMANN * temperature_k / Q_ELECTRON
 }
 
-/// Calculate silicon bandgap as function of temperature (eV)
-/// Eg(T) = Eg(0) - α*T²/(T+β)
-pub fn bandgap_silicon(temperature_k: Value) -> Value {
-    // Eg(0) ≈ 1.17 eV for silicon
-    let eg0 = 1.17;
-    eg0 - EG_ALPHA * temperature_k * temperature_k / (temperature_k + EG_BETA)
-}
 
 //=============================================================================
 // Temperature Context
@@ -200,26 +193,7 @@ impl Default for JunctionTempScaling {
 }
 
 impl JunctionTempScaling {
-    /// Scale saturation current with temperature
-    /// Is(T) = Is(Tnom) * (T/Tnom)^(XTI/N) * exp(Eg/(N*Vt_nom) - Eg/(N*Vt))
-    pub fn scale_is(&self, is_nom: Value, temp: &TemperatureContext) -> Value {
-        let vt_ratio = temp.vt_nom / temp.vt;
-        let t_factor = temp.ratio.powf(self.xti / self.n);
-        let eg_factor = (self.eg / (self.n * temp.vt_nom) * (1.0 - vt_ratio)).exp();
 
-        is_nom * t_factor * eg_factor
-    }
-
-    /// Scale junction capacitance with temperature (via built-in potential)
-    /// VJ(T) = VJ(Tnom) * T/Tnom - 3*Vt*ln(T/Tnom) - Eg(Tnom)*(T/Tnom - 1)
-    pub fn scale_vj(&self, vj_nom: Value, temp: &TemperatureContext) -> Value {
-        let eg_tnom = self.eg;
-        let term1 = vj_nom * temp.ratio;
-        let term2 = 3.0 * temp.vt * temp.ratio.ln();
-        let term3 = eg_tnom * (temp.ratio - 1.0);
-
-        term1 - term2 - term3
-    }
 }
 
 /// Temperature scaling for MOSFETs
@@ -247,16 +221,7 @@ impl Default for MosfetTempScaling {
 }
 
 impl MosfetTempScaling {
-    /// Scale threshold voltage with temperature
-    pub fn scale_vth(&self, vth_nom: Value, temp: &TemperatureContext) -> Value {
-        vth_nom + self.kt1 * temp.delta_t
-    }
 
-    /// Scale mobility with temperature
-    /// μ(T) = μ(Tnom) * (T/Tnom)^UTE
-    pub fn scale_mobility(&self, mu_nom: Value, temp: &TemperatureContext) -> Value {
-        mu_nom * temp.ratio.powf(self.ute)
-    }
 }
 
 //=============================================================================

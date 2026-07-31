@@ -9,7 +9,7 @@
 #![allow(clippy::too_many_arguments)]
 use super::{Engine, SimulationError, SpiceDialect, TransientResult};
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::analysis::transient::{
+use crate::numerics::integration::{
     BreakpointManager, BreakpointStepPolicy, LteEstimator, TimestepController, TrapGearController,
 };
 use crate::device::semiconductor::{
@@ -179,25 +179,20 @@ impl Engine {
         }
         let previous_step = grid[cursor - 1] - grid[cursor - 2];
         let current_step = grid[cursor] - grid[cursor - 1];
-        let next_step = grid[cursor + 1] - grid[cursor];
         let valid_steps = previous_step.is_finite()
             && previous_step > 0.0
             && current_step.is_finite()
-            && current_step > 0.0
-            && next_step.is_finite()
-            && next_step > 0.0;
+            && current_step > 0.0;
         if !valid_steps {
             return false;
         }
 
-        // OneStep promotes an accepted order-one step only when its proposed
-        // growth exceeds 1.05.  If the next accepted interval then contracts
-        // sharply, the producing run necessarily rejected the promoted trial
-        // and retried the current target at order one.  The rejected trial is
-        // absent from a locked oracle grid, so replay that order reset on the
-        // preceding target as well as on the visible contraction itself.
+        // A contraction is the observable trace of the accepted retry that
+        // restarts OneStep at order one.  Keep the preceding interval at its
+        // native order: Xyce applies the restart to the first step *after*
+        // the contraction, not retroactively to the larger step that landed
+        // at the contraction point.
         current_step < 0.75 * previous_step
-            || (current_step > 1.05 * previous_step && next_step < 0.75 * current_step)
     }
 
     #[inline]
@@ -3462,7 +3457,16 @@ impl Engine {
                 // shunts, converge, and track the solution back to the
                 // genuine system (transient/rescue.rs). A success flows
                 // into the normal LTE acceptance machinery below.
-                if retry_count >= TRANSIENT_GMIN_RESCUE_MIN_RETRIES
+                // GMIN continuation deforms only the nodal equations.  A
+                // pure Xyce LEVEL=1 Core deck has no semiconductor junction
+                // to regularize, so applying the deformation would accept a
+                // different magnetic branch and leave a persistent endpoint
+                // error.  LEVEL=2 Core retains the general rescue path because
+                // its constitutive trial can still require globalization.
+                let xyce_level1_core_only = self.config.spice_dialect == SpiceDialect::Xyce
+                    && circuit.has_only_xyce_core_inductors()
+                    && circuit.xyce_core_level2_mag_updates().is_empty();
+                if !xyce_level1_core_only
                     && circuit.has_nonlinear_devices()
                     && let Some(rescued) = self.rescue_transient_step_with_gmin_continuation(
                         &mut circuit,

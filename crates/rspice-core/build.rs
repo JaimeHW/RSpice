@@ -4,7 +4,7 @@ use std::env;
 use std::fs;
 use std::path::{Component, Path};
 
-const MANIFEST_SCHEMA_VERSION: u32 = 3;
+const MANIFEST_SCHEMA_VERSION: u32 = 5;
 const MANIFEST_FILE_NAME: &str = "manifest.txt";
 const REGENERATE_COMMAND: &str = "cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- regenerate-builtins";
 
@@ -25,12 +25,12 @@ struct GeneratedFile {
 }
 
 fn main() {
-    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_VERILOGA_BUILTINS");
-    if env::var_os("CARGO_FEATURE_VERILOGA_BUILTINS").is_none() {
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_VERILOGA_BUILTINS_BASE");
+    if env::var_os("CARGO_FEATURE_VERILOGA_BUILTINS_BASE").is_none() {
         return;
     }
 
-    let generated_root = Path::new("src").join("device").join("veriloga_generated");
+    let generated_root = Path::new("..").join("rspice-veriloga-models");
     verify_generated_bundle(&generated_root).unwrap_or_else(|error| {
         panic!(
             "generated Verilog-A built-in verification failed: {error}. Run `{REGENERATE_COMMAND}`"

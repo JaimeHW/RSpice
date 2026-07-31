@@ -12,7 +12,7 @@ use crate::workbench::menu_bar::{FileMenuAction, dispatch_file_menu_action};
 use std::cell::RefCell;
 
 use super::state::{
-    ModelsPage, ProjectLauncherFilter, ProjectPage, VerificationPage, WorkbenchState, Workspace,
+    ProjectLauncherFilter, VerificationPage, WorkbenchState, Workspace,
 };
 
 mod registry;
@@ -22,6 +22,28 @@ const COMMAND_ZOOM_FACTOR: f64 = 1.2;
 
 fn stop_simulation_enabled(is_running: bool) -> bool {
     is_running && crate::simulation::execution::execution_target_supports_cancellation()
+}
+
+fn model_library_rescan_diagnostic(app: &RSpiceApp) -> (String, bool) {
+    let discovered_files = app.state.pdk_config.discovered_files.len();
+    let scan_errors = &app.state.pdk_config.scan_errors;
+    let pack_definitions = app.state.model_library_manager.pack_definition_count();
+    let summary = format!(
+        "Model library rescan found {discovered_files} configured model file(s) and \
+         {pack_definitions} shipped pack part(s)"
+    );
+    if scan_errors.is_empty() {
+        (summary, false)
+    } else {
+        (
+            format!(
+                "{summary}; {} configured path error(s): {}",
+                scan_errors.len(),
+                scan_errors.join("; ")
+            ),
+            true,
+        )
+    }
 }
 
 fn selection_layout_command(
@@ -134,6 +156,61 @@ fn selected_project_model_for_editor(app: &RSpiceApp) -> Result<(&str, &str), &'
     .map_err(
         |_| "the selected project model retained source or typed definition is inconsistent",
     )?;
+    Ok((library_name, model_name))
+}
+
+/// Resolve one selected external or built-in model that can become a new
+/// project-owned revision. Mutation authority and editor lifecycle checks live
+/// here so every command surface exposes the same fail-closed availability.
+fn selected_model_for_project_copy(app: &RSpiceApp) -> Result<(&str, &str), &'static str> {
+    if !app.state.project_lifecycle.project_open {
+        return Err("open a project before creating an editable model copy");
+    }
+    let library_name = app
+        .state
+        .model_library_manager
+        .selected_library
+        .as_deref()
+        .ok_or("select one external or built-in model in Model & library catalog")?;
+    let model_name = app
+        .state
+        .workbench
+        .selected_model
+        .as_deref()
+        .ok_or("select one external or built-in model in Model & library catalog")?;
+    let library = app
+        .state
+        .model_library_manager
+        .get_library(library_name)
+        .ok_or("the selected model library no longer exists")?;
+    if !library.models.contains_key(model_name) {
+        return Err("the selected model no longer exists in its library");
+    }
+    if library.source_authority.is_project_owned() {
+        return Err("the selected model is already an editable project copy");
+    }
+    if app.state.workbench.safe_mode.project_read_only() {
+        return Err("the project is open read-only");
+    }
+    if app
+        .state
+        .workbench
+        .model_editor
+        .qualification_execution
+        .is_some()
+    {
+        return Err("a model qualification run is active");
+    }
+    if app
+        .state
+        .workbench
+        .model_editor
+        .draft
+        .as_ref()
+        .is_some_and(|draft| draft.is_dirty())
+    {
+        return Err("save or discard the open model candidate first");
+    }
     Ok((library_name, model_name))
 }
 
@@ -634,6 +711,7 @@ impl Command {
                     state,
                 )
             }
+            Self::ModelCreateProjectCopy => selected_model_for_project_copy(app).is_ok(),
             Self::ModelEditor | Self::ModelCorrelation => {
                 selected_project_model_for_editor(app).is_ok()
             }
@@ -749,6 +827,26 @@ impl Command {
                 !state.log_buffer.is_empty() || !state.script_console.history.is_empty()
             }
             _ => true,
+        }
+    }
+
+    pub(crate) fn execute_with_feedback(self, app: &mut RSpiceApp, ctx: &egui::Context) {
+        let available = self.availability(app) == CommandAvailability::Available;
+        self.execute(app);
+        if available && self == Self::RescanModelLibraries {
+            let (message, has_errors) = model_library_rescan_diagnostic(app);
+            if has_errors {
+                app.state.ui.toasts.warn_with_title(
+                    ctx,
+                    "Model library rescan completed with warnings",
+                    message,
+                );
+            } else {
+                app.state
+                    .ui
+                    .toasts
+                    .success(ctx, "Model libraries rescanned", message);
+            }
         }
     }
 
@@ -1563,6 +1661,33 @@ impl Command {
                 app.state.workbench.models_page = page;
             }
             Self::ModelBrowser => app.state.model_browser_state.open = true,
+            Self::ModelCreateProjectCopy => match selected_model_for_project_copy(app) {
+                Ok((library_name, model_name)) => {
+                    let library_name = library_name.to_owned();
+                    let model_name = model_name.to_owned();
+                    match crate::workbench::documents::model_editor::create_editable_project_copy_and_open(
+                        app,
+                        &library_name,
+                        &model_name,
+                    ) {
+                        Ok((project_library, project_model)) => app.state.push_user_message(
+                            crate::diagnostics::ConsoleMessage::info(format!(
+                                "Created editable project model '{project_library}/{project_model}'."
+                            )),
+                        ),
+                        Err(error) => app.state.push_user_message(
+                            crate::diagnostics::ConsoleMessage::warning(format!(
+                                "Cannot create editable project model: {error}"
+                            )),
+                        ),
+                    }
+                }
+                Err(reason) => app.state.push_user_message(
+                    crate::diagnostics::ConsoleMessage::warning(format!(
+                        "Cannot create editable project model: {reason}."
+                    )),
+                ),
+            },
             Self::ModelEditor => match selected_project_model_for_editor(app) {
                 Ok((library_name, model_name)) => {
                     let library_name = library_name.to_owned();
@@ -1633,6 +1758,19 @@ impl Command {
                 .state
                 .pdk_settings_dialog
                 .open(app.state.pdk_config.clone()),
+            Self::RescanModelLibraries => {
+                app.state.pdk_config.discover_model_files();
+                app.state.model_library_manager.discover_spice_packs();
+                let (message, has_errors) = model_library_rescan_diagnostic(app);
+                if has_errors {
+                    app.state.push_user_message(
+                        crate::diagnostics::ConsoleMessage::warning(message),
+                    );
+                } else {
+                    app.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::info(message));
+                }
+            }
             Self::CompileVerilogA => {
                 activate_workspace(app, Workspace::Netlist);
                 app.state.ui.code_workspace.page =

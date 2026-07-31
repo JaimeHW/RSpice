@@ -795,6 +795,9 @@ pub struct PackModelHit {
     pub line: usize,
     /// Whether RSpice has established the right to redistribute the pack.
     pub redistributable: bool,
+    /// The individual source file is excluded from redistribution even when
+    /// other files in the same pack are shippable.
+    pub restricted: bool,
 }
 
 /// One bounded page from the complete addressable shipped-parts catalog.
@@ -1057,7 +1060,7 @@ impl ModelLibraryManager {
     pub fn pack_definition_count(&self) -> usize {
         self.spice_packs
             .as_ref()
-            .map_or(0, |index| index.model_count())
+            .map_or(0, |index| index.part_count())
     }
 
     /// Search the shipped packs for definitions whose name contains `query`.
@@ -1643,6 +1646,170 @@ impl ModelLibraryManager {
             digest,
         };
         Ok(())
+            .map(|entry| {
+                let pack = index.pack(&entry.pack);
+                PackModelHit {
+                    name: entry.name.clone(),
+                    kind: entry.kind.clone(),
+                    device: entry.device.clone(),
+                    pack_name: pack.map_or_else(|| entry.pack.clone(), |p| p.name.clone()),
+                    redistributable: pack.is_some_and(|p| p.redistributable),
+                    source: entry.source_path(index),
+                    line: entry.line,
+                    pack: entry.pack,
+                    restricted: entry.restricted,
+                }
+            })
+            .collect()
+    }
+
+    /// Browse a bounded first page or a canonical device-class projection of
+    /// the shipped corpus without loading every catalog row into memory.
+    pub fn browse_pack_models(
+        &self,
+        query: &str,
+        device_filter: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<PackModelHit>, String> {
+        let Some(index) = self.spice_packs.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let query = query.trim();
+        let entries = if !query.is_empty() {
+            index.search_parts(query, limit)
+        } else if let Some(device) = device_filter {
+            index.parts_by_device(device, limit)
+        } else {
+            index.browse_parts(limit)
+        }
+        .map_err(|error| format!("Shipped model catalog could not be read: {error}"))?;
+
+        Ok(entries
+            .into_iter()
+            .filter(|entry| {
+                device_filter.is_none_or(|device| {
+                    let entry_device = entry.device.to_ascii_lowercase();
+                    match device {
+                        "mosfet" => entry_device.contains("mos"),
+                        "bipolar" => {
+                            entry_device.contains("bjt") || entry_device.contains("bipolar")
+                        }
+                        "jfet" => entry_device.contains("jfet") || entry_device.contains("hemt"),
+                        "passive" => ["resistor", "capacitor", "inductor", "passive"]
+                            .iter()
+                            .any(|kind| entry_device.contains(kind)),
+                        "subckt" => entry.kind.eq_ignore_ascii_case("subckt"),
+                        other => entry_device.contains(other),
+                    }
+                })
+            })
+            .map(|entry| {
+                let pack = index.pack(&entry.pack);
+                PackModelHit {
+                    name: entry.name.clone(),
+                    kind: entry.kind.clone(),
+                    device: entry.device.clone(),
+                    pack_name: pack.map_or_else(|| entry.pack.clone(), |p| p.name.clone()),
+                    redistributable: pack.is_some_and(|pack| pack.redistributable),
+                    source: entry.source_path(index),
+                    line: entry.line,
+                    pack: entry.pack,
+                    restricted: entry.restricted,
+                }
+            })
+            .collect())
+    }
+
+    /// Load a redistributable pack's declared entry as one authenticated model
+    /// library. The caller publishes the resulting manager candidate at the
+    /// project transaction boundary.
+    pub fn attach_spice_pack(&mut self, pack_id: &str) -> Result<String, String> {
+        let index = self.spice_packs.as_ref().ok_or_else(|| {
+            "The shipped model corpus is not installed on this machine.".to_owned()
+        })?;
+        let pack = index
+            .pack(pack_id)
+            .ok_or_else(|| format!("Model pack '{pack_id}' is no longer installed."))?;
+        if !pack.redistributable {
+            return Err(format!(
+                "Model pack '{}' cannot be embedded in a project because its redistribution grant is not established.",
+                pack.name
+            ));
+        }
+        let entry = pack.entry_path(index.root()).ok_or_else(|| {
+            format!(
+                "Model pack '{}' has no declared entry file to attach.",
+                pack.name
+            )
+        })?;
+        self.load_catalog_source_without_collision(&entry)
+    }
+
+    /// Load the exact shipped source containing an addressable part. Restricted
+    /// files fail closed instead of being silently copied into project data.
+    pub fn add_spice_part(&mut self, pack_id: &str, part_name: &str) -> Result<String, String> {
+        let index = self.spice_packs.as_ref().ok_or_else(|| {
+            "The shipped model corpus is not installed on this machine.".to_owned()
+        })?;
+        let pack = index
+            .pack(pack_id)
+            .ok_or_else(|| format!("Model pack '{pack_id}' is no longer installed."))?;
+        if !pack.redistributable {
+            return Err(format!(
+                "Part '{part_name}' cannot be copied from '{}' because its redistribution grant is not established.",
+                pack.name
+            ));
+        }
+        let matches = index
+            .find_part(part_name)
+            .map_err(|error| format!("Part '{part_name}' could not be resolved: {error}"))?;
+        let entry = matches
+            .into_iter()
+            .find(|entry| entry.pack == pack_id)
+            .ok_or_else(|| {
+                format!(
+                    "Part '{part_name}' is no longer present in pack '{}'.",
+                    pack.name
+                )
+            })?;
+        if entry.restricted {
+            return Err(format!(
+                "Part '{part_name}' is in a source file that is not licensed for project embedding."
+            ));
+        }
+        let source = entry
+            .source_path(index)
+            .ok_or_else(|| format!("Part '{part_name}' has no installed source file."))?;
+        self.load_catalog_source_without_collision(&source)
+    }
+
+    fn load_catalog_source_without_collision(&mut self, path: &Path) -> Result<String, String> {
+        let canonical = std::fs::canonicalize(path).map_err(|error| {
+            format!(
+                "Failed to resolve model source '{}': {error}",
+                path.display()
+            )
+        })?;
+        let library_name = canonical
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                format!(
+                    "Model source '{}' has no valid file name.",
+                    canonical.display()
+                )
+            })?
+            .to_owned();
+        if let Some(existing) = self.get_library(&library_name) {
+            if existing.root_path.as_deref() == Some(canonical.as_path()) {
+                return Ok(library_name);
+            }
+            return Err(format!(
+                "Library name '{library_name}' is already owned by another source; rename or detach it before adding '{}'.",
+                canonical.display()
+            ));
+        }
+        self.load_library_file(&canonical, None)
     }
 
     /// Get libraries sorted by name
@@ -1650,6 +1817,48 @@ impl ModelLibraryManager {
         let mut libs: Vec<_> = self.libraries.values().collect();
         libs.sort_by(|a, b| a.name.cmp(&b.name));
         libs
+    }
+
+    /// Stable owned snapshot used by guarded multi-library project
+    /// transactions. Presentation filters and the shipped-pack index remain
+    /// manager state and are intentionally excluded.
+    pub(crate) fn library_snapshot(&self) -> Vec<ModelLibrary> {
+        self.libraries_sorted().into_iter().cloned().collect()
+    }
+
+    /// Replace the complete loaded-library set while preserving presentation
+    /// state owned by this manager.
+    pub(crate) fn replace_library_snapshot(
+        &mut self,
+        libraries: Vec<ModelLibrary>,
+    ) -> Result<(), String> {
+        let expanded = self
+            .libraries
+            .iter()
+            .map(|(name, library)| (name.clone(), library.expanded))
+            .collect::<HashMap<_, _>>();
+        let mut replacement = HashMap::with_capacity(libraries.len());
+        for mut library in libraries {
+            if replacement.contains_key(&library.name) {
+                return Err(format!(
+                    "Model-library snapshot repeats library '{}'",
+                    library.name
+                ));
+            }
+            if let Some(retained) = expanded.get(&library.name) {
+                library.expanded = *retained;
+            }
+            replacement.insert(library.name.clone(), library);
+        }
+        self.libraries = replacement;
+        if self
+            .selected_library
+            .as_ref()
+            .is_some_and(|name| !self.libraries.contains_key(name))
+        {
+            self.selected_library = None;
+        }
+        Ok(())
     }
 
     /// Total library count
@@ -2734,7 +2943,8 @@ impl ModelLibraryManager {
             .corner_model_bindings(processes)
     }
 
-    /// Load models from all discovered files in a PdkConfig
+    /// Atomically replace the exact external libraries governed by a PDK
+    /// configuration.
     ///
     /// Reconcile every supported model source in the authoritative PDK scan.
     ///
@@ -2744,8 +2954,15 @@ impl ModelLibraryManager {
     /// by this host configuration and remain untouched. The replacement is
     /// published only when every source parses successfully.
     pub fn load_from_pdk_config(
+    /// Discovery always runs against `next`; cached dialog rows never
+    /// authorize application. Every enabled file is canonicalized and parsed
+    /// into an isolated manager candidate. Scan, include, parse, or
+    /// name-collision failure leaves both this manager and the retained PDK
+    /// ownership provenance unchanged.
+    pub fn replace_from_pdk_config(
         &mut self,
-        pdk_config: &crate::state::pdk_config::PdkConfig,
+        previous: Option<&crate::state::pdk_config::PdkConfig>,
+        next: &mut crate::state::pdk_config::PdkConfig,
     ) -> Result<usize, Vec<String>> {
         let mut candidate = self.clone();
         let previously_managed = std::mem::take(&mut candidate.pdk_config_libraries);
@@ -2780,6 +2997,75 @@ impl ModelLibraryManager {
                     loaded += 1;
                 }
                 Err(error) => errors.push(format!("{}: {error}", source.display())),
+        next.discover_model_files();
+        if !next.scan_errors.is_empty() {
+            return Err(next.scan_errors.clone());
+        }
+
+        let mut candidate = self.clone();
+        let mut previously_managed = previous
+            .into_iter()
+            .flat_map(|config| config.managed_model_sources.iter())
+            .map(|path| portable_path_key(path))
+            .collect::<BTreeSet<_>>();
+        if previously_managed.is_empty() {
+            previously_managed.extend(
+                previous
+                    .into_iter()
+                    .flat_map(|config| config.discovered_files.iter())
+                    .map(|file| portable_path_key(&file.path)),
+            );
+        }
+        let removed = candidate
+            .libraries
+            .iter()
+            .filter_map(|(name, library)| {
+                (matches!(library.source_authority, ModelSourceAuthority::External)
+                    && library
+                        .root_path
+                        .as_ref()
+                        .is_some_and(|path| previously_managed.contains(&portable_path_key(path))))
+                .then(|| name.clone())
+            })
+            .collect::<Vec<_>>();
+        for name in removed {
+            candidate.libraries.remove(&name);
+        }
+        if candidate
+            .selected_library
+            .as_ref()
+            .is_some_and(|name| !candidate.libraries.contains_key(name))
+        {
+            candidate.selected_library = None;
+        }
+
+        let mut loaded = 0;
+        let mut errors = Vec::new();
+        let mut admitted = Vec::new();
+        let mut seen = BTreeSet::new();
+        for file in &next.discovered_files {
+            if !crate::state::pdk_config::MODEL_FILE_EXTENSIONS.contains(&file.extension.as_str()) {
+                continue;
+            }
+            let canonical = match std::fs::canonicalize(&file.path) {
+                Ok(path) => path,
+                Err(error) => {
+                    errors.push(format!(
+                        "{}: failed to resolve discovered model source: {error}",
+                        file.path.display()
+                    ));
+                    continue;
+                }
+            };
+            if !seen.insert(portable_path_key(&canonical)) {
+                continue;
+            }
+            match candidate.load_library_file(&canonical, None) {
+                Ok(_) => {
+                    admitted.push(canonical);
+                    loaded += 1;
+                }
+                Err(error) => errors.push(format!("{}: {error}", file.path.display())),
             }
         }
 
@@ -2792,6 +3078,7 @@ impl ModelLibraryManager {
                 candidate.selected_library = None;
             }
             candidate.prune_inactive_definition_resolutions();
+            next.managed_model_sources = admitted;
             *self = candidate;
             Ok(loaded)
         } else {
@@ -3335,13 +3622,20 @@ fn reconcile_project_model_metadata(
     definition: &ProjectModelDefinition,
     previous: Option<&ModelDefinitionMetadata>,
 ) -> Result<ModelDefinitionMetadata, String> {
-    let mut metadata = previous.cloned().unwrap_or_default();
-    if !metadata.sections.is_empty() {
+    if previous.is_some_and(|metadata| !metadata.sections.is_empty()) {
         return Err(
             "A sectioned model must be changed through the complete project-model revision transaction"
                 .to_owned(),
         );
     }
+    reconcile_project_model_revision_metadata(definition, previous)
+}
+
+fn reconcile_project_model_revision_metadata(
+    definition: &ProjectModelDefinition,
+    previous: Option<&ModelDefinitionMetadata>,
+) -> Result<ModelDefinitionMetadata, String> {
+    let mut metadata = previous.cloned().unwrap_or_default();
     let previous_parameters = metadata.parameters;
     let mut parameters = Vec::with_capacity(
         definition.numeric_parameters.len() + definition.string_parameters.len(),

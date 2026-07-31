@@ -100,6 +100,12 @@ pub mod analysis;
 /// that library, netlist and engine can all share one copy.
 pub(crate) mod builtin_lib;
 pub mod circuit;
+/// Names of the XSPICE code models compiled in; a leaf so that both the parser
+/// that classifies a name and the subsystem that instantiates it read down.
+pub(crate) mod codemodels;
+/// Simulation configuration. Below everything that reads it, so a tolerance
+/// or dialect flag is a downward reference rather than a reach into `engine`.
+pub mod config;
 pub mod constants;
 pub mod device;
 pub mod diagnostics;
@@ -127,7 +133,7 @@ pub mod simd;
 // Re-export primary types for convenience
 pub use abort_signal::{AbortSignal, AtomicAbort, NoAbort};
 pub use analysis::{AcAnalysis, DcAnalysis, MeasureEngine, MeasureResult};
-pub use circuit::{Circuit, CircuitData, NodeId};
+pub use circuit::CircuitData;
 pub use device::{Device, DeviceModel};
 pub use engine::{
     ConvergenceConfig, ConvergencePreset, DampingStrategy, Engine, EngineHealthReport,
@@ -159,6 +165,14 @@ pub mod error {
 
 /// Simulation value type (using f64 for high precision)
 pub type Value = f64;
+
+/// Node identifier (0 = ground, always).
+///
+/// Beside [`Value`] because it is the same kind of thing: the crate's shared
+/// vocabulary, named by every layer and owned by none. It sat in `circuit`,
+/// two ranks above the device models that index with it, so thirty-eight
+/// device files reached up for an alias to `usize`.
+pub type NodeId = usize;
 
 /// Complex value type for AC analysis
 /// Re-export from num_complex for convenience

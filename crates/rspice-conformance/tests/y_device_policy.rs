@@ -9,7 +9,7 @@
 
 use rspice_conformance::suites::xyce::{XyceRunnerConfig, XyceTestRunner};
 use rspice_core::SpiceDialect;
-use rspice_core::analysis::IntegrationMethod;
+use rspice_core::numerics::integration::IntegrationMethod;
 use rspice_core::engine::{ConvergenceConfig, Engine, SimulationConfig};
 use rspice_core::netlist::{ElementKind, Netlist, flatten_netlist_with_models};
 use rspice_core::xspice::{register_data_file, unregister_data_file};

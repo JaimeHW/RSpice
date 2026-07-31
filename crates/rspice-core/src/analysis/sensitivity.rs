@@ -243,26 +243,6 @@ impl SensitivityResult {
         })
     }
 
-    /// Get top N most sensitive elements by absolute normalized sensitivity
-    pub fn top_sensitive(&self, n: usize) -> Vec<&Sensitivity> {
-        let mut sorted: Vec<_> = self.sensitivities.iter().collect();
-        sorted.sort_by(|a, b| {
-            let a_norm = if a.normalized.is_finite() {
-                a.normalized.abs()
-            } else {
-                f64::NEG_INFINITY
-            };
-            let b_norm = if b.normalized.is_finite() {
-                b.normalized.abs()
-            } else {
-                f64::NEG_INFINITY
-            };
-            b_norm
-                .total_cmp(&a_norm)
-                .then_with(|| a.element.cmp(&b.element))
-        });
-        sorted.into_iter().take(n).collect()
-    }
 
     /// Get total number of sensitivities
     pub fn len(&self) -> usize {
@@ -627,15 +607,6 @@ impl SensitivityAnalyzer {
 // Finite Difference Verification Helper
 //=============================================================================
 
-/// Verify sensitivity using finite difference (for testing)
-pub fn finite_difference_sensitivity<F>(nominal: Value, delta: Value, compute_output: F) -> Value
-where
-    F: Fn(Value) -> Value,
-{
-    let f_plus = compute_output(nominal + delta);
-    let f_minus = compute_output(nominal - delta);
-    (f_plus - f_minus) / (2.0 * delta)
-}
 
 //=============================================================================
 // Tests

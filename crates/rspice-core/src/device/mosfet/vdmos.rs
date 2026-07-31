@@ -27,7 +27,7 @@
 
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::solver::{CscIndex, StaticMatrix};
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 
 mod device;
 mod recovery;

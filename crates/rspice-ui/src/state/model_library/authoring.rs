@@ -45,6 +45,42 @@ impl ProjectModelDefinition {
         }
     }
 
+    /// Project the complete editable source semantics of a catalog model.
+    ///
+    /// Parsed external cards retain LEVEL, VERSION, and geometry bounds in
+    /// both the generic parameter map and typed browse fields. Built-in
+    /// catalogs may expose only the typed fields, however. Creating a project
+    /// copy must not silently discard those source-relevant values, so this
+    /// copy-specific projection fills only parameters that are absent from the
+    /// card's case-insensitive parameter map.
+    #[must_use]
+    pub fn editable_copy_from_device_model(model: &DeviceModel) -> Self {
+        let mut definition = Self::from_device_model(model);
+        for (name, value) in [
+            ("level", model.spice_level.map(f64::from)),
+            ("version", model.model_version),
+            ("lmin", model.l_min),
+            ("lmax", model.l_max),
+            ("wmin", model.w_min),
+            ("wmax", model.w_max),
+            ("vdd", model.vdd),
+            ("vth0", model.vth0),
+        ] {
+            let Some(value) = value else {
+                continue;
+            };
+            if !definition
+                .numeric_parameters
+                .keys()
+                .chain(definition.string_parameters.keys())
+                .any(|existing| existing.eq_ignore_ascii_case(name))
+            {
+                definition.numeric_parameters.insert(name.to_owned(), value);
+            }
+        }
+        definition
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         validate_identifier("model name", &self.name, false)?;
         validate_identifier("model type", &self.spice_type, true)?;

@@ -145,32 +145,7 @@ impl DigitalState {
         }
     }
 
-    /// Parse from character representation
-    pub fn from_char(c: char) -> Option<DigitalState> {
-        match c {
-            '0' | 'l' | 'L' => Some(DigitalState::Zero),
-            '1' | 'h' | 'H' => Some(DigitalState::One),
-            'x' | 'X' | 'u' | 'U' => Some(DigitalState::Unknown),
-            'z' | 'Z' => Some(DigitalState::HighZ),
-            _ => None,
-        }
-    }
 
-    /// Convert to character representation
-    pub fn to_char(&self) -> char {
-        match self {
-            DigitalState::Zero => '0',
-            DigitalState::One => '1',
-            DigitalState::Unknown => 'X',
-            DigitalState::ZeroR => 'l',
-            DigitalState::OneR => 'h',
-            DigitalState::UnknownR => 'x',
-            DigitalState::ZeroZ => 'L',
-            DigitalState::OneZ => 'H',
-            DigitalState::UnknownZ => 'u',
-            DigitalState::HighZ => 'Z',
-        }
-    }
 }
 
 impl fmt::Display for DigitalState {

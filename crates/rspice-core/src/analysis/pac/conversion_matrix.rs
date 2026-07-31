@@ -17,7 +17,6 @@
 //! - Diagonal elements H`[k,k]` represent harmonic transfer at same sideband
 
 use crate::{Complex64, Value};
-use std::collections::HashMap;
 
 //=============================================================================
 // Sideband Transfer Function
@@ -75,10 +74,6 @@ impl SidebandTransfer {
         self.transfer.arg() * 180.0 / std::f64::consts::PI
     }
 
-    /// Get the absolute input frequency
-    pub fn input_frequency(&self, fundamental: Value) -> Value {
-        (self.input_sideband as Value) * fundamental + self.frequency_offset
-    }
 
     /// Get the absolute output frequency
     pub fn output_frequency(&self, fundamental: Value) -> Value {
@@ -146,10 +141,6 @@ impl ConversionMatrix {
         self.fundamental
     }
 
-    /// Get the sideband range
-    pub fn sideband_range(&self) -> (i32, i32) {
-        (self.sideband_min, self.sideband_max)
-    }
 
     /// Get the number of sidebands
     pub fn num_sidebands(&self) -> usize {
@@ -248,23 +239,6 @@ impl ConversionMatrix {
         }
     }
 
-    /// Get all non-zero elements as a hashmap for sparse representation
-    pub fn to_sparse(&self) -> HashMap<(usize, i32, i32), Complex64> {
-        let mut sparse = HashMap::new();
-
-        for freq_idx in 0..self.frequencies.len() {
-            for out_sb in self.sideband_min..=self.sideband_max {
-                for in_sb in self.sideband_min..=self.sideband_max {
-                    let val = self.get(freq_idx, out_sb, in_sb);
-                    if val.norm() > 1e-15 {
-                        sparse.insert((freq_idx, out_sb, in_sb), val);
-                    }
-                }
-            }
-        }
-
-        sparse
-    }
 
     /// Get the diagonal elements (same-sideband transfer) across all frequencies
     pub fn diagonal(&self, sideband: i32) -> Vec<Complex64> {

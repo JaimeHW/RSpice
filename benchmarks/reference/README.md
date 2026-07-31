@@ -43,10 +43,10 @@ Per device evaluation + stamp, after subtracting the no-device baseline.
 
 | Model | ngspice (C) | Xyce (Sacado AD) | RSpice generated |
 |---|---|---|---|
-| VBIC 1.3, 4 terminals | **859 ns** | 2,658 ns | **1,501 ns** (`ScalarOptIr`) |
+| VBIC 1.3, 4 terminals | **859 ns** | 2,658 ns | **1,501 ns** (retired scalar emitter) |
 | HiSIM-HV2, default config (10 eq) | **1,169 ns** | — | — |
-| HiSIM-HV2, internal nodes on (16 eq) | **1,694 ns** | — | 10,465 ns (`SparseLocalKernel`) |
-| | | | 44,000 ns (`StructuredKernel`) |
+| HiSIM-HV2, internal nodes on (16 eq) | **1,694 ns** | — | 10,465 ns (retired sparse-local emitter) |
+| | | | 44,000 ns (retired indexed-workspace emitter) |
 
 Reading these:
 
@@ -91,10 +91,10 @@ that a compact `array::from_fn` chain rule compiles to the same straight-line
 FMAs the flattened emitter writes out by hand. If it did not, generated source
 would have to keep scaling by operations x lanes.
 
-It times three forms of identical arithmetic: `workspace` (today's
-`StructuredKernel` — indexed values behind a `&mut`, runtime-masked derivative
-loop, `#[inline(never)]` per op), `array` (the proposal), and `flat` (today's
-`SparseLocalKernel` — one named scalar per lane).
+It times three forms of identical arithmetic: `workspace` (the retired indexed
+workspace design — values behind a `&mut`, runtime-masked derivative loop,
+`#[inline(never)]` per op), `array` (the canonical packed-lane design), and
+`flat` (the retired flattened-scalar design — one named scalar per lane).
 
 Result, 2026-07-27:
 

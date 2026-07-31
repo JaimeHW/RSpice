@@ -5,6 +5,8 @@ mod drawers;
 mod inspector;
 mod navigator;
 
+pub(crate) use inspector::bind_component_model_from_catalog;
+
 use egui::{Context, Frame, Id, Key, Panel, Response, containers::PanelState};
 
 use crate::ui::tokens::Tokens;

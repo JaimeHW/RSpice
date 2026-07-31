@@ -148,14 +148,14 @@ impl SimulationOptions {
         }
     }
 
-    fn core_integration_method(&self) -> rspice_core::analysis::IntegrationMethod {
+    fn core_integration_method(&self) -> rspice_core::numerics::integration::IntegrationMethod {
         match self.method {
-            IntegrationMethod::Trap => rspice_core::analysis::IntegrationMethod::Trapezoidal,
-            IntegrationMethod::Euler => rspice_core::analysis::IntegrationMethod::BackwardEuler,
-            IntegrationMethod::Gear => rspice_core::analysis::IntegrationMethod::Gear2,
-            IntegrationMethod::Gear2 => rspice_core::analysis::IntegrationMethod::Gear2,
-            IntegrationMethod::TrapGear => rspice_core::analysis::IntegrationMethod::TrapGear,
-            IntegrationMethod::Gear2Only => rspice_core::analysis::IntegrationMethod::Gear2,
+            IntegrationMethod::Trap => rspice_core::numerics::integration::IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Euler => rspice_core::numerics::integration::IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Gear => rspice_core::numerics::integration::IntegrationMethod::Gear2,
+            IntegrationMethod::Gear2 => rspice_core::numerics::integration::IntegrationMethod::Gear2,
+            IntegrationMethod::TrapGear => rspice_core::numerics::integration::IntegrationMethod::TrapGear,
+            IntegrationMethod::Gear2Only => rspice_core::numerics::integration::IntegrationMethod::Gear2,
         }
     }
 

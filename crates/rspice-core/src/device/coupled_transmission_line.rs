@@ -3,7 +3,7 @@
 //! This realizes a coupled RLGC line in modal coordinates so transient
 //! propagation uses exact per-mode delays rather than a ladder approximation.
 
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 use faer::{Mat, Side};
 
 use super::TransmissionLine;

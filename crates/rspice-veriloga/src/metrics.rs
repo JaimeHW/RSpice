@@ -131,8 +131,8 @@ pub struct PipelineMetrics {
     /// matching the repeated branch work a specializer can remove.
     #[serde(default)]
     pub structural_guard_newton_values: u64,
-    /// Optional invalidation-stage splits that could not be projected safely
-    /// and therefore used the semantically equivalent unsplit body.
+    /// Number of invalidation-class splits that safely fell back to the
+    /// unsplit direct CFG because its control-flow projection was not total.
     #[serde(default)]
     pub invalidation_split_fallback_count: u64,
     /// Independent variables carried into automatic differentiation, including
@@ -420,12 +420,11 @@ mod tests {
     fn older_metrics_payloads_default_structural_guard_counts() {
         let mut encoded =
             serde_json::to_value(PipelineMetrics::default()).expect("serialize metrics");
-        let object = encoded
-            .as_object_mut()
-            .expect("metrics serialize as an object");
+        let object = encoded.as_object_mut().expect("metrics serialize as an object");
         object.remove("model_structural_guard_count");
         object.remove("instance_structural_guard_count");
         object.remove("structural_guard_newton_values");
+        object.remove("invalidation_split_fallback_count");
         object.remove("derivative_seed_count");
         object.remove("scalar_derivative_value_count");
         object.remove("packed_derivative_value_count");
@@ -437,6 +436,7 @@ mod tests {
         assert_eq!(decoded.model_structural_guard_count, 0);
         assert_eq!(decoded.instance_structural_guard_count, 0);
         assert_eq!(decoded.structural_guard_newton_values, 0);
+        assert_eq!(decoded.invalidation_split_fallback_count, 0);
         assert_eq!(decoded.derivative_seed_count, 0);
         assert_eq!(decoded.scalar_derivative_value_count, 0);
         assert_eq!(decoded.packed_derivative_value_count, 0);

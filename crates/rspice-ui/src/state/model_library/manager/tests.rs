@@ -1063,6 +1063,119 @@ fn project_definition(vth0: f64, tag: &str) -> ProjectModelDefinition {
     }
 }
 
+#[test]
+fn editable_project_copy_preserves_catalog_metadata_and_rebinds_source_identity() {
+    let mut manager = ModelLibraryManager::new();
+    let mut source = ModelLibrary::new("foundry reference");
+    source.pdk_name = "Example PDK".to_owned();
+    source.technology_node = "28nm".to_owned();
+    let mut model = DeviceModel::new("nch_reference", ModelType::Nmos);
+    model.spice_type = Some("NMOS".to_owned());
+    model.spice_level = Some(54);
+    model.model_version = Some(4.8);
+    model.description = "Authenticated foundry reference".to_owned();
+    model.l_min = Some(0.028);
+    model.l_max = Some(10.0);
+    model.w_min = Some(0.08);
+    model.w_max = Some(100.0);
+    model.parameters.insert("kp".to_owned(), 0.0012);
+    model
+        .string_parameters
+        .insert("version_tag".to_owned(), "pdk_r7".to_owned());
+    source.add_model(model);
+
+    let mut metadata = ModelDefinitionMetadata::default();
+    metadata.parameters.push(ParameterDefinition {
+        name: "kp".to_owned(),
+        data_type: ParameterDataType::Numeric,
+        value: ParameterValue::Numeric(FiniteF64::new(0.0012).expect("finite fixture")),
+        unit: Some("A/V^2".to_owned()),
+        bounds: None,
+        source: ParameterSource::Declared {
+            source: "foundry reference card".to_owned(),
+        },
+        description: "Preserved transconductance metadata".to_owned(),
+    });
+    source
+        .model_definition_metadata
+        .insert("nch_reference".to_owned(), metadata);
+    manager.add_library(source);
+
+    let commit = manager
+        .create_editable_project_copy(
+            "foundry reference",
+            "nch_reference",
+            "nch_reference project",
+        )
+        .expect("catalog model becomes an editable project revision");
+    assert!(commit.before.is_none());
+    assert!(commit.affects_execution);
+
+    let project = manager
+        .get_library("nch_reference project")
+        .expect("project copy is retained");
+    assert_eq!(project.pdk_name, "Example PDK");
+    assert_eq!(project.technology_node, "28nm");
+    assert!(project.source_authority.is_project_owned());
+    assert!(project.model_qualification.is_empty());
+    assert!(project.model_correlation.is_empty());
+
+    let copied = &project.models["nch_reference"];
+    assert_eq!(copied.description, "Authenticated foundry reference");
+    assert_eq!(copied.spice_level, Some(54));
+    assert_eq!(copied.model_version, Some(4.8));
+    assert_eq!(copied.l_min, Some(0.028));
+    assert_eq!(copied.l_max, Some(10.0));
+    assert_eq!(copied.w_min, Some(0.08));
+    assert_eq!(copied.w_max, Some(100.0));
+    assert_eq!(
+        copied
+            .string_parameters
+            .get("version_tag")
+            .map(String::as_str),
+        Some("pdk_r7")
+    );
+
+    let copied_metadata = &project.model_definition_metadata["nch_reference"];
+    assert!(copied_metadata.source_identity.is_some());
+    let kp = copied_metadata
+        .parameter("kp")
+        .expect("typed source parameter metadata is preserved");
+    assert_eq!(kp.unit.as_deref(), Some("A/V^2"));
+    assert_eq!(kp.description, "Preserved transconductance metadata");
+}
+
+#[test]
+fn editable_project_copy_rejects_owned_sources_and_name_collisions_atomically() {
+    let mut manager = ModelLibraryManager::new();
+    manager
+        .create_project_model("owned source", &project_definition(0.48, "r1"))
+        .expect("owned source fixture");
+    let before = manager
+        .get_library("owned source")
+        .expect("owned source retained")
+        .clone();
+
+    let owned_error = manager
+        .create_editable_project_copy("owned source", "owned_nch", "owned copy")
+        .expect_err("owned sources are already editable");
+    assert!(owned_error.contains("already project-owned"));
+    assert!(manager.get_library("owned copy").is_none());
+
+    let mut built_in = ModelLibrary::new("built-in source");
+    built_in.add_model(DeviceModel::new("copy_nch", ModelType::Nmos));
+    manager.add_library(built_in);
+    let collision = manager
+        .create_editable_project_copy("built-in source", "copy_nch", "owned source")
+        .expect_err("target collision fails before mutation");
+    assert!(collision.contains("conflicts with existing library"));
+    assert_eq!(
+        manager.get_library("owned source"),
+        Some(&before),
+        "failed copy must not disturb the colliding library"
+    );
+}
+
 fn current_model_source(
     library: &ModelLibrary,
 ) -> (
@@ -1519,6 +1632,115 @@ fn persisted_symlink_edge_survives_alias_removal_after_sealing() {
     assert!(cards.contains("symlink_n"), "{cards}");
 
     fs::remove_dir_all(directory).expect("remove symlink fixture directory");
+}
+
+#[test]
+fn configured_source_replacement_rescans_and_rolls_back_every_file_on_error() {
+    let old_root = std::env::temp_dir().join(format!("rspice-pdk-old-{}", uuid::Uuid::new_v4()));
+    let next_root = std::env::temp_dir().join(format!("rspice-pdk-next-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&old_root).expect("create old PDK root");
+    fs::create_dir_all(&next_root).expect("create next PDK root");
+    let old_file = old_root.join("accepted.lib");
+    fs::write(&old_file, ".model accepted_n NMOS (LEVEL=1 KP=1e-3)\n")
+        .expect("write accepted source");
+
+    let mut manager = ModelLibraryManager::new();
+    let mut accepted_config = crate::state::pdk_config::PdkConfig::new();
+    accepted_config.add_library_path(old_root.to_string_lossy());
+    assert_eq!(
+        manager
+            .replace_from_pdk_config(None, &mut accepted_config)
+            .expect("initial configured source applies"),
+        1
+    );
+    let accepted = manager
+        .get_library("accepted")
+        .expect("accepted library")
+        .clone();
+
+    let good_file = next_root.join("candidate.lib");
+    fs::write(&good_file, ".model candidate_n NMOS (LEVEL=1 KP=2e-3)\n")
+        .expect("write candidate source");
+    fs::write(
+        next_root.join("broken.lib"),
+        ".include definitely-missing.inc\n.model broken_n NMOS (LEVEL=1)\n",
+    )
+    .expect("write broken source");
+    let mut next_config = crate::state::pdk_config::PdkConfig::new();
+    next_config.add_library_path(next_root.to_string_lossy());
+    next_config
+        .discovered_files
+        .push(crate::state::pdk_config::DiscoveredFile::new(
+            old_file.clone(),
+            old_root.clone(),
+        ));
+
+    let errors = manager
+        .replace_from_pdk_config(Some(&accepted_config), &mut next_config)
+        .expect_err("one invalid enabled file rejects the whole candidate");
+
+    assert!(errors.iter().any(|error| error.contains("broken.lib")));
+    assert_eq!(manager.get_library("accepted"), Some(&accepted));
+    assert!(manager.get_library("candidate").is_none());
+    assert!(
+        next_config
+            .discovered_files
+            .iter()
+            .any(|file| file.path == good_file)
+    );
+    assert!(
+        next_config
+            .discovered_files
+            .iter()
+            .all(|file| file.path != old_file)
+    );
+
+    fs::remove_dir_all(old_root).expect("remove old PDK root");
+    fs::remove_dir_all(next_root).expect("remove next PDK root");
+}
+
+#[test]
+fn disabling_configured_sources_unloads_only_retained_pdk_ownership() {
+    let configured_root =
+        std::env::temp_dir().join(format!("rspice-pdk-configured-{}", uuid::Uuid::new_v4()));
+    let manual_root =
+        std::env::temp_dir().join(format!("rspice-pdk-manual-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&configured_root).expect("create configured root");
+    fs::create_dir_all(&manual_root).expect("create manual root");
+    fs::write(
+        configured_root.join("configured.lib"),
+        ".model configured_n NMOS (LEVEL=1)\n",
+    )
+    .expect("write configured source");
+    let manual_file = manual_root.join("manual.lib");
+    fs::write(&manual_file, ".model manual_n NMOS (LEVEL=1)\n").expect("write manual source");
+
+    let mut manager = ModelLibraryManager::new();
+    manager
+        .load_library_file(&manual_file, None)
+        .expect("load manual external library");
+    let mut enabled = crate::state::pdk_config::PdkConfig::new();
+    enabled.add_library_path(configured_root.to_string_lossy());
+    manager
+        .replace_from_pdk_config(None, &mut enabled)
+        .expect("configured source applies");
+    assert_eq!(enabled.managed_model_sources.len(), 1);
+
+    let mut disabled = enabled.clone();
+    disabled.toggle_path_enabled(0);
+    assert_eq!(
+        manager
+            .replace_from_pdk_config(Some(&enabled), &mut disabled)
+            .expect("disabled configured source unloads atomically"),
+        0
+    );
+    assert!(manager.get_library("configured").is_none());
+    assert!(manager.get_library("manual").is_some());
+    assert!(disabled.managed_model_sources.is_empty());
+    assert!(disabled.discovered_files.is_empty());
+
+    fs::remove_dir_all(configured_root).expect("remove configured root");
+    fs::remove_dir_all(manual_root).expect("remove manual root");
 }
 
 //=========================================================================

@@ -72,7 +72,7 @@ impl ParsedNetlistSourceMap {
         let mut builder = SourceMapBuilder::default();
         builder.scan(
             source,
-            netlist.params.expression_dialect() != super::ExpressionDialect::Xyce,
+            netlist.params.expression_dialect() != crate::config::ExpressionDialect::Xyce,
         );
         builder.into_map()
     }
@@ -551,7 +551,7 @@ fn builtin_model_names() -> &'static HashSet<String> {
         insert_model_names_from_library(BUILTIN_DIODE_LIB, &mut names);
         insert_model_names_from_library(BUILTIN_JFET_LIB, &mut names);
         insert_model_names_from_library(BUILTIN_MOSFET_LIB, &mut names);
-        for model_name in crate::xspice::CodeModelRegistry::with_builtins().model_names() {
+        for model_name in crate::codemodels::BUILTIN_MODEL_NAMES {
             names.insert(model_name.to_ascii_uppercase());
         }
         names

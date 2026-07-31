@@ -316,25 +316,6 @@ impl TransmissionLine {
         }
     }
 
-    /// Create from frequency and normalized length
-    pub fn from_frequency(
-        name: String,
-        node1_pos: NodeId,
-        node1_neg: NodeId,
-        node2_pos: NodeId,
-        node2_neg: NodeId,
-        z0: Value,
-        freq: Value,
-        nl: Value,
-    ) -> Self {
-        // TD = NL / freq (number of wavelengths at frequency)
-        let td = nl / freq;
-
-        let mut tl = Self::new(name, node1_pos, node1_neg, node2_pos, node2_neg, z0, td);
-        tl.freq = Some(freq);
-        tl.nl = Some(nl);
-        tl
-    }
 
     /// Set branch indices for MNA
     pub fn set_branches(&mut self, branch1: NodeId, branch2: NodeId) {

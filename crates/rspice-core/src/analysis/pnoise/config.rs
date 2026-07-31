@@ -78,35 +78,10 @@ impl PnoiseConfig {
         self
     }
 
-    /// Set maximum number of sidebands to analyze
-    pub fn with_max_sidebands(mut self, n: usize) -> Self {
-        self.max_sidebands = n;
-        self
-    }
 
-    /// Set carrier/reference frequency explicitly
-    pub fn with_reference_freq(mut self, freq: Value) -> Self {
-        self.reference_freq = Some(freq);
-        self
-    }
 
-    /// Set jitter integration bandwidth
-    pub fn with_jitter_integration(mut self, start: Value, stop: Value) -> Self {
-        self.jitter_integration = Some((start, stop));
-        self
-    }
 
-    /// Set points per decade for log sweep
-    pub fn with_points_per_decade(mut self, ppd: usize) -> Self {
-        self.points_per_decade = ppd.max(1);
-        self
-    }
 
-    /// Set relative tolerance
-    pub fn with_reltol(mut self, tol: Value) -> Self {
-        self.reltol = tol;
-        self
-    }
 
     /// Set absolute tolerance
     pub fn with_abstol(mut self, tol: Value) -> Self {

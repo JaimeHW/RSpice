@@ -65,7 +65,7 @@ impl Engine {
     /// transmission-line delay buffers are deliberately left alone — they
     /// hold genuine propagating state, not integrator history.
     pub(super) fn reseed_reactive_histories_for_restart(
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         solution: &[Value],
         hinted_max_step: Value,
         bjt_history: &mut BjtTransientHistory,
@@ -132,7 +132,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn initialize_bjt_history(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         solution: &[Value],
     ) -> BjtTransientHistory {
         let n = circuit.bjts.devices.len();
@@ -244,7 +244,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn initialize_jfet_history(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         solution: &[Value],
     ) -> JfetTransientHistory {
         let n = circuit.jfets.len();
@@ -327,7 +327,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn refresh_jfet2_transient_linearizations(
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         solution: &[Value],
         dt: Value,
         history: &JfetTransientHistory,
@@ -344,7 +344,7 @@ impl Engine {
     }
 
     pub(super) fn initialize_diode_history(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         solution: &[Value],
     ) -> DiodeTransientHistory {
         let n = circuit.diodes.devices.len();
@@ -375,7 +375,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn initialize_mosfet_history(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         solution: &[Value],
     ) -> MosfetTransientHistory {
         let n = circuit.mosfets.len();
@@ -470,7 +470,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn initialize_vdmos_history(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         solution: &[Value],
     ) -> VdmosTransientHistory {
         let n = circuit.vdmoses.len();
@@ -585,7 +585,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn stamp_bjt_transient_companions(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
@@ -740,7 +740,7 @@ impl Engine {
             source += ag0 * branch.d_external[col] * external[col];
         }
 
-        let mut stamp_row = |row: crate::circuit::NodeId, sign: Value| {
+        let mut stamp_row = |row: crate::NodeId, sign: Value| {
             if row == 0 {
                 return;
             }
@@ -777,7 +777,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn stamp_jfet_transient_companions(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
@@ -881,7 +881,7 @@ impl Engine {
     /// Resolve the matrix slots every diode junction-charge companion will
     /// stamp into; the pattern is frozen for the whole transient run.
     pub(super) fn link_diode_companion_slots(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         matrix: &crate::solver::StaticMatrix,
     ) -> Vec<TwoTerminalStampSlots> {
         circuit
@@ -895,7 +895,7 @@ impl Engine {
     /// Resolve the matrix slots for the five MOSFET charge companions
     /// (gate-source, gate-drain, gate-bulk, body-source, body-drain).
     pub(super) fn link_mosfet_companion_slots(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         matrix: &crate::solver::StaticMatrix,
     ) -> Vec<[TwoTerminalStampSlots; 5]> {
         circuit
@@ -917,7 +917,7 @@ impl Engine {
     }
 
     pub(super) fn link_vdmos_companion_slots(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         matrix: &crate::solver::StaticMatrix,
     ) -> Vec<[TwoTerminalStampSlots; 7]> {
         circuit
@@ -952,7 +952,7 @@ impl Engine {
     /// charge-form companion (`nonlinear_charge_companion_terms`) needs the
     /// charge history tracked against one consistent voltage.
     pub(super) fn stamp_diode_transient_companions(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
@@ -984,7 +984,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn stamp_mosfet_transient_companions(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
@@ -1127,7 +1127,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn stamp_vdmos_transient_companions(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
