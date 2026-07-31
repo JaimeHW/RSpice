@@ -50,6 +50,13 @@ pub struct SealedModelExecutionSources {
     sources: Vec<(PathBuf, String)>,
     edges: Vec<rspice_core::netlist::SealedSourceEdge>,
     libraries: Vec<SealedExecutionLibrary>,
+    pdk_process_bindings: Vec<crate::state::pdk_config::SealedPdkModelProcessBinding>,
+    pdk_veriloga_artifacts: Vec<crate::state::pdk_config::SealedPdkVerilogAArtifact>,
+    pdk_veriloga_bindings: Vec<crate::state::pdk_config::SealedPdkVerilogABinding>,
+    pdk_identity: Option<(
+        crate::state::pdk_config::PdkTechnologyBinding,
+        ContentDigest,
+    )>,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +74,118 @@ impl SealedModelExecutionSources {
     /// names one retained source exactly. This deliberately does not guess by
     /// basename or consult a host search path: unresolved and ambiguous deck
     /// references fail closed in browser execution.
+    pub(crate) fn with_pdk_model_sources(
+        mut self,
+        pdk: crate::state::pdk_config::SealedPdkModelSources,
+    ) -> Result<Self, String> {
+        if self.pdk_identity.is_some() {
+            return Err("A sealed model snapshot already contains a signed PDK binding".to_owned());
+        }
+
+        let mut sources_by_key = self
+            .sources
+            .iter()
+            .map(|(path, source)| (portable_path_key(path), (path.clone(), source.clone())))
+            .collect::<BTreeMap<_, _>>();
+        for (path, source) in pdk.sources {
+            let key = portable_path_key(&path);
+            match sources_by_key.entry(key) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert((path, source));
+                }
+                std::collections::btree_map::Entry::Occupied(entry) if entry.get().1 != source => {
+                    return Err(format!(
+                        "Signed PDK source '{}' conflicts with an authenticated model-library source",
+                        path.display()
+                    ));
+                }
+                std::collections::btree_map::Entry::Occupied(_) => {}
+            }
+        }
+
+        let mut edges_by_key = self
+            .edges
+            .iter()
+            .map(|edge| {
+                (
+                    (portable_path_key(&edge.owner), edge.requested_path.clone()),
+                    edge.clone(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        for edge in pdk.edges {
+            let key = (portable_path_key(&edge.owner), edge.requested_path.clone());
+            match edges_by_key.entry(key) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(edge);
+                }
+                std::collections::btree_map::Entry::Occupied(entry)
+                    if portable_path_key(&entry.get().target)
+                        != portable_path_key(&edge.target) =>
+                {
+                    return Err(format!(
+                        "Signed PDK and model libraries disagree on dependency '{}' in '{}'",
+                        edge.requested_path,
+                        edge.owner.display()
+                    ));
+                }
+                std::collections::btree_map::Entry::Occupied(_) => {}
+            }
+        }
+
+        self.sources = sources_by_key.into_values().collect();
+        self.sources.sort_by(|left, right| left.0.cmp(&right.0));
+        self.edges = edges_by_key.into_values().collect();
+        self.edges.sort_by(|left, right| {
+            left.owner
+                .cmp(&right.owner)
+                .then_with(|| left.requested_path.cmp(&right.requested_path))
+                .then_with(|| left.target.cmp(&right.target))
+        });
+        self.bundle = rspice_core::netlist::SealedSourceBundle::try_new_with_edges(
+            self.sources.clone(),
+            self.edges.clone(),
+        )
+        .map_err(|error| format!("Failed to merge signed PDK model sources: {error}"))?;
+        self.pdk_process_bindings = pdk.process_bindings;
+        self.pdk_veriloga_artifacts = pdk.veriloga_artifacts;
+        self.pdk_veriloga_bindings = pdk.veriloga_bindings;
+        self.pdk_identity = Some((pdk.binding, pdk.archive_digest));
+        Ok(self)
+    }
+
+    /// Exact signed package identity participating in this model snapshot.
+    #[must_use]
+    pub(crate) fn pdk_model_identity(&self) -> Option<(String, ContentDigest)> {
+        self.pdk_identity.as_ref().map(|(binding, archive_digest)| {
+            (
+                format!(
+                    "signed-pdk:{}@{}:manifest:{}",
+                    binding.package_id, binding.revision, binding.manifest_digest
+                ),
+                *archive_digest,
+            )
+        })
+    }
+
+    #[must_use]
+    pub(crate) fn pdk_veriloga_authority(
+        &self,
+    ) -> Option<(
+        &crate::state::pdk_config::PdkTechnologyBinding,
+        ContentDigest,
+        &[crate::state::pdk_config::SealedPdkVerilogAArtifact],
+        &[crate::state::pdk_config::SealedPdkVerilogABinding],
+    )> {
+        let (binding, archive_digest) = self.pdk_identity.as_ref()?;
+        Some((
+            binding,
+            *archive_digest,
+            &self.pdk_veriloga_artifacts,
+            &self.pdk_veriloga_bindings,
+        ))
+    }
+
     pub(crate) fn bundle_for_root(
         &self,
         root_path: &Path,
@@ -481,6 +600,23 @@ pub struct PackModelHit {
 }
 
 impl ModelLibraryManager {
+
+    /// Stable identity of the persisted model catalogue relevant to source
+    /// preparation. Browser filters, selection, shipped-pack indexes, and
+    /// audit ledgers are deliberately excluded.
+    pub(crate) fn execution_catalog_digest(&self) -> ContentDigest {
+        let mut libraries = self.libraries.values().collect::<Vec<_>>();
+        libraries.sort_by(|left, right| left.name.cmp(&right.name));
+        let mut hasher = Sha256::new();
+        hasher.update(b"rspice.model-execution-catalog/v3\0");
+        for library in libraries {
+            let bytes = serde_json::to_vec(library)
+                .unwrap_or_else(|error| format!("serialization-error:{error}").into_bytes());
+            hasher.update((bytes.len() as u64).to_le_bytes());
+            hasher.update(bytes);
+        }
+        ContentDigest::from_bytes(hasher.finalize().into())
+    }
     /// Create a new manager
     pub fn new() -> Self {
         Self::default()

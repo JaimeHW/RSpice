@@ -19,7 +19,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::DesignCheckStatus;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
-use crate::workbench::state::{ModelCatalogScope, ModelsPage, ProjectPage, Workspace};
+use crate::workbench::state::{ModelsCatalogScope, ModelsPage, ProjectPage, Workspace};
 
 use super::visible_workspace_width;
 
@@ -85,7 +85,7 @@ impl OverviewIntent {
             }
             Self::OpenProjectRoot => open_project_root(app),
             Self::OpenProjectModels => {
-                app.state.workbench.model_catalog_scope = ModelCatalogScope::Project;
+                app.state.workbench.models_view.catalog_scope = ModelsCatalogScope::Project;
                 Command::ModelsPage(ModelsPage::Models).execute(app);
             }
             Self::OpenRun(index) => {
@@ -2067,13 +2067,13 @@ mod tests {
     #[test]
     fn overview_model_closure_always_opens_the_project_catalog_scope() {
         let mut app = RSpiceApp::test_instance();
-        app.state.workbench.model_catalog_scope = ModelCatalogScope::Packs;
+        app.state.workbench.models_view.catalog_scope = ModelsCatalogScope::InstalledPacks;
         OverviewIntent::OpenProjectModels.execute(&mut app);
 
         assert_eq!(app.state.workbench.workspace, Workspace::Models);
         assert_eq!(
-            app.state.workbench.model_catalog_scope,
-            ModelCatalogScope::Project
+            app.state.workbench.models_view.catalog_scope,
+            ModelsCatalogScope::Project
         );
     }
 

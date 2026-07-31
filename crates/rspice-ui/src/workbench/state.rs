@@ -905,31 +905,6 @@ pub struct WorkbenchState {
     pub verification: VerificationSessionState,
     #[serde(default)]
     pub models_page: ModelsPage,
-    #[serde(default)]
-    pub model_catalog_scope: ModelCatalogScope,
-    #[serde(default)]
-    pub model_project_facet: ModelProjectFacet,
-    #[serde(default)]
-    pub model_pack_facet: ModelPackFacet,
-    #[serde(default)]
-    pub model_library_facet: ModelLibraryFacet,
-    /// Pack metadata search is intentionally independent from part search.
-    #[serde(default)]
-    pub model_pack_query: String,
-    #[serde(default)]
-    pub model_catalog_selected_pack: Option<String>,
-    /// Stable encoded pack/path/line/name identity for an indexed part.
-    #[serde(default)]
-    pub model_catalog_selected_part: Option<String>,
-    /// Stable kind/library/name identity for a selected project model or
-    /// subcircuit. `selected_model` remains the model-editor selection and is
-    /// deliberately cleared for subcircuits.
-    #[serde(default)]
-    pub model_catalog_selected_project: Option<String>,
-    /// Zero-based page in the bounded shipped-parts query. This is presentation
-    /// state only; changing a facet, pack, or query resets it to the first page.
-    #[serde(default)]
-    pub model_catalog_part_page: usize,
     /// Native confirmation owner for detaching every executable source from a
     /// shipped pack. This is never restored across an application session.
     #[serde(skip)]
@@ -1132,15 +1107,6 @@ impl Default for WorkbenchState {
             verification_page: VerificationPage::Yield,
             verification: VerificationSessionState::default(),
             models_page: ModelsPage::Models,
-            model_catalog_scope: ModelCatalogScope::Project,
-            model_project_facet: ModelProjectFacet::All,
-            model_pack_facet: ModelPackFacet::All,
-            model_library_facet: ModelLibraryFacet::All,
-            model_pack_query: String::new(),
-            model_catalog_selected_pack: None,
-            model_catalog_selected_part: None,
-            model_catalog_selected_project: None,
-            model_catalog_part_page: 0,
             model_catalog_detach_pack: None,
             model_catalog_pinned: HashSet::new(),
             model_include_direct_only: false,

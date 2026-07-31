@@ -589,6 +589,7 @@ pub enum ModelsWorkbenchDialog {
 pub enum PreflightRemediation {
     DesignChecks,
     SimulationPlan,
+    ProjectTechnology,
 }
 
 /// One ordered, actionable finding in a simulation-preflight report.
