@@ -40,9 +40,7 @@ impl PySParameterResult {
     /// K, mu, and the stability circles are defined for a two-port; deriving
     /// them from a sub-matrix of a larger network would describe a different
     /// device, so anything else yields None.
-    fn two_port_stability(
-        &self,
-    ) -> Option<Vec<rspice_core::analysis::s_param::StabilityAnalysis>> {
+    fn two_port_stability(&self) -> Option<Vec<rspice_core::analysis::s_param::StabilityAnalysis>> {
         Some(
             self.two_port_matrices()?
                 .iter()

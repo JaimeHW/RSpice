@@ -16,9 +16,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Args;
-use rspice_core::device::veriloga_generated::builtins;
 use rspice_conformance::suites::veriloga::fixture::{GoldenCase, GoldenFixture, GoldenPoint};
 use rspice_conformance::suites::veriloga::golden::GoldenHarness;
+use rspice_core::device::veriloga_generated::builtins;
 use serde::Serialize;
 
 use crate::error::BenchError;
@@ -211,10 +211,8 @@ fn run_capture(args: &CaptureArgs) -> Result<ExitCode, BenchError> {
         match build_fixture(model_name, args.points) {
             Ok(fixture) => {
                 let path = fixture_path(&args.out, model_name);
-                fs::write(&path, fixture.render()).map_err(|error| {
-                    BenchError::GeneratedStamp {
-                        message: format!("writing {}: {error}", path.display()),
-                    }
+                fs::write(&path, fixture.render()).map_err(|error| BenchError::GeneratedStamp {
+                    message: format!("writing {}: {error}", path.display()),
                 })?;
                 written += 1;
             }
@@ -281,7 +279,11 @@ fn relative(left: f64, right: f64) -> f64 {
         return 0.0;
     }
     let scale = left.abs().max(right.abs());
-    if scale == 0.0 { 0.0 } else { (left - right).abs() / scale }
+    if scale == 0.0 {
+        0.0
+    } else {
+        (left - right).abs() / scale
+    }
 }
 
 /// Below this, an entry carries no information and comparing it measures
@@ -413,7 +415,9 @@ fn compare_point(
                 .structural
                 .push(format!("{label}: jacobian[{index}] appeared or vanished"));
         }
-        deviation.jacobian.observe(label, "jacobian", index, *want, *got);
+        deviation
+            .jacobian
+            .observe(label, "jacobian", index, *want, *got);
     }
 
     let capacitance_scale = record_scale(&expected.record.capacitance, &actual.record.capacitance);
@@ -428,9 +432,9 @@ fn compare_point(
             continue;
         }
         if (*want == 0.0) != (*got == 0.0) {
-            deviation
-                .structural
-                .push(format!("{label}: capacitance[{index}] appeared or vanished"));
+            deviation.structural.push(format!(
+                "{label}: capacitance[{index}] appeared or vanished"
+            ));
         }
         deviation
             .capacitance
@@ -503,10 +507,7 @@ fn run_verify(args: &VerifyArgs) -> Result<ExitCode, BenchError> {
         {
             failures.push(format!(
                 "{model_name}: topology changed: {}+{} unknowns captured, {}+{} now",
-                expected.node_count,
-                expected.branch_count,
-                actual.node_count,
-                actual.branch_count
+                expected.node_count, expected.branch_count, actual.node_count, actual.branch_count
             ));
             continue;
         }
@@ -515,8 +516,11 @@ fn run_verify(args: &VerifyArgs) -> Result<ExitCode, BenchError> {
         for (case_index, (want_case, got_case)) in
             expected.cases.iter().zip(actual.cases.iter()).enumerate()
         {
-            for (point_index, (want, got)) in
-                want_case.points.iter().zip(got_case.points.iter()).enumerate()
+            for (point_index, (want, got)) in want_case
+                .points
+                .iter()
+                .zip(got_case.points.iter())
+                .enumerate()
             {
                 compare_point(
                     &format!("case {case_index} point {point_index}"),
@@ -576,7 +580,10 @@ fn run_verify(args: &VerifyArgs) -> Result<ExitCode, BenchError> {
         }
     }
 
-    println!("verified {verified} models against {}", args.fixtures.display());
+    println!(
+        "verified {verified} models against {}",
+        args.fixtures.display()
+    );
     for failure in &failures {
         eprintln!("FAIL {failure}");
     }
@@ -669,11 +676,12 @@ fn run_audit(args: &AuditArgs) -> Result<ExitCode, BenchError> {
     }
 
     if let Some(path) = &args.out {
-        let json = serde_json::to_string_pretty(&AuditReport { models: reports }).map_err(
-            |error| BenchError::GeneratedStamp {
-                message: format!("serializing audit report: {error}"),
-            },
-        )?;
+        let json =
+            serde_json::to_string_pretty(&AuditReport { models: reports }).map_err(|error| {
+                BenchError::GeneratedStamp {
+                    message: format!("serializing audit report: {error}"),
+                }
+            })?;
         fs::write(path, json).map_err(|error| BenchError::GeneratedStamp {
             message: format!("writing {}: {error}", path.display()),
         })?;

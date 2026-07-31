@@ -188,10 +188,12 @@ pub fn run(args: &GeneratedStampArgs) -> Result<ExitCode, BenchError> {
         failed: failed.clone(),
     };
     if let Some(path) = &args.out {
-        let json = serde_json::to_string_pretty(&report)
-            .map_err(|error| BenchError::GeneratedStamp { message: format!("serializing stamp report: {error}") })?;
-        fs::write(path, json).map_err(|error| {
-            BenchError::GeneratedStamp { message: format!("writing {}: {error}", path.display()) }
+        let json =
+            serde_json::to_string_pretty(&report).map_err(|error| BenchError::GeneratedStamp {
+                message: format!("serializing stamp report: {error}"),
+            })?;
+        fs::write(path, json).map_err(|error| BenchError::GeneratedStamp {
+            message: format!("writing {}: {error}", path.display()),
         })?;
     }
 
