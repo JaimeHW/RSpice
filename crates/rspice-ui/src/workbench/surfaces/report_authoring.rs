@@ -1182,7 +1182,14 @@ fn page_settings(
         }
     }
     let t = Tokens::get(ui.ctx());
-    code_inspector_section(ui, "Page settings", None, |ui| {
+    let page_marker = document
+        .pages()
+        .iter()
+        .position(|candidate| candidate.id() == page_id)
+        .map(|index| page_marker(index, page.title()))
+        .unwrap_or("+");
+    let section_title = format!("Page settings · {page_marker}");
+    code_inspector_section(ui, &section_title, None, |ui| {
         egui::Frame::new()
             .inner_margin(egui::Margin {
                 left: 10,
@@ -1339,6 +1346,7 @@ fn preview(
     separators: PaneSeparators,
 ) {
     let t = Tokens::get(ui.ctx());
+    let summary_metrics = ReportSummaryMetrics::from_state(&app.state);
     let width = ui.available_width();
     let height = ui.available_height();
     let pane = egui::Frame::new()
@@ -1409,7 +1417,7 @@ fn preview(
                             ui.add_space(24.0);
                             section_heading(ui, marker, title, &description);
                             ui.add_space(28.0);
-                            summary_grid(ui, document, page, compact);
+                            summary_grid(ui, summary_metrics, compact);
                             if let Some(page) = page {
                                 ui.add_space(28.0);
                                 page_elements(ui, app, document, page, compact);
@@ -1475,23 +1483,117 @@ fn section_heading(ui: &mut Ui, marker: &str, title: &str, description: &str) {
     });
 }
 
-fn summary_grid(
-    ui: &mut Ui,
-    document: &ReportDocument,
-    page: Option<&crate::results::report_document::ReportPage>,
-    compact: bool,
-) {
-    let page_sections = page.map_or(0, |page| page.sections().len());
-    let page_blocks = page.map_or(0, |page| {
-        page.sections()
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReportJointYield {
+    passing: usize,
+    total: usize,
+}
+
+impl ReportJointYield {
+    fn from_results(results: &[crate::services::yield_manager::YieldResult]) -> Option<Self> {
+        let total = results.first()?.total_runs;
+        if total == 0
+            || results
+                .iter()
+                .any(|result| result.total_runs != total || result.trail.len() != total)
+        {
+            return None;
+        }
+        let passing = (0..total)
+            .filter(|index| results.iter().all(|result| result.trail[*index]))
+            .count();
+        Some(Self { passing, total })
+    }
+
+    fn percent(self) -> f64 {
+        self.passing as f64 / self.total as f64 * 100.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReportSummaryMetrics {
+    checks_passing: usize,
+    checks_total: usize,
+    joint_yield: Option<ReportJointYield>,
+    pvt_completed: Option<usize>,
+    pvt_total: Option<usize>,
+}
+
+impl ReportSummaryMetrics {
+    fn from_state(state: &AppState) -> Self {
+        let run = state.simulation.active_run();
+        let checks_total = state.workspace.specs.len();
+        let checks_passing = state
+            .workspace
+            .specs
             .iter()
-            .map(|section| section.blocks().len())
-            .sum()
-    });
+            .filter(|spec| {
+                run.and_then(|run| {
+                    run.analyses
+                        .iter()
+                        .rev()
+                        .filter(|analysis| analysis.success && analysis.provenance.is_some())
+                        .flat_map(|analysis| analysis.measurements.iter())
+                        .find(|measurement| {
+                            measurement.name.eq_ignore_ascii_case(&spec.measurement)
+                        })
+                        .and_then(|measurement| measurement.value)
+                        .filter(|value| value.is_finite())
+                })
+                .is_some_and(|value| spec.passes(value))
+            })
+            .count();
+
+        let joint_yield = state
+            .simulation
+            .yield_results_for_active_dataset()
+            .and_then(ReportJointYield::from_results);
+
+        let pvt_progress = run
+            .and_then(|run| {
+                run.analyses.iter().rev().find(|analysis| {
+                    analysis.analysis_type == crate::state::AnalysisType::Corner
+                        && analysis.success
+                        && analysis.provenance.is_some()
+                })
+            })
+            .and_then(|analysis| match analysis.family_metadata.as_ref() {
+                Some(crate::state::AnalysisResultFamilyMetadata::Corner {
+                    x_values,
+                    failed_corners,
+                    ..
+                }) if !x_values.is_empty() && *failed_corners <= x_values.len() => {
+                    Some((x_values.len() - *failed_corners, x_values.len()))
+                }
+                _ => None,
+            });
+
+        Self {
+            checks_passing,
+            checks_total,
+            joint_yield,
+            pvt_completed: pvt_progress.map(|(completed, _)| completed),
+            pvt_total: pvt_progress.map(|(_, total)| total),
+        }
+    }
+}
+
+fn summary_grid(ui: &mut Ui, metrics: ReportSummaryMetrics, compact: bool) {
+    let yield_value = metrics.joint_yield.map_or_else(
+        || "not run".to_owned(),
+        |joint| format!("{:.1}%", joint.percent()),
+    );
+    let pvt_value = metrics.pvt_completed.zip(metrics.pvt_total).map_or_else(
+        || "not run".to_owned(),
+        |(completed, total)| format!("{completed} / {total}"),
+    );
     let cells = [
-        (document.pages().len().to_string(), "document pages"),
-        (page_sections.to_string(), "selected-page sections"),
-        (page_blocks.to_string(), "selected-page blocks"),
+        (
+            format!("{} / {}", metrics.checks_passing, metrics.checks_total),
+            "configured checks passing",
+        ),
+        (yield_value, "Monte Carlo yield estimate"),
+        (pvt_value, "PVT points completed"),
     ];
     if compact {
         for (value, label) in cells {
@@ -4840,5 +4942,101 @@ mod tests {
                 .and_then(|document| document.pages().first())
                 .map(|page| page.id())
         );
+    }
+
+    #[test]
+    fn report_joint_yield_requires_aligned_all_spec_sample_trails() {
+        fn result(
+            measurement: &str,
+            trail: Vec<bool>,
+        ) -> crate::services::yield_manager::YieldResult {
+            let total_runs = trail.len();
+            let pass_count = trail.iter().filter(|passed| **passed).count();
+            crate::services::yield_manager::YieldResult {
+                spec: crate::services::yield_manager::YieldSpec::lower(measurement, 0.0, "V"),
+                total_runs,
+                pass_count,
+                fail_count: total_runs - pass_count,
+                yield_percent: pass_count as f64 / total_runs as f64 * 100.0,
+                stats: crate::services::yield_manager::DistributionStats::default(),
+                trail,
+                samples: vec![0.0; total_runs],
+            }
+        }
+
+        let aligned = [
+            result("V(out)", vec![true, true, false]),
+            result("I(V1)", vec![true, false, true]),
+        ];
+        assert_eq!(
+            ReportJointYield::from_results(&aligned),
+            Some(ReportJointYield {
+                passing: 1,
+                total: 3,
+            })
+        );
+
+        let misaligned = [
+            result("V(out)", vec![true, false]),
+            result("I(V1)", vec![true]),
+        ];
+        assert_eq!(ReportJointYield::from_results(&misaligned), None);
+    }
+
+    #[test]
+    fn report_summary_uses_verified_spec_and_exact_corner_evidence() {
+        fn provenance(seed: u8) -> crate::state::AnalysisResultProvenance {
+            crate::state::AnalysisResultProvenance::new(
+                crate::product::AnalysisInstanceId::new(),
+                crate::product::ObjectRevision::INITIAL,
+                crate::product::ContentDigest::from_bytes([seed; 32]),
+                Vec::new(),
+            )
+            .expect("test provenance is valid")
+        }
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.workspace.specs = vec![
+            crate::state::SpecEntry {
+                measurement: "gain".to_owned(),
+                min: Some(10.0),
+                max: None,
+                unit: "V/V".to_owned(),
+            },
+            crate::state::SpecEntry {
+                measurement: "bandwidth".to_owned(),
+                min: Some(1_000.0),
+                max: None,
+                unit: "Hz".to_owned(),
+            },
+        ];
+        let checks = crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Ac, "AC")
+            .with_measurements(vec![
+                rspice_core::MeasureResult::success("gain", 12.0),
+                rspice_core::MeasureResult::success("bandwidth", 900.0),
+            ])
+            .with_provenance(provenance(0x31));
+        let corners =
+            crate::state::AnalysisResult::new(2, crate::state::AnalysisType::Corner, "PVT")
+                .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::Corner {
+                    x_values: vec![0.0, 1.0, 2.0],
+                    x_label: "corner".to_owned(),
+                    x_unit: String::new(),
+                    temperatures_c: vec![-40.0, 27.0, 125.0],
+                    corner_labels: vec!["ss".to_owned(), "tt".to_owned(), "ff".to_owned()],
+                    failed_corners: 1,
+                })
+                .with_provenance(provenance(0x32));
+        let mut run = crate::state::SimulationRun::new(1);
+        run.add_analysis(checks);
+        run.add_analysis(corners);
+        app.state.simulation.runs = vec![run];
+        app.state.simulation.active_run_idx = Some(0);
+
+        let metrics = ReportSummaryMetrics::from_state(&app.state);
+        assert_eq!(metrics.checks_passing, 1);
+        assert_eq!(metrics.checks_total, 2);
+        assert_eq!(metrics.pvt_completed, Some(2));
+        assert_eq!(metrics.pvt_total, Some(3));
     }
 }
