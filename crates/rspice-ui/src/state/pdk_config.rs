@@ -34,15 +34,59 @@ use std::path::PathBuf;
 mod accessors;
 mod discovered_file;
 mod discovery;
+mod display_profile;
 mod errors;
 mod library_path;
 mod paths;
 mod persistence;
 mod recent;
+mod technology_callback;
+mod technology_diff;
+mod technology_package;
 
 pub use discovered_file::DiscoveredFile;
+pub use display_profile::{
+    PdkDisplayFillStyle, PdkDisplayLayerStyle, PdkDisplayProfileAuditAction,
+    PdkDisplayProfileAuditReceipt, PdkDisplayProfileBinding, PdkDisplayProfileDraft,
+    PdkDisplayProfileRegistry, PdkDisplayProfileRevision, PdkDisplayProfileScope,
+};
 pub use errors::ConfigError;
 pub use library_path::LibraryPathEntry;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use persistence::{
+    BrowserPdkConfigReceipt, BrowserPdkConfigRestore, BrowserPdkStorageDurability,
+    BrowserPdkStorageStatus, start_browser_pdk_config_load, start_browser_pdk_config_save,
+};
+pub use technology_callback::{
+    MAX_PROJECT_PDK_CALLBACK_RECEIPTS, PDK_CALLBACK_EXECUTION_RECEIPT_SCHEMA_VERSION,
+    PROJECT_PDK_CALLBACK_RECEIPT_SCHEMA_VERSION, PdkCallbackError, PdkCallbackExecutionInput,
+    PdkCallbackExecutionReceipt, ProjectPdkCallbackReceipt,
+};
+#[cfg(test)]
+pub(crate) use technology_diff::tests::fixture_revision_archives as signed_technology_diff_test_fixture;
+pub use technology_diff::{
+    PdkTechnologyDiffArea, PdkTechnologyDiffEntry, PdkTechnologyDiffError, PdkTechnologyDiffImpact,
+    PdkTechnologyDiffKind, PdkTechnologyRevisionDiff,
+};
+#[cfg(test)]
+pub(crate) use technology_package::tests::fixture_archive as signed_technology_test_fixture;
+#[cfg(test)]
+pub(crate) use technology_package::tests::fixture_archive_with_veriloga as signed_veriloga_technology_test_fixture;
+pub use technology_package::{
+    MAX_PDK_ARCHIVE_BYTES, MAX_PDK_ARTIFACT_BYTES, MAX_PDK_ARTIFACTS,
+    MAX_PDK_CALLBACK_ARTIFACT_BYTES, MAX_PDK_CALLBACK_CONTRACTS, MAX_PDK_TOTAL_ARTIFACT_BYTES,
+    PDK_CALLBACK_ABI_VERSION, PdkAdministrativeAuthority, PdkCallbackCapability,
+    PdkCallbackContract, PdkExecutionTarget, PdkExtractionQuantity, PdkModelDomain,
+    PdkModelProcess, PdkModelProcessContract, PdkModelSectionSource, PdkPublisherTrustStore,
+    PdkTechnologyArtifactKind, PdkTechnologyAuditAction, PdkTechnologyAuditReceipt,
+    PdkTechnologyBinding, PdkTechnologyLayer, PdkTechnologyRegistry, PdkTrustAuditAction,
+    PdkTrustAuditReceipt, PdkVerilogASourceContract, TrustedPdkPublisherKey,
+    ValidatedPdkTechnologyPackage,
+};
+pub(crate) use technology_package::{
+    SealedPdkModelProcessBinding, SealedPdkModelSources, SealedPdkVerilogAArtifact,
+    SealedPdkVerilogABinding,
+};
 // =============================================================================
 // Constants
 // =============================================================================
@@ -65,6 +109,7 @@ pub const MAX_SCAN_DEPTH: usize = 10;
 /// Provides persistent storage and automatic model file discovery
 /// matching Cadence Spectre's model library management workflow.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PdkConfig {
     /// Configured library search paths
     pub library_paths: Vec<LibraryPathEntry>,
@@ -84,6 +129,25 @@ pub struct PdkConfig {
     /// substituting a guessed manufacturing grid.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout_database_unit: Option<crate::quantity::LayoutDatabaseUnit>,
+
+    /// Signed technology-package revisions, exact active binding, and
+    /// append-only administrative receipts. Persisted archives regain no
+    /// runtime authority until revalidated against the current trust store.
+    #[serde(default)]
+    pub technology_registry: PdkTechnologyRegistry,
+
+    /// Organization- or administrator-provisioned public publisher keys.
+    /// These are verification keys only; private signing material is never
+    /// accepted or persisted by RSpice.
+    #[serde(default)]
+    pub publisher_trust_store: PdkPublisherTrustStore,
+
+    /// Personal-device display overlays. Every immutable revision is bound to
+    /// an exact signed technology manifest and has its own hash-chained audit.
+    /// Project and organization scopes remain fail-closed until their
+    /// repository and policy authorities exist.
+    #[serde(default)]
+    pub display_profile_registry: PdkDisplayProfileRegistry,
 
     /// Discovered files from last scan (not persisted by default)
     #[serde(skip)]
@@ -106,6 +170,9 @@ impl Default for PdkConfig {
             recent_files: Vec::new(),
             max_recent_files: default_max_recent(),
             layout_database_unit: None,
+            technology_registry: PdkTechnologyRegistry::default(),
+            publisher_trust_store: PdkPublisherTrustStore::default(),
+            display_profile_registry: PdkDisplayProfileRegistry::default(),
             discovered_files: Vec::new(),
             scan_errors: Vec::new(),
         }
