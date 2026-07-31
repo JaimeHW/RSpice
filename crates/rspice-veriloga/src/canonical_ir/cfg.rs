@@ -229,7 +229,9 @@ pub enum CfgValueKind {
     ///
     /// Its shape must be a superset of the input's, which is what an operand
     /// reaching a merge or a wider consumer needs.
-    LaneWiden { input: ValueId },
+    LaneWiden {
+        input: ValueId,
+    },
     /// Elementwise over two packed values that share this value's shape.
     /// Only [`CfgBinaryOp::Add`] and [`CfgBinaryOp::Sub`] appear here.
     LaneBinary {
@@ -248,7 +250,10 @@ pub enum CfgValueKind {
     },
     /// One lane of a packed value, named by the unknown rather than by its
     /// position, so a reader does not have to know the shape's layout.
-    LaneExtract { input: ValueId, lane: u32 },
+    LaneExtract {
+        input: ValueId,
+        lane: u32,
+    },
 
     /// A value a coarser invalidation stage computed and cached.
     ///
@@ -256,7 +261,9 @@ pub enum CfgValueKind {
     /// purpose: within a stage the value has no derivation, which is exactly
     /// what makes the stage a function of its own inputs and cacheable
     /// independently.
-    Staged { slot: u32 },
+    Staged {
+        slot: u32,
+    },
 }
 
 impl CfgValueKind {
@@ -411,7 +418,10 @@ impl CfgFunction {
 
     /// The lane set of `value`, or `None` if it is an ordinary scalar.
     pub fn lanes_of(&self, value: ValueId) -> Option<&[u32]> {
-        self.value(value).value_type.shape().map(|id| self.shape(id))
+        self.value(value)
+            .value_type
+            .shape()
+            .map(|id| self.shape(id))
     }
 
     /// Where `lane` sits inside `value`'s shape.

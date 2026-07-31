@@ -519,10 +519,8 @@ impl ModelPlan {
         }
         let metrics = measurements.metrics_mut();
         metrics.derivative_seed_count = crate::metrics::usize_to_u64(seeds.len());
-        metrics.scalar_derivative_value_count =
-            crate::metrics::usize_to_u64(scalar_derivatives);
-        metrics.packed_derivative_value_count =
-            crate::metrics::usize_to_u64(packed_derivatives);
+        metrics.scalar_derivative_value_count = crate::metrics::usize_to_u64(scalar_derivatives);
+        metrics.packed_derivative_value_count = crate::metrics::usize_to_u64(packed_derivatives);
         metrics.derivative_lane_entry_count = crate::metrics::usize_to_u64(lane_entries);
         metrics.max_derivative_width = crate::metrics::usize_to_u64(max_width);
         record_phase(
@@ -563,8 +561,17 @@ impl ModelPlan {
             structural_guards.iter().fold(0_u64, |total, guard| {
                 total.saturating_add(crate::metrics::usize_to_u64(guard.newton_values))
             });
-        let stages = split(&function, &schedule, &outputs)
-            .map_err(|error| unsupported(artifact, format!("invalidation split: {error}")))?;
+        let stages = match split(&function, &schedule, &outputs) {
+            Ok(stages) => stages,
+            Err(_) => {
+                // Staging is an optional caching optimization. The unsplit
+                // function remains the authoritative semantic representation,
+                // so an unsafe control-flow projection must disable the split
+                // rather than reject an otherwise supported production model.
+                measurements.metrics_mut().invalidation_split_fallback_count += 1;
+                Vec::new()
+            }
+        };
         let (stages, slots) = if worth_splitting(&function, &stages) {
             let slots = stages
                 .iter()
@@ -1947,9 +1954,9 @@ impl ModelPlan {
         }
         let reactive = self.reactive.width();
         if reactive > 0 {
-            let _ = write!(
+            let _ = writeln!(
                 extensions.instance_fields,
-                "    pub(crate) canonical_reactive: Box<[f64; {reactive}]>,\n"
+                "    pub(crate) canonical_reactive: Box<[f64; {reactive}]>,"
             );
             extensions
                 .clone_fields
@@ -1972,9 +1979,9 @@ impl ModelPlan {
             extensions
                 .instance_fields
                 .push_str("    pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,\n");
-            extensions
-                .clone_fields
-                .push_str("            canonical_model_values: self.canonical_model_values.clone(),\n");
+            extensions.clone_fields.push_str(
+                "            canonical_model_values: self.canonical_model_values.clone(),\n",
+            );
             extensions
                 .new_initializers
                 .push_str("            canonical_model_values: None,\n");
@@ -2054,9 +2061,9 @@ impl ModelPlan {
              \x20   }\n\
              }\n\n",
         );
-        let _ = write!(
+        let _ = writeln!(
             extensions.instance_fields,
-            "    pub(crate) canonical_limit: Box<CanonicalLimitState<{count}>>,\n"
+            "    pub(crate) canonical_limit: Box<CanonicalLimitState<{count}>>,"
         );
         extensions
             .clone_fields
@@ -2173,14 +2180,12 @@ fn specialize_repeated_static_guards(
             .then_with(|| left_slot.cmp(right_slot))
     });
 
-    let byte_limit = baseline_body
-        .len()
-        .saturating_add(
-            baseline_body
-                .len()
-                .saturating_mul(MAX_SOURCE_GROWTH_PERCENT)
-                / 100,
-        );
+    let byte_limit = baseline_body.len().saturating_add(
+        baseline_body
+            .len()
+            .saturating_mul(MAX_SOURCE_GROWTH_PERCENT)
+            / 100,
+    );
     for (slot, branches) in candidates.into_iter().take(MAX_CANDIDATES) {
         let (true_body, true_names) =
             emit_static_guard_variant(function, outputs, slot, true, control)?;
@@ -2250,9 +2255,8 @@ fn emit_static_guard_variant(
     retain_reachable_blocks(&mut specialized);
     let mut outputs = outputs.to_vec();
     collapse_single_predecessor_parameters(&mut specialized, &mut outputs);
-    let (specialized, outputs) =
-        optimize_with_control(&specialized, &outputs, control)
-            .map_err(StructuralSpecializationError::Cancelled)?;
+    let (specialized, outputs) = optimize_with_control(&specialized, &outputs, control)
+        .map_err(StructuralSpecializationError::Cancelled)?;
     emit_body(&specialized, &outputs, &bindings()).map_err(StructuralSpecializationError::Emit)
 }
 
@@ -2972,14 +2976,11 @@ fn reject_unsupported_kinds(
     function: &CfgFunction,
 ) -> Result<(), RustBackendError> {
     for value in &function.values {
-        match &value.kind {
-            CfgValueKind::BranchFlow(branch) => {
-                return Err(unsupported(
-                    artifact,
-                    format!("an unresolved flow probe on {branch}"),
-                ));
-            }
-            _ => {}
+        if let CfgValueKind::BranchFlow(branch) = &value.kind {
+            return Err(unsupported(
+                artifact,
+                format!("an unresolved flow probe on {branch}"),
+            ));
         }
     }
     if artifact

@@ -915,7 +915,7 @@ pub fn split(
 
     let mut stages = Vec::new();
     for class in InvalidationClass::ALL {
-        if !schedule.values.iter().any(|held| *held == class) {
+        if !schedule.values.contains(&class) {
             continue;
         }
         stages.push(build_stage(
@@ -1762,10 +1762,7 @@ fn loop_headers(blocks: &[CfgBlock], entry: BlockId) -> HashSet<BlockId> {
 }
 
 /// What a value depends on before anything it reads is considered.
-fn leaf_class(
-    kind: &CfgValueKind,
-    parameter_scopes: &[ParameterScope],
-) -> InvalidationClass {
+fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> InvalidationClass {
     match kind {
         CfgValueKind::NodePotential(_)
         | CfgValueKind::BranchFlow(_)

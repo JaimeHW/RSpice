@@ -620,7 +620,10 @@ fn generate_devices(
     filter: Option<&str>,
     progress: bool,
     requested_jobs: Option<usize>,
-) -> BuiltinResult<(Vec<GeneratedRustDevice>, Vec<GeneratedBuiltinManifestDevice>)> {
+) -> BuiltinResult<(
+    Vec<GeneratedRustDevice>,
+    Vec<GeneratedBuiltinManifestDevice>,
+)> {
     let model_root = model_root
         .canonicalize()
         .unwrap_or_else(|_| model_root.to_path_buf());
@@ -740,7 +743,9 @@ fn generated_workspace_resources(
         .into_iter()
         .chain(reactive_packed)
         .try_fold(0u128, |total, bytes| total.checked_add(bytes))
-        .and_then(|bytes| bytes.checked_mul(super::state_file::MAX_CACHED_SCRATCH_WORKSPACES as u128))
+        .and_then(|bytes| {
+            bytes.checked_mul(super::state_file::MAX_CACHED_SCRATCH_WORKSPACES as u128)
+        })
         .ok_or("generated packed workspace resource estimate overflowed u128")?;
     let stamp_state_payload = stamp_state_payload_bytes(ddt_state_count, idt_state_count);
     let stamp_state_heap_allocations = u64::from(stamp_state_payload != 0);
@@ -1216,7 +1221,10 @@ fn generate_devices_with_stack(
     progress: bool,
     jobs: Option<usize>,
 ) -> Result<
-    (Vec<GeneratedRustDevice>, Vec<GeneratedBuiltinManifestDevice>),
+    (
+        Vec<GeneratedRustDevice>,
+        Vec<GeneratedBuiltinManifestDevice>,
+    ),
     Box<dyn std::error::Error + Send + Sync>,
 > {
     std::thread::Builder::new()

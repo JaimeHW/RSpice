@@ -796,7 +796,11 @@ impl Emitter<'_> {
                 self.operand(*input)
             ),
             CfgValueKind::DdtScale => format!("{}()", bindings.ddt_scale),
-            CfgValueKind::Idt { operator, input, ic } => format!(
+            CfgValueKind::Idt {
+                operator,
+                input,
+                ic,
+            } => format!(
                 "{}({}, {}, {})",
                 bindings.idt,
                 usize::from(*operator),
@@ -859,15 +863,19 @@ impl Emitter<'_> {
                 }
             }
             CfgValueKind::LaneBinary { op, left, right } => {
-                let symbol = if matches!(op, CfgBinaryOp::Sub) { "-" } else { "+" };
-                format!(
-                    "{} {symbol} {}",
-                    self.operand(*left),
-                    self.operand(*right)
-                )
+                let symbol = if matches!(op, CfgBinaryOp::Sub) {
+                    "-"
+                } else {
+                    "+"
+                };
+                format!("{} {symbol} {}", self.operand(*left), self.operand(*right))
             }
             CfgValueKind::LaneScalar { op, input, scalar } => {
-                let symbol = if matches!(op, CfgBinaryOp::Div) { "/" } else { "*" };
+                let symbol = if matches!(op, CfgBinaryOp::Div) {
+                    "/"
+                } else {
+                    "*"
+                };
                 format!(
                     "{} {symbol} {}",
                     self.operand(*input),

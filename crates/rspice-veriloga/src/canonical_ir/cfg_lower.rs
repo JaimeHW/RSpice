@@ -322,11 +322,7 @@ impl<'a> CfgLowerer<'a> {
         match builder.finish_with_outputs(entry, &outputs) {
             Ok((function, outputs)) => {
                 let (residuals, noise) = outputs.split_at(self.hir.contributions.len());
-                Ok((
-                    function,
-                    residuals.to_vec(),
-                    resolve_noise(pending, noise),
-                ))
+                Ok((function, residuals.to_vec(), resolve_noise(pending, noise)))
             }
             Err(error) => Err(vec![IrDiagnostic::global_error(
                 CompilerPhase::CfgLowering,
@@ -632,7 +628,11 @@ impl<'a> CfgLowerer<'a> {
         let (psd, exponent, table) = match kind {
             CanonicalNoiseSourceKind::White => {
                 let power = self.expr(operands[0]);
-                (self.binary(CfgBinaryOp::Mul, squared, power), None, Vec::new())
+                (
+                    self.binary(CfgBinaryOp::Mul, squared, power),
+                    None,
+                    Vec::new(),
+                )
             }
             CanonicalNoiseSourceKind::Flicker => {
                 let power = self.expr(operands[0]);
@@ -1667,8 +1667,11 @@ impl<'a> CfgLowerer<'a> {
     }
 
     fn warn(&mut self, span: SourceSpanRef, what: String) {
-        self.diagnostics
-            .push(IrDiagnostic::warning(CompilerPhase::CfgLowering, what, span));
+        self.diagnostics.push(IrDiagnostic::warning(
+            CompilerPhase::CfgLowering,
+            what,
+            span,
+        ));
     }
 }
 

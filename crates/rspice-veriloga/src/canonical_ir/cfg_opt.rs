@@ -619,7 +619,9 @@ impl Optimizer {
         for (index, block) in self.blocks.iter_mut().enumerate() {
             retain_by(&kept[index], &mut block.params);
             match &mut block.terminator {
-                CfgTerminator::Jump { target, args } => retain_by(&kept[usize::from(*target)], args),
+                CfgTerminator::Jump { target, args } => {
+                    retain_by(&kept[usize::from(*target)], args)
+                }
                 CfgTerminator::Branch {
                     then_target,
                     then_args,

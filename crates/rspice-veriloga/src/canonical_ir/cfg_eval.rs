@@ -19,9 +19,7 @@
 use smol_str::SmolStr;
 use std::collections::{HashMap, HashSet};
 
-use super::cfg::{
-    CfgBinaryOp, CfgFunction, CfgTerminator, CfgUnaryOp, CfgValueKind, is_leaf_kind,
-};
+use super::cfg::{CfgBinaryOp, CfgFunction, CfgTerminator, CfgUnaryOp, CfgValueKind, is_leaf_kind};
 use super::{BlockId, ValueId};
 
 /// The arithmetic a CFG needs from its scalar type.
@@ -544,8 +542,9 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             // The limiter body is still lowered, still differentiated, and still
             // emitted: what it produces is the correction lane, and that is
             // checked where it is applied rather than here.
-            CfgValueKind::Limit { proposed, .. }
-            | CfgValueKind::LimitPrevious { proposed, .. } => self.read(proposed)?,
+            CfgValueKind::Limit { proposed, .. } | CfgValueKind::LimitPrevious { proposed, .. } => {
+                self.read(proposed)?
+            }
             // Reading a lane the derivative pass has not created. A `ddx` that
             // survives to evaluation is an un-differentiated function, and the
             // honest answer is that its Jacobian entry does not exist yet.
