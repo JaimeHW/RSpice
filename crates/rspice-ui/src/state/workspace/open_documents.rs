@@ -604,6 +604,7 @@ impl ProjectWorkspace {
         self.project_sources_dirty = false;
         self.project_metadata_dirty = false;
         self.report_documents_dirty = false;
+        self.visualization_documents_dirty = false;
         self.hardcopy_setups_dirty = false;
         self.hardcopy_receipts_dirty = false;
         self.project_print_mappings_dirty = false;
@@ -620,6 +621,7 @@ impl ProjectWorkspace {
             || self.project_sources_dirty
             || self.project_metadata_dirty
             || self.report_documents_dirty
+            || self.visualization_documents_dirty
             || self.hardcopy_setups_dirty
             || self.hardcopy_receipts_dirty
             || self.project_print_mappings_dirty
@@ -733,12 +735,55 @@ impl ProjectWorkspace {
         &mut self,
         binding: ProjectTechnologyBinding,
     ) -> Result<ObjectRevision, ProjectDescriptorError> {
+        self.validate_physical_layout_technology_change(&binding)?;
         let before = self.project.revision();
         let revision = self.project.attach_technology(binding)?;
         if revision != before {
             self.project_metadata_dirty = true;
         }
         Ok(revision)
+    }
+
+    pub fn attach_technology_audited(
+        &mut self,
+        binding: ProjectTechnologyBinding,
+        context: ProjectTechnologyChangeContext,
+    ) -> Result<(ObjectRevision, ProjectTechnologyChangeReceipt), ProjectDescriptorError> {
+        self.validate_physical_layout_technology_change(&binding)?;
+        let before = self.project.revision();
+        let (revision, receipt) = self.project.attach_technology_audited(binding, context)?;
+        if revision != before {
+            self.project_metadata_dirty = true;
+        }
+        Ok((revision, receipt))
+    }
+
+    fn validate_physical_layout_technology_change(
+        &self,
+        binding: &ProjectTechnologyBinding,
+    ) -> Result<(), ProjectDescriptorError> {
+        if self.physical_layout_documents().is_empty() {
+            return Ok(());
+        }
+        let pin = binding.signed_package();
+        for document in self.physical_layout_documents().values() {
+            let technology = document.technology();
+            let matches = pin.is_some_and(|pin| {
+                technology.package_id() == pin.package_id()
+                    && technology.revision() == pin.revision()
+                    && technology.manifest_digest() == pin.manifest_digest()
+                    && technology.archive_digest() == pin.archive_digest()
+                    && technology.stack_id() == pin.stack_name()
+            });
+            if !matches {
+                return Err(
+                    ProjectDescriptorError::TechnologyConflictsWithPhysicalLayout {
+                        owner: document.owner().display_path(),
+                    },
+                );
+            }
+        }
+        Ok(())
     }
 
     pub fn set_netlist_source_dirty(&mut self, dirty: bool) {
