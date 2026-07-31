@@ -301,6 +301,32 @@ pub(crate) fn open(app: &mut RSpiceApp) {
     }
 }
 
+pub(crate) fn can_open(state: &AppState) -> bool {
+    state.project_lifecycle.project_open
+}
+
+pub(crate) fn can_save_document(state: &AppState) -> bool {
+    state.workbench.current_route().surface_id() == SurfaceId::ReportAuthoring
+        && report_mutation_allowed(state)
+        && active_document(state).is_some()
+        && state.workspace.report_documents_dirty
+}
+
+pub(crate) fn can_add_page(state: &AppState) -> bool {
+    state.workbench.current_route().surface_id() == SurfaceId::ReportAuthoring
+        && report_mutation_allowed(state)
+        && active_document(state).is_some()
+}
+
+pub(crate) fn can_edit_page_properties(state: &AppState) -> bool {
+    if state.workbench.current_route().surface_id() != SurfaceId::ReportAuthoring
+        || !report_mutation_allowed(state)
+    {
+        return false;
+    }
+    active_document(state).is_some_and(|document| selected_page_id(state, document).is_some())
+}
+
 pub(crate) fn save_document(app: &mut RSpiceApp) {
     if !report_mutation_allowed(&app.state) {
         app.state
@@ -4293,6 +4319,54 @@ mod tests {
         );
         assert_eq!(ComposerLayout::resolve(820.0), ComposerLayout::Stacked);
         assert_eq!(ComposerLayout::resolve(390.0), ComposerLayout::Stacked);
+    }
+
+    #[test]
+    fn report_commands_open_for_review_and_gate_mutations_by_exact_authority() {
+        let mut app = RSpiceApp::test_instance();
+        assert!(
+            crate::workbench::commands::vocabulary::command_catalog()
+                .any(|command| command == Command::ReportAuthoring)
+        );
+        for contextual_command in [
+            Command::SaveReportDocument,
+            Command::AddReportPage,
+            Command::ReportPageProperties,
+        ] {
+            assert!(
+                !crate::workbench::commands::vocabulary::command_catalog()
+                    .any(|command| command == contextual_command)
+            );
+        }
+        assert!(Command::ReportAuthoring.is_enabled(&app));
+        assert!(!Command::SaveReportDocument.is_enabled(&app));
+        assert!(!Command::AddReportPage.is_enabled(&app));
+        assert!(!Command::ReportPageProperties.is_enabled(&app));
+
+        Command::ReportAuthoring.execute(&mut app);
+        assert_eq!(
+            app.state.workbench.current_route().surface_id(),
+            SurfaceId::ReportAuthoring
+        );
+
+        app.state.workbench.report_authoring.create_document_title =
+            "Verification report".to_owned();
+        commit_create_document(&mut app);
+        assert!(Command::SaveReportDocument.is_enabled(&app));
+        assert!(Command::AddReportPage.is_enabled(&app));
+        assert!(Command::ReportPageProperties.is_enabled(&app));
+
+        app.state.workbench.safe_mode.activate(
+            crate::workbench::state::LocalSafeModeOptions {
+                open_project_read_only: true,
+                ..crate::workbench::state::LocalSafeModeOptions::default()
+            },
+            "report command authority test".to_owned(),
+        );
+        assert!(Command::ReportAuthoring.is_enabled(&app));
+        assert!(!Command::SaveReportDocument.is_enabled(&app));
+        assert!(!Command::AddReportPage.is_enabled(&app));
+        assert!(!Command::ReportPageProperties.is_enabled(&app));
     }
 
     #[test]

@@ -556,7 +556,6 @@ impl Command {
                 | Self::NextWorkspace
                 | Self::ToggleConsoleMaximized
                 | Self::ClearConsole
-                | Self::ReportAuthoring
                 | Self::SaveReportDocument
                 | Self::AddReportPage
                 | Self::ReportPageProperties

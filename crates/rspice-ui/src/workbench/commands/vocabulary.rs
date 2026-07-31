@@ -995,6 +995,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::License,
     Command::SpecialistToolBrowser,
     Command::VisualizationStudio,
+    Command::ReportAuthoring,
     Command::AddVisualizationPane,
     Command::VisualizationTraceManager,
     Command::VisualizationCursorManager,

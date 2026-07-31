@@ -666,13 +666,14 @@ impl Command {
                     })
             }
             Self::VisualizationStudio => state.project_lifecycle.project_open,
-            // The source-authoring executor is intentionally dormant until
-            // exact plot-artwork publication and release handoff complete the
-            // mockup's full Report Authoring contract.
-            Self::ReportAuthoring
-            | Self::SaveReportDocument
-            | Self::AddReportPage
-            | Self::ReportPageProperties => false,
+            Self::ReportAuthoring => super::surfaces::report_authoring::can_open(state),
+            Self::SaveReportDocument => {
+                super::surfaces::report_authoring::can_save_document(state)
+            }
+            Self::AddReportPage => super::surfaces::report_authoring::can_add_page(state),
+            Self::ReportPageProperties => {
+                super::surfaces::report_authoring::can_edit_page_properties(state)
+            }
             Self::AddVisualizationPane
             | Self::VisualizationTraceManager
             | Self::VisualizationCursorManager
