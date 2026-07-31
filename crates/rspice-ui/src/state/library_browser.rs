@@ -26,6 +26,7 @@
 
 mod cell;
 mod library;
+mod locks;
 mod manager;
 mod placement;
 mod primitives;
@@ -33,6 +34,10 @@ mod view;
 
 pub use cell::Cell;
 pub use library::Library;
+pub use locks::{
+    ProjectLibraryEditLock, ProjectLibraryEditLockScope, ProjectLibraryLockAuthority,
+    ProjectLibraryLockSnapshot,
+};
 pub use manager::LibraryManager;
 pub use placement::{LibraryCellPlacementCandidate, library_cell_placement_candidates};
 pub use view::{View, ViewType};

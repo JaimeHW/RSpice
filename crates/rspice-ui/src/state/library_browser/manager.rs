@@ -28,9 +28,11 @@ pub struct LibraryManager {
     pub filter_text: String,
     /// Whether to show read-only libraries
     pub show_read_only: bool,
-    /// Content revision for display caches — bumped on every mutation
-    /// (including pessimistically on `get_library_mut`).
-    #[serde(skip)]
+    /// Governed persisted catalog revision. Engineering mutations advance it;
+    /// runtime presentation projections and persistence sanitization do not.
+    /// `get_library_mut` advances pessimistically because callers receive
+    /// unrestricted access to persisted engineering content.
+    #[serde(default)]
     revision: u64,
     /// Column the keyboard owns in the browser (↑↓ move, ←→ hop) —
     /// runtime UI state, follows mouse clicks too.
@@ -295,5 +297,164 @@ impl LibraryManager {
         self.selected_cell = None;
         self.selected_view = None;
         self.revision = self.revision.wrapping_add(1);
+    }
+
+    /// Replace the complete governed library catalog from a validated
+    /// publication snapshot while retaining this session's presentation
+    /// preferences and advancing, never rewinding, its content revision.
+    pub(crate) fn replace_catalog_from_snapshot(&mut self, snapshot: &Self) -> Result<u64, String> {
+        let revision = self
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| "project library content revision is exhausted".to_owned())?;
+        self.libraries = snapshot.libraries.clone();
+        self.selected_library = snapshot.selected_library.clone();
+        self.selected_cell = snapshot.selected_cell.clone();
+        self.selected_view = snapshot.selected_view.clone();
+        self.revision = revision;
+        Ok(revision)
+    }
+
+    /// Clear runtime dirty markers without claiming an engineering catalog
+    /// mutation. Save acceptance must not advance the persisted content
+    /// revision merely because editor presentation state became clean.
+    pub(crate) fn mark_all_views_clean_runtime(&mut self) {
+        for library in self.libraries.values_mut() {
+            for cell in library.cells.values_mut() {
+                for view in cell.views.values_mut() {
+                    view.modified = false;
+                }
+            }
+        }
+    }
+
+    /// Clear one view's runtime dirty marker without advancing the governed
+    /// library revision.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn mark_view_clean_runtime(
+        &mut self,
+        library: &str,
+        cell: &str,
+        view: &str,
+    ) -> bool {
+        self.set_view_modified_runtime(library, cell, view, false)
+    }
+
+    /// Project one document-registry dirty bit into presentation state
+    /// without claiming a library content mutation.
+    pub(crate) fn set_view_modified_runtime(
+        &mut self,
+        library: &str,
+        cell: &str,
+        view: &str,
+        modified: bool,
+    ) -> bool {
+        let Some(view) = self
+            .libraries
+            .get_mut(library)
+            .and_then(|library| library.cells.get_mut(cell))
+            .and_then(|cell| cell.views.get_mut(view))
+        else {
+            return false;
+        };
+        view.modified = modified;
+        true
+    }
+
+    /// Strip runtime-only view presentation from a serialization clone while
+    /// preserving the exact governed catalog revision.
+    pub(crate) fn sanitize_views_for_persistence(&mut self) {
+        self.mark_all_views_clean_runtime();
+        for library in self.libraries.values_mut() {
+            for cell in library.cells.values_mut() {
+                for view in cell.views.values_mut() {
+                    view.is_open = false;
+                    view.file_path = None;
+                    view.modified_time = None;
+                }
+            }
+        }
+    }
+
+    /// Overlay one cell-view document from an already-snapshotted working
+    /// catalog without manufacturing a new revision while assembling a
+    /// partial-save candidate.
+    ///
+    /// The source snapshot is the authority for the observed revision. Parent
+    /// library/cell records are copied only when the document does not yet
+    /// exist in the accepted target. A generated symbol owned by a schematic
+    /// document is synchronized as part of the same atomic overlay.
+    pub(crate) fn overlay_cell_view_document_from_snapshot(
+        &mut self,
+        source: &Self,
+        library_name: &str,
+        cell_name: &str,
+        view_name: &str,
+    ) -> Result<(), String> {
+        if self.revision > source.revision {
+            return Err(
+                "accepted library revision is newer than the working document snapshot".to_owned(),
+            );
+        }
+
+        let source_library = source
+            .libraries
+            .get(library_name)
+            .ok_or_else(|| format!("missing library '{library_name}'"))?;
+        let source_cell = source_library
+            .cells
+            .get(cell_name)
+            .ok_or_else(|| format!("missing cell '{cell_name}'"))?;
+        let source_view = source_cell
+            .views
+            .get(view_name)
+            .ok_or_else(|| format!("missing view '{view_name}'"))?
+            .clone();
+        let generated_symbol = view_name.eq_ignore_ascii_case("schematic").then(|| {
+            source_cell
+                .views
+                .get("symbol")
+                .filter(|view| view.metadata.contains_key("generated"))
+                .cloned()
+        });
+
+        if !self.libraries.contains_key(library_name) {
+            let mut library = source_library.clone();
+            library.cells.clear();
+            self.libraries.insert(library_name.to_owned(), library);
+        }
+        let target_library = self
+            .libraries
+            .get_mut(library_name)
+            .expect("library was inserted above");
+        if !target_library.cells.contains_key(cell_name) {
+            let mut cell = source_cell.clone();
+            cell.views.clear();
+            target_library.cells.insert(cell_name.to_owned(), cell);
+        }
+        let target_cell = target_library
+            .cells
+            .get_mut(cell_name)
+            .expect("cell was inserted above");
+        target_cell.views.insert(view_name.to_owned(), source_view);
+
+        if let Some(generated_symbol) = generated_symbol {
+            match generated_symbol {
+                Some(symbol) => {
+                    target_cell.views.insert("symbol".to_owned(), symbol);
+                }
+                None if target_cell
+                    .views
+                    .get("symbol")
+                    .is_some_and(|view| view.metadata.contains_key("generated")) =>
+                {
+                    target_cell.views.remove("symbol");
+                }
+                None => {}
+            }
+        }
+
+        self.revision = source.revision;
+        Ok(())
     }
 }
