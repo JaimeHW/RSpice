@@ -639,7 +639,6 @@ fn next_unit(state: &mut u64) -> f64 {
 ///
 /// Bounds are respected including their exclusivity, excluded points are stepped
 /// off, and an integer parameter stays integral.
-#[allow(dead_code)]
 fn draw_parameter(slot: &MirParameterSlot, state: &mut u64) -> f64 {
     let default = slot.default.unwrap_or(0.0);
     let mut value = default * (0.5 + 1.5 * next_unit(state));
@@ -699,12 +698,19 @@ fn draw_parameter(slot: &MirParameterSlot, state: &mut u64) -> f64 {
 /// parameters — is the part that was fiddly to get right, and it is what that
 /// work will build on.
 fn random_bias_point(artifact: &CanonicalIrArtifact, state: &mut u64) -> BiasPoint {
+    let draw = std::env::var_os("RSPICE_DRAW_PARAMETERS").is_some();
     BiasPoint {
         parameters: artifact
             .mir
             .parameters
             .iter()
-            .map(|parameter| parameter.default.unwrap_or(0.0))
+            .map(|parameter| {
+                if draw {
+                    draw_parameter(parameter, state)
+                } else {
+                    parameter.default.unwrap_or(0.0)
+                }
+            })
             .collect(),
         node_potentials: (0..artifact.mir.nodes.len())
             .map(|_| -0.55 + next_unit(state) * 1.4)
@@ -1045,6 +1051,11 @@ fn the_complex_oracle_preserves_the_value_it_perturbs() {
 
         let mut state = seed_for(&module);
         for point in 0..3 {
+            if std::env::var_os("RSPICE_DRAW_PARAMETERS").is_some() {
+                eprintln!("[probe] {module} point {point}");
+                use std::io::Write as _;
+                let _ = std::io::stderr().flush();
+            }
             let bias = random_bias_point(&artifact, &mut state);
             let Ok(snapshot) = evaluate_cfg(&function.function, &inputs(&bias)) else {
                 continue;
