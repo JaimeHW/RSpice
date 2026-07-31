@@ -3465,7 +3465,7 @@ impl Engine {
                 // its constitutive trial can still require globalization.
                 let xyce_level1_core_only = self.config.spice_dialect == SpiceDialect::Xyce
                     && circuit.has_only_xyce_core_inductors()
-                    && circuit.xyce_core_level2_mag_updates().is_empty();
+                    && !circuit.has_xyce_core_level2();
                 if !xyce_level1_core_only
                     && circuit.has_nonlinear_devices()
                     && let Some(rescued) = self.rescue_transient_step_with_gmin_continuation(

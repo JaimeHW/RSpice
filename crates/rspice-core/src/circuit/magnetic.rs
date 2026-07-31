@@ -132,6 +132,21 @@ impl CircuitData {
                 .all(|group| group.device.is_xyce_core())
     }
 
+    /// Whether any Xyce Core in the deck is LEVEL=2.
+    ///
+    /// GMIN continuation deforms only the nodal equations, so a deck whose
+    /// Cores are all LEVEL=1 has nothing for the deformation to regularize.
+    /// A LEVEL=2 Core keeps the general rescue path because its constitutive
+    /// trial can still require globalization, and that is true of a single
+    /// winding as much as a coupled set — unlike
+    /// [`Self::has_xyce_core_shared_level2`], which asks the narrower question
+    /// of whether the stabilized Picard Jacobian applies.
+    pub(crate) fn has_xyce_core_level2(&self) -> bool {
+        self.xyce_core_groups
+            .iter()
+            .any(|group| group.device.is_xyce_core() && group.device.is_xyce_core_level2())
+    }
+
     /// Whether a shared LEVEL=2 Xyce Core has the coupled constitutive
     /// topology for which the transient solver uses its stabilized Picard
     /// Jacobian.
