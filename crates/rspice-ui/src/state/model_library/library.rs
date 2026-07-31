@@ -6,7 +6,7 @@
 //! inferred from its path.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use super::{
@@ -18,16 +18,22 @@ use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
 /// Ownership and execution policy for a model library's source material.
 ///
 /// External libraries are re-authenticated from the live filesystem for every
-/// native run. Project-owned sources are immutable revision records and
-/// execute from their retained, digest-checked bytes on every platform. Built-in
-/// catalogs have no source deck and therefore contribute no executable model
-/// cards through the source resolver.
+/// native run. Project-owned sources and retained imports execute from their
+/// digest-checked bytes on every platform. A retained import remains
+/// read-only and does not acquire project-authoring or qualification metadata
+/// merely because its bytes travel with the project. Built-in catalogs have no
+/// source deck and therefore contribute no executable model cards through the
+/// source resolver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ModelSourceAuthority {
     #[default]
     BuiltIn,
     External,
+    RetainedImport {
+        source_id: ModelSourceId,
+        digest: ContentDigest,
+    },
     ProjectOwned {
         source_id: ModelSourceId,
         revision: ObjectRevision,
@@ -44,6 +50,22 @@ impl ModelSourceAuthority {
     #[must_use]
     pub const fn has_execution_source(self) -> bool {
         !matches!(self, Self::BuiltIn)
+    }
+
+    #[must_use]
+    pub const fn uses_retained_bytes(self) -> bool {
+        matches!(
+            self,
+            Self::RetainedImport { .. } | Self::ProjectOwned { .. }
+        )
+    }
+
+    #[must_use]
+    pub const fn retained_root_digest(self) -> Option<ContentDigest> {
+        match self {
+            Self::RetainedImport { digest, .. } | Self::ProjectOwned { digest, .. } => Some(digest),
+            Self::BuiltIn | Self::External => None,
+        }
     }
 }
 
@@ -172,6 +194,31 @@ pub(crate) fn first_unreachable_source<'a>(
         .find(|source| !reachable.contains(*source))
 }
 
+pub(crate) fn subcircuit_interface_key(section: Option<&str>, name: &str) -> String {
+    section.map_or_else(
+        || name.to_owned(),
+        |section| format!("{section}\u{1f}{name}"),
+    )
+}
+
+/// Exact, source-authenticated public interface of one executable `.SUBCKT`.
+///
+/// This is intentionally separate from a schematic symbol. Import establishes
+/// the ordered terminal and parameter contract; an engineer can then review
+/// that contract before creating a governed `X`-instance symbol.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelSubcircuitInterface {
+    pub name: String,
+    pub ports: Vec<String>,
+    #[serde(default)]
+    pub parameter_defaults: BTreeMap<String, String>,
+    pub description: Option<String>,
+    pub file_path: Option<PathBuf>,
+    pub source_line: Option<usize>,
+    pub section: Option<String>,
+}
+
 /// A PDK model library
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct ModelLibrary {
@@ -203,6 +250,11 @@ pub struct ModelLibrary {
     pub source_edges: Vec<ModelSourceEdge>,
     /// Device models
     pub models: HashMap<String, DeviceModel>,
+    /// Exact public interfaces of top-level and section-addressable
+    /// subcircuits. Map keys are the exact name at top level and the stable
+    /// `section + unit-separator + name` identity inside a `.lib` section.
+    #[serde(default)]
+    pub subcircuits: HashMap<String, ModelSubcircuitInterface>,
     /// Project-owned typed authoring metadata keyed by exact model name.
     /// External and built-in libraries may omit it; its absence is displayed
     /// honestly rather than synthesized into qualification claims.
@@ -294,7 +346,9 @@ impl ModelLibrary {
     pub const fn project_source_revision(&self) -> Option<ObjectRevision> {
         match self.source_authority {
             ModelSourceAuthority::ProjectOwned { revision, .. } => Some(revision),
-            ModelSourceAuthority::BuiltIn | ModelSourceAuthority::External => None,
+            ModelSourceAuthority::BuiltIn
+            | ModelSourceAuthority::External
+            | ModelSourceAuthority::RetainedImport { .. } => None,
         }
     }
 

@@ -40,6 +40,10 @@ pub struct DeviceModel {
     pub vth0: Option<f64>,
     /// Model file path
     pub file_path: Option<PathBuf>,
+    /// Exact `.lib` section that owns this executable card. Top-level cards
+    /// have no section. This is execution provenance, not a display hint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section: Option<String>,
     /// Model parameters (key-value)
     pub parameters: HashMap<String, f64>,
     /// Non-numeric model parameters retained without lossy coercion.
@@ -67,6 +71,7 @@ impl Default for DeviceModel {
             vdd: None,
             vth0: None,
             file_path: None,
+            section: None,
             parameters: HashMap::new(),
             string_parameters: HashMap::new(),
             source_line: None,

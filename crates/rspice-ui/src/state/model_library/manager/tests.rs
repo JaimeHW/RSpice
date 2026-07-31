@@ -42,11 +42,468 @@ fn byte_backed_import_retains_exact_execution_authority() {
     assert_eq!(library.source_closure.len(), 1);
     assert_eq!(library.source_contents.len(), 1);
     assert_eq!(library.source_contents[0].bytes, bytes);
+    assert!(
+        library.selected_corner.is_none(),
+        "a sectionless upload must not retain ModelLibrary::new's default TT selection"
+    );
+    assert!(matches!(
+        library.source_authority,
+        ModelSourceAuthority::RetainedImport { .. }
+    ));
     let binding = crate::state::ProjectTechnologyBinding::from_model_library(library)
         .expect("byte-backed library is attachable");
     manager
         .validate_attached_technology(Some(&binding))
         .expect("unchanged byte-backed catalog matches attachment");
+}
+
+#[test]
+fn byte_backed_subcircuit_import_retains_exact_interface_without_device_models() {
+    let bytes = b"* Precision amplifier\n\
+        .subckt AMP inp inn out params: GAIN=100 MODE=\"low noise\" SCALE={GAIN * 2}\n\
+        e1 out 0 inp inn {GAIN}\n\
+        .ends AMP\n"
+        .to_vec();
+    let mut manager = ModelLibraryManager::new();
+    let name = manager
+        .load_library_bytes("browser-subcircuits.lib", bytes, None)
+        .expect("a pure subcircuit source imports");
+    let library = manager.get_library(&name).expect("library retained");
+    assert!(library.models.is_empty());
+    let interface = library.subcircuits.get("AMP").expect("interface retained");
+    assert_eq!(interface.ports, ["inp", "inn", "out"]);
+    assert_eq!(
+        interface.parameter_defaults.get("GAIN").map(String::as_str),
+        Some("100")
+    );
+    assert_eq!(
+        interface.parameter_defaults.get("MODE").map(String::as_str),
+        Some("\"low noise\"")
+    );
+    assert_eq!(
+        interface
+            .parameter_defaults
+            .get("SCALE")
+            .map(String::as_str),
+        Some("{GAIN * 2}")
+    );
+    assert_eq!(interface.source_line, Some(2));
+    assert!(interface.section.is_none());
+    assert_eq!(
+        interface.file_path.as_deref(),
+        library.root_path.as_deref(),
+        "browser imports use their authenticated virtual source identity"
+    );
+}
+
+#[test]
+fn active_scope_rejects_case_colliding_subcircuit_interfaces_transactionally() {
+    let mut manager = ModelLibraryManager::new();
+    let error = manager
+        .load_library_bytes(
+            "duplicate-subcircuits.lib",
+            b".lib TT\n\
+              .subckt AMP in out\n.ends AMP\n\
+              .subckt amp plus minus\n.ends amp\n\
+              .endl TT\n"
+                .to_vec(),
+            Some("TT"),
+        )
+        .expect_err("case-colliding active interfaces must fail closed");
+    assert!(error.contains("same library section"), "{error}");
+    assert_eq!(manager.library_count(), 0);
+}
+
+#[test]
+fn same_named_subcircuits_in_distinct_sections_remain_independently_addressable() {
+    let mut manager = ModelLibraryManager::new();
+    let name = manager
+        .load_library_bytes(
+            "sectioned-subcircuits.lib",
+            b".lib TT\n\
+              .subckt AMP inp out\n.ends AMP\n\
+              .endl TT\n\
+              .lib FF\n\
+              .subckt AMP inp inn out\n.ends AMP\n\
+              .endl FF\n"
+                .to_vec(),
+            Some("TT"),
+        )
+        .expect("same name in different sections is valid");
+    let library = manager.get_library(&name).expect("library retained");
+    assert_eq!(library.subcircuits.len(), 2);
+    assert_eq!(library.subcircuits["TT\u{1f}AMP"].ports.len(), 2);
+    assert_eq!(library.subcircuits["FF\u{1f}AMP"].ports.len(), 3);
+    assert_eq!(
+        library.subcircuits["FF\u{1f}AMP"].section.as_deref(),
+        Some("FF")
+    );
+}
+
+#[test]
+fn contested_model_definitions_require_explicit_stable_provider_precedence() {
+    let mut manager = ModelLibraryManager::new();
+    manager
+        .load_library_bytes(
+            "provider-a.lib",
+            b".model SharedCard NMOS (LEVEL=1 KP=1e-3)\n".to_vec(),
+            None,
+        )
+        .expect("first provider imports");
+    manager
+        .load_library_bytes(
+            "provider-b.lib",
+            b".model sharedcard NMOS (LEVEL=1 KP=2e-3)\n".to_vec(),
+            None,
+        )
+        .expect("second provider imports");
+
+    let conflicts = manager.definition_conflicts();
+    assert_eq!(conflicts.len(), 1);
+    assert_eq!(conflicts[0].normalized_name, "sharedcard");
+    assert_eq!(conflicts[0].providers.len(), 2);
+    assert_eq!(conflicts[0].providers[0].library, "provider-a");
+    assert_eq!(conflicts[0].providers[1].library, "provider-b");
+
+    let error = manager
+        .seal_execution_sources()
+        .expect_err("implicit provider order must never authorize execution");
+    assert!(error.contains("Contested model definition 'sharedcard'"));
+    assert!(error.contains("RSpice will not choose by implicit include order"));
+
+    manager
+        .resolve_definition_conflict("sharedcard", "provider-b", "sharedcard")
+        .expect("exact second provider is selected");
+    manager
+        .validate_definition_resolution()
+        .expect("explicit precedence is complete and acyclic");
+    let cards = manager
+        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .expect("resolved providers seal and materialize");
+    assert_eq!(cards.len(), 2);
+    assert!(cards[0].contains("provider-b.lib"));
+    assert!(cards[0].contains("KP=2e-3"));
+    assert!(cards[1].contains("provider-a.lib"));
+    let parsed = rspice_core::Netlist::parse(&format!(
+        "resolved provider precedence\n{}\n.end\n",
+        cards.join("\n")
+    ))
+    .expect("materialized resolution deck parses");
+    assert!(parsed.models[0].name.eq_ignore_ascii_case("sharedcard"));
+    assert_eq!(
+        parsed.models[0]
+            .params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("KP"))
+            .map(|(_, value)| *value),
+        Some(2.0e-3)
+    );
+    assert_ne!(
+        ModelLibraryManager::new().execution_catalog_digest(),
+        manager.execution_catalog_digest(),
+        "provider resolution participates in execution identity"
+    );
+}
+
+#[test]
+fn active_duplicate_subcircuits_fail_closed_before_source_sealing() {
+    let mut manager = ModelLibraryManager::new();
+    manager
+        .load_library_bytes(
+            "macro-a.lib",
+            b".lib TT\n.subckt SharedAmp in out\nR1 in out 1k\n.ends SharedAmp\n.endl TT\n"
+                .to_vec(),
+            Some("TT"),
+        )
+        .expect("first subcircuit provider imports");
+    manager
+        .load_library_bytes(
+            "macro-b.lib",
+            b".lib TT\n.subckt sharedamp in out\nR1 in out 2k\n.ends sharedamp\n.endl TT\n"
+                .to_vec(),
+            Some("TT"),
+        )
+        .expect("second subcircuit provider imports");
+
+    let error = manager
+        .seal_execution_sources()
+        .expect_err("implicit subcircuit include order must never authorize execution");
+    assert!(error.contains("Active subcircuit definition 'sharedamp'"));
+    assert!(error.contains("macro-a/TT"));
+    assert!(error.contains("macro-b/TT"));
+    assert!(error.contains("will not choose a subcircuit by implicit include order"));
+}
+
+#[test]
+fn conflicting_provider_choices_that_require_a_cycle_fail_closed() {
+    let mut manager = ModelLibraryManager::new();
+    manager
+        .load_library_bytes(
+            "provider-a.lib",
+            b".model shared_one NMOS (LEVEL=1 KP=1e-3)\n.model shared_two NMOS (LEVEL=1 KP=2e-3)\n"
+                .to_vec(),
+            None,
+        )
+        .expect("first provider imports");
+    manager
+        .load_library_bytes(
+            "provider-b.lib",
+            b".model shared_one NMOS (LEVEL=1 KP=3e-3)\n.model shared_two NMOS (LEVEL=1 KP=4e-3)\n"
+                .to_vec(),
+            None,
+        )
+        .expect("second provider imports");
+    manager
+        .resolve_definition_conflict("shared_one", "provider-a", "shared_one")
+        .expect("first choice records");
+    manager
+        .resolve_definition_conflict("shared_two", "provider-b", "shared_two")
+        .expect("second choice records");
+
+    let error = manager
+        .validate_definition_resolution()
+        .expect_err("crossed provider choices cannot produce one exact source order");
+    assert!(error.contains("cyclic precedence contract"));
+}
+
+#[test]
+fn pdk_config_import_is_atomic_when_any_discovered_library_fails() {
+    let (directory, valid) = model_fixture();
+    let missing = directory.join("missing.lib");
+    let mut config = crate::state::pdk_config::PdkConfig::new();
+    config.discovered_files = vec![
+        crate::state::pdk_config::DiscoveredFile::new(valid, directory.clone()),
+        crate::state::pdk_config::DiscoveredFile::new(missing, directory.clone()),
+    ];
+    let mut manager = ModelLibraryManager::new();
+    let before = manager.execution_catalog_digest();
+
+    let errors = manager
+        .load_from_pdk_config(&config)
+        .expect_err("one failed source must reject the complete batch");
+
+    assert_eq!(errors.len(), 1);
+    assert_eq!(manager.execution_catalog_digest(), before);
+    assert!(
+        manager.libraries_sorted().is_empty(),
+        "a failed batch must not retain libraries loaded before the failure"
+    );
+    fs::remove_dir_all(directory).expect("remove model fixture");
+}
+
+#[test]
+fn pdk_config_reconciliation_removes_disabled_and_deleted_sources_only() {
+    let (directory, _) = model_fixture();
+    fs::write(
+        directory.join("passives.mod"),
+        ".model pdk_res R (RSH=11)\n",
+    )
+    .expect("write second PDK source");
+
+    let mut config = crate::state::pdk_config::PdkConfig::new();
+    config.add_library_path(directory.to_string_lossy().to_string());
+    config.discover_model_files();
+
+    let mut manager = ModelLibraryManager::new();
+    manager
+        .load_library_bytes(
+            "direct-import.lib",
+            b".model direct_n NMOS (LEVEL=1 KP=9e-3)\n".to_vec(),
+            None,
+        )
+        .expect("direct retained source imports");
+    assert_eq!(
+        manager
+            .load_from_pdk_config(&config)
+            .expect("initial PDK scan publishes"),
+        2
+    );
+    assert_eq!(manager.pdk_config_libraries.len(), 2);
+    assert_eq!(manager.library_count(), 3);
+
+    config.library_paths_mut()[0].enabled = false;
+    config.discover_model_files();
+    assert_eq!(
+        manager
+            .load_from_pdk_config(&config)
+            .expect("disabled scan reconciles"),
+        0
+    );
+    assert!(manager.pdk_config_libraries.is_empty());
+    assert_eq!(manager.library_count(), 1);
+    assert!(
+        manager.get_library("direct-import").is_some(),
+        "direct retained imports are not owned by host PDK configuration"
+    );
+
+    config.library_paths_mut()[0].enabled = true;
+    config.discover_model_files();
+    assert_eq!(
+        manager
+            .load_from_pdk_config(&config)
+            .expect("re-enabled scan republishes"),
+        2
+    );
+    config.remove_library_path(0);
+    config.discover_model_files();
+    assert_eq!(
+        manager
+            .load_from_pdk_config(&config)
+            .expect("deleted path reconciles"),
+        0
+    );
+    assert_eq!(manager.library_count(), 1);
+    assert!(manager.get_library("direct-import").is_some());
+
+    fs::remove_dir_all(directory).expect("remove reconciliation fixture");
+}
+
+#[test]
+fn pdk_config_loads_every_advertised_model_extension() {
+    let (directory, _) = model_fixture();
+    for (extension, name) in [
+        ("scs", "from_scs"),
+        ("mod", "from_mod"),
+        ("sp", "from_sp"),
+        ("cir", "from_cir"),
+    ] {
+        fs::write(
+            directory.join(format!("{name}.{extension}")),
+            format!(".model {name} D (IS=1e-14)\n"),
+        )
+        .expect("write advertised model source");
+    }
+    let mut config = crate::state::pdk_config::PdkConfig::new();
+    config.add_library_path(directory.to_string_lossy().to_string());
+    config.discover_model_files();
+    assert_eq!(config.discovered_files().len(), 5);
+
+    let mut manager = ModelLibraryManager::new();
+    assert_eq!(
+        manager
+            .load_from_pdk_config(&config)
+            .expect("all advertised source types load"),
+        5
+    );
+    for model in ["nch", "from_scs", "from_mod", "from_sp", "from_cir"] {
+        assert!(
+            manager
+                .libraries_sorted()
+                .iter()
+                .any(|library| library.models.contains_key(model)),
+            "missing model from advertised source: {model}"
+        );
+    }
+
+    fs::remove_dir_all(directory).expect("remove extension fixture");
+}
+
+#[test]
+fn pdk_config_same_stem_sources_receive_stable_collision_safe_names() {
+    let (directory, _) = model_fixture();
+    let first = directory.join("first");
+    let second = directory.join("second");
+    fs::create_dir_all(&first).expect("create first source directory");
+    fs::create_dir_all(&second).expect("create second source directory");
+    fs::write(
+        first.join("models.lib"),
+        ".model first_n NMOS (LEVEL=1 KP=1e-3)\n",
+    )
+    .expect("write first same-stem source");
+    fs::write(
+        second.join("models.lib"),
+        ".model second_n NMOS (LEVEL=1 KP=2e-3)\n",
+    )
+    .expect("write second same-stem source");
+
+    let mut config = crate::state::pdk_config::PdkConfig::new();
+    config.add_library_path(first.to_string_lossy().to_string());
+    config.add_library_path(second.to_string_lossy().to_string());
+    config.discover_model_files();
+    let mut manager = ModelLibraryManager::new();
+    manager
+        .load_from_pdk_config(&config)
+        .expect("same-stem sources load independently");
+    let identities = manager
+        .libraries_sorted()
+        .into_iter()
+        .map(|library| {
+            (
+                library.root_path.clone().expect("PDK source has root"),
+                library.name.clone(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(identities.len(), 2);
+    assert_eq!(
+        identities
+            .values()
+            .filter(|name| name.as_str() == "models")
+            .count(),
+        1
+    );
+    assert_eq!(
+        identities
+            .values()
+            .filter(|name| name.starts_with("models@"))
+            .count(),
+        1
+    );
+
+    fs::write(
+        second.join("models.lib"),
+        ".model second_n NMOS (LEVEL=1 KP=3e-3)\n",
+    )
+    .expect("refresh second same-stem source");
+    config.discover_model_files();
+    manager
+        .load_from_pdk_config(&config)
+        .expect("same-stem refresh remains stable");
+    let refreshed = manager
+        .libraries_sorted()
+        .into_iter()
+        .map(|library| {
+            (
+                library.root_path.clone().expect("PDK source has root"),
+                library.name.clone(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(refreshed, identities);
+
+    fs::remove_dir_all(directory).expect("remove same-stem fixture");
+}
+
+#[test]
+fn empty_or_unsupported_pdk_source_rejects_the_complete_reconciliation() {
+    let (directory, _) = model_fixture();
+    let empty = directory.join("spectre-only.scs");
+    fs::write(&empty, "simulator lang=spectre\nparameters vdd=1.8\n")
+        .expect("write unsupported empty source");
+    let mut config = crate::state::pdk_config::PdkConfig::new();
+    config.discovered_files = vec![crate::state::pdk_config::DiscoveredFile::new(
+        empty,
+        directory.clone(),
+    )];
+    let mut manager = ModelLibraryManager::new();
+    manager
+        .load_library_bytes(
+            "direct-import.lib",
+            b".model direct_n NMOS (LEVEL=1 KP=9e-3)\n".to_vec(),
+            None,
+        )
+        .expect("direct source imports");
+    let before = manager.execution_catalog_digest();
+
+    let errors = manager
+        .load_from_pdk_config(&config)
+        .expect_err("unsupported source cannot publish an empty library");
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].contains("no supported device models"));
+    assert_eq!(manager.execution_catalog_digest(), before);
+    assert!(manager.get_library("direct-import").is_some());
+
+    fs::remove_dir_all(directory).expect("remove unsupported-source fixture");
 }
 
 #[test]
@@ -155,12 +612,69 @@ fn loaded_sections_resolve_to_exact_reference_and_corner_bindings() {
     assert_eq!(bindings[1].process, CornerProcess::FF);
     assert_eq!(bindings[1].section.as_deref(), Some("FF"));
     assert!(bindings[1].materialized_model_cards.contains("KP=2e-3"));
+    assert_eq!(
+        manager
+            .get_library("foundry")
+            .and_then(|library| library.models.get("nch"))
+            .and_then(|model| model.section.as_deref()),
+        Some("TT")
+    );
+
+    manager
+        .get_library_mut("foundry")
+        .expect("library exists")
+        .selected_corner = Some("FF".to_owned());
+    manager
+        .rebuild_active_model_projection("foundry")
+        .expect("active FF catalog rebuilds from retained authenticated bytes");
+    let ff_model = &manager
+        .get_library("foundry")
+        .expect("library exists")
+        .models["nch"];
+    assert_eq!(ff_model.section.as_deref(), Some("FF"));
+    assert_eq!(
+        ff_model.parameters.get("kp").map(|value| value.to_bits()),
+        Some(2e-3_f64.to_bits())
+    );
 
     let error = manager
         .corner_model_bindings(&[CornerProcess::SS])
         .expect_err("undefined SS section must fail closed");
     assert!(error.contains("does not define the SS process section"));
     fs::remove_dir_all(directory).expect("remove model fixture directory");
+}
+
+#[test]
+fn selected_section_shadows_top_level_model_names_case_insensitively() {
+    let mut manager = ModelLibraryManager::new();
+    let name = manager
+        .load_library_bytes(
+            "case-shadow.lib",
+            b".model NCH NMOS (LEVEL=1 KP=5e-4)\n\
+              .lib TT\n\
+              .model nch NMOS (LEVEL=1 KP=1e-3)\n\
+              .endl TT\n"
+                .to_vec(),
+            Some("tt"),
+        )
+        .expect("case-insensitive selected section imports");
+
+    let library = manager.get_library(&name).expect("library exists");
+    assert_eq!(library.models.len(), 1);
+    assert!(!library.models.contains_key("NCH"));
+    let selected = &library.models["nch"];
+    assert_eq!(selected.section.as_deref(), Some("TT"));
+    assert_eq!(
+        selected.parameters.get("kp").map(|value| value.to_bits()),
+        Some(1e-3_f64.to_bits())
+    );
+
+    manager
+        .rebuild_active_model_projection(&name)
+        .expect("retained projection preserves case-insensitive shadowing");
+    let rebuilt = manager.get_library(&name).expect("library exists");
+    assert_eq!(rebuilt.models.len(), 1);
+    assert_eq!(rebuilt.models["nch"].section.as_deref(), Some("TT"));
 }
 
 #[test]
@@ -1025,12 +1539,10 @@ fn repo_pack_manager() -> ModelLibraryManager {
 #[test]
 fn pack_search_finds_definitions_the_libraries_do_not_hold() {
     let manager = repo_pack_manager();
-    // Addressable parts, not raw definitions: `pack_definition_count` reports
-    // what a netlist can reference by name, which is roughly a third of the
-    // definitions in the tree because macromodel bodies carry helper cards.
-    // Core pins the definition total above 190_000; this is the smaller figure.
+    // Only top-level `.model` cards belong in this workspace. Subcircuits and
+    // nested helper definitions use separate interface workflows.
     assert!(
-        manager.pack_definition_count() > 60_000,
+        manager.pack_definition_count() > 15_000,
         "expected the shipped packs, counted {}",
         manager.pack_definition_count()
     );
@@ -1041,8 +1553,123 @@ fn pack_search_finds_definitions_the_libraries_do_not_hold() {
     let hits = manager.search_pack_models("2N3819", 50);
     assert!(!hits.is_empty(), "expected 2N3819 in the shipped packs");
     let hit = &hits[0];
+    assert_eq!(hit.kind, "model");
     assert!(hit.source.as_ref().is_some_and(|p| p.is_file()));
     assert!(hit.line > 0);
+}
+
+#[test]
+fn redistributable_pack_model_activation_is_exact_and_executable() {
+    let mut manager = repo_pack_manager();
+    let hit = manager
+        .search_pack_models("2N3819", 50)
+        .into_iter()
+        .find(|hit| hit.pack == "builtin")
+        .expect("redistributable built-in pack hit");
+    assert!(hit.redistributable);
+
+    let library_name = manager
+        .activate_pack_model(&hit)
+        .expect("pack model activates");
+    assert_eq!(library_name, "pack-builtin-jfet");
+    assert_eq!(
+        manager.selected_library.as_deref(),
+        Some(library_name.as_str())
+    );
+    let library = manager
+        .get_library(&library_name)
+        .expect("activated library retained");
+    assert!(
+        library
+            .models
+            .values()
+            .any(|model| model.name.eq_ignore_ascii_case("2N3819"))
+    );
+    assert!(library.source_authority.has_execution_source());
+    assert!(matches!(
+        library.source_authority,
+        ModelSourceAuthority::RetainedImport { .. }
+    ));
+    assert!(library.source_authority.uses_retained_bytes());
+    assert!(!library.source_closure.is_empty());
+    manager
+        .seal_execution_sources()
+        .expect("activated pack source seals for execution");
+}
+
+#[test]
+fn redistributable_pack_subcircuit_activation_retains_exact_ordered_interface() {
+    let mut manager = repo_pack_manager();
+    let hit = manager
+        .query_pack_parts("LM358", Some("builtin"), &[], 0, 50)
+        .expect("pack query succeeds")
+        .hits
+        .into_iter()
+        .find(|hit| hit.name == "LM358" && hit.kind == "subckt")
+        .expect("redistributable LM358 subcircuit hit");
+    assert!(hit.redistributable);
+
+    let activated = manager
+        .activate_pack_subcircuit(&hit)
+        .expect("subcircuit source and interface activate");
+    assert_eq!(activated.name, "LM358");
+    assert!(!activated.ports.is_empty());
+    assert!(activated.source_path.is_file());
+    let library = manager
+        .get_library(&activated.library)
+        .expect("activated source library retained");
+    assert!(matches!(
+        library.source_authority,
+        ModelSourceAuthority::RetainedImport { .. }
+    ));
+    let interface = library
+        .subcircuits
+        .get(&activated.name)
+        .expect("activated interface is retained in the project catalog");
+    assert_eq!(interface.ports, activated.ports);
+    assert_eq!(
+        interface.file_path.as_deref(),
+        Some(activated.source_path.as_path())
+    );
+    manager
+        .seal_execution_sources()
+        .expect("activated subcircuit source seals");
+}
+
+#[test]
+fn browse_only_pack_model_activation_fails_without_mutating_libraries() {
+    let mut manager = repo_pack_manager();
+    let hit = manager
+        .search_pack_models("2N3819", 50)
+        .into_iter()
+        .find(|hit| hit.pack == "interfet-jfet")
+        .expect("browse-only vendor hit");
+    assert!(!hit.redistributable);
+    let before = manager.library_count();
+
+    let error = manager
+        .activate_pack_model(&hit)
+        .expect_err("unestablished redistribution must block activation");
+    assert!(error.contains("browse-only"), "{error}");
+    assert_eq!(manager.library_count(), before);
+    assert!(manager.selected_library.is_none());
+}
+
+#[test]
+fn stale_or_forged_pack_hit_fails_before_loading_source() {
+    let mut manager = repo_pack_manager();
+    let mut hit = manager
+        .search_pack_models("2N3819", 50)
+        .into_iter()
+        .find(|hit| hit.pack == "builtin")
+        .expect("redistributable built-in pack hit");
+    hit.line = hit.line.saturating_add(1);
+
+    let error = manager
+        .activate_pack_model(&hit)
+        .expect_err("forged line identity must fail");
+    assert!(error.contains("changed or disappeared"), "{error}");
+    assert_eq!(manager.library_count(), 0);
 }
 
 #[test]
@@ -1060,12 +1687,110 @@ fn pack_search_is_bounded_and_ignores_an_empty_query() {
 #[test]
 fn pack_hits_carry_their_redistribution_status() {
     let manager = repo_pack_manager();
-    let hits = manager.search_pack_models("nfet_01v8", 20);
-    assert!(!hits.is_empty(), "expected sky130 devices in the packs");
+    let hits = manager.search_pack_models("mcl1d", 20);
+    assert!(!hits.is_empty(), "expected sky130 model cards in the packs");
     // sky130 is Apache-2.0, so its rows must not be flagged unlicensed.
     assert!(
         hits.iter().any(|hit| hit.redistributable),
         "expected at least one redistributable hit"
+    );
+}
+
+#[test]
+fn shipped_part_query_pages_the_complete_addressable_corpus() {
+    let manager = repo_pack_manager();
+    let page = manager
+        .query_pack_parts("", None, &[], 0, 40)
+        .expect("part catalog query");
+    assert_eq!(
+        page.total_matches,
+        manager.spice_packs().expect("index exists").part_count()
+    );
+    assert_eq!(page.hits.len(), 40);
+    assert!(page.hits.iter().all(|hit| hit.source.is_some()));
+
+    let diode_page = manager
+        .query_pack_parts("", None, &["diode"], 0, 25)
+        .expect("device facet query");
+    assert!(diode_page.total_matches > diode_page.hits.len());
+    assert!(
+        diode_page
+            .hits
+            .iter()
+            .all(|hit| hit.device.eq_ignore_ascii_case("diode"))
+    );
+}
+
+#[test]
+fn shipped_part_preview_revalidates_exact_identity() {
+    let manager = repo_pack_manager();
+    let hit = manager
+        .query_pack_parts("1N4148", None, &[], 0, 1)
+        .expect("part query")
+        .hits
+        .into_iter()
+        .next()
+        .expect("part exists");
+    let preview = manager.preview_pack_part(&hit).expect("preview reads");
+    assert!(preview.source.to_ascii_lowercase().contains("1n4148"));
+    assert_eq!(preview.start_line, hit.line);
+
+    let mut forged = hit;
+    forged.line = forged.line.saturating_add(1);
+    assert!(
+        manager
+            .preview_pack_part(&forged)
+            .expect_err("forged identity fails")
+            .contains("changed or disappeared")
+    );
+}
+
+#[test]
+fn pack_attachment_state_and_detach_are_exact() {
+    let mut manager = repo_pack_manager();
+    let hit = manager
+        .search_pack_models("2N3819", 50)
+        .into_iter()
+        .find(|hit| hit.pack == "builtin")
+        .expect("redistributable built-in hit");
+    assert!(!manager.is_pack_attached("builtin"));
+    manager
+        .activate_pack_model(&hit)
+        .expect("model source attaches");
+    assert!(manager.is_pack_attached("builtin"));
+
+    assert_eq!(manager.detach_pack("builtin").expect("pack detaches"), 1);
+    assert!(!manager.is_pack_attached("builtin"));
+    assert_eq!(manager.library_count(), 0);
+}
+
+#[test]
+fn redistributable_pack_entry_attaches_and_restricted_or_entryless_packs_fail_closed() {
+    let mut manager = repo_pack_manager();
+    let loaded = manager
+        .attach_pack("builtin")
+        .expect("built-in pack attaches");
+    assert!(loaded.starts_with("pack-builtin-"));
+    assert!(manager.is_pack_attached("builtin"));
+    assert!(manager.get_library(&loaded).is_some_and(|library| {
+        !library.models.is_empty()
+            && matches!(
+                library.source_authority,
+                ModelSourceAuthority::RetainedImport { .. }
+            )
+    }));
+
+    assert!(
+        manager
+            .attach_pack("microcap-library")
+            .expect_err("restricted pack cannot attach")
+            .contains("browse-only")
+    );
+    assert!(
+        manager
+            .attach_pack("mosis-bsim")
+            .expect_err("entryless pack cannot attach")
+            .contains("no declared entry")
     );
 }
 
@@ -1077,4 +1802,98 @@ fn missing_pack_tree_is_not_an_error() {
     assert_eq!(manager.pack_definition_count(), 0);
     assert!(manager.search_pack_models("2N3904", 10).is_empty());
     assert!(manager.spice_packs().is_none());
+}
+
+#[test]
+fn browser_bundle_import_authenticates_the_complete_include_closure() {
+    let mut manager = ModelLibraryManager::new();
+
+    let library_name = manager
+        .load_library_bundle_bytes(
+            vec![
+                ("root.lib".to_owned(), b".include \"device.inc\"\n".to_vec()),
+                (
+                    "device.inc".to_owned(),
+                    b"* exact dependency\n.model nested_n NMOS (LEVEL=1 KP=1e-3)\n".to_vec(),
+                ),
+            ],
+            None,
+        )
+        .expect("authenticated sibling bundle imports");
+
+    assert_eq!(library_name, "root");
+    let library = manager.get_library("root").expect("library published");
+    assert_eq!(library.source_closure.len(), 2);
+    assert_eq!(library.source_contents.len(), 2);
+    assert_eq!(library.source_edges.len(), 1);
+    assert_eq!(library.source_edges[0].requested_path, "device.inc");
+    assert!(library.models.values().any(|model| {
+        model.name == "nested_n"
+            && model
+                .file_path
+                .as_ref()
+                .is_some_and(|path| path.file_name().is_some_and(|name| name == "device.inc"))
+    }));
+    assert!(matches!(
+        library.source_authority,
+        ModelSourceAuthority::RetainedImport { .. }
+    ));
+}
+
+#[test]
+fn browser_bundle_import_rejects_missing_dependencies_without_mutation() {
+    let mut manager = ModelLibraryManager::new();
+
+    let error = manager
+        .load_library_bundle_bytes(
+            vec![(
+                "root.lib".to_owned(),
+                b".include \"missing.inc\"\n".to_vec(),
+            )],
+            None,
+        )
+        .expect_err("missing dependency must fail closed");
+
+    assert!(error.contains("missing sibling 'missing.inc'"), "{error}");
+    assert_eq!(manager.library_count(), 0);
+}
+
+#[test]
+fn browser_bundle_import_rejects_ambiguous_roots_and_case_collisions() {
+    let mut manager = ModelLibraryManager::new();
+    let error = manager
+        .load_library_bundle_bytes(
+            vec![
+                (
+                    "first.lib".to_owned(),
+                    b".model first_n NMOS (LEVEL=1)\n".to_vec(),
+                ),
+                (
+                    "second.lib".to_owned(),
+                    b".model second_n NMOS (LEVEL=1)\n".to_vec(),
+                ),
+            ],
+            None,
+        )
+        .expect_err("independent sources have no unique root");
+    assert!(error.contains("2 independent roots"), "{error}");
+    assert_eq!(manager.library_count(), 0);
+
+    let error = manager
+        .load_library_bundle_bytes(
+            vec![
+                (
+                    "device.inc".to_owned(),
+                    b".model first_n NMOS (LEVEL=1)\n".to_vec(),
+                ),
+                (
+                    "DEVICE.INC".to_owned(),
+                    b".model second_n NMOS (LEVEL=1)\n".to_vec(),
+                ),
+            ],
+            None,
+        )
+        .expect_err("portable browser bundle names cannot case-collide");
+    assert!(error.contains("case-insensitive file name"), "{error}");
+    assert_eq!(manager.library_count(), 0);
 }
