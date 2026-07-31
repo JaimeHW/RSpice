@@ -917,6 +917,106 @@ fn page_publication_settings_are_revisioned_and_exactly_bound() {
 }
 
 #[test]
+fn report_block_inclusion_is_revision_checked_and_persistent() {
+    let (mut document, _, section_id) = document_with_section();
+    let receipt = document
+        .transact(
+            document.revision(),
+            vec![ReportEdit::AddBlock {
+                section_id,
+                kind: ReportBlockKind::Prose(ProseBlock {
+                    style: ProseStyle::Body,
+                    markdown: "Nominal response remains inside specification.".to_owned(),
+                }),
+            }],
+            75,
+        )
+        .unwrap();
+    let block_id = match receipt.created[0] {
+        ReportEntityRef::Block(id) => id,
+        _ => unreachable!(),
+    };
+    let initial_revision = document.block(block_id).unwrap().revision();
+
+    document
+        .transact(
+            document.revision(),
+            vec![ReportEdit::SetBlockEnabled {
+                block_id,
+                expected_block_revision: initial_revision,
+                enabled: false,
+            }],
+            76,
+        )
+        .unwrap();
+
+    let block = document.block(block_id).unwrap();
+    assert!(!block.enabled());
+    assert_eq!(block.revision(), initial_revision.next().unwrap());
+    let unchanged = document.clone();
+    assert!(matches!(
+        document.transact(
+            document.revision(),
+            vec![ReportEdit::SetBlockEnabled {
+                block_id,
+                expected_block_revision: initial_revision,
+                enabled: true,
+            }],
+            77,
+        ),
+        Err(ReportError::EntityRevisionConflict { .. })
+    ));
+    assert_eq!(document, unchanged);
+
+    let restored: ReportDocument =
+        serde_json::from_slice(&serde_json::to_vec(&document).unwrap()).unwrap();
+    assert_eq!(restored, document);
+}
+
+#[test]
+fn add_block_to_sectionless_page_is_one_atomic_revision() {
+    let mut document = ReportDocument::new("Atomic report").unwrap();
+    let receipt = document
+        .transact(
+            document.revision(),
+            vec![ReportEdit::AddPage {
+                title: "Summary".to_owned(),
+            }],
+            81,
+        )
+        .unwrap();
+    let page_id = match receipt.created[0] {
+        ReportEntityRef::Page(id) => id,
+        _ => unreachable!(),
+    };
+    let expected_page_revision = document.page(page_id).unwrap().revision();
+    let document_revision = document.revision();
+    let receipt = document
+        .transact(
+            document_revision,
+            vec![ReportEdit::AddBlockToPage {
+                page_id,
+                expected_page_revision,
+                kind: ReportBlockKind::Prose(ProseBlock {
+                    style: ProseStyle::ExecutiveSummary,
+                    markdown: "One atomic page-content insertion.".to_owned(),
+                }),
+            }],
+            82,
+        )
+        .unwrap();
+
+    assert_eq!(document.revision(), document_revision.next().unwrap());
+    assert_eq!(receipt.created.len(), 2);
+    assert!(matches!(receipt.created[0], ReportEntityRef::Section(_)));
+    assert!(matches!(receipt.created[1], ReportEntityRef::Block(_)));
+    let page = document.page(page_id).unwrap();
+    assert_eq!(page.sections().len(), 1);
+    assert_eq!(page.sections()[0].title(), "Page content");
+    assert_eq!(page.sections()[0].blocks().len(), 1);
+}
+
+#[test]
 fn invalid_tables_notes_sources_and_duplicate_bindings_fail_closed() {
     let (snapshot, binding) = dataset_snapshot(80);
     let invalid_table = ReportBlockKind::DataTable(DataTableBlock {
@@ -1173,6 +1273,7 @@ fn version_one_initial_snapshots_migrate_without_fabricating_history() {
                 id: ReportBlockId::new(),
                 created_at_document_revision: ObjectRevision::INITIAL,
                 revision: ObjectRevision::INITIAL,
+                enabled: true,
                 kind: all_block_kinds().remove(5),
             }],
         }],
@@ -1467,6 +1568,77 @@ fn schema_three_migration_rejects_mislabeled_schema_four_page_policies() {
         serde_json::from_value::<ReportDocument>(mislabeled),
         Err(_)
     ));
+}
+
+#[test]
+fn schema_four_migration_preserves_authenticated_default_block_inclusion() {
+    let (mut document, _, section_id) = document_with_section();
+    document
+        .transact(
+            document.revision(),
+            vec![ReportEdit::AddBlock {
+                section_id,
+                kind: ReportBlockKind::Prose(ProseBlock {
+                    style: ProseStyle::Method,
+                    markdown: "Retained schema-four block.".to_owned(),
+                }),
+            }],
+            78,
+        )
+        .unwrap();
+    let mut schema_four = serde_json::to_value(&document).unwrap();
+    schema_four["schema_version"] = serde_json::json!(4);
+
+    let migrated: ReportDocument = serde_json::from_value(schema_four).unwrap();
+
+    assert_eq!(migrated, document);
+    assert_eq!(migrated.schema_version(), ReportDocument::SCHEMA_VERSION);
+    assert!(
+        migrated
+            .pages()
+            .iter()
+            .flat_map(|page| page.sections())
+            .flat_map(|section| section.blocks())
+            .all(ReportBlock::enabled)
+    );
+}
+
+#[test]
+fn schema_four_migration_rejects_mislabeled_disabled_blocks() {
+    let (mut document, _, section_id) = document_with_section();
+    let receipt = document
+        .transact(
+            document.revision(),
+            vec![ReportEdit::AddBlock {
+                section_id,
+                kind: ReportBlockKind::Prose(ProseBlock {
+                    style: ProseStyle::Warning,
+                    markdown: "Disabled only in schema five.".to_owned(),
+                }),
+            }],
+            79,
+        )
+        .unwrap();
+    let block_id = match receipt.created[0] {
+        ReportEntityRef::Block(id) => id,
+        _ => unreachable!(),
+    };
+    let block_revision = document.block(block_id).unwrap().revision();
+    document
+        .transact(
+            document.revision(),
+            vec![ReportEdit::SetBlockEnabled {
+                block_id,
+                expected_block_revision: block_revision,
+                enabled: false,
+            }],
+            80,
+        )
+        .unwrap();
+    let mut mislabeled = serde_json::to_value(document).unwrap();
+    mislabeled["schema_version"] = serde_json::json!(4);
+
+    assert!(serde_json::from_value::<ReportDocument>(mislabeled).is_err());
 }
 
 #[test]

@@ -148,6 +148,9 @@ impl ReportDocument {
             } => self.move_page(page_id, expected_page_revision, before, changed)?,
             ReportEdit::AddSection { page_id, title } => {
                 validate_label("report-section.title", &title, 512)?;
+                if self.section_count() >= MAX_SECTIONS_TOTAL {
+                    return Err(ReportError::CapacityExceeded("report sections"));
+                }
                 let page = self.page_mut(page_id)?;
                 if page.sections.len() >= MAX_SECTIONS_PER_PAGE {
                     return Err(ReportError::CapacityExceeded("sections per report page"));
@@ -210,12 +213,93 @@ impl ReportDocument {
                     id: ReportBlockId::new(),
                     created_at_document_revision: committed_revision,
                     revision: ObjectRevision::INITIAL,
+                    enabled: true,
                     kind,
                 };
                 created.push(ReportEntityRef::Block(block.id));
                 section.blocks.push(block);
                 section.revision = section.revision.next()?;
                 changed.push(ReportEntityRef::Section(section_id));
+            }
+            ReportEdit::AddBlockToPage {
+                page_id,
+                expected_page_revision,
+                kind,
+            } => {
+                kind.validate()?;
+                if self.block_count() >= MAX_BLOCKS_TOTAL {
+                    return Err(ReportError::CapacityExceeded("report content blocks"));
+                }
+                let page_index = self
+                    .pages
+                    .iter()
+                    .position(|page| page.id == page_id)
+                    .ok_or(ReportError::EntityNotFound(ReportEntityRef::Page(page_id)))?;
+                require_entity_revision(
+                    ReportEntityRef::Page(page_id),
+                    expected_page_revision,
+                    self.pages[page_index].revision,
+                )?;
+                if self.pages[page_index].sections.is_empty() {
+                    if self.section_count() >= MAX_SECTIONS_TOTAL {
+                        return Err(ReportError::CapacityExceeded("report sections"));
+                    }
+                    let block = ReportBlock {
+                        id: ReportBlockId::new(),
+                        created_at_document_revision: committed_revision,
+                        revision: ObjectRevision::INITIAL,
+                        enabled: true,
+                        kind,
+                    };
+                    let section = ReportSection {
+                        id: ReportSectionId::new(),
+                        created_at_document_revision: committed_revision,
+                        revision: ObjectRevision::INITIAL,
+                        title: "Page content".to_owned(),
+                        blocks: vec![block],
+                    };
+                    created.push(ReportEntityRef::Section(section.id));
+                    created.push(ReportEntityRef::Block(section.blocks[0].id));
+                    self.pages[page_index].sections.push(section);
+                    self.pages[page_index].revision = self.pages[page_index].revision.next()?;
+                    changed.push(ReportEntityRef::Page(page_id));
+                } else {
+                    let section = &mut self.pages[page_index].sections[0];
+                    if section.blocks.len() >= MAX_BLOCKS_PER_SECTION {
+                        return Err(ReportError::CapacityExceeded(
+                            "content blocks per report section",
+                        ));
+                    }
+                    let block = ReportBlock {
+                        id: ReportBlockId::new(),
+                        created_at_document_revision: committed_revision,
+                        revision: ObjectRevision::INITIAL,
+                        enabled: true,
+                        kind,
+                    };
+                    created.push(ReportEntityRef::Block(block.id));
+                    section.blocks.push(block);
+                    section.revision = section.revision.next()?;
+                    changed.push(ReportEntityRef::Section(section.id));
+                }
+            }
+            ReportEdit::SetBlockEnabled {
+                block_id,
+                expected_block_revision,
+                enabled,
+            } => {
+                let (_, _, _, _, block) = self.block_mut(block_id)?;
+                require_entity_revision(
+                    ReportEntityRef::Block(block_id),
+                    expected_block_revision,
+                    block.revision,
+                )?;
+                if block.enabled == enabled {
+                    return Err(ReportError::NoChanges);
+                }
+                block.enabled = enabled;
+                block.revision = block.revision.next()?;
+                changed.push(ReportEntityRef::Block(block_id));
             }
             ReportEdit::ReplaceBlock {
                 block_id,
@@ -662,6 +746,10 @@ impl ReportDocument {
             .flat_map(|page| page.sections.iter())
             .map(|section| section.blocks.len())
             .sum()
+    }
+
+    fn section_count(&self) -> usize {
+        self.pages.iter().map(|page| page.sections.len()).sum()
     }
 
     pub fn validate(&self) -> Result<(), ReportError> {

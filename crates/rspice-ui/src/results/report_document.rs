@@ -27,6 +27,7 @@ use crate::product::{
 
 const MAX_PAGES: usize = 256;
 const MAX_SECTIONS_PER_PAGE: usize = 256;
+const MAX_SECTIONS_TOTAL: usize = 8_192;
 const MAX_BLOCKS_PER_SECTION: usize = 1_024;
 const MAX_BLOCKS_TOTAL: usize = 8_192;
 const MAX_TRANSACTION_EDITS: usize = 256;
@@ -361,7 +362,20 @@ pub struct ReportBlock {
     #[serde(default)]
     created_at_document_revision: ObjectRevision,
     revision: ObjectRevision,
+    #[serde(
+        default = "report_block_enabled_default",
+        skip_serializing_if = "report_block_enabled_is_default"
+    )]
+    enabled: bool,
     kind: ReportBlockKind,
+}
+
+const fn report_block_enabled_default() -> bool {
+    true
+}
+
+const fn report_block_enabled_is_default(enabled: &bool) -> bool {
+    *enabled
 }
 
 impl ReportBlock {
@@ -378,6 +392,11 @@ impl ReportBlock {
     #[must_use]
     pub const fn created_at_document_revision(&self) -> ObjectRevision {
         self.created_at_document_revision
+    }
+
+    #[must_use]
+    pub const fn enabled(&self) -> bool {
+        self.enabled
     }
 
     #[must_use]
@@ -550,6 +569,16 @@ pub enum ReportEdit {
     AddBlock {
         section_id: ReportSectionId,
         kind: ReportBlockKind,
+    },
+    AddBlockToPage {
+        page_id: ReportPageId,
+        expected_page_revision: ObjectRevision,
+        kind: ReportBlockKind,
+    },
+    SetBlockEnabled {
+        block_id: ReportBlockId,
+        expected_block_revision: ObjectRevision,
+        enabled: bool,
     },
     ReplaceBlock {
         block_id: ReportBlockId,
@@ -1066,11 +1095,13 @@ impl<'de> Deserialize<'de> for ReportDocument {
                         .to_owned(),
                 }));
             }
-            (3, ReportRevisionHistoryWireField::Value(history)) => history,
-            (3, ReportRevisionHistoryWireField::Missing) => {
+            (3 | 4, ReportRevisionHistoryWireField::Value(history)) => history,
+            (version @ (3 | 4), ReportRevisionHistoryWireField::Missing) => {
                 return Err(serde::de::Error::custom(ReportError::InvalidValue {
                     field: "report-document.revision-history",
-                    message: "schema 3 documents must retain their revision history".to_owned(),
+                    message: format!(
+                        "schema {version} documents must retain their revision history"
+                    ),
                 }));
             }
             (1 | 2, ReportRevisionHistoryWireField::Missing) => ReportRevisionHistory {
@@ -1115,7 +1146,7 @@ impl<'de> Deserialize<'de> for ReportDocument {
 }
 
 impl ReportDocument {
-    pub const SCHEMA_VERSION: u16 = 4;
+    pub const SCHEMA_VERSION: u16 = 5;
 
     pub fn new(title: impl Into<String>) -> Result<Self, ReportError> {
         Self::new_with_template(title, ReportTemplate::ReleaseVerification42)
@@ -1688,6 +1719,32 @@ impl ReportDocument {
                 {
                     return Err(ReportError::UnsafeLegacyMigration { version: 3 });
                 }
+                self.schema_version = 4;
+                self.migrate()
+            }
+            4 => {
+                // Schema five adds report-block inclusion. Enabled is the
+                // serialization-omitted default, so an authentic schema-four
+                // source and every retained history snapshot keep the exact
+                // bytes and digests they had before this metadata-only
+                // upgrade. A disabled block in a schema-four envelope is a
+                // mislabeled schema-five value and is rejected fail-closed.
+                let uses_schema_five_block_policy = |page: &ReportPage| {
+                    page.sections
+                        .iter()
+                        .flat_map(|section| section.blocks.iter())
+                        .any(|block| !block.enabled)
+                };
+                if self.pages.iter().any(uses_schema_five_block_policy)
+                    || self
+                        .revision_history
+                        .records
+                        .iter()
+                        .flat_map(|record| record.snapshot.pages.iter())
+                        .any(uses_schema_five_block_policy)
+                {
+                    return Err(ReportError::UnsafeLegacyMigration { version: 4 });
+                }
                 self.schema_version = Self::SCHEMA_VERSION;
                 Ok(())
             }
@@ -1733,6 +1790,15 @@ impl<'a> ReportDocumentContentView<'a> {
         validate_label("report-document.title", self.title, 512)?;
         if self.pages.len() > MAX_PAGES {
             return Err(ReportError::CapacityExceeded("report pages"));
+        }
+        let section_count = self
+            .pages
+            .iter()
+            .map(|page| page.sections.len())
+            .try_fold(0_usize, usize::checked_add)
+            .ok_or(ReportError::CapacityExceeded("report sections"))?;
+        if section_count > MAX_SECTIONS_TOTAL {
+            return Err(ReportError::CapacityExceeded("report sections"));
         }
         let block_count = self
             .pages
