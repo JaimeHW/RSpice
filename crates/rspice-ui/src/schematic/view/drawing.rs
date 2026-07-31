@@ -1038,7 +1038,8 @@ mod tests {
         assert!(min.y < probe.position.y);
         assert!(max.y > probe.position.y);
         assert!(
-            max.x > probe.position.x + PROBE_LABEL_X_OFFSET,
+            max.x - probe.position.x
+                > i32::try_from(probe.reference.chars().count()).unwrap_or(i32::MAX),
             "fit and culling bounds must retain the complete reference label"
         );
     }

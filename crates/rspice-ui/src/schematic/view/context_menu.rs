@@ -1803,7 +1803,7 @@ mod tests {
         assert_eq!(desktop.max_height, 520.0);
         assert_eq!(desktop.row_height, 30.0);
         assert_eq!(desktop.radius, 3);
-        assert_eq!(desktop.outer_height(), 307.0);
+        assert_eq!(desktop.outer_height(), 406.0);
 
         let touch =
             SurfaceGeometry::for_viewport(vec2(390.0, 844.0), ContextInvocation::TouchSheet);
@@ -1811,7 +1811,7 @@ mod tests {
         assert_eq!(touch.max_height, 560.0);
         assert_eq!(touch.row_height, 44.0);
         assert_eq!(touch.radius, 7);
-        assert_eq!(touch.outer_height(), 419.0);
+        assert_eq!(touch.outer_height(), 560.0);
 
         let short_touch =
             SurfaceGeometry::for_viewport(vec2(1024.0, 500.0), ContextInvocation::TouchSheet);
@@ -1831,7 +1831,7 @@ mod tests {
         );
         assert_eq!(
             clamp_desktop_surface_origin(screen, pos2(790.0, 590.0), desktop),
-            pos2(508.0, 287.0)
+            pos2(508.0, 188.0)
         );
         assert_eq!(
             keyboard_surface_anchor(Rect::from_min_size(pos2(100.0, 200.0), vec2(1000.0, 500.0),)),

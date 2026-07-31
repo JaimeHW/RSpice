@@ -1,6 +1,5 @@
 //! Symbol library errors.
 
-
 /// Errors that can occur during symbol loading or parsing
 #[derive(Debug, Clone)]
 pub enum SymbolError {

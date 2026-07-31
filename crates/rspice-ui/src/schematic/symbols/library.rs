@@ -567,7 +567,6 @@ impl SymbolLibrary {
     pub fn asset_count(&self) -> usize {
         self.embedded_assets.len()
     }
-
 }
 
 #[cfg(test)]

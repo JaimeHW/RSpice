@@ -7,8 +7,8 @@
 
 use std::fmt;
 
-use crate::workbench::app_state::AppState;
 use crate::state::{Point, Selection};
+use crate::workbench::app_state::AppState;
 
 use super::SchematicSymbolContext;
 use super::design_notes;
@@ -90,6 +90,7 @@ enum TargetKind {
     Component,
     DesignNote,
     DocumentationShape,
+    Probe,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -170,6 +171,26 @@ pub(crate) fn apply_selection_layout(
                     .expect("validated documentation-shape target remains live");
                 shape.translate(delta);
             }
+            TargetKind::Probe => {
+                let probe = state
+                    .schematic
+                    .probes
+                    .iter_mut()
+                    .find(|probe| probe.id == target.id)
+                    .expect("validated probe target remains live");
+                probe.position = Point::new(
+                    probe
+                        .position
+                        .x
+                        .checked_add(delta.x)
+                        .expect("layout preflighted probe x"),
+                    probe
+                        .position
+                        .y
+                        .checked_add(delta.y)
+                        .expect("layout preflighted probe y"),
+                );
+            }
         }
     }
     state.schematic.is_dirty = true;
@@ -185,10 +206,7 @@ fn selection_layout_targets(
     symbol_context: &SchematicSymbolContext,
     command: SelectionLayoutCommand,
 ) -> Result<Vec<LayoutTarget>, SelectionLayoutError> {
-    if state.schematic.read_only
-        || state.active_view_read_only()
-        || state.workbench.safe_mode.project_read_only()
-    {
+    if state.schematic_edit_read_only() {
         return Err(SelectionLayoutError::ReadOnly);
     }
 
@@ -241,6 +259,22 @@ fn selection_layout_targets(
         let (min, max) = documentation_shapes::world_bounds(shape);
         targets.push(LayoutTarget {
             kind: TargetKind::DocumentationShape,
+            id: *id,
+            min,
+            max,
+        });
+    }
+    for id in &selection.probes {
+        let probe = state
+            .schematic
+            .probes
+            .iter()
+            .find(|probe| probe.id == *id)
+            .ok_or(SelectionLayoutError::StaleSelection)?;
+        require_active_sheet(state, probe.id)?;
+        let (min, max) = probe.world_bounds();
+        targets.push(LayoutTarget {
+            kind: TargetKind::Probe,
             id: *id,
             min,
             max,
@@ -433,7 +467,9 @@ fn checked_delta(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{Component, ComponentType, SheetDefinition, SheetPortPolicy, SheetTemplate};
+    use crate::state::{
+        Component, ComponentType, SchematicProbe, SheetDefinition, SheetPortPolicy, SheetTemplate,
+    };
 
     fn selected_components(positions: &[(u64, i32, i32)]) -> AppState {
         let mut state = AppState::default();
@@ -540,6 +576,34 @@ mod tests {
             apply_selection_layout(&mut state, &context, SelectionLayoutCommand::AlignLeft),
             Err(SelectionLayoutError::ReadOnly)
         );
+        assert!(!state.schematic.can_undo());
+    }
+
+    #[test]
+    fn probe_layout_is_non_electrical_and_undoable() {
+        let mut state = AppState::default();
+        state.schematic.probes = vec![
+            SchematicProbe::new(20, Point::new(10, 10), "V(out)", None).unwrap(),
+            SchematicProbe::new(21, Point::new(40, 30), "V(out)", None).unwrap(),
+        ];
+        state.schematic.selection.select_probe(20);
+        state.schematic.selection.select_probe(21);
+        state.schematic.init_undo_history();
+        let original = state.schematic.probes.clone();
+        let topology = state.schematic.topology_version();
+        let context = SchematicSymbolContext::from_state(&state);
+
+        assert!(
+            apply_selection_layout(&mut state, &context, SelectionLayoutCommand::AlignLeft)
+                .unwrap()
+        );
+        assert_eq!(state.schematic.probes[0].position.x, 10);
+        assert_eq!(state.schematic.probes[1].position.x, 10);
+        assert_eq!(state.schematic.topology_version(), topology);
+
+        assert!(state.schematic.undo());
+        assert_eq!(state.schematic.probes, original);
+        assert_eq!(state.schematic.topology_version(), topology);
         assert!(!state.schematic.can_undo());
     }
 

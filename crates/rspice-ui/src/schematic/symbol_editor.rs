@@ -5,7 +5,6 @@ use egui::{
 };
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::AppState;
 use crate::schematic::view::resolved_symbol_render::draw_resolved_symbol;
 use crate::state::{
     Component, ComponentType, LibraryCellInstance, PinSummary, Point, PortDirection, PortSpec,
@@ -17,6 +16,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
+use crate::workbench::AppState;
 use crate::workbench::{SymbolGridSpacing, SymbolSelection, SymbolTool};
 
 const PIN_HIT_RADIUS: f32 = 10.0;
@@ -635,7 +635,9 @@ fn read_only_banner(ui: &mut Ui, state: &mut AppState) {
                     .clicked()
                 {
                     let cell = state.workspace.active_view.cell.clone();
-                    state.open_copy_cell_dialog(&library, &cell);
+                    if let Err(error) = state.open_copy_cell_dialog(&library, &cell) {
+                        state.push_user_message(crate::diagnostics::ConsoleMessage::error(error));
+                    }
                 }
             });
         },

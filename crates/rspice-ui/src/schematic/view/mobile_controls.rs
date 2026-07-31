@@ -7,9 +7,9 @@
 use egui::{Align2, Color32, Context, FontId, Id, Order, Rect, Response, Sense, Stroke, Ui, Vec2};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::RSpiceApp;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::{
@@ -59,7 +59,7 @@ const MOBILE_CANVAS_CONTROLS: [MobileCanvasControl; MOBILE_CANVAS_CONTROL_COUNT]
     MobileCanvasControl {
         action: MobileCanvasAction::Command(Command::ZoomFit),
         icon: Some(WorkbenchIcon::ZoomFit),
-        accessible_label: "Fit complete schematic",
+        accessible_label: "Fit drawing sheet",
     },
     MobileCanvasControl {
         action: MobileCanvasAction::Command(Command::ZoomIn),
@@ -318,7 +318,7 @@ mod tests {
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| show(ctx, &mut app, ui.max_rect()));
+                    .show(ctx, |ui| show(ui.ctx(), &mut app, ui.max_rect()));
             },
         );
         let nodes = output
@@ -378,7 +378,7 @@ mod tests {
         app.state.schematic.zoom = 1.0;
 
         execute_action(&mut app, MobileCanvasAction::Command(Command::ZoomOut));
-        assert_eq!(app.state.schematic.zoom, 0.8);
+        assert_eq!(app.state.schematic.zoom, 1.0 / 1.2);
         execute_action(&mut app, MobileCanvasAction::Command(Command::ZoomIn));
         assert_eq!(app.state.schematic.zoom, 1.0);
 
@@ -386,7 +386,8 @@ mod tests {
         execute_action(&mut app, MobileCanvasAction::Command(Command::ZoomFit));
         assert_eq!(app.state.schematic.zoom, 1.0);
         assert_eq!(app.state.schematic.pan, (0.0, 0.0));
-        assert!(app.state.schematic.needs_fit);
+        assert!(app.state.schematic.needs_drawing_sheet_fit);
+        assert!(!app.state.schematic.needs_fit);
 
         execute_action(&mut app, MobileCanvasAction::TouchEditGuide);
         assert_eq!(

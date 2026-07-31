@@ -10,7 +10,7 @@ use crate::state::{
     DesignNoteKind, DocumentationShapeKind, Junction, NetLabel, PendingDesignNotePlacement,
     PendingDocumentationShapePlacement, PendingPortPlacement, PortDirection, PortDirectionType,
     PortDiscipline, PortSignalType, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
-    SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SheetDefinition,
+    SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicProbe, SheetDefinition,
     SheetPortPolicy, SheetTemplate, Tool, WaveformData, Wire,
 };
 
@@ -188,6 +188,32 @@ fn materialized_probe_toggles_immediately_without_creating_saved_output() {
 
     assert_eq!(
         request_probe_signal(&mut state, "OUT", "V(OUT)"),
+        ProbeSignalOutcome::WaveformShown
+    );
+    assert!(state.simulation.waveforms[0].visible);
+    assert!(saved_outputs(&state).is_empty());
+}
+
+#[test]
+fn ensure_visible_probe_action_never_hides_an_existing_trace() {
+    let mut state = AppState::default();
+    state.simulation.waveforms.push(WaveformData::new(
+        "V(OUT)",
+        vec![0.0, 1.0],
+        vec![0.0, 1.0],
+        "#ffffff",
+    ));
+
+    assert_eq!(
+        request_probe_signal_visible(&mut state, "OUT", "V(OUT)"),
+        ProbeSignalOutcome::WaveformAlreadyVisible
+    );
+    assert!(state.simulation.waveforms[0].visible);
+    assert!(saved_outputs(&state).is_empty());
+
+    state.simulation.waveforms[0].visible = false;
+    assert_eq!(
+        request_probe_signal_visible(&mut state, "OUT", "V(OUT)"),
         ProbeSignalOutcome::WaveformShown
     );
     assert!(state.simulation.waveforms[0].visible);
@@ -389,6 +415,39 @@ fn bound_probe_marker_retains_the_exact_source_expression() {
         state.schematic.probes[0].source_expression.as_deref(),
         Some("V(OUT)")
     );
+}
+
+#[test]
+fn equivalent_probe_marker_placement_reuses_identity_without_an_undo_step() {
+    let mut state = AppState::default();
+    let position = Point::new(10, 20);
+    let id = retain_probe_flag(&mut state, position, Some("V(OUT)")).expect("first marker");
+    state.schematic.clear_undo_history();
+
+    let repeated =
+        retain_probe_flag(&mut state, position, Some(" v ( out ) ")).expect("existing marker");
+
+    assert_eq!(repeated, id);
+    assert_eq!(state.schematic.probes.len(), 1);
+    assert_eq!(state.schematic.selection.single_probe(), Some(id));
+    assert!(!state.schematic.can_undo());
+}
+
+#[test]
+fn late_safe_mode_activation_rejects_probe_marker_without_mutation() {
+    let mut state = AppState::default();
+    state.workbench.safe_mode.activate(
+        crate::workbench::state::LocalSafeModeOptions {
+            open_project_read_only: true,
+            ..crate::workbench::state::LocalSafeModeOptions::default()
+        },
+        String::new(),
+    );
+
+    assert!(retain_probe_flag(&mut state, Point::new(10, 20), None).is_err());
+    assert!(state.schematic.probes.is_empty());
+    assert!(!state.schematic.is_dirty);
+    assert!(!state.schematic.can_undo());
 }
 
 #[test]
@@ -1143,6 +1202,58 @@ fn hidden_overlapping_component_cannot_block_active_component_hit() {
             egui::pos2(point.x as f32, point.y as f32),
         ),
         Some(PointerTarget::Component(10))
+    );
+}
+
+#[test]
+fn inactive_sheet_probe_cannot_block_active_probe_hit() {
+    let point = Point::new(10, 10);
+    let mut state = AppState::default();
+    state.schematic.probes = vec![
+        SchematicProbe::new(30, point, "V(active)", Some("V(active)".to_owned())).unwrap(),
+        SchematicProbe::new(31, point, "V(hidden)", Some("V(hidden)".to_owned())).unwrap(),
+    ];
+    let key = state.workspace.active_schematic_reference().key();
+    let first = state
+        .workspace
+        .design_management
+        .bootstrap_for_cell_view(&key, "Sheet 1", [30, 31])
+        .unwrap();
+    let catalog = state
+        .workspace
+        .design_management
+        .sheet_catalog_mut(&key)
+        .unwrap();
+    let second = catalog
+        .create_sheet(
+            SheetDefinition {
+                name: "Sheet 2".to_owned(),
+                template: SheetTemplate::AnalogSchematic,
+                port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                explicit_page_number: Some(2),
+            },
+            Some(first),
+        )
+        .unwrap();
+    catalog
+        .assign_objects(catalog.revision(), second, [31])
+        .unwrap();
+    catalog.set_active(first).unwrap();
+    let context = SchematicSymbolContext::default();
+    let ctx = egui::Context::default();
+    let viewport = pointer_viewport();
+
+    assert_eq!(
+        pointer_target(
+            &state,
+            PointerHit::new(point, point),
+            1,
+            &context,
+            &ctx,
+            &viewport,
+            viewport.schematic_to_screen(point),
+        ),
+        Some(PointerTarget::Probe(30))
     );
 }
 

@@ -5,9 +5,9 @@
 
 use egui::{Event, InputState, Key, Popup, Response};
 
-use crate::workbench::app_state::{AppState, SchematicKeyboardFocus};
 use crate::state::Point;
 use crate::workbench::TogglePreference;
+use crate::workbench::app_state::{AppState, SchematicKeyboardFocus};
 
 use super::SchematicSymbolContext;
 use super::sheet_visibility::object_is_on_active_sheet;
@@ -44,7 +44,7 @@ pub(super) fn handle_keyboard_object_navigation(
         .ctx
         .input_mut(|input| consume_unmodified_key(input, Key::Backspace))
     {
-        if !state.schematic.read_only && !state.active_view_read_only() {
+        if !state.schematic_edit_read_only() {
             crate::workbench::app::open_delete_selection_dialog(state);
         }
         return true;
@@ -204,14 +204,14 @@ fn traversal_candidates(
                 );
             }
         }
+    }
+
+    if filter.annotations {
         for probe in &state.schematic.probes {
             if object_is_on_active_sheet(state, probe.id) {
                 push(SchematicKeyboardFocus::Probe(probe.id), probe.position);
             }
         }
-    }
-
-    if filter.annotations {
         for note in super::scene::visible_design_notes(state).iter() {
             let (min, max) = super::design_notes::conservative_world_bounds(note);
             push(
@@ -265,6 +265,9 @@ fn selected_keyboard_object(state: &AppState) -> Option<SchematicKeyboardFocus> 
     if let Some(id) = selection.single_net_label() {
         return Some(SchematicKeyboardFocus::NetLabel(id));
     }
+    if let Some(id) = selection.single_probe() {
+        return Some(SchematicKeyboardFocus::Probe(id));
+    }
     if let Some(id) = selection.single_design_note() {
         return Some(SchematicKeyboardFocus::DesignNote(id));
     }
@@ -299,7 +302,9 @@ fn focus_keyboard_object(state: &mut AppState, object: SchematicKeyboardFocus) {
         SchematicKeyboardFocus::NetLabel(id) => {
             state.schematic.selection.select_only_net_label(id);
         }
-        SchematicKeyboardFocus::Probe(_) => {}
+        SchematicKeyboardFocus::Probe(id) => {
+            state.schematic.selection.select_only_probe(id);
+        }
         SchematicKeyboardFocus::DesignNote(id) => {
             state.schematic.selection.select_only_design_note(id);
         }
@@ -560,6 +565,7 @@ mod tests {
         assert_eq!(
             objects,
             vec![
+                SchematicKeyboardFocus::Probe(17),
                 SchematicKeyboardFocus::DesignNote(18),
                 SchematicKeyboardFocus::DocumentationShape(19),
             ]
@@ -602,7 +608,7 @@ mod tests {
             run_navigation_frame(&ctx, Key::ArrowRight, Modifiers::NONE, &mut state, true);
         assert!(handled);
         assert!(!available);
-        assert!(state.schematic.selection.is_empty());
+        assert_eq!(state.schematic.selection.single_probe(), Some(2));
         assert_eq!(
             state.dialogs.interaction.schematic_keyboard_focus,
             Some(SchematicKeyboardFocus::Probe(2))
@@ -676,7 +682,7 @@ mod tests {
                 }
                 let symbol_context = SchematicSymbolContext::from_state(state);
                 let handled = handle_keyboard_object_navigation(&response, state, &symbol_context);
-                let key_still_available = ctx.input_mut(|input| input.consume_key(modifiers, key));
+                let key_still_available = ui.input_mut(|input| input.consume_key(modifiers, key));
                 outcome = (handled, key_still_available);
             });
         });

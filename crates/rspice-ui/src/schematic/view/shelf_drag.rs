@@ -64,8 +64,7 @@ pub(super) enum ShelfDropOutcome {
 }
 
 pub(super) fn can_accept_shelf_drop(state: &AppState, payload: &SchematicShelfDragPayload) -> bool {
-    !state.schematic.read_only
-        && !state.active_view_read_only()
+    !state.schematic_edit_read_only()
         && !matches!(
             payload,
             SchematicShelfDragPayload::Primitive(ComponentType::Port | ComponentType::CellInstance)
@@ -241,7 +240,7 @@ mod tests {
                 let handled =
                     handle_placement_transform_keys(&response, state, shelf_drag_over_canvas);
                 let m_still_available =
-                    ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::M));
+                    ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::M));
                 outcome = (handled, m_still_available);
             });
         });
