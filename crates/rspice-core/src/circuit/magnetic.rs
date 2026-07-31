@@ -43,9 +43,10 @@ impl CircuitData {
             let np = self.inductors.node_pos[index];
             let nn = self.inductors.node_neg[index];
             let branch = num_nodes + self.inductors.branch_indices[index];
-            let is_core = core_bindings.iter().any(|binding| {
-                binding.inductor_index == index && binding.device.is_xyce_core()
-            }) || grouped_indices.contains(&index);
+            let is_core = core_bindings
+                .iter()
+                .any(|binding| binding.inductor_index == index && binding.device.is_xyce_core())
+                || grouped_indices.contains(&index);
 
             // Core rows own the constitutive branch equation, but their MNA
             // KCL/branch-incidence entries are still needed here.  Do not
@@ -770,19 +771,18 @@ impl CircuitData {
                     // non-monotone tangent from the solve matrix avoids a
                     // spurious relative-winding mode while preserving the
                     // exact converged solution.
-                    let static_derivative = if stabilized_jacobian
-                        && group.device.is_xyce_core_level2()
-                    {
-                        0.0
-                    } else {
-                        d_mid_d_current.map_or(0.0, |value| {
-                            if one_step_order2 {
-                                static_scale * voltages[i] * value / (trial.mid * trial.mid)
-                            } else {
-                                -static_scale * voltages[i] * value / (trial.mid * trial.mid)
-                            }
-                        })
-                    };
+                    let static_derivative =
+                        if stabilized_jacobian && group.device.is_xyce_core_level2() {
+                            0.0
+                        } else {
+                            d_mid_d_current.map_or(0.0, |value| {
+                                if one_step_order2 {
+                                    static_scale * voltages[i] * value / (trial.mid * trial.mid)
+                                } else {
+                                    -static_scale * voltages[i] * value / (trial.mid * trial.mid)
+                                }
+                            })
+                        };
                     let charge_derivative_j = if one_step_order2 {
                         charge_coeff * l0 / dt
                     } else {

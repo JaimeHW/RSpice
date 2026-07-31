@@ -196,9 +196,7 @@ impl<'a> Context<'a> {
             currents,
             time: 0.0,
             frequency: 0.0,
-            temperature: crate::constants::kelvin_to_celsius(
-                crate::constants::TEMP_REFERENCE,
-            ),
+            temperature: crate::constants::kelvin_to_celsius(crate::constants::TEMP_REFERENCE),
             gmin: crate::constants::GMIN,
             expression_dialect: ExpressionDialect::Ngspice,
         }
@@ -211,9 +209,7 @@ impl<'a> Context<'a> {
             currents,
             time,
             frequency: 0.0,
-            temperature: crate::constants::kelvin_to_celsius(
-                crate::constants::TEMP_REFERENCE,
-            ),
+            temperature: crate::constants::kelvin_to_celsius(crate::constants::TEMP_REFERENCE),
             gmin: crate::constants::GMIN,
             expression_dialect: ExpressionDialect::Ngspice,
         }

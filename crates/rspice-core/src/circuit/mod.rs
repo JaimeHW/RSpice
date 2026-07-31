@@ -7,9 +7,9 @@
 
 #![allow(clippy::too_many_arguments)]
 use crate::Value;
-use crate::numerics::integration::CompanionCoefficients;
 use crate::device::behavioral::BehavioralSources;
 use crate::device::{Cccs, Ccvs, MatrixStamper, NonlinearConvergenceCriteria, Vccs, Vcvs};
+use crate::numerics::integration::CompanionCoefficients;
 use crate::solver::{CscIndex, StaticMatrix, TripletMatrix};
 use crate::xspice::{CodeModelRegistry, DigitalValue, EventQueue, XspiceInstance};
 use std::collections::{HashMap, HashSet};

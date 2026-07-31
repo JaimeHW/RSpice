@@ -101,10 +101,7 @@ impl PoleZeroAnalyzer {
         (value * scale).round() / scale
     }
 
-    pub(in crate::analysis::pole_zero) fn canonicalize_real_roots(
-        &self,
-        roots: &mut [Complex],
-    ) {
+    pub(in crate::analysis::pole_zero) fn canonicalize_real_roots(&self, roots: &mut [Complex]) {
         for root in roots {
             if !root.re.is_finite() || !root.im.is_finite() {
                 continue;
@@ -193,10 +190,7 @@ impl PoleZeroAnalyzer {
         }
     }
 
-    pub(in crate::analysis::pole_zero) fn matrix_eigen_scale(
-        &self,
-        matrix: &Matrix,
-    ) -> Value {
+    pub(in crate::analysis::pole_zero) fn matrix_eigen_scale(&self, matrix: &Matrix) -> Value {
         matrix
             .data
             .iter()

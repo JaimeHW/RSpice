@@ -284,7 +284,10 @@ impl PssConfig {
     }
 
     /// Set integration method for transient shooting.
-    pub fn with_integration_method(mut self, method: crate::numerics::integration::IntegrationMethod) -> Self {
+    pub fn with_integration_method(
+        mut self,
+        method: crate::numerics::integration::IntegrationMethod,
+    ) -> Self {
         self.integration_method = Some(method);
         self
     }

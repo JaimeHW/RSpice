@@ -737,7 +737,7 @@ impl VoltageSources {
         fall: Value,
         width: Value,
         period: Value,
-        width_defaults_to_zero: bool,
+        _width_defaults_to_zero: bool,
         step_default: Value,
         stop_default: Value,
         dialect: crate::engine::SpiceDialect,
@@ -745,8 +745,10 @@ impl VoltageSources {
         let period_was_omitted = period.is_nan();
         let width_was_omitted = width.is_nan();
         let xyce_defaults = matches!(dialect, crate::engine::SpiceDialect::Xyce);
-        let ngspice_defaults = matches!(dialect, crate::engine::SpiceDialect::Ngspice);
-        let stop_time_defaults = xyce_defaults || ngspice_defaults;
+        // ngspice 46's vsrc/isrc load paths resolve an omitted PW to zero and
+        // an omitted or non-positive PER to TR + PW + TF. Xyce instead uses
+        // transient-stop defaults for omitted fields.
+        let stop_time_defaults = xyce_defaults;
 
         let td = if delay.is_finite() {
             delay.max(0.0)
@@ -756,8 +758,6 @@ impl VoltageSources {
         let tr = if rise.is_nan() { step_default } else { rise };
         let tf = if fall.is_nan() { step_default } else { fall };
         let pw = if width.is_nan() && xyce_defaults {
-            stop_default
-        } else if width.is_nan() && ngspice_defaults && !width_defaults_to_zero {
             stop_default
         } else if width.is_nan() {
             0.0
@@ -2259,7 +2259,7 @@ mod tests {
     }
 
     #[test]
-    fn ngspice_pulse_omitted_period_defaults_to_transient_stop_time() {
+    fn ngspice_pulse_omitted_period_defaults_to_waveform_duration() {
         let spec = SourceSpec::Pulse {
             v1: 0.0,
             v2: 1.0,
@@ -2279,12 +2279,12 @@ mod tests {
         );
         assert_close(
             VoltageSources::evaluate_source_at_time_with_context(&spec, 100.01208e-3, ctx),
-            0.0,
+            0.08,
         );
     }
 
     #[test]
-    fn ngspice_two_level_pulse_omitted_width_defaults_to_stop_time() {
+    fn ngspice_two_level_pulse_omitted_width_defaults_to_zero() {
         let spec = SourceSpec::Pulse {
             v1: 0.0,
             v2: 1.0,
@@ -2303,7 +2303,7 @@ mod tests {
                 7.0,
                 ngspice_transient_context(0.1, 7.0),
             ),
-            1.0,
+            0.0,
         );
     }
 

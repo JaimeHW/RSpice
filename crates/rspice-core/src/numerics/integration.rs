@@ -30,7 +30,6 @@ pub enum IntegrationMethod {
     TrapGear,
 }
 
-
 /// Companion model coefficients for numerical integration
 ///
 /// Each integration method converts differential elements (C, L) into
