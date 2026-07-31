@@ -10,12 +10,12 @@ use crate::ui::widgets::Button;
 use crate::workbench::RSpiceApp;
 use crate::workbench::ScalarPreference;
 
-use crate::workbench::documents::code_workspace::{
-    AutomationExecutionState, CodeEditorLanguage, CodeWorkspacePage, show_code_editor,
-};
 use super::super::design_system::{
     WorkbenchIcon, code_inspector_property_list, code_inspector_section, code_workspace_heading,
     property_row, workspace_title_row,
+};
+use crate::workbench::documents::code_workspace::{
+    AutomationExecutionState, CodeEditorLanguage, CodeWorkspacePage, show_code_editor,
 };
 
 const INTERNAL_INSPECTOR_MIN_WIDTH: f32 = 270.0;
@@ -188,7 +188,8 @@ fn generated_netlist_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
         button = button.min_width(width).max_width(width);
     }
     if button.show(ui).clicked() {
-        let _ = crate::workbench::documents::netlist_document::open_generated_primary(&mut app.state);
+        let _ =
+            crate::workbench::documents::netlist_document::open_generated_primary(&mut app.state);
         app.state.ui.code_workspace.page = CodeWorkspacePage::Netlist;
     }
 }

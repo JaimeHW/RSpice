@@ -1,5 +1,7 @@
 //! Hierarchical design document surface.
 
+mod layout_editor;
+
 use egui::{Align2, Context, Id, Order, Rect, Sense, Stroke, Ui, Vec2};
 
 use crate::state::ViewType;
@@ -33,6 +35,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             );
         }
         ViewType::Symbol => crate::schematic::symbol_editor::show(ui, &mut app.state),
+        ViewType::Layout => layout_editor::show(ui, app),
         ViewType::Spice | ViewType::Verilog | ViewType::VerilogA => source_document(ui, app),
         view_type => unsupported_document(ui, app, view_type),
     }

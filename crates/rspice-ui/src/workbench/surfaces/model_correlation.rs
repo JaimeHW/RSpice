@@ -32,6 +32,8 @@ use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, DialogTransac
 use crate::workbench::RSpiceApp;
 
 use super::super::design_system;
+use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
+use super::model_correlation_controller;
 use crate::workbench::documents::model_correlation::{
     CorrelationAggregationDraft, CorrelationAlignmentDraft, CorrelationCalculationDraft,
     CorrelationDatasetClassDraft, CorrelationDatasetDraft, CorrelationExtrapolationDraft,
@@ -42,8 +44,6 @@ use crate::workbench::documents::model_correlation::{
 use crate::workbench::documents::model_editor::{
     ModelEditorSection, open_project_model, resolve_project_model_for_editor,
 };
-use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
-use super::model_correlation_controller;
 
 const OUTER_HEADER_H: f32 = 58.0;
 const SUMMARY_H: f32 = 92.0;
@@ -1534,4 +1534,3 @@ const fn outlier_decision_label(value: CorrelationOutlierDecision) -> &'static s
         CorrelationOutlierDecision::LimitOnlyEvidence => "Limit-only evidence",
     }
 }
-

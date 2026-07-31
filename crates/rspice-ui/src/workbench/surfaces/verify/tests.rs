@@ -238,6 +238,7 @@ fn tuning_session_discovers_real_variables_and_revert_is_non_destructive() {
 #[test]
 fn tuning_commit_is_one_plan_revision_and_queues_the_required_run() {
     let mut app = RSpiceApp::test_instance();
+    app.state.provision_test_project_technology_contract();
     app.state.workspace.project_sources = Default::default();
     crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
     let variable_id = add_tuning_variable(&mut app);
@@ -321,6 +322,7 @@ fn reverting_a_literal_value_proposal_discards_variable_and_binding_only() {
 #[test]
 fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
     let mut app = RSpiceApp::test_instance();
+    app.state.provision_test_project_technology_contract();
     app.state.workspace.project_sources = Default::default();
     crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
     let component_id = app
@@ -478,6 +480,7 @@ fn tuning_commit_rechecks_live_schematic_authority_after_staging() {
 #[test]
 fn failed_literal_value_run_preparation_rolls_back_plan_and_schematic() {
     let mut app = RSpiceApp::test_instance();
+    app.state.provision_test_project_technology_contract();
     let component_id = app.state.schematic.add_component(
         crate::state::ComponentType::Resistor,
         crate::state::Point::origin(),

@@ -71,6 +71,7 @@ fn envelope_source_catalog_rejects_unknown_and_dc_only_selections() {
 #[test]
 fn dependency_source_catalog_uses_the_configured_design_not_the_open_netlist_document() {
     let mut app = RSpiceApp::test_instance();
+    app.state.provision_test_project_technology_contract();
     crate::workbench::examples::load_example("CMOS Inverter", &mut app.state.schematic);
     app.state.simulation.netlist_content =
         "stale document\nVSTALE stale 0 PULSE(0 1 0 1n 1n 1u 2u)\n.end\n".to_owned();
@@ -1091,6 +1092,7 @@ fn invalid_design_variable_workflow_leaves_authoritative_state_unchanged() {
 #[test]
 fn saved_output_workflow_commits_a_typed_plan_contract() {
     let mut app = RSpiceApp::test_instance();
+    app.state.provision_test_project_technology_contract();
     let plan_id = app
         .state
         .sim_setup
@@ -1129,6 +1131,7 @@ fn saved_output_workflow_commits_a_typed_plan_contract() {
 #[test]
 fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
     let mut app = RSpiceApp::test_instance();
+    app.state.provision_test_project_technology_contract();
     commit_design_variable(&mut app, &DesignVariableDraft::default()).expect("source variable");
     commit_saved_output(&mut app, &SavedOutputDraft::default()).expect("source output");
     let source_id = app
