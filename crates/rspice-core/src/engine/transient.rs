@@ -179,25 +179,20 @@ impl Engine {
         }
         let previous_step = grid[cursor - 1] - grid[cursor - 2];
         let current_step = grid[cursor] - grid[cursor - 1];
-        let next_step = grid[cursor + 1] - grid[cursor];
         let valid_steps = previous_step.is_finite()
             && previous_step > 0.0
             && current_step.is_finite()
-            && current_step > 0.0
-            && next_step.is_finite()
-            && next_step > 0.0;
+            && current_step > 0.0;
         if !valid_steps {
             return false;
         }
 
-        // OneStep promotes an accepted order-one step only when its proposed
-        // growth exceeds 1.05.  If the next accepted interval then contracts
-        // sharply, the producing run necessarily rejected the promoted trial
-        // and retried the current target at order one.  The rejected trial is
-        // absent from a locked oracle grid, so replay that order reset on the
-        // preceding target as well as on the visible contraction itself.
+        // A contraction is the observable trace of the accepted retry that
+        // restarts OneStep at order one.  Keep the preceding interval at its
+        // native order: Xyce applies the restart to the first step *after*
+        // the contraction, not retroactively to the larger step that landed
+        // at the contraction point.
         current_step < 0.75 * previous_step
-            || (current_step > 1.05 * previous_step && next_step < 0.75 * current_step)
     }
 
     /// Xyce IC capacitors use an operating-point-only branch unknown. Their
