@@ -17,19 +17,29 @@
 //! This is similar to the robust approach of "trying everything" to converge.
 
 use crate::Value;
+use crate::constants::{GMIN, GMIN_NEGLIGIBLE, GMIN_STEPPING_FACTOR};
 
 //=============================================================================
 // Constants
 //=============================================================================
 
-/// Default initial Gmin value (conductance added to each node)
-pub const GMIN_INITIAL: Value = 1e-12;
-/// Default final Gmin value (should be negligible)  
-pub const GMIN_FINAL: Value = 1e-15;
-/// Gmin reduction factor per step
-pub const GMIN_FACTOR: Value = 10.0;
-/// Maximum Gmin stepping iterations
-pub const GMIN_MAX_STEPS: usize = 10;
+/// Gmin reduction factor per successful step (one decade)
+pub const GMIN_RELAX_FACTOR: Value = GMIN_STEPPING_FACTOR;
+
+/// Maximum number of times [`GminStepper`] may back off after a failed Newton
+/// solve.
+///
+/// This budgets the *failure* path only. The descent stops when it reaches its
+/// target conductance, not after a fixed number of steps, so this value does
+/// not describe the length of the walk.
+pub const GMIN_MAX_FAILURE_RETRIES: usize = 10;
+
+/// Conductance above which [`GminStepper`] stops backing off and gives up.
+///
+/// Six decades above [`GMIN`]. Note this ceiling sits well below the
+/// [`crate::constants::GMIN_STEPPING_START`] value the engine's own
+/// continuation path uses for hard circuits.
+pub const GMIN_RELAX_CEILING: Value = 1e-6;
 
 /// Default source stepping factor
 pub const SOURCE_STEP_INITIAL: Value = 0.1;
@@ -208,10 +218,23 @@ impl Default for SourceStepper {
 ///
 /// This is especially helpful for circuits with floating nodes or
 /// high-impedance paths.
+///
+/// # Range
+///
+/// [`Self::new`] relaxes the conditioning floor from [`GMIN`] down to
+/// [`GMIN_NEGLIGIBLE`] — a three-decade walk that keeps high-impedance nodes
+/// solvable while the floor is retired. That is a narrower job than the DC
+/// engine's continuation ramp, which starts at
+/// [`crate::constants::GMIN_STEPPING_START`] (ten decades above [`GMIN`]) to
+/// force a hard operating point into existence. Callers that need the wide
+/// ramp must pass those endpoints via [`Self::with_params`]; the defaults
+/// here will not rescue a circuit that direct Newton cannot already solve.
 #[derive(Debug, Clone)]
 pub struct GminStepper {
     /// Current Gmin value
     current_gmin: Value,
+    /// Gmin this stepper starts (and restarts) from
+    initial_gmin: Value,
     /// Target (final) Gmin value
     target_gmin: Value,
     /// Reduction factor per step
@@ -228,11 +251,12 @@ impl GminStepper {
     /// Create a new Gmin stepper
     pub fn new() -> Self {
         Self {
-            current_gmin: GMIN_INITIAL,
-            target_gmin: GMIN_FINAL,
-            factor: GMIN_FACTOR,
+            current_gmin: GMIN,
+            initial_gmin: GMIN,
+            target_gmin: GMIN_NEGLIGIBLE,
+            factor: GMIN_RELAX_FACTOR,
             steps: 0,
-            max_steps: GMIN_MAX_STEPS,
+            max_steps: GMIN_MAX_FAILURE_RETRIES,
             complete: false,
         }
     }
@@ -241,10 +265,11 @@ impl GminStepper {
     pub fn with_params(initial: Value, target: Value, factor: Value) -> Self {
         Self {
             current_gmin: initial,
+            initial_gmin: initial,
             target_gmin: target,
             factor,
             steps: 0,
-            max_steps: GMIN_MAX_STEPS,
+            max_steps: GMIN_MAX_FAILURE_RETRIES,
             complete: false,
         }
     }
@@ -295,7 +320,7 @@ impl GminStepper {
         self.current_gmin *= self.factor;
 
         // If Gmin is getting too large, give up
-        if self.current_gmin > 1e-6 {
+        if self.current_gmin > GMIN_RELAX_CEILING {
             return false;
         }
 
@@ -304,7 +329,7 @@ impl GminStepper {
 
     /// Reset for a new solve attempt
     pub fn reset(&mut self) {
-        self.current_gmin = GMIN_INITIAL;
+        self.current_gmin = self.initial_gmin;
         self.steps = 0;
         self.complete = false;
     }
@@ -609,3 +634,85 @@ impl Default for ConvergenceController {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The descent is terminated by the target conductance, not by a step
+    /// count: it must land exactly on the target rather than sailing past it.
+    #[test]
+    fn gmin_walk_lands_on_its_target() {
+        let mut stepper = GminStepper::new();
+        assert_eq!(stepper.gmin(), GMIN);
+
+        let mut steps = 0;
+        while !stepper.is_complete() {
+            stepper.advance_on_success();
+            steps += 1;
+            assert!(steps <= 64, "gmin descent failed to terminate");
+        }
+
+        assert_eq!(stepper.gmin(), GMIN_NEGLIGIBLE);
+        // GMIN / GMIN_NEGLIGIBLE is three decades at one decade per step.
+        assert_eq!(steps, 3);
+    }
+
+    /// `GMIN_MAX_FAILURE_RETRIES` budgets the back-off path only, so it must
+    /// not truncate a descent that is longer than it.
+    #[test]
+    fn gmin_walk_is_not_bounded_by_the_failure_budget() {
+        let long_walk_decades = GMIN_MAX_FAILURE_RETRIES + 5;
+        let target = 1e-15;
+        let start = target * GMIN_RELAX_FACTOR.powi(long_walk_decades as i32);
+        let mut stepper = GminStepper::with_params(start, target, GMIN_RELAX_FACTOR);
+
+        let mut steps = 0;
+        while !stepper.is_complete() {
+            stepper.advance_on_success();
+            steps += 1;
+            assert!(steps <= 64, "gmin descent failed to terminate");
+        }
+
+        assert_eq!(steps, long_walk_decades);
+        assert!((stepper.gmin() - target).abs() <= target * 1e-12);
+    }
+
+    /// `reset` restores the conductance this stepper was built with, not the
+    /// module default — otherwise a `with_params` ramp silently collapses to
+    /// the narrow default window on its second attempt.
+    #[test]
+    fn gmin_reset_restores_the_configured_start() {
+        let mut stepper = GminStepper::with_params(
+            crate::constants::GMIN_STEPPING_START,
+            crate::constants::GMIN_STEPPING_TARGET,
+            GMIN_RELAX_FACTOR,
+        );
+
+        stepper.advance_on_success();
+        stepper.advance_on_success();
+        stepper.reset();
+
+        assert_eq!(stepper.gmin(), crate::constants::GMIN_STEPPING_START);
+        assert_eq!(stepper.steps(), 0);
+        assert!(!stepper.is_complete());
+    }
+
+    /// The back-off path is capped by a conductance ceiling, and that ceiling
+    /// currently sits below the start the engine's own continuation ramp uses
+    /// for hard circuits. Pinned so the gap is a deliberate choice, not drift.
+    #[test]
+    fn gmin_backoff_ceiling_stays_below_the_continuation_ramp_start() {
+        assert!(GMIN_RELAX_CEILING < crate::constants::GMIN_STEPPING_START_NONLINEAR);
+
+        let mut stepper = GminStepper::new();
+        let mut retries = 0;
+        while stepper.increase_on_failure() {
+            retries += 1;
+            assert!(retries <= 64, "gmin back-off failed to terminate");
+        }
+
+        assert!(stepper.gmin() > GMIN_RELAX_CEILING);
+        assert!(stepper.gmin() < crate::constants::GMIN_STEPPING_START_NONLINEAR);
+    }
+}

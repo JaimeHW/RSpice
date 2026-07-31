@@ -434,6 +434,12 @@ pub struct ConvergenceConfig {
     /// Damping strategy for Newton iterations
     pub damping_strategy: DampingStrategy,
     /// Initial continuation GMIN value for stepping.
+    ///
+    /// This is a *lower bound* on where the ramp starts, not the start itself:
+    /// the schedule builders raise it to at least
+    /// [`crate::constants::GMIN_STEPPING_START`] (linear) or
+    /// [`crate::constants::GMIN_STEPPING_START_NONLINEAR`] (nonlinear), so the
+    /// default only matters when a caller asks for a ramp that starts higher.
     pub gmin_initial: Value,
     /// Final global nodal diagonal floor used only for numerical conditioning.
     /// Zero explicitly disables this floor for idealized or equation-oracle
@@ -495,8 +501,8 @@ impl Default for ConvergenceConfig {
             pseudo_transient: true,
             arc_length: false, // Only for difficult circuits
             damping_strategy: DampingStrategy::VoltageLimiting,
-            gmin_initial: 1e-12,
-            gmin_target: 1e-15,
+            gmin_initial: crate::constants::GMIN,
+            gmin_target: crate::constants::GMIN_NEGLIGIBLE,
             junction_gmin_target: crate::constants::GMIN,
             voltage_reltol: crate::constants::RELTOL,
             voltage_abstol: 0.0,

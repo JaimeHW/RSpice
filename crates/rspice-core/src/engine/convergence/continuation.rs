@@ -166,7 +166,7 @@ impl Engine {
     #[inline]
     pub(in crate::engine::convergence) fn gmin_linear_schedule(&self) -> Vec<Value> {
         let conv = &self.config.convergence_config;
-        let start = conv.gmin_initial.max(1e-2);
+        let start = conv.gmin_initial.max(crate::constants::GMIN_STEPPING_START);
         let end = conv.gmin_target.max(0.0);
         Self::build_descending_schedule(start, end)
     }
@@ -174,7 +174,9 @@ impl Engine {
     #[inline]
     pub(in crate::engine) fn gmin_nonlinear_schedule(&self) -> Vec<Value> {
         let conv = &self.config.convergence_config;
-        let start = conv.gmin_initial.max(1e-3);
+        let start = conv
+            .gmin_initial
+            .max(crate::constants::GMIN_STEPPING_START_NONLINEAR);
         let end = conv.gmin_target.max(0.0);
         Self::build_descending_schedule(start, end)
     }
@@ -185,7 +187,9 @@ impl Engine {
         circuit: &CircuitData,
     ) -> Vec<Value> {
         let conv = &self.config.convergence_config;
-        let start = conv.gmin_initial.max(1e-3);
+        let start = conv
+            .gmin_initial
+            .max(crate::constants::GMIN_STEPPING_START_NONLINEAR);
         let end = self.dc_nodal_gmin_floor(circuit);
         Self::build_descending_schedule(start, end)
     }
@@ -783,8 +787,10 @@ impl Engine {
 
     /// GMIN stepping for very difficult nonlinear circuits
     ///
-    /// GMIN stepping starts with a large GMIN (1e-3) added to each node,
-    /// then progressively reduces it to the normal value (1e-12).
+    /// GMIN stepping starts with a large GMIN
+    /// ([`crate::constants::GMIN_STEPPING_START_NONLINEAR`]) added to each
+    /// node, then progressively reduces it to the normal value
+    /// ([`crate::constants::GMIN`]).
     /// This helps BJT and other semiconductor devices find their operating
     /// point by initially providing a strong DC path that's gradually removed.
     /// This is a technique used in commercial SPICE simulators like Spectre/HSPICE.
@@ -803,7 +809,11 @@ impl Engine {
         const MAX_GMIN_ATTEMPTS: usize = 2048;
 
         let gmin_scales = self.gmin_nonlinear_schedule_for_circuit(circuit);
-        let start_gmin = gmin_scales.first().copied().unwrap_or(1.0e-3).max(0.0);
+        let start_gmin = gmin_scales
+            .first()
+            .copied()
+            .unwrap_or(crate::constants::GMIN_STEPPING_START_NONLINEAR)
+            .max(0.0);
         let final_gmin = gmin_scales.last().copied().unwrap_or(0.0).max(0.0);
 
         let size = circuit.matrix_size();

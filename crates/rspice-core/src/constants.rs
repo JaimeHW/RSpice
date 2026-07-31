@@ -122,17 +122,46 @@ pub const BREAKPOINT_TOLERANCE: Value = 1e-15;
 /// Similar to SPICE GMIN parameter. Typical range: 1e-12 to 1e-9.
 pub const GMIN: Value = 1e-12;
 
-/// Initial GMIN value for GMIN stepping (larger for convergence aid)
-pub const GMIN_INITIAL: Value = 1e-2;
+/// Conductance at which a nodal GMIN floor is numerically negligible.
+///
+/// Three decades below [`GMIN`]: small enough that the diagonal floor no longer
+/// perturbs a converged operating point, but still non-zero so a genuinely
+/// floating node keeps a finite path to ground. This is a *resting* floor, not
+/// a convergence aid — continuation ramps start decades above it, at
+/// [`GMIN_STEPPING_START`].
+pub const GMIN_NEGLIGIBLE: Value = 1e-15;
 
-/// Target GMIN value after stepping converges
-pub const GMIN_TARGET: Value = 1e-12;
+/// First (largest) conductance in the GMIN continuation ramp.
+///
+/// GMIN stepping short-circuits every node to ground hard enough that the
+/// linearized circuit is trivially solvable, then walks the conductance back
+/// down, re-solving at each decade. The ramp is defined by the invariant
+///
+/// ```text
+/// GMIN_STEPPING_START == GMIN_STEPPING_TARGET * GMIN_STEPPING_FACTOR^GMIN_STEPPING_MAX_STEPS
+/// ```
+///
+/// which is exactly how ngspice sizes its own ramp (`spice3_gmin` in
+/// `cktop.c` multiplies GMIN by `gminFactor` `gminsteps` times to find the
+/// start, then divides back down). 1e-12 * 10^10 = 1e-2.
+pub const GMIN_STEPPING_START: Value = 1e-2;
 
-/// GMIN reduction factor per successful step
-pub const GMIN_FACTOR: Value = 10.0;
+/// First conductance in the GMIN ramp used by the nonlinear continuation path.
+///
+/// One decade gentler than [`GMIN_STEPPING_START`]: the nonlinear corrector
+/// re-solves the full device set at every step, so it starts closer to the
+/// real operating point rather than from a fully shorted circuit.
+pub const GMIN_STEPPING_START_NONLINEAR: Value = 1e-3;
 
-/// Maximum GMIN stepping iterations
-pub const GMIN_MAX_STEPS: usize = 10;
+/// Conductance the GMIN ramp lands on, i.e. the standard SPICE GMIN floor.
+pub const GMIN_STEPPING_TARGET: Value = GMIN;
+
+/// GMIN reduction factor per successful continuation step (one decade)
+pub const GMIN_STEPPING_FACTOR: Value = 10.0;
+
+/// Number of steps in the GMIN ramp from [`GMIN_STEPPING_START`] down to
+/// [`GMIN_STEPPING_TARGET`].
+pub const GMIN_STEPPING_MAX_STEPS: usize = 10;
 
 //=============================================================================
 // Source Stepping Constants
@@ -260,4 +289,39 @@ pub fn safe_exp(x: Value) -> Value {
 #[inline]
 pub fn clamp_with_margin(x: Value, min: Value, max: Value) -> Value {
     x.max(min + EPSILON).min(max - EPSILON)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The four GMIN stepping constants describe one ramp, so they have to
+    /// agree: walking `GMIN_STEPPING_START` down by `GMIN_STEPPING_FACTOR`
+    /// exactly `GMIN_STEPPING_MAX_STEPS` times must land on
+    /// `GMIN_STEPPING_TARGET`, not short of it or past it.
+    #[test]
+    fn gmin_ramp_lands_on_its_named_target() {
+        let mut gmin = GMIN_STEPPING_START;
+        for _ in 0..GMIN_STEPPING_MAX_STEPS {
+            gmin /= GMIN_STEPPING_FACTOR;
+        }
+
+        let relative_error = (gmin - GMIN_STEPPING_TARGET).abs() / GMIN_STEPPING_TARGET;
+        assert!(
+            relative_error < 1e-12,
+            "GMIN ramp walks {GMIN_STEPPING_START:e} to {gmin:e} in \
+             {GMIN_STEPPING_MAX_STEPS} steps of /{GMIN_STEPPING_FACTOR}, but names \
+             {GMIN_STEPPING_TARGET:e} as its target"
+        );
+    }
+
+    /// The nonlinear ramp is gentler but must still descend toward the same
+    /// floor, and both starts must stay above the resting floors they relax to.
+    #[test]
+    fn gmin_ramp_starts_above_the_floors_it_relaxes_to() {
+        assert!(GMIN_STEPPING_START > GMIN_STEPPING_START_NONLINEAR);
+        assert!(GMIN_STEPPING_START_NONLINEAR > GMIN_STEPPING_TARGET);
+        assert!(GMIN_STEPPING_TARGET > GMIN_NEGLIGIBLE);
+        assert!(GMIN_NEGLIGIBLE > 0.0);
+    }
 }
