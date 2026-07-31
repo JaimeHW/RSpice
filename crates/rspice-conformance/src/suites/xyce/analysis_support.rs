@@ -1405,7 +1405,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         netlist: &Netlist,
         tran: &XyceTranAnalysis,
     ) -> Option<Value> {
-        netlist
+        let independent_source_step = netlist
             .elements
             .iter()
             .filter_map(|element| match &element.kind {
@@ -1413,7 +1413,36 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     Self::source_spec_transient_max_step(spec, tran)
                 }
                 _ => None,
-            })
+            });
+        independent_source_step
+            .chain(netlist.elements.iter().filter_map(|element| {
+                let (ElementKind::BehavioralVoltage { expression, .. }
+                | ElementKind::BehavioralCurrent { expression, .. }) = &element.kind
+                else {
+                    return None;
+                };
+                // A direct behavioral SPICE_SIN is the expression form of the
+                // same periodic source that receives the ordinary SIN source
+                // envelope above. Keep the family execution grid identical
+                // while leaving arbitrary behavioral expressions uncapped.
+                let prepared = prepare_behavioral_expression(expression, &netlist.params).ok()?;
+                let ast = parse_expression_strict(&prepared).ok()?;
+                let Expr::Function {
+                    func: rspice_core::expr::Function::SpiceSin,
+                    args,
+                } = ast
+                else {
+                    return None;
+                };
+                let [Expr::Const(_offset), Expr::Const(_amplitude), Expr::Const(frequency)] =
+                    args.as_slice()
+                else {
+                    return None;
+                };
+                Self::positive_frequency_step(Self::resolved_sin_frequency(
+                    *frequency, tran.stop,
+                ))
+            }))
             .filter(|step| step.is_finite() && *step > 0.0)
             .reduce(Value::min)
     }
