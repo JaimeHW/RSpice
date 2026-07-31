@@ -3445,7 +3445,16 @@ impl Engine {
                 // shunts, converge, and track the solution back to the
                 // genuine system (transient/rescue.rs). A success flows
                 // into the normal LTE acceptance machinery below.
-                if retry_count >= TRANSIENT_GMIN_RESCUE_MIN_RETRIES
+                // GMIN continuation deforms only the nodal equations.  A
+                // pure Xyce LEVEL=1 Core deck has no semiconductor junction
+                // to regularize, so applying the deformation would accept a
+                // different magnetic branch and leave a persistent endpoint
+                // error.  LEVEL=2 Core retains the general rescue path because
+                // its constitutive trial can still require globalization.
+                let xyce_level1_core_only = self.config.spice_dialect == SpiceDialect::Xyce
+                    && circuit.has_only_xyce_core_inductors()
+                    && circuit.xyce_core_level2_mag_updates().is_empty();
+                if !xyce_level1_core_only
                     && circuit.has_nonlinear_devices()
                     && let Some(rescued) = self.rescue_transient_step_with_gmin_continuation(
                         &mut circuit,
