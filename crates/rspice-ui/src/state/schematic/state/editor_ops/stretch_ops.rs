@@ -196,6 +196,9 @@ impl SchematicState {
         if self.read_only || delta == Point::origin() {
             return Ok(None);
         }
+        if !self.selection.probes.is_empty() {
+            return Err(StretchSelectionError::ProbeSelectionUnsupported);
+        }
         if !target_is_live(self, target) {
             return Err(StretchSelectionError::StaleTarget);
         }

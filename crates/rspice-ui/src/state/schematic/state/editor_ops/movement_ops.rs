@@ -53,6 +53,11 @@ impl SchematicState {
                 .iter()
                 .filter(|item| self.selection.has_documentation_shape(item.id))
                 .count()
+            + self
+                .probes
+                .iter()
+                .filter(|item| self.selection.has_probe(item.id))
+                .count()
     }
 
     /// Move a component and update all attached wire endpoints (rubber-banding)
@@ -235,6 +240,14 @@ impl SchematicState {
             .filter(|shape| self.selection.has_documentation_shape(shape.id))
         {
             shape.translate(documentation_shape_delta);
+        }
+
+        for probe in self
+            .probes
+            .iter_mut()
+            .filter(|probe| self.selection.has_probe(probe.id))
+        {
+            probe.position = offset_point(probe.position, delta);
         }
 
         // Move selected wires wholesale.
@@ -518,6 +531,14 @@ impl SchematicState {
             shape.translate(documentation_shape_delta);
         }
 
+        for probe in self
+            .probes
+            .iter_mut()
+            .filter(|probe| self.selection.has_probe(probe.id))
+        {
+            probe.position = offset_point(probe.position, delta);
+        }
+
         // Move selected wires entirely, tracking endpoints for junctions.
         let mut wire_endpoints: Vec<Point> = Vec::new();
         for wire in self
@@ -625,6 +646,10 @@ fn has_live_movable_selection(state: &SchematicState) -> bool {
             .documentation_shapes
             .iter()
             .any(|item| state.selection.has_documentation_shape(item.id))
+        || state
+            .probes
+            .iter()
+            .any(|item| state.selection.has_probe(item.id))
 }
 
 fn has_live_electrical_selection(state: &SchematicState) -> bool {
@@ -784,6 +809,13 @@ fn preflight_rigid_translation(
                 .iter()
                 .filter(|item| state.selection.has_documentation_shape(item.id))
                 .flat_map(|item| item.geometry.points()),
+        )
+        .chain(
+            state
+                .probes
+                .iter()
+                .filter(|item| state.selection.has_probe(item.id))
+                .map(|item| item.position),
         )
         .chain(junctions_to_move.iter().copied());
     for point in selected_points {
@@ -1091,6 +1123,13 @@ fn apply_rigid_selection_translation(
         .filter(|item| state.selection.has_documentation_shape(item.id))
     {
         shape.translate(delta);
+    }
+    for probe in state
+        .probes
+        .iter_mut()
+        .filter(|item| state.selection.has_probe(item.id))
+    {
+        probe.position = exact_offset(probe.position, delta);
     }
     for junction in &mut state.junctions {
         if junctions_to_move.contains(&junction.pos) {
@@ -1714,6 +1753,7 @@ fn commit_movement_candidate(
     state.junctions = candidate.junctions;
     state.design_notes = candidate.design_notes;
     state.documentation_shapes = candidate.documentation_shapes;
+    state.probes = candidate.probes;
     state.connections = candidate.connections;
     state.is_dirty = true;
     if electrical_selection {
@@ -1746,7 +1786,6 @@ fn exact_offset(point: Point, delta: Point) -> Point {
             .expect("guarded move preflighted the y coordinate"),
     )
 }
-
 
 #[cfg(test)]
 mod tests;

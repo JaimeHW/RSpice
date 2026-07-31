@@ -4,9 +4,9 @@
 //! between the copied objects, their junctions, and their labels — and
 //! re-anchoring it at the paste point with fresh object identities.
 
-use super::super::super::clamped_documentation_shape_translation;
 #[cfg(test)]
 use super::super::super::{BusDeclaration, BusSlice, BusTapOrientation, DesignNoteKind};
+use super::super::super::{SchematicProbe, clamped_documentation_shape_translation};
 use super::super::*;
 
 impl SchematicState {
@@ -142,6 +142,12 @@ impl SchematicState {
             .filter(|shape| self.selection.has_documentation_shape(shape.id))
             .cloned()
             .collect();
+        let probes_to_copy: Vec<SchematicProbe> = self
+            .probes
+            .iter()
+            .filter(|probe| self.selection.has_probe(probe.id))
+            .cloned()
+            .collect();
 
         ClipboardData::from_complete_selection(ClipboardData {
             components: selected_comps,
@@ -152,6 +158,7 @@ impl SchematicState {
             net_labels: net_labels_to_copy,
             design_notes: design_notes_to_copy,
             documentation_shapes: documentation_shapes_to_copy,
+            probes: probes_to_copy,
             origin: Point::origin(),
         })
     }
@@ -173,7 +180,8 @@ impl SchematicState {
             && self.clipboard.bus_taps.is_empty()
             && self.clipboard.net_labels.is_empty()
             && self.clipboard.design_notes.is_empty()
-            && self.clipboard.documentation_shapes.is_empty();
+            && self.clipboard.documentation_shapes.is_empty()
+            && self.clipboard.probes.is_empty();
         // A junction-only clipboard is a connectivity edit, not decoration.
         // Snap its anchor through the same ambiguous-crossing candidate set as
         // the junction tool, then reject it before opening an undo transaction
@@ -217,6 +225,7 @@ impl SchematicState {
             let clipboard_bus_taps = s.clipboard.bus_taps.clone();
             let clipboard_design_notes = s.clipboard.design_notes.clone();
             let clipboard_documentation_shapes = s.clipboard.documentation_shapes.clone();
+            let clipboard_probes = s.clipboard.probes.clone();
             let origin = s.clipboard.origin;
 
             if clipboard_components.is_empty()
@@ -227,6 +236,7 @@ impl SchematicState {
                 && clipboard_bus_taps.is_empty()
                 && clipboard_design_notes.is_empty()
                 && clipboard_documentation_shapes.is_empty()
+                && clipboard_probes.is_empty()
             {
                 return;
             }
@@ -333,6 +343,33 @@ impl SchematicState {
                 shape.id = new_id;
                 s.documentation_shapes.push(shape);
                 s.selection.select_documentation_shape(new_id);
+            }
+
+            // Probe markers are non-electrical authored output intent. Bound
+            // markers retain their exact raw expression; unbound markers get
+            // a fresh display reference matching their new stable identity.
+            for mut probe in clipboard_probes {
+                if probe.validate().is_err() {
+                    continue;
+                }
+                let new_id = s.next_id();
+                probe.id = new_id;
+                probe.position = Point::new(
+                    probe.position.x.saturating_add(offset_x),
+                    probe.position.y.saturating_add(offset_y),
+                );
+                if probe.source_expression.is_none() {
+                    probe.reference = format!("P{new_id}");
+                }
+                if probe.validate().is_err() {
+                    continue;
+                }
+                if !committed {
+                    s.selection.clear();
+                    committed = true;
+                }
+                s.probes.push(probe);
+                s.selection.select_probe(new_id);
             }
 
             // Paste buses before taps so every source reference can be
@@ -783,5 +820,41 @@ mod tests {
             !schematic.can_undo(),
             "paste must create exactly one undo step"
         );
+    }
+
+    #[test]
+    fn bound_probe_copy_paste_preserves_expression_without_changing_topology() {
+        let original =
+            SchematicProbe::new(120, Point::new(10, 20), "V(out)", Some("V(out)".to_owned()))
+                .unwrap();
+        let mut schematic = SchematicState::default();
+        schematic.probes.push(original.clone());
+        schematic.recalculate_runtime_state();
+        schematic.selection.select_only_probe(original.id);
+        schematic.copy_selection();
+        schematic.clear_undo_history();
+        let topology = schematic.topology_version();
+
+        assert_eq!(schematic.clipboard.probes, vec![original.clone()]);
+        assert_eq!(schematic.clipboard.origin, original.position);
+        assert!(schematic.paste_at(Point::new(110, 220)));
+
+        assert_eq!(schematic.probes.len(), 2);
+        let pasted = schematic
+            .probes
+            .iter()
+            .find(|probe| probe.id != original.id)
+            .unwrap();
+        assert_eq!(pasted.position, Point::new(110, 220));
+        assert_eq!(pasted.reference, original.reference);
+        assert_eq!(pasted.source_expression, original.source_expression);
+        assert_eq!(schematic.selection.single_probe(), Some(pasted.id));
+        assert_eq!(schematic.topology_version(), topology);
+        assert_eq!(schematic.undo_description(), Some("paste"));
+
+        assert!(schematic.undo());
+        assert_eq!(schematic.probes, vec![original]);
+        assert_eq!(schematic.topology_version(), topology);
+        assert!(!schematic.can_undo());
     }
 }

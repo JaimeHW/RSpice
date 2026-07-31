@@ -8,6 +8,7 @@ use super::design_note::DesignNote;
 use super::documentation_shape::DocumentationShape;
 use super::net_label::NetLabel;
 use super::point::Point;
+use super::probe::SchematicProbe;
 use super::wire::Wire;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -57,6 +58,10 @@ pub struct ClipboardData {
     #[serde(default)]
     pub documentation_shapes: Vec<DocumentationShape>,
 
+    /// Copied non-electrical probe markers.
+    #[serde(default)]
+    pub probes: Vec<SchematicProbe>,
+
     /// Origin point (center of copied selection)
     ///
     /// Used to calculate offsets when pasting at a new location.
@@ -79,6 +84,7 @@ impl ClipboardData {
             || !self.net_labels.is_empty()
             || !self.design_notes.is_empty()
             || !self.documentation_shapes.is_empty()
+            || !self.probes.is_empty()
     }
 
     /// Check if clipboard is empty
@@ -91,6 +97,7 @@ impl ClipboardData {
             && self.net_labels.is_empty()
             && self.design_notes.is_empty()
             && self.documentation_shapes.is_empty()
+            && self.probes.is_empty()
     }
 
     /// Get total number of items in clipboard
@@ -103,6 +110,7 @@ impl ClipboardData {
             + self.net_labels.len()
             + self.design_notes.len()
             + self.documentation_shapes.len()
+            + self.probes.len()
     }
 
     /// Clear all clipboard content
@@ -115,6 +123,7 @@ impl ClipboardData {
         self.net_labels.clear();
         self.design_notes.clear();
         self.documentation_shapes.clear();
+        self.probes.clear();
         self.origin = Point::origin();
     }
 
@@ -166,6 +175,7 @@ impl ClipboardData {
             net_labels,
             design_notes: Vec::new(),
             documentation_shapes: Vec::new(),
+            probes: Vec::new(),
             origin: Point::origin(),
         })
     }
@@ -284,6 +294,12 @@ impl ClipboardData {
             let point_count = i64::try_from(points.len()).unwrap_or(i64::MAX).max(1);
             cx = cx.saturating_add(sx / point_count);
             cy = cy.saturating_add(sy / point_count);
+            count = count.saturating_add(1);
+        }
+
+        for probe in &selection.probes {
+            cx = cx.saturating_add(i64::from(probe.position.x));
+            cy = cy.saturating_add(i64::from(probe.position.y));
             count = count.saturating_add(1);
         }
 

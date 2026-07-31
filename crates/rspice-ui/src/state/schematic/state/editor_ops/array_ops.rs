@@ -446,6 +446,9 @@ impl SchematicState {
         if self.read_only {
             return Err(SchematicArrayError::ReadOnly);
         }
+        if !self.selection.probes.is_empty() {
+            return Err(SchematicArrayError::ProbeSelectionUnsupported);
+        }
         validate_live_array_selection(self)?;
         validate_array_source_selection_direct(self)?;
         let normalized_plan =
@@ -2297,7 +2300,6 @@ fn format_bus_range(name: &str, start: u32, end: u32, notation: BusNotation) -> 
         BusNotation::Angle => format!("{name}<{start}>…{name}<{end}>"),
     }
 }
-
 
 #[cfg(test)]
 mod tests;

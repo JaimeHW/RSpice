@@ -105,7 +105,7 @@ pub(crate) use replacement::{
 };
 pub use rotation::Rotation;
 pub use selection::{JunctionSelection, SchematicSelectionFilter, Selection};
-pub use snap::SnapEngine;
+pub use snap::{SnapEngine, SnapResult, SnapTarget, SnapTargetType};
 pub use state::{MoveSelectionMode, SchematicState, StretchOrthogonalPolicy, StretchTarget};
 pub use symbol_gen::generate_symbol;
 pub use tool::Tool;
