@@ -118,9 +118,7 @@ impl SolutionDependentCapacitor {
             branch_bindings: Vec::new(),
             node_values: Vec::new(),
             branch_values: Vec::new(),
-            temperature: crate::constants::kelvin_to_celsius(
-                crate::constants::TEMP_REFERENCE,
-            ),
+            temperature: crate::constants::kelvin_to_celsius(crate::constants::TEMP_REFERENCE),
             frequency: 0.0,
             gmin: crate::constants::GMIN,
             expression_dialect: ExpressionDialect::Ngspice,

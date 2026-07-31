@@ -149,9 +149,7 @@ impl BehavioralVoltageSource {
             node_partials: Vec::new(),
             branch_partials: Vec::new(),
             linearized_affine: 0.0,
-            temperature: crate::constants::kelvin_to_celsius(
-                crate::constants::TEMP_REFERENCE,
-            ),
+            temperature: crate::constants::kelvin_to_celsius(crate::constants::TEMP_REFERENCE),
             frequency: 0.0,
             frequency_dependent,
             gmin: crate::constants::GMIN,
@@ -1603,9 +1601,7 @@ impl BehavioralCurrentSource {
             node_partials: Vec::new(),
             branch_partials: Vec::new(),
             linearized_affine: 0.0,
-            temperature: crate::constants::kelvin_to_celsius(
-                crate::constants::TEMP_REFERENCE,
-            ),
+            temperature: crate::constants::kelvin_to_celsius(crate::constants::TEMP_REFERENCE),
             frequency: 0.0,
             frequency_dependent,
             gmin: crate::constants::GMIN,

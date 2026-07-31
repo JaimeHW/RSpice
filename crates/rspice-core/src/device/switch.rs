@@ -1188,9 +1188,7 @@ impl GenericSwitch {
             node_partials: Vec::new(),
             branch_partials: Vec::new(),
             time_breakpoints,
-            temperature: crate::constants::kelvin_to_celsius(
-                crate::constants::TEMP_REFERENCE,
-            ),
+            temperature: crate::constants::kelvin_to_celsius(crate::constants::TEMP_REFERENCE),
             gmin: crate::constants::GMIN,
             expression_dialect: crate::netlist::ExpressionDialect::Ngspice,
             ron: 1.0,
@@ -1977,10 +1975,9 @@ mod tests {
             .expect("runtime-special CONTROL expression parses");
         switch.set_expression_context(80.0, 2.5e-8, ExpressionDialect::Xyce);
 
-        let expected =
-            80.0 + crate::constants::thermal_voltage(
-                crate::constants::celsius_to_kelvin(80.0),
-            ) + 2.5e-8;
+        let expected = 80.0
+            + crate::constants::thermal_voltage(crate::constants::celsius_to_kelvin(80.0))
+            + 2.5e-8;
         let actual = switch.evaluate_control(0.0);
         assert!(
             (actual - expected).abs() < 1.0e-14,
