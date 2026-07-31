@@ -1,10 +1,10 @@
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::netlist::{ElementKind, SourceSpec, StepCommand, StepTarget};
+use crate::netlist::{ModelDef, StepSweep};
 use crate::solver::SimulationResult;
 use crate::{Netlist, Value};
 use std::collections::HashSet;
-use crate::netlist::{ModelDef, StepSweep};
 
 #[derive(Clone, Copy)]
 enum DeviceStepResolution {

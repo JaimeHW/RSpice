@@ -12,13 +12,13 @@ use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::transient::{
     BreakpointManager, BreakpointStepPolicy, LteEstimator, TimestepController, TrapGearController,
 };
-use crate::numerics::integration::{CompanionCoefficients, IntegrationMethod};
-use crate::engine::waveform::{CompressionConfig, TransientResultCompressed};
 use crate::device::semiconductor::{
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeBranch,
     BjtChargeSnapshot,
 };
+use crate::engine::waveform::{CompressionConfig, TransientResultCompressed};
 use crate::netlist::{AnalysisCommand, SaveSignal};
+use crate::numerics::integration::{CompanionCoefficients, IntegrationMethod};
 use crate::{Netlist, Value};
 use std::collections::HashMap;
 
@@ -198,6 +198,17 @@ impl Engine {
         // preceding target as well as on the visible contraction itself.
         current_step < 0.75 * previous_step
             || (current_step > 1.05 * previous_step && next_step < 0.75 * current_step)
+    }
+
+    #[inline]
+    fn dialect_requires_locked_grid_order_restart(
+        dialect: SpiceDialect,
+        grid: &[Value],
+        cursor: usize,
+        target_is_breakpoint: bool,
+    ) -> bool {
+        dialect == SpiceDialect::Xyce
+            && Self::locked_grid_requires_xyce_order_restart(grid, cursor, target_is_breakpoint)
     }
 
     /// Xyce IC capacitors use an operating-point-only branch unknown. Their
@@ -2560,7 +2571,8 @@ impl Engine {
                     || !circuit.coupled_tlines.is_empty();
             let locked_reference_order_restart = !xyce_one_step_stateful_topology
                 && locked_grid.as_ref().is_some_and(|grid| {
-                    Self::locked_grid_requires_xyce_order_restart(
+                    Self::dialect_requires_locked_grid_order_restart(
+                        self.config.spice_dialect,
                         grid,
                         locked_cursor,
                         breakpoints.at_breakpoint(step_time),
@@ -4374,7 +4386,7 @@ impl Engine {
                         );
                     }
                     retry_count += 1;
-                self.record_convergence(|quality| quality.record_timestep_reduction());
+                    self.record_convergence(|quality| quality.record_timestep_reduction());
                     // Match ngspice truncation retries: keep the current integration
                     // order and only reduce the timestep.
                     trap_order =
@@ -6034,6 +6046,30 @@ mod tests {
             1,
             "ulp-scale duplicates should still be folded: {normalized:?}"
         );
+    }
+
+    #[test]
+    fn locked_grid_order_restart_is_scoped_to_xyce_replay() {
+        let grid = [0.0, 1.0, 2.0, 2.5, 3.0];
+
+        assert!(Engine::dialect_requires_locked_grid_order_restart(
+            SpiceDialect::Xyce,
+            &grid,
+            3,
+            false
+        ));
+        assert!(!Engine::dialect_requires_locked_grid_order_restart(
+            SpiceDialect::Ngspice,
+            &grid,
+            3,
+            false
+        ));
+        assert!(!Engine::dialect_requires_locked_grid_order_restart(
+            SpiceDialect::Xyce,
+            &grid,
+            3,
+            true
+        ));
     }
 
     #[test]

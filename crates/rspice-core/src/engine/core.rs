@@ -518,10 +518,7 @@ impl Engine {
     ///
     /// Returns the flattened node name, or `None` when nothing matches any
     /// candidate from [`Self::node_lookup_candidates`].
-    pub fn resolve_hierarchical_node_name(
-        netlist: &Netlist,
-        node_name: &str,
-    ) -> Option<String> {
+    pub fn resolve_hierarchical_node_name(netlist: &Netlist, node_name: &str) -> Option<String> {
         let normalized = Self::normalize_hierarchical_node_name(node_name);
         Self::resolve_hierarchical_node_name_with_delimiter(netlist, &normalized, ':').or_else(
             || Self::resolve_hierarchical_node_name_with_delimiter(netlist, &normalized, '.'),
