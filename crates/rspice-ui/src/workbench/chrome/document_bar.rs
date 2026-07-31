@@ -9,7 +9,7 @@ use egui::{Frame, Layout, Panel, Sense, Ui, Vec2};
 use crate::state::ViewType;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::{AppState, RSpiceApp, SurfaceId};
 
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
@@ -305,17 +305,32 @@ fn available_documents_for_workspace(
             }
             documents
         }
-        Workspace::Results => state
-            .simulation
-            .runs
-            .iter()
-            .map(|run| WorkspaceDocument {
-                id: WorkspaceDocumentId::ResultDataset(run.dataset_id),
-                label: run.label.clone(),
-                icon: WorkbenchIcon::Results,
-                dirty: false,
-            })
-            .collect(),
+        Workspace::Results => {
+            let mut documents = state
+                .simulation
+                .runs
+                .iter()
+                .map(|run| WorkspaceDocument {
+                    id: WorkspaceDocumentId::ResultDataset(run.dataset_id),
+                    label: run.label.clone(),
+                    icon: WorkbenchIcon::Results,
+                    dirty: false,
+                })
+                .collect::<Vec<_>>();
+            documents.extend(
+                state
+                    .workspace
+                    .visualization_documents
+                    .iter()
+                    .map(|document| WorkspaceDocument {
+                        id: WorkspaceDocumentId::VisualizationDocument(document.id()),
+                        label: document.title().to_owned(),
+                        icon: WorkbenchIcon::Results,
+                        dirty: state.workspace.visualization_documents_dirty,
+                    }),
+            );
+            documents
+        }
         Workspace::Verify => vec![WorkspaceDocument {
             id: WorkspaceDocumentId::Verification,
             label: "Verification".to_owned(),
@@ -400,9 +415,16 @@ fn authoritative_active_document(
             state.workspace.active_view.clone(),
         )),
         Workspace::Results => state
-            .simulation
-            .active_run()
-            .map(|run| WorkspaceDocumentId::ResultDataset(run.dataset_id)),
+            .workbench
+            .documents
+            .active(Workspace::Results)
+            .cloned()
+            .or_else(|| {
+                state
+                    .simulation
+                    .active_run()
+                    .map(|run| WorkspaceDocumentId::ResultDataset(run.dataset_id))
+            }),
         workspace => state.workbench.documents.active(workspace).cloned(),
     };
     candidate
@@ -591,6 +613,12 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
             .iter()
             .position(|run| run.dataset_id == *dataset_id)
             .is_some_and(|index| state.simulation.select_run(index)),
+        WorkspaceDocumentId::VisualizationDocument(document_id) => {
+            crate::workbench::documents::result_document::activate_persistent_document(
+                state,
+                *document_id,
+            )
+        }
         WorkspaceDocumentId::Project
         | WorkspaceDocumentId::SimulationPlan
         | WorkspaceDocumentId::Verification
@@ -598,6 +626,14 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
         | WorkspaceDocumentId::NetlistSource => true,
     };
     if activated {
+        if matches!(document, WorkspaceDocumentId::VisualizationDocument(_))
+            && state.workbench.current_route().surface_id() != SurfaceId::Results
+        {
+            // A stable result-document tab always owns the canonical Results
+            // surface. Do not leave a previously opened specialist route in
+            // charge of the center stage.
+            state.workbench.activate(Workspace::Results);
+        }
         state.workbench.documents.activate(document.clone());
         let window = state.workbench.window_session.current();
         let _ = state

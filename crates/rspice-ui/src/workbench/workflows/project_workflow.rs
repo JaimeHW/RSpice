@@ -76,6 +76,7 @@ pub(crate) fn create_new_project(state: &mut AppState) {
     workspace.save_active_schematic(&schematic);
 
     state.library_manager = library_manager;
+    state.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
     state.workspace = workspace;
     state.schematic = schematic;
     state.ui.schematic_snap = state.schematic.snap_engine.clone();
@@ -850,6 +851,7 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
     workspace.save_active_schematic(&schematic);
     state.clear_design_execution_context();
     state.library_manager = libraries;
+    state.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
     state.workspace = workspace;
     state.schematic = schematic;
     state.ui.schematic_snap = state.schematic.snap_engine.clone();
@@ -990,11 +992,17 @@ fn apply_loaded_project_authorized(
     let mut simulation_results_warning = project.simulation_results_warning;
     state.clear_design_execution_context();
     state.library_manager = project.libraries;
+    state.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
     state.workspace = project.workspace;
     state.sim_setup = simulation_plan;
     state.model_library_manager = model_library_manager;
     state.restore_active_schematic_from_workspace();
     state.simulation = crate::state::SimulationState::default();
+    if let Err(error) = state.validate_project_technology_contract() {
+        state.push_user_message(ConsoleMessage::warning(format!(
+            "Project opened with simulation execution blocked: {error}. Review Project \u{00b7} Dependencies and attach an exact trusted signed PDK revision before running or governed saving"
+        )));
+    }
     if let Err(error) = simulation_results.apply_to_state(&mut state.simulation)
         && simulation_results_warning.is_none()
     {
@@ -1571,6 +1579,23 @@ mod tests {
     }
 
     fn seed_specialized_viewer_caches(state: &mut AppState) {
+        let waveform = crate::state::WaveformData::new(
+            "V(out)",
+            vec![0.0, 1.0, 2.0],
+            vec![0.0, 0.5, 1.0],
+            "#00aaff",
+        );
+        let mut run = crate::state::SimulationRun::new(1);
+        run.add_analysis(
+            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
+                .with_waveforms(vec![waveform]),
+        );
+        seal_legacy_unattributed(&mut run);
+        state.simulation.runs = vec![run];
+        state.simulation.active_run_idx = Some(0);
+        state.simulation.active_analysis_idx = Some(0);
+        state.simulation.next_run_id = 2;
+
         state
             .analysis
             .histogram_state
@@ -1612,6 +1637,20 @@ mod tests {
                 8.0,
                 WindowFunction::Rectangular,
             ));
+
+        let provenance = state
+            .active_specialized_viewer_cache_provenance()
+            .expect("default test project has an active retained analysis");
+        for viewer in [
+            ActiveViewer::BodePlot,
+            ActiveViewer::Nyquist,
+            ActiveViewer::SmithChart,
+            ActiveViewer::Histogram,
+            ActiveViewer::Fft,
+            ActiveViewer::EyeDiagram,
+        ] {
+            state.bind_specialized_viewer_cache(viewer, provenance);
+        }
 
         for viewer in [
             ActiveViewer::SmithChart,
@@ -1855,11 +1894,9 @@ mod tests {
             project_default.inheritance,
             DrawingSheetInheritance::ProjectDefault
         );
-        assert!(
-            crate::workbench::app::dialogs::drawing_sheet_setup::open_drawing_sheet_setup_for_state(
-                &mut state
-            )
-        );
+        assert!(crate::workbench::app::open_drawing_sheet_setup_for_state(
+            &mut state
+        ));
         let page_setup_format = state
             .dialogs
             .drawing_sheet_setup
@@ -1876,7 +1913,7 @@ mod tests {
             page_setup_format.title_block.fields
                 [&crate::state::DrawingSheetTitleFieldId::SheetTitle]
                 .value,
-            "Sheet 1",
+            "top",
             "the governed sheet keeps its own title while inheriting the project format"
         );
     }
@@ -1910,6 +1947,7 @@ mod tests {
             .preferences
             .set_drawing_sheet_personal_preferences(personal.clone())
             .unwrap();
+        let retained_personal = state.ui.preferences.drawing_sheet_personal_preferences();
 
         create_new_project(&mut state);
 
@@ -1928,7 +1966,7 @@ mod tests {
         assert!(project_settings.presets.is_empty());
         assert_eq!(
             state.ui.preferences.drawing_sheet_personal_preferences(),
-            personal,
+            retained_personal,
             "seeding a project must not mutate personal preferences"
         );
     }

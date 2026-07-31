@@ -450,8 +450,9 @@ fn checkpoint_age(modified: std::time::SystemTime) -> String {
 fn validate_candidate_path(candidate: &RecoveryCandidate) -> Result<(), String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let expected =
-            crate::workbench::workflows::file_workflow::autosave_checkpoint_path(&candidate.original);
+        let expected = crate::workbench::workflows::file_workflow::autosave_checkpoint_path(
+            &candidate.original,
+        );
         if expected != candidate.checkpoint {
             return Err(
                 "Recovery checkpoint identity no longer matches its saved source".to_owned(),
@@ -1224,10 +1225,12 @@ mod tests {
         let root = unique_temp_dir("recovery-project-boundary");
         let project_path = root.join("guard.rspiceproj");
         let mut state = AppState::default();
-        assert!(crate::workbench::workflows::project_workflow::save_project_to_path(
-            &mut state,
-            &project_path
-        ));
+        assert!(
+            crate::workbench::workflows::project_workflow::save_project_to_path(
+                &mut state,
+                &project_path
+            )
+        );
         assert_eq!(recovery_replacement_block_reason(&state), None);
 
         let transient = state
@@ -1261,7 +1264,8 @@ mod tests {
         let root = unique_temp_dir("recovery-discovery");
         let source = root.join("design.rsch");
         crate::io::save_schematic(&SchematicState::default(), &source).expect("save source");
-        let checkpoint = crate::workbench::workflows::file_workflow::autosave_checkpoint_path(&source);
+        let checkpoint =
+            crate::workbench::workflows::file_workflow::autosave_checkpoint_path(&source);
         std::fs::write(&checkpoint, "not schematic json").expect("write malformed checkpoint");
 
         let candidates = discover_candidates(

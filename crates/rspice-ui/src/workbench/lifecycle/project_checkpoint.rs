@@ -34,12 +34,14 @@ const BROWSER_KEY_PREFIX: &str = "rspice.project-recovery.v1";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ProjectCheckpointReason {
+    Manual,
     TechnologyAttachment,
 }
 
 impl ProjectCheckpointReason {
     pub(crate) const fn label(self) -> &'static str {
         match self {
+            Self::Manual => "Manual checkpoint",
             Self::TechnologyAttachment => "Before technology attachment",
         }
     }
@@ -143,6 +145,14 @@ impl ProjectCheckpointSummary {
 
     pub(crate) const fn snapshot_byte_len(&self) -> u64 {
         self.snapshot_byte_len
+    }
+
+    pub(crate) const fn created_unix_ms(&self) -> u64 {
+        self.created_unix_ms
+    }
+
+    pub(crate) const fn snapshot_digest(&self) -> ContentDigest {
+        self.snapshot_digest
     }
 }
 
@@ -647,98 +657,105 @@ pub(crate) fn start_list(
 ) {
     let project_id = state.workspace.project.id().to_string();
     let prefix = browser_project_prefix(&project_id);
-    crate::workbench::lifecycle::project_lifecycle::start_browser_checkpoint_list(prefix, move |records| {
-        complete(records.map(|(records, orphan_snapshots)| {
-            let mut checkpoints = Vec::new();
-            let mut quarantined = Vec::new();
-            for (manifest_key, value, snapshot_key, snapshot) in records {
-                let Some(value) = value else {
-                    quarantined.push(ProjectCheckpointQuarantine {
-                        label: manifest_key.clone(),
-                        reason: "checkpoint manifest is not a JSON string".to_owned(),
-                        artifact_keys: vec![manifest_key, snapshot_key],
-                    });
-                    continue;
-                };
-                let manifest = match serde_json::from_str::<ProjectCheckpointManifest>(&value) {
-                    Ok(manifest) => manifest,
-                    Err(error) => {
+    crate::workbench::lifecycle::project_lifecycle::start_browser_checkpoint_list(
+        prefix,
+        move |records| {
+            complete(records.map(|(records, orphan_snapshots)| {
+                let mut checkpoints = Vec::new();
+                let mut quarantined = Vec::new();
+                for (manifest_key, value, snapshot_key, snapshot) in records {
+                    let Some(value) = value else {
                         quarantined.push(ProjectCheckpointQuarantine {
                             label: manifest_key.clone(),
-                            reason: format!("checkpoint manifest is invalid: {error}"),
+                            reason: "checkpoint manifest is not a JSON string".to_owned(),
+                            artifact_keys: vec![manifest_key, snapshot_key],
+                        });
+                        continue;
+                    };
+                    let manifest = match serde_json::from_str::<ProjectCheckpointManifest>(&value) {
+                        Ok(manifest) => manifest,
+                        Err(error) => {
+                            quarantined.push(ProjectCheckpointQuarantine {
+                                label: manifest_key.clone(),
+                                reason: format!("checkpoint manifest is invalid: {error}"),
+                                artifact_keys: vec![manifest_key, snapshot_key],
+                            });
+                            continue;
+                        }
+                    };
+                    if manifest.project_id != project_id {
+                        quarantined.push(ProjectCheckpointQuarantine {
+                            label: manifest_key.clone(),
+                            reason:
+                                "checkpoint key ownership and manifest project identity disagree"
+                                    .to_owned(),
                             artifact_keys: vec![manifest_key, snapshot_key],
                         });
                         continue;
                     }
-                };
-                if manifest.project_id != project_id {
-                    quarantined.push(ProjectCheckpointQuarantine {
-                        label: manifest_key.clone(),
-                        reason: "checkpoint key ownership and manifest project identity disagree"
-                            .to_owned(),
-                        artifact_keys: vec![manifest_key, snapshot_key],
-                    });
-                    continue;
-                }
-                let (expected_manifest_key, expected_snapshot_key) = browser_keys(&manifest);
-                if manifest_key != expected_manifest_key || snapshot_key != expected_snapshot_key {
-                    quarantined.push(ProjectCheckpointQuarantine {
-                        label: manifest.checkpoint_id.to_string(),
-                        reason: "checkpoint manifest is not bound to its canonical IndexedDB keys"
-                            .to_owned(),
-                        artifact_keys: vec![manifest_key, snapshot_key],
-                    });
-                    continue;
-                }
-                let Some(snapshot) = snapshot else {
-                    quarantined.push(ProjectCheckpointQuarantine {
-                        label: manifest.checkpoint_id.to_string(),
-                        reason: "checkpoint snapshot is missing".to_owned(),
-                        artifact_keys: vec![manifest_key, snapshot_key],
-                    });
-                    continue;
-                };
-                let summary = match summary_from_manifest(
-                    manifest,
-                    ProjectCheckpointLocator::Browser {
-                        manifest_key: manifest_key.clone(),
-                        snapshot_key: snapshot_key.clone(),
-                    },
-                ) {
-                    Ok(summary) => summary,
-                    Err(error) => {
+                    let (expected_manifest_key, expected_snapshot_key) = browser_keys(&manifest);
+                    if manifest_key != expected_manifest_key
+                        || snapshot_key != expected_snapshot_key
+                    {
                         quarantined.push(ProjectCheckpointQuarantine {
-                            label: manifest_key.clone(),
+                            label: manifest.checkpoint_id.to_string(),
+                            reason:
+                                "checkpoint manifest is not bound to its canonical IndexedDB keys"
+                                    .to_owned(),
+                            artifact_keys: vec![manifest_key, snapshot_key],
+                        });
+                        continue;
+                    }
+                    let Some(snapshot) = snapshot else {
+                        quarantined.push(ProjectCheckpointQuarantine {
+                            label: manifest.checkpoint_id.to_string(),
+                            reason: "checkpoint snapshot is missing".to_owned(),
+                            artifact_keys: vec![manifest_key, snapshot_key],
+                        });
+                        continue;
+                    };
+                    let summary = match summary_from_manifest(
+                        manifest,
+                        ProjectCheckpointLocator::Browser {
+                            manifest_key: manifest_key.clone(),
+                            snapshot_key: snapshot_key.clone(),
+                        },
+                    ) {
+                        Ok(summary) => summary,
+                        Err(error) => {
+                            quarantined.push(ProjectCheckpointQuarantine {
+                                label: manifest_key.clone(),
+                                reason: error,
+                                artifact_keys: vec![manifest_key, snapshot_key],
+                            });
+                            continue;
+                        }
+                    };
+                    match validate_snapshot_bytes(&summary, &snapshot) {
+                        Ok(_) => checkpoints.push(summary),
+                        Err(error) => quarantined.push(ProjectCheckpointQuarantine {
+                            label: summary.checkpoint_id.to_string(),
                             reason: error,
                             artifact_keys: vec![manifest_key, snapshot_key],
-                        });
-                        continue;
+                        }),
                     }
-                };
-                match validate_snapshot_bytes(&summary, &snapshot) {
-                    Ok(_) => checkpoints.push(summary),
-                    Err(error) => quarantined.push(ProjectCheckpointQuarantine {
-                        label: summary.checkpoint_id.to_string(),
-                        reason: error,
-                        artifact_keys: vec![manifest_key, snapshot_key],
-                    }),
                 }
-            }
-            for snapshot_key in orphan_snapshots {
-                quarantined.push(ProjectCheckpointQuarantine {
-                    label: snapshot_key.clone(),
-                    reason: "checkpoint snapshot has no committed manifest".to_owned(),
-                    artifact_keys: vec![snapshot_key],
-                });
-            }
-            sort_newest_first(&mut checkpoints);
-            quarantined.sort_by(|left, right| right.label.cmp(&left.label));
-            ProjectCheckpointCatalog {
-                checkpoints,
-                quarantined,
-            }
-        }));
-    });
+                for snapshot_key in orphan_snapshots {
+                    quarantined.push(ProjectCheckpointQuarantine {
+                        label: snapshot_key.clone(),
+                        reason: "checkpoint snapshot has no committed manifest".to_owned(),
+                        artifact_keys: vec![snapshot_key],
+                    });
+                }
+                sort_newest_first(&mut checkpoints);
+                quarantined.sort_by(|left, right| right.label.cmp(&left.label));
+                ProjectCheckpointCatalog {
+                    checkpoints,
+                    quarantined,
+                }
+            }));
+        },
+    );
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -786,7 +803,8 @@ mod tests {
     #[test]
     fn snapshot_integrity_rejects_any_byte_change() {
         let state = AppState::default();
-        let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).expect("snapshot");
+        let project =
+            crate::workbench::lifecycle::project_lifecycle::snapshot(&state).expect("snapshot");
         let bytes = crate::io::project_io::serialize_project_file(&project)
             .expect("serialize")
             .into_bytes();

@@ -410,14 +410,12 @@ fn apply_registry_dirty_flags(state: &mut AppState) {
         {
             open.dirty = *dirty;
         }
-        if let Some(view) = state
-            .library_manager
-            .get_library_mut(&reference.library)
-            .and_then(|library| library.get_cell_mut(&reference.cell))
-            .and_then(|cell| cell.get_view_mut(&reference.view))
-        {
-            view.modified = *dirty;
-        }
+        let _ = state.library_manager.set_view_modified_runtime(
+            &reference.library,
+            &reference.cell,
+            &reference.view,
+            *dirty,
+        );
     }
     if let Some((_, dirty)) = cell_dirty
         .iter()
@@ -1449,14 +1447,11 @@ fn mark_active_document_clean(state: &mut AppState) {
             {
                 open.dirty = false;
             }
-            if let Some(view) = state
-                .library_manager
-                .get_library_mut(&reference.library)
-                .and_then(|library| library.get_cell_mut(&reference.cell))
-                .and_then(|cell| cell.get_view_mut(&reference.view))
-            {
-                view.modified = false;
-            }
+            let _ = state.library_manager.mark_view_clean_runtime(
+                &reference.library,
+                &reference.cell,
+                &reference.view,
+            );
         }
         ProjectDocumentId::NetlistSource => {
             state.workspace.netlist_source_dirty = false;
@@ -1561,9 +1556,14 @@ fn revert_document_in_place(
 
     match id {
         ProjectDocumentId::ProjectConfiguration => {
+            let callback_receipts = baseline.workspace.pdk_callback_receipts().to_vec();
             state.workspace.project = baseline.workspace.project;
             state.workspace.configuration_sets = baseline.workspace.configuration_sets;
             state.workspace.design_management = baseline.workspace.design_management;
+            state
+                .workspace
+                .replace_pdk_callback_receipts_for_lifecycle(callback_receipts)
+                .map_err(ProjectLifecycleError::InvalidState)?;
             restore_project_structure_preserving_documents(state, baseline.libraries);
         }
         ProjectDocumentId::CellView(reference) => revert_cell_view(state, &baseline, &reference)?,
@@ -1608,6 +1608,8 @@ fn revert_document_in_place(
             state.simulation = simulation;
             state.workspace.report_documents = baseline.workspace.report_documents;
             state.workspace.report_documents_dirty = false;
+            state.workspace.visualization_documents = baseline.workspace.visualization_documents;
+            state.workspace.visualization_documents_dirty = false;
             state.clear_specialized_viewer_data();
         }
         ProjectDocumentId::VerificationSpecifications => {
@@ -1789,6 +1791,12 @@ fn overlay_document(
             target.workspace.project = working.workspace.project.clone();
             target.workspace.configuration_sets = working.workspace.configuration_sets.clone();
             target.workspace.design_management = working.workspace.design_management.clone();
+            target
+                .workspace
+                .replace_pdk_callback_receipts_for_lifecycle(
+                    working.workspace.pdk_callback_receipts().to_vec(),
+                )
+                .map_err(ProjectLifecycleError::InvalidState)?;
             target.libraries = merge_project_structure_with_document_content(
                 &working.libraries,
                 &target.libraries,
@@ -1832,6 +1840,8 @@ fn overlay_document(
         ProjectDocumentId::ResultHistory => {
             target.simulation_results = working.simulation_results.clone();
             target.workspace.report_documents = working.workspace.report_documents.clone();
+            target.workspace.visualization_documents =
+                working.workspace.visualization_documents.clone();
         }
         ProjectDocumentId::VerificationSpecifications => {
             target.workspace.specs = working.workspace.specs.clone();
@@ -1870,40 +1880,15 @@ fn overlay_cell_view(
     working: &ProjectFile,
     reference: &CellViewRef,
 ) -> Result<(), ProjectLifecycleError> {
-    let working_library = working
+    target
         .libraries
-        .get_library(&reference.library)
-        .ok_or_else(|| {
-            ProjectLifecycleError::InvalidState(format!("missing library '{}'", reference.library))
-        })?;
-    let working_cell = working_library.get_cell(&reference.cell).ok_or_else(|| {
-        ProjectLifecycleError::InvalidState(format!("missing cell '{}'", reference.cell))
-    })?;
-    let working_view = working_cell
-        .get_view(&reference.view)
-        .ok_or_else(|| {
-            ProjectLifecycleError::InvalidState(format!("missing view '{}'", reference.view))
-        })?
-        .clone();
-
-    if target.libraries.get_library(&reference.library).is_none() {
-        let mut library = working_library.clone();
-        library.cells.clear();
-        target.libraries.add_library(library);
-    }
-    let target_library = target
-        .libraries
-        .get_library_mut(&reference.library)
-        .expect("library inserted above");
-    if target_library.get_cell(&reference.cell).is_none() {
-        let mut cell = working_cell.clone();
-        cell.views.clear();
-        target_library.add_cell(cell);
-    }
-    target_library
-        .get_cell_mut(&reference.cell)
-        .expect("cell inserted above")
-        .add_view(working_view);
+        .overlay_cell_view_document_from_snapshot(
+            &working.libraries,
+            &reference.library,
+            &reference.cell,
+            &reference.view,
+        )
+        .map_err(ProjectLifecycleError::InvalidState)?;
 
     let key = reference.key();
     match working.workspace.schematic_buffers.get(&key) {
@@ -1917,47 +1902,16 @@ fn overlay_cell_view(
             target.workspace.schematic_buffers.remove(&key);
         }
     }
-    overlay_generated_symbol(target, working, reference);
+    target
+        .workspace
+        .synchronize_physical_layout_document_from(reference, &working.workspace)
+        .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
     target
         .workspace
         .project_sources
         .synchronize_cell_view_bundle_from(reference, &working.workspace.project_sources)
         .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
     Ok(())
-}
-
-fn overlay_generated_symbol(
-    target: &mut ProjectFile,
-    working: &ProjectFile,
-    reference: &CellViewRef,
-) {
-    if !reference.view.eq_ignore_ascii_case("schematic") {
-        return;
-    }
-    let working_symbol = working
-        .libraries
-        .get_library(&reference.library)
-        .and_then(|library| library.get_cell(&reference.cell))
-        .and_then(|cell| cell.get_view("symbol"))
-        .filter(|view| view.metadata.contains_key("generated"))
-        .cloned();
-    let Some(cell) = target
-        .libraries
-        .get_library_mut(&reference.library)
-        .and_then(|library| library.get_cell_mut(&reference.cell))
-    else {
-        return;
-    };
-    match working_symbol {
-        Some(symbol) => cell.add_view(symbol),
-        None if cell
-            .get_view("symbol")
-            .is_some_and(|view| view.metadata.contains_key("generated")) =>
-        {
-            cell.remove_view("symbol");
-        }
-        None => {}
-    }
 }
 
 fn revert_cell_view(
@@ -2015,6 +1969,10 @@ fn revert_cell_view(
             state.workspace.schematic_buffers.remove(&key);
         }
     }
+    state
+        .workspace
+        .synchronize_physical_layout_document_from(reference, &baseline.workspace)
+        .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
     if reference == &state.workspace.active_view {
         state.restore_active_schematic_from_workspace();
     }
@@ -2152,54 +2110,16 @@ fn merge_project_structure_with_document_content(
     merged
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn mark_all_library_views_clean(libraries: &mut crate::state::LibraryManager) {
-    let references = libraries
-        .libraries_by_key()
-        .flat_map(|(library_key, library)| {
-            library.cells.iter().flat_map(move |(cell_key, cell)| {
-                cell.views
-                    .keys()
-                    .map(move |view_key| CellViewRef::new(library_key, cell_key, view_key))
-            })
-        })
-        .collect::<Vec<_>>();
-    for reference in references {
-        if let Some(view) = libraries
-            .get_library_mut(&reference.library)
-            .and_then(|library| library.get_cell_mut(&reference.cell))
-            .and_then(|cell| cell.get_view_mut(&reference.view))
-        {
-            view.modified = false;
-        }
-    }
+    libraries.mark_all_views_clean_runtime();
 }
 
 /// Remove presentation-only state from the serialized clone. This must never
 /// be used on the live library manager: saving engineering content does not
 /// close tabs or alter the user's presentation state.
 fn sanitize_library_view_runtime_state(libraries: &mut crate::state::LibraryManager) {
-    mark_all_library_views_clean(libraries);
-    let references = libraries
-        .libraries_by_key()
-        .flat_map(|(library_key, library)| {
-            library.cells.iter().flat_map(move |(cell_key, cell)| {
-                cell.views
-                    .keys()
-                    .map(move |view_key| CellViewRef::new(library_key, cell_key, view_key))
-            })
-        })
-        .collect::<Vec<_>>();
-    for reference in references {
-        if let Some(view) = libraries
-            .get_library_mut(&reference.library)
-            .and_then(|library| library.get_cell_mut(&reference.cell))
-            .and_then(|cell| cell.get_view_mut(&reference.view))
-        {
-            view.is_open = false;
-            view.file_path = None;
-            view.modified_time = None;
-        }
-    }
+    libraries.sanitize_views_for_persistence();
 }
 
 fn strip_schematic_runtime_state(schematic: &mut crate::state::SchematicState) {
@@ -2211,7 +2131,6 @@ fn strip_schematic_runtime_state(schematic: &mut crate::state::SchematicState) {
     schematic.connections.clear();
     schematic.is_dirty = false;
 }
-
 
 #[cfg(test)]
 mod tests;

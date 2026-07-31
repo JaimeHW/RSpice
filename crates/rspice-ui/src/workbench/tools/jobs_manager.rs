@@ -24,7 +24,9 @@ use crate::ui::{
 };
 use crate::workbench::{AppState, RSpiceApp};
 
-use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute, commands::vocabulary::Command};
+use crate::workbench::{
+    RouteTransitionSource, SurfaceId, SurfaceRoute, commands::vocabulary::Command,
+};
 
 const DESCRIPTION: &str = "Review active execution, retained run history, immutable run authority, qualified targets, and exact run-manifest exports.";
 const TABLE_MIN_WIDTH: f32 = 800.0;
@@ -548,8 +550,17 @@ fn render_inspector(ui: &mut Ui, snapshot: &JobsSnapshot) {
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             crate::workbench::design_system::property_card(ui, "Execution target", |ui| {
-                crate::workbench::design_system::property_row_toned(ui, "Readiness", "Ready", t.color.ok);
-                crate::workbench::design_system::property_row(ui, "Runtime", snapshot.current_target.label());
+                crate::workbench::design_system::property_row_toned(
+                    ui,
+                    "Readiness",
+                    "Ready",
+                    t.color.ok,
+                );
+                crate::workbench::design_system::property_row(
+                    ui,
+                    "Runtime",
+                    snapshot.current_target.label(),
+                );
                 crate::workbench::design_system::property_row(
                     ui,
                     "Parallel slots",
@@ -582,14 +593,26 @@ fn render_inspector(ui: &mut Ui, snapshot: &JobsSnapshot) {
                         "Stable run ID",
                         &row.run_id.to_string(),
                     );
-                    crate::workbench::design_system::property_row(ui, "Input revision", &row.source_revision);
+                    crate::workbench::design_system::property_row(
+                        ui,
+                        "Input revision",
+                        &row.source_revision,
+                    );
                     crate::workbench::design_system::property_row(
                         ui,
                         "Analyses",
                         &row.analysis_count.to_string(),
                     );
-                    crate::workbench::design_system::property_row(ui, "Run-set ID", &row.run_set_id);
-                    crate::workbench::design_system::property_row(ui, "Tasks", &row.task_count.to_string());
+                    crate::workbench::design_system::property_row(
+                        ui,
+                        "Run-set ID",
+                        &row.run_set_id,
+                    );
+                    crate::workbench::design_system::property_row(
+                        ui,
+                        "Tasks",
+                        &row.task_count.to_string(),
+                    );
                     crate::workbench::design_system::property_row_toned(
                         ui,
                         "Status",
@@ -597,7 +620,11 @@ fn render_inspector(ui: &mut Ui, snapshot: &JobsSnapshot) {
                         row.tone.color(&t),
                     );
                 } else {
-                    crate::workbench::design_system::property_row(ui, "Status", "No retained run selected");
+                    crate::workbench::design_system::property_row(
+                        ui,
+                        "Status",
+                        "No retained run selected",
+                    );
                 }
             });
             crate::workbench::design_system::property_card(ui, "Execution targets", |ui| {

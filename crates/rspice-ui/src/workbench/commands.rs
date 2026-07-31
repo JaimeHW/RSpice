@@ -120,6 +120,11 @@ fn selected_project_model_for_editor(app: &RSpiceApp) -> Result<(&str, &str), &'
         crate::state::model_library::ModelSourceAuthority::External => {
             return Err("the selected model is external; create an editable project copy first");
         }
+        crate::state::model_library::ModelSourceAuthority::RetainedImport { .. } => {
+            return Err(
+                "the selected model is a read-only retained import; create an editable project copy first",
+            );
+        }
     }
     crate::workbench::documents::model_editor::resolve_project_model_for_editor(
         &app.state.model_library_manager,
@@ -259,6 +264,15 @@ impl Command {
                 crate::workbench::lifecycle::project_lifecycle::can_close_active_document(state)
             }
             Self::CloseProject => state.project_lifecycle.project_open,
+            Self::OpenNetlist => {
+                state.simulation.active_execution.is_none() && !state.simulation.is_running
+            }
+            Self::ImportNetlist => {
+                state.project_lifecycle.project_open
+                    && !state.workbench.safe_mode.project_read_only()
+                    && state.simulation.active_execution.is_none()
+                    && !state.simulation.is_running
+            }
             Self::PageSetup => crate::workbench::app::drawing_sheet_setup_available(app),
             Self::SheetFormatManager => {
                 crate::workbench::app::drawing_sheet_setup_available(app)
@@ -427,9 +441,10 @@ impl Command {
                 active_schematic_editor(app) && state.project_lifecycle.project_open
             }
             Self::ConfigurationSets => state.project_lifecycle.project_open,
-            Self::ReviewComments | Self::RevisionHistory => {
+            Self::ReviewComments => {
                 active_schematic_editor(app) && state.project_lifecycle.project_open
             }
+            Self::RevisionHistory => state.project_lifecycle.project_open,
             Self::ObjectProperties => {
                 if active_symbol_editor(app) {
                     let selection = state.ui.symbol.effective_selection();
@@ -553,8 +568,20 @@ impl Command {
             Self::CheckAndSave => {
                 active_schematic_editor(app) && !state.schematic_edit_read_only()
             }
-            Self::ClearChecks => state.dialogs.drc_results.is_some(),
-            Self::NextViolation | Self::PreviousViolation => state.dialogs.drc_results.is_some(),
+            Self::ClearChecks if active_symbol_editor(app) => state.dialogs.drc_results.is_some(),
+            Self::ClearChecks => {
+                state.dialogs.drc_results.is_some()
+                    || state.active_design_check_status().last_receipt().is_some()
+            }
+            Self::NextViolation | Self::PreviousViolation if active_symbol_editor(app) => state
+                .dialogs
+                .drc_results
+                .as_ref()
+                .is_some_and(|result| !result.violations().is_empty()),
+            Self::NextViolation | Self::PreviousViolation => state
+                .active_design_check_status()
+                .current_receipt()
+                .is_some_and(|receipt| !receipt.result.violations().is_empty()),
             Self::RunSimulation => {
                 if state.workbench.workspace == Workspace::Netlist {
                     app.manual_deck_run_block_reason().is_none()
@@ -580,6 +607,11 @@ impl Command {
                     && state.simulation.active_execution.is_none()
                     && !state.simulation.is_running
             }
+            Self::ImportResultDataset => {
+                !state.workbench.safe_mode.project_read_only()
+                    && state.simulation.active_execution.is_none()
+                    && !state.simulation.is_running
+            }
             // "Open results workspace" is the generic route and remains
             // useful before a dataset exists. Specialized viewers are only
             // actionable when the active retained dataset satisfies the same
@@ -590,6 +622,17 @@ impl Command {
             }
             Self::ToggleLinkedCursors => {
                 state.workbench.workspace == Workspace::Results && state.simulation.has_results()
+            }
+            Self::DatasetManifestBrowser => {
+                state.project_lifecycle.project_open && !state.simulation.runs.is_empty()
+            }
+            Self::CreateResultDocument => {
+                state.project_lifecycle.project_open && state.simulation.has_results()
+            }
+            Self::CompareResultDatasets => {
+                crate::workbench::documents::visualization_studio::results_comparison_available(
+                    state,
+                )
             }
             Self::ModelEditor | Self::ModelCorrelation => {
                 selected_project_model_for_editor(app).is_ok()
@@ -674,19 +717,31 @@ impl Command {
             Self::ReportPageProperties => {
                 super::surfaces::report_authoring::can_edit_page_properties(state)
             }
-            Self::AddVisualizationPane
-            | Self::VisualizationTraceManager
-            | Self::VisualizationCursorManager
-            | Self::ExportVisualizationDocument => {
+            Self::AddVisualizationPane | Self::ExportVisualizationDocument => {
                 state.workbench.current_route().surface_id()
                     == super::SurfaceId::VisualizationStudio
                     && state.project_lifecycle.project_open
                     && state.simulation.has_results()
             }
+            Self::VisualizationTraceManager
+            | Self::VisualizationCursorManager
+            | Self::ReviewNotes
+            | Self::MeasurementLibrary
+            | Self::FamilySlicing => {
+                matches!(
+                    state.workbench.current_route().surface_id(),
+                    super::SurfaceId::Results | super::SurfaceId::VisualizationStudio
+                ) && state.project_lifecycle.project_open
+                    && state.simulation.has_results()
+            }
             Self::VisualizationDocumentProperties => {
-                state.workbench.current_route().surface_id()
-                    == super::SurfaceId::VisualizationStudio
-                    && state.project_lifecycle.project_open
+                let surface = state.workbench.current_route().surface_id();
+                matches!(
+                    surface,
+                    super::SurfaceId::Results | super::SurfaceId::VisualizationStudio
+                ) && state.project_lifecycle.project_open
+                    && (surface == super::SurfaceId::VisualizationStudio
+                        || state.simulation.has_results())
             }
             Self::ExportWaveformsCsv => state.simulation.has_results(),
             Self::VerificationPage(page) if !page.is_operational() => false,
@@ -749,11 +804,14 @@ impl Command {
             Self::CloseProject => file_action(app, FileMenuAction::CloseProject),
             Self::NewCell => open_new_cell_dialog(app),
             Self::OpenDocument => file_action(app, FileMenuAction::Open),
-            Self::OpenNetlist | Self::ImportNetlist => {
-                file_action(app, FileMenuAction::ImportNetlist);
-                activate_workspace(app, Workspace::Netlist);
-            }
+            Self::OpenNetlist => file_action(app, FileMenuAction::OpenNetlist),
+            Self::ImportNetlist => file_action(app, FileMenuAction::ImportNetlist),
             Self::ImportVerilogA => file_action(app, FileMenuAction::ImportVerilogA),
+            Self::ImportResultDataset => {
+                crate::workbench::workflows::result_import_workflow::import_result_dataset(
+                    &mut app.state,
+                );
+            }
             Self::ExportSchematicSvg => file_action(app, FileMenuAction::ExportSvg),
             Self::ExportWaveformsCsv => file_action(app, FileMenuAction::ExportCsvWaveforms),
             Self::ExportNetlist(format) => {
@@ -1374,7 +1432,14 @@ impl Command {
             Self::CheckAndSave => {
                 crate::workbench::app::open_check_and_save_dialog(&mut app.state);
             }
-            Self::ClearChecks => app.state.dialogs.drc_results = None,
+            Self::ClearChecks => {
+                if !active_symbol_editor(app) {
+                    app.state.clear_active_design_check();
+                }
+                app.state.dialogs.drc_results = None;
+                app.state.dialogs.drc_checked_version = 0;
+                app.state.dialogs.drc_cycle = None;
+            }
             Self::NextViolation => {
                 crate::schematic::view::violations::cycle_violation(&mut app.state, 1);
             }
@@ -1446,7 +1511,16 @@ impl Command {
                 }
             }
             Self::ToggleLinkedCursors => app.state.ui.results.toggle_linked_cursors(),
+            Self::DatasetManifestBrowser => {
+                crate::workbench::documents::result_document::open_dataset_browser(app);
+            }
+            Self::CreateResultDocument => {
+                crate::workbench::documents::result_document::open_create_document(app);
+            }
             Self::WaveformCalculator => app.state.dialogs.waveform_calculator_dialog = true,
+            Self::CompareResultDatasets => {
+                crate::workbench::documents::visualization_studio::open_results_comparison(app);
+            }
             Self::ResultViewer(viewer) => {
                 if viewer == crate::workbench::ResultViewer::Waves
                     || crate::workbench::documents::result_document::viewer_is_available(&app.state, viewer)
@@ -1585,12 +1659,39 @@ impl Command {
             }
             Self::AddVisualizationPane => crate::workbench::documents::visualization_studio::open_add_pane(app),
             Self::VisualizationTraceManager => {
+                if app.state.workbench.current_route().surface_id() == super::SurfaceId::Results {
+                    crate::workbench::documents::visualization_studio::open(app);
+                }
                 crate::workbench::documents::visualization_studio::open_trace_manager(app);
             }
             Self::VisualizationCursorManager => {
+                if app.state.workbench.current_route().surface_id() == super::SurfaceId::Results {
+                    crate::workbench::documents::visualization_studio::open(app);
+                }
                 crate::workbench::documents::visualization_studio::open_cursor_manager(app);
             }
+            Self::ReviewNotes => {
+                if app.state.workbench.current_route().surface_id() == super::SurfaceId::Results {
+                    crate::workbench::documents::visualization_studio::open(app);
+                }
+                crate::workbench::documents::visualization_studio::open_annotation_editor(app);
+            }
+            Self::MeasurementLibrary => {
+                if app.state.workbench.current_route().surface_id() == super::SurfaceId::Results {
+                    crate::workbench::documents::visualization_studio::open(app);
+                }
+                crate::workbench::documents::visualization_studio::open_measurement_editor(app);
+            }
+            Self::FamilySlicing => {
+                if app.state.workbench.current_route().surface_id() == super::SurfaceId::Results {
+                    crate::workbench::documents::visualization_studio::open(app);
+                }
+                crate::workbench::documents::visualization_studio::open_family_slicing(app);
+            }
             Self::VisualizationDocumentProperties => {
+                if app.state.workbench.current_route().surface_id() == super::SurfaceId::Results {
+                    crate::workbench::documents::visualization_studio::open(app);
+                }
                 crate::workbench::documents::visualization_studio::open_document_properties(app);
             }
             Self::ExportVisualizationDocument => {
@@ -1884,6 +1985,7 @@ fn open_new_cell_dialog(app: &mut RSpiceApp) {
             .find(|library| !library.read_only)
             .map(|library| library.name.clone())
     });
+    let library_revision = app.state.library_manager.revision();
 
     let dialogs = &mut app.state.dialogs;
     dialogs.new_cell_library = target_library.unwrap_or_default();
@@ -1893,6 +1995,7 @@ fn open_new_cell_dialog(app: &mut RSpiceApp) {
     dialogs.new_cell_create_symbol = false;
     dialogs.new_cell_create_testbench = false;
     dialogs.new_cell_error = None;
+    dialogs.new_cell_library_revision = library_revision;
     dialogs.new_cell_dialog = true;
 }
 

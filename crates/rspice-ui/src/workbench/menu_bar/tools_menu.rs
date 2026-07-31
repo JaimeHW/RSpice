@@ -2,9 +2,9 @@
 //! `crate::workbench::chrome::title_bar`.
 
 use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
-use crate::services::drc::{DrcConfig, DrcSeverity};
-use crate::state::CellViewRef;
+use crate::services::drc::DrcSeverity;
 use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::DesignCheckOrigin;
 
 /// Per-run cap on per-finding console rows; the rest stay reachable via
 /// the canvas badges and typed finding-navigation commands.
@@ -15,25 +15,15 @@ const MAX_FINDING_ROWS: usize = 50;
 /// and console rows — one summary line plus a clickable row per finding
 /// that jumps to its anchor.
 pub(crate) fn run_design_rule_check(state: &mut AppState) {
-    let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_workspace(
-        &state.library_manager,
-        &state.workspace.schematic_buffers,
-    );
-    let root_schematic = CellViewRef::new(
-        &state.workspace.project.root_library,
-        &state.workspace.project.top_cell,
-        "schematic",
-    );
-    let result = crate::services::drc::run_drc_check_with_hierarchy_and_config(
-        &state.schematic,
-        &hierarchy,
-        DrcConfig {
-            // Ground is a top-level circuit contract. Requiring every reusable
-            // child cell to contain node 0 produces false blockers.
-            check_missing_ground: state.workspace.active_schematic_reference() == root_schematic,
-            ..DrcConfig::default()
-        },
-    );
+    let result = match state.run_active_design_checks(DesignCheckOrigin::Manual) {
+        Ok(result) => result,
+        Err(error) => {
+            state.push_user_message(ConsoleMessage::error(format!(
+                "Design checks could not create current evidence: {error}"
+            )));
+            return;
+        }
+    };
     let summary = result.summary();
     let msg = if result.passed() {
         format!(

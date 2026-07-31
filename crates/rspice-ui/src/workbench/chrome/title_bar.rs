@@ -1197,7 +1197,10 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::OpenWorkspace(Workspace::Simulate) => WorkbenchIcon::Simulate,
         Command::OpenWorkspace(Workspace::Results)
         | Command::ResultViewer(_)
-        | Command::WaveformCalculator => WorkbenchIcon::Results,
+        | Command::WaveformCalculator
+        | Command::CompareResultDatasets
+        | Command::MeasurementLibrary
+        | Command::FamilySlicing => WorkbenchIcon::Results,
         Command::OpenWorkspace(Workspace::Verify)
         | Command::VerificationPage(_)
         | Command::EditSpecifications => WorkbenchIcon::Verify,
@@ -1209,8 +1212,11 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::OpenWorkspace(Workspace::Netlist) => WorkbenchIcon::Netlist,
         Command::AutomationConsole => WorkbenchIcon::Terminal,
         Command::NewProject => WorkbenchIcon::File,
-        Command::NewCell => WorkbenchIcon::Add,
-        Command::OpenProject | Command::OpenDocument => WorkbenchIcon::Folder,
+        Command::NewCell | Command::CreateResultDocument => WorkbenchIcon::Add,
+        Command::OpenProject
+        | Command::OpenDocument
+        | Command::ImportResultDataset
+        | Command::DatasetManifestBrowser => WorkbenchIcon::Folder,
         Command::OpenNetlist => WorkbenchIcon::Netlist,
         Command::RecentProjects => WorkbenchIcon::History,
         Command::Save | Command::SaveAs | Command::SaveAll | Command::ModelSaveRevision => {
@@ -1269,7 +1275,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::CreateHierarchy | Command::DesignManagement => WorkbenchIcon::Folder,
         Command::ConnectivityManager => WorkbenchIcon::Bus,
         Command::SelectionBulkEdit => WorkbenchIcon::Sliders,
-        Command::ReviewComments => WorkbenchIcon::Info,
+        Command::ReviewComments | Command::ReviewNotes => WorkbenchIcon::Info,
         Command::RevisionHistory => WorkbenchIcon::History,
         Command::AscendHierarchy => WorkbenchIcon::ArrowLeft,
         Command::DescendHierarchy | Command::DescendHierarchyDirect => WorkbenchIcon::Folder,
@@ -1512,46 +1518,25 @@ fn simulate_menu(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn results_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    command_item_as(
+    command_item(
         ui,
         app,
         Command::ResultViewer(crate::workbench::ResultViewer::Waves),
-        "Open results workspace",
-        None,
     );
+    command_item(ui, app, Command::DatasetManifestBrowser);
+    command_item(ui, app, Command::CreateResultDocument);
+    command_item(ui, app, Command::CompareResultDatasets);
     menu_separator(ui);
-    for (viewer, label) in [
-        (crate::workbench::ResultViewer::Bode, "Bode / stability"),
-        (crate::workbench::ResultViewer::Fft, "FFT / spectrum"),
-        (crate::workbench::ResultViewer::Eye, "Eye diagram"),
-        (crate::workbench::ResultViewer::Hist, "Distribution"),
-        (crate::workbench::ResultViewer::Op, "Operating point"),
-        (
-            crate::workbench::ResultViewer::NoiseContrib,
-            "Noise contributors",
-        ),
-        (
-            crate::workbench::ResultViewer::Contribution,
-            "Sensitivity contributions",
-        ),
-        (
-            crate::workbench::ResultViewer::TransferFunction,
-            "Transfer function",
-        ),
-        (
-            crate::workbench::ResultViewer::Specs,
-            "Measurements & specifications",
-        ),
-        (crate::workbench::ResultViewer::Nyquist, "Nyquist"),
-        (crate::workbench::ResultViewer::Smith, "Smith chart"),
-        (crate::workbench::ResultViewer::PoleZero, "Pole-zero"),
-    ] {
-        command_item_as(ui, app, Command::ResultViewer(viewer), label, None);
-    }
+    command_item(ui, app, Command::VisualizationTraceManager);
+    command_item(ui, app, Command::VisualizationCursorManager);
+    command_item(ui, app, Command::ReviewNotes);
+    command_item(ui, app, Command::WaveformCalculator);
+    command_item(ui, app, Command::MeasurementLibrary);
+    command_item(ui, app, Command::FamilySlicing);
+    command_item(ui, app, Command::VisualizationDocumentProperties);
     menu_separator(ui);
-    command_item_as(ui, app, Command::WaveformCalculator, "Calculator…", None);
+    command_item(ui, app, Command::ImportResultDataset);
     command_item(ui, app, Command::ExportWaveformsCsv);
-    command_item(ui, app, Command::ClearResults);
 }
 
 fn verify_menu(ui: &mut Ui, app: &mut RSpiceApp) {

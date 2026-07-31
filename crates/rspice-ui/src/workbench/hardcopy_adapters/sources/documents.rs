@@ -115,32 +115,21 @@ pub fn resolve_all_schematic_sheets(
     let mut resolved_sheets = Vec::with_capacity(source.sheet_catalog.sheets().len());
     for sheet in source.sheet_catalog.sheets() {
         let sheet_identity = schematic_sheet_identity(&source.identity, sheet)?;
-        if schematic_has_objects_on_sheet(source.schematic, source.sheet_catalog, sheet.id()) {
-            resolved_sheets.push(resolve_schematic_source(SchematicHardcopySource {
-                identity: sheet_identity,
-                schematic: source.schematic,
-                expected_topology_version: source.expected_topology_version,
-                symbol_resolver: source.symbol_resolver,
-                sheet_catalog: Some(source.sheet_catalog),
-                sheet_id: Some(sheet.id()),
-                project_default_drawing_sheet: Some(source.project_default_drawing_sheet),
-                project_title_block_field_values: Some(source.project_title_block_field_values),
-                scope: HardcopyScope::CurrentSheet,
-            })?);
-        } else {
-            let format = effective_governed_sheet_format(
-                sheet.page_format(),
-                source.project_default_drawing_sheet,
-            );
-            resolved_sheets.push(
-                resolve_blank_schematic_sheet_with_format_and_project_values(
-                    sheet_identity,
-                    HardcopyScope::CurrentSheet,
-                    Some(&format),
-                    Some(source.project_title_block_field_values),
-                )?,
-            );
-        }
+        // Resolve empty sheets through the same governed path as populated
+        // sheets. Besides eliminating a duplicate resolver, this preserves
+        // catalog-aware automatic title values such as "3 / 3" and the
+        // effective inherited project format on a deliberately blank page.
+        resolved_sheets.push(resolve_schematic_source(SchematicHardcopySource {
+            identity: sheet_identity,
+            schematic: source.schematic,
+            expected_topology_version: source.expected_topology_version,
+            symbol_resolver: source.symbol_resolver,
+            sheet_catalog: Some(source.sheet_catalog),
+            sheet_id: Some(sheet.id()),
+            project_default_drawing_sheet: Some(source.project_default_drawing_sheet),
+            project_title_block_field_values: Some(source.project_title_block_field_values),
+            scope: HardcopyScope::CurrentSheet,
+        })?);
     }
 
     let members = resolved_sheets

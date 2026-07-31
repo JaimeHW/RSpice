@@ -33,10 +33,10 @@ use crate::results::report_document::FigureSizing;
 use crate::results::report_document::{
     FrozenReportArtifact, ReportBlockId, ReportBlockKind, ReportDocument,
     ReportReferenceCurrentness, ReportReferenceInventory, ReportReferenceMode,
-    ReportReferenceSnapshot,
+    ReportReferenceSnapshot, ReportSourceId,
 };
 use crate::results::visualization_document::{
-    AnnotationAnchor, PageId, PaneId, TypedValue, VisualizationDocument,
+    AnnotationAnchor, Page, PageId, Pane, PaneId, TypedValue, VisualizationDocument,
 };
 use crate::results::visualization_raster::{
     ResolvedCartesianLineScene, VisualizationRasterError, resolve_cartesian_line_scene,
@@ -96,7 +96,7 @@ pub(crate) const MAX_WORKER_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub(super) const WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-pub(super) const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 4;
+pub(super) const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 5;
 const SCHEMATIC_EDGE_ALLOWANCE_UNITS: i64 = 16;
 const SYMBOL_EDGE_ALLOWANCE_UNITS: i64 = 10;
 const PLOT_INSET_UM: i64 = 12_700;
@@ -335,6 +335,27 @@ pub(crate) fn enumerate_retained_hardcopy_sources(
                 HardcopyScope::ActiveDocument,
             ],
             availability,
+        });
+    }
+
+    if let Some(WorkspaceDocumentId::VisualizationDocument(document_id)) =
+        state.workbench.documents.active(Workspace::Results)
+        && let Some((document, page, pane)) =
+            active_visualization_document_pane(state, *document_id)
+    {
+        descriptors.push(RetainedHardcopySourceDescriptor {
+            source_key: visualization_document_pane_source_key(project_id, document.id(), pane.id),
+            display_name: compact_display(
+                &format!("{} · {} · {}", document.title(), page.title, pane.title),
+                "Result document pane",
+            ),
+            document_kind: HardcopyDocumentKind::PlotOrWorksheet,
+            allowed_scopes: vec![
+                HardcopyScope::ActivePlotDocument,
+                HardcopyScope::ActiveDocument,
+                HardcopyScope::AllSheetsOrPanes,
+            ],
+            availability: visualization_document_pane_availability(document, pane),
         });
     }
 
@@ -580,6 +601,26 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
         };
     }
 
+    if let Some(WorkspaceDocumentId::VisualizationDocument(document_id)) =
+        state.workbench.documents.active(Workspace::Results)
+        && let Some((document, page, pane)) =
+            active_visualization_document_pane(state, *document_id)
+        && source_key == visualization_document_pane_source_key(project_id, document.id(), pane.id)
+    {
+        let all_panes = matches!(scope, HardcopyScope::AllSheetsOrPanes);
+        return Ok(PreparedRetainedHardcopyResolution {
+            payload: PreparedRetainedHardcopyPayload::VisualizationDocument {
+                source_key: source_key.to_owned(),
+                project_id,
+                document: document.clone(),
+                page_id: page.id,
+                pane_id: pane.id,
+                all_panes,
+                scope,
+            },
+        });
+    }
+
     if let Some(run) = state.simulation.active_run() {
         let result_key = format!(
             "project:{}:result-dataset:{}",
@@ -753,12 +794,22 @@ pub(crate) fn active_app_hardcopy_source_available(state: &AppState) -> bool {
                 ViewType::Schematic | ViewType::Testbench | ViewType::Symbol
             )
         }
-        SurfaceId::Results => state.simulation.active_run().is_some_and(|run| {
-            matches!(
-                state.workbench.documents.active(Workspace::Results),
-                Some(WorkspaceDocumentId::ResultDataset(dataset)) if *dataset == run.dataset_id
-            ) && quick_result_availability(state, run).is_available()
-        }),
+        SurfaceId::Results => match state.workbench.documents.active(Workspace::Results) {
+            Some(WorkspaceDocumentId::ResultDataset(dataset)) => {
+                state.simulation.active_run().is_some_and(|run| {
+                    *dataset == run.dataset_id
+                        && quick_result_availability(state, run).is_available()
+                })
+            }
+            Some(WorkspaceDocumentId::VisualizationDocument(document_id)) => {
+                active_visualization_document_pane(state, *document_id).is_some_and(
+                    |(document, _, pane)| {
+                        visualization_document_pane_availability(document, pane).is_available()
+                    },
+                )
+            }
+            _ => false,
+        },
         SurfaceId::VisualizationStudio => state
             .workbench
             .visualization_studio
@@ -932,6 +983,12 @@ fn quick_result_availability(
             run.dataset_id
         ));
     }
+    let viewer = state.ui.results.viewer;
+    if viewer == ResultViewer::Manifest {
+        // Manifest hardcopy is bound to the terminal dataset as a whole and
+        // must not require an arbitrarily selected analysis.
+        return RetainedHardcopySourceAvailability::Available;
+    }
     let Some(index) = state.simulation.active_analysis_idx else {
         return unavailable("no active analysis is selected".to_owned());
     };
@@ -944,7 +1001,6 @@ fn quick_result_availability(
             analysis.id
         ));
     }
-    let viewer = state.ui.results.viewer;
     let visible_waveforms = || {
         analysis
             .waveforms
@@ -1004,6 +1060,8 @@ fn quick_result_availability(
         ),
         // The sample table needs nothing but retained samples.
         ResultViewer::Table => has_waveform(),
+        // Handled before analysis selection because this is dataset-native.
+        ResultViewer::Manifest => true,
     };
     if available {
         RetainedHardcopySourceAvailability::Available
@@ -1073,44 +1131,81 @@ fn studio_pane_availability(
     RetainedHardcopySourceAvailability::Available
 }
 
-fn report_app_availability(document: &ReportDocument) -> RetainedHardcopySourceAvailability {
-    if document.pages().is_empty() {
-        return RetainedHardcopySourceAvailability::Unavailable {
-            reason: "report has no authored pages".to_owned(),
-        };
-    }
-    for block in document
+fn active_visualization_document_pane(
+    state: &AppState,
+    document_id: crate::product::ResultDocumentId,
+) -> Option<(&VisualizationDocument, &Page, &Pane)> {
+    let document = state.workspace.visualization_document(document_id)?;
+    let selected_page_id = state
+        .ui
+        .results
+        .persistent_document_page(document_id)
+        .filter(|selected| document.pages().iter().any(|page| page.id == *selected))
+        .or_else(|| document.pages().first().map(|page| page.id))?;
+    let page = document
         .pages()
         .iter()
-        .flat_map(|page| page.sections())
-        .flat_map(|section| section.blocks())
+        .find(|page| page.id == selected_page_id)?;
+    let pane = document
+        .panes()
+        .iter()
+        .filter(|pane| pane.page_id == page.id)
+        .min_by_key(|pane| (pane.order, pane.id.get()))?;
+    Some((document, page, pane))
+}
+
+fn visualization_document_pane_availability(
+    document: &VisualizationDocument,
+    pane: &Pane,
+) -> RetainedHardcopySourceAvailability {
+    let unavailable = |reason: &str| RetainedHardcopySourceAvailability::Unavailable {
+        reason: reason.to_owned(),
+    };
+    if pane.binding.is_none() {
+        return unavailable("the selected result pane has no immutable dataset binding");
+    }
+    if !document
+        .traces()
+        .iter()
+        .any(|trace| trace.pane_id == pane.id)
     {
-        if matches!(
-            block.kind().reference(),
-            Some(ReportReferenceMode::Linked { .. })
-        ) {
-            return RetainedHardcopySourceAvailability::Unavailable {
-                reason: format!(
-                    "linked report block {} has no retained reference inventory",
-                    block.id()
-                ),
-            };
-        }
-        if let ReportBlockKind::PlotFigure(figure) = block.kind()
-            && figure
-                .reference
-                .frozen_artifact()
-                .is_none_or(|artifact| artifact.media_type() != "image/png")
-        {
-            return RetainedHardcopySourceAvailability::Unavailable {
-                reason: format!(
-                    "frozen plot block {} has no supported opaque PNG artifact",
-                    block.id()
-                ),
-            };
-        }
+        return unavailable("the selected result pane has no retained trace");
     }
     RetainedHardcopySourceAvailability::Available
+}
+
+fn visualization_document_pane_source_key(
+    project_id: ProjectId,
+    document_id: crate::product::ResultDocumentId,
+    pane_id: PaneId,
+) -> String {
+    format!(
+        "project:{}:result-document:{}:pane:{}",
+        project_id.as_uuid(),
+        document_id,
+        pane_id.get()
+    )
+}
+
+fn visualization_document_reference(
+    document: &VisualizationDocument,
+) -> Result<ReportReferenceSnapshot, HardcopySourceError> {
+    let content_digest = document
+        .content_digest()
+        .map_err(|error| HardcopySourceError::InvalidVisualizationSource(error.to_string()))?;
+    ReportReferenceSnapshot::new(
+        ReportSourceId::VisualizationDocument {
+            document_id: document.id(),
+        },
+        Some(document.revision()),
+        content_digest,
+        document
+            .datasets()
+            .iter()
+            .map(|dataset| dataset.binding())
+            .collect(),
+    )
+    .map_err(|error| HardcopySourceError::InvalidVisualizationSource(error.to_string()))
 }
 
 /// Resolve the one application document that owns the current route.
@@ -1188,20 +1283,40 @@ pub(crate) fn resolve_active_app_hardcopy_source(
                 ))),
             }
         }
-        SurfaceId::Results => {
-            let run = active_terminal_run(state)?;
-            require_active_result_document(state, run.dataset_id)?;
-            resolve_results_quick_view_source(ResultsQuickViewHardcopySource {
-                source_key: format!(
-                    "project:{}:result-dataset:{}",
-                    project_id.as_uuid(),
-                    run.dataset_id
-                ),
-                project_id,
-                state,
-                scope: HardcopyScope::ActivePlotDocument,
-            })
-        }
+        SurfaceId::Results => match state.workbench.documents.active(Workspace::Results) {
+            Some(WorkspaceDocumentId::ResultDataset(_)) => {
+                let run = active_terminal_run(state)?;
+                require_active_result_document(state, run.dataset_id)?;
+                resolve_results_quick_view_source(ResultsQuickViewHardcopySource {
+                    source_key: format!(
+                        "project:{}:result-dataset:{}",
+                        project_id.as_uuid(),
+                        run.dataset_id
+                    ),
+                    project_id,
+                    state,
+                    scope: HardcopyScope::ActivePlotDocument,
+                })
+            }
+            Some(WorkspaceDocumentId::VisualizationDocument(document_id)) => {
+                let (document, page, pane) =
+                    active_visualization_document_pane(state, *document_id).ok_or(
+                        HardcopySourceError::NoActiveDocumentAuthority("result document pane"),
+                    )?;
+                resolve_visualization_document_source(
+                    visualization_document_pane_source_key(project_id, document.id(), pane.id),
+                    project_id,
+                    document,
+                    page.id,
+                    pane.id,
+                    false,
+                    HardcopyScope::ActivePlotDocument,
+                )
+            }
+            other => Err(HardcopySourceError::StaleActiveDocumentAuthority(format!(
+                "results registry points at {other:?}"
+            ))),
+        },
         SurfaceId::VisualizationStudio => {
             let pane_id = state.workbench.visualization_studio.active_pane.ok_or(
                 HardcopySourceError::NoActiveDocumentAuthority("visualization pane"),
@@ -1934,6 +2049,23 @@ pub(crate) fn resolve_retained_hardcopy_source(
                 "active design view type {view_type:?} has no semantic hardcopy adapter"
             ))),
         };
+    }
+
+    if let Some(WorkspaceDocumentId::VisualizationDocument(document_id)) =
+        state.workbench.documents.active(Workspace::Results)
+        && let Some((document, page, pane)) =
+            active_visualization_document_pane(state, *document_id)
+        && source_key == visualization_document_pane_source_key(project_id, document.id(), pane.id)
+    {
+        return resolve_visualization_document_source(
+            source_key.to_owned(),
+            project_id,
+            document,
+            page.id,
+            pane.id,
+            matches!(scope, HardcopyScope::AllSheetsOrPanes),
+            scope,
+        );
     }
 
     if let Some(run) = state.simulation.active_run() {

@@ -626,7 +626,8 @@ pub(crate) fn save_owned_netlist_source(
         ));
         return false;
     }
-    let visible_digest = crate::workbench::documents::netlist_document::source_content_digest(source);
+    let visible_digest =
+        crate::workbench::documents::netlist_document::source_content_digest(source);
     let Some(validation) = state.ui.netlist.validation.as_ref().filter(|receipt| {
         receipt.visible_content_digest == visible_digest
             && receipt.project_revision == state.workspace.project.revision().get()
@@ -775,6 +776,16 @@ pub(crate) fn apply_imported_netlist(
     source_path: Option<std::path::PathBuf>,
     display_name: &str,
 ) -> bool {
+    apply_imported_netlist_transaction(state, source, source_path, display_name, false)
+}
+
+fn apply_imported_netlist_transaction(
+    state: &mut AppState,
+    source: String,
+    source_path: Option<std::path::PathBuf>,
+    display_name: &str,
+    initializing_netlist_project: bool,
+) -> bool {
     if source.trim().is_empty() {
         state.push_user_message(ConsoleMessage::error(format!(
             "SPICE deck import failed: {display_name} is empty"
@@ -782,7 +793,25 @@ pub(crate) fn apply_imported_netlist(
         return false;
     }
 
-    state.clear_design_execution_context();
+    if !state.project_lifecycle.project_open {
+        state.push_user_message(ConsoleMessage::error(
+            "SPICE deck import requires an open project",
+        ));
+        return false;
+    }
+    if state.workbench.safe_mode.project_read_only() && !initializing_netlist_project {
+        state.push_user_message(ConsoleMessage::error(
+            "SPICE deck import is unavailable because the project is open read-only",
+        ));
+        return false;
+    }
+    if state.simulation.active_execution.is_some() || state.simulation.is_running {
+        state.push_user_message(ConsoleMessage::error(
+            "SPICE deck import is blocked while a simulation execution owns the project",
+        ));
+        return false;
+    }
+
     let (document, descriptor) =
         match canonical_import_document(state, &source, source_path.as_deref(), display_name) {
             Ok(canonical) => canonical,
@@ -793,7 +822,14 @@ pub(crate) fn apply_imported_netlist(
                 return false;
             }
         };
-    let source_digest = crate::workbench::documents::netlist_document::source_content_digest(&source);
+    // Importing a new source deck changes future execution authority but does
+    // not delete immutable datasets produced by earlier sources. Every run
+    // carries its own provenance, so retained history remains truthful and
+    // reviewable after this project-owned document changes.
+    state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
+    state.ui.netlist = Default::default();
+    let source_digest =
+        crate::workbench::documents::netlist_document::source_content_digest(&source);
     state.workspace.netlist_source = Some(source.clone());
     state.workspace.netlist_document = Some(document.clone());
     state.workspace.netlist_descriptor = Some(descriptor);
@@ -806,7 +842,9 @@ pub(crate) fn apply_imported_netlist(
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
     state.ui.netlist.active_document_initialized = true;
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
-    crate::workbench::documents::netlist_document::invalidate_source_evidence(&mut state.ui.netlist);
+    crate::workbench::documents::netlist_document::invalidate_source_evidence(
+        &mut state.ui.netlist,
+    );
     state
         .workbench
         .activate(crate::workbench::state::Workspace::Netlist);
@@ -814,6 +852,109 @@ pub(crate) fn apply_imported_netlist(
         "Imported SPICE deck: {display_name}"
     )));
     true
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NetlistImportMode {
+    OpenProject,
+    ImportIntoProject,
+}
+
+impl NetlistImportMode {
+    const fn dialog_title(self) -> &'static str {
+        match self {
+            Self::OpenProject => "Open Netlist Project",
+            Self::ImportIntoProject => "Import SPICE Deck",
+        }
+    }
+}
+
+fn netlist_import_start_block_reason(
+    state: &AppState,
+    mode: NetlistImportMode,
+) -> Option<&'static str> {
+    if state.simulation.active_execution.is_some() || state.simulation.is_running {
+        return Some("a simulation execution still owns the project");
+    }
+    if mode == NetlistImportMode::ImportIntoProject && !state.project_lifecycle.project_open {
+        return Some("no project is open");
+    }
+    if mode == NetlistImportMode::ImportIntoProject && state.workbench.safe_mode.project_read_only()
+    {
+        return Some("the project is open read-only");
+    }
+    None
+}
+
+fn apply_opened_netlist_project(
+    state: &mut AppState,
+    source: String,
+    source_path: Option<std::path::PathBuf>,
+    display_name: &str,
+) -> bool {
+    if source.trim().is_empty() {
+        state.push_user_message(ConsoleMessage::error(format!(
+            "Netlist project open failed: {display_name} is empty"
+        )));
+        return false;
+    }
+    if state.simulation.active_execution.is_some() || state.simulation.is_running {
+        state.push_user_message(ConsoleMessage::error(
+            "Netlist project open is blocked while a simulation execution owns the project",
+        ));
+        return false;
+    }
+
+    // Construct and validate the replacement off to the side. The currently
+    // open project, its dirty documents and all retained evidence remain
+    // untouched unless the complete netlist-first project is ready to commit.
+    let mut candidate = state.clone();
+    crate::workbench::workflows::project_workflow::create_new_project(&mut candidate);
+    let proposed_name = std::path::Path::new(display_name)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.trim().is_empty())
+        .unwrap_or("Netlist Project");
+    if candidate
+        .workspace
+        .project
+        .rename(proposed_name.to_owned())
+        .is_err()
+    {
+        let _ = candidate
+            .workspace
+            .project
+            .rename("Netlist Project".to_owned());
+    }
+    if !apply_imported_netlist_transaction(&mut candidate, source, source_path, display_name, true)
+    {
+        state.push_user_message(ConsoleMessage::error(
+            "Netlist project open failed; the current project was left unchanged",
+        ));
+        return false;
+    }
+    candidate.push_user_message(ConsoleMessage::info(format!(
+        "Opened netlist-first project: {display_name}"
+    )));
+    *state = candidate;
+    true
+}
+
+fn apply_netlist_import_result(
+    state: &mut AppState,
+    mode: NetlistImportMode,
+    source: String,
+    source_path: Option<std::path::PathBuf>,
+    display_name: &str,
+) -> bool {
+    match mode {
+        NetlistImportMode::OpenProject => {
+            apply_opened_netlist_project(state, source, source_path, display_name)
+        }
+        NetlistImportMode::ImportIntoProject => {
+            apply_imported_netlist(state, source, source_path, display_name)
+        }
+    }
 }
 
 fn canonical_import_document(
@@ -833,7 +974,8 @@ fn canonical_import_document(
         NetlistDocumentId, SourceLocator,
     };
 
-    let source_digest = crate::workbench::documents::netlist_document::source_content_digest(source);
+    let source_digest =
+        crate::workbench::documents::netlist_document::source_content_digest(source);
     let provenance = GeneratedProvenance::try_new(
         "rspice-import-baseline/v1",
         GenerationInput::new(state.workspace.project.revision(), source_digest),
@@ -894,20 +1036,54 @@ fn canonical_import_document(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn import_netlist(state: &mut AppState) -> bool {
-    match show_open_netlist_dialog().and_then(|path| {
+fn import_netlist_with_mode(state: &mut AppState, mode: NetlistImportMode) -> bool {
+    if let Some(reason) = netlist_import_start_block_reason(state, mode) {
+        state.push_user_message(ConsoleMessage::error(format!(
+            "{} is unavailable: {reason}",
+            mode.dialog_title()
+        )));
+        return false;
+    }
+    let transaction =
+        match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
+            Ok(transaction) => transaction,
+            Err(error) => {
+                state.push_user_message(ConsoleMessage::error(format!(
+                    "{} is unavailable: {error}",
+                    mode.dialog_title()
+                )));
+                return false;
+            }
+        };
+    let loaded = show_open_netlist_dialog(mode).and_then(|path| {
         std::fs::read_to_string(&path)
             .map(|contents| (path, contents))
             .map_err(|error| error.to_string())
-    }) {
+    });
+    match loaded {
         Ok((path, contents)) => {
+            if let Err(error) =
+                crate::workbench::lifecycle::project_lifecycle::validate_project_replacement(
+                    state,
+                    transaction,
+                )
+            {
+                crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
+                state.push_user_message(ConsoleMessage::error(format!(
+                    "{} was cancelled because the project changed: {error}",
+                    mode.dialog_title()
+                )));
+                return false;
+            }
+            crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
             let display_name = path
                 .file_name()
                 .map(|name| name.to_string_lossy().to_string())
                 .unwrap_or_else(|| path.display().to_string());
-            apply_imported_netlist(state, contents, Some(path), &display_name)
+            apply_netlist_import_result(state, mode, contents, Some(path), &display_name)
         }
         Err(error) => {
+            crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
             if error != "cancelled" {
                 state.push_user_message(ConsoleMessage::error(format!(
                     "SPICE deck import failed: {error}"
@@ -919,18 +1095,35 @@ pub(crate) fn import_netlist(state: &mut AppState) -> bool {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn show_open_netlist_dialog() -> Result<std::path::PathBuf, String> {
+pub(crate) fn open_netlist_project(state: &mut AppState) -> bool {
+    import_netlist_with_mode(state, NetlistImportMode::OpenProject)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn import_netlist(state: &mut AppState) -> bool {
+    import_netlist_with_mode(state, NetlistImportMode::ImportIntoProject)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn show_open_netlist_dialog(mode: NetlistImportMode) -> Result<std::path::PathBuf, String> {
     rfd::FileDialog::new()
         .add_filter(NETLIST_FILTER.0, NETLIST_FILTER.1)
         .add_filter("All Files", &["*"])
-        .set_title("Import SPICE Deck")
+        .set_title(mode.dialog_title())
         .pick_file()
         .ok_or_else(|| "cancelled".to_string())
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn import_netlist(state: &mut AppState) -> bool {
-    match start_browser_netlist_import() {
+fn import_netlist_with_mode(state: &mut AppState, mode: NetlistImportMode) -> bool {
+    if let Some(reason) = netlist_import_start_block_reason(state, mode) {
+        state.push_user_message(ConsoleMessage::error(format!(
+            "{} is unavailable: {reason}",
+            mode.dialog_title()
+        )));
+        return false;
+    }
+    match start_browser_netlist_import(state, mode) {
         Ok(()) => true,
         Err(error) => {
             state.push_user_message(ConsoleMessage::error(format!(
@@ -939,6 +1132,16 @@ pub(crate) fn import_netlist(state: &mut AppState) -> bool {
             false
         }
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn open_netlist_project(state: &mut AppState) -> bool {
+    import_netlist_with_mode(state, NetlistImportMode::OpenProject)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn import_netlist(state: &mut AppState) -> bool {
+    import_netlist_with_mode(state, NetlistImportMode::ImportIntoProject)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -951,6 +1154,8 @@ enum BrowserNetlistImportResult {
 #[cfg(target_arch = "wasm32")]
 struct BrowserNetlistImportCompletion {
     token: crate::workbench::browser::file_import::TextImportToken,
+    transaction: crate::workbench::lifecycle::project_lifecycle::TransactionId,
+    mode: NetlistImportMode,
     result: BrowserNetlistImportResult,
 }
 
@@ -961,18 +1166,24 @@ thread_local! {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn start_browser_netlist_import() -> Result<(), String> {
+fn start_browser_netlist_import(
+    state: &mut AppState,
+    mode: NetlistImportMode,
+) -> Result<(), String> {
+    let transaction =
+        crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state)
+            .map_err(|error| error.to_string())?;
     let token = crate::workbench::browser::file_import::try_begin_text_import(
         crate::workbench::browser::file_import::BrowserTextImportKind::Netlist,
-    )?;
+    )
+    .inspect_err(|_| {
+        crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
+    })?;
 
     crate::workbench::browser::file_import::pick_text_file(
         NETLIST_FILTER.0,
         NETLIST_FILTER.1,
         move |result| {
-            if !crate::workbench::browser::file_import::text_import_is_current(token) {
-                return;
-            }
             let event = match result {
                 Ok(Some(file)) => BrowserNetlistImportResult::Loaded(file),
                 Ok(None) => BrowserNetlistImportResult::Cancelled,
@@ -981,6 +1192,8 @@ fn start_browser_netlist_import() -> Result<(), String> {
             BROWSER_NETLIST_IMPORT_RESULT.with(|slot| {
                 *slot.borrow_mut() = Some(BrowserNetlistImportCompletion {
                     token,
+                    transaction,
+                    mode,
                     result: event,
                 });
             });
@@ -996,11 +1209,33 @@ pub(crate) fn poll_browser_netlist_import(state: &mut AppState) -> bool {
         return false;
     };
     if !crate::workbench::browser::file_import::finish_text_import(completion.token) {
+        crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
+            state,
+            completion.transaction,
+        );
         return false;
     }
+    if let Err(error) = crate::workbench::lifecycle::project_lifecycle::validate_project_replacement(
+        state,
+        completion.transaction,
+    ) {
+        crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
+            state,
+            completion.transaction,
+        );
+        state.push_user_message(ConsoleMessage::error(format!(
+            "{} was cancelled because the project changed: {error}",
+            completion.mode.dialog_title()
+        )));
+        return false;
+    }
+    crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
+        state,
+        completion.transaction,
+    );
     match completion.result {
         BrowserNetlistImportResult::Loaded(file) => {
-            apply_imported_netlist(state, file.contents, None, &file.name)
+            apply_netlist_import_result(state, completion.mode, file.contents, None, &file.name)
         }
         BrowserNetlistImportResult::Failed(error) => {
             state.push_user_message(ConsoleMessage::error(format!(
@@ -1213,7 +1448,7 @@ mod tests {
     }
 
     #[test]
-    fn imported_netlist_becomes_dirty_manual_source_in_netlist_workspace() {
+    fn imported_netlist_becomes_dirty_manual_source_without_deleting_retained_runs() {
         let mut state = AppState::default();
         state.simulation.start_run();
         assert!(state.simulation.has_results());
@@ -1253,8 +1488,58 @@ mod tests {
             .workspace
             .validate_simulation_configuration()
             .expect("imported canonical source must satisfy project persistence invariants");
-        assert!(!state.simulation.has_results());
+        assert!(state.simulation.has_results());
+        assert_eq!(state.simulation.runs.len(), 1);
         assert!(state.recent_files.is_empty());
+    }
+
+    #[test]
+    fn opening_a_netlist_commits_an_independent_netlist_first_project() {
+        let mut state = AppState::default();
+        let original_project_id = state.workspace.project.id();
+        state.simulation.start_run();
+        state.workspace.netlist_source = Some("old\n.op\n.end\n".to_owned());
+
+        assert!(apply_opened_netlist_project(
+            &mut state,
+            "new\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned(),
+            Some(std::path::PathBuf::from("bias.cir")),
+            "bias.cir",
+        ));
+
+        assert_ne!(state.workspace.project.id(), original_project_id);
+        assert_eq!(state.workspace.project.name(), "bias");
+        assert!(!state.simulation.has_results());
+        assert_eq!(
+            state.workspace.netlist_source_path.as_deref(),
+            Some(std::path::Path::new("bias.cir"))
+        );
+        assert_eq!(
+            state.workbench.workspace,
+            crate::workbench::state::Workspace::Netlist
+        );
+    }
+
+    #[test]
+    fn importing_a_deck_refuses_read_only_projects_without_mutation() {
+        let mut state = AppState::default();
+        state.workbench.safe_mode.active = true;
+        state.workbench.safe_mode.applied = crate::workbench::state::LocalSafeModeOptions {
+            open_project_read_only: true,
+            ..Default::default()
+        };
+        state.workspace.netlist_source = Some("old\n.op\n.end\n".to_owned());
+
+        assert!(!apply_imported_netlist(
+            &mut state,
+            "new\n.op\n.end\n".to_owned(),
+            None,
+            "new.cir",
+        ));
+        assert_eq!(
+            state.workspace.netlist_source.as_deref(),
+            Some("old\n.op\n.end\n")
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1274,9 +1559,7 @@ mod tests {
         assert!(app.state.ui.netlist.validation.is_some());
         assert_eq!(
             app.state.ui.netlist.externally_saved_content_digest,
-            Some(crate::workbench::documents::netlist_document::source_content_digest(
-                source
-            ))
+            Some(crate::workbench::documents::netlist_document::source_content_digest(source))
         );
         assert_eq!(app.manual_deck_run_block_reason(), None);
     }

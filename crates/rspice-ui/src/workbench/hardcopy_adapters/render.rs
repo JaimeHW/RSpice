@@ -1955,12 +1955,26 @@ mod tests {
     }
 
     fn resolved_blank_schematic(format: &SchematicSheetFormat) -> ResolvedHardcopyDocument {
+        resolved_blank_schematic_with_identity(
+            format,
+            "test-schematic",
+            0x5343_4845_4d41,
+            "Test schematic",
+        )
+    }
+
+    fn resolved_blank_schematic_with_identity(
+        format: &SchematicSheetFormat,
+        source_key: &str,
+        document_id: u128,
+        display_name: &str,
+    ) -> ResolvedHardcopyDocument {
         resolve_blank_schematic_sheet_with_format(
             HardcopySourceIdentity::try_new(
-                "test-schematic",
-                HardcopyDocumentId::try_from_uuid(Uuid::from_u128(0x5343_4845_4d41)).unwrap(),
+                source_key,
+                HardcopyDocumentId::try_from_uuid(Uuid::from_u128(document_id)).unwrap(),
                 ObjectRevision::INITIAL,
-                "Test schematic",
+                display_name,
             )
             .unwrap(),
             HardcopyScope::CurrentSheet,
@@ -2761,7 +2775,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_authored_title_value_prints_an_em_dash_without_automatic_substitution() {
+    fn structured_scale_authority_projects_even_when_legacy_field_storage_is_empty() {
         let format = SchematicSheetFormat::default()
             .try_update(|draft| {
                 draft
@@ -2801,10 +2815,10 @@ mod tests {
                 Some(text.as_str())
             })
             .collect::<Vec<_>>();
-        assert!(text.contains(&"SCALE: \u{2014}"));
+        assert!(text.contains(&"\u{2022} Scale: 1:1"));
         assert!(
             !text.iter().any(|line| line.starts_with("SCALE: NTS")),
-            "the automatic scale projection must not overwrite an authored empty value"
+            "the structured ratio must not be replaced by an unrelated NTS value"
         );
     }
 
@@ -2812,8 +2826,8 @@ mod tests {
     fn hardcopy_zone_alphabet_matches_engineering_drawing_overflow_rules() {
         assert_eq!(compiler::zone_alpha_label(0), "A");
         assert_eq!(compiler::zone_alpha_label(8), "J");
-        assert_eq!(compiler::zone_alpha_label(22), "Y");
-        assert_eq!(compiler::zone_alpha_label(23), "24");
+        assert_eq!(compiler::zone_alpha_label(21), "Y");
+        assert_eq!(compiler::zone_alpha_label(22), "23");
     }
 
     #[test]
@@ -2821,7 +2835,12 @@ mod tests {
         let first = resolved_blank_schematic(&SchematicSheetFormat::default());
         let mut second_format = SchematicSheetFormat::default();
         second_format.orientation = crate::state::SchematicPageOrientation::Landscape;
-        let second = resolved_blank_schematic(&second_format);
+        let second = resolved_blank_schematic_with_identity(
+            &second_format,
+            "test-schematic-second-sheet",
+            0x5343_4845_4d42,
+            "Test schematic · second sheet",
+        );
         let members = [&first, &second]
             .into_iter()
             .map(|document| {

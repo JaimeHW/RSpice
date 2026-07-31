@@ -15,6 +15,7 @@ pub(crate) struct PickedTextFile {
 pub(crate) enum BrowserTextImportKind {
     Netlist,
     Project,
+    ResultDataset,
     Schematic,
     ShortcutProfile,
     #[cfg_attr(test, allow(dead_code))]
@@ -29,6 +30,7 @@ impl BrowserTextImportKind {
         match self {
             Self::Netlist => "SPICE deck",
             Self::Project => "project",
+            Self::ResultDataset => "result dataset",
             Self::Schematic => "schematic",
             Self::ShortcutProfile => "shortcut profile",
             Self::EngineeringTableView => "engineering table view",
@@ -44,6 +46,9 @@ impl BrowserTextImportKind {
                 crate::workbench::shortcuts::profile_workflow::MAX_SHORTCUT_PROFILE_BYTES
             }
             Self::EngineeringTableView => 512 * 1024,
+            Self::ResultDataset => {
+                crate::workbench::workflows::result_import_workflow::MAX_RESULT_DATASET_BYTES
+            }
             Self::SymbolDefinition => crate::workbench::app::MAX_SYMBOL_DEFINITION_IMPORT_BYTES,
             Self::Netlist | Self::Project | Self::Schematic | Self::VerilogA => {
                 crate::io::project_io::MAX_PROJECT_FILE_BYTES
@@ -266,6 +271,10 @@ mod tests {
         assert!(blocked.contains("file import is already in progress"));
 
         assert!(finish_text_import(netlist));
+        let result_dataset = try_begin_text_import(BrowserTextImportKind::ResultDataset)
+            .expect("result dataset starts");
+        assert_eq!(result_dataset.kind, BrowserTextImportKind::ResultDataset);
+        assert!(finish_text_import(result_dataset));
         let symbol = try_begin_text_import(BrowserTextImportKind::SymbolDefinition)
             .expect("symbol definition starts");
         assert_eq!(symbol.kind, BrowserTextImportKind::SymbolDefinition);

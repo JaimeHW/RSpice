@@ -76,6 +76,15 @@ pub(super) enum PreparedRetainedHardcopyPayload {
         all_panes: bool,
         scope: HardcopyScope,
     },
+    VisualizationDocument {
+        source_key: String,
+        project_id: ProjectId,
+        document: VisualizationDocument,
+        page_id: PageId,
+        pane_id: PaneId,
+        all_panes: bool,
+        scope: HardcopyScope,
+    },
     Report {
         project_id: ProjectId,
         source_key: String,
@@ -442,6 +451,15 @@ pub(super) enum PreparedRetainedHardcopyWorkerPayload {
         all_panes: bool,
         scope: HardcopyScope,
     },
+    VisualizationDocument {
+        source_key: String,
+        project_id: ProjectId,
+        document: CanonicalHardcopyOwner,
+        page_id: PageId,
+        pane_id: PaneId,
+        all_panes: bool,
+        scope: HardcopyScope,
+    },
     Report {
         project_id: ProjectId,
         source_key: String,
@@ -629,6 +647,26 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 all_panes,
                 scope,
             },
+            PreparedRetainedHardcopyPayload::VisualizationDocument {
+                source_key,
+                project_id,
+                document,
+                page_id,
+                pane_id,
+                all_panes,
+                scope,
+            } => Self::VisualizationDocument {
+                source_key,
+                project_id,
+                document: CanonicalHardcopyOwner::capture(
+                    "prepared visualization document",
+                    &document,
+                )?,
+                page_id,
+                pane_id,
+                all_panes,
+                scope,
+            },
             PreparedRetainedHardcopyPayload::Report {
                 project_id,
                 source_key,
@@ -768,6 +806,38 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 {
                     return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
                         "studio aggregate flag and scope are inconsistent".to_owned(),
+                    ));
+                }
+            }
+            Self::VisualizationDocument {
+                source_key,
+                project_id,
+                pane_id,
+                all_panes,
+                scope,
+                ..
+            } => {
+                validate_label(
+                    "prepared visualization-document source key",
+                    source_key,
+                    SOURCE_KEY_LIMIT,
+                )?;
+                require_project_source_prefix(*project_id, source_key, "result-document")?;
+                let pane_suffix = format!(":pane:{}", pane_id.get());
+                if !source_key.ends_with(&pane_suffix) {
+                    return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
+                        "result-document pane identity does not match its source key".to_owned(),
+                    ));
+                }
+                if (*all_panes && !matches!(scope, HardcopyScope::AllSheetsOrPanes))
+                    || (!*all_panes
+                        && !matches!(
+                            scope,
+                            HardcopyScope::ActivePlotDocument | HardcopyScope::ActiveDocument
+                        ))
+                {
+                    return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
+                        "result-document aggregate flag and scope are inconsistent".to_owned(),
                     ));
                 }
             }
@@ -953,6 +1023,41 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     project_id,
                     studio,
                     simulation,
+                    pane_id,
+                    all_panes,
+                    scope,
+                }
+            }
+            Self::VisualizationDocument {
+                source_key,
+                project_id,
+                document,
+                page_id,
+                pane_id,
+                all_panes,
+                scope,
+            } => {
+                let document =
+                    document.restore::<VisualizationDocument>("prepared visualization document")?;
+                let expected_key =
+                    visualization_document_pane_source_key(project_id, document.id(), pane_id);
+                if source_key != expected_key
+                    || !document.pages().iter().any(|page| page.id == page_id)
+                    || !document
+                        .panes()
+                        .iter()
+                        .any(|pane| pane.id == pane_id && pane.page_id == page_id)
+                {
+                    return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
+                        "result-document source identity is not retained by its exact document"
+                            .to_owned(),
+                    ));
+                }
+                PreparedRetainedHardcopyPayload::VisualizationDocument {
+                    source_key,
+                    project_id,
+                    document,
+                    page_id,
                     pane_id,
                     all_panes,
                     scope,
@@ -1260,6 +1365,22 @@ fn prepared_payload_identity(
                 scope.clone(),
             ))
         }
+        PreparedRetainedHardcopyPayload::VisualizationDocument {
+            source_key,
+            document,
+            scope,
+            ..
+        } => Ok((
+            HardcopySourceIdentity::try_new(
+                source_key,
+                HardcopyDocumentId::try_from_uuid(document.id().as_uuid()).map_err(|error| {
+                    HardcopySourceError::InvalidPreparedWorkerSnapshot(error.to_string())
+                })?,
+                document.revision(),
+                document.title(),
+            )?,
+            scope.clone(),
+        )),
         PreparedRetainedHardcopyPayload::Report {
             source_key,
             document,
@@ -1460,6 +1581,17 @@ impl PreparedRetainedHardcopyResolution {
                     })
                 }
             }
+            PreparedRetainedHardcopyPayload::VisualizationDocument {
+                source_key,
+                project_id,
+                document,
+                page_id,
+                pane_id,
+                all_panes,
+                scope,
+            } => resolve_visualization_document_source(
+                source_key, project_id, &document, page_id, pane_id, all_panes, scope,
+            ),
             PreparedRetainedHardcopyPayload::Report {
                 project_id: _,
                 source_key,

@@ -235,6 +235,7 @@ fn insert_configuration_root(
 #[test]
 fn project_configuration_overlay_and_revert_own_exact_configuration_catalog() {
     let mut state = AppState::default();
+    state.provision_test_project_technology_contract();
     let baseline = snapshot(&state).expect("baseline");
     state.project_lifecycle.project_open = true;
     state.project_lifecycle.accepted = Some(AcceptedProject {
@@ -251,6 +252,17 @@ fn project_configuration_overlay_and_revert_own_exact_configuration_catalog() {
         .design_management
         .bootstrap_for_cell_view("user/top/schematic", "Main", [1])
         .expect("design-management catalog");
+    let authority = crate::state::pdk_config::PdkAdministrativeAuthority {
+        actor_id: "callback-operator@rspice.invalid".to_owned(),
+        authority_id: "test:lifecycle-callback".to_owned(),
+    };
+    let callback_receipt = state
+        .execute_project_pdk_callback(
+            "derive-device",
+            &authority,
+            "Verify callback lifecycle ownership",
+        )
+        .expect("execute exact project callback");
     let edited = snapshot(&state).expect("edited");
     let mut accepted = baseline.clone();
 
@@ -267,6 +279,10 @@ fn project_configuration_overlay_and_revert_own_exact_configuration_catalog() {
     assert_eq!(
         accepted.workspace.design_management,
         edited.workspace.design_management
+    );
+    assert_eq!(
+        accepted.workspace.pdk_callback_receipts(),
+        [callback_receipt.clone()]
     );
     assert_eq!(
         accepted
@@ -292,6 +308,7 @@ fn project_configuration_overlay_and_revert_own_exact_configuration_catalog() {
         state.workspace.design_management,
         baseline.workspace.design_management
     );
+    assert!(state.workspace.pdk_callback_receipts().is_empty());
     snapshot(&state).expect("reverted state remains valid");
 }
 
@@ -702,9 +719,13 @@ fn safe_mode_read_only_policy_blocks_native_project_writes_before_publication() 
 #[test]
 fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
     let path = unique_path("session-receipt");
-    let mut state = AppState::default();
+    // Keep the several full application snapshots in this adversarial test on
+    // the heap. AppState is intentionally broad, and retaining every scenario
+    // in one native test must not depend on the test harness thread's small
+    // default stack.
+    let mut state = Box::new(AppState::default());
     save_native(
-        &mut state,
+        state.as_mut(),
         SaveScope::AllDocuments,
         &path,
         DestinationAuthority::UserSelected,
@@ -716,30 +737,31 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
         .clone()
         .expect("successful save records receipt");
     let accepted_bytes = std::fs::read(&canonical).expect("read accepted bytes");
-    let session = serde_json::to_string(&state).expect("serialize accepted session");
+    let session = serde_json::to_string(state.as_ref()).expect("serialize accepted session");
 
     assert_eq!(receipt.canonical_path, canonical);
     assert_eq!(receipt.project_id, state.workspace.project.id().to_string());
 
-    let mut exact: AppState = serde_json::from_str(&session).expect("restore exact session");
-    initialize_from_session(&mut exact);
+    let mut exact = serde_json::from_str::<Box<AppState>>(&session).expect("restore exact session");
+    initialize_from_session(exact.as_mut());
     assert_eq!(canonical_native_path(&exact), Some(canonical.clone()));
     assert!(exact.project_lifecycle.accepted.is_some());
 
-    let mut same_project = crate::io::load_project_file(&canonical).expect("load fixture");
+    let mut same_project =
+        Box::new(crate::io::load_project_file(&canonical).expect("load fixture"));
     same_project
         .workspace
         .project
         .rename("Externally renamed project")
         .expect("valid project name");
-    let changed = crate::io::project_io::serialize_project_file(&same_project)
+    let changed = crate::io::project_io::serialize_project_file(same_project.as_ref())
         .expect("serialize same-UUID replacement");
     std::fs::write(&canonical, changed).expect("write same-UUID replacement");
     let changed_bytes = std::fs::read(&canonical).expect("capture replacement bytes");
 
-    let mut digest_conflict: AppState =
-        serde_json::from_str(&session).expect("restore conflicted session");
-    initialize_from_session(&mut digest_conflict);
+    let mut digest_conflict =
+        serde_json::from_str::<Box<AppState>>(&session).expect("restore conflicted session");
+    initialize_from_session(digest_conflict.as_mut());
     assert!(digest_conflict.project_lifecycle.accepted.is_none());
     assert!(canonical_native_path(&digest_conflict).is_none());
     assert_eq!(
@@ -753,15 +775,16 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
         "startup conflict handling must not rewrite the target"
     );
 
-    let mut different = snapshot(&AppState::default()).expect("snapshot different project");
+    let mut different =
+        Box::new(snapshot(&AppState::default()).expect("snapshot different project"));
     different.workspace.project.set_path(canonical.clone());
-    let different_bytes = crate::io::project_io::serialize_project_file(&different)
+    let different_bytes = crate::io::project_io::serialize_project_file(different.as_ref())
         .expect("serialize different-UUID replacement");
     std::fs::write(&canonical, different_bytes.as_bytes())
         .expect("write different-UUID replacement");
-    let mut identity_conflict: AppState =
-        serde_json::from_str(&session).expect("restore identity-conflict session");
-    initialize_from_session(&mut identity_conflict);
+    let mut identity_conflict =
+        serde_json::from_str::<Box<AppState>>(&session).expect("restore identity-conflict session");
+    initialize_from_session(identity_conflict.as_mut());
     assert!(identity_conflict.project_lifecycle.accepted.is_none());
     assert!(canonical_native_path(&identity_conflict).is_none());
 
@@ -772,15 +795,16 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
         .as_object_mut()
         .expect("session object")
         .remove("native_project_binding_receipt");
-    let mut legacy: AppState =
-        serde_json::from_value(legacy_value).expect("restore legacy session");
-    initialize_from_session(&mut legacy);
+    let mut legacy =
+        serde_json::from_value::<Box<AppState>>(legacy_value).expect("restore legacy session");
+    initialize_from_session(legacy.as_mut());
     assert!(legacy.project_lifecycle.accepted.is_none());
     assert!(canonical_native_path(&legacy).is_none());
 
     std::fs::remove_file(&canonical).expect("remove canonical fixture");
-    let mut missing: AppState = serde_json::from_str(&session).expect("restore missing session");
-    initialize_from_session(&mut missing);
+    let mut missing =
+        serde_json::from_str::<Box<AppState>>(&session).expect("restore missing session");
+    initialize_from_session(missing.as_mut());
     assert!(missing.project_lifecycle.accepted.is_none());
     assert!(canonical_native_path(&missing).is_none());
     remove_project_artifacts(&path);
@@ -1312,6 +1336,7 @@ fn save_all_preserves_live_document_presentation_while_sanitizing_persisted_copy
     view.modified = true;
     view.file_path = Some(view_path.clone());
     view.modified_time = Some(8_675_309);
+    let governed_revision = state.library_manager.revision();
 
     save_native(
         &mut state,
@@ -1323,6 +1348,11 @@ fn save_all_preserves_live_document_presentation_while_sanitizing_persisted_copy
 
     assert_eq!(state.workspace.active_view, active);
     assert_eq!(state.workspace.open_views.len(), open_count);
+    assert_eq!(
+        state.library_manager.revision(),
+        governed_revision,
+        "save acceptance must not manufacture a catalog revision"
+    );
     let live = state
         .library_manager
         .get_library(&active.library)
@@ -1335,6 +1365,11 @@ fn save_all_preserves_live_document_presentation_while_sanitizing_persisted_copy
     assert_eq!(live.modified_time, Some(8_675_309));
 
     let persisted = crate::io::load_project_file(&path).expect("reload persisted project");
+    assert_eq!(
+        persisted.libraries.revision(),
+        governed_revision,
+        "persistence sanitization must preserve the exact governed revision"
+    );
     let persisted_view = persisted
         .libraries
         .get_library(&active.library)
@@ -1375,6 +1410,7 @@ fn saving_active_cell_never_dirties_project_configuration() {
             "document-setting".to_owned(),
             "engineering-value".to_owned(),
         );
+    let governed_revision = state.library_manager.revision();
 
     save_native(
         &mut state,
@@ -1395,6 +1431,23 @@ fn saving_active_cell_never_dirties_project_configuration() {
             .project_lifecycle
             .registry
             .is_dirty(&ProjectDocumentId::ProjectConfiguration)
+    );
+    assert_eq!(
+        state.library_manager.revision(),
+        governed_revision,
+        "partial-save overlay must preserve the observed catalog revision"
+    );
+    assert_eq!(
+        state
+            .project_lifecycle
+            .accepted
+            .as_ref()
+            .expect("accepted save")
+            .baseline
+            .libraries
+            .revision(),
+        governed_revision,
+        "accepted partial-save artifact must record the observed revision"
     );
     assert!(!has_unsaved_changes(&state));
     remove_project_artifacts(&path);

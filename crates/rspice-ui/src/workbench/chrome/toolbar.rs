@@ -740,14 +740,49 @@ fn simulation_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) 
 }
 
 fn results_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    let historical = results_document_is_historical(app);
+    if results_tracking_button(ui, app, layout) {
+        context_separator(ui, layout);
+    }
     toolbar_icon_command(
         ui,
         app,
-        Command::WaveformCalculator,
+        Command::VisualizationTraceManager,
+        WorkbenchIcon::Results,
+        layout,
+    );
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::VisualizationCursorManager,
         WorkbenchIcon::Target,
         layout,
     );
     context_separator(ui, layout);
+    if !historical {
+        toolbar_icon_command(
+            ui,
+            app,
+            Command::WaveformCalculator,
+            WorkbenchIcon::Target,
+            layout,
+        );
+        context_separator(ui, layout);
+    }
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::CompareResultDatasets,
+        WorkbenchIcon::Compare,
+        layout,
+    );
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::ImportResultDataset,
+        WorkbenchIcon::Folder,
+        layout,
+    );
     toolbar_text_command(
         ui,
         app,
@@ -756,6 +791,152 @@ fn results_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         "Export active result document data",
         layout,
     );
+    toolbar_icon_command(ui, app, Command::PrintHardcopy, WorkbenchIcon::File, layout);
+}
+
+fn results_tracking_button(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) -> bool {
+    use crate::results::visualization_document::{
+        DocumentEdit, ResultDocumentTracking, ResultDocumentTrackingMode,
+    };
+    use crate::workbench::state::WorkspaceDocumentId;
+
+    let Some(WorkspaceDocumentId::VisualizationDocument(document_id)) = app
+        .state
+        .workbench
+        .documents
+        .active(Workspace::Results)
+        .cloned()
+    else {
+        return false;
+    };
+    if results_document_is_historical(app) {
+        return false;
+    }
+    let Some((tracking, revision)) = app
+        .state
+        .workspace
+        .visualization_document(document_id)
+        .map(|document| (document.tracking(), document.revision()))
+    else {
+        return false;
+    };
+    let (Some(plan_id), Some(analysis_id)) =
+        (tracking.simulation_plan_id, tracking.authored_analysis_id)
+    else {
+        // A migrated or externally imported historical document cannot
+        // truthfully claim Latest until exact plan and authored-analysis
+        // authority exists.
+        return false;
+    };
+    if !take_projected_tool_slot(ui, layout) {
+        return true;
+    }
+
+    let pinned = tracking.mode == ResultDocumentTrackingMode::Pinned;
+    let label = if pinned { "Pinned" } else { "Latest" };
+    let tooltip = if pinned {
+        "Pinned to the current immutable dataset; reruns will not rebind this document."
+    } else {
+        "Tracking latest: this document follows the newest run of its exact plan and authored analysis."
+    };
+    let response = labeled_icon_button_sized(
+        ui,
+        WorkbenchIcon::Pin,
+        label,
+        pinned,
+        explicit_label_width(label),
+        layout.toolbar_control_height,
+    );
+    let response = response.on_hover_text(tooltip);
+    if response.clicked() {
+        let next_mode = if pinned {
+            ResultDocumentTrackingMode::Latest
+        } else {
+            ResultDocumentTrackingMode::Pinned
+        };
+        let next = ResultDocumentTracking::for_plan(next_mode, plan_id, analysis_id);
+        let result = app
+            .state
+            .workspace
+            .visualization_documents
+            .iter_mut()
+            .find(|document| document.id() == document_id)
+            .ok_or_else(|| "The active result document is no longer retained.".to_owned())
+            .and_then(|document| {
+                document
+                    .transact(revision, vec![DocumentEdit::SetTracking(next)])
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            });
+        match result {
+            Ok(()) => {
+                app.state.workspace.visualization_documents_dirty = true;
+                app.state
+                    .push_user_message(crate::diagnostics::ConsoleMessage::info(if pinned {
+                        "Result document now tracks the latest exact plan run."
+                    } else {
+                        "Result document is pinned to its current immutable dataset."
+                    }));
+            }
+            Err(error) => app
+                .state
+                .push_user_message(crate::diagnostics::ConsoleMessage::error(error)),
+        }
+    }
+    true
+}
+
+fn results_document_is_historical(app: &RSpiceApp) -> bool {
+    use crate::workbench::state::WorkspaceDocumentId;
+
+    match app.state.workbench.documents.active(Workspace::Results) {
+        Some(WorkspaceDocumentId::ResultDataset(dataset_id)) => app
+            .state
+            .simulation
+            .runs
+            .iter()
+            .filter(|run| run.lifecycle.is_terminal())
+            .max_by_key(|run| run.id)
+            .is_some_and(|latest| latest.dataset_id != *dataset_id),
+        Some(WorkspaceDocumentId::VisualizationDocument(document_id)) => {
+            let Some(document) = app.state.workspace.visualization_document(*document_id) else {
+                return true;
+            };
+            let Some(binding) = document
+                .panes()
+                .iter()
+                .filter_map(|pane| pane.binding)
+                .next()
+            else {
+                return true;
+            };
+            let tracking = document.tracking();
+            let (Some(plan_id), Some(analysis_id)) =
+                (tracking.simulation_plan_id, tracking.authored_analysis_id)
+            else {
+                return true;
+            };
+            app.state
+                .simulation
+                .runs
+                .iter()
+                .filter(|run| {
+                    run.lifecycle.is_terminal()
+                        && run
+                            .prepared_receipt()
+                            .and_then(|receipt| receipt.simulation_plan_id())
+                            == Some(plan_id)
+                        && run.analyses.iter().any(|analysis| {
+                            analysis.provenance().is_some_and(|provenance| {
+                                provenance.source_instance_id() == analysis_id
+                            })
+                        })
+                })
+                .max_by_key(|run| run.id)
+                .is_none_or(|latest| latest.dataset_id != binding.dataset.dataset_id)
+        }
+        _ => false,
+    }
 }
 
 fn visualization_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
@@ -1493,7 +1674,7 @@ fn pvt_menu_height_for_viewport(viewport_height: f32, row_height: f32) -> f32 {
     (viewport_height - 72.0).clamp(row_height * 3.0, 484.0)
 }
 
-fn commit_reference_pvt(
+pub(in crate::workbench) fn commit_reference_pvt(
     app: &mut RSpiceApp,
     process: crate::simulation::dialog::corner::ProcessCorner,
     temperature_celsius: f64,

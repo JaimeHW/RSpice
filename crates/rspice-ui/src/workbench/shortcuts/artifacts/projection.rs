@@ -17,7 +17,7 @@ use super::schema::{
 };
 use crate::workbench::ShortcutPreferences;
 use crate::workbench::commands::ShortcutContext;
-use crate::workbench::commands::vocabulary::{Command, COMMAND_REGISTRY, CommandPlatform};
+use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandPlatform};
 use crate::workbench::shortcuts::{
     CommandShortcutOverride, ProfileShortcutBinding, ShortcutBindingSlot, ShortcutBindingSource,
     ShortcutSequence,

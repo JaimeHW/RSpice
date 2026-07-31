@@ -92,7 +92,7 @@ fn rendered_results_menu_labels() -> Vec<String> {
                 .show(ctx, |ui| results_menu(ui, &mut app));
         },
     );
-    output
+    let mut items = output
         .platform_output
         .accesskit_update
         .expect("AccessKit results-menu tree")
@@ -100,12 +100,20 @@ fn rendered_results_menu_labels() -> Vec<String> {
         .into_iter()
         .filter_map(|(_, node)| {
             if node.role() == egui::accesskit::Role::MenuItem {
-                node.label().map(str::to_owned)
+                node.label()
+                    .zip(node.bounds())
+                    .map(|(label, bounds)| (bounds.y0, bounds.x0, label.to_owned()))
             } else {
                 None
             }
         })
-        .collect()
+        .collect::<Vec<_>>();
+    items.sort_by(|left, right| {
+        left.0
+            .total_cmp(&right.0)
+            .then_with(|| left.1.total_cmp(&right.1))
+    });
+    items.into_iter().map(|(_, _, label)| label).collect()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -594,53 +602,24 @@ fn design_specialist_row_uses_the_mockup_scoped_command_identity() {
 #[test]
 fn results_menu_exposes_only_truthful_completed_result_workflows() {
     let labels = rendered_results_menu_labels();
-    for expected in [
-        "Open results workspace",
-        "Bode / stability",
-        "FFT / spectrum",
-        "Eye diagram",
-        "Distribution",
-        "Operating point",
-        "Noise contributors",
-        "Measurements & specifications",
-        "Nyquist",
-        "Smith chart",
-        "Pole-zero",
-        "Calculator…",
-        "Export result data…",
-    ] {
-        assert!(
-            labels.iter().any(|label| label == expected),
-            "missing completed Results route: {expected}"
-        );
-    }
-
-    // These are specified by the mockup, but their complete product
-    // contracts are broader than the currently retained executors. Keep
-    // them absent rather than advertising a partial or differently scoped
-    // action under the production label.
-    for incomplete in [
-        "Dataset and manifest browser…",
-        "Create result document…",
-        "Add result comparison…",
-        "Report page and datasheet editor…",
-        "Trace and family manager…",
-        "Cursor and linked-probe manager…",
-        "Plot markers and annotations…",
-        "Review notes…",
-        "Expression and unit diagnostics…",
-        "Measurement library…",
-        "Family slicing and pivot…",
-        "Plot document properties…",
-        "Measurement and calibration hub…",
-        "Import result dataset…",
-        "Export dataset…",
-    ] {
-        assert!(
-            labels.iter().all(|label| label != incomplete),
-            "partial mockup route was exposed: {incomplete}"
-        );
-    }
+    assert_eq!(
+        labels,
+        [
+            "Open results workspace",
+            "Dataset and manifest browser…",
+            "Create result document…",
+            "Add result comparison…",
+            "Trace and family manager…",
+            "Cursor groups and links…",
+            "Review notes…",
+            "Calculator…",
+            "Measurement library…",
+            "Family slicing and pivot…",
+            "Plot document properties…",
+            "Import result dataset…",
+            "Export dataset…",
+        ]
+    );
 }
 
 #[test]

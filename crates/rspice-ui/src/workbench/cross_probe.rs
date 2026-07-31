@@ -203,7 +203,8 @@ fn semantic_selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<St
         && selection.bus_taps.is_empty()
         && selection.net_labels.is_empty()
         && selection.design_notes.is_empty()
-        && selection.documentation_shapes.is_empty();
+        && selection.documentation_shapes.is_empty()
+        && selection.probes.is_empty();
     let exact_wires = selection.wires == net.wire_ids.iter().copied().collect();
     let exact_components = if net.wire_ids.is_empty() {
         selection.components
@@ -230,6 +231,7 @@ fn conductor_selection(selection: &crate::state::Selection) -> bool {
         && selection.bus_taps.is_empty()
         && selection.design_notes.is_empty()
         && selection.documentation_shapes.is_empty()
+        && selection.probes.is_empty()
 }
 
 fn emitted_instance_name(component: &crate::state::Component) -> String {
@@ -348,18 +350,13 @@ fn compatible_result_trace(
 
     let preferred = state.simulation.active_analysis_idx;
     let find_in_analysis = |analysis_index: usize| {
-        run.analyses
-            .get(analysis_index)?
+        let analysis = run.analyses.get(analysis_index)?;
+        let (waveform_index, _) = analysis
             .waveforms
             .iter()
             .enumerate()
-            .find(|(_, waveform)| waveform.name.eq_ignore_ascii_case(&signal))
-            .map(|(waveform_index, waveform)| SelectedResultTrace {
-                dataset_id: run.dataset_id,
-                analysis_index,
-                waveform_index,
-                source_name: waveform.name.clone(),
-            })
+            .find(|(_, waveform)| waveform.name.eq_ignore_ascii_case(&signal))?;
+        SelectedResultTrace::from_run_indices(run, analysis_index, waveform_index)
     };
     preferred
         .and_then(find_in_analysis)
@@ -581,7 +578,7 @@ mod tests {
                 .results
                 .selected_trace
                 .as_ref()
-                .map(|trace| trace.source_name.as_str()),
+                .map(|trace| trace.source_name()),
             Some("V(OUT)")
         );
 
@@ -646,7 +643,7 @@ mod tests {
                 .results
                 .selected_trace
                 .as_ref()
-                .map(|trace| trace.source_name.as_str()),
+                .map(|trace| trace.source_name()),
             Some(signal.as_str())
         );
     }

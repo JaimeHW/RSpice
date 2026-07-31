@@ -132,7 +132,10 @@ pub fn load_example(name: &str, state: &mut SchematicState) {
 /// the legacy schematic-only behavior; hierarchy examples also populate the
 /// project library, open views, and schematic buffers that their cell
 /// instances resolve through.
-pub(crate) fn load_example_into_app(name: &str, app: &mut crate::workbench::app_state::AppState) -> bool {
+pub(crate) fn load_example_into_app(
+    name: &str,
+    app: &mut crate::workbench::app_state::AppState,
+) -> bool {
     if name == HIERARCHICAL_RC_FILTER {
         build_hierarchical_rc_project(app);
         reset_example_runtime_context(app);

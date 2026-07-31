@@ -211,7 +211,9 @@ macro_rules! define_surface_catalog {
                 match self {
                     Self::VisualizationStudio => Some(Workspace::Results),
                     Self::DesignManagement => Some(Workspace::Design),
-                    Self::ModelEditor | Self::ModelCorrelation => Some(Workspace::Models),
+                    Self::ModelEditor
+                    | Self::ModelCorrelation
+                    | Self::LibraryCellviewManager => Some(Workspace::Models),
                     _ => self.workspace(),
                 }
             }
@@ -251,46 +253,46 @@ define_surface_catalog! {
     Verify => { id: "verify", label: "Verification", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=verify" },
     Models => { id: "models", label: "Models and libraries", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=models" },
     Netlist => { id: "netlist", label: "Code and automation", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=netlist" },
-    ReleaseCockpit => { id: "release-cockpit", label: "Release closure · RC-19", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=release-cockpit" },
+    ReleaseCockpit => { id: "release-cockpit", label: "Release closure · RC-19", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=release-cockpit" },
     MultiTestStudio => { id: "multi-test-studio", label: "AFE release verification", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=multi-test-studio" },
     AmsWorkbench => { id: "ams-workbench", label: "AMS · mixed-signal verification", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=ams-workbench" },
     RfWorkbench => { id: "rf-workbench", label: "RF · receiver and PA verification", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=rf-workbench" },
     HighSigmaWorkbench => { id: "high-sigma-workbench", label: "High-sigma variation", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=high-sigma-workbench" },
-    LayoutWorkbench => { id: "layout-workbench", label: "top · physical layout", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=layout-workbench" },
+    LayoutWorkbench => { id: "layout-workbench", label: "top · physical layout", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=layout-workbench" },
     LvsPexWorkbench => { id: "lvs-pex-workbench", label: "LVS and parasitic extraction", archetype: SpecialistWorkspace, tier: QualifiedExternalFirst, status: ExternalFirst, deep_link: "?surface=lvs-pex-workbench" },
     EmWorkbench => { id: "em-workbench", label: "EM, IR and electrothermal", archetype: SpecialistWorkspace, tier: QualifiedExternalFirst, status: ExternalFirst, deep_link: "?surface=em-workbench" },
     SiPiWorkbench => { id: "si-pi-workbench", label: "SI, PI and SerDes", archetype: SpecialistWorkspace, tier: QualifiedExternalFirst, status: ExternalFirst, deep_link: "?surface=si-pi-workbench" },
     ReliabilityWorkbench => { id: "reliability-workbench", label: "Reliability, fault and SOA", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=reliability-workbench" },
     VisualizationStudio => { id: "visualization-studio", label: "Visualization Studio", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=visualization-studio" },
-    DigitalEventWorkbench => { id: "digital-event-workbench", label: "Digital & AMS event viewer", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=digital-event-workbench" },
+    DigitalEventWorkbench => { id: "digital-event-workbench", label: "Digital & AMS event viewer", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=digital-event-workbench" },
     RfDataDisplayWorkbench => { id: "rf-data-display-workbench", label: "RF data display worksheet", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=rf-data-display-workbench" },
-    MeasurementInterchangeWorkbench => { id: "measurement-interchange-workbench", label: "Measurement data interchange", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=measurement-interchange-workbench" },
+    MeasurementInterchangeWorkbench => { id: "measurement-interchange-workbench", label: "Measurement data interchange", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=measurement-interchange-workbench" },
     StatisticalVisualizationWorkbench => { id: "statistical-visualization-workbench", label: "Statistical visualization laboratory", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=statistical-visualization-workbench" },
     ReportAuthoring => { id: "report-authoring", label: "Verification report · RC-19", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=report-authoring" },
-    ModelEditor => { id: "model-editor", label: "Device model and parameter editor", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=model-editor" },
-    PcellDesigner => { id: "pcell-designer", label: "Parameterized-cell designer", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=pcell-designer" },
-    ModelExtraction => { id: "model-extraction", label: "Model extraction · BSIM4 candidate", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=model-extraction" },
-    ModelCorrelation => { id: "model-correlation", label: "Measurement correlation", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=model-correlation" },
+    ModelEditor => { id: "model-editor", label: "Device model editor", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=model-editor" },
+    PcellDesigner => { id: "pcell-designer", label: "Parameterized-cell designer", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=pcell-designer" },
+    ModelExtraction => { id: "model-extraction", label: "Model extraction · BSIM4 candidate", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=model-extraction" },
+    ModelCorrelation => { id: "model-correlation", label: "Measurement correlation", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=model-correlation" },
     JobDiagnostics => { id: "job-diagnostics", label: "Failure diagnostics · Run 40", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=job-diagnostics" },
-    RegressionOrchestration => { id: "regression-orchestration", label: "Regression orchestration · main", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=regression-orchestration" },
-    ApiBrowser => { id: "api-browser", label: "Automation API browser", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=api-browser" },
+    RegressionOrchestration => { id: "regression-orchestration", label: "Regression orchestration · main", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=regression-orchestration" },
+    ApiBrowser => { id: "api-browser", label: "Automation API browser", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=api-browser" },
     FastspiceWorkbench => { id: "fastspice-workbench", label: "FastSPICE · full-chip and memory", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=fastspice-workbench" },
     PhotonicsWorkbench => { id: "photonics-workbench", label: "Electronic-photonic co-design", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=photonics-workbench" },
     HeterogeneousWorkbench => { id: "heterogeneous-workbench", label: "Heterogeneous assembly · AFE module", archetype: SpecialistWorkspace, tier: QualifiedExternalFirst, status: ExternalFirst, deep_link: "?surface=heterogeneous-workbench" },
-    LibraryCharacterization => { id: "library-characterization", label: "Cell-library characterization", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=library-characterization" },
-    PdkTechnologyAdmin => { id: "pdk-technology-admin", label: "PDK technology administration", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=pdk-technology-admin" },
+    LibraryCharacterization => { id: "library-characterization", label: "Cell-library characterization", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=library-characterization" },
+    PdkTechnologyAdmin => { id: "pdk-technology-admin", label: "PDK technology administration", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=pdk-technology-admin" },
     PowerElectronicsWorkbench => { id: "power-electronics-workbench", label: "Power electronics design center", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=power-electronics-workbench" },
-    InstrumentWorkbench => { id: "instrument-workbench", label: "Measurement and calibration hub", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=instrument-workbench" },
+    InstrumentWorkbench => { id: "instrument-workbench", label: "Measurement and calibration hub", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=instrument-workbench" },
     PcbWorkbench => { id: "pcb-workbench", label: "PCB and laminate authoring", archetype: SpecialistWorkspace, tier: QualifiedExternalFirst, status: ExternalFirst, deep_link: "?surface=pcb-workbench" },
     CliBatchWorkbench => { id: "cli-batch-workbench", label: "CLI, batch and reproducible execution", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=cli-batch-workbench" },
-    DesignMigrationWorkbench => { id: "design-migration-workbench", label: "Process migration and layout reuse", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=design-migration-workbench" },
+    DesignMigrationWorkbench => { id: "design-migration-workbench", label: "Process migration and layout reuse", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=design-migration-workbench" },
     RfApplicationWorkbench => { id: "rf-application-workbench", label: "RF application synthesis and characterization", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=rf-application-workbench" },
     CosimulationWorkbench => { id: "cosimulation-workbench", label: "System co-simulation and external runtimes", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=cosimulation-workbench" },
     ComplianceLabWorkbench => { id: "compliance-lab-workbench", label: "High-speed compliance laboratory", archetype: SpecialistWorkspace, tier: QualifiedExternalFirst, status: ExternalFirst, deep_link: "?surface=compliance-lab-workbench" },
     QuantumWorkbench => { id: "quantum-workbench", label: "Quantum electronics design center", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=quantum-workbench" },
-    SolverQualificationCenter => { id: "solver-qualification-center", label: "Simulator qualification center", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=solver-qualification-center" },
+    SolverQualificationCenter => { id: "solver-qualification-center", label: "Simulator qualification center", archetype: SpecialistWorkspace, tier: Internal, status: InternalOnly, deep_link: "?surface=solver-qualification-center" },
     DeckCompatibilityCenter => { id: "deck-compatibility-center", label: "Netlist compatibility and migration", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=deck-compatibility-center" },
-    ProtectedIpCenter => { id: "protected-ip-center", label: "Protected model and IP execution", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=protected-ip-center" },
+    ProtectedIpCenter => { id: "protected-ip-center", label: "Protected model and IP execution", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=protected-ip-center" },
     LibraryCellviewManager => { id: "library-cellview-manager", label: "Library, cellview, symbol and form authoring", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=library-cellview-manager" },
     ProjectLauncher => { id: "project-launcher", label: "Project launcher", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=project-launcher" },
     Preferences => { id: "preferences", label: "Preferences", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=preferences" },
@@ -399,10 +401,10 @@ mod tests {
                 .filter(|surface| surface.release_status() == status)
                 .count()
         };
-        assert_eq!(count_status(ReleaseStatus::ReleaseScope), 47);
-        assert_eq!(count_status(ReleaseStatus::Preview), 10);
+        assert_eq!(count_status(ReleaseStatus::ReleaseScope), 32);
+        assert_eq!(count_status(ReleaseStatus::Preview), 24);
         assert_eq!(count_status(ReleaseStatus::ExternalFirst), 6);
-        assert_eq!(count_status(ReleaseStatus::InternalOnly), 1);
+        assert_eq!(count_status(ReleaseStatus::InternalOnly), 2);
 
         let count_archetype = |archetype| {
             SurfaceId::ALL
@@ -416,6 +418,33 @@ mod tests {
         assert_eq!(count_archetype(SurfaceArchetype::Modal), 2);
         assert_eq!(count_archetype(SurfaceArchetype::Overlay), 3);
         assert_eq!(count_archetype(SurfaceArchetype::Internal), 1);
+    }
+
+    #[test]
+    fn models_and_pdk_commercial_tiers_match_the_governed_mockup_contract() {
+        for surface in [
+            SurfaceId::PcellDesigner,
+            SurfaceId::ModelExtraction,
+            SurfaceId::ModelCorrelation,
+            SurfaceId::LibraryCharacterization,
+            SurfaceId::PdkTechnologyAdmin,
+            SurfaceId::ProtectedIpCenter,
+        ] {
+            assert_eq!(surface.canonical_tier(), CanonicalTier::Preview);
+            assert_eq!(surface.release_status(), ReleaseStatus::Preview);
+        }
+        for surface in [SurfaceId::ModelEditor, SurfaceId::LibraryCellviewManager] {
+            assert_eq!(surface.canonical_tier(), CanonicalTier::ReleaseTarget);
+            assert_eq!(surface.release_status(), ReleaseStatus::ReleaseScope);
+        }
+        assert_eq!(
+            SurfaceId::SolverQualificationCenter.canonical_tier(),
+            CanonicalTier::Internal
+        );
+        assert_eq!(
+            SurfaceId::SolverQualificationCenter.release_status(),
+            ReleaseStatus::InternalOnly
+        );
     }
 
     #[test]
@@ -507,6 +536,25 @@ mod tests {
         assert_eq!(
             SurfaceId::VisualizationStudio.deep_link(),
             "?surface=visualization-studio"
+        );
+    }
+
+    #[test]
+    fn library_cellview_manager_keeps_specialist_identity_with_models_ownership() {
+        assert_eq!(SurfaceId::LibraryCellviewManager.workspace(), None);
+        assert_eq!(
+            SurfaceId::LibraryCellviewManager.owner_workspace(),
+            Some(Workspace::Models)
+        );
+        assert_eq!(
+            Workspace::try_from(SurfaceId::LibraryCellviewManager),
+            Err(NonPrimarySurface {
+                surface_id: SurfaceId::LibraryCellviewManager,
+            })
+        );
+        assert_eq!(
+            SurfaceId::LibraryCellviewManager.deep_link(),
+            "?surface=library-cellview-manager"
         );
     }
 

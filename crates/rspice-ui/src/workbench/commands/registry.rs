@@ -442,9 +442,9 @@ impl Command {
                 | Self::CloseAllDocuments
                 | Self::CloseProject
                 | Self::NewCell
-                | Self::OpenNetlist
                 | Self::ImportNetlist
                 | Self::ImportVerilogA
+                | Self::ImportResultDataset
                 | Self::ExportSchematicSvg
                 | Self::ExportWaveformsCsv
                 | Self::ExportNetlist(_)
@@ -467,7 +467,13 @@ impl Command {
                 | Self::PreflightChecks
                 | Self::SimulationOptions
                 | Self::GenerateNetlist
+                | Self::DatasetManifestBrowser
+                | Self::CreateResultDocument
                 | Self::WaveformCalculator
+                | Self::CompareResultDatasets
+                | Self::ReviewNotes
+                | Self::MeasurementLibrary
+                | Self::FamilySlicing
                 | Self::ResultViewer(_)
                 | Self::EditSpecifications
                 | Self::VerificationPage(_)
@@ -516,6 +522,8 @@ impl Command {
                 | Self::OpenNetlist
                 | Self::ImportNetlist
                 | Self::ImportVerilogA
+                | Self::ImportResultDataset
+                | Self::CreateResultDocument
                 | Self::PageSetup
                 | Self::SheetFormatManager
                 | Self::CustomSheetSizes
@@ -624,7 +632,14 @@ impl Command {
             Self::PreflightChecks => ShortcutContext::SimulationWorkspace,
             Self::NextViolation | Self::PreviousViolation => ShortcutContext::ViolationNavigation,
             Self::ClearResults
+            | Self::ImportResultDataset
+            | Self::DatasetManifestBrowser
+            | Self::CreateResultDocument
             | Self::WaveformCalculator
+            | Self::CompareResultDatasets
+            | Self::ReviewNotes
+            | Self::MeasurementLibrary
+            | Self::FamilySlicing
             | Self::ResultViewer(_)
             | Self::AddVisualizationPane
             | Self::VisualizationTraceManager
@@ -907,7 +922,7 @@ impl Command {
             Self::SelectionBulkEdit => "open a schematic project",
             Self::ConfigurationSets => "open a project",
             Self::ReviewComments => "open a schematic project",
-            Self::RevisionHistory => "open a schematic project",
+            Self::RevisionHistory => "open a project",
             Self::Paste => "clipboard has no compatible content",
             Self::RenameSelection => "select one editable component, net label, or declared bus",
             Self::ObjectProperties => "select one inspectable object",
@@ -930,6 +945,15 @@ impl Command {
                 "the active schematic is read-only"
             }
             Self::RunSimulation => "active plan is not runnable",
+            Self::OpenNetlist | Self::ImportNetlist
+                if app.state.simulation.active_execution.is_some()
+                    || app.state.simulation.is_running =>
+            {
+                "an active simulation execution still owns the project"
+            }
+            Self::ImportNetlist if app.state.workbench.safe_mode.project_read_only() => {
+                "the project is open read-only"
+            }
             Self::StopSimulation
                 if app.state.simulation.is_running
                     && !crate::simulation::execution::execution_target_supports_cancellation() =>
@@ -943,7 +967,45 @@ impl Command {
             {
                 "an active simulation execution still owns result history"
             }
+            Self::ImportResultDataset
+                if app.state.simulation.active_execution.is_some()
+                    || app.state.simulation.is_running =>
+            {
+                "an active simulation execution still owns result history"
+            }
+            Self::ImportResultDataset if app.state.workbench.safe_mode.project_read_only() => {
+                "the project is open read-only"
+            }
             Self::ClearResults | Self::ExportWaveformsCsv => "no result dataset is available",
+            Self::CompareResultDatasets if app.state.workbench.workspace != Workspace::Results => {
+                "open an active result document"
+            }
+            Self::CompareResultDatasets => {
+                "a second compatible immutable result dataset is required"
+            }
+            Self::DatasetManifestBrowser | Self::CreateResultDocument => {
+                "no retained result dataset is available"
+            }
+            Self::ReviewNotes
+            | Self::MeasurementLibrary
+            | Self::FamilySlicing
+            | Self::VisualizationTraceManager
+            | Self::VisualizationCursorManager
+            | Self::VisualizationDocumentProperties
+                if !matches!(
+                    app.state.workbench.current_route().surface_id(),
+                    crate::workbench::SurfaceId::Results
+                        | crate::workbench::SurfaceId::VisualizationStudio
+                ) =>
+            {
+                "open an active result document"
+            }
+            Self::ReviewNotes
+            | Self::MeasurementLibrary
+            | Self::FamilySlicing
+            | Self::VisualizationTraceManager
+            | Self::VisualizationCursorManager
+            | Self::VisualizationDocumentProperties => "no retained result dataset is available",
             Self::ToggleResultsSplit if !app.state.workbench.supports_results_split() => {
                 "open Design, Netlist, or Simulation setup"
             }

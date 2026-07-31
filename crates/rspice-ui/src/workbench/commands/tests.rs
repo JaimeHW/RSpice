@@ -670,7 +670,7 @@ fn move_selection_requires_one_live_object_in_an_editable_active_schematic() {
     assert!(!Command::MoveSelection.is_enabled(&app));
     assert_eq!(
         Command::MoveSelection.availability(&app),
-        CommandAvailability::Disabled("select an editable object")
+        CommandAvailability::Disabled("the active schematic is read-only")
     );
 
     app.state.schematic.read_only = false;
@@ -704,7 +704,7 @@ fn stretch_selection_requires_one_live_eligible_geometry_target() {
     assert!(!Command::StretchSelection.is_enabled(&app));
     assert_eq!(
         Command::StretchSelection.availability(&app),
-        CommandAvailability::Disabled("select an editable object")
+        CommandAvailability::Disabled("the active schematic is read-only")
     );
 
     app.state.schematic.read_only = false;
@@ -739,7 +739,7 @@ fn array_selection_requires_a_live_eligible_editable_selection() {
     assert!(!Command::ArraySelection.is_enabled(&app));
     assert_eq!(
         Command::ArraySelection.availability(&app),
-        CommandAvailability::Disabled("select an editable object")
+        CommandAvailability::Disabled("the active schematic is read-only")
     );
 
     app.state.schematic.read_only = false;
@@ -1132,7 +1132,7 @@ fn incompatible_result_viewer_command_is_disabled_and_cannot_navigate() {
     assert_eq!(
         command.availability(&app),
         CommandAvailability::Disabled(
-            "Requires a usable AC magnitude response in the active dataset"
+            "Requires a usable AC response or ordinary noise spectrum in the active dataset"
         )
     );
     command.execute(&mut app);
@@ -1162,12 +1162,38 @@ fn exposed_results_calculator_opens_the_real_editor_dialog() {
 
 #[test]
 fn truthful_results_menu_routes_keep_their_stable_dispatch_identities() {
-    assert_eq!(
-        Command::ResultViewer(crate::workbench::ResultViewer::Waves).stable_id(),
-        "waveforms"
-    );
-    assert_eq!(Command::WaveformCalculator.stable_id(), "calculator");
-    assert_eq!(Command::ExportWaveformsCsv.stable_id(), "export-waveforms");
+    for (command, stable_id) in [
+        (
+            Command::ResultViewer(crate::workbench::ResultViewer::Waves),
+            "waveforms",
+        ),
+        (Command::DatasetManifestBrowser, "dataset-browser"),
+        (Command::CreateResultDocument, "create-result-document"),
+        (Command::CompareResultDatasets, "compare-datasets"),
+        (Command::VisualizationTraceManager, "trace-manager"),
+        (Command::VisualizationCursorManager, "cursor-manager"),
+        (Command::ReviewNotes, "annotation-manager"),
+        (Command::WaveformCalculator, "calculator"),
+        (Command::MeasurementLibrary, "measurement-library"),
+        (Command::FamilySlicing, "family-slicing"),
+        (Command::VisualizationDocumentProperties, "plot-properties"),
+        (Command::ImportResultDataset, "import-dataset"),
+        (Command::ExportWaveformsCsv, "export-results"),
+        (Command::ReportAuthoring, "report-page-editor"),
+    ] {
+        assert_eq!(command.stable_id(), stable_id);
+        assert_eq!(Command::from_stable_id(stable_id), Some(command));
+        assert!(vocabulary::COMMAND_REGISTRY.contains(&command));
+        assert!(command_catalog().any(|candidate| candidate == command));
+    }
+
+    for unavailable in [
+        Command::SaveReportDocument,
+        Command::AddReportPage,
+        Command::ReportPageProperties,
+    ] {
+        assert!(!command_catalog().any(|candidate| candidate == unavailable));
+    }
 }
 
 #[test]
@@ -1386,6 +1412,50 @@ fn all_workspace_commands_are_discoverable() {
 }
 
 #[test]
+fn every_project_tab_has_one_discoverable_command_with_a_stable_identity() {
+    let expected = [
+        (ProjectPage::Overview, "project-overview"),
+        (ProjectPage::Library, "project-library"),
+        (
+            ProjectPage::Configuration,
+            "project-testbench-configuration",
+        ),
+        (ProjectPage::Dependencies, "project-dependencies"),
+        (ProjectPage::Recovery, "project-recovery"),
+    ];
+    assert_eq!(ProjectPage::ALL.len(), expected.len());
+
+    for (page, stable_id) in expected {
+        let command = Command::ProjectPage(page);
+        assert!(
+            vocabulary::COMMAND_REGISTRY.contains(&command),
+            "project tab is absent from the command registry: {page:?}"
+        );
+        assert_eq!(command.stable_id(), stable_id);
+        assert_eq!(Command::from_stable_id(stable_id), Some(command));
+        assert!(
+            command.requires_open_project(),
+            "project tab bypasses the open-project boundary: {page:?}"
+        );
+    }
+}
+
+#[test]
+fn project_tab_commands_activate_the_project_workspace_and_exact_tab() {
+    for page in ProjectPage::ALL {
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.project_open = true;
+        app.state.workbench.workspace = Workspace::Results;
+        app.state.workbench.project_page = ProjectPage::Overview;
+
+        Command::ProjectPage(page).execute(&mut app);
+
+        assert_eq!(app.state.workbench.workspace, Workspace::Project);
+        assert_eq!(app.state.workbench.project_page, page);
+    }
+}
+
+#[test]
 fn protected_commands_keep_the_exact_mockup_action_ids() {
     assert_eq!(Command::CommandPalette.spec().id, "command-palette");
     assert_eq!(Command::ToggleFocusMode.spec().id, "toggle-focus-mode");
@@ -1571,6 +1641,7 @@ fn project_operation_gate_covers_every_mutating_project_command() {
         Command::OpenDocument,
         Command::ImportNetlist,
         Command::ImportVerilogA,
+        Command::ImportResultDataset,
         Command::CheckAndSave,
         Command::ModelEditor,
     ] {
@@ -1581,6 +1652,23 @@ fn project_operation_gate_covers_every_mutating_project_command() {
     }
     assert!(!Command::Copy.blocked_by_project_operation());
     assert!(!Command::ExportWaveformsCsv.blocked_by_project_operation());
+}
+
+#[test]
+fn result_dataset_import_has_mockup_authoritative_command_identity_and_gates() {
+    assert_eq!(Command::ImportResultDataset.stable_id(), "import-dataset");
+    assert_eq!(
+        Command::ImportResultDataset.spec().label,
+        "Import result dataset…"
+    );
+    assert_eq!(Command::ImportResultDataset.spec().group, "Results");
+    assert!(vocabulary::COMMAND_REGISTRY.contains(&Command::ImportResultDataset));
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.project_open = true;
+    assert!(Command::ImportResultDataset.is_enabled(&app));
+    app.state.simulation.is_running = true;
+    assert!(!Command::ImportResultDataset.is_enabled(&app));
 }
 
 #[test]
@@ -2026,6 +2114,17 @@ fn closed_projects_expose_only_the_project_workspace() {
 }
 
 #[test]
+fn new_cell_command_captures_exact_library_catalog_revision() {
+    let mut app = RSpiceApp::test_instance();
+    let revision = app.state.library_manager.revision();
+
+    Command::NewCell.execute(&mut app);
+
+    assert!(app.state.dialogs.new_cell_dialog);
+    assert_eq!(app.state.dialogs.new_cell_library_revision, revision);
+}
+
+#[test]
 fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
     // This independent expectation list prevents the predicate under test
     // from silently omitting a newly exposed submenu route.
@@ -2033,6 +2132,7 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         Command::NewCell,
         Command::ImportNetlist,
         Command::ImportVerilogA,
+        Command::ImportResultDataset,
         Command::ExportSchematicSvg,
         Command::ExportWaveformsCsv,
         Command::ExportNetlist(crate::io::NetlistFormat::Spice),
@@ -2040,11 +2140,16 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         Command::CheckAndSave,
         Command::SelectionBulkEdit,
         Command::ConnectivityManager,
+        Command::ProjectPage(ProjectPage::Overview),
+        Command::ProjectPage(ProjectPage::Library),
         Command::ProjectPage(ProjectPage::Configuration),
+        Command::ProjectPage(ProjectPage::Dependencies),
+        Command::ProjectPage(ProjectPage::Recovery),
         Command::PreflightChecks,
         Command::SimulationOptions,
         Command::GenerateNetlist,
         Command::WaveformCalculator,
+        Command::CompareResultDatasets,
         Command::ResultViewer(crate::workbench::ResultViewer::Waves),
         Command::EditSpecifications,
         Command::VerificationPage(VerificationPage::Yield),

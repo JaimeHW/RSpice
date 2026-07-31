@@ -7,6 +7,7 @@
 //! showed it has gone.
 
 use super::*;
+use crate::workbench::documents::result_document::manifest::ManifestViewModel;
 
 /// Resolve an active Visualization Studio pane without depending on a window,
 /// screenshot, framebuffer, or transient viewer cache.
@@ -62,6 +63,92 @@ pub fn resolve_visualization_pane_source(
     )
     .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?;
     resolved.default_print_mapping = default_print_mapping(&resolved.semantic_document)?;
+    Ok(resolved)
+}
+
+pub(crate) fn resolve_visualization_document_source(
+    source_key: String,
+    project_id: ProjectId,
+    document: &VisualizationDocument,
+    page_id: PageId,
+    pane_id: PaneId,
+    all_panes: bool,
+    scope: HardcopyScope,
+) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
+    let reference = visualization_document_reference(document)?;
+    if !all_panes {
+        return resolve_visualization_pane_source(VisualizationPaneHardcopySource {
+            source_key,
+            display_name: document.title().to_owned(),
+            document,
+            reference: &reference,
+            page_id,
+            pane_id,
+            scope,
+        });
+    }
+    if !matches!(scope, HardcopyScope::AllSheetsOrPanes) {
+        return Err(HardcopySourceError::UnsupportedScope(scope));
+    }
+    let mut ordered = Vec::new();
+    for page in document.pages() {
+        let mut panes = document
+            .panes()
+            .iter()
+            .filter(|pane| pane.page_id == page.id)
+            .collect::<Vec<_>>();
+        panes.sort_by_key(|pane| (pane.order, pane.id.get()));
+        ordered.extend(panes.into_iter().map(|pane| (page, pane)));
+    }
+    if ordered.is_empty() {
+        return Err(HardcopySourceError::InvalidSourceSet(
+            "all-panes result-document hardcopy requires at least one retained pane".to_owned(),
+        ));
+    }
+    let mut resolved_panes = Vec::with_capacity(ordered.len());
+    for (page, pane) in ordered {
+        resolved_panes.push(resolve_visualization_pane_source(
+            VisualizationPaneHardcopySource {
+                source_key: visualization_document_pane_source_key(
+                    project_id,
+                    document.id(),
+                    pane.id,
+                ),
+                display_name: format!("{} · {} · {}", document.title(), page.title, pane.title),
+                document,
+                reference: &reference,
+                page_id: page.id,
+                pane_id: pane.id,
+                scope: HardcopyScope::ActivePlotDocument,
+            },
+        )?);
+    }
+    let members = resolved_panes
+        .iter()
+        .map(HardcopySourceSetMember::from_resolved)
+        .collect::<Result<Vec<_>, _>>()?;
+    let source_set = HardcopySourceSet::try_new(
+        HardcopyDocumentId::try_from_uuid(document.id().as_uuid())
+            .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?,
+        document.revision(),
+        document.title(),
+        HardcopyDocumentKind::PlotOrWorksheet,
+        HardcopyScope::AllSheetsOrPanes,
+        members,
+    )?;
+    let mut resolved_panes = resolved_panes.into_iter();
+    let mut resolved = resolve_hardcopy_source_set_with(&source_set, |expected| {
+        let actual = resolved_panes.next().ok_or_else(|| {
+            HardcopySourceError::SourceNotRetained(expected.source_key().to_owned())
+        })?;
+        if actual.source_key() != expected.source_key() {
+            return Err(HardcopySourceError::StaleSourceSetMember {
+                source_key: expected.source_key().to_owned(),
+            });
+        }
+        Ok(actual)
+    })?;
+    resolved.source_key = source_key;
     Ok(resolved)
 }
 
@@ -428,6 +515,15 @@ pub(crate) fn resolve_results_quick_view_source(
     source: ResultsQuickViewHardcopySource<'_>,
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
     let presentation = ResultsQuickViewPresentation::from_state(source.state);
+    if presentation.viewer == ResultViewer::Manifest {
+        let run = active_terminal_run(source.state)?;
+        return resolve_results_manifest_source(
+            source.source_key,
+            source.project_id,
+            source.scope,
+            run,
+        );
+    }
     let active = active_quick_result(source.state)?;
     resolve_results_quick_view_parts(
         source.source_key,
@@ -477,6 +573,11 @@ pub(super) fn resolve_results_quick_view_parts(
         | ResultViewer::PoleZero => HardcopySemanticDocument::ResultSummary(
             semantic_result_summary(viewer, active.analysis)?,
         ),
+        ResultViewer::Manifest => {
+            return Err(HardcopySourceError::UnsupportedVisualizationViewer(
+                "dataset-native Manifest must resolve from its owning run".to_owned(),
+            ));
+        }
     };
     let digest = canonical_digest(
         b"rspice-hardcopy-results-quick-view-v2",
@@ -509,6 +610,173 @@ pub(super) fn resolve_results_quick_view_parts(
         semantic_document,
         bounds,
     )
+}
+
+fn resolve_results_manifest_source(
+    source_key: String,
+    project_id: ProjectId,
+    scope: HardcopyScope,
+    run: &SimulationRun,
+) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
+    validate_label("source key", &source_key, SOURCE_KEY_LIMIT)?;
+    if !matches!(
+        &scope,
+        HardcopyScope::ActivePlotDocument | HardcopyScope::ActiveDocument
+    ) {
+        return Err(HardcopySourceError::UnsupportedScope(scope));
+    }
+
+    let manifest = ManifestViewModel::from_run(run);
+    let semantic_document =
+        HardcopySemanticDocument::ResultSummary(semantic_manifest_summary(&manifest));
+    let dataset_digest = run.dataset_content_digest();
+    let digest = canonical_digest(
+        b"rspice-hardcopy-results-manifest-v1",
+        &(
+            run.dataset_id,
+            run.run_id,
+            dataset_digest,
+            &semantic_document,
+        ),
+    )?;
+    let mut identity_name = Vec::with_capacity(80);
+    identity_name.extend_from_slice(b"rspice-results-manifest-v1");
+    identity_name.extend_from_slice(run.dataset_id.as_uuid().as_bytes());
+    identity_name.extend_from_slice(run.run_id.as_uuid().as_bytes());
+    identity_name.extend_from_slice(dataset_digest.as_bytes());
+    let identity = HardcopySourceIdentity::try_new(
+        source_key.clone(),
+        HardcopyDocumentId::try_from_uuid(Uuid::new_v5(&project_id.as_uuid(), &identity_name))
+            .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?,
+        ObjectRevision::INITIAL,
+        format!("Results · {} · Manifest", run.label),
+    )?;
+
+    finish_resolved(
+        identity,
+        digest,
+        HardcopyDocumentKind::PlotOrWorksheet,
+        scope,
+        semantic_document,
+        SemanticBounds::try_new(
+            SemanticPoint::new(0, 0),
+            SemanticPoint::new(REPORT_PAGE_WIDTH_UM, REPORT_PAGE_HEIGHT_UM),
+        )?,
+    )
+}
+
+fn semantic_manifest_summary(manifest: &ManifestViewModel) -> SemanticResultSummary {
+    let inventory = SemanticTable {
+        title: format!("Frozen analysis inventory · {}", manifest.run_label),
+        columns: vec![
+            "Analysis".to_owned(),
+            "Expansion".to_owned(),
+            "Tasks".to_owned(),
+            "Domain axis".to_owned(),
+            "Stored values".to_owned(),
+            "Precision".to_owned(),
+            "Eligibility".to_owned(),
+        ],
+        rows: manifest
+            .rows
+            .iter()
+            .map(|row| {
+                vec![
+                    row.analysis.clone(),
+                    row.expansion.clone(),
+                    row.tasks.clone(),
+                    row.domain_axis.clone(),
+                    row.stored_values.clone(),
+                    row.precision.clone(),
+                    row.eligibility.clone(),
+                ]
+            })
+            .collect(),
+    };
+    let mut tables = vec![
+        inventory,
+        SemanticTable {
+            title: "Dataset identity".to_owned(),
+            columns: vec!["Field".to_owned(), "Value".to_owned()],
+            rows: vec![
+                vec!["Dataset".to_owned(), manifest.dataset_id.clone()],
+                vec!["Content digest".to_owned(), manifest.dataset_digest.clone()],
+                vec!["Run".to_owned(), manifest.run_id.clone()],
+                vec!["Run sequence".to_owned(), manifest.run_sequence.clone()],
+                vec!["Lifecycle".to_owned(), manifest.lifecycle.clone()],
+                vec![
+                    "Execution target".to_owned(),
+                    manifest.execution_target.clone(),
+                ],
+                vec!["Duration".to_owned(), manifest.elapsed_time.clone()],
+            ],
+        },
+        SemanticTable {
+            title: "Integrity and eligibility".to_owned(),
+            columns: vec!["Field".to_owned(), "Value".to_owned()],
+            rows: vec![
+                vec!["Receipt".to_owned(), manifest.integrity.clone()],
+                vec!["Qualification".to_owned(), manifest.qualification.clone()],
+                vec!["Frozen tasks".to_owned(), manifest.task_count.to_string()],
+                vec![
+                    "Retained results".to_owned(),
+                    manifest.retained_result_count.to_string(),
+                ],
+            ],
+        },
+    ];
+
+    if let Some(authority) = &manifest.authority {
+        tables.push(SemanticTable {
+            title: "Prepared source authority".to_owned(),
+            columns: vec!["Field".to_owned(), "Value".to_owned()],
+            rows: vec![
+                vec!["Source domain".to_owned(), authority.source_domain.clone()],
+                vec![
+                    "Simulation plan".to_owned(),
+                    authority
+                        .simulation_plan_id
+                        .clone()
+                        .unwrap_or_else(|| "manual deck · no simulation plan".to_owned()),
+                ],
+                vec![
+                    "Project revision".to_owned(),
+                    authority.project_revision.clone(),
+                ],
+                vec![
+                    "Prepared snapshot".to_owned(),
+                    authority.prepared_snapshot_digest.clone(),
+                ],
+                vec![
+                    "Source content".to_owned(),
+                    authority.source_content_digest.clone(),
+                ],
+                vec!["Source check".to_owned(), authority.source_check.clone()],
+                vec![
+                    "Check digest".to_owned(),
+                    authority.source_check_digest.clone(),
+                ],
+            ],
+        });
+        if !authority.model_sources.is_empty() {
+            tables.push(SemanticTable {
+                title: "Model source digests".to_owned(),
+                columns: vec!["Model source".to_owned(), "Content digest".to_owned()],
+                rows: authority
+                    .model_sources
+                    .iter()
+                    .map(|(name, digest)| vec![name.clone(), digest.clone()])
+                    .collect(),
+            });
+        }
+    }
+
+    SemanticResultSummary {
+        viewer: ResultViewer::Manifest,
+        title: format!("Frozen analysis inventory · {}", manifest.run_label),
+        tables,
+        payload: None,
+    }
 }
 
 #[derive(Debug)]
@@ -1314,6 +1582,11 @@ pub(super) fn semantic_result_summary(
                 columns: vec!["Root".to_owned(), "Real".to_owned(), "Imaginary".to_owned()],
                 rows,
             });
+        }
+        ResultViewer::Manifest => {
+            return Err(HardcopySourceError::UnsupportedVisualizationViewer(
+                "dataset-native Manifest cannot be derived from one analysis".to_owned(),
+            ));
         }
         viewer if is_curve_viewer(viewer) => unreachable!("curve viewers resolve as plots"),
         viewer => {

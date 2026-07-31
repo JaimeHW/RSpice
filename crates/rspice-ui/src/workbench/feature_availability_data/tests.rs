@@ -42,6 +42,79 @@ fn read_mockup_source(relative_path: &Path) -> String {
     })
 }
 
+fn read_mockup_bundle_source(bundle: &str, extension: &str) -> String {
+    let bundle_root = mockup_root().join("rspice-src").join(bundle);
+    let topics = std::fs::read_dir(&bundle_root).unwrap_or_else(|error| {
+        panic!(
+            "could not enumerate governed source bundle {}: {error}",
+            bundle_root.display()
+        )
+    });
+    let mut parts = Vec::new();
+    for topic in topics {
+        let topic = topic.expect("governed source topic must be readable");
+        if !topic
+            .file_type()
+            .expect("governed source topic type must be readable")
+            .is_dir()
+        {
+            continue;
+        }
+        for part in std::fs::read_dir(topic.path()).expect("source topic must be readable") {
+            let part = part.expect("governed source part must be readable");
+            if !part
+                .file_type()
+                .expect("governed source part type must be readable")
+                .is_file()
+            {
+                continue;
+            }
+            let path = part.path();
+            if path.extension().and_then(|value| value.to_str()) != Some(extension) {
+                continue;
+            }
+            let file_name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .expect("governed source part name must be UTF-8");
+            let ordinal = file_name
+                .split_once('-')
+                .and_then(|(value, _)| value.parse::<u32>().ok())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "governed source part {} must start with a numeric ordinal",
+                        path.display()
+                    )
+                });
+            parts.push((ordinal, path));
+        }
+    }
+    parts.sort_by_key(|(ordinal, _)| *ordinal);
+    assert!(
+        !parts.is_empty(),
+        "governed source bundle {} contains no .{extension} parts",
+        bundle_root.display()
+    );
+    for pair in parts.windows(2) {
+        assert_ne!(
+            pair[0].0,
+            pair[1].0,
+            "governed source bundle {} repeats ordinal {}",
+            bundle_root.display(),
+            pair[0].0
+        );
+    }
+    parts
+        .into_iter()
+        .map(|(_, path)| {
+            std::fs::read_to_string(&path).unwrap_or_else(|error| {
+                panic!("could not read governed source {}: {error}", path.display())
+            })
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
 fn cached_mockup_source(cache: &'static OnceLock<String>, relative_path: &str) -> &'static str {
     cache
         .get_or_init(|| read_mockup_source(Path::new(relative_path)))
@@ -74,11 +147,15 @@ fn surface_registry_source() -> &'static str {
 }
 
 fn app_source() -> &'static str {
-    cached_mockup_source(&APP_SOURCE, "rspice-src/app.js")
+    APP_SOURCE
+        .get_or_init(|| read_mockup_bundle_source("app", "js"))
+        .as_str()
 }
 
 fn styles_source() -> &'static str {
-    cached_mockup_source(&STYLES_SOURCE, "rspice-src/styles.css")
+    STYLES_SOURCE
+        .get_or_init(|| read_mockup_bundle_source("styles", "css"))
+        .as_str()
 }
 
 fn parse_json(source: &str) -> Value {
@@ -107,7 +184,7 @@ fn planned_specification_source(id: &str) -> &str {
         .unwrap_or_else(|| panic!("missing planned specification `{id}`"));
     let tail = &source[start..];
     let end = tail
-        .find("\n    };")
+        .find("\n  };")
         .expect("planned specification must have a closed object literal");
     &tail[..end]
 }
@@ -335,7 +412,11 @@ fn touch_edit_guide_document_and_responsive_contract_match_the_mockup_exactly() 
         ".dialog-note-grid p {",
         ".detail-record-header {",
     );
-    assert!(note_body_styles.contains("font-size: 11px;"));
+    assert!(note_body_styles.contains("font-size: var(--fs-caption);"));
+    assert!(
+        styles_source()
+            .contains("--fs-caption: calc((11px + var(--density-type)) * var(--type-mult));")
+    );
     assert!(note_body_styles.contains("line-height: 1.45;"));
 }
 

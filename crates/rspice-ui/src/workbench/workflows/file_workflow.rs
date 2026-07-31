@@ -374,14 +374,17 @@ pub(crate) fn save_schematic_to_path_with_io(
                 // legacy, or replaced recovery evidence is retained.
                 #[cfg(not(target_arch = "wasm32"))]
                 {
-                    if let Err(error) = crate::workbench::lifecycle::recovery_checkpoint::cleanup_checkpoint(path) {
+                    if let Err(error) =
+                        crate::workbench::lifecycle::recovery_checkpoint::cleanup_checkpoint(path)
+                    {
                         log::warn!("Saved source but autosave checkpoint cleanup failed: {error}");
                     }
                 }
             }
             state.sync_active_schematic_to_workspace();
             if saved_path_is_reopenable {
-                state.remember_recent_file(crate::workbench::app_state::RecentKind::Schematic, path);
+                state
+                    .remember_recent_file(crate::workbench::app_state::RecentKind::Schematic, path);
                 state.push_user_message(ConsoleMessage::info(format!("Saved: {}", path.display())));
             } else {
                 state.browser_schematic_save_name = file_name_string(path);

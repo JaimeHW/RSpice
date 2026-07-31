@@ -12,12 +12,12 @@ pub use availability_rows::*;
 
 use crate::simulation::plan::AnalysisKind;
 
+use super::routing::availability::{SurfaceExecutionAvailability, surface_availability};
+use super::routing::surface_catalog::{CanonicalTier, SurfaceId};
 use super::{
     CapabilityWorkflowId,
     state::{EngineeringProfile, InteroperabilityDomain, InteroperabilitySupportLevel, Workspace},
 };
-use super::routing::availability::{SurfaceExecutionAvailability, surface_availability};
-use super::routing::surface_catalog::{CanonicalTier, SurfaceId};
 
 /// Deliberate state vocabulary shared by the versioned readiness fixture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -98,12 +98,12 @@ pub const PLATFORM_AVAILABILITY_ROWS: [PlatformAvailabilityRow; 4] = [
     },
     PlatformAvailabilityRow {
         id: "phone",
-        label: "Phone application or browser",
+        label: "Phone application or browser (deferred platform)",
         capability_mode_summary: "viewport: adaptive \u{00b7} pointer: adaptive \u{00b7} keyboard: adaptive \u{00b7} stylus: adaptive \u{00b7} renderer: adaptive \u{00b7} storage: adaptive \u{00b7} filesystem: adaptive \u{00b7} network: adaptive \u{00b7} lifecycle: adaptive \u{00b7} windowing: unavailable-with-reason \u{00b7} printing: adaptive \u{00b7} assistive-technology: full",
         fixture_state: ReadinessState::Unknown,
         fixture_qualification: "unqualified-design-target",
         qualification_boundary: "The phone branch intentionally represents unknown device evidence; responsive intent cannot substitute for device qualification.",
-        design_qualification_boundary: "Design target for phone portrait and landscape task compositions. Release-scope authoring must be full or adaptive; this record is not real-device qualification.",
+        design_qualification_boundary: "Deferred platform (2026-07-24): phone portrait and landscape task compositions remain designed but are excluded from release scope, evidence, and test matrices until the platform is explicitly reactivated. This record is not real-device qualification.",
         sign_off_rule: PLATFORM_SIGN_OFF_RULE,
     },
 ];
@@ -1973,7 +1973,6 @@ fn matches_query(query: &str, values: &[&str]) -> bool {
             .iter()
             .any(|value| value.to_lowercase().contains(query))
 }
-
 
 #[cfg(test)]
 mod tests;

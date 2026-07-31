@@ -58,6 +58,7 @@ pub enum Command {
     OpenNetlist,
     ImportNetlist,
     ImportVerilogA,
+    ImportResultDataset,
     ExportSchematicSvg,
     ExportWaveformsCsv,
     ExportNetlist(crate::io::NetlistFormat),
@@ -182,7 +183,13 @@ pub enum Command {
     CompareGeneratedRevisions,
     ClearResults,
     ToggleLinkedCursors,
+    DatasetManifestBrowser,
+    CreateResultDocument,
     WaveformCalculator,
+    CompareResultDatasets,
+    ReviewNotes,
+    MeasurementLibrary,
+    FamilySlicing,
     ResultViewer(crate::workbench::ResultViewer),
     EditSpecifications,
     VerificationPage(VerificationPage),
@@ -251,6 +258,18 @@ impl Command {
         if id == "fit-canvas" {
             return Some(Self::ZoomFit);
         }
+        if id == "export-waveforms" {
+            return Some(Self::ExportWaveformsCsv);
+        }
+        if id == "visualization-trace-manager" {
+            return Some(Self::VisualizationTraceManager);
+        }
+        if id == "visualization-cursor-manager" {
+            return Some(Self::VisualizationCursorManager);
+        }
+        if id == "visualization-document-properties" {
+            return Some(Self::VisualizationDocumentProperties);
+        }
         COMMAND_REGISTRY
             .iter()
             .copied()
@@ -297,10 +316,13 @@ impl Command {
             Self::OpenNetlist => spec("open-netlist", "Open netlist…", "File"),
             Self::ImportNetlist => spec("import-netlist", "Import SPICE deck…", "File"),
             Self::ImportVerilogA => spec("import-veriloga", "Import Verilog-A…", "File"),
+            Self::ImportResultDataset => {
+                spec("import-dataset", "Import result dataset…", "Results")
+            }
             Self::ExportSchematicSvg => {
                 spec("export-schematic-svg", "Export schematic SVG…", "File")
             }
-            Self::ExportWaveformsCsv => spec("export-waveforms", "Export result data…", "File"),
+            Self::ExportWaveformsCsv => spec("export-results", "Export dataset…", "Results"),
             Self::ExportNetlist(crate::io::NetlistFormat::Spectre) => {
                 spec("export-netlist-spectre", "Export Spectre netlist…", "File")
             }
@@ -580,7 +602,28 @@ impl Command {
             Self::ToggleLinkedCursors => {
                 spec("toggle-linked-cursors", "Linked A/B cursors", "Results")
             }
+            Self::DatasetManifestBrowser => spec(
+                "dataset-browser",
+                "Dataset and manifest browser…",
+                "Results",
+            ),
+            Self::CreateResultDocument => spec(
+                "create-result-document",
+                "Create result document…",
+                "Results",
+            ),
             Self::WaveformCalculator => spec("calculator", "Calculator…", "Results"),
+            Self::CompareResultDatasets => {
+                spec("compare-datasets", "Add result comparison…", "Results")
+            }
+            Self::ReviewNotes => spec("annotation-manager", "Review notes…", "Results"),
+            Self::MeasurementLibrary => {
+                spec("measurement-library", "Measurement library…", "Results")
+            }
+            Self::FamilySlicing => spec("family-slicing", "Family slicing and pivot…", "Results"),
+            Self::ResultViewer(crate::workbench::ResultViewer::Manifest) => {
+                spec("result-manifest", "Open dataset manifest", "Results")
+            }
             Self::ResultViewer(crate::workbench::ResultViewer::Waves) => {
                 spec("waveforms", "Open results workspace", "Results")
             }
@@ -655,17 +698,17 @@ impl Command {
             Self::VerificationPage(VerificationPage::Drc) => {
                 spec("open-drc", "Physical DRC unavailable", "Verify")
             }
-            Self::ProjectPage(ProjectPage::Dashboard) => {
+            Self::ProjectPage(ProjectPage::Overview) => {
                 spec("project-overview", "Open project overview", "Project")
+            }
+            Self::ProjectPage(ProjectPage::Library) => {
+                spec("project-library", "Open project library", "Project")
             }
             Self::ProjectPage(ProjectPage::Configuration) => spec(
                 "project-testbench-configuration",
                 "Open testbench configuration",
                 "Project",
             ),
-            Self::ProjectPage(ProjectPage::Technology) => {
-                spec("project-technology", "Open technology and PDK", "Project")
-            }
             Self::ProjectPage(ProjectPage::Dependencies) => spec(
                 "project-dependencies",
                 "Open dependency manifest",
@@ -681,6 +724,7 @@ impl Command {
             Self::ModelsPage(ModelsPage::Corners) => {
                 spec("corner-sections", "Corners & sections", "Models")
             }
+            Self::ModelsPage(ModelsPage::Bins) => spec("model-bins", "Bins & geometry", "Models"),
             Self::ModelsPage(ModelsPage::Include) => {
                 spec("include-graph", "Include graph", "Models")
             }
@@ -741,16 +785,14 @@ impl Command {
                 "Results",
             ),
             Self::VisualizationTraceManager => {
-                spec("visualization-trace-manager", "Trace manager", "Results")
+                spec("trace-manager", "Trace and family manager…", "Results")
             }
             Self::VisualizationCursorManager => {
-                spec("visualization-cursor-manager", "Cursor manager", "Results")
+                spec("cursor-manager", "Cursor groups and links…", "Results")
             }
-            Self::VisualizationDocumentProperties => spec(
-                "visualization-document-properties",
-                "Document properties",
-                "Results",
-            ),
+            Self::VisualizationDocumentProperties => {
+                spec("plot-properties", "Plot document properties…", "Results")
+            }
             Self::ExportVisualizationDocument => spec(
                 "visualization-export-document",
                 "Export document",
@@ -818,6 +860,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::OpenNetlist,
     Command::ImportNetlist,
     Command::ImportVerilogA,
+    Command::ImportResultDataset,
     Command::ExportSchematicSvg,
     Command::ExportNetlist(crate::io::NetlistFormat::Spectre),
     Command::ExportNetlist(crate::io::NetlistFormat::Spice),
@@ -848,9 +891,9 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::OpenWorkspace(Workspace::Verify),
     Command::OpenWorkspace(Workspace::Models),
     Command::OpenWorkspace(Workspace::Netlist),
-    Command::ProjectPage(ProjectPage::Dashboard),
+    Command::ProjectPage(ProjectPage::Overview),
+    Command::ProjectPage(ProjectPage::Library),
     Command::ProjectPage(ProjectPage::Configuration),
-    Command::ProjectPage(ProjectPage::Technology),
     Command::ProjectPage(ProjectPage::Dependencies),
     Command::ProjectPage(ProjectPage::Recovery),
     Command::ResultViewer(crate::workbench::ResultViewer::Waves),
@@ -967,7 +1010,13 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ExportWaveformsCsv,
     Command::ClearResults,
     Command::ToggleLinkedCursors,
+    Command::DatasetManifestBrowser,
+    Command::CreateResultDocument,
     Command::WaveformCalculator,
+    Command::CompareResultDatasets,
+    Command::ReviewNotes,
+    Command::MeasurementLibrary,
+    Command::FamilySlicing,
     Command::ResultViewer(crate::workbench::ResultViewer::Bode),
     Command::ResultViewer(crate::workbench::ResultViewer::Fft),
     Command::ResultViewer(crate::workbench::ResultViewer::Eye),
@@ -987,6 +1036,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::VerificationPage(VerificationPage::Regression),
     Command::ModelsPage(ModelsPage::Symbols),
     Command::ModelsPage(ModelsPage::Corners),
+    Command::ModelsPage(ModelsPage::Bins),
     Command::ModelsPage(ModelsPage::Include),
     Command::ModelsPage(ModelsPage::Qualification),
     Command::ModelBrowser,

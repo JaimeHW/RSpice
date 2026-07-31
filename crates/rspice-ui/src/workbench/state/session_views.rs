@@ -182,16 +182,18 @@ pub enum ModelsPage {
     Symbols,
     #[serde(alias = "Pdk")]
     Corners,
+    Bins,
     #[serde(alias = "Behavioral")]
     Include,
     Qualification,
 }
 
 impl ModelsPage {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Models,
         Self::Symbols,
         Self::Corners,
+        Self::Bins,
         Self::Include,
         Self::Qualification,
     ];
@@ -201,6 +203,7 @@ impl ModelsPage {
             Self::Models => "Models",
             Self::Symbols => "Symbols & CDF",
             Self::Corners => "Corners & sections",
+            Self::Bins => "Bins & geometry",
             Self::Include => "Include graph",
             Self::Qualification => "Qualification",
         }
@@ -214,6 +217,135 @@ impl ModelsPage {
     pub const Catalog: Self = Self::Models;
 }
 
+/// Corpus shown by the Models page. These are deliberately separate scopes:
+/// loaded project models are executable project state, packs are installed
+/// distribution units, and library parts are addressable definitions that may
+/// not yet be parsed or attached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ModelCatalogScope {
+    #[default]
+    Project,
+    Packs,
+    Library,
+}
+
+impl ModelCatalogScope {
+    pub const ALL: [Self; 3] = [Self::Project, Self::Packs, Self::Library];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Project => "Project",
+            Self::Packs => "Installed packs",
+            Self::Library => "RSpice library",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ModelProjectFacet {
+    #[default]
+    All,
+    Bound,
+    Pinned,
+    Review,
+    Preview,
+    Protected,
+}
+
+impl ModelProjectFacet {
+    pub const ALL: [Self; 6] = [
+        Self::All,
+        Self::Bound,
+        Self::Pinned,
+        Self::Review,
+        Self::Preview,
+        Self::Protected,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Bound => "Bound in project",
+            Self::Pinned => "Pinned",
+            Self::Review => "Review",
+            Self::Preview => "Preview",
+            Self::Protected => "Protected",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ModelPackFacet {
+    #[default]
+    All,
+    Attention,
+    Attached,
+    Foundry,
+    Vendor,
+    Community,
+    Redistributable,
+}
+
+impl ModelPackFacet {
+    pub const ALL: [Self; 7] = [
+        Self::All,
+        Self::Attention,
+        Self::Attached,
+        Self::Foundry,
+        Self::Vendor,
+        Self::Community,
+        Self::Redistributable,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Attention => "Needs attention",
+            Self::Attached => "Attached",
+            Self::Foundry => "Foundry",
+            Self::Vendor => "Vendor",
+            Self::Community => "Community",
+            Self::Redistributable => "Redistributable",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ModelLibraryFacet {
+    #[default]
+    All,
+    Mosfet,
+    Bipolar,
+    Diode,
+    Jfet,
+    Passive,
+    Ic,
+}
+
+impl ModelLibraryFacet {
+    pub const ALL: [Self; 7] = [
+        Self::All,
+        Self::Mosfet,
+        Self::Bipolar,
+        Self::Diode,
+        Self::Jfet,
+        Self::Passive,
+        Self::Ic,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::All => "All classes",
+            Self::Mosfet => "MOSFET",
+            Self::Bipolar => "Bipolar",
+            Self::Diode => "Diode",
+            Self::Jfet => "JFET & HEMT",
+            Self::Passive => "Passive",
+            Self::Ic => "IC & macro",
+        }
+    }
+}
+
 /// Destination that can resolve a blocking simulation-preflight finding.
 /// The dialog stores semantic destinations instead of callbacks so a report
 /// remains deterministic for the exact project revision that produced it.
@@ -221,6 +353,7 @@ impl ModelsPage {
 pub enum PreflightRemediation {
     DesignChecks,
     SimulationPlan,
+    ProjectTechnology,
 }
 
 /// One ordered, actionable finding in a simulation-preflight report.

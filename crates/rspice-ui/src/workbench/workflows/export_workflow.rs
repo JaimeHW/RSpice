@@ -258,6 +258,38 @@ impl ExportWorkflowIo for NativeExportWorkflowIo {
     }
 }
 
+/// Publish a derived, read-only project manifest through the same observed
+/// destination contract as every other production export. Cancellation is not
+/// an error; successful publication returns a receipt for the activity log.
+pub(crate) fn publish_project_manifest(
+    suggested_name: &str,
+    contents: &[u8],
+) -> Result<Option<String>, String> {
+    let filename = if suggested_name.trim().is_empty() {
+        "rspice-project-manifest.json"
+    } else {
+        suggested_name
+    };
+    let io = NativeExportWorkflowIo;
+    let Some(path) = io.show_save_dialog(SaveDialogConfig {
+        title: "Export dependency manifest",
+        default_name: filename,
+        filter_name: "JSON manifest",
+        filter_extensions: &["json"],
+    })?
+    else {
+        return Ok(None);
+    };
+    let destination = io.observe_destination(&path)?;
+    io.write_bytes_file_observed(&destination, contents, "application/json")?;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let receipt = format!("Saved dependency manifest to {}", path.display());
+    #[cfg(target_arch = "wasm32")]
+    let receipt = "The dependency manifest was handed to the browser download manager.".to_owned();
+    Ok(Some(receipt))
+}
+
 pub(crate) fn deterministic_stored_zip(entries: &[(&str, &[u8])]) -> Result<Vec<u8>, String> {
     if entries.is_empty() || entries.len() > u16::MAX as usize {
         return Err("CI evidence package has an invalid entry count".to_owned());

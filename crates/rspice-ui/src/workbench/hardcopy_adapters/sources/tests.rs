@@ -309,10 +309,16 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
             expected_wire,
             "sheet {index} must contain only its own assigned wire"
         );
-        assert_eq!(
-            sheet.drawing_sheet.as_ref(),
-            Some(catalog.sheets()[index].page_format())
-        );
+        let stored_format = catalog.sheets()[index].page_format();
+        let effective_format =
+            if stored_format.inheritance == crate::state::DrawingSheetInheritance::ProjectDefault {
+                project_settings
+                    .default_format
+                    .with_target_sheet_title_fields(stored_format)
+            } else {
+                stored_format.clone()
+            };
+        assert_eq!(sheet.drawing_sheet.as_ref(), Some(&effective_format));
         assert_eq!(
             sheet
                 .drawing_sheet_title_values
@@ -329,7 +335,7 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
                 .drawing_sheet_title_values
                 .get(&DrawingSheetTitleFieldId::Format)
                 .map(String::as_str),
-            Some(catalog.sheets()[index].page_format().authored_size.label())
+            Some(effective_format.authored_size.label())
         );
         assert_eq!(
             sheet
