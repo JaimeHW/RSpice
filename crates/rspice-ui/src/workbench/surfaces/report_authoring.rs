@@ -4328,6 +4328,11 @@ mod tests {
             crate::workbench::commands::vocabulary::command_catalog()
                 .any(|command| command == Command::ReportAuthoring)
         );
+        assert_eq!(Command::ReportAuthoring.stable_id(), "report-page-editor");
+        assert_eq!(
+            Command::ReportAuthoring.spec().label,
+            "Report page and datasheet editor…"
+        );
         for contextual_command in [
             Command::SaveReportDocument,
             Command::AddReportPage,

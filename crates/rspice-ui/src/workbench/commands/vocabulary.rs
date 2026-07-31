@@ -723,7 +723,11 @@ impl Command {
                 "Open Visualization Studio",
                 "Navigate",
             ),
-            Self::ReportAuthoring => spec("report-authoring", "Open report authoring", "Navigate"),
+            Self::ReportAuthoring => spec(
+                "report-page-editor",
+                "Report page and datasheet editor\u{2026}",
+                "Results",
+            ),
             Self::SaveReportDocument => {
                 spec("report-save-document", "Save report document", "Results")
             }
