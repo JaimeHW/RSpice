@@ -7,7 +7,8 @@
 use super::*;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind, AnalysisLifecycleState};
 use crate::state::model_library::{
-    CorrelationDatasetClass, CorrelationDatasetRevision, CorrelationSuite,
+    CornerSectionBinding, CornerSectionDomain, CorrelationDatasetClass, CorrelationDatasetRevision,
+    CorrelationSuite, ModelBinAuditDraft,
 };
 
 fn project_id() -> ProjectId {
@@ -83,6 +84,264 @@ fn transient_runtime_state_is_not_serialized() {
         );
     }
     assert!(plan.get("analysis_plan").is_some());
+}
+
+#[test]
+fn explicit_model_provider_resolution_round_trips_and_rejects_tampering() {
+    let mut manager = ModelLibraryManager::new();
+    manager
+        .load_library_bytes(
+            "provider-a.lib",
+            b".model shared NMOS (LEVEL=1 KP=1e-3)\n".to_vec(),
+            None,
+        )
+        .expect("first provider imports");
+    manager
+        .load_library_bytes(
+            "provider-b.lib",
+            b".model SHARED NMOS (LEVEL=1 KP=2e-3)\n".to_vec(),
+            None,
+        )
+        .expect("second provider imports");
+    manager
+        .resolve_definition_conflict("shared", "provider-b", "SHARED")
+        .expect("exact provider selected");
+
+    let context =
+        context_from_state(&SimSetupState::new(), &manager).expect("resolved context saves");
+    let value = serde_json::to_value(&context).expect("context serializes");
+    assert_eq!(
+        value["model_definition_resolutions"][0]["provider_library"],
+        "provider-b"
+    );
+
+    let restored: ProjectExecutionContext =
+        serde_json::from_value(value.clone()).expect("context deserializes");
+    let (_, restored_manager, _) = restored
+        .into_state(project_id())
+        .expect("exact provider resolution restores");
+    assert_eq!(
+        restored_manager
+            .definition_resolution("SHARED")
+            .map(|resolution| resolution.provider_library.as_str()),
+        Some("provider-b")
+    );
+    restored_manager
+        .seal_execution_sources()
+        .expect("restored explicit precedence seals");
+
+    let mut tampered = value.clone();
+    tampered["model_definition_resolutions"][0]["provider_library"] =
+        serde_json::json!("invented-provider");
+    let tampered: ProjectExecutionContext =
+        serde_json::from_value(tampered).expect("tampered shape deserializes");
+    let error = tampered
+        .validate()
+        .expect_err("stale provider identity must fail");
+    assert!(error.contains("selects stale provider"));
+}
+
+#[test]
+fn retained_subcircuit_interfaces_round_trip_migrate_and_reject_tampering() {
+    let mut manager = ModelLibraryManager::new();
+    manager
+        .load_library_bytes(
+            "browser-subcircuits.lib",
+            b".subckt AMP inp inn out params: GAIN=100 MODE=\"low noise\"\n\
+              e1 out 0 inp inn {GAIN}\n\
+              .ends AMP\n"
+                .to_vec(),
+            None,
+        )
+        .expect("subcircuit source imports");
+    let context =
+        context_from_state(&SimSetupState::new(), &manager).expect("interface context saves");
+    let value = serde_json::to_value(&context).expect("context serializes");
+    assert_eq!(
+        value["model_libraries"][0]["subcircuits"]["AMP"]["ports"],
+        serde_json::json!(["inp", "inn", "out"])
+    );
+    assert_eq!(
+        value["model_libraries"][0]["subcircuits"]["AMP"]["parameter_defaults"]["MODE"],
+        "\"low noise\""
+    );
+
+    let restored: ProjectExecutionContext =
+        serde_json::from_value(value.clone()).expect("context deserializes");
+    let (_, restored_manager, _) = restored
+        .into_state(project_id())
+        .expect("exact interface restores");
+    assert_eq!(
+        restored_manager
+            .get_library("browser-subcircuits")
+            .and_then(|library| library.subcircuits.get("AMP"))
+            .map(|interface| interface.ports.clone()),
+        Some(vec!["inp".to_owned(), "inn".to_owned(), "out".to_owned()])
+    );
+
+    let mut tampered = value.clone();
+    tampered["model_libraries"][0]["subcircuits"]["AMP"]["ports"][0] =
+        serde_json::json!("forged_terminal");
+    let tampered: ProjectExecutionContext =
+        serde_json::from_value(tampered).expect("tampered shape deserializes");
+    let error = tampered
+        .validate()
+        .expect_err("interface metadata cannot diverge from authenticated source");
+    assert!(
+        error.contains("not the exact interface projection"),
+        "{error}"
+    );
+
+    let mut legacy = value;
+    legacy["schema_version"] =
+        serde_json::json!(EXPLICIT_MODEL_DEFINITION_RESOLUTION_SCHEMA_VERSION);
+    legacy["model_libraries"][0]
+        .as_object_mut()
+        .expect("library is an object")
+        .remove("subcircuits");
+    let mut migrated: ProjectExecutionContext =
+        serde_json::from_value(legacy).expect("schema-13 context deserializes");
+    migrated
+        .migrate_to_current(project_id())
+        .expect("schema-13 interfaces rebuild from retained bytes");
+    assert_eq!(
+        migrated.schema_version,
+        PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION
+    );
+    assert_eq!(
+        migrated.model_libraries[0].subcircuits["AMP"].ports,
+        ["inp", "inn", "out"]
+    );
+    migrated.validate().expect("migrated context validates");
+}
+
+#[test]
+fn active_model_section_provenance_round_trips_migrates_and_rejects_tampering() {
+    let mut manager = ModelLibraryManager::new();
+    manager
+        .load_library_bytes(
+            "sectioned-cards.lib",
+            b".model helper NMOS (LEVEL=1 KP=5e-4)\n\
+              .lib TT\n\
+              .model nch NMOS (LEVEL=1 KP=1e-3)\n\
+              .endl TT\n\
+              .lib FF\n\
+              .model nch NMOS (LEVEL=1 KP=2e-3)\n\
+              .endl FF\n"
+                .to_vec(),
+            Some("TT"),
+        )
+        .expect("sectioned cards import");
+    let context =
+        context_from_state(&SimSetupState::new(), &manager).expect("sectioned context saves");
+    let value = serde_json::to_value(&context).expect("context serializes");
+    assert_eq!(
+        value["model_libraries"][0]["models"]["nch"]["section"],
+        "TT"
+    );
+    assert!(
+        value["model_libraries"][0]["models"]["helper"]
+            .get("section")
+            .is_none(),
+        "top-level cards omit section provenance"
+    );
+
+    let restored: ProjectExecutionContext =
+        serde_json::from_value(value.clone()).expect("current context deserializes");
+    restored.validate().expect("exact section validates");
+
+    let mut legacy = value.clone();
+    legacy["schema_version"] = serde_json::json!(RETAINED_SUBCIRCUIT_INTERFACE_SCHEMA_VERSION);
+    legacy["model_libraries"][0]["models"]["nch"]
+        .as_object_mut()
+        .expect("model is an object")
+        .remove("section");
+    let mut migrated: ProjectExecutionContext =
+        serde_json::from_value(legacy).expect("schema-14 context deserializes");
+    migrated
+        .migrate_to_current(project_id())
+        .expect("schema-14 section is recovered from authenticated bytes");
+    assert_eq!(
+        migrated.model_libraries[0].models["nch"].section.as_deref(),
+        Some("TT")
+    );
+    assert_eq!(migrated.model_libraries[0].models["helper"].section, None);
+    migrated.validate().expect("migrated context validates");
+
+    let mut tampered = value.clone();
+    tampered["model_libraries"][0]["models"]["nch"]
+        .as_object_mut()
+        .expect("model is an object")
+        .remove("section");
+    let tampered: ProjectExecutionContext =
+        serde_json::from_value(tampered).expect("tampered shape deserializes");
+    let error = tampered
+        .validate()
+        .expect_err("current schema cannot discard active-card section provenance");
+    assert!(error.contains("not an exact projection"), "{error}");
+
+    let mut duplicate = value;
+    let mut alias = duplicate["model_libraries"][0]["models"]["nch"].clone();
+    alias["name"] = serde_json::json!("NCH");
+    duplicate["model_libraries"][0]["models"]
+        .as_object_mut()
+        .expect("models is an object")
+        .insert("NCH".to_owned(), alias);
+    let duplicate: ProjectExecutionContext =
+        serde_json::from_value(duplicate).expect("duplicate model shape deserializes");
+    let error = duplicate
+        .validate()
+        .expect_err("SPICE model identifiers are case-insensitive");
+    assert!(
+        error.contains("case-insensitive duplicate names"),
+        "{error}"
+    );
+}
+
+#[test]
+fn model_bin_audit_ledger_round_trips_and_rejects_tampering() {
+    let mut manager = ModelLibraryManager::new();
+    let receipt = manager
+        .record_model_bin_audit(ModelBinAuditDraft::blocked(
+            ContentDigest::from_bytes([0x31; 32]),
+            project_id(),
+            1,
+            crate::state::CellViewRef::default_top(),
+            crate::simulation::dialog::corner::ProcessCorner::TT,
+            27.0,
+            "authoritative inspection blocked for test",
+        ))
+        .expect("audit receipt records");
+    let context =
+        context_from_state(&SimSetupState::new(), &manager).expect("valid execution context");
+    let value = serde_json::to_value(&context).expect("context serializes");
+    assert_eq!(
+        value["model_bin_audit_receipts"].as_array().map(Vec::len),
+        Some(1)
+    );
+
+    let restored: ProjectExecutionContext =
+        serde_json::from_value(value.clone()).expect("context deserializes");
+    let (_, restored_manager, _) = restored
+        .into_state(project_id())
+        .expect("valid audit ledger restores");
+    assert_eq!(
+        restored_manager
+            .latest_model_bin_audit_receipt()
+            .expect("receipt retained")
+            .semantic_digest(),
+        receipt.semantic_digest()
+    );
+
+    let mut tampered = value;
+    tampered["model_bin_audit_receipts"][0]["findings"][0]["detail"] =
+        serde_json::json!("tampered after publication");
+    let tampered: ProjectExecutionContext =
+        serde_json::from_value(tampered).expect("receipt shape still deserializes");
+    let error = tampered
+        .into_state(project_id())
+        .expect_err("tampered receipt must fail context restore");
+    assert!(error.contains("digest mismatch"), "{error}");
 }
 
 #[test]
@@ -428,6 +687,49 @@ fn project_owned_model_round_trip_preserves_authority_bytes_and_revision() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn retained_import_round_trip_executes_from_authenticated_bytes_after_source_disappears() {
+    let (directory, path) = model_fixture();
+    let mut manager = ModelLibraryManager::new();
+    let library_name = manager
+        .load_library_file(&path, Some("TT"))
+        .expect("load imported source");
+    let library = manager
+        .get_library_mut(&library_name)
+        .expect("loaded library");
+    let root = library.root_path.clone().expect("root identity");
+    let digest = library
+        .source_closure
+        .iter()
+        .find(|source| source.path == root)
+        .expect("root pin")
+        .digest;
+    library.source_authority = ModelSourceAuthority::RetainedImport {
+        source_id: crate::product::ModelSourceId::new(),
+        digest,
+    };
+
+    let context = context_from_state(&SimSetupState::new(), &manager).expect("context validates");
+    std::fs::remove_dir_all(directory).expect("remove live imported source");
+    let (_, restored, warnings) = context
+        .into_state(project_id())
+        .expect("retained import restores");
+    assert!(warnings.is_empty());
+    let restored_library = restored
+        .get_library(&library_name)
+        .expect("library restores");
+    assert!(matches!(
+        restored_library.source_authority,
+        ModelSourceAuthority::RetainedImport { .. }
+    ));
+    assert!(!restored_library.source_contents.is_empty());
+    let cards = restored
+        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .expect("retained bytes execute without live file");
+    assert!(cards.join("\n").to_ascii_lowercase().contains(".model nch"));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn project_owned_multifile_closure_restores_distinct_member_identities() {
     let (directory, path) = model_fixture();
     let mut manager = ModelLibraryManager::new();
@@ -573,6 +875,13 @@ fn project_model_identity_is_bound_to_its_member_digest_and_independent_revision
     for corner in library.corners.values_mut() {
         corner.file_path = Some(member.clone());
     }
+    let _ = library;
+    manager
+        .rebuild_active_model_projection("sectioned-model")
+        .expect("synthetic member rewrite rebuilds its exact active-card projection");
+    let library = manager
+        .get_library_mut("sectioned-model")
+        .expect("sectioned library still exists");
     let model_revision = crate::product::ObjectRevision::new(7).expect("fixture revision");
     let metadata = library
         .model_definition_metadata
@@ -884,6 +1193,8 @@ fn legacy_context_migrates_to_sorted_execution_order() {
         schema_version: LEGACY_EXECUTION_CONTEXT_SCHEMA_VERSION,
         simulation_plan: plan,
         model_libraries: Vec::new(),
+        model_bin_audit_receipts: Vec::new(),
+        model_definition_resolutions: Vec::new(),
     };
 
     context
@@ -931,6 +1242,18 @@ fn model_source_and_section_bindings_round_trip_without_substitution() {
     manager
         .load_library_file(&path, Some("FF"))
         .expect("load FF section");
+    {
+        let corner = manager
+            .get_library_mut("foundry")
+            .and_then(|library| library.corners.get_mut("FF"))
+            .expect("FF corner exists");
+        corner
+            .section_bindings
+            .push(CornerSectionBinding::new(CornerSectionDomain::Aging, "FF"));
+        corner.required_domains.push(CornerSectionDomain::Aging);
+        corner.minimum_temperature_c = Some(-40.0);
+        corner.maximum_temperature_c = Some(150.0);
+    }
     let expected = manager
         .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::FF)
         .expect("source FF binding");
@@ -962,6 +1285,25 @@ fn model_source_and_section_bindings_round_trip_without_substitution() {
             .as_deref(),
         Some("FF")
     );
+    let restored_corner = restored_manager
+        .get_library("foundry")
+        .and_then(|library| library.corners.get("FF"))
+        .expect("typed FF corner restores");
+    assert_eq!(
+        restored_corner
+            .section_bindings
+            .iter()
+            .find(|binding| binding.domain == CornerSectionDomain::Aging)
+            .map(|binding| binding.section.as_str()),
+        Some("FF")
+    );
+    assert!(
+        restored_corner
+            .required_domains
+            .contains(&CornerSectionDomain::Aging)
+    );
+    assert_eq!(restored_corner.minimum_temperature_c, Some(-40.0));
+    assert_eq!(restored_corner.maximum_temperature_c, Some(150.0));
     assert_eq!(
         restored_manager
             .get_library("foundry")
@@ -989,6 +1331,65 @@ fn model_source_and_section_bindings_round_trip_without_substitution() {
     assert_eq!(
         restored_library.source_edges[0].requested_path,
         "shared.inc"
+    );
+
+    std::fs::remove_dir_all(directory).expect("remove model fixture");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn schema_ten_corner_names_migrate_to_required_composite_contracts() {
+    let (directory, path) = model_fixture();
+    let mut manager = ModelLibraryManager::new();
+    manager
+        .load_library_file(&path, Some("TT"))
+        .expect("load legacy-shaped source");
+    let context = context_from_state(&SimSetupState::new(), &manager).expect("context validates");
+    let mut value = serde_json::to_value(context).expect("context serializes");
+    value["schema_version"] = serde_json::json!(MODEL_BIN_AUDIT_SCHEMA_VERSION);
+    for library in value["model_libraries"]
+        .as_array_mut()
+        .expect("libraries array")
+    {
+        for corner in library["corners"]
+            .as_object_mut()
+            .expect("corner map")
+            .values_mut()
+        {
+            let corner = corner.as_object_mut().expect("corner object");
+            corner.remove("section_bindings");
+            corner.remove("required_domains");
+            corner.remove("minimum_temperature_c");
+            corner.remove("maximum_temperature_c");
+        }
+    }
+
+    let mut restored: ProjectExecutionContext =
+        serde_json::from_value(value).expect("schema ten shape decodes");
+    restored
+        .migrate_to_current(project_id())
+        .expect("schema ten migrates");
+    assert_eq!(
+        restored.schema_version,
+        PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION
+    );
+    let (_, restored_manager, _) = restored
+        .into_state(project_id())
+        .expect("migrated state restores");
+    let corner = restored_manager
+        .get_library("foundry")
+        .and_then(|library| library.corners.get("TT"))
+        .expect("TT corner restores");
+    assert_eq!(
+        corner.effective_required_domains(),
+        vec![CornerSectionDomain::Composite]
+    );
+    assert_eq!(
+        corner.effective_section_bindings(),
+        vec![CornerSectionBinding::new(
+            CornerSectionDomain::Composite,
+            "TT"
+        )]
     );
 
     std::fs::remove_dir_all(directory).expect("remove model fixture");
@@ -1129,6 +1530,7 @@ fn foreign_platform_source_binding_is_retained_without_filesystem_probe() {
             source_contents: Vec::new(),
             source_edges: Vec::new(),
             models: HashMap::new(),
+            subcircuits: HashMap::new(),
             model_definition_metadata: HashMap::new(),
             model_qualification: HashMap::new(),
             model_correlation: HashMap::new(),
@@ -1136,6 +1538,8 @@ fn foreign_platform_source_binding_is_retained_without_filesystem_probe() {
             selected_corner: None,
             version: String::new(),
         }],
+        model_bin_audit_receipts: Vec::new(),
+        model_definition_resolutions: Vec::new(),
     };
 
     context
@@ -1204,6 +1608,7 @@ fn disconnected_source_subgraph_is_rejected_even_when_every_member_has_an_edge()
             source_contents: Vec::new(),
             source_edges,
             models: HashMap::new(),
+            subcircuits: HashMap::new(),
             model_definition_metadata: HashMap::new(),
             model_qualification: HashMap::new(),
             model_correlation: HashMap::new(),
@@ -1211,6 +1616,8 @@ fn disconnected_source_subgraph_is_rejected_even_when_every_member_has_an_edge()
             selected_corner: None,
             version: String::new(),
         }],
+        model_bin_audit_receipts: Vec::new(),
+        model_definition_resolutions: Vec::new(),
     };
 
     let error = context

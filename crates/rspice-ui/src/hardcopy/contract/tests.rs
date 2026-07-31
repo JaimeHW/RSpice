@@ -1042,7 +1042,7 @@ fn receipt_ledger_round_trips_and_rejects_tampered_entries() {
     let receipt = HardcopyReceipt::record(
         &plan,
         HardcopyOutcome::Cancelled {
-            phase: CancellationPhase::BeforeIrreversibleHandoff,
+            phase: CancellationPhase::Preparing,
             pages_completed: 0,
             reason: Some("operator cancelled preview".to_owned()),
         },

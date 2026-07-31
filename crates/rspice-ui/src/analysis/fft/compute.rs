@@ -67,5 +67,3 @@ pub fn compute_fft(time: &[f64], values: &[f64], window: WindowFunction) -> Opti
         window,
     })
 }
-
-

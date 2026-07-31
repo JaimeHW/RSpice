@@ -1,8 +1,6 @@
 //! Tree rows — the list/tree row used across hierarchy trees, cell lists,
 //! signal browsers and run history.
 
-
-
 use egui::{Rect, Response, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
 use crate::ui::theme::{self, FontWeight, mix};

@@ -73,7 +73,17 @@ pub struct NewPagePane {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DocumentEdit {
+    SetTracking(ResultDocumentTracking),
     AttachDataset(SourceDataset),
+    /// Attach a newer immutable source snapshot and move presentation
+    /// entities that currently consume `previous` to it. The prior snapshot
+    /// remains attached so comparison receipts and review evidence stay
+    /// reproducible.
+    RetargetTrackedDataset {
+        previous: DatasetBinding,
+        next: SourceDataset,
+        analysis_id: AnalysisInstanceId,
+    },
     AddPage {
         title: String,
     },
@@ -122,6 +132,15 @@ pub enum DocumentEdit {
         coordinate: TypedValue,
         label: String,
     },
+    AddTypedMarker {
+        pane_id: PaneId,
+        trace_id: TraceId,
+        coordinate: TypedValue,
+        label: String,
+        kind: PlotMarkerKind,
+        scope: PlotMarkerScope,
+        source_specification: Option<String>,
+    },
     AddMeasurement {
         pane_id: PaneId,
         trace_ids: Vec<TraceId>,
@@ -157,6 +176,14 @@ pub enum DocumentEdit {
     MoveMarker {
         marker_id: MarkerId,
         coordinate: TypedValue,
+    },
+    SetMarker {
+        marker_id: MarkerId,
+        coordinate: TypedValue,
+        label: String,
+        kind: PlotMarkerKind,
+        scope: PlotMarkerScope,
+        source_specification: Option<String>,
     },
     SetAnnotation {
         annotation_id: AnnotationId,

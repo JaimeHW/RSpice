@@ -141,6 +141,50 @@ impl ValidatedLibraryIndex {
     }
 }
 
+fn validate_physical_layout_hierarchy(
+    hierarchy: &HashMap<String, Vec<String>>,
+) -> Result<(), ProjectIoError> {
+    let mut colors = HashMap::<String, u8>::with_capacity(hierarchy.len());
+    for root in hierarchy.keys() {
+        if colors.get(root).copied().unwrap_or(0) != 0 {
+            continue;
+        }
+        colors.insert(root.clone(), 1);
+        let mut stack = vec![(root.clone(), 0_usize)];
+        while let Some((owner, next_index)) = stack.pop() {
+            let masters = hierarchy.get(&owner).ok_or_else(|| {
+                ProjectIoError::InvalidData(format!(
+                    "physical-layout hierarchy owner {owner} has no authoritative document"
+                ))
+            })?;
+            if next_index >= masters.len() {
+                colors.insert(owner.clone(), 2);
+                continue;
+            }
+            let master = masters[next_index].clone();
+            stack.push((owner, next_index + 1));
+            match colors.get(&master).copied().unwrap_or(0) {
+                0 => {
+                    if !hierarchy.contains_key(&master) {
+                        return Err(ProjectIoError::InvalidData(format!(
+                            "physical-layout hierarchy master {master} has no authoritative document"
+                        )));
+                    }
+                    colors.insert(master.clone(), 1);
+                    stack.push((master, 0));
+                }
+                1 => {
+                    return Err(ProjectIoError::InvalidData(format!(
+                        "physical-layout hierarchy contains a recursive cycle through {master}"
+                    )));
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectVersion {
     pub major: u32,
@@ -255,6 +299,7 @@ impl ProjectFile {
         let view_index = self.validate_library_tree()?;
         self.validate_project_source_owners(&view_index)?;
         self.validate_workspace_references(&view_index)?;
+        self.validate_physical_layout_references(&view_index)?;
         if let Some(context) = &self.execution_context {
             context.validate().map_err(|error| {
                 ProjectIoError::InvalidData(format!("execution context is invalid: {error}"))
@@ -275,6 +320,73 @@ impl ProjectFile {
                 })?;
         }
         self.validate_simulation_configuration_references()?;
+        Ok(())
+    }
+
+    fn validate_physical_layout_references(
+        &self,
+        view_index: &ValidatedLibraryIndex,
+    ) -> Result<(), ProjectIoError> {
+        let mut hierarchy = HashMap::<String, Vec<String>>::new();
+        let signed_pin = self
+            .workspace
+            .project
+            .technology_binding()
+            .and_then(crate::state::ProjectTechnologyBinding::signed_package);
+        for (key, document) in self.workspace.physical_layout_documents() {
+            let mut masters = Vec::with_capacity(document.instances().len());
+            let owner = view_index.get_exact(key).ok_or_else(|| {
+                ProjectIoError::InvalidData(format!(
+                    "workspace.physical_layout_documents[{key}] has no exact owning library view"
+                ))
+            })?;
+            if &owner.reference != document.owner() || owner.view_type != ViewType::Layout {
+                return Err(ProjectIoError::InvalidData(format!(
+                    "workspace.physical_layout_documents[{key}] must be owned by that exact Layout view"
+                )));
+            }
+            let signed_pin = signed_pin.ok_or_else(|| {
+                ProjectIoError::InvalidData(format!(
+                    "workspace.physical_layout_documents[{key}] requires an exact signed project PDK pin"
+                ))
+            })?;
+            let technology = document.technology();
+            if technology.package_id() != signed_pin.package_id()
+                || technology.revision() != signed_pin.revision()
+                || technology.manifest_digest() != signed_pin.manifest_digest()
+                || technology.archive_digest() != signed_pin.archive_digest()
+                || technology.stack_id() != signed_pin.stack_name()
+            {
+                return Err(ProjectIoError::InvalidData(format!(
+                    "workspace.physical_layout_documents[{key}] technology binding does not match the project's exact signed PDK pin"
+                )));
+            }
+            for (instance_id, instance) in document.instances() {
+                let master_key = instance.master.key();
+                let master = view_index.get_exact(&master_key).ok_or_else(|| {
+                    ProjectIoError::InvalidData(format!(
+                        "workspace.physical_layout_documents[{key}].instances[{instance_id}] references missing exact master {master_key}"
+                    ))
+                })?;
+                if master.reference != instance.master || master.view_type != ViewType::Layout {
+                    return Err(ProjectIoError::InvalidData(format!(
+                        "workspace.physical_layout_documents[{key}].instances[{instance_id}] master {master_key} is not that exact Layout view"
+                    )));
+                }
+                if self
+                    .workspace
+                    .physical_layout_document(&instance.master)
+                    .is_none()
+                {
+                    return Err(ProjectIoError::InvalidData(format!(
+                        "workspace.physical_layout_documents[{key}].instances[{instance_id}] master {master_key} has no authoritative physical-layout document"
+                    )));
+                }
+                masters.push(master_key);
+            }
+            hierarchy.insert(key.clone(), masters);
+        }
+        validate_physical_layout_hierarchy(&hierarchy)?;
         Ok(())
     }
 
@@ -1621,7 +1733,6 @@ fn read_project_bytes_and_digest(path: &Path) -> Result<(Vec<u8>, ContentDigest)
     }
     Ok((bytes, ContentDigest::from_bytes(hasher.finalize().into())))
 }
-
 
 #[cfg(test)]
 mod tests;

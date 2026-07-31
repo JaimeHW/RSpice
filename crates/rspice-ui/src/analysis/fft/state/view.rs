@@ -63,4 +63,3 @@ impl FftState {
         self.spectrum_revision = self.spectrum_revision.wrapping_add(1);
     }
 }
-

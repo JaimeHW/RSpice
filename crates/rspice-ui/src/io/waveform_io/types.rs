@@ -200,4 +200,3 @@ impl WaveformDataset {
         self.signals.iter().map(|s| s.name.as_str()).collect()
     }
 }
-

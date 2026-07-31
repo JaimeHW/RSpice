@@ -109,7 +109,6 @@ pub fn run_parametric_analysis_with_source_path_and_abort(
     })
 }
 
-
 /// Run an explicitly configured temperature sweep with source-path resolution
 /// and cooperative cancellation.
 pub fn run_parametric_analysis_with_config_and_source_path_and_abort(

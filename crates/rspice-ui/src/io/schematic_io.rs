@@ -70,7 +70,6 @@ impl SchematicVersion {
     pub fn is_compatible(&self) -> bool {
         self.major == Self::current().major
     }
-
 }
 
 impl std::fmt::Display for SchematicVersion {

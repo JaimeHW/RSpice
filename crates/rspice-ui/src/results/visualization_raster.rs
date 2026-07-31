@@ -99,7 +99,6 @@ impl VisualizationRasterPalette {
         Ok(palette)
     }
 
-
     fn validate(&self) -> Result<(), VisualizationRasterError> {
         if self.traces.is_empty() || self.traces.len() > MAX_RASTER_TRACES {
             return Err(VisualizationRasterError::InvalidProfile {
@@ -158,7 +157,6 @@ impl VisualizationRasterProfile {
         profile.validate()?;
         Ok(profile)
     }
-
 
     pub fn validate(&self) -> Result<(), VisualizationRasterError> {
         for (field, value) in [
@@ -340,7 +338,6 @@ impl VisualizationRasterArtifact {
     pub const fn artifact(&self) -> &FrozenReportArtifact {
         &self.artifact
     }
-
 }
 
 #[derive(Debug, thiserror::Error)]

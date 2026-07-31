@@ -70,6 +70,8 @@ pub struct PlotResponse {
     pub hover_x: Option<f64>,
     /// Data-space X of a primary click inside the plot area, this frame.
     pub clicked_x: Option<f64>,
+    /// Updated left-axis horizontal cursor value from a click or drag.
+    pub horizontal_cursor_y: Option<f64>,
     /// The inner plot rectangle (inside margins), for overlays.
     pub plot_rect: Rect,
     /// Zoom/pan/fit gesture result: wheel zooms X about the cursor
@@ -315,15 +317,20 @@ fn plot_accessibility_label(spec: &PlotSpec<'_>, cursors: Option<&CursorPair>) -
         (Some(a), None) => format!(" Cursor A {}.", spec.x.format_display_value(a)),
         _ => String::new(),
     });
+    let horizontal_cursor = spec.horizontal_cursor.map_or_else(String::new, |value| {
+        format!(" Horizontal cursor {}.", spec.y.format_display_value(value))
+    });
     format!(
-        "{}. {}. X axis {}. Left Y axis {}.{} {}.{} Drag to pan, use the mouse wheel to zoom, Shift-drag or right-drag to zoom a region, and double-click to fit the data.",
+        "{}. {}. X axis {}. Left Y axis {}.{} {}. {}.{}{} Drag to pan, use the mouse wheel to zoom, Shift-drag or right-drag to zoom a region, and double-click to fit the data.",
         spec.accessible_name,
         counted(trace_count, "visible trace", "visible traces"),
         axis_accessibility_range(&spec.x),
         axis_accessibility_range(&spec.y),
         right_axis,
         counted(spec.markers.len(), "marker", "markers"),
+        counted(spec.limit_lines.len(), "project limit", "project limits"),
         cursor_summary,
+        horizontal_cursor,
     )
 }
 
@@ -374,6 +381,7 @@ pub fn show(
         response,
         hover_x: None,
         clicked_x: None,
+        horizontal_cursor_y: None,
         plot_rect,
         view: ViewChange::default(),
     };
@@ -444,6 +452,27 @@ pub fn show(
     };
     // Labels skip when they would collide with the previous label (dense
     // log decades at deep zoom) — every gridline still draws.
+    if spec.minor_grid {
+        let minor = Stroke::new(1.0, c.canvas_grid.gamma_multiply(0.45));
+        for pair in spec.x.ticks.windows(2) {
+            let a = spec.x_scale.normalize(pair[0].0, spec.x.min, spec.x.max);
+            let b = spec.x_scale.normalize(pair[1].0, spec.x.min, spec.x.max);
+            for step in 1..4 {
+                let value = spec.x_scale.denormalize(
+                    a + (b - a) * f64::from(step) / 4.0,
+                    spec.x.min,
+                    spec.x.max,
+                );
+                painter.vline(mx(value), plot_rect.y_range(), minor);
+            }
+        }
+        for pair in spec.y.ticks.windows(2) {
+            for step in 1..4 {
+                let value = pair[0].0 + (pair[1].0 - pair[0].0) * f64::from(step) / 4.0;
+                painter.hline(plot_rect.x_range(), my(value), minor);
+            }
+        }
+    }
     let mut last_label_right = f32::NEG_INFINITY;
     for (xv, label) in &spec.x.ticks {
         let px = mx(*xv);
@@ -492,6 +521,22 @@ pub fn show(
             4.0,
             3.0,
         ));
+    }
+    for line in &spec.limit_lines {
+        let py = my(line.y);
+        painter.extend(Shape::dashed_line(
+            &[pos2(plot_rect.left(), py), pos2(plot_rect.right(), py)],
+            Stroke::new(1.0, line.color),
+            6.0,
+            4.0,
+        ));
+        painter.text(
+            pos2(plot_rect.right() - 4.0, py - 3.0),
+            Align2::RIGHT_BOTTOM,
+            &line.label,
+            theme::mono(9.0, FontWeight::Medium),
+            line.color,
+        );
     }
 
     // ---- custom underlay (histogram bars, eye acquisitions)
@@ -730,6 +775,21 @@ pub fn show(
         }
     }
 
+    if let Some(y) = spec
+        .horizontal_cursor
+        .filter(|y| y.is_finite() && *y >= spec.y.min && *y <= spec.y.max)
+    {
+        let py = my(y);
+        painter.hline(plot_rect.x_range(), py, Stroke::new(1.0, c.accent));
+        painter.text(
+            pos2(plot_rect.left() + 4.0, py - 3.0),
+            Align2::LEFT_BOTTOM,
+            format!("H {}", spec.y.format_display_value(y)),
+            theme::mono(9.0, FontWeight::Medium),
+            c.accent,
+        );
+    }
+
     // ---- pointer: crosshair, readout, clicks
     if let Some(pointer) = out.response.hover_pos()
         && plot_rect.contains(pointer)
@@ -752,6 +812,13 @@ pub fn show(
         }
         if out.response.clicked() {
             out.clicked_x = Some(data_x);
+        }
+        if spec.horizontal_cursor_interactive
+            && (out.response.clicked() || out.response.dragged_by(egui::PointerButton::Primary))
+        {
+            let fraction = ((plot_rect.bottom() - pointer.y) / plot_rect.height()).clamp(0.0, 1.0);
+            out.horizontal_cursor_y =
+                Some(spec.y.min + f64::from(fraction) * (spec.y.max - spec.y.min));
         }
     }
 

@@ -28,7 +28,7 @@ use sha2::{Digest as _, Sha256};
 
 use crate::product::{
     AnalysisInstanceId, ContentDigest, DatasetBinding, DatasetId, ObjectRevision, ResultDocumentId,
-    RevisionError,
+    RevisionError, SimulationPlanId,
 };
 use crate::results::viewer_catalog::{ViewerArt, viewer_document};
 
@@ -299,6 +299,14 @@ where
     D: Deserializer<'de>,
 {
     BoundedString::<MAX_VISUALIZATION_LABEL_BYTES>::deserialize(deserializer).map(|value| value.0)
+}
+
+fn deserialize_optional_label_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<BoundedString<MAX_VISUALIZATION_LABEL_BYTES>>::deserialize(deserializer)
+        .map(|value| value.map(|value| value.0))
 }
 
 fn deserialize_unit_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
@@ -642,7 +650,6 @@ impl SourceColumn {
     pub const fn role(&self) -> ColumnRole {
         self.role
     }
-
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -1353,6 +1360,63 @@ pub struct Cursor {
     pub label: String,
 }
 
+/// Semantic role of a retained plot marker.
+///
+/// The role is independent from its coordinate so a specification boundary,
+/// peak flag, and freeform point note never become indistinguishable after a
+/// project round trip or hardcopy export.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PlotMarkerKind {
+    #[default]
+    PointNote,
+    Peak,
+    SpecificationLine,
+    MeasurementAnchor,
+}
+
+impl PlotMarkerKind {
+    pub const ALL: [Self; 4] = [
+        Self::PointNote,
+        Self::Peak,
+        Self::SpecificationLine,
+        Self::MeasurementAnchor,
+    ];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::PointNote => "Point note",
+            Self::Peak => "Peak flag",
+            Self::SpecificationLine => "Specification line",
+            Self::MeasurementAnchor => "Measurement anchor",
+        }
+    }
+}
+
+/// Visibility and publication scope of a retained plot marker.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PlotMarkerScope {
+    #[default]
+    Document,
+    Pane,
+    DatasetFamily,
+}
+
+impl PlotMarkerScope {
+    pub const ALL: [Self; 3] = [Self::Document, Self::Pane, Self::DatasetFamily];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Document => "Document",
+            Self::Pane => "Pane",
+            Self::DatasetFamily => "Dataset family",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Marker {
     pub id: MarkerId,
@@ -1361,6 +1425,14 @@ pub struct Marker {
     pub coordinate: TypedValue,
     #[serde(deserialize_with = "deserialize_label_string")]
     pub label: String,
+    #[serde(default)]
+    pub kind: PlotMarkerKind,
+    #[serde(default)]
+    pub scope: PlotMarkerScope,
+    /// Stable source specification name when this marker was imported from a
+    /// project requirement. `None` denotes an authored plot annotation.
+    #[serde(default, deserialize_with = "deserialize_optional_label_string")]
+    pub source_specification: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1420,6 +1492,73 @@ pub enum LinkKind {
     HorizontalViewport,
     VerticalViewport,
     CursorPosition,
+}
+
+/// How a project-owned result document resolves future executions.
+///
+/// A pinned document is an immutable review artifact. A latest-bound
+/// document may advance only to a newer retained run from the same simulation
+/// plan and authored analysis instance; it never follows analysis kind, label,
+/// display order, or whichever run happens to be selected.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ResultDocumentTrackingMode {
+    Latest,
+    #[default]
+    Pinned,
+}
+
+/// Exact authority required to implement the Results toolbar's Latest/Pinned
+/// contract without ambiguous rebinding.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResultDocumentTracking {
+    pub mode: ResultDocumentTrackingMode,
+    pub simulation_plan_id: Option<SimulationPlanId>,
+    pub authored_analysis_id: Option<AnalysisInstanceId>,
+}
+
+impl ResultDocumentTracking {
+    #[must_use]
+    pub const fn pinned() -> Self {
+        Self {
+            mode: ResultDocumentTrackingMode::Pinned,
+            simulation_plan_id: None,
+            authored_analysis_id: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn for_plan(
+        mode: ResultDocumentTrackingMode,
+        simulation_plan_id: SimulationPlanId,
+        authored_analysis_id: AnalysisInstanceId,
+    ) -> Self {
+        Self {
+            mode,
+            simulation_plan_id: Some(simulation_plan_id),
+            authored_analysis_id: Some(authored_analysis_id),
+        }
+    }
+
+    fn validate(self) -> Result<(), VisualizationError> {
+        if self.simulation_plan_id.is_some() != self.authored_analysis_id.is_some() {
+            return Err(VisualizationError::InvalidValue {
+                field: "visualization-document.tracking",
+                message:
+                    "simulation plan and authored analysis identities must be present together"
+                        .to_owned(),
+            });
+        }
+        if self.mode == ResultDocumentTrackingMode::Latest && self.simulation_plan_id.is_none() {
+            return Err(VisualizationError::InvalidValue {
+                field: "visualization-document.tracking",
+                message: "latest tracking requires exact simulation-plan and analysis identities"
+                    .to_owned(),
+            });
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1549,6 +1688,7 @@ pub struct VisualizationDocument {
     id: ResultDocumentId,
     revision: ObjectRevision,
     title: String,
+    tracking: ResultDocumentTracking,
     next_serial: u64,
     datasets: Vec<SourceDataset>,
     pages: Vec<Page>,
@@ -1572,6 +1712,8 @@ struct VisualizationDocumentWire {
     revision: ObjectRevision,
     #[serde(deserialize_with = "deserialize_label_string")]
     title: String,
+    #[serde(default)]
+    tracking: ResultDocumentTracking,
     next_serial: u64,
     datasets: BoundedSourceDatasets,
     pages: BoundedVec<Page, MAX_VISUALIZATION_PAGES>,
@@ -1614,6 +1756,7 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
             id: wire.id,
             revision: wire.revision,
             title: wire.title,
+            tracking: wire.tracking,
             next_serial: wire.next_serial,
             datasets: wire.datasets.0,
             pages: wire.pages.into_inner(),
@@ -1632,8 +1775,13 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
             1 => {
                 document.migrate_v1_to_v2();
                 document.migrate_v2_to_v3();
+                document.migrate_v3_to_v4();
             }
-            2 => document.migrate_v2_to_v3(),
+            2 => {
+                document.migrate_v2_to_v3();
+                document.migrate_v3_to_v4();
+            }
+            3 => document.migrate_v3_to_v4(),
             Self::SCHEMA_VERSION => {}
             version => {
                 return Err(serde::de::Error::custom(format!(
@@ -1647,16 +1795,16 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
 }
 
 impl VisualizationDocument {
-    /// Resource hardening does not change the schema-v3 wire vocabulary.
+    /// Resource hardening does not change the schema-v4 wire vocabulary.
     ///
-    /// V1, V2, and V3 documents within the published resource limits retain
+    /// V1 through V4 documents within the published resource limits retain
     /// their prior deterministic interpretation. Inputs above those limits
     /// are rejected as unsafe containers; the limits do not reinterpret or
     /// migrate any accepted source value, identity, or presentation entity.
-    /// Unknown extension fields remain ignored for schema-v3 forward
+    /// Unknown extension fields remain ignored for schema-v4 forward
     /// compatibility; introducing required semantics still requires a schema
     /// revision.
-    pub const SCHEMA_VERSION: u16 = 3;
+    pub const SCHEMA_VERSION: u16 = 4;
 
     pub fn new(
         title: impl Into<String>,
@@ -1678,6 +1826,7 @@ impl VisualizationDocument {
             id: ResultDocumentId::new(),
             revision: ObjectRevision::INITIAL,
             title,
+            tracking: ResultDocumentTracking::pinned(),
             next_serial: 3,
             datasets,
             pages: vec![Page {
@@ -1720,6 +1869,21 @@ impl VisualizationDocument {
     #[must_use]
     pub const fn revision(&self) -> ObjectRevision {
         self.revision
+    }
+
+    /// Human-facing document title retained by the project document registry.
+    ///
+    /// The title is authoritative project content rather than presentation
+    /// state: document tabs, reports, and duplicate-name validation all read
+    /// this exact value.
+    #[must_use]
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    #[must_use]
+    pub const fn tracking(&self) -> ResultDocumentTracking {
+        self.tracking
     }
 
     #[must_use]
@@ -1946,10 +2110,17 @@ impl VisualizationDocument {
         for pane in &mut self.panes {
             pane.family_policy = None;
         }
+        self.schema_version = 3;
+    }
+
+    fn migrate_v3_to_v4(&mut self) {
+        // Earlier documents were bound only by immutable DatasetBinding and
+        // therefore had pinned semantics. Migration must not invent plan
+        // ownership or silently follow a newer run.
+        self.tracking = ResultDocumentTracking::pinned();
         self.schema_version = Self::SCHEMA_VERSION;
     }
 }
-
 
 #[cfg(test)]
 mod tests;

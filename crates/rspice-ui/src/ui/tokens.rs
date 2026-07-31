@@ -49,6 +49,8 @@ pub const FS_2: f32 = 13.0;
 pub const FS_3: f32 = 14.0;
 /// 16 px — large headings (rare).
 pub const FS_4: f32 = 16.0;
+/// 18 px — workspace identity and display headings.
+pub const FS_5: f32 = 18.0;
 
 // ============================================================================
 // Direction / Mode / Density

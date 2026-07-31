@@ -282,7 +282,17 @@ impl VisualizationDocument {
         tombstoned: &mut Vec<EntityRef>,
     ) -> Result<(), VisualizationError> {
         match edit {
+            DocumentEdit::SetTracking(tracking) => {
+                tracking.validate()?;
+                self.tracking = tracking;
+                Ok(())
+            }
             DocumentEdit::AttachDataset(dataset) => self.attach_dataset(dataset),
+            DocumentEdit::RetargetTrackedDataset {
+                previous,
+                next,
+                analysis_id,
+            } => self.retarget_tracked_dataset(previous, next, analysis_id),
             DocumentEdit::AddPage { title } => {
                 let id = self.create_page(NewPage {
                     title,
@@ -437,6 +447,38 @@ impl VisualizationDocument {
                     trace_id,
                     coordinate,
                     label,
+                    kind: PlotMarkerKind::PointNote,
+                    scope: PlotMarkerScope::Document,
+                    source_specification: None,
+                });
+                created.push(EntityRef::Marker(id));
+                Ok(())
+            }
+            DocumentEdit::AddTypedMarker {
+                pane_id,
+                trace_id,
+                coordinate,
+                label,
+                kind,
+                scope,
+                source_specification,
+            } => {
+                validate_label("marker.label", &label)?;
+                if let Some(source) = source_specification.as_deref() {
+                    validate_label("marker.source-specification", source)?;
+                }
+                coordinate.validate("marker.coordinate")?;
+                self.require_trace_in_pane(trace_id, pane_id)?;
+                let id = MarkerId::allocate(self.allocate_serial()?)?;
+                self.markers.push(Marker {
+                    id,
+                    pane_id,
+                    trace_id,
+                    coordinate,
+                    label,
+                    kind,
+                    scope,
+                    source_specification,
                 });
                 created.push(EntityRef::Marker(id));
                 Ok(())
@@ -529,6 +571,27 @@ impl VisualizationDocument {
                 self.marker_mut(marker_id)?.coordinate = coordinate;
                 Ok(())
             }
+            DocumentEdit::SetMarker {
+                marker_id,
+                coordinate,
+                label,
+                kind,
+                scope,
+                source_specification,
+            } => {
+                validate_label("marker.label", &label)?;
+                if let Some(source) = source_specification.as_deref() {
+                    validate_label("marker.source-specification", source)?;
+                }
+                coordinate.validate("marker.coordinate")?;
+                let marker = self.marker_mut(marker_id)?;
+                marker.coordinate = coordinate;
+                marker.label = label;
+                marker.kind = kind;
+                marker.scope = scope;
+                marker.source_specification = source_specification;
+                Ok(())
+            }
             DocumentEdit::SetAnnotation {
                 annotation_id,
                 anchor,
@@ -593,6 +656,56 @@ impl VisualizationDocument {
             });
         }
         self.datasets.push(dataset);
+        Ok(())
+    }
+
+    fn retarget_tracked_dataset(
+        &mut self,
+        previous: DatasetBinding,
+        next: SourceDataset,
+        analysis_id: AnalysisInstanceId,
+    ) -> Result<(), VisualizationError> {
+        if self.tracking.mode != ResultDocumentTrackingMode::Latest {
+            return Err(VisualizationError::InvalidValue {
+                field: "visualization-document.tracking",
+                message: "only a latest-bound document may advance to a newer dataset".to_owned(),
+            });
+        }
+        self.dataset_for_binding(previous)?;
+        let next_binding = next.binding();
+        if next_binding == previous {
+            return Err(VisualizationError::InvalidValue {
+                field: "visualization-document.datasets",
+                message: "the replacement dataset is identical to the current binding".to_owned(),
+            });
+        }
+        self.attach_dataset(next)?;
+
+        let mut rebound = 0usize;
+        for pane in &mut self.panes {
+            if let Some(binding) = pane.binding.as_mut()
+                && binding.dataset == previous
+            {
+                binding.dataset = next_binding;
+                binding.analysis_id = analysis_id;
+                rebound = rebound.saturating_add(1);
+            }
+        }
+        for trace in &mut self.traces {
+            if trace.binding == previous {
+                trace.binding = next_binding;
+                rebound = rebound.saturating_add(1);
+            }
+        }
+        if rebound == 0 {
+            return Err(VisualizationError::InvalidValue {
+                field: "visualization-document.datasets",
+                message: format!(
+                    "dataset {} is attached but no pane or trace is bound to it",
+                    previous.dataset_id
+                ),
+            });
+        }
         Ok(())
     }
 
@@ -842,6 +955,7 @@ impl VisualizationDocument {
             });
         }
         validate_label("visualization-document.title", &self.title)?;
+        self.tracking.validate()?;
         validate_dataset_set(&self.datasets)?;
         ensure_maximum_len(
             "visualization-document.pages",
@@ -1021,6 +1135,9 @@ impl VisualizationDocument {
         }
         for marker in &self.markers {
             validate_label("marker.label", &marker.label)?;
+            if let Some(source) = marker.source_specification.as_deref() {
+                validate_label("marker.source-specification", source)?;
+            }
             marker.coordinate.validate("marker.coordinate")?;
             self.require_trace_in_pane(marker.trace_id, marker.pane_id)?;
             ensure_identity(&mut identities, EntityRef::Marker(marker.id))?;

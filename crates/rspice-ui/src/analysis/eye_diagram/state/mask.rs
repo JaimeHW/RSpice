@@ -117,7 +117,6 @@ impl EyeMask {
         }
         1.0 - (self.violation_count as f64 / self.total_samples as f64)
     }
-
 }
 
 /// Migration shim: legacy masks stored polygons normalized to the eye

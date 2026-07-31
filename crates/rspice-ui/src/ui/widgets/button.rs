@@ -111,7 +111,7 @@ impl<'a> Button<'a> {
 
         let text = self.label.to_owned();
         let font_id = theme::sans(
-            tokens::FS_0,
+            tokens::FS_1,
             if self.accent {
                 FontWeight::SemiBold
             } else {

@@ -716,6 +716,13 @@ pub const VIEWER_QUICK_MODES: &[ViewerQuickModeDefinition] = &[
         analysis_ids: &[],
     },
     ViewerQuickModeDefinition {
+        id: "table",
+        document_id: "viewer-table",
+        icon: QuickModeIcon::Cells,
+        label: "Table",
+        analysis_ids: &[],
+    },
+    ViewerQuickModeDefinition {
         id: "hist",
         document_id: "viewer-histogram",
         icon: QuickModeIcon::Chart,
@@ -874,6 +881,7 @@ mod tests {
         ("sens", "viewer-table"),
         ("op", "viewer-table"),
         ("specs", "viewer-table"),
+        ("table", "viewer-table"),
         ("hist", "viewer-histogram"),
         ("eye", "eye-viewer"),
         ("pz", "viewer-pz"),
@@ -893,7 +901,7 @@ mod tests {
 
     #[test]
     fn catalog_has_exact_manifest_quick_mode_ids_and_owners() {
-        assert_eq!(VIEWER_QUICK_MODES.len(), 16);
+        assert_eq!(VIEWER_QUICK_MODES.len(), 17);
         assert_eq!(
             VIEWER_QUICK_MODES
                 .iter()

@@ -177,9 +177,7 @@ pub struct PstbData {
     pub stability_margin_db: Vec<Value>,
 }
 
-fn stability_type_label(
-    stability: rspice_core::analysis::pstb::StabilityType,
-) -> &'static str {
+fn stability_type_label(stability: rspice_core::analysis::pstb::StabilityType) -> &'static str {
     use rspice_core::analysis::pstb::StabilityType;
     match stability {
         StabilityType::Stable => "Stable",

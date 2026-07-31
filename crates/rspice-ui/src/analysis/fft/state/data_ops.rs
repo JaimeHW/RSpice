@@ -149,7 +149,6 @@ impl FftState {
     pub fn has_data(&self) -> bool {
         self.data.is_some()
     }
-
 }
 
 fn finite_time_bounds(time: &[f64]) -> Option<(f64, f64)> {
