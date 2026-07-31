@@ -1,7 +1,9 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
-use super::state::Instance;
+use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
 use crate::device::veriloga_generated::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 #[inline(always)]
 fn rspice_limexp(x: f64) -> f64 {
@@ -140,12 +142,112 @@ fn rspice_eval_ddt<const STATE_COUNT: usize>(
     }
 }
 
+
+static CANONICAL_MODEL_CACHE: OnceLock<Mutex<HashMap<Box<[u64]>, Weak<CanonicalModelValues>>>> = OnceLock::new();
+
+fn canonical_model_cache() -> &'static Mutex<HashMap<Box<[u64]>, Weak<CanonicalModelValues>>> {
+    CANONICAL_MODEL_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn canonical_model_cache_lookup(key: &[u64]) -> Option<Arc<CanonicalModelValues>> {
+    let mut cache = canonical_model_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let found = cache.get(key).and_then(Weak::upgrade);
+    if found.is_none() {
+        cache.remove(key);
+    }
+    found
+}
+
+fn canonical_model_cache_intern(
+    key: Box<[u64]>,
+    candidate: Arc<CanonicalModelValues>,
+) -> Arc<CanonicalModelValues> {
+    let mut cache = canonical_model_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(existing) = cache.get(key.as_ref()).and_then(Weak::upgrade) {
+        return existing;
+    }
+    cache.retain(|_, values| values.strong_count() > 0);
+    cache.insert(key, Arc::downgrade(&candidate));
+    candidate
+}
+
 impl Instance {
-    fn canonical_instance_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
-        if self.canonical_instance_valid {
+    fn canonical_model_key(&self) -> Box<[u64]> {
+        let mut key = Vec::with_capacity(126);
+        for index in 0..Self::PARAMETER_COUNT {
+            if PARAMETER_MODEL_FLAGS[index] {
+                key.push(self.params.values[index].to_bits());
+                key.push(u64::from(self.param_given[index]));
+            }
+        }
+        key.into_boxed_slice()
+    }
+
+    fn canonical_install_model_values(&mut self, values: Arc<CanonicalModelValues>) {
+        self.canonical_staged[74] = values[0];
+        self.canonical_staged[16] = values[1];
+        self.canonical_staged[1] = values[2];
+        self.canonical_staged[2] = values[3];
+        self.canonical_staged[75] = values[4];
+        self.canonical_staged[76] = values[5];
+        self.canonical_staged[77] = values[6];
+        self.canonical_staged[78] = values[7];
+        self.canonical_staged[79] = values[8];
+        self.canonical_staged[80] = values[9];
+        self.canonical_staged[0] = values[10];
+        self.canonical_staged[91] = values[11];
+        self.canonical_staged[7] = values[12];
+        self.canonical_staged[8] = values[13];
+        self.canonical_staged[101] = values[14];
+        self.canonical_staged[102] = values[15];
+        self.canonical_staged[38] = values[16];
+        self.canonical_staged[17] = values[17];
+        self.canonical_staged[103] = values[18];
+        self.canonical_staged[22] = values[19];
+        self.canonical_staged[31] = values[20];
+        self.canonical_staged[32] = values[21];
+        self.canonical_staged[33] = values[22];
+        self.canonical_staged[36] = values[23];
+        self.canonical_staged[104] = values[24];
+        self.canonical_staged[105] = values[25];
+        self.canonical_staged[106] = values[26];
+        self.canonical_staged[41] = values[27];
+        self.canonical_staged[48] = values[28];
+        self.canonical_staged[49] = values[29];
+        self.canonical_staged[52] = values[30];
+        self.canonical_staged[55] = values[31];
+        self.canonical_staged[56] = values[32];
+        self.canonical_staged[59] = values[33];
+        self.canonical_staged[63] = values[34];
+        self.canonical_staged[65] = values[35];
+        self.canonical_staged[118] = values[36];
+        self.canonical_staged[119] = values[37];
+        self.canonical_staged[120] = values[38];
+        self.canonical_staged[121] = values[39];
+        self.canonical_staged[122] = values[40];
+        self.canonical_staged[123] = values[41];
+        self.canonical_staged[124] = values[42];
+        self.canonical_staged[125] = values[43];
+        self.canonical_staged[126] = values[44];
+        self.canonical_staged[127] = values[45];
+        self.canonical_staged[128] = values[46];
+        self.canonical_model_values = Some(values);
+    }
+
+    fn canonical_model_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
+        if self.canonical_model_values.is_some() {
             return;
         }
-        let produced: [f64; 62] = {
+        let key = self.canonical_model_key();
+        if let Some(values) = canonical_model_cache_lookup(key.as_ref()) {
+            self.canonical_install_model_values(values);
+            return;
+        }
+        let produced: CanonicalModelValues = {
             let parameters = &self.params.values;
             let multiplicity = self.multiplicity;
             let staged = &*self.canonical_staged;
@@ -175,77 +277,53 @@ impl Instance {
                 let v48 = parameters[8];
                 let v50 = parameters[9];
                 let v52 = 2.7315e2f64;
-                let v54 = parameters[1];
-                let v55 = parameters[12];
-                let v57 = parameters[13];
-                let v59 = parameters[0];
-                let v60 = parameters[14];
-                let v62 = parameters[15];
-                let v64 = parameters[31];
-                let v66 = parameters[32];
-                let v70 = parameters[35];
-                let v72 = parameters[34];
-                let v75 = 2e0f64;
-                let v77 = parameters[16];
-                let v78 = parameters[2];
-                let v79 = 1e0f64;
-                let v81 = 9e0f64;
-                let v83 = 3e0f64;
-                let v87 = parameters[33];
-                let v90 = 1.2e1f64;
-                let v92 = parameters[66];
-                let v94 = parameters[49];
-                let v95 = parameters[55];
-                let v98 = 1e12f64;
-                let v100 = parameters[56];
-                let v102 = parameters[53];
-                let v106 = parameters[60];
-                let v110 = parameters[61];
-                let v115 = parameters[50];
-                let v117 = parameters[51];
-                let v119 = 2.918995620956536e-49f64;
-                let v122 = 1.3333333333333333e0f64;
-                let v124 = 1.05457168e-34f64;
-                let v127 = 2.918995620956536e-49f64;
-                let v130 = 1.3333333333333333e0f64;
-                let v134 = parameters[59];
-                let v136 = 1e-1f64;
-                let v145 = -4.95e-1f64;
-                let v146 = parameters[58];
-                let v150 = parameters[64];
-                let v152 = -4.95e-1f64;
-                let v153 = parameters[63];
-                let v157 = 7.5e-1f64;
-                let v159 = 1e27f64;
-                let v162 = parameters[18];
-                let v164 = parameters[21];
-                let v168 = 3.7e-1f64;
-                let v174 = -1e0f64;
-                let v177 = 0e0f64;
-                let v178 = 0e0f64;
-                let v179 = 0e0f64;
-                let v180 = 0e0f64;
-                let v185 = 0e0f64;
-                let v186 = 0e0f64;
-                let v189 = 0e0f64;
-                let v190 = 0e0f64;
-                let v191 = 0e0f64;
-                let v192 = 0e0f64;
-                let v193 = 0e0f64;
+                let v54 = parameters[16];
+                let v55 = parameters[66];
+                let v57 = parameters[49];
+                let v58 = 2e0f64;
+                let v59 = parameters[56];
+                let v61 = parameters[53];
+                let v63 = parameters[61];
+                let v66 = 1e0f64;
+                let v67 = parameters[50];
+                let v69 = parameters[51];
+                let v71 = 2.918995620956536e-49f64;
+                let v74 = 1.3333333333333333e0f64;
+                let v76 = 1.05457168e-34f64;
+                let v79 = 2.918995620956536e-49f64;
+                let v82 = 1.3333333333333333e0f64;
+                let v86 = parameters[59];
+                let v88 = 1e-1f64;
+                let v97 = -4.95e-1f64;
+                let v98 = parameters[58];
+                let v102 = parameters[64];
+                let v104 = -4.95e-1f64;
+                let v105 = parameters[63];
+                let v109 = 7.5e-1f64;
+                let v111 = 1e27f64;
+                let v114 = parameters[18];
+                let v116 = parameters[21];
+                let v120 = 3.7e-1f64;
+                let v126 = -1e0f64;
+                let v129 = 0e0f64;
+                let v130 = 0e0f64;
+                let v131 = 0e0f64;
+                let v132 = 0e0f64;
+                let v137 = 0e0f64;
+                let v138 = 0e0f64;
+                let v141 = 0e0f64;
+                let v142 = 0e0f64;
+                let v143 = 0e0f64;
+                let v144 = 0e0f64;
+                let v145 = 0e0f64;
                 let mut out29: f64 = 0.0;
-                let mut out85: f64 = 0.0;
-                let mut out86: f64 = 0.0;
-                let mut out89: f64 = 0.0;
-                let mut out91: f64 = 0.0;
-                let mut out99: f64 = 0.0;
-                let mut out105: f64 = 0.0;
-                let mut out109: f64 = 0.0;
-                let mut out114: f64 = 0.0;
-                let mut out135: f64 = 0.0;
-                let mut out151: f64 = 0.0;
-                let mut out158: f64 = 0.0;
-                let mut out163: f64 = 0.0;
-                let mut out167: f64 = 0.0;
+                let mut out62: f64 = 0.0;
+                let mut out65: f64 = 0.0;
+                let mut out87: f64 = 0.0;
+                let mut out103: f64 = 0.0;
+                let mut out110: f64 = 0.0;
+                let mut out115: f64 = 0.0;
+                let mut out119: f64 = 0.0;
                 let v2 = if v0 != v1 { 1.0 } else { 0.0 };
                 let v9 = (v6 * (v3 / v4)) / v8;
                 let v14 = ((v10 * v11).sqrt()) / v9;
@@ -287,213 +365,222 @@ impl Instance {
                 let v49 = if v47 < v48 { 1.0 } else { 0.0 };
                 let v51 = if v47 > v50 { 1.0 } else { 0.0 };
                 let v53 = v52 + v47;
-                let v56 = if v54 < v55 { 1.0 } else { 0.0 };
-                let v58 = if v54 > v57 { 1.0 } else { 0.0 };
-                let v61 = if v59 < v60 { 1.0 } else { 0.0 };
-                let v63 = if v59 > v62 { 1.0 } else { 0.0 };
-                let v65 = v54 + v64;
-                let v67 = v59 + v66;
-                let v68 = if v65 <= v21 { 1.0 } else { 0.0 };
-                let v69 = if v67 <= v21 { 1.0 } else { 0.0 };
-                let v76 = v75 * ((v70 * v59) + (v72 * v54));
-                if v77 != 0.0 {
-                    let v85 = (v83 + ((v78 - v79) * v81)) * v54;
-                    out85 = v85;
-                    let v86 = v59 * v54;
-                    out86 = v86;
-                    let v88 = v59 + v87;
-                    let v89 = v75 * v88;
-                    out89 = v89;
-                    let v91 = v90 * v88;
-                    out91 = v91;
-                } else {
-                }
-                let v93 = if v92 == v21 { 1.0 } else { 0.0 };
-                let v137: f64;
-                let v138: f64;
-                let v139: f64;
-                let v140: f64;
-                let v141: f64;
-                let v142: f64;
-                let v143: f64;
-                let v144: f64;
-                if v94 != 0.0 {
-                    let v99 = ((v95 * v67) * v65) * v98;
-                    out99 = v99;
-                    let v105 = (((v75 * v100) * v102) * v67) * v98;
-                    out105 = v105;
-                    let v109 = ((v106 * v67) * v65) * v98;
-                    out109 = v109;
-                    let v114 = (((v75 * v110) * v102) * v67) * v98;
-                    out114 = v114;
-                    let v116 = v79 / v115;
-                    let v118 = v79 / v117;
-                    let v126 = ((v122 * ((v119 * v115).sqrt())) / v124) * v8;
-                    let v133 = ((v130 * ((v127 * v117).sqrt())) / v124) * v8;
-                    let v135 = if v134 < v21 { 1.0 } else { 0.0 };
-                    out135 = v135;
-                    let v149: f64;
-                    if v135 != 0.0 {
-                        let v148 = (v145 * v146) / v134;
-                        v149 = v148;
+                let v56 = if v55 == v21 { 1.0 } else { 0.0 };
+                let v89: f64;
+                let v90: f64;
+                let v91: f64;
+                let v92: f64;
+                let v93: f64;
+                let v94: f64;
+                let v95: f64;
+                let v96: f64;
+                if v57 != 0.0 {
+                    let v62 = (v58 * v59) * v61;
+                    out62 = v62;
+                    let v65 = (v58 * v63) * v61;
+                    out65 = v65;
+                    let v68 = v66 / v67;
+                    let v70 = v66 / v69;
+                    let v78 = ((v74 * ((v71 * v67).sqrt())) / v76) * v8;
+                    let v85 = ((v82 * ((v79 * v69).sqrt())) / v76) * v8;
+                    let v87 = if v86 < v21 { 1.0 } else { 0.0 };
+                    out87 = v87;
+                    let v101: f64;
+                    if v87 != 0.0 {
+                        let v100 = (v97 * v98) / v86;
+                        v101 = v100;
                     } else {
-                        v149 = v21;
+                        v101 = v21;
                     }
-                    let v151 = if v150 < v21 { 1.0 } else { 0.0 };
-                    out151 = v151;
-                    let v156: f64;
-                    if v151 != 0.0 {
-                        let v155 = (v152 * v153) / v150;
-                        v156 = v155;
+                    let v103 = if v102 < v21 { 1.0 } else { 0.0 };
+                    out103 = v103;
+                    let v108: f64;
+                    if v103 != 0.0 {
+                        let v107 = (v104 * v105) / v102;
+                        v108 = v107;
                     } else {
-                        v156 = v21;
+                        v108 = v21;
                     }
-                    v137 = v118;
-                    v138 = v156;
-                    v139 = v133;
-                    v140 = v116;
-                    v141 = v149;
-                    v142 = v126;
-                    v143 = v133;
-                    v144 = v126;
+                    v89 = v70;
+                    v90 = v108;
+                    v91 = v85;
+                    v92 = v68;
+                    v93 = v101;
+                    v94 = v78;
+                    v95 = v85;
+                    v96 = v78;
                 } else {
-                    v137 = v136;
-                    v138 = v21;
-                    v139 = v21;
-                    v140 = v136;
-                    v141 = v21;
-                    v142 = v21;
-                    v143 = v21;
-                    v144 = v21;
+                    v89 = v88;
+                    v90 = v21;
+                    v91 = v21;
+                    v92 = v88;
+                    v93 = v21;
+                    v94 = v21;
+                    v95 = v21;
+                    v96 = v21;
                 }
                 if v22 != 0.0 {
-                    let v158 = v157 * v30;
-                    out158 = v158;
+                    let v110 = v109 * v30;
+                    out110 = v110;
                 } else {
                 }
-                let v160 = if v11 < v159 { 1.0 } else { 0.0 };
-                if v160 != 0.0 {
-                    let v163 = (-v28) * v162;
-                    out163 = v163;
+                let v112 = if v11 < v111 { 1.0 } else { 0.0 };
+                if v112 != 0.0 {
+                    let v115 = (-v28) * v114;
+                    out115 = v115;
                 } else {
                 }
-                let v165 = if v164 < v79 { 1.0 } else { 0.0 };
-                if v160 != 0.0 {
-                    let v167 = (-v28) * v162;
-                    out167 = v167;
+                let v117 = if v116 < v66 { 1.0 } else { 0.0 };
+                if v112 != 0.0 {
+                    let v119 = (-v28) * v114;
+                    out119 = v119;
                 } else {
                 }
-                let v170 = v79 + (v168 * v42);
-                let v171 = if v30 > v21 { 1.0 } else { 0.0 };
-                let v172 = if v92 == v75 { 1.0 } else { 0.0 };
-                let v175 = if (v162 * v28) == v174 { 1.0 } else { 0.0 };
-                let v176 = if v94 != v21 { 1.0 } else { 0.0 };
-                let v181: f64;
-                let v182: f64;
-                let v183: f64;
-                let v184: f64;
-                if v77 != 0.0 {
-                    v181 = v21;
-                    v182 = v21;
-                    v183 = v21;
-                    v184 = v21;
+                let v122 = v66 + (v120 * v42);
+                let v123 = if v30 > v21 { 1.0 } else { 0.0 };
+                let v124 = if v55 == v58 { 1.0 } else { 0.0 };
+                let v127 = if (v114 * v28) == v126 { 1.0 } else { 0.0 };
+                let v128 = if v57 != v21 { 1.0 } else { 0.0 };
+                let v133: f64;
+                let v134: f64;
+                let v135: f64;
+                let v136: f64;
+                if v54 != 0.0 {
+                    v133 = v21;
+                    v134 = v21;
+                    v135 = v21;
+                    v136 = v21;
                 } else {
-                    v181 = v177;
-                    v182 = v178;
-                    v183 = v179;
-                    v184 = v180;
+                    v133 = v129;
+                    v134 = v130;
+                    v135 = v131;
+                    v136 = v132;
                 }
-                let v187: f64;
-                let v188: f64;
-                if v94 != 0.0 {
-                    v187 = v185;
-                    v188 = v186;
+                let v139: f64;
+                let v140: f64;
+                if v57 != 0.0 {
+                    v139 = v137;
+                    v140 = v138;
                 } else {
-                    v187 = v21;
-                    v188 = v21;
+                    v139 = v21;
+                    v140 = v21;
                 }
-                let v194: f64;
-                let v195: f64;
-                let v196: f64;
-                let v197: f64;
-                let v198: f64;
-                if v77 != 0.0 {
-                    v194 = v189;
-                    v195 = v190;
-                    v196 = v191;
-                    v197 = v192;
-                    v198 = v193;
+                let v146: f64;
+                let v147: f64;
+                let v148: f64;
+                let v149: f64;
+                let v150: f64;
+                if v54 != 0.0 {
+                    v146 = v141;
+                    v147 = v142;
+                    v148 = v143;
+                    v149 = v144;
+                    v150 = v145;
                 } else {
-                    v194 = v21;
-                    v195 = v21;
-                    v196 = v21;
-                    v197 = v21;
-                    v198 = v21;
+                    v146 = v21;
+                    v147 = v21;
+                    v148 = v21;
+                    v149 = v21;
+                    v150 = v21;
                 }
-            [v2, v9, v14, v19, v22, out29, v31, v45, v49, v51, v53, v56, v58, v61, v63, v65, v67, v68, v69, v76, out85, out86, out89, out91, v93, out99, out105, out109, out114, out135, out151, v30, out158, v160, out163, v165, out167, v170, v40, v171, v172, v175, v176, v137, v138, v139, v140, v141, v142, v143, v144, v181, v182, v183, v184, v187, v188, v194, v195, v196, v197, v198]
+            [v2, v9, v14, v19, v22, out29, v31, v45, v49, v51, v53, v56, out62, out65, out87, out103, v30, out110, v112, out115, v117, out119, v122, v40, v123, v124, v127, v128, v89, v90, v91, v92, v93, v94, v95, v96, v133, v134, v135, v136, v139, v140, v146, v147, v148, v149, v150]
         };
-        self.canonical_staged[72] = produced[0];
-        self.canonical_staged[14] = produced[1];
-        self.canonical_staged[1] = produced[2];
-        self.canonical_staged[2] = produced[3];
-        self.canonical_staged[73] = produced[4];
-        self.canonical_staged[74] = produced[5];
-        self.canonical_staged[75] = produced[6];
-        self.canonical_staged[76] = produced[7];
-        self.canonical_staged[77] = produced[8];
-        self.canonical_staged[78] = produced[9];
-        self.canonical_staged[0] = produced[10];
-        self.canonical_staged[81] = produced[11];
-        self.canonical_staged[82] = produced[12];
-        self.canonical_staged[83] = produced[13];
-        self.canonical_staged[84] = produced[14];
-        self.canonical_staged[65] = produced[15];
-        self.canonical_staged[66] = produced[16];
-        self.canonical_staged[85] = produced[17];
-        self.canonical_staged[86] = produced[18];
-        self.canonical_staged[67] = produced[19];
-        self.canonical_staged[3] = produced[20];
-        self.canonical_staged[4] = produced[21];
-        self.canonical_staged[5] = produced[22];
-        self.canonical_staged[6] = produced[23];
-        self.canonical_staged[89] = produced[24];
-        self.canonical_staged[7] = produced[25];
-        self.canonical_staged[8] = produced[26];
-        self.canonical_staged[9] = produced[27];
-        self.canonical_staged[10] = produced[28];
-        self.canonical_staged[99] = produced[29];
-        self.canonical_staged[100] = produced[30];
-        self.canonical_staged[36] = produced[31];
-        self.canonical_staged[15] = produced[32];
-        self.canonical_staged[101] = produced[33];
-        self.canonical_staged[20] = produced[34];
-        self.canonical_staged[29] = produced[35];
-        self.canonical_staged[30] = produced[36];
-        self.canonical_staged[31] = produced[37];
-        self.canonical_staged[34] = produced[38];
-        self.canonical_staged[102] = produced[39];
-        self.canonical_staged[103] = produced[40];
-        self.canonical_staged[104] = produced[41];
-        self.canonical_staged[39] = produced[42];
-        self.canonical_staged[46] = produced[43];
-        self.canonical_staged[47] = produced[44];
-        self.canonical_staged[50] = produced[45];
-        self.canonical_staged[53] = produced[46];
-        self.canonical_staged[54] = produced[47];
-        self.canonical_staged[57] = produced[48];
-        self.canonical_staged[61] = produced[49];
-        self.canonical_staged[63] = produced[50];
-        self.canonical_staged[116] = produced[51];
-        self.canonical_staged[117] = produced[52];
-        self.canonical_staged[118] = produced[53];
-        self.canonical_staged[119] = produced[54];
-        self.canonical_staged[120] = produced[55];
-        self.canonical_staged[121] = produced[56];
-        self.canonical_staged[122] = produced[57];
-        self.canonical_staged[123] = produced[58];
-        self.canonical_staged[124] = produced[59];
-        self.canonical_staged[125] = produced[60];
-        self.canonical_staged[126] = produced[61];
+        let values = canonical_model_cache_intern(key, Arc::new(produced));
+        self.canonical_install_model_values(values);
+    }
+
+    fn canonical_instance_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
+        if self.canonical_instance_valid {
+            return;
+        }
+        let produced: [f64; 17] = {
+            let parameters = &self.params.values;
+            let multiplicity = self.multiplicity;
+            let staged = &*self.canonical_staged;
+                let v0 = parameters[1];
+                let v1 = parameters[12];
+                let v3 = parameters[13];
+                let v5 = parameters[0];
+                let v6 = parameters[14];
+                let v8 = parameters[15];
+                let v10 = parameters[31];
+                let v12 = parameters[32];
+                let v14 = 0e0f64;
+                let v17 = parameters[35];
+                let v19 = parameters[34];
+                let v22 = 2e0f64;
+                let v24 = parameters[16];
+                let v25 = parameters[2];
+                let v26 = 1e0f64;
+                let v28 = 9e0f64;
+                let v30 = 3e0f64;
+                let v34 = parameters[33];
+                let v37 = 1.2e1f64;
+                let v39 = parameters[49];
+                let v40 = parameters[55];
+                let v43 = 1e12f64;
+                let v45 = staged[7];
+                let v48 = parameters[60];
+                let v52 = staged[8];
+                let mut out32: f64 = 0.0;
+                let mut out33: f64 = 0.0;
+                let mut out36: f64 = 0.0;
+                let mut out38: f64 = 0.0;
+                let mut out44: f64 = 0.0;
+                let mut out47: f64 = 0.0;
+                let mut out51: f64 = 0.0;
+                let mut out54: f64 = 0.0;
+                let v2 = if v0 < v1 { 1.0 } else { 0.0 };
+                let v4 = if v0 > v3 { 1.0 } else { 0.0 };
+                let v7 = if v5 < v6 { 1.0 } else { 0.0 };
+                let v9 = if v5 > v8 { 1.0 } else { 0.0 };
+                let v11 = v0 + v10;
+                let v13 = v5 + v12;
+                let v15 = if v11 <= v14 { 1.0 } else { 0.0 };
+                let v16 = if v13 <= v14 { 1.0 } else { 0.0 };
+                let v23 = v22 * ((v17 * v5) + (v19 * v0));
+                if v24 != 0.0 {
+                    let v32 = (v30 + ((v25 - v26) * v28)) * v0;
+                    out32 = v32;
+                    let v33 = v5 * v0;
+                    out33 = v33;
+                    let v35 = v5 + v34;
+                    let v36 = v22 * v35;
+                    out36 = v36;
+                    let v38 = v37 * v35;
+                    out38 = v38;
+                } else {
+                }
+                if v39 != 0.0 {
+                    let v44 = ((v40 * v13) * v11) * v43;
+                    out44 = v44;
+                    let v47 = (v45 * v13) * v43;
+                    out47 = v47;
+                    let v51 = ((v48 * v13) * v11) * v43;
+                    out51 = v51;
+                    let v54 = (v52 * v13) * v43;
+                    out54 = v54;
+                } else {
+                }
+            [v2, v4, v7, v9, v11, v13, v15, v16, v23, out32, out33, out36, out38, out44, out47, out51, out54]
+        };
+        self.canonical_staged[83] = produced[0];
+        self.canonical_staged[84] = produced[1];
+        self.canonical_staged[85] = produced[2];
+        self.canonical_staged[86] = produced[3];
+        self.canonical_staged[67] = produced[4];
+        self.canonical_staged[68] = produced[5];
+        self.canonical_staged[87] = produced[6];
+        self.canonical_staged[88] = produced[7];
+        self.canonical_staged[69] = produced[8];
+        self.canonical_staged[3] = produced[9];
+        self.canonical_staged[4] = produced[10];
+        self.canonical_staged[5] = produced[11];
+        self.canonical_staged[6] = produced[12];
+        self.canonical_staged[9] = produced[13];
+        self.canonical_staged[10] = produced[14];
+        self.canonical_staged[11] = produced[15];
+        self.canonical_staged[12] = produced[16];
         self.canonical_instance_valid = true;
     }
 
@@ -569,18 +656,18 @@ impl Instance {
                 let v172 = 1.2e1f64;
                 let v177 = parameters[49];
                 let v178 = parameters[52];
-                let v180 = staged[7];
-                let v182 = staged[8];
-                let v184 = staged[9];
-                let v186 = staged[10];
+                let v180 = staged[9];
+                let v182 = staged[10];
+                let v184 = staged[11];
+                let v186 = staged[12];
                 let v196 = parameters[17];
                 let v203 = parameters[57];
                 let v205 = parameters[62];
                 let v207 = 7.324648775608221e-1f64;
                 let v209 = 1.25e0f64;
-                let v212 = staged[104];
+                let v212 = staged[106];
                 let v213 = parameters[18];
-                let v219 = staged[39];
+                let v219 = staged[41];
                 let v226 = parameters[64];
                 let v228 = 1.0f64;
                 let v231 = parameters[59];
@@ -861,71 +948,71 @@ impl Instance {
                 }
             [v6, v8, v14, v18, v21, v23, v27, v54, v77, v79, v93, v95, v96, v97, v100, v101, v103, v104, v106, v107, v109, v110, v112, out141, out149, out151, out153, out155, out157, out159, out161, out163, out166, v143, v144, v145, v146, v147, v210, v127, v211, v215, v188, v216, v189, v218, v220, out222, v190, out227, v191, out229, v192, out230, v193, out232, v194, out223, v195, out225, out234, out235, out237, out238, out239]
         };
-        self.canonical_staged[79] = produced[0];
-        self.canonical_staged[80] = produced[1];
-        self.canonical_staged[32] = produced[2];
-        self.canonical_staged[19] = produced[3];
-        self.canonical_staged[35] = produced[4];
-        self.canonical_staged[17] = produced[5];
-        self.canonical_staged[18] = produced[6];
-        self.canonical_staged[13] = produced[7];
-        self.canonical_staged[11] = produced[8];
-        self.canonical_staged[12] = produced[9];
-        self.canonical_staged[16] = produced[10];
-        self.canonical_staged[24] = produced[11];
-        self.canonical_staged[25] = produced[12];
-        self.canonical_staged[26] = produced[13];
-        self.canonical_staged[27] = produced[14];
-        self.canonical_staged[22] = produced[15];
-        self.canonical_staged[21] = produced[16];
-        self.canonical_staged[28] = produced[17];
-        self.canonical_staged[44] = produced[18];
-        self.canonical_staged[43] = produced[19];
-        self.canonical_staged[41] = produced[20];
-        self.canonical_staged[40] = produced[21];
-        self.canonical_staged[87] = produced[22];
-        self.canonical_staged[88] = produced[23];
-        self.canonical_staged[90] = produced[24];
-        self.canonical_staged[91] = produced[25];
-        self.canonical_staged[92] = produced[26];
-        self.canonical_staged[93] = produced[27];
-        self.canonical_staged[94] = produced[28];
-        self.canonical_staged[95] = produced[29];
-        self.canonical_staged[96] = produced[30];
-        self.canonical_staged[97] = produced[31];
-        self.canonical_staged[98] = produced[32];
-        self.canonical_staged[68] = produced[33];
-        self.canonical_staged[69] = produced[34];
-        self.canonical_staged[71] = produced[35];
-        self.canonical_staged[70] = produced[36];
-        self.canonical_staged[37] = produced[37];
-        self.canonical_staged[42] = produced[38];
-        self.canonical_staged[23] = produced[39];
-        self.canonical_staged[33] = produced[40];
-        self.canonical_staged[38] = produced[41];
-        self.canonical_staged[58] = produced[42];
-        self.canonical_staged[109] = produced[43];
-        self.canonical_staged[51] = produced[44];
-        self.canonical_staged[106] = produced[45];
-        self.canonical_staged[105] = produced[46];
-        self.canonical_staged[107] = produced[47];
-        self.canonical_staged[45] = produced[48];
-        self.canonical_staged[110] = produced[49];
-        self.canonical_staged[55] = produced[50];
-        self.canonical_staged[48] = produced[51];
-        self.canonical_staged[56] = produced[52];
-        self.canonical_staged[49] = produced[53];
-        self.canonical_staged[52] = produced[54];
-        self.canonical_staged[111] = produced[55];
-        self.canonical_staged[64] = produced[56];
-        self.canonical_staged[113] = produced[57];
-        self.canonical_staged[62] = produced[58];
-        self.canonical_staged[108] = produced[59];
-        self.canonical_staged[112] = produced[60];
-        self.canonical_staged[114] = produced[61];
-        self.canonical_staged[59] = produced[62];
-        self.canonical_staged[60] = produced[63];
-        self.canonical_staged[115] = produced[64];
+        self.canonical_staged[81] = produced[0];
+        self.canonical_staged[82] = produced[1];
+        self.canonical_staged[34] = produced[2];
+        self.canonical_staged[21] = produced[3];
+        self.canonical_staged[37] = produced[4];
+        self.canonical_staged[19] = produced[5];
+        self.canonical_staged[20] = produced[6];
+        self.canonical_staged[15] = produced[7];
+        self.canonical_staged[13] = produced[8];
+        self.canonical_staged[14] = produced[9];
+        self.canonical_staged[18] = produced[10];
+        self.canonical_staged[26] = produced[11];
+        self.canonical_staged[27] = produced[12];
+        self.canonical_staged[28] = produced[13];
+        self.canonical_staged[29] = produced[14];
+        self.canonical_staged[24] = produced[15];
+        self.canonical_staged[23] = produced[16];
+        self.canonical_staged[30] = produced[17];
+        self.canonical_staged[46] = produced[18];
+        self.canonical_staged[45] = produced[19];
+        self.canonical_staged[43] = produced[20];
+        self.canonical_staged[42] = produced[21];
+        self.canonical_staged[89] = produced[22];
+        self.canonical_staged[90] = produced[23];
+        self.canonical_staged[92] = produced[24];
+        self.canonical_staged[93] = produced[25];
+        self.canonical_staged[94] = produced[26];
+        self.canonical_staged[95] = produced[27];
+        self.canonical_staged[96] = produced[28];
+        self.canonical_staged[97] = produced[29];
+        self.canonical_staged[98] = produced[30];
+        self.canonical_staged[99] = produced[31];
+        self.canonical_staged[100] = produced[32];
+        self.canonical_staged[70] = produced[33];
+        self.canonical_staged[71] = produced[34];
+        self.canonical_staged[73] = produced[35];
+        self.canonical_staged[72] = produced[36];
+        self.canonical_staged[39] = produced[37];
+        self.canonical_staged[44] = produced[38];
+        self.canonical_staged[25] = produced[39];
+        self.canonical_staged[35] = produced[40];
+        self.canonical_staged[40] = produced[41];
+        self.canonical_staged[60] = produced[42];
+        self.canonical_staged[111] = produced[43];
+        self.canonical_staged[53] = produced[44];
+        self.canonical_staged[108] = produced[45];
+        self.canonical_staged[107] = produced[46];
+        self.canonical_staged[109] = produced[47];
+        self.canonical_staged[47] = produced[48];
+        self.canonical_staged[112] = produced[49];
+        self.canonical_staged[57] = produced[50];
+        self.canonical_staged[50] = produced[51];
+        self.canonical_staged[58] = produced[52];
+        self.canonical_staged[51] = produced[53];
+        self.canonical_staged[54] = produced[54];
+        self.canonical_staged[113] = produced[55];
+        self.canonical_staged[66] = produced[56];
+        self.canonical_staged[115] = produced[57];
+        self.canonical_staged[64] = produced[58];
+        self.canonical_staged[110] = produced[59];
+        self.canonical_staged[114] = produced[60];
+        self.canonical_staged[116] = produced[61];
+        self.canonical_staged[61] = produced[62];
+        self.canonical_staged[62] = produced[63];
+        self.canonical_staged[117] = produced[64];
         self.canonical_temperature = temperature;
         self.canonical_thermal_voltage = thermal_voltage;
         self.canonical_temperature_valid = true;
@@ -940,6 +1027,7 @@ impl Instance {
     }
 
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
+        self.canonical_model_stage(ctx);
         self.canonical_instance_stage(ctx);
         self.canonical_temperature_stage(ctx);
         self.canonical_timestep_stage(ctx);
@@ -971,13 +1059,13 @@ impl Instance {
                 value,
             )
         };
-            let v0 = staged[73];
+            let v0 = staged[75];
             let v1 = parameters[16];
             let v2 = parameters[49];
             let v3 = node_potentials[4];
             let v4 = node_potentials[5];
-            let v6 = Lanes([1e0f64; 1]);
-            let v8 = Lanes([1e0f64; 1]);
+            let v6 = 1e0f64;
+            let v8 = 1e0f64;
             let v11 = parameters[27];
             let v13 = parameters[17];
             let v16 = 1e-16f64;
@@ -994,29 +1082,29 @@ impl Instance {
             let v76 = 1e-6f64;
             let v92 = parameters[24];
             let v95 = 1e23f64;
-            let v98 = staged[11];
-            let v104 = staged[12];
-            let v107 = staged[13];
+            let v98 = staged[13];
+            let v104 = staged[14];
+            let v107 = staged[15];
             let v109 = 3.348580862e-29f64;
-            let v116 = staged[14];
+            let v116 = staged[16];
             let v129 = 5e-7f64;
             let v136 = 1e-3f64;
             let v155 = 6.666666666666666e-1f64;
             let v157 = -3.3333333333333337e-1f64;
-            let v161 = staged[15];
+            let v161 = staged[17];
             let v166 = 1.3333333333333333e0f64;
-            let v182 = staged[16];
+            let v182 = staged[18];
             let v192 = 7.071067811865475e-1f64;
             let v200 = 1e-5f64;
-            let v202 = staged[17];
+            let v202 = staged[19];
             let v205 = 4.6051701859880916e2f64;
             let v214 = 3.333333333333333e-1f64;
             let v228 = 1e-200f64;
             let v235 = 7.324648775608221e-1f64;
             let v238 = 1.25e0f64;
-            let v240 = staged[18];
+            let v240 = staged[20];
             let v250 = 1.666666666666667e-1f64;
-            let v282 = staged[101];
+            let v282 = staged[103];
             let v291 = 1e1f64;
             let v293 = 6e0f64;
             let v298 = 6.4e1f64;
@@ -1036,21 +1124,21 @@ impl Instance {
             let v693 = 1e-120f64;
             let v705 = 2.5e0f64;
             let v712 = 2.23606797749979e0f64;
-            let v925 = staged[19];
-            let v930 = staged[20];
-            let v936 = staged[21];
-            let v943 = staged[29];
-            let v945 = staged[22];
-            let v951 = staged[23];
-            let v955 = staged[24];
-            let v1005 = staged[25];
-            let v1015 = staged[26];
-            let v1089 = staged[27];
+            let v925 = staged[21];
+            let v930 = staged[22];
+            let v936 = staged[23];
+            let v943 = staged[31];
+            let v945 = staged[24];
+            let v951 = staged[25];
+            let v955 = staged[26];
+            let v1005 = staged[27];
+            let v1015 = staged[28];
+            let v1089 = staged[29];
             let v1105 = -2.3025850929940458e2f64;
             let v1199 = -2.3025850929940458e2f64;
             let v1202 = -2.3025850929940458e2f64;
             let v1206 = -2.3025850929940458e2f64;
-            let v1243 = staged[28];
+            let v1243 = staged[30];
             let v1332 = 2.5e0f64;
             let v1339 = 2.23606797749979e0f64;
             let v1719 = -2.3025850929940458e2f64;
@@ -1061,14 +1149,14 @@ impl Instance {
             let v1990 = 2.23606797749979e0f64;
             let v2203 = Lanes([0e0f64; 2]);
             let v2209 = node_potentials[6];
-            let v2212 = Lanes([1e0f64; 1]);
+            let v2212 = 1e0f64;
             let v2347 = 1.75e0f64;
             let v2672 = 4e0f64;
             let v2697 = -2.3025850929940458e2f64;
             let v2762 = -2.3025850929940458e2f64;
             let v2765 = -2.3025850929940458e2f64;
             let v2769 = -2.3025850929940458e2f64;
-            let v2810 = staged[30];
+            let v2810 = staged[32];
             let v2817 = Lanes([0e0f64; 3]);
             let v2979 = -2.3025850929940458e2f64;
             let v3073 = -2.3025850929940458e2f64;
@@ -1081,124 +1169,124 @@ impl Instance {
             let v3773 = -2.3025850929940458e2f64;
             let v3777 = -2.3025850929940458e2f64;
             let v3881 = 1.62e0f64;
-            let v3888 = staged[31];
-            let v3893 = staged[32];
-            let v3896 = staged[33];
-            let v4023 = staged[34];
-            let v4028 = staged[102];
-            let v4070 = staged[35];
+            let v3888 = staged[33];
+            let v3893 = staged[34];
+            let v3896 = staged[35];
+            let v4023 = staged[36];
+            let v4028 = staged[104];
+            let v4070 = staged[37];
             let v4072 = -1.666666666666667e-1f64;
             let v4074 = -1.1666666666666667e0f64;
-            let v4078 = staged[36];
+            let v4078 = staged[38];
             let v4094 = 1e-2f64;
             let v4110 = -1e0f64;
             let v4136 = 4e-2f64;
-            let v4146 = staged[37];
+            let v4146 = staged[39];
             let v4149 = parameters[41];
             let v4168 = 5e-3f64;
             let v4175 = 1e-1f64;
             let v4183 = node_potentials[1];
-            let v4186 = Lanes([1e0f64; 1]);
-            let v4189 = staged[38];
-            let v4195 = staged[105];
-            let v4197 = staged[40];
+            let v4186 = 1e0f64;
+            let v4189 = staged[40];
+            let v4195 = staged[107];
+            let v4197 = staged[42];
             let v4199 = Lanes([0e0f64; 2]);
-            let v4204 = staged[41];
-            let v4215 = staged[42];
-            let v4255 = staged[43];
-            let v4374 = staged[44];
+            let v4204 = staged[43];
+            let v4215 = staged[44];
+            let v4255 = staged[45];
+            let v4374 = staged[46];
             let v4457 = -2.3025850929940458e2f64;
             let v4512 = -2.3025850929940458e2f64;
             let v4515 = -2.3025850929940458e2f64;
             let v4519 = -2.3025850929940458e2f64;
-            let v4558 = staged[106];
-            let v4567 = staged[65];
-            let v4570 = staged[66];
+            let v4558 = staged[108];
+            let v4567 = staged[67];
+            let v4570 = staged[68];
             let v4579 = parameters[22];
             let v4582 = node_potentials[3];
-            let v4584 = Lanes([1e0f64; 1]);
-            let v4588 = staged[67];
-            let v4592 = staged[107];
-            let v4595 = staged[108];
-            let v4598 = staged[45];
-            let v4605 = staged[109];
-            let v4631 = staged[46];
-            let v4634 = staged[110];
+            let v4584 = 1e0f64;
+            let v4588 = staged[69];
+            let v4592 = staged[109];
+            let v4595 = staged[110];
+            let v4598 = staged[47];
+            let v4605 = staged[111];
+            let v4631 = staged[48];
+            let v4634 = staged[112];
             let v4645 = 5e-3f64;
             let v4652 = 1e-1f64;
-            let v4660 = staged[47];
+            let v4660 = staged[49];
             let v4666 = 1.0f64;
             let v4695 = 5e-7f64;
             let v4702 = 1e-3f64;
-            let v4712 = staged[48];
-            let v4722 = staged[49];
+            let v4712 = staged[50];
+            let v4722 = staged[51];
             let v4756 = parameters[64];
             let v4759 = parameters[63];
             let v4765 = -1.5e0f64;
-            let v4767 = staged[50];
+            let v4767 = staged[52];
             let v4786 = -2.3025850929940458e2f64;
-            let v4790 = staged[51];
+            let v4790 = staged[53];
             let v4803 = -2.3025850929940458e2f64;
             let v4806 = -2.3025850929940458e2f64;
             let v4810 = -2.3025850929940458e2f64;
-            let v4833 = staged[52];
-            let v4865 = staged[53];
-            let v4868 = staged[111];
+            let v4833 = staged[54];
+            let v4865 = staged[55];
+            let v4868 = staged[113];
             let v4879 = 5e-3f64;
             let v4886 = 1e-1f64;
-            let v4894 = staged[54];
+            let v4894 = staged[56];
             let v4900 = 1.0f64;
             let v4929 = 5e-7f64;
             let v4936 = 1e-3f64;
-            let v4946 = staged[55];
-            let v4954 = staged[56];
+            let v4946 = staged[57];
+            let v4954 = staged[58];
             let v4986 = parameters[59];
             let v4989 = parameters[58];
             let v4995 = -1.5e0f64;
-            let v4997 = staged[57];
+            let v4997 = staged[59];
             let v5004 = -2.3025850929940458e2f64;
-            let v5008 = staged[58];
+            let v5008 = staged[60];
             let v5021 = -2.3025850929940458e2f64;
             let v5024 = -2.3025850929940458e2f64;
             let v5028 = -2.3025850929940458e2f64;
-            let v5073 = staged[112];
-            let v5084 = staged[113];
-            let v5112 = staged[114];
+            let v5073 = staged[114];
+            let v5084 = staged[115];
+            let v5112 = staged[116];
             let v5123 = 5e-3f64;
             let v5130 = 1e-1f64;
             let v5143 = 0.0f64;
             let v5172 = 5e-7f64;
             let v5179 = 1e-3f64;
-            let v5189 = staged[59];
-            let v5199 = staged[60];
+            let v5189 = staged[61];
+            let v5199 = staged[62];
             let v5241 = -1.5e0f64;
-            let v5243 = staged[61];
+            let v5243 = staged[63];
             let v5262 = -2.3025850929940458e2f64;
-            let v5266 = staged[62];
+            let v5266 = staged[64];
             let v5279 = -2.3025850929940458e2f64;
             let v5282 = -2.3025850929940458e2f64;
             let v5286 = -2.3025850929940458e2f64;
-            let v5342 = staged[115];
+            let v5342 = staged[117];
             let v5353 = 5e-3f64;
             let v5360 = 1e-1f64;
             let v5373 = 0.0f64;
             let v5402 = 5e-7f64;
             let v5409 = 1e-3f64;
             let v5465 = -1.5e0f64;
-            let v5467 = staged[63];
+            let v5467 = staged[65];
             let v5474 = -2.3025850929940458e2f64;
-            let v5478 = staged[64];
+            let v5478 = staged[66];
             let v5491 = -2.3025850929940458e2f64;
             let v5494 = -2.3025850929940458e2f64;
             let v5498 = -2.3025850929940458e2f64;
             let v5537 = node_potentials[0];
-            let v5539 = Lanes([1e0f64; 1]);
-            let v5543 = staged[68];
-            let v5550 = staged[69];
-            let v5557 = staged[70];
+            let v5539 = 1e0f64;
+            let v5543 = staged[70];
+            let v5550 = staged[71];
+            let v5557 = staged[72];
             let v5565 = node_potentials[2];
-            let v5568 = Lanes([1e0f64; 1]);
-            let v5571 = staged[71];
+            let v5568 = 1e0f64;
+            let v5571 = staged[73];
             let v5574 = Lanes([0e0f64; 2]);
             let v5575 = Lanes([0e0f64; 2]);
             let v5576 = Lanes([0e0f64; 4]);
@@ -1208,7 +1296,7 @@ impl Instance {
             let v5605 = parameters[10];
             let v5 = v3 - v4;
             let v14 = v13 * (v5 - v11);
-            let v15 = ((Lanes([v6[0], 0.0])) - (Lanes([0.0, v8[0]]))) * v13;
+            let v15 = ((Lanes([v6, 0.0])) - (Lanes([0.0, v8]))) * v13;
             let v17 = if v14 > v16 { 1.0 } else { 0.0 };
             let v39: f64;
             let v40: Lanes<2>;
@@ -2388,7 +2476,7 @@ impl Instance {
             let v2208 = v2206 * v36;
             let v2210 = v242 + v2209;
             let v2211 = Lanes([v15[0], v15[1], 0.0]);
-            let v2213 = Lanes([0.0, 0.0, v2212[0]]);
+            let v2213 = Lanes([0.0, 0.0, v2212]);
             let v2214 = v2211 + v2213;
             let v2215 = v2210 * v202;
             let v2216 = v2214 * v202;
@@ -3208,10 +3296,9 @@ impl Instance {
             let v4022: Lanes<3>;
             if v3964 != 0.0 {
                 let v4001 = v3963 * v3962;
-                let v4002 = v4001 + v4001;
                 let v4007 = ((v3962 * v3962) + v3901).sqrt();
                 let v4016 = v2209 + (v31 * (v3962 + v4007));
-                let v4017 = v2213 + (((Lanes([0.0, 0.0, v3963[0]])) + (((Lanes([0.0, 0.0, v4002[0]])) + (Lanes([v3902[0], v3902[1], 0.0]))) * (v26 / (v24 * v4007)))) * v31);
+                let v4017 = v2213 + (((Lanes([0.0, 0.0, v3963])) + (((Lanes([0.0, 0.0, (v4001 + v4001)])) + (Lanes([v3902[0], v3902[1], 0.0]))) * (v26 / (v24 * v4007)))) * v31);
                 v4021 = v4016;
                 v4022 = v4017;
             } else {
@@ -3223,19 +3310,18 @@ impl Instance {
                 if v4020 != 0.0 {
                     let v4030 = v3902 * v31;
                     let v4032 = v4019 * v4018;
-                    let v4033 = v4032 + v4032;
                     let v4038 = ((v4018 * v4018) + v3901).sqrt();
                     let v4042 = v4018 + v4038;
                     let v4045 = (v31 * v3901) / v4042;
                     let v4050 = v2209 + v4045;
-                    let v4051 = v2213 + (((Lanes([v4030[0], v4030[1], 0.0])) - (((Lanes([0.0, 0.0, v4019[0]])) + (((Lanes([0.0, 0.0, v4033[0]])) + (Lanes([v3902[0], v3902[1], 0.0]))) * (v26 / (v24 * v4038)))) * v4045)) / v4042);
+                    let v4051 = v2213 + (((Lanes([v4030[0], v4030[1], 0.0])) - (((Lanes([0.0, 0.0, v4019])) + (((Lanes([0.0, 0.0, (v4032 + v4032)])) + (Lanes([v3902[0], v3902[1], 0.0]))) * (v26 / (v24 * v4038)))) * v4045)) / v4042);
                     v4065 = v4050;
                     v4066 = v4051;
                 } else {
                     let v4053 = (v65 + v3901).sqrt();
                     let v4056 = v3902 * (v26 / (v24 * v4053));
                     let v4063 = v2209 + (v31 * (v3962 + v4053));
-                    let v4064 = v2213 + (((Lanes([0.0, 0.0, v3963[0]])) + (Lanes([v4056[0], v4056[1], 0.0]))) * v31);
+                    let v4064 = v2213 + (((Lanes([0.0, 0.0, v3963])) + (Lanes([v4056[0], v4056[1], 0.0]))) * v31);
                     v4065 = v4063;
                     v4066 = v4064;
                 }
@@ -3305,7 +3391,7 @@ impl Instance {
             let v4154 = ((((v15 * v36) + ((v4134 + v4134) * (v26 / (v24 * v4138)))) * v31) * v4149) * v4153;
             let v4157 = ((((((Lanes([v4122[0], v4122[1], 0.0])) + (v4087 * v178)) * v4117) + (Lanes([v4128[0], v4128[1], 0.0]))) * v4146) - (Lanes([v4154[0], v4154[1], 0.0]))) / v4152;
             let v4184 = v3 - v4183;
-            let v4192 = ((Lanes([0.0, v6[0]])) - (Lanes([v4186[0], 0.0]))) * v13;
+            let v4192 = ((Lanes([0.0, v6])) - (Lanes([v4186, 0.0]))) * v13;
             let v4193 = (v13 * (v4184 - v4189)) * v202;
             let v4194 = v4192 * v202;
             let v4200: f64;
@@ -4254,7 +4340,7 @@ impl Instance {
             let v4580 = v4579 * v2209;
             let v4581 = v2212 * v4579;
             let v4589 = v4588 * (v4582 - v4183);
-            let v4590 = ((Lanes([0.0, v4584[0]])) - (Lanes([v4186[0], 0.0]))) * v4588;
+            let v4590 = ((Lanes([0.0, v4584])) - (Lanes([v4186, 0.0]))) * v4588;
             let v5578: f64;
             let v5579: f64;
             let v5580: f64;
@@ -4265,17 +4351,17 @@ impl Instance {
             let v5585: Lanes<2>;
             if v1 != 0.0 {
                 let v5544 = (v5537 - v4582) * v5543;
-                let v5545 = ((Lanes([v5539[0], 0.0])) - (Lanes([0.0, v4584[0]]))) * v5543;
+                let v5545 = ((Lanes([v5539, 0.0])) - (Lanes([0.0, v4584]))) * v5543;
                 let v5551 = (v4582 - v3) * v5550;
-                let v5552 = ((Lanes([v4584[0], 0.0])) - (Lanes([0.0, v6[0]]))) * v5550;
+                let v5552 = ((Lanes([v4584, 0.0])) - (Lanes([0.0, v6]))) * v5550;
                 let v5553 = v4 - v4183;
                 let v5558 = v5557 + v4153;
                 let v5559 = v5553 * v5558;
-                let v5560 = ((Lanes([0.0, v8[0]])) - (Lanes([v4186[0], 0.0]))) * v5558;
+                let v5560 = ((Lanes([0.0, v8])) - (Lanes([v4186, 0.0]))) * v5558;
                 let v5561 = v4157 * v5553;
                 let v5564 = (Lanes([v5560[0], 0.0, v5560[1], 0.0])) + (Lanes([0.0, v5561[0], v5561[1], v5561[2]]));
                 let v5572 = (v4183 - v5565) * v5571;
-                let v5573 = ((Lanes([v4186[0], 0.0])) - (Lanes([0.0, v5568[0]]))) * v5571;
+                let v5573 = ((Lanes([v4186, 0.0])) - (Lanes([0.0, v5568]))) * v5571;
                 v5578 = v5544;
                 v5579 = v5551;
                 v5580 = v5559;
@@ -4309,7 +4395,7 @@ impl Instance {
             let v5602 = v4590 * v5595;
             let v5606 = if ((v5537 - v5565).abs()) > v5605 { 1.0 } else { 0.0 };
             let v5607 = v4578[0];
-            let v5608 = v2212[0];
+            let v5608 = v2212;
             let v5609 = v5582[0];
             let v5610 = v5582[1];
             let v5611 = v5583[0];
@@ -4330,12 +4416,12 @@ impl Instance {
             let v5626 = v5596[2];
             let v5627 = v5598[0];
             let v5628 = v5598[1];
-            let v5629 = v5600[0];
+            let v5629 = v5600;
             let v5630 = v5602[0];
             let v5631 = v5602[1];
             let v5632 = v4578[1];
             let v5633 = v4578[2];
-            let v5634 = v4581[0];
+            let v5634 = v4581;
             let v5635 = v4590[0];
             let v5636 = v4590[1];
         stamper.stamp_current_sparse_local::<1, 0>(
@@ -4391,7 +4477,7 @@ impl Instance {
         stamper.stamp_potential_branch_local(Some(0), Some(3), 0, multiplicity);
         stamper.stamp_potential_sparse_local::<0, 0>(
             0,
-            staged[116],
+            staged[118],
             [],
             [],
             [],
@@ -4400,7 +4486,7 @@ impl Instance {
         stamper.stamp_potential_branch_local(Some(3), Some(4), 1, multiplicity);
         stamper.stamp_potential_sparse_local::<0, 0>(
             1,
-            staged[117],
+            staged[119],
             [],
             [],
             [],
@@ -4409,7 +4495,7 @@ impl Instance {
         stamper.stamp_potential_branch_local(Some(5), Some(1), 2, multiplicity);
         stamper.stamp_potential_sparse_local::<0, 0>(
             2,
-            staged[118],
+            staged[120],
             [],
             [],
             [],
@@ -4418,7 +4504,7 @@ impl Instance {
         stamper.stamp_potential_branch_local(Some(1), Some(2), 3, multiplicity);
         stamper.stamp_potential_sparse_local::<0, 0>(
             3,
-            staged[119],
+            staged[121],
             [],
             [],
             [],
@@ -4487,7 +4573,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(4),
             Some(5),
-            multiplicity * (staged[120]),
+            multiplicity * (staged[122]),
             [],
             [],
             [],
@@ -4497,7 +4583,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(4),
             Some(1),
-            multiplicity * (staged[121]),
+            multiplicity * (staged[123]),
             [],
             [],
             [],
@@ -4507,7 +4593,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(0),
             Some(3),
-            multiplicity * (staged[122]),
+            multiplicity * (staged[124]),
             [],
             [],
             [],
@@ -4517,7 +4603,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(3),
             Some(4),
-            multiplicity * (staged[123]),
+            multiplicity * (staged[125]),
             [],
             [],
             [],
@@ -4527,27 +4613,27 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(1),
             Some(2),
-            multiplicity * (staged[124]),
-            [],
-            [],
-            [],
-            [],
-            multiplicity,
-        );
-        stamper.stamp_current_sparse_local::<0, 0>(
-            Some(5),
-            Some(1),
-            multiplicity * (staged[125]),
-            [],
-            [],
-            [],
-            [],
-            multiplicity,
-        );
-        stamper.stamp_current_sparse_local::<0, 0>(
-            Some(5),
-            Some(1),
             multiplicity * (staged[126]),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<0, 0>(
+            Some(5),
+            Some(1),
+            multiplicity * (staged[127]),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<0, 0>(
+            Some(5),
+            Some(1),
+            multiplicity * (staged[128]),
             [],
             [],
             [],
@@ -4559,10 +4645,10 @@ impl Instance {
         self.canonical_reactive[2] = v5579;
         self.canonical_reactive[3] = v5580;
         self.canonical_reactive[4] = v5581;
-        self.canonical_reactive[5] = staged[116];
-        self.canonical_reactive[6] = staged[117];
-        self.canonical_reactive[7] = staged[118];
-        self.canonical_reactive[8] = staged[119];
+        self.canonical_reactive[5] = staged[118];
+        self.canonical_reactive[6] = staged[119];
+        self.canonical_reactive[7] = staged[120];
+        self.canonical_reactive[8] = staged[121];
         self.canonical_reactive[9] = v5586;
         self.canonical_reactive[10] = v5588;
         self.canonical_reactive[11] = v4577;
@@ -4575,13 +4661,13 @@ impl Instance {
         self.canonical_reactive[18] = v4589;
         self.canonical_reactive[19] = v5635;
         self.canonical_reactive[20] = v5636;
-        self.canonical_reactive[21] = staged[120];
-        self.canonical_reactive[22] = staged[121];
-        self.canonical_reactive[23] = staged[122];
-        self.canonical_reactive[24] = staged[123];
-        self.canonical_reactive[25] = staged[124];
-        self.canonical_reactive[26] = staged[125];
-        self.canonical_reactive[27] = staged[126];
+        self.canonical_reactive[21] = staged[122];
+        self.canonical_reactive[22] = staged[123];
+        self.canonical_reactive[23] = staged[124];
+        self.canonical_reactive[24] = staged[125];
+        self.canonical_reactive[25] = staged[126];
+        self.canonical_reactive[26] = staged[127];
+        self.canonical_reactive[27] = staged[128];
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

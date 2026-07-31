@@ -273,6 +273,14 @@ const PARAMETER_NAME_LOOKUP: [(&str, usize); 149] = [
     ("istat", 142), ("vtat", 143), ("ktat", 144), ("vbtbt", 145), ("kbtbt", 146),
 ];
 
+pub(crate) const PARAMETER_MODEL_FLAGS: [bool; 147] = [
+    false, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+];
+
 const PARAMETER_MIN_REFERENCES: [Option<usize>; 147] = [
     None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
     None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
@@ -547,7 +555,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 585;
     pub const DDT_STATE_COUNT: usize = 10;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "b955486f6f42fea8c8fdd3be2cce49cba1a589e92b0ffd8c8ad86e740daab12d";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "628902ab86352bfd7b685071a1d60f7151844260ce61e373e12e5c52ac81901c";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 

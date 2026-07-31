@@ -255,6 +255,11 @@ const PARAMETER_NAME_LOOKUP: [(&str, usize); 53] = [
     ("ijbv", 47), ("vsatb", 48), ("mexp", 49), ("vsate", 50), ("mexpe", 51),
 ];
 
+pub(crate) const PARAMETER_MODEL_FLAGS: [bool; 52] = [
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, false, false, true, false, true, true, true, true, true, true,
+];
+
 const PARAMETER_MIN_REFERENCES: [Option<usize>; 52] = [
     None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
     None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
@@ -415,6 +420,7 @@ fn canonical_boxed_zero_f64<const N: usize>() -> Box<[f64; N]> {
     }
 }
 
+pub(crate) type CanonicalModelValues = [f64; 26];
 pub struct Instance {
     pub nodes: [usize; 7],
     pub branches: [usize; 7],
@@ -426,7 +432,8 @@ pub struct Instance {
     pub(crate) timestep: f64,
     pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
     pub(crate) canonical_reactive: Box<[f64; 43]>,
-    pub(crate) canonical_staged: Box<[f64; 31]>,
+    pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
+    pub(crate) canonical_staged: Box<[f64; 33]>,
     pub(crate) canonical_instance_valid: bool,
     pub(crate) canonical_temperature_valid: bool,
     pub(crate) canonical_temperature: f64,
@@ -447,6 +454,7 @@ impl Clone for Instance {
             timestep: self.timestep,
             ddt_coefficients: self.ddt_coefficients,
             canonical_reactive: self.canonical_reactive.clone(),
+            canonical_model_values: self.canonical_model_values.clone(),
             canonical_staged: self.canonical_staged.clone(),
             canonical_instance_valid: self.canonical_instance_valid,
             canonical_temperature_valid: self.canonical_temperature_valid,
@@ -467,7 +475,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 83;
     pub const DDT_STATE_COUNT: usize = 6;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "7ef1d369c88dc2d2c9ac512daceac7ef5bc2364a0af0e5428b53349ae693dedb";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "32363fc8778fd16ac8f4518c62ffd24d082ecd5896609b942c6bdb7523327310";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 
@@ -486,6 +494,7 @@ impl Instance {
             timestep: 0.0,
             ddt_coefficients: GeneratedDdtCoefficients::inactive(),
             canonical_reactive: canonical_boxed_zero_f64(),
+            canonical_model_values: None,
             canonical_staged: canonical_boxed_zero_f64(),
             canonical_instance_valid: false,
             canonical_temperature_valid: false,
@@ -625,6 +634,9 @@ impl Instance {
     fn finish_set_parameter(&mut self, index: usize, invalidates_caches: bool) {
         self.mark_param_given(index);
         if invalidates_caches {
+            if PARAMETER_MODEL_FLAGS[index] {
+                self.canonical_model_values = None;
+            }
             self.canonical_instance_valid = false;
             self.canonical_temperature_valid = false;
         }
@@ -639,7 +651,12 @@ impl Instance {
     #[inline]
     pub fn set_multiplicity(&mut self, multiplicity: f64) -> Result<(), String> {
         if multiplicity.is_finite() && multiplicity > 0.0 {
+            let changed = self.multiplicity.to_bits() != multiplicity.to_bits();
             self.multiplicity = multiplicity;
+            if changed {
+                self.canonical_instance_valid = false;
+                self.canonical_temperature_valid = false;
+            }
             Ok(())
         } else {
             Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", multiplicity))

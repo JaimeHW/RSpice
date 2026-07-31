@@ -256,6 +256,13 @@ const PARAMETER_NAME_LOOKUP: [(&str, usize); 103] = [
     ("td1", 94), ("tmn", 95), ("klf", 96), ("fgr", 97), ("np", 98), ("lw", 99), ("tnom", 100),
 ];
 
+pub(crate) const PARAMETER_MODEL_FLAGS: [bool; 101] = [
+    false, false, false, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true,
+];
+
 const PARAMETER_MIN_REFERENCES: [Option<usize>; 101] = [
     None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
     None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
@@ -453,6 +460,7 @@ fn canonical_boxed_zero_f64<const N: usize>() -> Box<[f64; N]> {
     }
 }
 
+pub(crate) type CanonicalModelValues = [f64; 48];
 pub struct Instance {
     pub nodes: [usize; 19],
     pub branches: [usize; 19],
@@ -464,6 +472,7 @@ pub struct Instance {
     pub(crate) timestep: f64,
     pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
     pub(crate) canonical_reactive: Box<[f64; 103]>,
+    pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
     pub(crate) canonical_staged: Box<[f64; 70]>,
     pub(crate) canonical_instance_valid: bool,
     pub(crate) canonical_temperature_valid: bool,
@@ -485,6 +494,7 @@ impl Clone for Instance {
             timestep: self.timestep,
             ddt_coefficients: self.ddt_coefficients,
             canonical_reactive: self.canonical_reactive.clone(),
+            canonical_model_values: self.canonical_model_values.clone(),
             canonical_staged: self.canonical_staged.clone(),
             canonical_instance_valid: self.canonical_instance_valid,
             canonical_temperature_valid: self.canonical_temperature_valid,
@@ -505,7 +515,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 145;
     pub const DDT_STATE_COUNT: usize = 17;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "46168a82ea4b6c1e4b102d62cf25fcbef75d0b6499342105cb3cfbd989230820";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "2843c174e765d1a25f745d55f79a29b7f67d62cd7f5476d7d0ac6ba6fb3b4fbd";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 
@@ -524,6 +534,7 @@ impl Instance {
             timestep: 0.0,
             ddt_coefficients: GeneratedDdtCoefficients::inactive(),
             canonical_reactive: canonical_boxed_zero_f64(),
+            canonical_model_values: None,
             canonical_staged: canonical_boxed_zero_f64(),
             canonical_instance_valid: false,
             canonical_temperature_valid: false,
@@ -663,6 +674,9 @@ impl Instance {
     fn finish_set_parameter(&mut self, index: usize, invalidates_caches: bool) {
         self.mark_param_given(index);
         if invalidates_caches {
+            if PARAMETER_MODEL_FLAGS[index] {
+                self.canonical_model_values = None;
+            }
             self.canonical_instance_valid = false;
             self.canonical_temperature_valid = false;
         }
@@ -677,7 +691,12 @@ impl Instance {
     #[inline]
     pub fn set_multiplicity(&mut self, multiplicity: f64) -> Result<(), String> {
         if multiplicity.is_finite() && multiplicity > 0.0 {
+            let changed = self.multiplicity.to_bits() != multiplicity.to_bits();
             self.multiplicity = multiplicity;
+            if changed {
+                self.canonical_instance_valid = false;
+                self.canonical_temperature_valid = false;
+            }
             Ok(())
         } else {
             Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", multiplicity))

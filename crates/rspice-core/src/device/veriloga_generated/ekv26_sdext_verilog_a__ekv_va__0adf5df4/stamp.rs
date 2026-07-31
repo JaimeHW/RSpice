@@ -1,7 +1,9 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
-use super::state::Instance;
+use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
 use crate::device::veriloga_generated::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 #[inline(always)]
 fn rspice_limexp(x: f64) -> f64 {
@@ -140,12 +142,110 @@ fn rspice_eval_ddt<const STATE_COUNT: usize>(
     }
 }
 
+
+static CANONICAL_MODEL_CACHE: OnceLock<Mutex<HashMap<Box<[u64]>, Weak<CanonicalModelValues>>>> = OnceLock::new();
+
+fn canonical_model_cache() -> &'static Mutex<HashMap<Box<[u64]>, Weak<CanonicalModelValues>>> {
+    CANONICAL_MODEL_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn canonical_model_cache_lookup(key: &[u64]) -> Option<Arc<CanonicalModelValues>> {
+    let mut cache = canonical_model_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let found = cache.get(key).and_then(Weak::upgrade);
+    if found.is_none() {
+        cache.remove(key);
+    }
+    found
+}
+
+fn canonical_model_cache_intern(
+    key: Box<[u64]>,
+    candidate: Arc<CanonicalModelValues>,
+) -> Arc<CanonicalModelValues> {
+    let mut cache = canonical_model_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(existing) = cache.get(key.as_ref()).and_then(Weak::upgrade) {
+        return existing;
+    }
+    cache.retain(|_, values| values.strong_count() > 0);
+    cache.insert(key, Arc::downgrade(&candidate));
+    candidate
+}
+
 impl Instance {
-    fn canonical_instance_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
-        if self.canonical_instance_valid {
+    fn canonical_model_key(&self) -> Box<[u64]> {
+        let mut key = Vec::with_capacity(150);
+        for index in 0..Self::PARAMETER_COUNT {
+            if PARAMETER_MODEL_FLAGS[index] {
+                key.push(self.params.values[index].to_bits());
+                key.push(u64::from(self.param_given[index]));
+            }
+        }
+        key.into_boxed_slice()
+    }
+
+    fn canonical_install_model_values(&mut self, values: Arc<CanonicalModelValues>) {
+        self.canonical_staged[2] = values[0];
+        self.canonical_staged[25] = values[1];
+        self.canonical_staged[40] = values[2];
+        self.canonical_staged[33] = values[3];
+        self.canonical_staged[69] = values[4];
+        self.canonical_staged[32] = values[5];
+        self.canonical_staged[70] = values[6];
+        self.canonical_staged[71] = values[7];
+        self.canonical_staged[72] = values[8];
+        self.canonical_staged[0] = values[9];
+        self.canonical_staged[1] = values[10];
+        self.canonical_staged[3] = values[11];
+        self.canonical_staged[7] = values[12];
+        self.canonical_staged[73] = values[13];
+        self.canonical_staged[4] = values[14];
+        self.canonical_staged[74] = values[15];
+        self.canonical_staged[5] = values[16];
+        self.canonical_staged[75] = values[17];
+        self.canonical_staged[6] = values[18];
+        self.canonical_staged[76] = values[19];
+        self.canonical_staged[8] = values[20];
+        self.canonical_staged[77] = values[21];
+        self.canonical_staged[10] = values[22];
+        self.canonical_staged[19] = values[23];
+        self.canonical_staged[18] = values[24];
+        self.canonical_staged[15] = values[25];
+        self.canonical_staged[16] = values[26];
+        self.canonical_staged[27] = values[27];
+        self.canonical_staged[29] = values[28];
+        self.canonical_staged[78] = values[29];
+        self.canonical_staged[36] = values[30];
+        self.canonical_staged[38] = values[31];
+        self.canonical_staged[39] = values[32];
+        self.canonical_staged[44] = values[33];
+        self.canonical_staged[79] = values[34];
+        self.canonical_staged[80] = values[35];
+        self.canonical_staged[81] = values[36];
+        self.canonical_staged[82] = values[37];
+        self.canonical_staged[45] = values[38];
+        self.canonical_staged[46] = values[39];
+        self.canonical_staged[47] = values[40];
+        self.canonical_staged[50] = values[41];
+        self.canonical_staged[58] = values[42];
+        self.canonical_staged[59] = values[43];
+        self.canonical_staged[83] = values[44];
+        self.canonical_model_values = Some(values);
+    }
+
+    fn canonical_model_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
+        if self.canonical_model_values.is_some() {
             return;
         }
-        let produced: [f64; 45] = {
+        let key = self.canonical_model_key();
+        if let Some(values) = canonical_model_cache_lookup(key.as_ref()) {
+            self.canonical_install_model_values(values);
+            return;
+        }
+        let produced: CanonicalModelValues = {
             let parameters = &self.params.values;
             let multiplicity = self.multiplicity;
             let staged = &*self.canonical_staged;
@@ -337,52 +437,8 @@ impl Instance {
                 let v152 = -v52;
             [v5, v7, v15, v18, v24, v27, v30, out32, v35, v38, v46, v49, v52, out59, out64, out60, out66, v62, out69, v71, v76, v77, v96, v99, v101, v104, v105, v107, v109, v110, v111, v112, v117, v118, v125, v132, v139, v145, v151, v142, v148, v152, v129, v136, v121]
         };
-        self.canonical_staged[2] = produced[0];
-        self.canonical_staged[25] = produced[1];
-        self.canonical_staged[40] = produced[2];
-        self.canonical_staged[33] = produced[3];
-        self.canonical_staged[69] = produced[4];
-        self.canonical_staged[32] = produced[5];
-        self.canonical_staged[70] = produced[6];
-        self.canonical_staged[71] = produced[7];
-        self.canonical_staged[72] = produced[8];
-        self.canonical_staged[0] = produced[9];
-        self.canonical_staged[1] = produced[10];
-        self.canonical_staged[3] = produced[11];
-        self.canonical_staged[7] = produced[12];
-        self.canonical_staged[73] = produced[13];
-        self.canonical_staged[4] = produced[14];
-        self.canonical_staged[74] = produced[15];
-        self.canonical_staged[5] = produced[16];
-        self.canonical_staged[75] = produced[17];
-        self.canonical_staged[6] = produced[18];
-        self.canonical_staged[76] = produced[19];
-        self.canonical_staged[8] = produced[20];
-        self.canonical_staged[77] = produced[21];
-        self.canonical_staged[10] = produced[22];
-        self.canonical_staged[19] = produced[23];
-        self.canonical_staged[18] = produced[24];
-        self.canonical_staged[15] = produced[25];
-        self.canonical_staged[16] = produced[26];
-        self.canonical_staged[27] = produced[27];
-        self.canonical_staged[29] = produced[28];
-        self.canonical_staged[78] = produced[29];
-        self.canonical_staged[36] = produced[30];
-        self.canonical_staged[38] = produced[31];
-        self.canonical_staged[39] = produced[32];
-        self.canonical_staged[44] = produced[33];
-        self.canonical_staged[79] = produced[34];
-        self.canonical_staged[80] = produced[35];
-        self.canonical_staged[81] = produced[36];
-        self.canonical_staged[82] = produced[37];
-        self.canonical_staged[45] = produced[38];
-        self.canonical_staged[46] = produced[39];
-        self.canonical_staged[47] = produced[40];
-        self.canonical_staged[50] = produced[41];
-        self.canonical_staged[58] = produced[42];
-        self.canonical_staged[59] = produced[43];
-        self.canonical_staged[83] = produced[44];
-        self.canonical_instance_valid = true;
+        let values = canonical_model_cache_intern(key, Arc::new(produced));
+        self.canonical_install_model_values(values);
     }
 
     fn canonical_temperature_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
@@ -624,7 +680,7 @@ impl Instance {
     }
 
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
-        self.canonical_instance_stage(ctx);
+        self.canonical_model_stage(ctx);
         self.canonical_temperature_stage(ctx);
         self.canonical_timestep_stage(ctx);
         let parameters = &self.params.values;
@@ -657,13 +713,13 @@ impl Instance {
         };
             let v0 = node_potentials[1];
             let v1 = node_potentials[3];
-            let v3 = Lanes([1e0f64; 1]);
-            let v5 = Lanes([1e0f64; 1]);
+            let v3 = 1e0f64;
+            let v5 = 1e0f64;
             let v8 = parameters[0];
             let v11 = node_potentials[2];
-            let v13 = Lanes([1e0f64; 1]);
+            let v13 = 1e0f64;
             let v19 = node_potentials[0];
-            let v21 = Lanes([1e0f64; 1]);
+            let v21 = 1e0f64;
             let v30 = 0e0f64;
             let v32 = -1e0f64;
             let v33 = 1e0f64;
@@ -789,11 +845,11 @@ impl Instance {
             let v1834 = staged[58];
             let v1849 = staged[59];
             let v9 = v8 * (v0 - v1);
-            let v10 = ((Lanes([v3[0], 0.0])) - (Lanes([0.0, v5[0]]))) * v8;
+            let v10 = ((Lanes([v3, 0.0])) - (Lanes([0.0, v5]))) * v8;
             let v17 = v8 * (v11 - v1);
-            let v18 = ((Lanes([v13[0], 0.0])) - (Lanes([0.0, v5[0]]))) * v8;
+            let v18 = ((Lanes([v13, 0.0])) - (Lanes([0.0, v5]))) * v8;
             let v25 = v8 * (v19 - v1);
-            let v26 = ((Lanes([v21[0], 0.0])) - (Lanes([0.0, v5[0]]))) * v8;
+            let v26 = ((Lanes([v21, 0.0])) - (Lanes([0.0, v5]))) * v8;
             let v28 = Lanes([v26[0], 0.0, v26[1]]);
             let v29 = Lanes([0.0, v18[0], v18[1]]);
             let v31 = if (v25 - v17) < v30 { 1.0 } else { 0.0 };

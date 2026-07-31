@@ -261,6 +261,12 @@ const PARAMETER_NAME_LOOKUP: [(&str, usize); 86] = [
     ("kbwm", 79), ("xbwm", 80), ("ikbwm", 81), ("xkf", 82), ("cthbb", 83), ("cdelay", 84),
 ];
 
+pub(crate) const PARAMETER_MODEL_FLAGS: [bool; 85] = [
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, false, false, true, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+];
+
 const PARAMETER_MIN_REFERENCES: [Option<usize>; 85] = [
     None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
     None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
@@ -487,7 +493,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 160;
     pub const DDT_STATE_COUNT: usize = 13;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "163b7b31237f2be255a4e33b2f9e5a171eb8d6ae9fbe54dc4273be86a5a1f578";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "a99b896902d51d64fe5444e915e52873632562e9ca41ec374fb51e044bd29441";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 

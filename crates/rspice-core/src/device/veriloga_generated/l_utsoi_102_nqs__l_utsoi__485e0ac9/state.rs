@@ -340,6 +340,25 @@ const PARAMETER_NAME_LOOKUP: [(&str, usize); 504] = [
     ("rgo", 495), ("rint", 496), ("rvpoly", 497), ("rshg", 498), ("dlsil", 499), ("rsh", 500), ("rshd", 501), ("rwello", 502),
 ];
 
+pub(crate) const PARAMETER_MODEL_FLAGS: [bool; 503] = [
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, false, false, false, false, false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+];
+
 const PARAMETER_MIN_REFERENCES: [Option<usize>; 503] = [
     None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
     None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
@@ -836,6 +855,7 @@ fn canonical_boxed_zero_f64<const N: usize>() -> Box<[f64; N]> {
     }
 }
 
+pub(crate) type CanonicalModelValues = [f64; 248];
 pub struct Instance {
     pub nodes: [usize; 14],
     pub branches: [usize; 4],
@@ -847,7 +867,8 @@ pub struct Instance {
     pub(crate) timestep: f64,
     pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
     pub(crate) canonical_reactive: Box<[f64; 122]>,
-    pub(crate) canonical_staged: Box<[f64; 419]>,
+    pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
+    pub(crate) canonical_staged: Box<[f64; 487]>,
     pub(crate) canonical_instance_valid: bool,
     pub(crate) canonical_temperature_valid: bool,
     pub(crate) canonical_temperature: f64,
@@ -868,6 +889,7 @@ impl Clone for Instance {
             timestep: self.timestep,
             ddt_coefficients: self.ddt_coefficients,
             canonical_reactive: self.canonical_reactive.clone(),
+            canonical_model_values: self.canonical_model_values.clone(),
             canonical_staged: self.canonical_staged.clone(),
             canonical_instance_valid: self.canonical_instance_valid,
             canonical_temperature_valid: self.canonical_temperature_valid,
@@ -888,7 +910,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 1911;
     pub const DDT_STATE_COUNT: usize = 24;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "79180b1437589238840f2423b1c3d1edcacbf708c5aab49b15490d8caf78a29c";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "c684ffd9ee91d61a492b44e37d25f185bc34232ecbebab351f35f2f817150581";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 
@@ -907,6 +929,7 @@ impl Instance {
             timestep: 0.0,
             ddt_coefficients: GeneratedDdtCoefficients::inactive(),
             canonical_reactive: canonical_boxed_zero_f64(),
+            canonical_model_values: None,
             canonical_staged: canonical_boxed_zero_f64(),
             canonical_instance_valid: false,
             canonical_temperature_valid: false,
@@ -1046,6 +1069,9 @@ impl Instance {
     fn finish_set_parameter(&mut self, index: usize, invalidates_caches: bool) {
         self.mark_param_given(index);
         if invalidates_caches {
+            if PARAMETER_MODEL_FLAGS[index] {
+                self.canonical_model_values = None;
+            }
             self.canonical_instance_valid = false;
             self.canonical_temperature_valid = false;
         }
@@ -1060,7 +1086,12 @@ impl Instance {
     #[inline]
     pub fn set_multiplicity(&mut self, multiplicity: f64) -> Result<(), String> {
         if multiplicity.is_finite() && multiplicity > 0.0 {
+            let changed = self.multiplicity.to_bits() != multiplicity.to_bits();
             self.multiplicity = multiplicity;
+            if changed {
+                self.canonical_instance_valid = false;
+                self.canonical_temperature_valid = false;
+            }
             Ok(())
         } else {
             Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", multiplicity))

@@ -1182,6 +1182,36 @@ const PARAMETER_NAME_LOOKUP: [(&str, usize); 864] = [
     ("wvdiffjs", 848), ("pjs0", 849), ("pjs0sw", 850), ("pnj", 851), ("pcisbk", 852), ("pvdiffj", 853), ("pjs0d", 854), ("pjs0swd", 855), ("pnjd", 856), ("pcisbkd", 857), ("pvdiffjd", 858), ("pjs0s", 859), ("pjs0sws", 860), ("pnjs", 861), ("pcisbks", 862), ("pvdiffjs", 863),
 ];
 
+pub(crate) const PARAMETER_MODEL_FLAGS: [bool; 864] = [
+    false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+];
+
 const PARAMETER_MIN_REFERENCES: [Option<usize>; 864] = [
     None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
     None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
@@ -1949,6 +1979,7 @@ fn canonical_boxed_zero_f64<const N: usize>() -> Box<[f64; N]> {
     }
 }
 
+pub(crate) type CanonicalModelValues = [f64; 251];
 pub struct Instance {
     pub nodes: [usize; 19],
     pub branches: [usize; 13],
@@ -1960,7 +1991,8 @@ pub struct Instance {
     pub(crate) timestep: f64,
     pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
     pub(crate) canonical_reactive: Box<[f64; 172]>,
-    pub(crate) canonical_staged: Box<[f64; 876]>,
+    pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
+    pub(crate) canonical_staged: Box<[f64; 897]>,
     pub(crate) canonical_instance_valid: bool,
     pub(crate) canonical_temperature_valid: bool,
     pub(crate) canonical_temperature: f64,
@@ -1981,6 +2013,7 @@ impl Clone for Instance {
             timestep: self.timestep,
             ddt_coefficients: self.ddt_coefficients,
             canonical_reactive: self.canonical_reactive.clone(),
+            canonical_model_values: self.canonical_model_values.clone(),
             canonical_staged: self.canonical_staged.clone(),
             canonical_instance_valid: self.canonical_instance_valid,
             canonical_temperature_valid: self.canonical_temperature_valid,
@@ -2001,7 +2034,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 3414;
     pub const DDT_STATE_COUNT: usize = 21;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "d76ed49500e1fd62b6b78976fd4e8e13e6ebb18badce6cfdc1ff0ab904b1a4d8";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "243c5398df69f355056294a5b64407c94775f73f0db890961f2625806f813f8f";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 
@@ -2020,6 +2053,7 @@ impl Instance {
             timestep: 0.0,
             ddt_coefficients: GeneratedDdtCoefficients::inactive(),
             canonical_reactive: canonical_boxed_zero_f64(),
+            canonical_model_values: None,
             canonical_staged: canonical_boxed_zero_f64(),
             canonical_instance_valid: false,
             canonical_temperature_valid: false,
@@ -2159,6 +2193,9 @@ impl Instance {
     fn finish_set_parameter(&mut self, index: usize, invalidates_caches: bool) {
         self.mark_param_given(index);
         if invalidates_caches {
+            if PARAMETER_MODEL_FLAGS[index] {
+                self.canonical_model_values = None;
+            }
             self.canonical_instance_valid = false;
             self.canonical_temperature_valid = false;
         }
@@ -2173,7 +2210,12 @@ impl Instance {
     #[inline]
     pub fn set_multiplicity(&mut self, multiplicity: f64) -> Result<(), String> {
         if multiplicity.is_finite() && multiplicity > 0.0 {
+            let changed = self.multiplicity.to_bits() != multiplicity.to_bits();
             self.multiplicity = multiplicity;
+            if changed {
+                self.canonical_instance_valid = false;
+                self.canonical_temperature_valid = false;
+            }
             Ok(())
         } else {
             Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", multiplicity))

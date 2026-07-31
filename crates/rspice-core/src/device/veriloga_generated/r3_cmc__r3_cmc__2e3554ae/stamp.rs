@@ -1,7 +1,9 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
-use super::state::Instance;
+use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
 use crate::device::veriloga_generated::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 #[inline(always)]
 fn rspice_limexp(x: f64) -> f64 {
@@ -140,12 +142,102 @@ fn rspice_eval_ddt<const STATE_COUNT: usize>(
     }
 }
 
+
+static CANONICAL_MODEL_CACHE: OnceLock<Mutex<HashMap<Box<[u64]>, Weak<CanonicalModelValues>>>> = OnceLock::new();
+
+fn canonical_model_cache() -> &'static Mutex<HashMap<Box<[u64]>, Weak<CanonicalModelValues>>> {
+    CANONICAL_MODEL_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn canonical_model_cache_lookup(key: &[u64]) -> Option<Arc<CanonicalModelValues>> {
+    let mut cache = canonical_model_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let found = cache.get(key).and_then(Weak::upgrade);
+    if found.is_none() {
+        cache.remove(key);
+    }
+    found
+}
+
+fn canonical_model_cache_intern(
+    key: Box<[u64]>,
+    candidate: Arc<CanonicalModelValues>,
+) -> Arc<CanonicalModelValues> {
+    let mut cache = canonical_model_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(existing) = cache.get(key.as_ref()).and_then(Weak::upgrade) {
+        return existing;
+    }
+    cache.retain(|_, values| values.strong_count() > 0);
+    cache.insert(key, Arc::downgrade(&candidate));
+    candidate
+}
+
 impl Instance {
-    fn canonical_instance_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
-        if self.canonical_instance_valid {
+    fn canonical_model_key(&self) -> Box<[u64]> {
+        let mut key = Vec::with_capacity(222);
+        for index in 0..Self::PARAMETER_COUNT {
+            if PARAMETER_MODEL_FLAGS[index] {
+                key.push(self.params.values[index].to_bits());
+                key.push(u64::from(self.param_given[index]));
+            }
+        }
+        key.into_boxed_slice()
+    }
+
+    fn canonical_install_model_values(&mut self, values: Arc<CanonicalModelValues>) {
+        self.canonical_staged[65] = values[0];
+        self.canonical_staged[66] = values[1];
+        self.canonical_staged[67] = values[2];
+        self.canonical_staged[2] = values[3];
+        self.canonical_staged[1] = values[4];
+        self.canonical_staged[0] = values[5];
+        self.canonical_staged[24] = values[6];
+        self.canonical_staged[26] = values[7];
+        self.canonical_staged[44] = values[8];
+        self.canonical_staged[5] = values[9];
+        self.canonical_staged[85] = values[10];
+        self.canonical_staged[6] = values[11];
+        self.canonical_staged[86] = values[12];
+        self.canonical_staged[87] = values[13];
+        self.canonical_staged[8] = values[14];
+        self.canonical_staged[10] = values[15];
+        self.canonical_staged[12] = values[16];
+        self.canonical_staged[13] = values[17];
+        self.canonical_staged[14] = values[18];
+        self.canonical_staged[15] = values[19];
+        self.canonical_staged[16] = values[20];
+        self.canonical_staged[92] = values[21];
+        self.canonical_staged[22] = values[22];
+        self.canonical_staged[93] = values[23];
+        self.canonical_staged[23] = values[24];
+        self.canonical_staged[94] = values[25];
+        self.canonical_staged[28] = values[26];
+        self.canonical_staged[29] = values[27];
+        self.canonical_staged[95] = values[28];
+        self.canonical_staged[30] = values[29];
+        self.canonical_staged[31] = values[30];
+        self.canonical_staged[96] = values[31];
+        self.canonical_staged[32] = values[32];
+        self.canonical_staged[33] = values[33];
+        self.canonical_staged[61] = values[34];
+        self.canonical_staged[62] = values[35];
+        self.canonical_staged[63] = values[36];
+        self.canonical_model_values = Some(values);
+    }
+
+    fn canonical_model_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
+        if self.canonical_model_values.is_some() {
             return;
         }
-        let produced: [f64; 73] = {
+        let key = self.canonical_model_key();
+        if let Some(values) = canonical_model_cache_lookup(key.as_ref()) {
+            self.canonical_install_model_values(values);
+            return;
+        }
+        let produced: CanonicalModelValues = {
             let parameters = &self.params.values;
             let multiplicity = self.multiplicity;
             let staged = &*self.canonical_staged;
@@ -161,134 +253,49 @@ impl Instance {
                 let v17 = 2.7315e2f64;
                 let v18 = parameters[28];
                 let v20 = parameters[35];
-                let v22 = parameters[0];
-                let v24 = parameters[1];
-                let v26 = parameters[31];
-                let v28 = parameters[32];
-                let v30 = parameters[29];
-                let v32 = parameters[30];
-                let v34 = parameters[2];
-                let v36 = 0e0f64;
-                let v38 = parameters[4];
-                let v40 = 0e0f64;
-                let v42 = parameters[7];
-                let v45 = 2e0f64;
-                let v47 = parameters[5];
-                let v48 = 0e0f64;
-                let v50 = parameters[8];
-                let v55 = 5e-1f64;
-                let v57 = parameters[44];
-                let v59 = parameters[43];
-                let v62 = parameters[38];
-                let v64 = parameters[39];
-                let v68 = parameters[41];
-                let v72 = parameters[42];
-                let v75 = parameters[40];
-                let v81 = parameters[127];
-                let v84 = parameters[16];
-                let v85 = parameters[119];
-                let v86 = parameters[122];
-                let v89 = parameters[11];
-                let v90 = parameters[125];
-                let v92 = multiplicity;
-                let v97 = parameters[120];
-                let v98 = parameters[123];
-                let v101 = parameters[12];
-                let v102 = parameters[126];
-                let v108 = parameters[118];
-                let v109 = parameters[121];
-                let v111 = parameters[10];
-                let v112 = parameters[124];
-                let v172 = parameters[45];
-                let v175 = parameters[53];
-                let v178 = parameters[56];
-                let v181 = parameters[58];
-                let v184 = parameters[55];
-                let v187 = parameters[54];
-                let v189 = parameters[57];
-                let v193 = parameters[59];
-                let v198 = parameters[15];
-                let v199 = parameters[50];
-                let v201 = parameters[51];
-                let v204 = parameters[52];
-                let v208 = parameters[49];
-                let v211 = parameters[63];
-                let v213 = parameters[64];
-                let v216 = parameters[48];
-                let v219 = parameters[47];
-                let v224 = parameters[37];
-                let v229 = parameters[46];
-                let v231 = 4e0f64;
-                let v237 = parameters[66];
-                let v240 = parameters[67];
-                let v250 = parameters[111];
-                let v252 = parameters[110];
-                let v254 = parameters[112];
-                let v258 = parameters[113];
-                let v261 = parameters[115];
-                let v263 = parameters[114];
-                let v265 = parameters[116];
-                let v268 = parameters[117];
-                let v272 = parameters[97];
-                let v274 = parameters[93];
-                let v276 = parameters[99];
-                let v278 = parameters[95];
-                let v283 = parameters[98];
-                let v285 = parameters[94];
-                let v287 = parameters[100];
-                let v289 = parameters[96];
-                let v294 = parameters[71];
-                let v296 = parameters[78];
-                let v302 = parameters[72];
-                let v304 = parameters[79];
-                let v310 = parameters[21];
-                let v312 = parameters[92];
-                let v313 = 1e0f64;
-                let v315 = parameters[69];
-                let v317 = parameters[90];
-                let v319 = parameters[76];
-                let v323 = parameters[73];
-                let v325 = -5e-1f64;
-                let v327 = parameters[74];
-                let v330 = parameters[80];
-                let v332 = -5e-1f64;
-                let v334 = parameters[81];
-                let v336 = parameters[83];
-                let v338 = parameters[60];
-                let v342 = parameters[27];
-                let v343 = parameters[84];
-                let v345 = parameters[65];
-                let v352 = parameters[26];
-                let v356 = parameters[13];
-                let v363 = 0e0f64;
-                let v364 = 0e0f64;
-                let v365 = 0e0f64;
-                let v366 = 0e0f64;
-                let mut out124: f64 = 0.0;
-                let mut out143: f64 = 0.0;
-                let mut out158: f64 = 0.0;
-                let mut out214: f64 = 0.0;
-                let mut out215: f64 = 0.0;
-                let mut out221: f64 = 0.0;
-                let mut out222: f64 = 0.0;
-                let mut out223: f64 = 0.0;
-                let mut out228: f64 = 0.0;
-                let mut out230: f64 = 0.0;
-                let mut out236: f64 = 0.0;
-                let mut out260: f64 = 0.0;
-                let mut out318: f64 = 0.0;
-                let mut out321: f64 = 0.0;
-                let mut out324: f64 = 0.0;
-                let mut out326: f64 = 0.0;
-                let mut out328: f64 = 0.0;
-                let mut out331: f64 = 0.0;
-                let mut out333: f64 = 0.0;
-                let mut out335: f64 = 0.0;
-                let mut out344: f64 = 0.0;
-                let mut out347: f64 = 0.0;
-                let mut out348: f64 = 0.0;
-                let mut out361: f64 = 0.0;
-                let mut out362: f64 = 0.0;
+                let v22 = 0e0f64;
+                let v24 = 0e0f64;
+                let v26 = parameters[63];
+                let v28 = 2e0f64;
+                let v29 = parameters[64];
+                let v31 = 0e0f64;
+                let v36 = parameters[46];
+                let v38 = parameters[66];
+                let v40 = parameters[71];
+                let v43 = parameters[72];
+                let v46 = parameters[21];
+                let v48 = parameters[92];
+                let v49 = 1e0f64;
+                let v51 = parameters[69];
+                let v53 = parameters[90];
+                let v55 = parameters[76];
+                let v59 = 5e-1f64;
+                let v60 = parameters[73];
+                let v62 = -5e-1f64;
+                let v64 = parameters[74];
+                let v66 = parameters[79];
+                let v68 = parameters[80];
+                let v70 = -5e-1f64;
+                let v72 = parameters[81];
+                let v74 = parameters[83];
+                let v76 = parameters[60];
+                let v78 = parameters[27];
+                let v79 = parameters[84];
+                let mut out30: f64 = 0.0;
+                let mut out32: f64 = 0.0;
+                let mut out33: f64 = 0.0;
+                let mut out34: f64 = 0.0;
+                let mut out35: f64 = 0.0;
+                let mut out37: f64 = 0.0;
+                let mut out54: f64 = 0.0;
+                let mut out57: f64 = 0.0;
+                let mut out61: f64 = 0.0;
+                let mut out63: f64 = 0.0;
+                let mut out65: f64 = 0.0;
+                let mut out69: f64 = 0.0;
+                let mut out71: f64 = 0.0;
+                let mut out73: f64 = 0.0;
+                let mut out80: f64 = 0.0;
                 let v2 = if v0 != v1 { 1.0 } else { 0.0 };
                 let v5 = if v3 != v4 { 1.0 } else { 0.0 };
                 let v7 = if v3 < v6 { 1.0 } else { 0.0 };
@@ -296,320 +303,417 @@ impl Instance {
                 let v16 = v15 * v15;
                 let v19 = v17 + v18;
                 let v21 = v20 + v3;
-                let v23 = v22 * v15;
-                let v25 = v24 * v15;
-                let v27 = if v23 < v26 { 1.0 } else { 0.0 };
-                let v29 = if v23 > v28 { 1.0 } else { 0.0 };
-                let v31 = if v25 < v30 { 1.0 } else { 0.0 };
-                let v33 = if v25 > v32 { 1.0 } else { 0.0 };
-                let v37 = v36 * v16;
-                let v39 = v38 * v15;
-                let v41 = v40 * v16;
-                let v43 = v42 * v15;
-                let v44 = v25 * v23;
-                let v49 = if v47 > v48 { 1.0 } else { 0.0 };
-                let v51 = if v50 > v48 { 1.0 } else { 0.0 };
-                let v52 = v49 + v51;
-                let v54 = (v45 * v25) + (v52 * v23);
-                let v56 = v55 * v52;
-                let v79 = (((v23 + v62) + (v64 / v23)) + (v72 * (v3 - (((-v23) / v68).exp())))) / (v3 - ((v75 * (v34 * v15)) / v44));
-                let v80 = v25 + (v56 * (v59 + (v57 / v23)));
-                let v82: f64;
-                let v83: f64;
-                if v81 != 0.0 {
-                    v82 = v80;
-                    v83 = v79;
+                let v23 = v22 * v16;
+                let v25 = v24 * v16;
+                let v27 = if v26 > v3 { 1.0 } else { 0.0 };
+                if v27 != 0.0 {
+                    let v30 = v28 * v29;
+                    out30 = v30;
                 } else {
-                    v82 = v25;
-                    v83 = v23;
-                }
-                let v125: f64;
-                let v126: f64;
-                let v127: f64;
-                if v84 != 0.0 {
-                    let v93 = v92 * v82;
-                    let v96 = (v79 + (v85 * v86)) + ((v89 * v90) / (v93.sqrt()));
-                    let v107 = (v80 + (v97 * v98)) + ((v101 * v102) / ((v92 * v83).sqrt()));
-                    let v119 = (v8 * ((v108 * v109) + ((v111 * v112) / ((v93 * v83).sqrt())))).exp();
-                    v125 = v96;
-                    v126 = v107;
-                    v127 = v119;
-                } else {
-                    let v124 = if (if v85 != v48 { 1.0 } else { 0.0 }) != 0.0 && (if (if v90 > v48 { 1.0 } else { 0.0 }) != 0.0 || (if v86 > v48 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
-                    out124 = v124;
-                    let v138: f64;
-                    if v124 != 0.0 {
-                        let v131 = v90 / ((v92 * v82).sqrt());
-                        let v137 = v79 + (v85 * (((v86 * v86) + (v131 * v131)).sqrt()));
-                        v138 = v137;
-                    } else {
-                        v138 = v79;
-                    }
-                    let v143 = if (if v97 != v48 { 1.0 } else { 0.0 }) != 0.0 && (if (if v102 > v48 { 1.0 } else { 0.0 }) != 0.0 || (if v98 > v48 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
-                    out143 = v143;
-                    let v153: f64;
-                    if v143 != 0.0 {
-                        let v146 = v102 / ((v92 * v83).sqrt());
-                        let v152 = v80 + (v97 * (((v98 * v98) + (v146 * v146)).sqrt()));
-                        v153 = v152;
-                    } else {
-                        v153 = v80;
-                    }
-                    let v158 = if (if v108 != v48 { 1.0 } else { 0.0 }) != 0.0 && (if (if v112 > v48 { 1.0 } else { 0.0 }) != 0.0 || (if v109 > v48 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
-                    out158 = v158;
-                    let v170: f64;
-                    if v158 != 0.0 {
-                        let v162 = v112 / (((v92 * v82) * v83).sqrt());
-                        let v169 = ((v8 * v108) * (((v109 * v109) + (v162 * v162)).sqrt())).exp();
-                        v170 = v169;
-                    } else {
-                        v170 = v3;
-                    }
-                    v125 = v138;
-                    v126 = v153;
-                    v127 = v170;
-                }
-                let v128 = if v125 <= v48 { 1.0 } else { 0.0 };
-                let v171 = if v126 <= v48 { 1.0 } else { 0.0 };
-                let v173 = v126 + v172;
-                let v174 = if v173 <= v48 { 1.0 } else { 0.0 };
-                let v176: f64;
-                let v177: f64;
-                if v175 != 0.0 {
-                    v176 = v125;
-                    v177 = v126;
-                } else {
-                    v176 = v23;
-                    v177 = v25;
-                }
-                let v180 = v3 / (v176.powf(v178));
-                let v183 = v3 / (v177.powf(v181));
-                let v197 = ((v187 * (v3 + (v184 * v180))) * (v3 + (v189 * v183))) * (v3 + ((v193 * v180) * v183));
-                let v210: f64;
-                if v198 != 0.0 {
-                    v210 = v48;
-                } else {
-                    let v209 = v208 + ((((v199 * v177) + (v201 * v176)) + v204) / (v177 * v176));
-                    v210 = v209;
-                }
-                let v212 = if v211 > v3 { 1.0 } else { 0.0 };
-                if v212 != 0.0 {
-                    let v214 = v45 * v213;
-                    out214 = v214;
-                } else {
-                    let v215 = if v211 > v48 { 1.0 } else { 0.0 };
-                    out215 = v215;
-                    if v215 != 0.0 {
-                        let v221 = v45 * v213;
-                        out221 = v221;
+                    let v32 = if v26 > v31 { 1.0 } else { 0.0 };
+                    out32 = v32;
+                    if v32 != 0.0 {
+                        let v33 = v28 * v29;
+                        out33 = v33;
                     } else {
                     }
                 }
-                let v220 = v219 / (v3 + (v216 / v126));
-                if v212 != 0.0 {
-                    let v222 = if v211 > v45 { 1.0 } else { 0.0 };
-                    out222 = v222;
-                    if v222 != 0.0 {
-                        let v228 = -v220;
-                        out228 = v228;
+                if v27 != 0.0 {
+                    let v34 = if v26 > v28 { 1.0 } else { 0.0 };
+                    out34 = v34;
+                } else {
+                    let v35 = if v26 > v31 { 1.0 } else { 0.0 };
+                    out35 = v35;
+                    if v35 != 0.0 {
+                        let v37 = v28 * v36;
+                        out37 = v37;
                     } else {
                     }
-                } else {
-                    let v223 = if v211 > v48 { 1.0 } else { 0.0 };
-                    out223 = v223;
-                    let v236: f64;
-                    if v223 != 0.0 {
-                        let v230 = v45 * v229;
-                        out230 = v230;
-                        let v233 = (v231 * v220) * v220;
-                        v236 = v233;
-                    } else {
-                        let v235 = (v231 * v220) * v220;
-                        v236 = v235;
-                    }
-                    out236 = v236;
                 }
-                let v227 = (v224 * v127) * (v126 / v125);
-                let v238 = if v237 > v48 { 1.0 } else { 0.0 };
-                let v239 = if v238 != 0.0 && v49 != 0.0 { 1.0 } else { 0.0 };
-                let v244: f64;
-                if v239 != 0.0 {
-                    let v243 = (v237 + (v240 / v23)) / v47;
-                    v244 = v243;
-                } else {
-                    v244 = v48;
-                }
-                let v245 = if v238 != 0.0 && v51 != 0.0 { 1.0 } else { 0.0 };
-                let v249: f64;
-                if v245 != 0.0 {
-                    let v248 = (v237 + (v240 / v23)) / v50;
-                    v249 = v248;
-                } else {
-                    v249 = v48;
-                }
-                let v271: f64;
-                if v198 != 0.0 {
-                    v271 = v48;
-                } else {
-                    let v257 = v47 + v50;
-                    let v260 = ((v252 + (v250 * v54)) + (v254 * v44)) + (v258 * v257);
-                    out260 = v260;
-                    let v270 = ((v263 + (v261 * v54)) + (v265 * v44)) + (v268 * v257);
-                    v271 = v270;
-                }
-                let v282 = (v274 + (v272 / v125)) + ((v56 * (v278 + (v276 / v125))) / v126);
-                let v293 = (v285 + (v283 / v125)) + ((v56 * (v289 + (v287 / v125))) / v126);
-                let v298 = (v294 * v37) + (v296 * v39);
-                let v301 = (v294 * v41) + (v296 * v43);
-                let v306 = (v302 * v37) + (v304 * v39);
-                let v309 = (v302 * v41) + (v304 * v43);
-                let v311 = -v310;
-                let v314 = v312 - v313;
-                let v316 = if v315 > v48 { 1.0 } else { 0.0 };
-                if v316 != 0.0 {
-                    let v318 = -v317;
-                    out318 = v318;
+                let v39 = if v38 > v31 { 1.0 } else { 0.0 };
+                let v41 = v40 * v23;
+                let v42 = v40 * v25;
+                let v44 = v43 * v23;
+                let v45 = v43 * v25;
+                let v47 = -v46;
+                let v50 = v48 - v49;
+                let v52 = if v51 > v31 { 1.0 } else { 0.0 };
+                if v52 != 0.0 {
+                    let v54 = -v53;
+                    out54 = v54;
                 } else {
                 }
-                let v320 = if v319 > v48 { 1.0 } else { 0.0 };
-                if v320 != 0.0 {
-                    let v321 = -v317;
-                    out321 = v321;
+                let v56 = if v55 > v31 { 1.0 } else { 0.0 };
+                if v56 != 0.0 {
+                    let v57 = -v53;
+                    out57 = v57;
                 } else {
                 }
-                let v322 = if v302 > v48 { 1.0 } else { 0.0 };
-                if v322 != 0.0 {
-                    let v324 = v55 * v323;
-                    out324 = v324;
-                    let v326 = v325 * v323;
-                    out326 = v326;
-                    let v328 = v327 - v313;
-                    out328 = v328;
+                let v58 = if v43 > v31 { 1.0 } else { 0.0 };
+                if v58 != 0.0 {
+                    let v61 = v59 * v60;
+                    out61 = v61;
+                    let v63 = v62 * v60;
+                    out63 = v63;
+                    let v65 = v64 - v49;
+                    out65 = v65;
                 } else {
                 }
-                let v329 = if v304 > v48 { 1.0 } else { 0.0 };
-                if v329 != 0.0 {
-                    let v331 = v55 * v330;
-                    out331 = v331;
-                    let v333 = v332 * v330;
-                    out333 = v333;
-                    let v335 = v334 - v313;
-                    out335 = v335;
+                let v67 = if v66 > v31 { 1.0 } else { 0.0 };
+                if v67 != 0.0 {
+                    let v69 = v59 * v68;
+                    out69 = v69;
+                    let v71 = v70 * v68;
+                    out71 = v71;
+                    let v73 = v72 - v49;
+                    out73 = v73;
                 } else {
                 }
-                let v337 = if v336 > v48 { 1.0 } else { 0.0 };
-                if v337 != 0.0 {
-                    let v344 = v342 / v343;
-                    out344 = v344;
+                let v75 = if v74 > v31 { 1.0 } else { 0.0 };
+                if v75 != 0.0 {
+                    let v80 = v78 / v79;
+                    out80 = v80;
                 } else {
                 }
-                let v340 = if v198 == 0.0 { 1.0 } else { 0.0 };
-                let v341 = if (if v338 > v48 { 1.0 } else { 0.0 }) != 0.0 && v340 != 0.0 { 1.0 } else { 0.0 };
-                if v341 != 0.0 {
-                    let v347 = (v231 * v345) * v345;
-                    out347 = v347;
-                    let v348 = v45 * v345;
-                    out348 = v348;
-                } else {
-                }
-                let v349 = if v306 > v48 { 1.0 } else { 0.0 };
-                let v350 = if v309 > v48 { 1.0 } else { 0.0 };
-                let v353 = if (v244 / v92) <= v352 { 1.0 } else { 0.0 };
-                let v355 = if (v249 / v92) <= v352 { 1.0 } else { 0.0 };
-                let v357: f64;
-                let v358: f64;
-                let v359: f64;
-                let v360: f64;
-                if v356 != 0.0 {
-                    let v361 = if v244 > v48 { 1.0 } else { 0.0 };
-                    out361 = v361;
-                    let v362 = if v249 > v48 { 1.0 } else { 0.0 };
-                    out362 = v362;
-                    v357 = v363;
-                    v358 = v364;
-                    v359 = v365;
-                    v360 = v366;
-                } else {
-                    v357 = v48;
-                    v358 = v48;
-                    v359 = v48;
-                    v360 = v48;
-                }
-            [v2, v5, v7, v19, v21, v27, v29, v31, v33, v37, v39, v41, v43, out124, out143, out158, v125, v128, v171, v173, v174, v197, v210, v212, out214, out215, out221, out222, out228, out223, out230, v227, v239, v245, out260, v282, v293, v298, v301, v311, v316, out318, v320, out321, v322, out324, out326, v329, out331, out333, v337, out344, v340, v341, out347, out348, out236, v349, v350, v271, v244, v353, v249, v355, out361, out362, v357, v358, v359, v360, v314, out328, out335]
+                let v77 = if v76 > v31 { 1.0 } else { 0.0 };
+            [v2, v5, v7, v15, v19, v21, v23, v25, v27, out30, out32, out33, out34, out35, out37, v39, v41, v42, v44, v45, v47, v52, out54, v56, out57, v58, out61, out63, v67, out69, out71, v75, out80, v77, v50, out65, out73]
         };
-        self.canonical_staged[58] = produced[0];
-        self.canonical_staged[59] = produced[1];
-        self.canonical_staged[60] = produced[2];
-        self.canonical_staged[1] = produced[3];
-        self.canonical_staged[0] = produced[4];
-        self.canonical_staged[65] = produced[5];
-        self.canonical_staged[66] = produced[6];
-        self.canonical_staged[67] = produced[7];
-        self.canonical_staged[68] = produced[8];
-        self.canonical_staged[18] = produced[9];
-        self.canonical_staged[19] = produced[10];
-        self.canonical_staged[20] = produced[11];
-        self.canonical_staged[21] = produced[12];
-        self.canonical_staged[69] = produced[13];
-        self.canonical_staged[71] = produced[14];
-        self.canonical_staged[72] = produced[15];
-        self.canonical_staged[47] = produced[16];
-        self.canonical_staged[70] = produced[17];
-        self.canonical_staged[73] = produced[18];
-        self.canonical_staged[29] = produced[19];
-        self.canonical_staged[74] = produced[20];
-        self.canonical_staged[2] = produced[21];
-        self.canonical_staged[3] = produced[22];
-        self.canonical_staged[37] = produced[23];
-        self.canonical_staged[4] = produced[24];
-        self.canonical_staged[78] = produced[25];
-        self.canonical_staged[5] = produced[26];
-        self.canonical_staged[79] = produced[27];
-        self.canonical_staged[6] = produced[28];
-        self.canonical_staged[80] = produced[29];
-        self.canonical_staged[7] = produced[30];
-        self.canonical_staged[8] = produced[31];
-        self.canonical_staged[83] = produced[32];
-        self.canonical_staged[84] = produced[33];
-        self.canonical_staged[9] = produced[34];
-        self.canonical_staged[13] = produced[35];
-        self.canonical_staged[12] = produced[36];
-        self.canonical_staged[48] = produced[37];
-        self.canonical_staged[49] = produced[38];
-        self.canonical_staged[10] = produced[39];
-        self.canonical_staged[85] = produced[40];
-        self.canonical_staged[16] = produced[41];
-        self.canonical_staged[86] = produced[42];
-        self.canonical_staged[17] = produced[43];
-        self.canonical_staged[87] = produced[44];
-        self.canonical_staged[22] = produced[45];
-        self.canonical_staged[23] = produced[46];
-        self.canonical_staged[88] = produced[47];
-        self.canonical_staged[24] = produced[48];
-        self.canonical_staged[25] = produced[49];
-        self.canonical_staged[89] = produced[50];
-        self.canonical_staged[26] = produced[51];
-        self.canonical_staged[41] = produced[52];
-        self.canonical_staged[90] = produced[53];
-        self.canonical_staged[27] = produced[54];
-        self.canonical_staged[28] = produced[55];
-        self.canonical_staged[82] = produced[56];
-        self.canonical_staged[97] = produced[57];
-        self.canonical_staged[98] = produced[58];
-        self.canonical_staged[50] = produced[59];
-        self.canonical_staged[51] = produced[60];
-        self.canonical_staged[99] = produced[61];
-        self.canonical_staged[52] = produced[62];
-        self.canonical_staged[100] = produced[63];
-        self.canonical_staged[102] = produced[64];
-        self.canonical_staged[103] = produced[65];
-        self.canonical_staged[104] = produced[66];
-        self.canonical_staged[105] = produced[67];
-        self.canonical_staged[106] = produced[68];
-        self.canonical_staged[107] = produced[69];
-        self.canonical_staged[54] = produced[70];
-        self.canonical_staged[55] = produced[71];
-        self.canonical_staged[56] = produced[72];
+        let values = canonical_model_cache_intern(key, Arc::new(produced));
+        self.canonical_install_model_values(values);
+    }
+
+    fn canonical_instance_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
+        if self.canonical_instance_valid {
+            return;
+        }
+        let produced: [f64; 43] = {
+            let parameters = &self.params.values;
+            let multiplicity = self.multiplicity;
+            let staged = &*self.canonical_staged;
+                let v0 = 1e0f64;
+                let v1 = parameters[0];
+                let v2 = staged[2];
+                let v4 = parameters[1];
+                let v6 = parameters[31];
+                let v8 = parameters[32];
+                let v10 = parameters[29];
+                let v12 = parameters[30];
+                let v14 = parameters[2];
+                let v16 = parameters[4];
+                let v18 = parameters[7];
+                let v21 = 2e0f64;
+                let v23 = parameters[5];
+                let v24 = 0e0f64;
+                let v26 = parameters[8];
+                let v31 = 5e-1f64;
+                let v33 = parameters[44];
+                let v35 = parameters[43];
+                let v38 = parameters[38];
+                let v40 = parameters[39];
+                let v44 = parameters[41];
+                let v48 = parameters[42];
+                let v51 = parameters[40];
+                let v57 = parameters[127];
+                let v60 = parameters[16];
+                let v61 = parameters[119];
+                let v62 = parameters[122];
+                let v65 = parameters[11];
+                let v66 = parameters[125];
+                let v68 = multiplicity;
+                let v73 = parameters[120];
+                let v74 = parameters[123];
+                let v77 = parameters[12];
+                let v78 = parameters[126];
+                let v84 = parameters[118];
+                let v85 = parameters[121];
+                let v87 = parameters[10];
+                let v88 = parameters[124];
+                let v94 = 1e-2f64;
+                let v149 = parameters[45];
+                let v152 = parameters[53];
+                let v155 = parameters[56];
+                let v158 = parameters[58];
+                let v161 = parameters[55];
+                let v164 = parameters[54];
+                let v166 = parameters[57];
+                let v170 = parameters[59];
+                let v175 = parameters[15];
+                let v176 = parameters[50];
+                let v178 = parameters[51];
+                let v181 = parameters[52];
+                let v185 = parameters[49];
+                let v188 = staged[44];
+                let v189 = parameters[48];
+                let v192 = parameters[47];
+                let v194 = staged[86];
+                let v195 = staged[87];
+                let v196 = parameters[37];
+                let v201 = 4e0f64;
+                let v207 = staged[10];
+                let v209 = parameters[67];
+                let v211 = parameters[66];
+                let v220 = parameters[111];
+                let v222 = parameters[110];
+                let v224 = parameters[112];
+                let v228 = parameters[113];
+                let v231 = parameters[115];
+                let v233 = parameters[114];
+                let v235 = parameters[116];
+                let v238 = parameters[117];
+                let v242 = parameters[97];
+                let v244 = parameters[93];
+                let v246 = parameters[99];
+                let v248 = parameters[95];
+                let v253 = parameters[98];
+                let v255 = parameters[94];
+                let v257 = parameters[100];
+                let v259 = parameters[96];
+                let v264 = parameters[78];
+                let v266 = staged[12];
+                let v269 = staged[13];
+                let v271 = parameters[79];
+                let v273 = staged[14];
+                let v276 = staged[15];
+                let v279 = staged[33];
+                let v281 = parameters[65];
+                let v288 = parameters[26];
+                let v292 = parameters[13];
+                let v299 = 0e0f64;
+                let v300 = 0e0f64;
+                let v301 = 0e0f64;
+                let v302 = 0e0f64;
+                let mut out101: f64 = 0.0;
+                let mut out120: f64 = 0.0;
+                let mut out135: f64 = 0.0;
+                let mut out200: f64 = 0.0;
+                let mut out206: f64 = 0.0;
+                let mut out230: f64 = 0.0;
+                let mut out283: f64 = 0.0;
+                let mut out284: f64 = 0.0;
+                let mut out297: f64 = 0.0;
+                let mut out298: f64 = 0.0;
+                let v3 = v1 * v2;
+                let v5 = v4 * v2;
+                let v7 = if v3 < v6 { 1.0 } else { 0.0 };
+                let v9 = if v3 > v8 { 1.0 } else { 0.0 };
+                let v11 = if v5 < v10 { 1.0 } else { 0.0 };
+                let v13 = if v5 > v12 { 1.0 } else { 0.0 };
+                let v17 = v16 * v2;
+                let v19 = v18 * v2;
+                let v20 = v5 * v3;
+                let v25 = if v23 > v24 { 1.0 } else { 0.0 };
+                let v27 = if v26 > v24 { 1.0 } else { 0.0 };
+                let v28 = v25 + v27;
+                let v30 = (v21 * v5) + (v28 * v3);
+                let v32 = v31 * v28;
+                let v55 = (((v3 + v38) + (v40 / v3)) + (v48 * (v0 - (((-v3) / v44).exp())))) / (v0 - ((v51 * (v14 * v2)) / v20));
+                let v56 = v5 + (v32 * (v35 + (v33 / v3)));
+                let v58: f64;
+                let v59: f64;
+                if v57 != 0.0 {
+                    v58 = v56;
+                    v59 = v55;
+                } else {
+                    v58 = v5;
+                    v59 = v3;
+                }
+                let v102: f64;
+                let v103: f64;
+                let v104: f64;
+                if v60 != 0.0 {
+                    let v69 = v68 * v58;
+                    let v72 = (v55 + (v61 * v62)) + ((v65 * v66) / (v69.sqrt()));
+                    let v83 = (v56 + (v73 * v74)) + ((v77 * v78) / ((v68 * v59).sqrt()));
+                    let v96 = (v94 * ((v84 * v85) + ((v87 * v88) / ((v69 * v59).sqrt())))).exp();
+                    v102 = v72;
+                    v103 = v83;
+                    v104 = v96;
+                } else {
+                    let v101 = if (if v61 != v24 { 1.0 } else { 0.0 }) != 0.0 && (if (if v66 > v24 { 1.0 } else { 0.0 }) != 0.0 || (if v62 > v24 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+                    out101 = v101;
+                    let v115: f64;
+                    if v101 != 0.0 {
+                        let v108 = v66 / ((v68 * v58).sqrt());
+                        let v114 = v55 + (v61 * (((v62 * v62) + (v108 * v108)).sqrt()));
+                        v115 = v114;
+                    } else {
+                        v115 = v55;
+                    }
+                    let v120 = if (if v73 != v24 { 1.0 } else { 0.0 }) != 0.0 && (if (if v78 > v24 { 1.0 } else { 0.0 }) != 0.0 || (if v74 > v24 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+                    out120 = v120;
+                    let v130: f64;
+                    if v120 != 0.0 {
+                        let v123 = v78 / ((v68 * v59).sqrt());
+                        let v129 = v56 + (v73 * (((v74 * v74) + (v123 * v123)).sqrt()));
+                        v130 = v129;
+                    } else {
+                        v130 = v56;
+                    }
+                    let v135 = if (if v84 != v24 { 1.0 } else { 0.0 }) != 0.0 && (if (if v88 > v24 { 1.0 } else { 0.0 }) != 0.0 || (if v85 > v24 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+                    out135 = v135;
+                    let v147: f64;
+                    if v135 != 0.0 {
+                        let v139 = v88 / (((v68 * v58) * v59).sqrt());
+                        let v146 = ((v94 * v84) * (((v85 * v85) + (v139 * v139)).sqrt())).exp();
+                        v147 = v146;
+                    } else {
+                        v147 = v0;
+                    }
+                    v102 = v115;
+                    v103 = v130;
+                    v104 = v147;
+                }
+                let v105 = if v102 <= v24 { 1.0 } else { 0.0 };
+                let v148 = if v103 <= v24 { 1.0 } else { 0.0 };
+                let v150 = v103 + v149;
+                let v151 = if v150 <= v24 { 1.0 } else { 0.0 };
+                let v153: f64;
+                let v154: f64;
+                if v152 != 0.0 {
+                    v153 = v102;
+                    v154 = v103;
+                } else {
+                    v153 = v3;
+                    v154 = v5;
+                }
+                let v157 = v0 / (v153.powf(v155));
+                let v160 = v0 / (v154.powf(v158));
+                let v174 = ((v164 * (v0 + (v161 * v157))) * (v0 + (v166 * v160))) * (v0 + ((v170 * v157) * v160));
+                let v187: f64;
+                if v175 != 0.0 {
+                    v187 = v24;
+                } else {
+                    let v186 = v185 + ((((v176 * v154) + (v178 * v153)) + v181) / (v154 * v153));
+                    v187 = v186;
+                }
+                let v193 = v192 / (v0 + (v189 / v103));
+                if v188 != 0.0 {
+                    if v194 != 0.0 {
+                        let v200 = -v193;
+                        out200 = v200;
+                    } else {
+                    }
+                } else {
+                    let v206: f64;
+                    if v195 != 0.0 {
+                        let v203 = (v201 * v193) * v193;
+                        v206 = v203;
+                    } else {
+                        let v205 = (v201 * v193) * v193;
+                        v206 = v205;
+                    }
+                    out206 = v206;
+                }
+                let v199 = (v196 * v104) * (v103 / v102);
+                let v208 = if v207 != 0.0 && v25 != 0.0 { 1.0 } else { 0.0 };
+                let v214: f64;
+                if v208 != 0.0 {
+                    let v213 = (v211 + (v209 / v3)) / v23;
+                    v214 = v213;
+                } else {
+                    v214 = v24;
+                }
+                let v215 = if v207 != 0.0 && v27 != 0.0 { 1.0 } else { 0.0 };
+                let v219: f64;
+                if v215 != 0.0 {
+                    let v218 = (v211 + (v209 / v3)) / v26;
+                    v219 = v218;
+                } else {
+                    v219 = v24;
+                }
+                let v241: f64;
+                if v175 != 0.0 {
+                    v241 = v24;
+                } else {
+                    let v227 = v23 + v26;
+                    let v230 = ((v222 + (v220 * v30)) + (v224 * v20)) + (v228 * v227);
+                    out230 = v230;
+                    let v240 = ((v233 + (v231 * v30)) + (v235 * v20)) + (v238 * v227);
+                    v241 = v240;
+                }
+                let v252 = (v244 + (v242 / v102)) + ((v32 * (v248 + (v246 / v102))) / v103);
+                let v263 = (v255 + (v253 / v102)) + ((v32 * (v259 + (v257 / v102))) / v103);
+                let v267 = v266 + (v264 * v17);
+                let v270 = v269 + (v264 * v19);
+                let v274 = v273 + (v271 * v17);
+                let v277 = v276 + (v271 * v19);
+                let v278 = if v175 == 0.0 { 1.0 } else { 0.0 };
+                let v280 = if v279 != 0.0 && v278 != 0.0 { 1.0 } else { 0.0 };
+                if v280 != 0.0 {
+                    let v283 = (v201 * v281) * v281;
+                    out283 = v283;
+                    let v284 = v21 * v281;
+                    out284 = v284;
+                } else {
+                }
+                let v285 = if v274 > v24 { 1.0 } else { 0.0 };
+                let v286 = if v277 > v24 { 1.0 } else { 0.0 };
+                let v289 = if (v214 / v68) <= v288 { 1.0 } else { 0.0 };
+                let v291 = if (v219 / v68) <= v288 { 1.0 } else { 0.0 };
+                let v293: f64;
+                let v294: f64;
+                let v295: f64;
+                let v296: f64;
+                if v292 != 0.0 {
+                    let v297 = if v214 > v24 { 1.0 } else { 0.0 };
+                    out297 = v297;
+                    let v298 = if v219 > v24 { 1.0 } else { 0.0 };
+                    out298 = v298;
+                    v293 = v299;
+                    v294 = v300;
+                    v295 = v301;
+                    v296 = v302;
+                } else {
+                    v293 = v24;
+                    v294 = v24;
+                    v295 = v24;
+                    v296 = v24;
+                }
+            [v7, v9, v11, v13, v17, v19, out101, out120, out135, v102, v105, v148, v150, v151, v174, v187, out200, v199, v208, v215, out230, v252, v263, v267, v270, v278, v280, out283, out284, out206, v285, v286, v241, v214, v289, v219, v291, out297, out298, v293, v294, v295, v296]
+        };
+        self.canonical_staged[72] = produced[0];
+        self.canonical_staged[73] = produced[1];
+        self.canonical_staged[74] = produced[2];
+        self.canonical_staged[75] = produced[3];
+        self.canonical_staged[25] = produced[4];
+        self.canonical_staged[27] = produced[5];
+        self.canonical_staged[76] = produced[6];
+        self.canonical_staged[78] = produced[7];
+        self.canonical_staged[79] = produced[8];
+        self.canonical_staged[54] = produced[9];
+        self.canonical_staged[77] = produced[10];
+        self.canonical_staged[80] = produced[11];
+        self.canonical_staged[36] = produced[12];
+        self.canonical_staged[81] = produced[13];
+        self.canonical_staged[3] = produced[14];
+        self.canonical_staged[4] = produced[15];
+        self.canonical_staged[7] = produced[16];
+        self.canonical_staged[9] = produced[17];
+        self.canonical_staged[90] = produced[18];
+        self.canonical_staged[91] = produced[19];
+        self.canonical_staged[11] = produced[20];
+        self.canonical_staged[19] = produced[21];
+        self.canonical_staged[18] = produced[22];
+        self.canonical_staged[55] = produced[23];
+        self.canonical_staged[56] = produced[24];
+        self.canonical_staged[48] = produced[25];
+        self.canonical_staged[97] = produced[26];
+        self.canonical_staged[34] = produced[27];
+        self.canonical_staged[35] = produced[28];
+        self.canonical_staged[89] = produced[29];
+        self.canonical_staged[104] = produced[30];
+        self.canonical_staged[105] = produced[31];
+        self.canonical_staged[57] = produced[32];
+        self.canonical_staged[58] = produced[33];
+        self.canonical_staged[106] = produced[34];
+        self.canonical_staged[59] = produced[35];
+        self.canonical_staged[107] = produced[36];
+        self.canonical_staged[109] = produced[37];
+        self.canonical_staged[110] = produced[38];
+        self.canonical_staged[111] = produced[39];
+        self.canonical_staged[112] = produced[40];
+        self.canonical_staged[113] = produced[41];
+        self.canonical_staged[114] = produced[42];
         self.canonical_instance_valid = true;
     }
 
@@ -641,36 +745,36 @@ impl Instance {
                 let v26 = staged[1];
                 let v34 = parameters[104];
                 let v36 = parameters[103];
-                let v40 = staged[2];
+                let v40 = staged[3];
                 let v42 = 1e-1f64;
                 let v46 = 1e4f64;
                 let v49 = parameters[15];
-                let v50 = staged[3];
+                let v50 = staged[4];
                 let v52 = 0e0f64;
                 let v57 = 5e-1f64;
-                let v61 = staged[37];
-                let v64 = staged[4];
+                let v61 = staged[44];
+                let v64 = staged[5];
                 let v67 = 1.666666666666667e-1f64;
-                let v70 = staged[78];
-                let v73 = staged[5];
+                let v70 = staged[85];
+                let v73 = staged[6];
                 let v78 = parameters[46];
-                let v80 = staged[79];
-                let v81 = staged[80];
-                let v86 = staged[8];
+                let v80 = staged[86];
+                let v81 = staged[87];
+                let v86 = staged[9];
                 let v88 = 1e-99f64;
                 let v90 = 5.5e-1f64;
-                let v92 = staged[6];
+                let v92 = staged[7];
                 let v97 = 1.1e0f64;
-                let v100 = staged[7];
-                let v104 = staged[82];
+                let v100 = staged[8];
+                let v104 = staged[89];
                 let v105 = parameters[109];
-                let v107 = staged[9];
+                let v107 = staged[11];
                 let v110 = parameters[63];
                 let v112 = -4e-1f64;
                 let v114 = 1e-9f64;
                 let v117 = 2e0f64;
                 let v120 = parameters[14];
-                let v122 = staged[41];
+                let v122 = staged[48];
                 let v142 = 1e0f64;
                 let mut out19: f64 = 0.0;
                 let mut out53: f64 = 0.0;
@@ -862,41 +966,41 @@ impl Instance {
                 }
             [v3, v7, v9, v11, out19, v25, v43, v44, v51, out53, v55, v60, v56, v87, v89, out111, v71, v82, out113, v72, v116, v83, out118, v109, v119, v123, out124, out130, out132, out133, out135, out141, out144, v146, out143]
         };
-        self.canonical_staged[11] = produced[0];
-        self.canonical_staged[61] = produced[1];
-        self.canonical_staged[62] = produced[2];
-        self.canonical_staged[63] = produced[3];
-        self.canonical_staged[64] = produced[4];
-        self.canonical_staged[38] = produced[5];
-        self.canonical_staged[75] = produced[6];
-        self.canonical_staged[32] = produced[7];
-        self.canonical_staged[76] = produced[8];
-        self.canonical_staged[77] = produced[9];
-        self.canonical_staged[34] = produced[10];
-        self.canonical_staged[36] = produced[11];
-        self.canonical_staged[39] = produced[12];
-        self.canonical_staged[15] = produced[13];
-        self.canonical_staged[81] = produced[14];
-        self.canonical_staged[14] = produced[15];
-        self.canonical_staged[30] = produced[16];
-        self.canonical_staged[31] = produced[17];
-        self.canonical_staged[33] = produced[18];
-        self.canonical_staged[35] = produced[19];
-        self.canonical_staged[91] = produced[20];
-        self.canonical_staged[40] = produced[21];
-        self.canonical_staged[92] = produced[22];
-        self.canonical_staged[42] = produced[23];
-        self.canonical_staged[101] = produced[24];
-        self.canonical_staged[93] = produced[25];
-        self.canonical_staged[94] = produced[26];
-        self.canonical_staged[95] = produced[27];
-        self.canonical_staged[43] = produced[28];
-        self.canonical_staged[44] = produced[29];
-        self.canonical_staged[96] = produced[30];
-        self.canonical_staged[45] = produced[31];
-        self.canonical_staged[46] = produced[32];
-        self.canonical_staged[53] = produced[33];
-        self.canonical_staged[57] = produced[34];
+        self.canonical_staged[17] = produced[0];
+        self.canonical_staged[68] = produced[1];
+        self.canonical_staged[69] = produced[2];
+        self.canonical_staged[70] = produced[3];
+        self.canonical_staged[71] = produced[4];
+        self.canonical_staged[45] = produced[5];
+        self.canonical_staged[82] = produced[6];
+        self.canonical_staged[39] = produced[7];
+        self.canonical_staged[83] = produced[8];
+        self.canonical_staged[84] = produced[9];
+        self.canonical_staged[41] = produced[10];
+        self.canonical_staged[43] = produced[11];
+        self.canonical_staged[46] = produced[12];
+        self.canonical_staged[21] = produced[13];
+        self.canonical_staged[88] = produced[14];
+        self.canonical_staged[20] = produced[15];
+        self.canonical_staged[37] = produced[16];
+        self.canonical_staged[38] = produced[17];
+        self.canonical_staged[40] = produced[18];
+        self.canonical_staged[42] = produced[19];
+        self.canonical_staged[98] = produced[20];
+        self.canonical_staged[47] = produced[21];
+        self.canonical_staged[99] = produced[22];
+        self.canonical_staged[49] = produced[23];
+        self.canonical_staged[108] = produced[24];
+        self.canonical_staged[100] = produced[25];
+        self.canonical_staged[101] = produced[26];
+        self.canonical_staged[102] = produced[27];
+        self.canonical_staged[50] = produced[28];
+        self.canonical_staged[51] = produced[29];
+        self.canonical_staged[103] = produced[30];
+        self.canonical_staged[52] = produced[31];
+        self.canonical_staged[53] = produced[32];
+        self.canonical_staged[60] = produced[33];
+        self.canonical_staged[64] = produced[34];
         self.canonical_temperature = temperature;
         self.canonical_thermal_voltage = thermal_voltage;
         self.canonical_temperature_valid = true;
@@ -911,6 +1015,7 @@ impl Instance {
     }
 
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
+        self.canonical_model_stage(ctx);
         self.canonical_instance_stage(ctx);
         self.canonical_temperature_stage(ctx);
         self.canonical_timestep_stage(ctx);
@@ -947,56 +1052,56 @@ impl Instance {
             let v2 = 1e0f64;
             let v3 = node_potentials[5];
             let v4 = node_potentials[4];
-            let v6 = Lanes([1e0f64; 1]);
-            let v8 = Lanes([1e0f64; 1]);
-            let v11 = staged[10];
+            let v6 = 1e0f64;
+            let v8 = 1e0f64;
+            let v11 = staged[16];
             let v14 = node_potentials[1];
-            let v16 = Lanes([1e0f64; 1]);
-            let v28 = staged[11];
+            let v16 = 1e0f64;
+            let v28 = staged[17];
             let v29 = node_potentials[3];
             let v31 = 2.7315e2f64;
             let v33 = staged[0];
             let v35 = parameters[35];
-            let v39 = Lanes([1e0f64; 1]);
+            let v39 = 1e0f64;
             let v42 = parameters[36];
             let v48 = 1.3806505e-23f64;
             let v51 = 1.60217653e-19f64;
             let v54 = staged[1];
-            let v58 = staged[12];
-            let v61 = staged[13];
+            let v58 = staged[18];
+            let v61 = staged[19];
             let v68 = 1.1e-1f64;
             let v71 = -1e0f64;
             let v80 = 1e-2f64;
             let v82 = 1e1f64;
             let v88 = 1e-1f64;
             let v94 = parameters[63];
-            let v95 = staged[14];
-            let v102 = staged[15];
+            let v95 = staged[20];
+            let v102 = staged[21];
             let v111 = parameters[102];
             let v114 = parameters[101];
             let v121 = 1.1e-1f64;
             let v134 = parameters[92];
-            let v136 = staged[54];
-            let v140 = staged[85];
-            let v143 = staged[16];
+            let v136 = staged[61];
+            let v140 = staged[92];
+            let v143 = staged[22];
             let v151 = 1e0f64;
             let v154 = parameters[91];
             let v159 = parameters[70];
             let v164 = parameters[69];
             let v169 = parameters[27];
-            let v182 = Lanes([0e0f64; 1]);
-            let v187 = staged[86];
-            let v190 = staged[17];
+            let v182 = 0e0f64;
+            let v187 = staged[93];
+            let v190 = staged[23];
             let v204 = parameters[77];
             let v209 = parameters[76];
-            let v230 = staged[18];
-            let v233 = staged[19];
-            let v237 = staged[20];
-            let v240 = staged[21];
-            let v244 = staged[87];
+            let v230 = staged[24];
+            let v233 = staged[25];
+            let v237 = staged[26];
+            let v240 = staged[27];
+            let v244 = staged[94];
             let v249 = 2e0f64;
-            let v252 = staged[22];
-            let v261 = staged[23];
+            let v252 = staged[28];
+            let v261 = staged[29];
             let v283 = 3e0f64;
             let v296 = parameters[90];
             let v311 = 4e0f64;
@@ -1004,44 +1109,44 @@ impl Instance {
             let v321 = 5e-1f64;
             let v333 = parameters[73];
             let v338 = parameters[74];
-            let v340 = staged[55];
+            let v340 = staged[62];
             let v344 = parameters[72];
-            let v351 = staged[88];
-            let v358 = staged[24];
-            let v367 = staged[25];
+            let v351 = staged[95];
+            let v358 = staged[30];
+            let v367 = staged[31];
             let v434 = parameters[80];
             let v439 = parameters[81];
-            let v441 = staged[56];
+            let v441 = staged[63];
             let v445 = parameters[79];
             let v452 = parameters[108];
             let v455 = parameters[86];
-            let v458 = staged[89];
+            let v458 = staged[96];
             let v459 = parameters[106];
             let v462 = parameters[105];
             let v469 = parameters[83];
             let v473 = parameters[85];
-            let v480 = staged[90];
+            let v480 = staged[97];
             let v483 = parameters[107];
-            let v501 = staged[26];
+            let v501 = staged[32];
             let v510 = parameters[62];
             let v511 = 1e3f64;
-            let v522 = staged[29];
+            let v522 = staged[36];
             let v525 = 1e5f64;
             let v527 = parameters[61];
             let v534 = parameters[60];
-            let v548 = staged[27];
-            let v561 = staged[28];
+            let v548 = staged[34];
+            let v561 = staged[35];
             let v566 = parameters[65];
             let v605 = -1e0f64;
-            let v614 = staged[30];
-            let v618 = staged[31];
-            let v649 = staged[33];
-            let v655 = staged[32];
+            let v614 = staged[37];
+            let v618 = staged[38];
+            let v649 = staged[40];
+            let v655 = staged[39];
             let v660 = -4e-1f64;
             let v669 = -4e-1f64;
             let v672 = -4e-1f64;
             let v674 = Lanes([0e0f64; 3]);
-            let v677 = staged[34];
+            let v677 = staged[41];
             let v689 = -1e0f64;
             let v697 = 2.25e0f64;
             let v701 = 1.5e0f64;
@@ -1049,8 +1154,8 @@ impl Instance {
             let v784 = 9e0f64;
             let v796 = 2.7e1f64;
             let v799 = 2.5e-1f64;
-            let v813 = staged[35];
-            let v817 = staged[91];
+            let v813 = staged[42];
+            let v817 = staged[98];
             let v818 = -5e-1f64;
             let v829 = -5e-1f64;
             let v844 = 1e-6f64;
@@ -1065,78 +1170,78 @@ impl Instance {
             let v949 = -2.5e-1f64;
             let v964 = 1e-4f64;
             let v974 = -2.5e-1f64;
-            let v986 = staged[36];
+            let v986 = staged[43];
             let v1031 = 4.5e0f64;
-            let v1038 = staged[38];
-            let v1047 = staged[39];
-            let v1063 = staged[40];
+            let v1038 = staged[45];
+            let v1047 = staged[46];
+            let v1063 = staged[47];
             let v1091 = parameters[64];
             let v1217 = parameters[47];
-            let v1268 = staged[92];
+            let v1268 = staged[99];
             let v1359 = Lanes([0e0f64; 4]);
             let v1440 = Lanes([0e0f64; 3]);
             let v1593 = parameters[84];
             let v1607 = Lanes([0e0f64; 3]);
             let v1631 = node_potentials[0];
-            let v1633 = Lanes([1e0f64; 1]);
+            let v1633 = 1e0f64;
             let v1637 = branch_unknown_flows[0];
-            let v1639 = Lanes([1e0f64; 1]);
+            let v1639 = 1e0f64;
             let v1649 = node_potentials[2];
-            let v1651 = Lanes([1e0f64; 1]);
+            let v1651 = 1e0f64;
             let v1655 = branch_unknown_flows[1];
-            let v1657 = Lanes([1e0f64; 1]);
-            let v1667 = staged[93];
-            let v1831 = staged[94];
+            let v1657 = 1e0f64;
+            let v1667 = staged[100];
+            let v1831 = staged[101];
             let v1832 = 1e6f64;
             let v1835 = Lanes([0e0f64; 8]);
-            let v1846 = staged[47];
+            let v1846 = staged[54];
             let v1849 = parameters[33];
-            let v1851 = staged[42];
-            let v1856 = staged[96];
-            let v1857 = staged[43];
-            let v1861 = staged[44];
-            let v1863 = staged[57];
-            let v1868 = staged[45];
-            let v1875 = staged[46];
+            let v1851 = staged[49];
+            let v1856 = staged[103];
+            let v1857 = staged[50];
+            let v1861 = staged[51];
+            let v1863 = staged[64];
+            let v1868 = staged[52];
+            let v1875 = staged[53];
             let v1891 = parameters[34];
-            let v1898 = staged[97];
-            let v1901 = staged[98];
+            let v1898 = staged[104];
+            let v1901 = staged[105];
             let v1907 = 4e-2f64;
             let v1926 = parameters[68];
             let v1929 = parameters[75];
             let v1951 = -5e-1f64;
             let v2081 = parameters[82];
             let v2114 = -5e-1f64;
-            let v2242 = staged[48];
-            let v2248 = staged[49];
-            let v2258 = staged[50];
-            let v2261 = staged[99];
+            let v2242 = staged[55];
+            let v2248 = staged[56];
+            let v2258 = staged[57];
+            let v2261 = staged[106];
             let v2308 = -5e-1f64;
             let v2470 = -5e-1f64;
-            let v2596 = staged[51];
+            let v2596 = staged[58];
             let v2605 = Lanes([0e0f64; 3]);
             let v2614 = Lanes([0e0f64; 2]);
-            let v2619 = staged[100];
-            let v2620 = staged[52];
+            let v2619 = staged[107];
+            let v2620 = staged[59];
             let v2629 = Lanes([0e0f64; 3]);
             let v2638 = Lanes([0e0f64; 2]);
             let v2644 = ddt_scale();
             let v2650 = parameters[13];
             let v2654 = 0e0f64;
             let v2656 = 0e0f64;
-            let v2660 = staged[53];
+            let v2660 = staged[60];
             let v2667 = 1e-99f64;
             let v1 = ctx.simparam_or("gmin", v0);
             let v12 = v11 * (v3 - v4);
-            let v13 = ((Lanes([0.0, v6[0]])) - (Lanes([v8[0], 0.0]))) * v11;
+            let v13 = ((Lanes([0.0, v6])) - (Lanes([v8, 0.0]))) * v11;
             let v20 = v11 * (v14 - v4);
-            let v21 = ((Lanes([v16[0], 0.0])) - (Lanes([0.0, v8[0]]))) * v11;
+            let v21 = ((Lanes([v16, 0.0])) - (Lanes([0.0, v8]))) * v11;
             let v26 = v11 * (v14 - v3);
-            let v27 = ((Lanes([v16[0], 0.0])) - (Lanes([0.0, v6[0]]))) * v11;
+            let v27 = ((Lanes([v16, 0.0])) - (Lanes([0.0, v6]))) * v11;
             let v32 = (v28 + v29) - v31;
             let v34 = if v32 < v33 { 1.0 } else { 0.0 };
             let v45: f64;
-            let v46: Lanes<1>;
+            let v46: f64;
             if v34 != 0.0 {
                 let v38 = ((v32 - v35) - v2).exp();
                 let v40 = v39 * v38;
@@ -1146,7 +1251,7 @@ impl Instance {
             } else {
                 let v44 = if v32 > (v42 - v2) { 1.0 } else { 0.0 };
                 let v78: f64;
-                let v79: Lanes<1>;
+                let v79: f64;
                 if v44 != 0.0 {
                     let v74 = ((v42 - v32) - v2).exp();
                     let v76 = v42 - v74;
@@ -1171,7 +1276,7 @@ impl Instance {
             let v67 = v2 + (v57 * v62);
             let v69 = if v67 < v68 { 1.0 } else { 0.0 };
             let v92: f64;
-            let v93: Lanes<1>;
+            let v93: f64;
             if v69 != 0.0 {
                 let v86 = ((v82 * (v67 - v80)) - v2).exp();
                 let v90 = ((v66 * v82) * v86) * v88;
@@ -1183,7 +1288,7 @@ impl Instance {
                 v93 = v66;
             }
             let v109: f64;
-            let v110: Lanes<1>;
+            let v110: f64;
             if v94 != 0.0 {
                 let v96 = v95 * v92;
                 let v98 = v2 / v96;
@@ -1202,7 +1307,7 @@ impl Instance {
             let v120 = v2 + (v57 * v115);
             let v122 = if v120 < v121 { 1.0 } else { 0.0 };
             let v132: f64;
-            let v133: Lanes<1>;
+            let v133: f64;
             if v122 != 0.0 {
                 let v127 = ((v82 * (v120 - v80)) - v2).exp();
                 let v130 = ((v119 * v82) * v127) * v88;
@@ -1217,8 +1322,8 @@ impl Instance {
             let v139 = v56 * (v134 * (v55.powf(v136)));
             let v183: f64;
             let v184: f64;
-            let v185: Lanes<1>;
-            let v186: Lanes<1>;
+            let v185: f64;
+            let v186: f64;
             if v140 != 0.0 {
                 let v146 = (v143 * (v2 - v55)) / v52;
                 let v162 = ((v146 + (v154 * (v55.ln()))) / v159).exp();
@@ -1242,8 +1347,8 @@ impl Instance {
             }
             let v226: f64;
             let v227: f64;
-            let v228: Lanes<1>;
-            let v229: Lanes<1>;
+            let v228: f64;
+            let v229: f64;
             if v187 != 0.0 {
                 let v193 = (v190 * (v2 - v55)) / v52;
                 let v207 = ((v193 + (v154 * (v55.ln()))) / v204).exp();
@@ -1277,8 +1382,8 @@ impl Instance {
             let v243 = v238 + v241;
             let v347: f64;
             let v348: f64;
-            let v349: Lanes<1>;
-            let v350: Lanes<1>;
+            let v349: f64;
+            let v350: f64;
             if v244 != 0.0 {
                 let v245 = v52 / v55;
                 let v250 = v249 * v245;
@@ -1316,8 +1421,8 @@ impl Instance {
             }
             let v448: f64;
             let v449: f64;
-            let v450: Lanes<1>;
-            let v451: Lanes<1>;
+            let v450: f64;
+            let v451: f64;
             if v351 != 0.0 {
                 let v352 = v52 / v55;
                 let v356 = v249 * v352;
@@ -1357,16 +1462,16 @@ impl Instance {
             let v474: f64;
             let v475: f64;
             let v476: f64;
-            let v477: Lanes<1>;
-            let v478: Lanes<1>;
-            let v479: Lanes<1>;
+            let v477: f64;
+            let v478: f64;
+            let v479: f64;
             if v458 != 0.0 {
                 let v463 = v462 + (v57 * v459);
                 let v470 = v469 * (v2 + (v57 * v463));
                 let v471 = ((v46 * v463) + ((v46 * v459) * v57)) * v469;
                 let v472 = if v470 > v0 { 1.0 } else { 0.0 };
                 let v481: f64;
-                let v482: Lanes<1>;
+                let v482: f64;
                 if v472 != 0.0 {
                     v481 = v470;
                     v482 = v471;
@@ -1403,16 +1508,16 @@ impl Instance {
             let v514: f64;
             let v515: f64;
             let v516: f64;
-            let v517: Lanes<1>;
-            let v518: Lanes<1>;
-            let v519: Lanes<1>;
-            let v520: Lanes<1>;
-            let v521: Lanes<1>;
+            let v517: f64;
+            let v518: f64;
+            let v519: f64;
+            let v520: f64;
+            let v521: f64;
             if v480 != 0.0 {
                 let v541: f64;
                 let v542: f64;
-                let v543: Lanes<1>;
-                let v544: Lanes<1>;
+                let v543: f64;
+                let v544: f64;
                 if v510 != 0.0 {
                     let v528 = v527 * v135;
                     let v530 = v528 * v92;
@@ -1473,7 +1578,7 @@ impl Instance {
             let v524 = v517 * v522;
             let v526 = if v523 > v525 { 1.0 } else { 0.0 };
             let v597: f64;
-            let v598: Lanes<1>;
+            let v598: f64;
             if v526 != 0.0 {
                 v597 = v525;
                 v598 = v182;
@@ -1588,7 +1693,6 @@ impl Instance {
                 let v686 = v283 * v677;
                 let v690 = v689 + (v686 * v656);
                 let v691 = v656 / v597;
-                let v692 = v598 * v691;
                 let v699 = v677 * (v697 + v691);
                 let v703 = (v701 * v677) / v597;
                 let v707 = v311 * v597;
@@ -1596,15 +1700,12 @@ impl Instance {
                 let v714 = (((v598 * v311) * v597) + (v598 * v707)) / v677;
                 let v715 = v684 * v713;
                 let v716 = ((((v654 * v677) * v656) + (v654 * v678)) - v654) * v713;
-                let v717 = v714 * v684;
-                let v720 = (Lanes([v716[0], 0.0, v716[1], v716[2]])) + (Lanes([0.0, v717[0], 0.0, 0.0]));
+                let v720 = (Lanes([v716[0], 0.0, v716[1], v716[2]])) + (Lanes([0.0, (v714 * v684), 0.0, 0.0]));
                 let v721 = v690 * v713;
                 let v722 = (v654 * v686) * v713;
-                let v723 = v714 * v690;
-                let v726 = (Lanes([v722[0], 0.0, v722[1], v722[2]])) + (Lanes([0.0, v723[0], 0.0, 0.0]));
+                let v726 = (Lanes([v722[0], 0.0, v722[1], v722[2]])) + (Lanes([0.0, (v714 * v690), 0.0, 0.0]));
                 let v727 = v699 * v713;
-                let v729 = v714 * v699;
-                let v731 = (((((Lanes([v654[0], 0.0, v654[1], v654[2]])) - (Lanes([0.0, v692[0], 0.0, 0.0]))) / v597) * v677) * v713) + (Lanes([0.0, v729[0], 0.0, 0.0]));
+                let v731 = (((((Lanes([v654[0], 0.0, v654[1], v654[2]])) - (Lanes([0.0, (v598 * v691), 0.0, 0.0]))) / v597) * v677) * v713) + (Lanes([0.0, (v714 * v699), 0.0, 0.0]));
                 let v732 = v703 * v713;
                 let v735 = ((((v598 * v703) * v71) / v597) * v713) + (v714 * v703);
                 let v736 = v732 * v732;
@@ -1612,18 +1713,16 @@ impl Instance {
                 let v738 = v737 + v737;
                 let v739 = -v727;
                 let v740 = v731 * v71;
-                let v742 = v735 * v721;
                 let v748 = (v732 * v721) - (v311 * v715);
-                let v749 = ((Lanes([0.0, v742[0], 0.0, 0.0])) + (v726 * v732)) - (v720 * v311);
+                let v749 = ((Lanes([0.0, (v735 * v721), 0.0, 0.0])) + (v726 * v732)) - (v720 * v311);
                 let v750 = v311 * v727;
                 let v757 = v726 * v721;
-                let v763 = v738 * v715;
                 let v769 = v740 * v739;
                 let v774 = v748 - ((v739 * v739) * v771);
                 let v775 = v749 - ((v769 + v769) * v771);
                 let v778 = v748 + (v249 * v774);
                 let v787 = (((v750 * v715) - (v721 * v721)) - (v715 * v736)) - ((v739 * v778) / v784);
-                let v788 = (((((v731 * v311) * v715) + (v720 * v750)) - (v757 + v757)) - ((v720 * v736) + (Lanes([0.0, v763[0], 0.0, 0.0])))) - (((v740 * v778) + ((v749 + (v775 * v249)) * v739)) / v784);
+                let v788 = (((((v731 * v311) * v715) + (v720 * v750)) - (v757 + v757)) - ((v720 * v736) + (Lanes([0.0, (v738 * v715), 0.0, 0.0])))) - (((v740 * v778) + ((v749 + (v775 * v249)) * v739)) / v784);
                 let v789 = v774 * v774;
                 let v790 = v775 * v774;
                 let v797 = (v789 * v774) / v796;
@@ -1712,15 +1811,12 @@ impl Instance {
                 let v885 = v799 * v736;
                 let v886 = v738 * v799;
                 let v892 = ((v885 - v727) + ((v853 + v877) - (v739 * v771))).sqrt();
-                let v895 = (((Lanes([0.0, v886[0], 0.0, 0.0])) - v731) + ((v854 + v878) - (v740 * v771))) * (v151 / (v316 * v892));
-                let v898 = v738 * v896;
+                let v895 = (((Lanes([0.0, v886, 0.0, 0.0])) - v731) + ((v854 + v878) - (v740 * v771))) * (v151 / (v316 * v892));
                 let v900 = v895 * v892;
                 let v907 = ((v896 * v736) - (v892 * v892)) - (v249 * v727);
-                let v908 = ((Lanes([0.0, v898[0], 0.0, 0.0])) - (v900 + v900)) - (v731 * v249);
-                let v910 = v735 * v727;
-                let v921 = (v886 * v732) + (v735 * v885);
+                let v908 = ((Lanes([0.0, (v738 * v896), 0.0, 0.0])) - (v900 + v900)) - (v731 * v249);
                 let v925 = (((v732 * v727) - (v249 * v721)) - (v885 * v732)) / v892;
-                let v928 = (((((Lanes([0.0, v910[0], 0.0, 0.0])) + (v731 * v732)) - (v726 * v249)) - (Lanes([0.0, v921[0], 0.0, 0.0]))) - (v895 * v925)) / v892;
+                let v928 = (((((Lanes([0.0, (v735 * v727), 0.0, 0.0])) + (v731 * v732)) - (v726 * v249)) - (Lanes([0.0, ((v886 * v732) + (v735 * v885)), 0.0, 0.0]))) - (v895 * v925)) / v892;
                 let v929 = v907 + v925;
                 let v930 = v908 + v928;
                 let v931 = if v929 > v0 { 1.0 } else { 0.0 };
@@ -1728,9 +1824,8 @@ impl Instance {
                 let v985: Lanes<4>;
                 if v931 != 0.0 {
                     let v945 = v929.sqrt();
-                    let v951 = v735 * v949;
                     let v956 = (v949 * v732) + (v321 * (v945 + v892));
-                    let v958 = (Lanes([0.0, v951[0], 0.0, 0.0])) + (((v930 * (v151 / (v316 * v945))) + v895) * v321);
+                    let v958 = (Lanes([0.0, (v735 * v949), 0.0, 0.0])) + (((v930 * (v151 / (v316 * v945))) + v895) * v321);
                     v984 = v956;
                     v985 = v958;
                 } else {
@@ -1738,9 +1833,8 @@ impl Instance {
                     let v962 = (v908 - v928) * v959;
                     let v966 = ((v959 * v959) + v964).sqrt();
                     let v970 = v966.sqrt();
-                    let v976 = v735 * v974;
                     let v981 = (v974 * v732) + (v321 * (v970 - v892));
-                    let v983 = (Lanes([0.0, v976[0], 0.0, 0.0])) + (((((v962 + v962) * (v151 / (v316 * v966))) * (v151 / (v316 * v970))) - v895) * v321);
+                    let v983 = (Lanes([0.0, (v735 * v974), 0.0, 0.0])) + (((((v962 + v962) * (v151 / (v316 * v966))) * (v151 / (v316 * v970))) - v895) * v321);
                     v984 = v981;
                     v985 = v983;
                 }
@@ -1795,17 +1889,15 @@ impl Instance {
                 if v657 != 0.0 {
                     let v1093 = v1039 / v522;
                     let v1094 = v816 / v522;
-                    let v1096 = Lanes([0.0, v519[0], 0.0, 0.0]);
+                    let v1096 = Lanes([0.0, v519, 0.0, 0.0]);
                     let v1098 = v321 * (v1093 - v514);
                     let v1100 = v1098 * v513;
-                    let v1102 = v518 * v1098;
-                    let v1104 = (((v1094 - v1096) * v321) * v513) + (Lanes([0.0, v1102[0], 0.0, 0.0]));
+                    let v1104 = (((v1094 - v1096) * v321) * v513) + (Lanes([0.0, (v518 * v1098), 0.0, 0.0]));
                     let v1107 = v321 * (v1093 + v514);
                     let v1109 = v1107 * v513;
-                    let v1111 = v518 * v1107;
-                    let v1113 = (((v1094 + v1096) * v321) * v513) + (Lanes([0.0, v1111[0], 0.0, 0.0]));
+                    let v1113 = (((v1094 + v1096) * v321) * v513) + (Lanes([0.0, (v518 * v1107), 0.0, 0.0]));
                     let v1115 = v1104 * v1100;
-                    let v1118 = Lanes([0.0, v520[0], 0.0, 0.0]);
+                    let v1118 = Lanes([0.0, v520, 0.0, 0.0]);
                     let v1120 = ((v1100 * v1100) + v515).sqrt();
                     let v1123 = ((v1115 + v1115) + v1118) * (v151 / (v316 * v1120));
                     let v1125 = v1113 * v1109;
@@ -1814,7 +1906,6 @@ impl Instance {
                     let v1138 = v1100 / v1120;
                     let v1142 = v1109 / v1129;
                     let v1148 = v321 * (v1138 + v1142);
-                    let v1152 = v518 * v1148;
                     let v1155 = (v1148 * v513) / v522;
                     let v1157 = v249 * v1048;
                     let v1159 = v2 - v1048;
@@ -1824,7 +1915,7 @@ impl Instance {
                     let v1174 = v2 - v1170;
                     let v1180 = (v1161 * v1174) / v1039;
                     let v1184 = v1180.sqrt();
-                    let v1187 = (((((((v1049 * v249) * v1159) + ((v1049 * v71) * v1157)) * v1174) + (((((((((((((v1104 - (v1123 * v1138)) / v1120) + ((v1113 - (v1132 * v1142)) / v1129)) * v321) * v513) + (Lanes([0.0, v1152[0], 0.0, 0.0]))) / v522) * v1039) + (v816 * v1155)) - (((v1123 + v1132) - (Lanes([0.0, v521[0], 0.0, 0.0]))) * v1170)) / v1169) * v71) * v1161)) - (v816 * v1180)) / v1039) * (v151 / (v316 * v1184));
+                    let v1187 = (((((((v1049 * v249) * v1159) + ((v1049 * v71) * v1157)) * v1174) + (((((((((((((v1104 - (v1123 * v1138)) / v1120) + ((v1113 - (v1132 * v1142)) / v1129)) * v321) * v513) + (Lanes([0.0, (v518 * v1148), 0.0, 0.0]))) / v522) * v1039) + (v816 * v1155)) - (((v1123 + v1132) - (Lanes([0.0, v521, 0.0, 0.0]))) * v1170)) / v1169) * v71) * v1161)) - (v816 * v1180)) / v1039) * (v151 / (v316 * v1184));
                     v1204 = v1184;
                     v1205 = v1187;
                 } else {
@@ -1894,20 +1985,18 @@ impl Instance {
                 if v657 != 0.0 {
                     let v1314 = v1300 / v522;
                     let v1315 = v1301 / v522;
-                    let v1317 = Lanes([0.0, v519[0], 0.0, 0.0]);
+                    let v1317 = Lanes([0.0, v519, 0.0, 0.0]);
                     let v1319 = v321 * (v1314 - v514);
                     let v1321 = v1319 * v513;
-                    let v1323 = v518 * v1319;
                     let v1328 = v321 * (v1314 + v514);
                     let v1330 = v1328 * v513;
-                    let v1332 = v518 * v1328;
-                    let v1336 = ((((v1315 - v1317) * v321) * v513) + (Lanes([0.0, v1323[0], 0.0, 0.0]))) * v1321;
-                    let v1339 = Lanes([0.0, v520[0], 0.0, 0.0]);
+                    let v1336 = ((((v1315 - v1317) * v321) * v513) + (Lanes([0.0, (v518 * v1319), 0.0, 0.0]))) * v1321;
+                    let v1339 = Lanes([0.0, v520, 0.0, 0.0]);
                     let v1341 = ((v1321 * v1321) + v515).sqrt();
-                    let v1346 = ((((v1315 + v1317) * v321) * v513) + (Lanes([0.0, v1332[0], 0.0, 0.0]))) * v1330;
+                    let v1346 = ((((v1315 + v1317) * v321) * v513) + (Lanes([0.0, (v518 * v1328), 0.0, 0.0]))) * v1330;
                     let v1350 = ((v1330 * v1330) + v515).sqrt();
                     let v1356 = (v1341 + v1350) - v516;
-                    let v1358 = ((((v1336 + v1336) + v1339) * (v151 / (v316 * v1341))) + (((v1346 + v1346) + v1339) * (v151 / (v316 * v1350)))) - (Lanes([0.0, v521[0], 0.0, 0.0]));
+                    let v1358 = ((((v1336 + v1336) + v1339) * (v151 / (v316 * v1341))) + (((v1346 + v1346) + v1339) * (v151 / (v316 * v1350)))) - (Lanes([0.0, v521, 0.0, 0.0]));
                     v1360 = v1356;
                     v1361 = v1358;
                 } else {
@@ -1938,20 +2027,18 @@ impl Instance {
                 if v657 != 0.0 {
                     let v1362 = v1081 / v522;
                     let v1363 = v1084 / v522;
-                    let v1365 = Lanes([0.0, v519[0], 0.0, 0.0]);
+                    let v1365 = Lanes([0.0, v519, 0.0, 0.0]);
                     let v1367 = v321 * (v1362 - v514);
                     let v1369 = v1367 * v513;
-                    let v1371 = v518 * v1367;
                     let v1376 = v321 * (v1362 + v514);
                     let v1378 = v1376 * v513;
-                    let v1380 = v518 * v1376;
-                    let v1384 = ((((v1363 - v1365) * v321) * v513) + (Lanes([0.0, v1371[0], 0.0, 0.0]))) * v1369;
-                    let v1387 = Lanes([0.0, v520[0], 0.0, 0.0]);
+                    let v1384 = ((((v1363 - v1365) * v321) * v513) + (Lanes([0.0, (v518 * v1367), 0.0, 0.0]))) * v1369;
+                    let v1387 = Lanes([0.0, v520, 0.0, 0.0]);
                     let v1389 = ((v1369 * v1369) + v515).sqrt();
-                    let v1394 = ((((v1363 + v1365) * v321) * v513) + (Lanes([0.0, v1380[0], 0.0, 0.0]))) * v1378;
+                    let v1394 = ((((v1363 + v1365) * v321) * v513) + (Lanes([0.0, (v518 * v1376), 0.0, 0.0]))) * v1378;
                     let v1398 = ((v1378 * v1378) + v515).sqrt();
                     let v1404 = (v1389 + v1398) - v516;
-                    let v1406 = ((((v1384 + v1384) + v1387) * (v151 / (v316 * v1389))) + (((v1394 + v1394) + v1387) * (v151 / (v316 * v1398)))) - (Lanes([0.0, v521[0], 0.0, 0.0]));
+                    let v1406 = ((((v1384 + v1384) + v1387) * (v151 / (v316 * v1389))) + (((v1394 + v1394) + v1387) * (v151 / (v316 * v1398)))) - (Lanes([0.0, v521, 0.0, 0.0]));
                     v1407 = v1404;
                     v1408 = v1406;
                 } else {
@@ -1978,12 +2065,11 @@ impl Instance {
                 v1420 = v1085;
                 v1421 = v1088;
             }
-            let v1423 = v110 * v1420;
             let v1427 = v2 + v1086;
             let v1428 = (v109 * v1420) / v1427;
             let v1432 = v611 * v1428;
             let v1434 = v1432 * v1087;
-            let v1437 = ((((((Lanes([0.0, v1423[0], 0.0, 0.0])) + (v1421 * v109)) - (v1089 * v1428)) / v1427) * v611) * v1087) + (v1090 * v1432);
+            let v1437 = ((((((Lanes([0.0, (v110 * v1420), 0.0, 0.0])) + (v1421 * v109)) - (v1089 * v1428)) / v1427) * v611) * v1087) + (v1090 * v1432);
             let v1438 = if v236 > v0 { 1.0 } else { 0.0 };
             let v1441: f64;
             let v1442: Lanes<3>;
@@ -2000,26 +2086,22 @@ impl Instance {
                     let v1484: Lanes<3>;
                     if v1450 != 0.0 {
                         let v1455 = v21 * v1446;
-                        let v1456 = v1449 * v20;
                         let v1460 = (v20 * v1446).exp();
-                        let v1461 = ((Lanes([v1455[0], 0.0, v1455[1]])) + (Lanes([0.0, v1456[0], 0.0]))) * v1460;
+                        let v1461 = ((Lanes([v1455[0], 0.0, v1455[1]])) + (Lanes([0.0, (v1449 * v20), 0.0]))) * v1460;
                         v1483 = v1460;
                         v1484 = v1461;
                     } else {
                         let v1466 = (v184 * v1446).exp();
                         let v1468 = v20 - v184;
-                        let v1474 = v1449 * v1468;
                         let v1477 = v2 + (v1468 * v1446);
                         let v1478 = v1466 * v1477;
-                        let v1479 = (((v186 * v1446) + (v1449 * v184)) * v1466) * v1477;
-                        let v1482 = (Lanes([0.0, v1479[0], 0.0])) + (((((Lanes([v21[0], 0.0, v21[1]])) - (Lanes([0.0, v186[0], 0.0]))) * v1446) + (Lanes([0.0, v1474[0], 0.0]))) * v1466);
+                        let v1482 = (Lanes([0.0, ((((v186 * v1446) + (v1449 * v184)) * v1466) * v1477), 0.0])) + (((((Lanes([v21[0], 0.0, v21[1]])) - (Lanes([0.0, v186, 0.0]))) * v1446) + (Lanes([0.0, (v1449 * v1468), 0.0]))) * v1466);
                         v1483 = v1478;
                         v1484 = v1482;
                     }
                     let v1485 = v1483 - v2;
                     let v1486 = v231 * v1485;
-                    let v1487 = v232 * v1485;
-                    let v1490 = (Lanes([0.0, v1487[0], 0.0])) + (v1484 * v231);
+                    let v1490 = (Lanes([0.0, (v232 * v1485), 0.0])) + (v1484 * v231);
                     v1451 = v1486;
                     v1452 = v1490;
                 } else {
@@ -2038,26 +2120,22 @@ impl Instance {
                     let v1533: Lanes<3>;
                     if v1497 != 0.0 {
                         let v1504 = v21 * v1493;
-                        let v1505 = v1496 * v20;
                         let v1509 = (v20 * v1493).exp();
-                        let v1510 = ((Lanes([v1504[0], 0.0, v1504[1]])) + (Lanes([0.0, v1505[0], 0.0]))) * v1509;
+                        let v1510 = ((Lanes([v1504[0], 0.0, v1504[1]])) + (Lanes([0.0, (v1496 * v20), 0.0]))) * v1509;
                         v1532 = v1509;
                         v1533 = v1510;
                     } else {
                         let v1515 = (v227 * v1493).exp();
                         let v1517 = v20 - v227;
-                        let v1523 = v1496 * v1517;
                         let v1526 = v2 + (v1517 * v1493);
                         let v1527 = v1515 * v1526;
-                        let v1528 = (((v229 * v1493) + (v1496 * v227)) * v1515) * v1526;
-                        let v1531 = (Lanes([0.0, v1528[0], 0.0])) + (((((Lanes([v21[0], 0.0, v21[1]])) - (Lanes([0.0, v229[0], 0.0]))) * v1493) + (Lanes([0.0, v1523[0], 0.0]))) * v1515);
+                        let v1531 = (Lanes([0.0, ((((v229 * v1493) + (v1496 * v227)) * v1515) * v1526), 0.0])) + (((((Lanes([v21[0], 0.0, v21[1]])) - (Lanes([0.0, v229, 0.0]))) * v1493) + (Lanes([0.0, (v1496 * v1517), 0.0]))) * v1515);
                         v1532 = v1527;
                         v1533 = v1531;
                     }
                     let v1534 = v1532 - v2;
                     let v1535 = v234 * v1534;
-                    let v1536 = v235 * v1534;
-                    let v1539 = (Lanes([0.0, v1536[0], 0.0])) + (v1533 * v234);
+                    let v1539 = (Lanes([0.0, (v235 * v1534), 0.0])) + (v1533 * v234);
                     v1498 = v1535;
                     v1499 = v1539;
                 } else {
@@ -2073,7 +2151,7 @@ impl Instance {
                     let v1540 = -v474;
                     let v1541 = v477 * v71;
                     let v1542 = v1540 - v20;
-                    let v1545 = (Lanes([0.0, v1541[0], 0.0])) - (Lanes([v21[0], 0.0, v21[1]]));
+                    let v1545 = (Lanes([0.0, v1541, 0.0])) - (Lanes([v21[0], 0.0, v21[1]]));
                     let v1546 = v475 * v52;
                     let v1550 = v2 / v1546;
                     let v1553 = ((((v478 * v52) + (v53 * v475)) * v1550) * v71) / v1546;
@@ -2081,27 +2159,23 @@ impl Instance {
                     let v1591: f64;
                     let v1592: Lanes<3>;
                     if v1554 != 0.0 {
-                        let v1566 = v1553 * v1542;
                         let v1569 = (v1542 * v1550).exp();
-                        let v1570 = ((v1545 * v1550) + (Lanes([0.0, v1566[0], 0.0]))) * v1569;
+                        let v1570 = ((v1545 * v1550) + (Lanes([0.0, (v1553 * v1542), 0.0]))) * v1569;
                         v1591 = v1569;
                         v1592 = v1570;
                     } else {
                         let v1575 = (v476 * v1550).exp();
                         let v1577 = v1542 - v476;
-                        let v1582 = v1553 * v1577;
                         let v1585 = v2 + (v1577 * v1550);
                         let v1586 = v1575 * v1585;
-                        let v1587 = (((v479 * v1550) + (v1553 * v476)) * v1575) * v1585;
-                        let v1590 = (Lanes([0.0, v1587[0], 0.0])) + ((((v1545 - (Lanes([0.0, v479[0], 0.0]))) * v1550) + (Lanes([0.0, v1582[0], 0.0]))) * v1575);
+                        let v1590 = (Lanes([0.0, ((((v479 * v1550) + (v1553 * v476)) * v1575) * v1585), 0.0])) + ((((v1545 - (Lanes([0.0, v479, 0.0]))) * v1550) + (Lanes([0.0, (v1553 * v1577), 0.0]))) * v1575);
                         v1591 = v1586;
                         v1592 = v1590;
                     }
                     let v1594 = -v1593;
                     let v1599 = (v1540 * v1550).exp();
-                    let v1600 = ((v1541 * v1550) + (v1553 * v1540)) * v1599;
                     let v1604 = v1594 * (v1591 - v1599);
-                    let v1605 = (v1592 - (Lanes([0.0, v1600[0], 0.0]))) * v1594;
+                    let v1605 = (v1592 - (Lanes([0.0, (((v1541 * v1550) + (v1553 * v1540)) * v1599), 0.0]))) * v1594;
                     v1555 = v1604;
                     v1556 = v1605;
                 } else {
@@ -2133,26 +2207,22 @@ impl Instance {
                     let v1708: Lanes<3>;
                     if v1674 != 0.0 {
                         let v1679 = v27 * v1670;
-                        let v1680 = v1673 * v26;
                         let v1684 = (v26 * v1670).exp();
-                        let v1685 = ((Lanes([v1679[0], 0.0, v1679[1]])) + (Lanes([0.0, v1680[0], 0.0]))) * v1684;
+                        let v1685 = ((Lanes([v1679[0], 0.0, v1679[1]])) + (Lanes([0.0, (v1673 * v26), 0.0]))) * v1684;
                         v1707 = v1684;
                         v1708 = v1685;
                     } else {
                         let v1690 = (v184 * v1670).exp();
                         let v1692 = v26 - v184;
-                        let v1698 = v1673 * v1692;
                         let v1701 = v2 + (v1692 * v1670);
                         let v1702 = v1690 * v1701;
-                        let v1703 = (((v186 * v1670) + (v1673 * v184)) * v1690) * v1701;
-                        let v1706 = (Lanes([0.0, v1703[0], 0.0])) + (((((Lanes([v27[0], 0.0, v27[1]])) - (Lanes([0.0, v186[0], 0.0]))) * v1670) + (Lanes([0.0, v1698[0], 0.0]))) * v1690);
+                        let v1706 = (Lanes([0.0, ((((v186 * v1670) + (v1673 * v184)) * v1690) * v1701), 0.0])) + (((((Lanes([v27[0], 0.0, v27[1]])) - (Lanes([0.0, v186, 0.0]))) * v1670) + (Lanes([0.0, (v1673 * v1692), 0.0]))) * v1690);
                         v1707 = v1702;
                         v1708 = v1706;
                     }
                     let v1709 = v1707 - v2;
                     let v1710 = v238 * v1709;
-                    let v1711 = v239 * v1709;
-                    let v1714 = (Lanes([0.0, v1711[0], 0.0])) + (v1708 * v238);
+                    let v1714 = (Lanes([0.0, (v239 * v1709), 0.0])) + (v1708 * v238);
                     v1675 = v1710;
                     v1676 = v1714;
                 } else {
@@ -2171,26 +2241,22 @@ impl Instance {
                     let v1757: Lanes<3>;
                     if v1721 != 0.0 {
                         let v1728 = v27 * v1717;
-                        let v1729 = v1720 * v26;
                         let v1733 = (v26 * v1717).exp();
-                        let v1734 = ((Lanes([v1728[0], 0.0, v1728[1]])) + (Lanes([0.0, v1729[0], 0.0]))) * v1733;
+                        let v1734 = ((Lanes([v1728[0], 0.0, v1728[1]])) + (Lanes([0.0, (v1720 * v26), 0.0]))) * v1733;
                         v1756 = v1733;
                         v1757 = v1734;
                     } else {
                         let v1739 = (v227 * v1717).exp();
                         let v1741 = v26 - v227;
-                        let v1747 = v1720 * v1741;
                         let v1750 = v2 + (v1741 * v1717);
                         let v1751 = v1739 * v1750;
-                        let v1752 = (((v229 * v1717) + (v1720 * v227)) * v1739) * v1750;
-                        let v1755 = (Lanes([0.0, v1752[0], 0.0])) + (((((Lanes([v27[0], 0.0, v27[1]])) - (Lanes([0.0, v229[0], 0.0]))) * v1717) + (Lanes([0.0, v1747[0], 0.0]))) * v1739);
+                        let v1755 = (Lanes([0.0, ((((v229 * v1717) + (v1720 * v227)) * v1739) * v1750), 0.0])) + (((((Lanes([v27[0], 0.0, v27[1]])) - (Lanes([0.0, v229, 0.0]))) * v1717) + (Lanes([0.0, (v1720 * v1741), 0.0]))) * v1739);
                         v1756 = v1751;
                         v1757 = v1755;
                     }
                     let v1758 = v1756 - v2;
                     let v1759 = v241 * v1758;
-                    let v1760 = v242 * v1758;
-                    let v1763 = (Lanes([0.0, v1760[0], 0.0])) + (v1757 * v241);
+                    let v1763 = (Lanes([0.0, (v242 * v1758), 0.0])) + (v1757 * v241);
                     v1722 = v1759;
                     v1723 = v1763;
                 } else {
@@ -2206,7 +2272,7 @@ impl Instance {
                     let v1764 = -v474;
                     let v1765 = v477 * v71;
                     let v1766 = v1764 - v26;
-                    let v1769 = (Lanes([0.0, v1765[0], 0.0])) - (Lanes([v27[0], 0.0, v27[1]]));
+                    let v1769 = (Lanes([0.0, v1765, 0.0])) - (Lanes([v27[0], 0.0, v27[1]]));
                     let v1770 = v475 * v52;
                     let v1774 = v2 / v1770;
                     let v1777 = ((((v478 * v52) + (v53 * v475)) * v1774) * v71) / v1770;
@@ -2214,27 +2280,23 @@ impl Instance {
                     let v1815: f64;
                     let v1816: Lanes<3>;
                     if v1778 != 0.0 {
-                        let v1790 = v1777 * v1766;
                         let v1793 = (v1766 * v1774).exp();
-                        let v1794 = ((v1769 * v1774) + (Lanes([0.0, v1790[0], 0.0]))) * v1793;
+                        let v1794 = ((v1769 * v1774) + (Lanes([0.0, (v1777 * v1766), 0.0]))) * v1793;
                         v1815 = v1793;
                         v1816 = v1794;
                     } else {
                         let v1799 = (v476 * v1774).exp();
                         let v1801 = v1766 - v476;
-                        let v1806 = v1777 * v1801;
                         let v1809 = v2 + (v1801 * v1774);
                         let v1810 = v1799 * v1809;
-                        let v1811 = (((v479 * v1774) + (v1777 * v476)) * v1799) * v1809;
-                        let v1814 = (Lanes([0.0, v1811[0], 0.0])) + ((((v1769 - (Lanes([0.0, v479[0], 0.0]))) * v1774) + (Lanes([0.0, v1806[0], 0.0]))) * v1799);
+                        let v1814 = (Lanes([0.0, ((((v479 * v1774) + (v1777 * v476)) * v1799) * v1809), 0.0])) + ((((v1769 - (Lanes([0.0, v479, 0.0]))) * v1774) + (Lanes([0.0, (v1777 * v1801), 0.0]))) * v1799);
                         v1815 = v1810;
                         v1816 = v1814;
                     }
                     let v1817 = -v1593;
                     let v1822 = (v1764 * v1774).exp();
-                    let v1823 = ((v1765 * v1774) + (v1777 * v1764)) * v1822;
                     let v1827 = v1817 * (v1815 - v1822);
-                    let v1828 = (v1816 - (Lanes([0.0, v1823[0], 0.0]))) * v1817;
+                    let v1828 = (v1816 - (Lanes([0.0, (((v1765 * v1774) + (v1777 * v1764)) * v1822), 0.0]))) * v1817;
                     v1779 = v1827;
                     v1780 = v1828;
                 } else {
@@ -2257,27 +2319,25 @@ impl Instance {
             let v1627 = (v1609 * v26) + (Lanes([v1625[0], 0.0, v1625[1]]));
             let v1630 = (((v1437 * v12) + (Lanes([0.0, 0.0, v1612[0], v1612[1]]))) + (Lanes([v1619[0], v1619[1], v1619[2], 0.0]))) + (Lanes([v1627[0], v1627[1], 0.0, v1627[2]]));
             let v1632 = v1631 - v4;
-            let v1636 = (Lanes([v1633[0], 0.0])) - (Lanes([0.0, v8[0]]));
-            let v1640 = v1639 * v1632;
+            let v1636 = (Lanes([v1633, 0.0])) - (Lanes([0.0, v8]));
             let v1641 = v1636 * v1637;
-            let v1644 = (Lanes([0.0, 0.0, v1640[0]])) + (Lanes([v1641[0], v1641[1], 0.0]));
+            let v1644 = (Lanes([0.0, 0.0, (v1639 * v1632)])) + (Lanes([v1641[0], v1641[1], 0.0]));
             let v1648 = (Lanes([0.0, v1630[0], v1630[1], v1630[2], v1630[3], 0.0])) + (Lanes([v1644[0], 0.0, 0.0, v1644[1], 0.0, v1644[2]]));
             let v1650 = v1649 - v3;
-            let v1654 = (Lanes([v1651[0], 0.0])) - (Lanes([0.0, v6[0]]));
-            let v1658 = v1657 * v1650;
+            let v1654 = (Lanes([v1651, 0.0])) - (Lanes([0.0, v6]));
             let v1659 = v1654 * v1655;
-            let v1662 = (Lanes([0.0, 0.0, v1658[0]])) + (Lanes([v1659[0], v1659[1], 0.0]));
+            let v1662 = (Lanes([0.0, 0.0, (v1657 * v1650)])) + (Lanes([v1659[0], v1659[1], 0.0]));
             let v1663 = ((((v1434 * v12) + (v1441 * v20)) + (v1608 * v26)) + (v1637 * v1632)) + (v1655 * v1650);
             let v1666 = (Lanes([v1648[0], v1648[1], 0.0, v1648[2], v1648[3], v1648[4], v1648[5], 0.0])) + (Lanes([0.0, 0.0, v1662[0], 0.0, 0.0, v1662[1], 0.0, v1662[2]]));
             let v1836: f64;
             let v1837: f64;
-            let v1838: Lanes<1>;
+            let v1838: f64;
             let v1839: Lanes<8>;
             if v1667 != 0.0 {
                 let v1829 = -v1663;
                 let v1830 = v1666 * v71;
                 let v1854: f64;
-                let v1855: Lanes<1>;
+                let v1855: f64;
                 if v1831 != 0.0 {
                     let v1852 = v1851 * v29;
                     let v1853 = v39 * v1851;
@@ -2285,7 +2345,7 @@ impl Instance {
                     v1855 = v1853;
                 } else {
                     let v1885: f64;
-                    let v1886: Lanes<1>;
+                    let v1886: f64;
                     if v1856 != 0.0 {
                         let v1860 = v2 + (v29 / v1857);
                         let v1871 = (v1868 * ((v1860.powf(v1861)) - v2)) / v1861;
@@ -2361,7 +2421,7 @@ impl Instance {
                     if v1930 != 0.0 {
                         let v1934 = v1917 + v1927;
                         let v1935 = Lanes([v1918[0], 0.0, v1918[1]]);
-                        let v1937 = v1935 + (Lanes([0.0, v1928[0], 0.0]));
+                        let v1937 = v1935 + (Lanes([0.0, v1928, 0.0]));
                         let v1938 = if v1934 > v0 { 1.0 } else { 0.0 };
                         let v2071: f64;
                         let v2072: f64;
@@ -2373,28 +2433,24 @@ impl Instance {
                             let v2025 = v2 - (v2023 * v2021);
                             let v2028 = v2 - v338;
                             let v2029 = (v348 * v2025) / v2028;
-                            let v2030 = (v350 * v2025) / v2028;
                             let v2031 = v321 * v338;
                             let v2034 = v348 * v2021;
                             let v2036 = (v2031 * v1934) / v2034;
-                            let v2037 = (v350 * v2021) * v2036;
                             let v2041 = v2 + v2036;
                             let v2046 = (v1934 * v2041) * v2023;
-                            let v2047 = ((v1937 * v2041) + ((((v1937 * v2031) - (Lanes([0.0, v2037[0], 0.0]))) / v2034) * v1934)) * v2023;
-                            let v2048 = Lanes([0.0, v2030[0], 0.0]);
+                            let v2047 = ((v1937 * v2041) + ((((v1937 * v2031) - (Lanes([0.0, ((v350 * v2021) * v2036), 0.0]))) / v2034) * v1934)) * v2023;
+                            let v2048 = Lanes([0.0, ((v350 * v2025) / v2028), 0.0]);
                             v2071 = v2029;
                             v2072 = v2046;
                             v2073 = v2048;
                             v2074 = v2047;
                         } else {
                             let v2049 = v1917 / v348;
-                            let v2050 = v350 * v2049;
                             let v2054 = v2 - v2049;
                             let v2056 = v2 - v338;
                             let v2062 = v2 - (v2054.powf(v2056));
-                            let v2065 = v350 * v2062;
                             let v2069 = (v348 * v2062) / v2056;
-                            let v2070 = ((Lanes([0.0, v2065[0], 0.0])) + ((((((v1935 - (Lanes([0.0, v2050[0], 0.0]))) / v348) * v71) * (v2056 * (v2054.powf((v2056 - v151))))) * v71) * v348)) / v2056;
+                            let v2070 = ((Lanes([0.0, (v350 * v2062), 0.0])) + ((((((v1935 - (Lanes([0.0, (v350 * v2049), 0.0]))) / v348) * v71) * (v2056 * (v2054.powf((v2056 - v151))))) * v71) * v348)) / v2056;
                             v2071 = v2069;
                             v2072 = v0;
                             v2073 = v2070;
@@ -2408,33 +2464,29 @@ impl Instance {
                         let v1940 = v1928 * v1927;
                         let v1943 = (v311 * v1929) * v1929;
                         let v1945 = ((v1927 * v1927) + v1943).sqrt();
-                        let v1953 = (v1928 + ((v1940 + v1940) * (v151 / (v316 * v1945)))) * v1951;
                         let v1954 = v1917 + v1927;
                         let v1955 = Lanes([v1918[0], 0.0, v1918[1]]);
-                        let v1956 = Lanes([0.0, v1928[0], 0.0]);
+                        let v1956 = Lanes([0.0, v1928, 0.0]);
                         let v1957 = v1955 + v1956;
                         let v1959 = v1957 * v1954;
                         let v1962 = ((v1954 * v1954) + v1943).sqrt();
                         let v1970 = (v321 * (v1954 - v1962)) - v1927;
                         let v1971 = ((v1957 - ((v1959 + v1959) * (v151 / (v316 * v1962)))) * v321) - v1956;
                         let v1972 = v1970 / v348;
-                        let v1973 = v350 * v1972;
                         let v1977 = v2 - v1972;
                         let v1979 = v2 - v338;
                         let v1980 = v1977.powf(v1979);
-                        let v1986 = v1925 * v1980;
                         let v1992 = v2 - v1926;
                         let v1994 = v1992.powf((-v338));
                         let v1997 = (v1917 - v1970) + (v1951 * (v1927 + v1945));
-                        let v1999 = (v1955 - v1971) + (Lanes([0.0, v1953[0], 0.0]));
+                        let v1999 = (v1955 - v1971) + (Lanes([0.0, ((v1928 + ((v1940 + v1940) * (v151 / (v316 * v1945)))) * v1951), 0.0]));
                         let v2000 = v1994 * v1997;
                         let v2002 = v321 * v338;
                         let v2005 = v348 * v1992;
                         let v2007 = (v2002 * v1997) / v2005;
-                        let v2008 = (v350 * v1992) * v2007;
                         let v2012 = v2 + v2007;
                         let v2017 = ((v1924 * v1980) / v1979) + (v2000 * v2012);
-                        let v2018 = (((Lanes([0.0, v1986[0], 0.0])) + (((((v1971 - (Lanes([0.0, v1973[0], 0.0]))) / v348) * v71) * (v1979 * (v1977.powf((v1979 - v151))))) * v1924)) / v1979) + (((v1999 * v1994) * v2012) + ((((v1999 * v2002) - (Lanes([0.0, v2008[0], 0.0]))) / v2005) * v2000));
+                        let v2018 = (((Lanes([0.0, (v1925 * v1980), 0.0])) + (((((v1971 - (Lanes([0.0, (v350 * v1972), 0.0]))) / v348) * v71) * (v1979 * (v1977.powf((v1979 - v151))))) * v1924)) / v1979) + (((v1999 * v1994) * v2012) + ((((v1999 * v2002) - (Lanes([0.0, ((v350 * v1992) * v2007), 0.0]))) / v2005) * v2000));
                         v2019 = v2017;
                         v2020 = v2018;
                     }
@@ -2458,7 +2510,7 @@ impl Instance {
                     if v2082 != 0.0 {
                         let v2097 = v1917 + v2079;
                         let v2098 = Lanes([v1918[0], 0.0, v1918[1]]);
-                        let v2100 = v2098 + (Lanes([0.0, v2080[0], 0.0]));
+                        let v2100 = v2098 + (Lanes([0.0, v2080, 0.0]));
                         let v2101 = if v2097 > v0 { 1.0 } else { 0.0 };
                         let v2234: f64;
                         let v2235: f64;
@@ -2470,28 +2522,24 @@ impl Instance {
                             let v2188 = v2 - (v2186 * v2184);
                             let v2191 = v2 - v439;
                             let v2192 = (v449 * v2188) / v2191;
-                            let v2193 = (v451 * v2188) / v2191;
                             let v2194 = v321 * v439;
                             let v2197 = v449 * v2184;
                             let v2199 = (v2194 * v2097) / v2197;
-                            let v2200 = (v451 * v2184) * v2199;
                             let v2204 = v2 + v2199;
                             let v2209 = (v2097 * v2204) * v2186;
-                            let v2210 = ((v2100 * v2204) + ((((v2100 * v2194) - (Lanes([0.0, v2200[0], 0.0]))) / v2197) * v2097)) * v2186;
-                            let v2211 = Lanes([0.0, v2193[0], 0.0]);
+                            let v2210 = ((v2100 * v2204) + ((((v2100 * v2194) - (Lanes([0.0, ((v451 * v2184) * v2199), 0.0]))) / v2197) * v2097)) * v2186;
+                            let v2211 = Lanes([0.0, ((v451 * v2188) / v2191), 0.0]);
                             v2234 = v2192;
                             v2235 = v2209;
                             v2236 = v2211;
                             v2237 = v2210;
                         } else {
                             let v2212 = v1917 / v449;
-                            let v2213 = v451 * v2212;
                             let v2217 = v2 - v2212;
                             let v2219 = v2 - v439;
                             let v2225 = v2 - (v2217.powf(v2219));
-                            let v2228 = v451 * v2225;
                             let v2232 = (v449 * v2225) / v2219;
-                            let v2233 = ((Lanes([0.0, v2228[0], 0.0])) + ((((((v2098 - (Lanes([0.0, v2213[0], 0.0]))) / v449) * v71) * (v2219 * (v2217.powf((v2219 - v151))))) * v71) * v449)) / v2219;
+                            let v2233 = ((Lanes([0.0, (v451 * v2225), 0.0])) + ((((((v2098 - (Lanes([0.0, (v451 * v2212), 0.0]))) / v449) * v71) * (v2219 * (v2217.powf((v2219 - v151))))) * v71) * v449)) / v2219;
                             v2234 = v2232;
                             v2235 = v0;
                             v2236 = v2233;
@@ -2505,33 +2553,29 @@ impl Instance {
                         let v2103 = v2080 * v2079;
                         let v2106 = (v311 * v2081) * v2081;
                         let v2108 = ((v2079 * v2079) + v2106).sqrt();
-                        let v2116 = (v2080 + ((v2103 + v2103) * (v151 / (v316 * v2108)))) * v2114;
                         let v2117 = v1917 + v2079;
                         let v2118 = Lanes([v1918[0], 0.0, v1918[1]]);
-                        let v2119 = Lanes([0.0, v2080[0], 0.0]);
+                        let v2119 = Lanes([0.0, v2080, 0.0]);
                         let v2120 = v2118 + v2119;
                         let v2122 = v2120 * v2117;
                         let v2125 = ((v2117 * v2117) + v2106).sqrt();
                         let v2133 = (v321 * (v2117 - v2125)) - v2079;
                         let v2134 = ((v2120 - ((v2122 + v2122) * (v151 / (v316 * v2125)))) * v321) - v2119;
                         let v2135 = v2133 / v449;
-                        let v2136 = v451 * v2135;
                         let v2140 = v2 - v2135;
                         let v2142 = v2 - v439;
                         let v2143 = v2140.powf(v2142);
-                        let v2149 = v2078 * v2143;
                         let v2155 = v2 - v1926;
                         let v2157 = v2155.powf((-v439));
                         let v2160 = (v1917 - v2133) + (v2114 * (v2079 + v2108));
-                        let v2162 = (v2118 - v2134) + (Lanes([0.0, v2116[0], 0.0]));
+                        let v2162 = (v2118 - v2134) + (Lanes([0.0, ((v2080 + ((v2103 + v2103) * (v151 / (v316 * v2108)))) * v2114), 0.0]));
                         let v2163 = v2157 * v2160;
                         let v2165 = v321 * v439;
                         let v2168 = v449 * v2155;
                         let v2170 = (v2165 * v2160) / v2168;
-                        let v2171 = (v451 * v2155) * v2170;
                         let v2175 = v2 + v2170;
                         let v2180 = ((v2077 * v2143) / v2142) + (v2163 * v2175);
-                        let v2181 = (((Lanes([0.0, v2149[0], 0.0])) + (((((v2134 - (Lanes([0.0, v2136[0], 0.0]))) / v449) * v71) * (v2142 * (v2140.powf((v2142 - v151))))) * v2077)) / v2142) + (((v2162 * v2157) * v2175) + ((((v2162 * v2165) - (Lanes([0.0, v2171[0], 0.0]))) / v2168) * v2163));
+                        let v2181 = (((Lanes([0.0, (v2078 * v2143), 0.0])) + (((((v2134 - (Lanes([0.0, (v451 * v2135), 0.0]))) / v449) * v71) * (v2142 * (v2140.powf((v2142 - v151))))) * v2077)) / v2142) + (((v2162 * v2157) * v2175) + ((((v2162 * v2165) - (Lanes([0.0, ((v451 * v2155) * v2170), 0.0]))) / v2168) * v2163));
                         v2182 = v2180;
                         v2183 = v2181;
                     }
@@ -2541,10 +2585,8 @@ impl Instance {
                     v2083 = v0;
                     v2084 = v1440;
                 }
-                let v2086 = v1920 * v1931;
-                let v2091 = v1922 * v2083;
                 let v2095 = (v1919 * v1931) + (v1921 * v2083);
-                let v2096 = ((Lanes([0.0, v2086[0], 0.0])) + (v1932 * v1919)) + ((Lanes([0.0, v2091[0], 0.0])) + (v2084 * v1921));
+                let v2096 = ((Lanes([0.0, (v1920 * v1931), 0.0])) + (v1932 * v1919)) + ((Lanes([0.0, (v1922 * v2083), 0.0])) + (v2084 * v1921));
                 v1899 = v2095;
                 v1900 = v2096;
             } else {
@@ -2586,7 +2628,7 @@ impl Instance {
                     if v2287 != 0.0 {
                         let v2291 = v2276 + v2285;
                         let v2292 = Lanes([v2277[0], 0.0, v2277[1]]);
-                        let v2294 = v2292 + (Lanes([0.0, v2286[0], 0.0]));
+                        let v2294 = v2292 + (Lanes([0.0, v2286, 0.0]));
                         let v2295 = if v2291 > v0 { 1.0 } else { 0.0 };
                         let v2428: f64;
                         let v2429: f64;
@@ -2598,28 +2640,24 @@ impl Instance {
                             let v2382 = v2 - (v2380 * v2378);
                             let v2385 = v2 - v338;
                             let v2386 = (v348 * v2382) / v2385;
-                            let v2387 = (v350 * v2382) / v2385;
                             let v2388 = v321 * v338;
                             let v2391 = v348 * v2378;
                             let v2393 = (v2388 * v2291) / v2391;
-                            let v2394 = (v350 * v2378) * v2393;
                             let v2398 = v2 + v2393;
                             let v2403 = (v2291 * v2398) * v2380;
-                            let v2404 = ((v2294 * v2398) + ((((v2294 * v2388) - (Lanes([0.0, v2394[0], 0.0]))) / v2391) * v2291)) * v2380;
-                            let v2405 = Lanes([0.0, v2387[0], 0.0]);
+                            let v2404 = ((v2294 * v2398) + ((((v2294 * v2388) - (Lanes([0.0, ((v350 * v2378) * v2393), 0.0]))) / v2391) * v2291)) * v2380;
+                            let v2405 = Lanes([0.0, ((v350 * v2382) / v2385), 0.0]);
                             v2428 = v2386;
                             v2429 = v2403;
                             v2430 = v2405;
                             v2431 = v2404;
                         } else {
                             let v2406 = v2276 / v348;
-                            let v2407 = v350 * v2406;
                             let v2411 = v2 - v2406;
                             let v2413 = v2 - v338;
                             let v2419 = v2 - (v2411.powf(v2413));
-                            let v2422 = v350 * v2419;
                             let v2426 = (v348 * v2419) / v2413;
-                            let v2427 = ((Lanes([0.0, v2422[0], 0.0])) + ((((((v2292 - (Lanes([0.0, v2407[0], 0.0]))) / v348) * v71) * (v2413 * (v2411.powf((v2413 - v151))))) * v71) * v348)) / v2413;
+                            let v2427 = ((Lanes([0.0, (v350 * v2419), 0.0])) + ((((((v2292 - (Lanes([0.0, (v350 * v2406), 0.0]))) / v348) * v71) * (v2413 * (v2411.powf((v2413 - v151))))) * v71) * v348)) / v2413;
                             v2428 = v2426;
                             v2429 = v0;
                             v2430 = v2427;
@@ -2633,33 +2671,29 @@ impl Instance {
                         let v2297 = v2286 * v2285;
                         let v2300 = (v311 * v1929) * v1929;
                         let v2302 = ((v2285 * v2285) + v2300).sqrt();
-                        let v2310 = (v2286 + ((v2297 + v2297) * (v151 / (v316 * v2302)))) * v2308;
                         let v2311 = v2276 + v2285;
                         let v2312 = Lanes([v2277[0], 0.0, v2277[1]]);
-                        let v2313 = Lanes([0.0, v2286[0], 0.0]);
+                        let v2313 = Lanes([0.0, v2286, 0.0]);
                         let v2314 = v2312 + v2313;
                         let v2316 = v2314 * v2311;
                         let v2319 = ((v2311 * v2311) + v2300).sqrt();
                         let v2327 = (v321 * (v2311 - v2319)) - v2285;
                         let v2328 = ((v2314 - ((v2316 + v2316) * (v151 / (v316 * v2319)))) * v321) - v2313;
                         let v2329 = v2327 / v348;
-                        let v2330 = v350 * v2329;
                         let v2334 = v2 - v2329;
                         let v2336 = v2 - v338;
                         let v2337 = v2334.powf(v2336);
-                        let v2343 = v2284 * v2337;
                         let v2349 = v2 - v1926;
                         let v2351 = v2349.powf((-v338));
                         let v2354 = (v2276 - v2327) + (v2308 * (v2285 + v2302));
-                        let v2356 = (v2312 - v2328) + (Lanes([0.0, v2310[0], 0.0]));
+                        let v2356 = (v2312 - v2328) + (Lanes([0.0, ((v2286 + ((v2297 + v2297) * (v151 / (v316 * v2302)))) * v2308), 0.0]));
                         let v2357 = v2351 * v2354;
                         let v2359 = v321 * v338;
                         let v2362 = v348 * v2349;
                         let v2364 = (v2359 * v2354) / v2362;
-                        let v2365 = (v350 * v2349) * v2364;
                         let v2369 = v2 + v2364;
                         let v2374 = ((v2283 * v2337) / v2336) + (v2357 * v2369);
-                        let v2375 = (((Lanes([0.0, v2343[0], 0.0])) + (((((v2328 - (Lanes([0.0, v2330[0], 0.0]))) / v348) * v71) * (v2336 * (v2334.powf((v2336 - v151))))) * v2283)) / v2336) + (((v2356 * v2351) * v2369) + ((((v2356 * v2359) - (Lanes([0.0, v2365[0], 0.0]))) / v2362) * v2357));
+                        let v2375 = (((Lanes([0.0, (v2284 * v2337), 0.0])) + (((((v2328 - (Lanes([0.0, (v350 * v2329), 0.0]))) / v348) * v71) * (v2336 * (v2334.powf((v2336 - v151))))) * v2283)) / v2336) + (((v2356 * v2351) * v2369) + ((((v2356 * v2359) - (Lanes([0.0, ((v350 * v2349) * v2364), 0.0]))) / v2362) * v2357));
                         v2376 = v2374;
                         v2377 = v2375;
                     }
@@ -2683,7 +2717,7 @@ impl Instance {
                     if v2438 != 0.0 {
                         let v2453 = v2276 + v2436;
                         let v2454 = Lanes([v2277[0], 0.0, v2277[1]]);
-                        let v2456 = v2454 + (Lanes([0.0, v2437[0], 0.0]));
+                        let v2456 = v2454 + (Lanes([0.0, v2437, 0.0]));
                         let v2457 = if v2453 > v0 { 1.0 } else { 0.0 };
                         let v2590: f64;
                         let v2591: f64;
@@ -2695,28 +2729,24 @@ impl Instance {
                             let v2544 = v2 - (v2542 * v2540);
                             let v2547 = v2 - v439;
                             let v2548 = (v449 * v2544) / v2547;
-                            let v2549 = (v451 * v2544) / v2547;
                             let v2550 = v321 * v439;
                             let v2553 = v449 * v2540;
                             let v2555 = (v2550 * v2453) / v2553;
-                            let v2556 = (v451 * v2540) * v2555;
                             let v2560 = v2 + v2555;
                             let v2565 = (v2453 * v2560) * v2542;
-                            let v2566 = ((v2456 * v2560) + ((((v2456 * v2550) - (Lanes([0.0, v2556[0], 0.0]))) / v2553) * v2453)) * v2542;
-                            let v2567 = Lanes([0.0, v2549[0], 0.0]);
+                            let v2566 = ((v2456 * v2560) + ((((v2456 * v2550) - (Lanes([0.0, ((v451 * v2540) * v2555), 0.0]))) / v2553) * v2453)) * v2542;
+                            let v2567 = Lanes([0.0, ((v451 * v2544) / v2547), 0.0]);
                             v2590 = v2548;
                             v2591 = v2565;
                             v2592 = v2567;
                             v2593 = v2566;
                         } else {
                             let v2568 = v2276 / v449;
-                            let v2569 = v451 * v2568;
                             let v2573 = v2 - v2568;
                             let v2575 = v2 - v439;
                             let v2581 = v2 - (v2573.powf(v2575));
-                            let v2584 = v451 * v2581;
                             let v2588 = (v449 * v2581) / v2575;
-                            let v2589 = ((Lanes([0.0, v2584[0], 0.0])) + ((((((v2454 - (Lanes([0.0, v2569[0], 0.0]))) / v449) * v71) * (v2575 * (v2573.powf((v2575 - v151))))) * v71) * v449)) / v2575;
+                            let v2589 = ((Lanes([0.0, (v451 * v2581), 0.0])) + ((((((v2454 - (Lanes([0.0, (v451 * v2568), 0.0]))) / v449) * v71) * (v2575 * (v2573.powf((v2575 - v151))))) * v71) * v449)) / v2575;
                             v2590 = v2588;
                             v2591 = v0;
                             v2592 = v2589;
@@ -2730,33 +2760,29 @@ impl Instance {
                         let v2459 = v2437 * v2436;
                         let v2462 = (v311 * v2081) * v2081;
                         let v2464 = ((v2436 * v2436) + v2462).sqrt();
-                        let v2472 = (v2437 + ((v2459 + v2459) * (v151 / (v316 * v2464)))) * v2470;
                         let v2473 = v2276 + v2436;
                         let v2474 = Lanes([v2277[0], 0.0, v2277[1]]);
-                        let v2475 = Lanes([0.0, v2437[0], 0.0]);
+                        let v2475 = Lanes([0.0, v2437, 0.0]);
                         let v2476 = v2474 + v2475;
                         let v2478 = v2476 * v2473;
                         let v2481 = ((v2473 * v2473) + v2462).sqrt();
                         let v2489 = (v321 * (v2473 - v2481)) - v2436;
                         let v2490 = ((v2476 - ((v2478 + v2478) * (v151 / (v316 * v2481)))) * v321) - v2475;
                         let v2491 = v2489 / v449;
-                        let v2492 = v451 * v2491;
                         let v2496 = v2 - v2491;
                         let v2498 = v2 - v439;
                         let v2499 = v2496.powf(v2498);
-                        let v2505 = v2435 * v2499;
                         let v2511 = v2 - v1926;
                         let v2513 = v2511.powf((-v439));
                         let v2516 = (v2276 - v2489) + (v2470 * (v2436 + v2464));
-                        let v2518 = (v2474 - v2490) + (Lanes([0.0, v2472[0], 0.0]));
+                        let v2518 = (v2474 - v2490) + (Lanes([0.0, ((v2437 + ((v2459 + v2459) * (v151 / (v316 * v2464)))) * v2470), 0.0]));
                         let v2519 = v2513 * v2516;
                         let v2521 = v321 * v439;
                         let v2524 = v449 * v2511;
                         let v2526 = (v2521 * v2516) / v2524;
-                        let v2527 = (v451 * v2511) * v2526;
                         let v2531 = v2 + v2526;
                         let v2536 = ((v2434 * v2499) / v2498) + (v2519 * v2531);
-                        let v2537 = (((Lanes([0.0, v2505[0], 0.0])) + (((((v2490 - (Lanes([0.0, v2492[0], 0.0]))) / v449) * v71) * (v2498 * (v2496.powf((v2498 - v151))))) * v2434)) / v2498) + (((v2518 * v2513) * v2531) + ((((v2518 * v2521) - (Lanes([0.0, v2527[0], 0.0]))) / v2524) * v2519));
+                        let v2537 = (((Lanes([0.0, (v2435 * v2499), 0.0])) + (((((v2490 - (Lanes([0.0, (v451 * v2491), 0.0]))) / v449) * v71) * (v2498 * (v2496.powf((v2498 - v151))))) * v2434)) / v2498) + (((v2518 * v2513) * v2531) + ((((v2518 * v2521) - (Lanes([0.0, ((v451 * v2511) * v2526), 0.0]))) / v2524) * v2519));
                         v2538 = v2536;
                         v2539 = v2537;
                     }
@@ -2766,10 +2792,8 @@ impl Instance {
                     v2439 = v0;
                     v2440 = v1607;
                 }
-                let v2442 = v2279 * v2288;
-                let v2447 = v2281 * v2439;
                 let v2451 = (v2278 * v2288) + (v2280 * v2439);
-                let v2452 = ((Lanes([0.0, v2442[0], 0.0])) + (v2289 * v2278)) + ((Lanes([0.0, v2447[0], 0.0])) + (v2440 * v2280));
+                let v2452 = ((Lanes([0.0, (v2279 * v2288), 0.0])) + (v2289 * v2278)) + ((Lanes([0.0, (v2281 * v2439), 0.0])) + (v2440 * v2280));
                 v2240 = v2451;
                 v2241 = v2452;
             } else {
@@ -2791,9 +2815,7 @@ impl Instance {
             if v2261 != 0.0 {
                 let v2597 = v1637 * v2596;
                 let v2599 = v2597 * v132;
-                let v2600 = (v1639 * v2596) * v132;
-                let v2601 = v133 * v2597;
-                let v2604 = (Lanes([0.0, v2600[0]])) + (Lanes([v2601[0], 0.0]));
+                let v2604 = (Lanes([0.0, ((v1639 * v2596) * v132)])) + (Lanes([(v133 * v2597), 0.0]));
                 v2615 = v2599;
                 v2616 = v0;
                 v2617 = v2604;
@@ -2801,8 +2823,7 @@ impl Instance {
             } else {
                 let v2606 = v2596 * v132;
                 let v2608 = v1632 / v2606;
-                let v2609 = (v133 * v2596) * v2608;
-                let v2613 = ((Lanes([v1636[0], 0.0, v1636[1]])) - (Lanes([0.0, v2609[0], 0.0]))) / v2606;
+                let v2613 = ((Lanes([v1636[0], 0.0, v1636[1]])) - (Lanes([0.0, ((v133 * v2596) * v2608), 0.0]))) / v2606;
                 v2615 = v0;
                 v2616 = v2608;
                 v2617 = v2614;
@@ -2815,9 +2836,7 @@ impl Instance {
             if v2619 != 0.0 {
                 let v2621 = v1655 * v2620;
                 let v2623 = v2621 * v132;
-                let v2624 = (v1657 * v2620) * v132;
-                let v2625 = v133 * v2621;
-                let v2628 = (Lanes([0.0, v2624[0]])) + (Lanes([v2625[0], 0.0]));
+                let v2628 = (Lanes([0.0, ((v1657 * v2620) * v132)])) + (Lanes([(v133 * v2621), 0.0]));
                 v2639 = v2623;
                 v2640 = v0;
                 v2641 = v2628;
@@ -2825,8 +2844,7 @@ impl Instance {
             } else {
                 let v2630 = v2620 * v132;
                 let v2632 = v1650 / v2630;
-                let v2633 = (v133 * v2620) * v2632;
-                let v2637 = ((Lanes([v1654[0], 0.0, v1654[1]])) - (Lanes([0.0, v2633[0], 0.0]))) / v2630;
+                let v2637 = ((Lanes([v1654[0], 0.0, v1654[1]])) - (Lanes([0.0, ((v133 * v2620) * v2632), 0.0]))) / v2630;
                 v2639 = v0;
                 v2640 = v2632;
                 v2641 = v2638;
@@ -2871,7 +2889,7 @@ impl Instance {
             let v2674 = v1845[0];
             let v2675 = v1845[1];
             let v2676 = v1845[2];
-            let v2677 = v1838[0];
+            let v2677 = v1838;
             let v2678 = v1839[0];
             let v2679 = v1839[1];
             let v2680 = v1839[2];
@@ -2896,14 +2914,14 @@ impl Instance {
             let v2699 = v2647[0];
             let v2700 = v2647[1];
             let v2701 = v2647[2];
-            let v2702 = v2649[0];
+            let v2702 = v2649;
             let v2703 = v2255[0];
             let v2704 = v2255[1];
             let v2705 = v2255[2];
             let v2706 = v2257[0];
             let v2707 = v2257[1];
             let v2708 = v2257[2];
-            let v2709 = v2260[0];
+            let v2709 = v2260;
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(5),
             Some(4),
@@ -3025,7 +3043,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(5),
             Some(4),
-            multiplicity * (staged[104]),
+            multiplicity * (staged[111]),
             [],
             [],
             [],
@@ -3035,7 +3053,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(5),
             Some(4),
-            multiplicity * (staged[105]),
+            multiplicity * (staged[112]),
             [],
             [],
             [],
@@ -3045,7 +3063,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(0),
             Some(4),
-            multiplicity * (staged[106]),
+            multiplicity * (staged[113]),
             [],
             [],
             [],
@@ -3055,7 +3073,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(2),
             Some(5),
-            multiplicity * (staged[107]),
+            multiplicity * (staged[114]),
             [],
             [],
             [],
@@ -3101,10 +3119,10 @@ impl Instance {
         self.canonical_reactive[16] = v2708;
         self.canonical_reactive[17] = v2259;
         self.canonical_reactive[18] = v2709;
-        self.canonical_reactive[19] = staged[104];
-        self.canonical_reactive[20] = staged[105];
-        self.canonical_reactive[21] = staged[106];
-        self.canonical_reactive[22] = staged[107];
+        self.canonical_reactive[19] = staged[111];
+        self.canonical_reactive[20] = staged[112];
+        self.canonical_reactive[21] = staged[113];
+        self.canonical_reactive[22] = staged[114];
         self.canonical_reactive[23] = v2651;
         self.canonical_reactive[24] = v2652;
     }

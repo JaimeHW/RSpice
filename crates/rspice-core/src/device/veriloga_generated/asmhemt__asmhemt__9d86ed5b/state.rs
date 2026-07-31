@@ -298,6 +298,18 @@ const PARAMETER_NAME_LOOKUP: [(&str, usize); 287] = [
     ("knsl", 272), ("kbvdsl", 273), ("dtemp", 274), ("nsb", 275), ("ndb", 276), ("isbl", 277), ("idbl", 278), ("vbisb", 279), ("vbidb", 280), ("ktisb", 281), ("ktidb", 282), ("ktnsb", 283), ("ktndb", 284), ("ktvbisb", 285), ("ktvbidb", 286),
 ];
 
+pub(crate) const PARAMETER_MODEL_FLAGS: [bool; 287] = [
+    true, true, true, false, false, false, false, false, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    false, false, true, true, true, true, true, true, true, true, true, true, true, false, false, true, true, true, true, true, true, true, true, true, true, true, false, false, true, true, true, true,
+    true, true, true, true, true, true, true, false, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, false, true, true, true, true, true, true, true, true, true, true, true, true,
+];
+
 const PARAMETER_MIN_REFERENCES: [Option<usize>; 287] = [
     None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
     None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
@@ -672,7 +684,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 1156;
     pub const DDT_STATE_COUNT: usize = 121;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "866666932439adeb0fcb987f708cc11d3ca3e23a4acb713c684d437545e0c760";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "9fbdbc6ce615ee11dc4b24f29c06928b93e005fc31cbc1fd0f0ad206aac1582a";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 

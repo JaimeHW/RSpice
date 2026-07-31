@@ -1203,37 +1203,37 @@ impl Instance {
             let v9380 = parameters[321];
             let v9386 = 0e0f64;
             let v9751 = 1e0f64;
-            let v9752 = Lanes([1e0f64; 1]);
-            let v9753 = Lanes([1e0f64; 1]);
-            let v9754 = Lanes([1e0f64; 1]);
-            let v9755 = Lanes([1e0f64; 1]);
-            let v9756 = Lanes([1e0f64; 1]);
-            let v9757 = Lanes([1e0f64; 1]);
-            let v9758 = Lanes([1e0f64; 1]);
-            let v9759 = Lanes([1e0f64; 1]);
-            let v9760 = Lanes([1e0f64; 1]);
-            let v9761 = Lanes([1e0f64; 1]);
-            let v9762 = Lanes([1e0f64; 1]);
-            let v9763 = Lanes([1e0f64; 1]);
-            let v9764 = Lanes([1e0f64; 1]);
-            let v9765 = Lanes([1e0f64; 1]);
-            let v9766 = Lanes([1e0f64; 1]);
-            let v9767 = Lanes([1e0f64; 1]);
-            let v9768 = Lanes([1e0f64; 1]);
-            let v9769 = Lanes([1e0f64; 1]);
-            let v9770 = Lanes([1e0f64; 1]);
-            let v9771 = Lanes([1e0f64; 1]);
-            let v9772 = Lanes([1e0f64; 1]);
-            let v9773 = Lanes([1e0f64; 1]);
-            let v9774 = Lanes([1e0f64; 1]);
-            let v9775 = Lanes([1e0f64; 1]);
-            let v9776 = Lanes([1e0f64; 1]);
-            let v9777 = Lanes([1e0f64; 1]);
-            let v9778 = Lanes([1e0f64; 1]);
-            let v9779 = Lanes([1e0f64; 1]);
-            let v9780 = Lanes([1e0f64; 1]);
-            let v9781 = Lanes([1e0f64; 1]);
-            let v10838 = Lanes([0e0f64; 1]);
+            let v9752 = 1e0f64;
+            let v9753 = 1e0f64;
+            let v9754 = 1e0f64;
+            let v9755 = 1e0f64;
+            let v9756 = 1e0f64;
+            let v9757 = 1e0f64;
+            let v9758 = 1e0f64;
+            let v9759 = 1e0f64;
+            let v9760 = 1e0f64;
+            let v9761 = 1e0f64;
+            let v9762 = 1e0f64;
+            let v9763 = 1e0f64;
+            let v9764 = 1e0f64;
+            let v9765 = 1e0f64;
+            let v9766 = 1e0f64;
+            let v9767 = 1e0f64;
+            let v9768 = 1e0f64;
+            let v9769 = 1e0f64;
+            let v9770 = 1e0f64;
+            let v9771 = 1e0f64;
+            let v9772 = 1e0f64;
+            let v9773 = 1e0f64;
+            let v9774 = 1e0f64;
+            let v9775 = 1e0f64;
+            let v9776 = 1e0f64;
+            let v9777 = 1e0f64;
+            let v9778 = 1e0f64;
+            let v9779 = 1e0f64;
+            let v9780 = 1e0f64;
+            let v9781 = 1e0f64;
+            let v10838 = 0e0f64;
             let v10962 = 2e0f64;
             let v10982 = -1e0f64;
             let v10984 = Lanes([0e0f64; 4]);
@@ -1251,9 +1251,9 @@ impl Instance {
             let v11039 = 0e0f64;
             let v11099 = Lanes([0e0f64; 2]);
             let v11100 = Lanes([0e0f64; 3]);
-            let v11101 = Lanes([0e0f64; 1]);
+            let v11101 = 0e0f64;
             let v11102 = Lanes([0e0f64; 2]);
-            let v11103 = Lanes([0e0f64; 1]);
+            let v11103 = 0e0f64;
             let v11414 = Lanes([0e0f64; 5]);
             let v11415 = Lanes([0e0f64; 4]);
             let v11416 = Lanes([0e0f64; 3]);
@@ -1304,8 +1304,8 @@ impl Instance {
             let v19792 = Lanes([0e0f64; 10]);
             let v19793 = Lanes([0e0f64; 2]);
             let v19794 = Lanes([0e0f64; 3]);
-            let v19795 = Lanes([0e0f64; 1]);
-            let v19796 = Lanes([0e0f64; 1]);
+            let v19795 = 0e0f64;
+            let v19796 = 0e0f64;
             let v19814 = Lanes([0e0f64; 3]);
             let v19815 = Lanes([0e0f64; 3]);
             let v19816 = Lanes([0e0f64; 3]);
@@ -1325,14 +1325,14 @@ impl Instance {
             let v11 = (v5 + v9) + v8;
             let v13 = if v11 < v12 { 1.0 } else { 0.0 };
             let v47: f64;
-            let v9782: Lanes<1>;
+            let v9782: f64;
             if v13 != 0.0 {
                 v47 = v14;
                 v9782 = v10838;
             } else {
                 let v16 = if v11 > v15 { 1.0 } else { 0.0 };
                 let v48: f64;
-                let v9783: Lanes<1>;
+                let v9783: f64;
                 if v16 != 0.0 {
                     v48 = v17;
                     v9783 = v10838;
@@ -1359,7 +1359,7 @@ impl Instance {
             }
             let v45 = if (if v41 >= v42 { 1.0 } else { 0.0 }) != 0.0 && (if v41 > v0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
             let v9129: f64;
-            let v9784: Lanes<1>;
+            let v9784: f64;
             if v45 != 0.0 {
                 let v49 = v47 - v4;
                 let v53 = v52 * v49;
@@ -1368,7 +1368,7 @@ impl Instance {
                 let v58 = v57 * v41;
                 let v59 = if v56 < v58 { 1.0 } else { 0.0 };
                 let v9130: f64;
-                let v9785: Lanes<1>;
+                let v9785: f64;
                 if v59 != 0.0 {
                     v9130 = v58;
                     v9785 = v10838;
@@ -1384,7 +1384,7 @@ impl Instance {
             }
             let v63 = if (if v60 >= v42 { 1.0 } else { 0.0 }) != 0.0 && (if v60 > v0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
             let v9124: f64;
-            let v9786: Lanes<1>;
+            let v9786: f64;
             if v63 != 0.0 {
                 let v64 = v47 - v4;
                 let v67 = v52 * v64;
@@ -1393,7 +1393,7 @@ impl Instance {
                 let v71 = v57 * v60;
                 let v72 = if v70 < v71 { 1.0 } else { 0.0 };
                 let v9125: f64;
-                let v9787: Lanes<1>;
+                let v9787: f64;
                 if v72 != 0.0 {
                     v9125 = v71;
                     v9787 = v10838;
@@ -1417,7 +1417,7 @@ impl Instance {
             let v94 = v6 + (v91 * v92);
             let v95 = if v94 < v57 { 1.0 } else { 0.0 };
             let v434: f64;
-            let v9788: Lanes<1>;
+            let v9788: f64;
             if v95 != 0.0 {
                 v434 = v57;
                 v9788 = v10838;
@@ -1434,7 +1434,7 @@ impl Instance {
             let v102 = v6 + (v100 * v92);
             let v104 = if v102 < v103 { 1.0 } else { 0.0 };
             let v105: f64;
-            let v9789: Lanes<1>;
+            let v9789: f64;
             if v104 != 0.0 {
                 v105 = v103;
                 v9789 = v10838;
@@ -1448,7 +1448,7 @@ impl Instance {
             let v110 = v6 + (v108 * v92);
             let v111 = if v110 < v103 { 1.0 } else { 0.0 };
             let v112: f64;
-            let v9790: Lanes<1>;
+            let v9790: f64;
             if v111 != 0.0 {
                 v112 = v103;
                 v9790 = v10838;
@@ -1462,7 +1462,7 @@ impl Instance {
             let v117 = v6 + (v115 * v92);
             let v118 = if v117 < v103 { 1.0 } else { 0.0 };
             let v119: f64;
-            let v9791: Lanes<1>;
+            let v9791: f64;
             if v118 != 0.0 {
                 v119 = v103;
                 v9791 = v10838;
@@ -1476,7 +1476,7 @@ impl Instance {
             let v124 = v6 + (v122 * v92);
             let v125 = if v124 < v103 { 1.0 } else { 0.0 };
             let v126: f64;
-            let v9792: Lanes<1>;
+            let v9792: f64;
             if v125 != 0.0 {
                 v126 = v103;
                 v9792 = v10838;
@@ -1490,7 +1490,7 @@ impl Instance {
             let v131 = v6 + (v129 * v92);
             let v132 = if v131 < v103 { 1.0 } else { 0.0 };
             let v133: f64;
-            let v9793: Lanes<1>;
+            let v9793: f64;
             if v132 != 0.0 {
                 v133 = v103;
                 v9793 = v10838;
@@ -1504,7 +1504,7 @@ impl Instance {
             let v138 = v6 + (v136 * v92);
             let v139 = if v138 < v103 { 1.0 } else { 0.0 };
             let v140: f64;
-            let v9794: Lanes<1>;
+            let v9794: f64;
             if v139 != 0.0 {
                 v140 = v103;
                 v9794 = v10838;
@@ -1515,7 +1515,7 @@ impl Instance {
             let v141 = v135 * v140;
             let v10870 = v9794 * v135;
             let v143: f64;
-            let v9795: Lanes<1>;
+            let v9795: f64;
             if v104 != 0.0 {
                 v143 = v103;
                 v9795 = v10838;
@@ -1526,7 +1526,7 @@ impl Instance {
             let v144 = v142 * v143;
             let v10871 = v9795 * v142;
             let v146: f64;
-            let v9796: Lanes<1>;
+            let v9796: f64;
             if v111 != 0.0 {
                 v146 = v103;
                 v9796 = v10838;
@@ -1537,7 +1537,7 @@ impl Instance {
             let v147 = v145 * v146;
             let v10872 = v9796 * v145;
             let v149: f64;
-            let v9797: Lanes<1>;
+            let v9797: f64;
             if v118 != 0.0 {
                 v149 = v103;
                 v9797 = v10838;
@@ -1548,7 +1548,7 @@ impl Instance {
             let v150 = v148 * v149;
             let v10873 = v9797 * v148;
             let v152: f64;
-            let v9798: Lanes<1>;
+            let v9798: f64;
             if v125 != 0.0 {
                 v152 = v103;
                 v9798 = v10838;
@@ -1559,7 +1559,7 @@ impl Instance {
             let v153 = v151 * v152;
             let v10874 = v9798 * v151;
             let v155: f64;
-            let v9799: Lanes<1>;
+            let v9799: f64;
             if v132 != 0.0 {
                 v155 = v103;
                 v9799 = v10838;
@@ -1570,7 +1570,7 @@ impl Instance {
             let v156 = v154 * v155;
             let v10875 = v9799 * v154;
             let v158: f64;
-            let v9800: Lanes<1>;
+            let v9800: f64;
             if v139 != 0.0 {
                 v158 = v103;
                 v9800 = v10838;
@@ -1584,7 +1584,7 @@ impl Instance {
             let v163 = v6 + (v161 * v92);
             let v164 = if v163 < v103 { 1.0 } else { 0.0 };
             let v165: f64;
-            let v9801: Lanes<1>;
+            let v9801: f64;
             if v164 != 0.0 {
                 v165 = v103;
                 v9801 = v10838;
@@ -1598,7 +1598,7 @@ impl Instance {
             let v170 = v6 + (v168 * v92);
             let v171 = if v170 < v103 { 1.0 } else { 0.0 };
             let v172: f64;
-            let v9802: Lanes<1>;
+            let v9802: f64;
             if v171 != 0.0 {
                 v172 = v103;
                 v9802 = v10838;
@@ -1612,7 +1612,7 @@ impl Instance {
             let v177 = v6 + (v175 * v92);
             let v178 = if v177 < v103 { 1.0 } else { 0.0 };
             let v179: f64;
-            let v9803: Lanes<1>;
+            let v9803: f64;
             if v178 != 0.0 {
                 v179 = v103;
                 v9803 = v10838;
@@ -1626,7 +1626,7 @@ impl Instance {
             let v184 = v6 + (v182 * v92);
             let v185 = if v184 < v103 { 1.0 } else { 0.0 };
             let v186: f64;
-            let v9804: Lanes<1>;
+            let v9804: f64;
             if v185 != 0.0 {
                 v186 = v103;
                 v9804 = v10838;
@@ -1640,7 +1640,7 @@ impl Instance {
             let v191 = v6 + (v189 * v92);
             let v192 = if v191 < v103 { 1.0 } else { 0.0 };
             let v193: f64;
-            let v9805: Lanes<1>;
+            let v9805: f64;
             if v192 != 0.0 {
                 v193 = v103;
                 v9805 = v10838;
@@ -1654,7 +1654,7 @@ impl Instance {
             let v198 = v6 + (v196 * v92);
             let v199 = if v198 < v103 { 1.0 } else { 0.0 };
             let v200: f64;
-            let v9806: Lanes<1>;
+            let v9806: f64;
             if v199 != 0.0 {
                 v200 = v103;
                 v9806 = v10838;
@@ -1668,7 +1668,7 @@ impl Instance {
             let v205 = v6 + (v203 * v92);
             let v206 = if v205 < v103 { 1.0 } else { 0.0 };
             let v207: f64;
-            let v9807: Lanes<1>;
+            let v9807: f64;
             if v206 != 0.0 {
                 v207 = v103;
                 v9807 = v10838;
@@ -1682,7 +1682,7 @@ impl Instance {
             let v212 = v6 + (v210 * v92);
             let v213 = if v212 < v103 { 1.0 } else { 0.0 };
             let v214: f64;
-            let v9808: Lanes<1>;
+            let v9808: f64;
             if v213 != 0.0 {
                 v214 = v103;
                 v9808 = v10838;
@@ -1696,7 +1696,7 @@ impl Instance {
             let v219 = v6 + (v217 * v92);
             let v220 = if v219 < v103 { 1.0 } else { 0.0 };
             let v221: f64;
-            let v9809: Lanes<1>;
+            let v9809: f64;
             if v220 != 0.0 {
                 v221 = v103;
                 v9809 = v10838;
@@ -1710,7 +1710,7 @@ impl Instance {
             let v226 = v6 + (v224 * v92);
             let v227 = if v226 < v103 { 1.0 } else { 0.0 };
             let v228: f64;
-            let v9810: Lanes<1>;
+            let v9810: f64;
             if v227 != 0.0 {
                 v228 = v103;
                 v9810 = v10838;
@@ -1724,7 +1724,7 @@ impl Instance {
             let v233 = v6 + (v231 * v92);
             let v234 = if v233 < v103 { 1.0 } else { 0.0 };
             let v235: f64;
-            let v9811: Lanes<1>;
+            let v9811: f64;
             if v234 != 0.0 {
                 v235 = v103;
                 v9811 = v10838;
@@ -1738,7 +1738,7 @@ impl Instance {
             let v240 = v6 + (v238 * v92);
             let v241 = if v240 < v103 { 1.0 } else { 0.0 };
             let v242: f64;
-            let v9812: Lanes<1>;
+            let v9812: f64;
             if v241 != 0.0 {
                 v242 = v103;
                 v9812 = v10838;
@@ -1752,7 +1752,7 @@ impl Instance {
             let v247 = v6 + (v245 * v92);
             let v248 = if v247 < v103 { 1.0 } else { 0.0 };
             let v249: f64;
-            let v9813: Lanes<1>;
+            let v9813: f64;
             if v248 != 0.0 {
                 v249 = v103;
                 v9813 = v10838;
@@ -1766,7 +1766,7 @@ impl Instance {
             let v254 = v6 + (v252 * v92);
             let v255 = if v254 < v103 { 1.0 } else { 0.0 };
             let v256: f64;
-            let v9814: Lanes<1>;
+            let v9814: f64;
             if v255 != 0.0 {
                 v256 = v103;
                 v9814 = v10838;
@@ -1780,7 +1780,7 @@ impl Instance {
             let v261 = v6 + (v259 * v92);
             let v262 = if v261 < v103 { 1.0 } else { 0.0 };
             let v263: f64;
-            let v9815: Lanes<1>;
+            let v9815: f64;
             if v262 != 0.0 {
                 v263 = v103;
                 v9815 = v10838;
@@ -1794,7 +1794,7 @@ impl Instance {
             let v268 = v6 + (v266 * v92);
             let v269 = if v268 < v103 { 1.0 } else { 0.0 };
             let v270: f64;
-            let v9816: Lanes<1>;
+            let v9816: f64;
             if v269 != 0.0 {
                 v270 = v103;
                 v9816 = v10838;
@@ -1808,7 +1808,7 @@ impl Instance {
             let v275 = v6 + (v273 * v92);
             let v276 = if v275 < v103 { 1.0 } else { 0.0 };
             let v277: f64;
-            let v9817: Lanes<1>;
+            let v9817: f64;
             if v276 != 0.0 {
                 v277 = v103;
                 v9817 = v10838;
@@ -1822,7 +1822,7 @@ impl Instance {
             let v282 = v6 + (v280 * v92);
             let v283 = if v282 < v103 { 1.0 } else { 0.0 };
             let v284: f64;
-            let v9818: Lanes<1>;
+            let v9818: f64;
             if v283 != 0.0 {
                 v284 = v103;
                 v9818 = v10838;
@@ -1836,7 +1836,7 @@ impl Instance {
             let v289 = v6 + (v287 * v92);
             let v290 = if v289 < v103 { 1.0 } else { 0.0 };
             let v291: f64;
-            let v9819: Lanes<1>;
+            let v9819: f64;
             if v290 != 0.0 {
                 v291 = v103;
                 v9819 = v10838;
@@ -1850,7 +1850,7 @@ impl Instance {
             let v296 = v6 + (v294 * v92);
             let v297 = if v296 < v103 { 1.0 } else { 0.0 };
             let v298: f64;
-            let v9820: Lanes<1>;
+            let v9820: f64;
             if v297 != 0.0 {
                 v298 = v103;
                 v9820 = v10838;
@@ -1864,7 +1864,7 @@ impl Instance {
             let v303 = v6 + (v301 * v92);
             let v304 = if v303 < v103 { 1.0 } else { 0.0 };
             let v305: f64;
-            let v9821: Lanes<1>;
+            let v9821: f64;
             if v304 != 0.0 {
                 v305 = v103;
                 v9821 = v10838;
@@ -1878,7 +1878,7 @@ impl Instance {
             let v310 = v6 + (v308 * v92);
             let v311 = if v310 < v103 { 1.0 } else { 0.0 };
             let v312: f64;
-            let v9822: Lanes<1>;
+            let v9822: f64;
             if v311 != 0.0 {
                 v312 = v103;
                 v9822 = v10838;
@@ -1892,7 +1892,7 @@ impl Instance {
             let v317 = v6 + (v315 * v92);
             let v318 = if v317 < v103 { 1.0 } else { 0.0 };
             let v319: f64;
-            let v9823: Lanes<1>;
+            let v9823: f64;
             if v318 != 0.0 {
                 v319 = v103;
                 v9823 = v10838;
@@ -1906,7 +1906,7 @@ impl Instance {
             let v324 = v6 + (v322 * v92);
             let v325 = if v324 < v103 { 1.0 } else { 0.0 };
             let v326: f64;
-            let v9824: Lanes<1>;
+            let v9824: f64;
             if v325 != 0.0 {
                 v326 = v103;
                 v9824 = v10838;
@@ -1920,7 +1920,7 @@ impl Instance {
             let v331 = v6 + (v329 * v92);
             let v332 = if v331 < v103 { 1.0 } else { 0.0 };
             let v333: f64;
-            let v9825: Lanes<1>;
+            let v9825: f64;
             if v332 != 0.0 {
                 v333 = v103;
                 v9825 = v10838;
@@ -1931,11 +1931,11 @@ impl Instance {
             let v334 = v328 * v333;
             let v10926 = v9825 * v328;
             let v338 = v336 - v337;
-            let v10929 = (Lanes([v9753[0], 0.0])) - (Lanes([0.0, v9754[0]]));
+            let v10929 = (Lanes([v9753, 0.0])) - (Lanes([0.0, v9754]));
             let v339 = v335 * v338;
             let v10930 = v10929 * v335;
             let v341 = v340 - v337;
-            let v10933 = (Lanes([v9755[0], 0.0])) - (Lanes([0.0, v9754[0]]));
+            let v10933 = (Lanes([v9755, 0.0])) - (Lanes([0.0, v9754]));
             let v342 = v335 * v341;
             let v10934 = v10933 * v335;
             let v344 = if v343 == v0 { 1.0 } else { 0.0 };
@@ -1943,9 +1943,9 @@ impl Instance {
             let v9826: Lanes<3>;
             if v344 != 0.0 {
                 let v348 = v335 * (v345 - v346);
-                let v10971 = ((Lanes([0.0, v9756[0]])) - (Lanes([v9757[0], 0.0]))) * v335;
+                let v10971 = ((Lanes([0.0, v9756])) - (Lanes([v9757, 0.0]))) * v335;
                 let v351 = v335 * (v345 - v349);
-                let v10975 = ((Lanes([0.0, v9756[0]])) - (Lanes([v9758[0], 0.0]))) * v335;
+                let v10975 = ((Lanes([0.0, v9756])) - (Lanes([v9758, 0.0]))) * v335;
                 let v352 = if v348 <= v351 { 1.0 } else { 0.0 };
                 let v387: f64;
                 let v9827: Lanes<3>;
@@ -1962,9 +1962,9 @@ impl Instance {
                 v9826 = v9827;
             } else {
                 let v354 = v335 * (v345 - v346);
-                let v10938 = ((Lanes([0.0, v9756[0]])) - (Lanes([v9757[0], 0.0]))) * v335;
+                let v10938 = ((Lanes([0.0, v9756])) - (Lanes([v9757, 0.0]))) * v335;
                 let v356 = v335 * (v345 - v349);
-                let v10942 = ((Lanes([0.0, v9756[0]])) - (Lanes([v9758[0], 0.0]))) * v335;
+                let v10942 = ((Lanes([0.0, v9756])) - (Lanes([v9758, 0.0]))) * v335;
                 let v375: f64;
                 let v9828: Lanes<3>;
                 if v344 != 0.0 {
@@ -1993,7 +1993,7 @@ impl Instance {
                 v9826 = v9828;
             }
             let v384 = v383 - v345;
-            let v10980 = (Lanes([v9759[0], 0.0])) - (Lanes([0.0, v9756[0]]));
+            let v10980 = (Lanes([v9759, 0.0])) - (Lanes([0.0, v9756]));
             let v385 = v335 * v384;
             let v10981 = v10980 * v335;
             let v388 = (v376 + (v6 / ((v29 * v377) * v379))) - v386;
@@ -2039,10 +2039,10 @@ impl Instance {
             let v9829: Lanes<2>;
             let v9830: Lanes<4>;
             let v9831: Lanes<3>;
-            let v9832: Lanes<1>;
+            let v9832: f64;
             let v9833: Lanes<2>;
-            let v9834: Lanes<1>;
-            let v9835: Lanes<1>;
+            let v9834: f64;
+            let v9835: f64;
             let v9836: Lanes<2>;
             let v9837: Lanes<3>;
             let v9838: Lanes<2>;
@@ -2054,15 +2054,14 @@ impl Instance {
             let v9844: Lanes<2>;
             let v9845: Lanes<2>;
             let v9846: Lanes<2>;
-            let v9847: Lanes<1>;
+            let v9847: f64;
             let v9848: Lanes<2>;
             let v9849: Lanes<2>;
             if v390 != 0.0 {
                 let v398 = v346 - v397;
-                let v11106 = (Lanes([v9757[0], 0.0])) - (Lanes([0.0, v9760[0]]));
-                let v11107 = v9761 * v402;
+                let v11106 = (Lanes([v9757, 0.0])) - (Lanes([0.0, v9760]));
                 let v406 = ((v398 - v399) - (v401 * v402)) / v405;
-                let v11111 = ((Lanes([v11106[0], v11106[1], 0.0])) - (Lanes([0.0, 0.0, v11107[0]]))) / v405;
+                let v11111 = ((Lanes([v11106[0], v11106[1], 0.0])) - (Lanes([0.0, 0.0, (v9761 * v402)]))) / v405;
                 let v408 = if v406 > v407 { 1.0 } else { 0.0 };
                 let v420: f64;
                 let v9850: Lanes<3>;
@@ -2093,16 +2092,14 @@ impl Instance {
                 let v425 = v401 / v424;
                 let v11122 = v9761 / v424;
                 let v429 = v426 * (v401 - v427);
-                let v11126 = ((Lanes([0.0, v9761[0]])) - (Lanes([v9762[0], 0.0]))) * v426;
+                let v11126 = ((Lanes([0.0, v9761])) - (Lanes([v9762, 0.0]))) * v426;
                 let v430 = ddt(51696, v429);
                 let v11127 = v11126 * v11018;
                 let v432 = v431 * v427;
                 let v11128 = v9762 * v431;
                 let v433 = ddt(51700, v432);
                 let v11129 = v11128 * v11018;
-                let v11130 = v9762 * v434;
-                let v11131 = v9788 * v427;
-                let v11134 = (Lanes([0.0, v11130[0]])) + (Lanes([v11131[0], 0.0]));
+                let v11134 = (Lanes([0.0, (v9762 * v434)])) + (Lanes([(v9788 * v427), 0.0]));
                 let v436 = v6 + (v427 * v434);
                 v559 = v436;
                 v6258 = v6;
@@ -2202,11 +2199,10 @@ impl Instance {
                 let v9864: Lanes<2>;
                 if v438 != 0.0 {
                     let v442 = v335 * (v346 - v349);
-                    let v10998 = ((Lanes([v9757[0], 0.0])) - (Lanes([0.0, v9758[0]]))) * v335;
-                    let v11001 = (Lanes([0.0, v9765[0]])) - (Lanes([v9764[0], 0.0]));
+                    let v10998 = ((Lanes([v9757, 0.0])) - (Lanes([0.0, v9758]))) * v335;
+                    let v11001 = (Lanes([0.0, v9765])) - (Lanes([v9764, 0.0]));
                     let v447 = (v445 - v444) / v90;
-                    let v11002 = v10854 * v447;
-                    let v11006 = ((Lanes([0.0, v11001[0], v11001[1]])) - (Lanes([v11002[0], 0.0, 0.0]))) / v90;
+                    let v11006 = ((Lanes([0.0, v11001[0], v11001[1]])) - (Lanes([(v10854 * v447), 0.0, 0.0]))) / v90;
                     let v448 = if v447 > v407 { 1.0 } else { 0.0 };
                     let v458: f64;
                     let v9865: Lanes<3>;
@@ -2234,9 +2230,9 @@ impl Instance {
                     let v461 = v457 * (v458 - v6);
                     let v11009 = v9865 * v457;
                     let v464 = (v443 - v445) / v463;
-                    let v11013 = ((Lanes([v9763[0], 0.0])) - (Lanes([0.0, v9765[0]]))) / v463;
-                    let v11014 = Lanes([v9763[0], 0.0]);
-                    let v11015 = Lanes([0.0, v9764[0]]);
+                    let v11013 = ((Lanes([v9763, 0.0])) - (Lanes([0.0, v9765]))) / v463;
+                    let v11014 = Lanes([v9763, 0.0]);
+                    let v11015 = Lanes([0.0, v9764]);
                     let v467 = (v443 - v444) / v466;
                     let v11017 = (v11014 - v11015) / v466;
                     let v470 = v468 * (ddt(51755, v444));
@@ -2245,22 +2241,17 @@ impl Instance {
                     let v477 = (v6 + (v471 * v92)) + (v475 * v92);
                     let v11027 = (v9782 * v471) + (((v9782 * v474) * v92) + (v9782 * v475));
                     let v478 = v470 * v477;
-                    let v11028 = ((v9764 * v11018) * v468) * v477;
-                    let v11029 = v11027 * v470;
-                    let v11032 = (Lanes([0.0, v11028[0]])) + (Lanes([v11029[0], 0.0]));
+                    let v11032 = (Lanes([0.0, (((v9764 * v11018) * v468) * v477)])) + (Lanes([(v11027 * v470), 0.0]));
                     let v9616 = v9615 * v477;
-                    let v11033 = (v9764 * v468) * v477;
-                    let v11034 = v11027 * v9615;
-                    let v11037 = (Lanes([0.0, v11033[0]])) + (Lanes([v11034[0], 0.0]));
+                    let v11037 = (Lanes([0.0, ((v9764 * v468) * v477)])) + (Lanes([(v11027 * v9615), 0.0]));
                     let v479 = v444 - v443;
                     let v482 = (v479.abs()) / v481;
                     let v11044 = ((v11015 - v11014) * ((v10962 * (if v479 >= v11039 { 1.0 } else { 0.0 })) - v9751)) / v481;
                     let v484 = v335 * (v397 - v349);
-                    let v11048 = ((Lanes([v9760[0], 0.0])) - (Lanes([0.0, v9758[0]]))) * v335;
-                    let v11051 = (Lanes([v9767[0], 0.0])) - (Lanes([0.0, v9768[0]]));
+                    let v11048 = ((Lanes([v9760, 0.0])) - (Lanes([0.0, v9758]))) * v335;
+                    let v11051 = (Lanes([v9767, 0.0])) - (Lanes([0.0, v9768]));
                     let v489 = (v486 - v487) / v90;
-                    let v11052 = v10854 * v489;
-                    let v11056 = ((Lanes([0.0, v11051[0], v11051[1]])) - (Lanes([v11052[0], 0.0, 0.0]))) / v90;
+                    let v11056 = ((Lanes([0.0, v11051[0], v11051[1]])) - (Lanes([(v10854 * v489), 0.0, 0.0]))) / v90;
                     let v490 = if v489 > v407 { 1.0 } else { 0.0 };
                     let v499: f64;
                     let v9867: Lanes<3>;
@@ -2288,9 +2279,9 @@ impl Instance {
                     let v502 = v457 * (v499 - v6);
                     let v11059 = v9867 * v457;
                     let v504 = (v485 - v487) / v463;
-                    let v11063 = ((Lanes([v9766[0], 0.0])) - (Lanes([0.0, v9768[0]]))) / v463;
-                    let v11064 = Lanes([v9766[0], 0.0]);
-                    let v11065 = Lanes([0.0, v9767[0]]);
+                    let v11063 = ((Lanes([v9766, 0.0])) - (Lanes([0.0, v9768]))) / v463;
+                    let v11064 = Lanes([v9766, 0.0]);
+                    let v11065 = Lanes([0.0, v9767]);
                     let v506 = (v485 - v486) / v466;
                     let v11067 = (v11064 - v11065) / v466;
                     let v508 = v468 * (ddt(51823, v486));
@@ -2299,13 +2290,9 @@ impl Instance {
                     let v515 = (v6 + (v509 * v92)) + (v513 * v92);
                     let v11076 = (v9782 * v509) + (((v9782 * v512) * v92) + (v9782 * v513));
                     let v516 = v508 * v515;
-                    let v11077 = ((v9767 * v11018) * v468) * v515;
-                    let v11078 = v11076 * v508;
-                    let v11081 = (Lanes([0.0, v11077[0]])) + (Lanes([v11078[0], 0.0]));
+                    let v11081 = (Lanes([0.0, (((v9767 * v11018) * v468) * v515)])) + (Lanes([(v11076 * v508), 0.0]));
                     let v9620 = v9619 * v515;
-                    let v11082 = (v9767 * v468) * v515;
-                    let v11083 = v11076 * v9619;
-                    let v11086 = (Lanes([0.0, v11082[0]])) + (Lanes([v11083[0], 0.0]));
+                    let v11086 = (Lanes([0.0, ((v9767 * v468) * v515)])) + (Lanes([(v11076 * v9619), 0.0]));
                     let v517 = v486 - v485;
                     let v11092 = ((v11065 - v11064) * ((v10962 * (if v517 >= v11039 { 1.0 } else { 0.0 })) - v9751)) / v519;
                     let v522 = (v6 + v482) + ((v517.abs()) / v519);
@@ -2448,9 +2435,9 @@ impl Instance {
             let v9869: Lanes<3>;
             if v344 != 0.0 {
                 let v534 = v335 * (v532 - v346);
-                let v11170 = ((Lanes([0.0, v9769[0]])) - (Lanes([v9757[0], 0.0]))) * v335;
+                let v11170 = ((Lanes([0.0, v9769])) - (Lanes([v9757, 0.0]))) * v335;
                 let v536 = v335 * (v532 - v349);
-                let v11174 = ((Lanes([0.0, v9769[0]])) - (Lanes([v9758[0], 0.0]))) * v335;
+                let v11174 = ((Lanes([0.0, v9769])) - (Lanes([v9758, 0.0]))) * v335;
                 let v537 = if v534 <= v536 { 1.0 } else { 0.0 };
                 let v570: f64;
                 let v9870: Lanes<3>;
@@ -2467,9 +2454,9 @@ impl Instance {
                 v9869 = v9870;
             } else {
                 let v539 = v335 * (v532 - v346);
-                let v11138 = ((Lanes([0.0, v9769[0]])) - (Lanes([v9757[0], 0.0]))) * v335;
+                let v11138 = ((Lanes([0.0, v9769])) - (Lanes([v9757, 0.0]))) * v335;
                 let v541 = v335 * (v532 - v349);
-                let v11142 = ((Lanes([0.0, v9769[0]])) - (Lanes([v9758[0], 0.0]))) * v335;
+                let v11142 = ((Lanes([0.0, v9769])) - (Lanes([v9758, 0.0]))) * v335;
                 let v557: f64;
                 let v9871: Lanes<3>;
                 if v344 != 0.0 {
@@ -2501,7 +2488,7 @@ impl Instance {
             let v564 = v6 / v563;
             let v11182 = (((((v9829 * v29) * v561) * v379) * v564) * v10982) / v563;
             let v567 = v566 - v532;
-            let v11185 = (Lanes([0.0, v9770[0]])) - (Lanes([v9769[0], 0.0]));
+            let v11185 = (Lanes([0.0, v9770])) - (Lanes([v9769, 0.0]));
             let v568 = v335 * v567;
             let v11186 = v11185 * v335;
             let v571 = (v558 + v564) - v569;
@@ -2513,9 +2500,9 @@ impl Instance {
             let v9873: Lanes<3>;
             if v573 != 0.0 {
                 let v577 = v335 * (v574 - v575);
-                let v11203 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9772[0]]))) * v335;
+                let v11203 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9772]))) * v335;
                 let v579 = v335 * (v349 - v575);
-                let v11207 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9772[0]]))) * v335;
+                let v11207 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9772]))) * v335;
                 let v11208 = Lanes([0.0, v11203[0], v11203[1]]);
                 let v11209 = Lanes([v11207[0], 0.0, v11207[1]]);
                 v3040 = v577;
@@ -2524,9 +2511,9 @@ impl Instance {
                 v9873 = v11209;
             } else {
                 let v581 = v335 * (v349 - v575);
-                let v11193 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9772[0]]))) * v335;
+                let v11193 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9772]))) * v335;
                 let v583 = v335 * (v574 - v575);
-                let v11197 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9772[0]]))) * v335;
+                let v11197 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9772]))) * v335;
                 let v11198 = Lanes([v11193[0], 0.0, v11193[1]]);
                 let v11199 = Lanes([0.0, v11197[0], v11197[1]]);
                 v3040 = v581;
@@ -2535,11 +2522,11 @@ impl Instance {
                 v9873 = v11199;
             }
             let v584 = v337 - v575;
-            let v11212 = (Lanes([v9754[0], 0.0])) - (Lanes([0.0, v9772[0]]));
+            let v11212 = (Lanes([v9754, 0.0])) - (Lanes([0.0, v9772]));
             let v585 = v335 * v584;
             let v11213 = v11212 * v335;
             let v587 = v586 - v575;
-            let v11216 = (Lanes([v9773[0], 0.0])) - (Lanes([0.0, v9772[0]]));
+            let v11216 = (Lanes([v9773, 0.0])) - (Lanes([0.0, v9772]));
             let v588 = v335 * v587;
             let v11217 = v11216 * v335;
             let v590 = if v589 == v6 { 1.0 } else { 0.0 };
@@ -2549,9 +2536,9 @@ impl Instance {
             let v9875: Lanes<3>;
             if v590 != 0.0 {
                 let v593 = v335 * (v574 - v591);
-                let v11231 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9774[0]]))) * v335;
+                let v11231 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9774]))) * v335;
                 let v595 = v335 * (v349 - v591);
-                let v11235 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9774[0]]))) * v335;
+                let v11235 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9774]))) * v335;
                 let v11236 = Lanes([0.0, v11231[0], v11231[1]]);
                 let v11237 = Lanes([v11235[0], 0.0, v11235[1]]);
                 v3621 = v593;
@@ -2560,9 +2547,9 @@ impl Instance {
                 v9875 = v11237;
             } else {
                 let v597 = v335 * (v349 - v591);
-                let v11221 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9774[0]]))) * v335;
+                let v11221 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9774]))) * v335;
                 let v599 = v335 * (v574 - v591);
-                let v11225 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9774[0]]))) * v335;
+                let v11225 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9774]))) * v335;
                 let v11226 = Lanes([v11221[0], 0.0, v11221[1]]);
                 let v11227 = Lanes([0.0, v11225[0], v11225[1]]);
                 v3621 = v597;
@@ -2571,11 +2558,11 @@ impl Instance {
                 v9875 = v11227;
             }
             let v600 = v575 - v591;
-            let v11240 = (Lanes([v9772[0], 0.0])) - (Lanes([0.0, v9774[0]]));
+            let v11240 = (Lanes([v9772, 0.0])) - (Lanes([0.0, v9774]));
             let v601 = v335 * v600;
             let v11241 = v11240 * v335;
             let v602 = v586 - v591;
-            let v11244 = (Lanes([v9773[0], 0.0])) - (Lanes([0.0, v9774[0]]));
+            let v11244 = (Lanes([v9773, 0.0])) - (Lanes([0.0, v9774]));
             let v603 = v335 * v602;
             let v11245 = v11244 * v335;
             let v605 = if v604 == v6 { 1.0 } else { 0.0 };
@@ -2585,9 +2572,9 @@ impl Instance {
             let v9877: Lanes<3>;
             if v605 != 0.0 {
                 let v608 = v335 * (v574 - v606);
-                let v11259 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9775[0]]))) * v335;
+                let v11259 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9775]))) * v335;
                 let v610 = v335 * (v349 - v606);
-                let v11263 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9775[0]]))) * v335;
+                let v11263 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9775]))) * v335;
                 let v11264 = Lanes([0.0, v11259[0], v11259[1]]);
                 let v11265 = Lanes([v11263[0], 0.0, v11263[1]]);
                 v4204 = v608;
@@ -2596,9 +2583,9 @@ impl Instance {
                 v9877 = v11265;
             } else {
                 let v612 = v335 * (v349 - v606);
-                let v11249 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9775[0]]))) * v335;
+                let v11249 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9775]))) * v335;
                 let v614 = v335 * (v574 - v606);
-                let v11253 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9775[0]]))) * v335;
+                let v11253 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9775]))) * v335;
                 let v11254 = Lanes([v11249[0], 0.0, v11249[1]]);
                 let v11255 = Lanes([0.0, v11253[0], v11253[1]]);
                 v4204 = v612;
@@ -2607,11 +2594,11 @@ impl Instance {
                 v9877 = v11255;
             }
             let v615 = v591 - v606;
-            let v11268 = (Lanes([v9774[0], 0.0])) - (Lanes([0.0, v9775[0]]));
+            let v11268 = (Lanes([v9774, 0.0])) - (Lanes([0.0, v9775]));
             let v616 = v335 * v615;
             let v11269 = v11268 * v335;
             let v617 = v586 - v606;
-            let v11272 = (Lanes([v9773[0], 0.0])) - (Lanes([0.0, v9775[0]]));
+            let v11272 = (Lanes([v9773, 0.0])) - (Lanes([0.0, v9775]));
             let v618 = v335 * v617;
             let v11273 = v11272 * v335;
             let v620 = if v619 == v6 { 1.0 } else { 0.0 };
@@ -2621,9 +2608,9 @@ impl Instance {
             let v9879: Lanes<3>;
             if v620 != 0.0 {
                 let v622 = v335 * (v574 - v383);
-                let v11287 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9759[0]]))) * v335;
+                let v11287 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9759]))) * v335;
                 let v624 = v335 * (v349 - v383);
-                let v11291 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9759[0]]))) * v335;
+                let v11291 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9759]))) * v335;
                 let v11292 = Lanes([0.0, v11287[0], v11287[1]]);
                 let v11293 = Lanes([v11291[0], 0.0, v11291[1]]);
                 v4787 = v622;
@@ -2632,9 +2619,9 @@ impl Instance {
                 v9879 = v11293;
             } else {
                 let v626 = v335 * (v349 - v383);
-                let v11277 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9759[0]]))) * v335;
+                let v11277 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9759]))) * v335;
                 let v628 = v335 * (v574 - v383);
-                let v11281 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9759[0]]))) * v335;
+                let v11281 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9759]))) * v335;
                 let v11282 = Lanes([v11277[0], 0.0, v11277[1]]);
                 let v11283 = Lanes([0.0, v11281[0], v11281[1]]);
                 v4787 = v626;
@@ -2643,11 +2630,11 @@ impl Instance {
                 v9879 = v11283;
             }
             let v629 = v606 - v383;
-            let v11296 = (Lanes([v9775[0], 0.0])) - (Lanes([0.0, v9759[0]]));
+            let v11296 = (Lanes([v9775, 0.0])) - (Lanes([0.0, v9759]));
             let v630 = v335 * v629;
             let v11297 = v11296 * v335;
             let v631 = v586 - v383;
-            let v11300 = (Lanes([v9773[0], 0.0])) - (Lanes([0.0, v9759[0]]));
+            let v11300 = (Lanes([v9773, 0.0])) - (Lanes([0.0, v9759]));
             let v632 = v335 * v631;
             let v11301 = v11300 * v335;
             let v634 = if v633 == v6 { 1.0 } else { 0.0 };
@@ -2657,9 +2644,9 @@ impl Instance {
             let v9881: Lanes<3>;
             if v634 != 0.0 {
                 let v636 = v335 * (v574 - v336);
-                let v11315 = ((Lanes([0.0, v9771[0]])) - (Lanes([v9753[0], 0.0]))) * v335;
+                let v11315 = ((Lanes([0.0, v9771])) - (Lanes([v9753, 0.0]))) * v335;
                 let v638 = v335 * (v349 - v336);
-                let v11319 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9753[0]]))) * v335;
+                let v11319 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9753]))) * v335;
                 let v11320 = Lanes([0.0, v11315[0], v11315[1]]);
                 let v11321 = Lanes([v11319[0], v11319[1], 0.0]);
                 v2457 = v636;
@@ -2668,9 +2655,9 @@ impl Instance {
                 v9881 = v11321;
             } else {
                 let v640 = v335 * (v349 - v336);
-                let v11305 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9753[0]]))) * v335;
+                let v11305 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9753]))) * v335;
                 let v642 = v335 * (v574 - v336);
-                let v11309 = ((Lanes([0.0, v9771[0]])) - (Lanes([v9753[0], 0.0]))) * v335;
+                let v11309 = ((Lanes([0.0, v9771])) - (Lanes([v9753, 0.0]))) * v335;
                 let v11310 = Lanes([v11305[0], v11305[1], 0.0]);
                 let v11311 = Lanes([0.0, v11309[0], v11309[1]]);
                 v2457 = v640;
@@ -2679,11 +2666,11 @@ impl Instance {
                 v9881 = v11311;
             }
             let v644 = v643 - v336;
-            let v11324 = (Lanes([0.0, v9776[0]])) - (Lanes([v9753[0], 0.0]));
+            let v11324 = (Lanes([0.0, v9776])) - (Lanes([v9753, 0.0]));
             let v645 = v335 * v644;
             let v11325 = v11324 * v335;
             let v646 = v586 - v336;
-            let v11328 = (Lanes([v9773[0], 0.0])) - (Lanes([0.0, v9753[0]]));
+            let v11328 = (Lanes([v9773, 0.0])) - (Lanes([0.0, v9753]));
             let v647 = v335 * v646;
             let v11329 = v11328 * v335;
             let v649 = if v648 == v6 { 1.0 } else { 0.0 };
@@ -2693,9 +2680,9 @@ impl Instance {
             let v9883: Lanes<3>;
             if v649 != 0.0 {
                 let v651 = v335 * (v574 - v643);
-                let v11343 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9776[0]]))) * v335;
+                let v11343 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9776]))) * v335;
                 let v653 = v335 * (v349 - v643);
-                let v11347 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9776[0]]))) * v335;
+                let v11347 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9776]))) * v335;
                 let v11348 = Lanes([0.0, v11343[0], v11343[1]]);
                 let v11349 = Lanes([v11347[0], 0.0, v11347[1]]);
                 v1874 = v651;
@@ -2704,9 +2691,9 @@ impl Instance {
                 v9883 = v11349;
             } else {
                 let v655 = v335 * (v349 - v643);
-                let v11333 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9776[0]]))) * v335;
+                let v11333 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9776]))) * v335;
                 let v657 = v335 * (v574 - v643);
-                let v11337 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9776[0]]))) * v335;
+                let v11337 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9776]))) * v335;
                 let v11338 = Lanes([v11333[0], 0.0, v11333[1]]);
                 let v11339 = Lanes([0.0, v11337[0], v11337[1]]);
                 v1874 = v655;
@@ -2715,11 +2702,11 @@ impl Instance {
                 v9883 = v11339;
             }
             let v659 = v658 - v643;
-            let v11352 = (Lanes([0.0, v9777[0]])) - (Lanes([v9776[0], 0.0]));
+            let v11352 = (Lanes([0.0, v9777])) - (Lanes([v9776, 0.0]));
             let v660 = v335 * v659;
             let v11353 = v11352 * v335;
             let v661 = v586 - v643;
-            let v11356 = (Lanes([v9773[0], 0.0])) - (Lanes([0.0, v9776[0]]));
+            let v11356 = (Lanes([v9773, 0.0])) - (Lanes([0.0, v9776]));
             let v662 = v335 * v661;
             let v11357 = v11356 * v335;
             let v664 = if v663 == v6 { 1.0 } else { 0.0 };
@@ -2729,9 +2716,9 @@ impl Instance {
             let v9885: Lanes<3>;
             if v664 != 0.0 {
                 let v666 = v335 * (v574 - v658);
-                let v11371 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9777[0]]))) * v335;
+                let v11371 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9777]))) * v335;
                 let v668 = v335 * (v349 - v658);
-                let v11375 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9777[0]]))) * v335;
+                let v11375 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9777]))) * v335;
                 let v11376 = Lanes([0.0, v11371[0], v11371[1]]);
                 let v11377 = Lanes([v11375[0], 0.0, v11375[1]]);
                 v1291 = v666;
@@ -2740,9 +2727,9 @@ impl Instance {
                 v9885 = v11377;
             } else {
                 let v670 = v335 * (v349 - v658);
-                let v11361 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9777[0]]))) * v335;
+                let v11361 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9777]))) * v335;
                 let v672 = v335 * (v574 - v658);
-                let v11365 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9777[0]]))) * v335;
+                let v11365 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9777]))) * v335;
                 let v11366 = Lanes([v11361[0], 0.0, v11361[1]]);
                 let v11367 = Lanes([0.0, v11365[0], v11365[1]]);
                 v1291 = v670;
@@ -2751,11 +2738,11 @@ impl Instance {
                 v9885 = v11367;
             }
             let v674 = v673 - v658;
-            let v11380 = (Lanes([0.0, v9778[0]])) - (Lanes([v9777[0], 0.0]));
+            let v11380 = (Lanes([0.0, v9778])) - (Lanes([v9777, 0.0]));
             let v675 = v335 * v674;
             let v11381 = v11380 * v335;
             let v676 = v586 - v658;
-            let v11384 = (Lanes([v9773[0], 0.0])) - (Lanes([0.0, v9777[0]]));
+            let v11384 = (Lanes([v9773, 0.0])) - (Lanes([0.0, v9777]));
             let v677 = v335 * v676;
             let v11385 = v11384 * v335;
             let v679 = if v678 == v6 { 1.0 } else { 0.0 };
@@ -2765,9 +2752,9 @@ impl Instance {
             let v9887: Lanes<3>;
             if v679 != 0.0 {
                 let v681 = v335 * (v574 - v673);
-                let v11399 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9778[0]]))) * v335;
+                let v11399 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9778]))) * v335;
                 let v683 = v335 * (v349 - v673);
-                let v11403 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9778[0]]))) * v335;
+                let v11403 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9778]))) * v335;
                 let v11404 = Lanes([0.0, v11399[0], v11399[1]]);
                 let v11405 = Lanes([v11403[0], 0.0, v11403[1]]);
                 v695 = v681;
@@ -2776,9 +2763,9 @@ impl Instance {
                 v9887 = v11405;
             } else {
                 let v685 = v335 * (v349 - v673);
-                let v11389 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9778[0]]))) * v335;
+                let v11389 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9778]))) * v335;
                 let v687 = v335 * (v574 - v673);
-                let v11393 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9778[0]]))) * v335;
+                let v11393 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9778]))) * v335;
                 let v11394 = Lanes([v11389[0], 0.0, v11389[1]]);
                 let v11395 = Lanes([0.0, v11393[0], v11393[1]]);
                 v695 = v685;
@@ -2787,11 +2774,11 @@ impl Instance {
                 v9887 = v11395;
             }
             let v688 = v532 - v673;
-            let v11408 = (Lanes([0.0, v9769[0]])) - (Lanes([v9778[0], 0.0]));
+            let v11408 = (Lanes([0.0, v9769])) - (Lanes([v9778, 0.0]));
             let v689 = v335 * v688;
             let v11409 = v11408 * v335;
             let v690 = v586 - v673;
-            let v11412 = (Lanes([v9773[0], 0.0])) - (Lanes([0.0, v9778[0]]));
+            let v11412 = (Lanes([v9773, 0.0])) - (Lanes([0.0, v9778]));
             let v691 = v335 * v690;
             let v11413 = v11412 * v335;
             let v694 = if v692 > v693 { 1.0 } else { 0.0 };
@@ -2837,7 +2824,7 @@ impl Instance {
                 let v11436 = (((v10854 * v725) * v727) * v10982) / v726;
                 let v11437 = v9895 * v703;
                 let v729 = v727 + (v703 * v722);
-                let v11440 = (Lanes([v11436[0], 0.0, 0.0])) + (Lanes([0.0, v11437[0], v11437[1]]));
+                let v11440 = (Lanes([v11436, 0.0, 0.0])) + (Lanes([0.0, v11437[0], v11437[1]]));
                 let v11441 = v9782 * v710;
                 let v731 = v700 + (v710 * v92);
                 let v732 = v96.powf(v712);
@@ -2861,18 +2848,16 @@ impl Instance {
                 let v742 = v702 - (v740 * v0);
                 let v11463 = (((v9896 * v0) * v10982) * v722) + (v9895 * v742);
                 let v744 = v731 - (v742 * v722);
-                let v11466 = (Lanes([v11441[0], 0.0, 0.0])) - (Lanes([0.0, v11463[0], v11463[1]]));
+                let v11466 = (Lanes([v11441, 0.0, 0.0])) - (Lanes([0.0, v11463[0], v11463[1]]));
                 let v745 = v437 * v729;
                 let v746 = v745 * v90;
-                let v11469 = v10854 * v745;
-                let v11471 = ((v11440 * v437) * v90) + (Lanes([v11469[0], 0.0, 0.0]));
+                let v11471 = ((v11440 * v437) * v90) + (Lanes([(v10854 * v745), 0.0, 0.0]));
                 let v747 = v278 * v746;
-                let v11472 = v10910 * v746;
-                let v11475 = (Lanes([v11472[0], 0.0, 0.0])) + (v11471 * v278);
+                let v11475 = (Lanes([(v10910 * v746), 0.0, 0.0])) + (v11471 * v278);
                 let v750 = (v748 * v724) / v437;
                 let v11477 = (v11432 * v748) / v437;
                 let v751 = v744 - v750;
-                let v11479 = v11466 - (Lanes([v11477[0], 0.0, 0.0]));
+                let v11479 = v11466 - (Lanes([v11477, 0.0, 0.0]));
                 let v767: f64;
                 let v9897: Lanes<4>;
                 if v344 != 0.0 {
@@ -2895,8 +2880,7 @@ impl Instance {
                 }
                 let v11501 = Lanes([0.0, v11479[0], 0.0, v11479[1], v11479[2]]);
                 let v769 = (v767 - v751) / v724;
-                let v11503 = v11432 * v769;
-                let v11506 = (((Lanes([v9897[0], 0.0, v9897[1], v9897[2], v9897[3]])) - v11501) - (Lanes([0.0, v11503[0], 0.0, 0.0, 0.0]))) / v724;
+                let v11506 = (((Lanes([v9897[0], 0.0, v9897[1], v9897[2], v9897[3]])) - v11501) - (Lanes([0.0, (v11432 * v769), 0.0, 0.0, 0.0]))) / v724;
                 let v770 = if v769 > v407 { 1.0 } else { 0.0 };
                 let v794: f64;
                 let v9898: Lanes<5>;
@@ -2944,11 +2928,10 @@ impl Instance {
                 let v792 = v748 * v57;
                 let v793 = v792 * v724;
                 let v11531 = v11432 * v792;
-                let v11532 = v11531 * v794;
                 let v11536 = Lanes([0.0, v11466[0], 0.0, v11466[1], v11466[2]]);
                 let v799 = (v791 - (v744 - (v793 * v794))) / v746;
                 let v11540 = v11471 * v799;
-                let v11543 = (((Lanes([v9900[0], 0.0, v9900[1], v9900[2], v9900[3]])) - (v11536 - ((Lanes([0.0, v11532[0], 0.0, 0.0, 0.0])) + (v9898 * v793)))) - (Lanes([0.0, v11540[0], 0.0, v11540[1], v11540[2]]))) / v746;
+                let v11543 = (((Lanes([v9900[0], 0.0, v9900[1], v9900[2], v9900[3]])) - (v11536 - ((Lanes([0.0, (v11531 * v794), 0.0, 0.0, 0.0])) + (v9898 * v793)))) - (Lanes([0.0, v11540[0], 0.0, v11540[1], v11540[2]]))) / v746;
                 let v800 = if v799 > v407 { 1.0 } else { 0.0 };
                 let v810: f64;
                 let v9901: Lanes<5>;
@@ -2983,36 +2966,30 @@ impl Instance {
                     v9901 = v9902;
                 }
                 let v813 = (v708 * v810) / v278;
-                let v11561 = v10910 * v813;
                 let v814 = v6 + v813;
                 let v815 = v732 * v814;
-                let v11565 = v11445 * v814;
                 let v816 = v706 / v815;
-                let v11571 = ((((Lanes([0.0, v11565[0], 0.0, 0.0, 0.0])) + ((((v9901 * v708) - (Lanes([0.0, v11561[0], 0.0, 0.0, 0.0]))) / v278) * v732)) * v816) * v10982) / v815;
+                let v11571 = ((((Lanes([0.0, (v11445 * v814), 0.0, 0.0, 0.0])) + ((((v9901 * v708) - (Lanes([0.0, (v10910 * v813), 0.0, 0.0, 0.0]))) / v278) * v732)) * v816) * v10982) / v815;
                 let v820 = v6 + (v713 * v47);
                 let v821 = (v6 + (v713 * v4)) / v820;
                 let v822 = v705 * v821;
                 let v11576 = ((((v9782 * v713) * v821) * v10982) / v820) * v705;
                 let v825 = v6 + ((v714 * v722) / v692);
-                let v11579 = v11576 * v825;
                 let v11580 = ((v9895 * v714) / v692) * v822;
-                let v11583 = (Lanes([v11579[0], 0.0, 0.0])) + (Lanes([0.0, v11580[0], v11580[1]]));
+                let v11583 = (Lanes([(v11576 * v825), 0.0, 0.0])) + (Lanes([0.0, v11580[0], v11580[1]]));
                 let v828 = (v709 * v810) / v278;
-                let v11585 = v10910 * v828;
                 let v829 = v6 + v828;
                 let v830 = (v822 * v825) / v829;
-                let v11592 = ((Lanes([0.0, v11583[0], 0.0, v11583[1], v11583[2]])) - ((((v9901 * v709) - (Lanes([0.0, v11585[0], 0.0, 0.0, 0.0]))) / v278) * v830)) / v829;
+                let v11592 = ((Lanes([0.0, v11583[0], 0.0, v11583[1], v11583[2]])) - ((((v9901 * v709) - (Lanes([0.0, (v10910 * v828), 0.0, 0.0, 0.0]))) / v278) * v830)) / v829;
                 let v831 = v437 * v794;
                 let v832 = v831 * v90;
-                let v11595 = v10854 * v831;
                 let v835 = v6 - v794;
                 let v11602 = v9898 * v10982;
                 let v837 = ((v832 * v816) / v692) + (v835 * v830);
-                let v11606 = ((((((v9898 * v437) * v90) + (Lanes([0.0, v11595[0], 0.0, 0.0, 0.0]))) * v816) + (v11571 * v832)) / v692) + ((v11602 * v830) + (v11592 * v835));
+                let v11606 = ((((((v9898 * v437) * v90) + (Lanes([0.0, (v10854 * v831), 0.0, 0.0, 0.0]))) * v816) + (v11571 * v832)) / v692) + ((v11602 * v830) + (v11592 * v835));
                 let v839 = (v830 * v692) / v816;
                 let v11610 = ((v11592 * v692) - (v11571 * v839)) / v816;
                 let v841 = (v437 * v810) / v278;
-                let v11612 = v10910 * v841;
                 let v842 = v841 / v839;
                 let v844 = (v6 + v842).sqrt();
                 let v846 = (v839 * v844) - v839;
@@ -3022,7 +2999,7 @@ impl Instance {
                 let v849 = (v839 * v835) + v848;
                 let v11633 = ((v11610 * v835) + (v11602 * v839)) + v11632;
                 let v851 = (v846 * v835) + v848;
-                let v11637 = (((((v11610 * v844) + (((((((v9901 * v437) - (Lanes([0.0, v11612[0], 0.0, 0.0, 0.0]))) / v278) - (v11610 * v842)) / v839) * (v9751 / (v10962 * v844))) * v839)) - v11610) * v835) + (v11602 * v846)) + v11632;
+                let v11637 = (((((v11610 * v844) + (((((((v9901 * v437) - (Lanes([0.0, (v10910 * v841), 0.0, 0.0, 0.0]))) / v278) - (v11610 * v842)) / v839) * (v9751 / (v10962 * v844))) * v839)) - v11610) * v835) + (v11602 * v846)) + v11632;
                 let v852 = v689 / v851;
                 let v11639 = Lanes([0.0, 0.0, 0.0, v11409[0], v11409[1]]);
                 let v11641 = (v11639 - (v11637 * v852)) / v851;
@@ -3088,8 +3065,7 @@ impl Instance {
                 let v11710 = (Lanes([0.0, 0.0, 0.0, v11707[0], v11707[1]])) + ((((((v9904 * (v707 * (v888.powf(v11660)))) * (v869 * (v890.powf(v11664)))) * v892) * v10982) / v891) * v873);
                 let v11711 = Lanes([v9886[0], 0.0, v9886[1], v9886[2], 0.0]);
                 let v895 = (v695 - v751) / v724;
-                let v11713 = v11432 * v895;
-                let v11716 = ((v11711 - v11501) - (Lanes([0.0, v11713[0], 0.0, 0.0, 0.0]))) / v724;
+                let v11716 = ((v11711 - v11501) - (Lanes([0.0, (v11432 * v895), 0.0, 0.0, 0.0]))) / v724;
                 let v896 = if v895 > v407 { 1.0 } else { 0.0 };
                 let v903: f64;
                 let v9905: Lanes<5>;
@@ -3115,10 +3091,9 @@ impl Instance {
                     v9905 = v9906;
                 }
                 let v11721 = Lanes([v11431[0], 0.0, v11431[1], v11431[2], v11431[3]]);
-                let v11723 = v11531 * v903;
                 let v908 = ((v723 - v893) - (v744 - (v793 * v903))) / v746;
                 let v11729 = v11471 * v908;
-                let v11732 = (((v11721 - v11710) - (v11536 - ((Lanes([0.0, v11723[0], 0.0, 0.0, 0.0])) + (v9905 * v793)))) - (Lanes([0.0, v11729[0], 0.0, v11729[1], v11729[2]]))) / v746;
+                let v11732 = (((v11721 - v11710) - (v11536 - ((Lanes([0.0, (v11531 * v903), 0.0, 0.0, 0.0])) + (v9905 * v793)))) - (Lanes([0.0, v11729[0], 0.0, v11729[1], v11729[2]]))) / v746;
                 let v909 = if v908 > v407 { 1.0 } else { 0.0 };
                 let v944: f64;
                 let v9907: Lanes<5>;
@@ -3153,8 +3128,7 @@ impl Instance {
                     v9907 = v9908;
                 }
                 let v920 = (v723 - v751) / v724;
-                let v11750 = v11432 * v920;
-                let v11753 = ((v11721 - v11501) - (Lanes([0.0, v11750[0], 0.0, 0.0, 0.0]))) / v724;
+                let v11753 = ((v11721 - v11501) - (Lanes([0.0, (v11432 * v920), 0.0, 0.0, 0.0]))) / v724;
                 let v921 = if v920 > v407 { 1.0 } else { 0.0 };
                 let v928: f64;
                 let v9909: Lanes<5>;
@@ -3179,10 +3153,9 @@ impl Instance {
                     v928 = v929;
                     v9909 = v9910;
                 }
-                let v11759 = v11531 * v928;
                 let v933 = ((v695 - v872) - (v744 - (v793 * v928))) / v746;
                 let v11765 = v11471 * v933;
-                let v11768 = (((v11711 - v11674) - (v11536 - ((Lanes([0.0, v11759[0], 0.0, 0.0, 0.0])) + (v9909 * v793)))) - (Lanes([0.0, v11765[0], 0.0, v11765[1], v11765[2]]))) / v746;
+                let v11768 = (((v11711 - v11674) - (v11536 - ((Lanes([0.0, (v11531 * v928), 0.0, 0.0, 0.0])) + (v9909 * v793)))) - (Lanes([0.0, v11765[0], 0.0, v11765[1], v11765[2]]))) / v746;
                 let v934 = if v933 > v407 { 1.0 } else { 0.0 };
                 let v946: f64;
                 let v9911: Lanes<5>;
@@ -3217,9 +3190,8 @@ impl Instance {
                     v9911 = v9912;
                 }
                 let v949 = (v944 - v946) / v278;
-                let v11786 = v10910 * v949;
                 let v950 = v949 / v849;
-                let v11792 = ((((v9907 - v9911) - (Lanes([0.0, v11786[0], 0.0, 0.0, 0.0]))) / v278) - (v11633 * v950)) / v849;
+                let v11792 = ((((v9907 - v9911) - (Lanes([0.0, (v10910 * v949), 0.0, 0.0, 0.0]))) / v278) - (v11633 * v950)) / v849;
                 let v958: f64;
                 let v9913: Lanes<5>;
                 if v344 != 0.0 {
@@ -3271,10 +3243,9 @@ impl Instance {
                     v989 = v988;
                     v9914 = v11840;
                 }
-                let v11851 = Lanes([0.0, v11829[0], 0.0, 0.0, 0.0]);
+                let v11851 = Lanes([0.0, v11829, 0.0, 0.0, 0.0]);
                 let v991 = (v989 - v973) / v724;
-                let v11853 = v11432 * v991;
-                let v11856 = (((Lanes([v9914[0], 0.0, v9914[1], v9914[2], v9914[3]])) - v11851) - (Lanes([0.0, v11853[0], 0.0, 0.0, 0.0]))) / v724;
+                let v11856 = (((Lanes([v9914[0], 0.0, v9914[1], v9914[2], v9914[3]])) - v11851) - (Lanes([0.0, (v11432 * v991), 0.0, 0.0, 0.0]))) / v724;
                 let v992 = if v991 > v407 { 1.0 } else { 0.0 };
                 let v1014: f64;
                 let v9915: Lanes<5>;
@@ -3319,18 +3290,15 @@ impl Instance {
                     v1013 = v1012;
                     v9917 = v11871;
                 }
-                let v11881 = v11531 * v1014;
-                let v11885 = Lanes([0.0, v11441[0], 0.0, 0.0, 0.0]);
+                let v11885 = Lanes([0.0, v11441, 0.0, 0.0, 0.0]);
                 let v1019 = (v1013 - (v731 - (v793 * v1014))) / v971;
-                let v11889 = v11825 * v1019;
-                let v11892 = (((Lanes([v9917[0], 0.0, v9917[1], v9917[2], v9917[3]])) - (v11885 - ((Lanes([0.0, v11881[0], 0.0, 0.0, 0.0])) + (v9915 * v793)))) - (Lanes([0.0, v11889[0], 0.0, 0.0, 0.0]))) / v971;
+                let v11892 = (((Lanes([v9917[0], 0.0, v9917[1], v9917[2], v9917[3]])) - (v11885 - ((Lanes([0.0, (v11531 * v1014), 0.0, 0.0, 0.0])) + (v9915 * v793)))) - (Lanes([0.0, (v11825 * v1019), 0.0, 0.0, 0.0]))) / v971;
                 let v1020 = if v1019 > v407 { 1.0 } else { 0.0 };
                 let v1033: f64;
                 let v9918: Lanes<5>;
                 if v1020 != 0.0 {
                     let v1021 = v972 * v1019;
-                    let v11905 = v11828 * v1019;
-                    let v11908 = (Lanes([0.0, v11905[0], 0.0, 0.0, 0.0])) + (v11892 * v972);
+                    let v11908 = (Lanes([0.0, (v11828 * v1019), 0.0, 0.0, 0.0])) + (v11892 * v972);
                     v1033 = v1021;
                     v9918 = v11908;
                 } else {
@@ -3340,8 +3308,7 @@ impl Instance {
                     if v1023 != 0.0 {
                         let v1024 = v1019.exp();
                         let v1025 = v972 * v1024;
-                        let v11901 = v11828 * v1024;
-                        let v11904 = (Lanes([0.0, v11901[0], 0.0, 0.0, 0.0])) + ((v11892 * v1024) * v972);
+                        let v11904 = (Lanes([0.0, (v11828 * v1024), 0.0, 0.0, 0.0])) + ((v11892 * v1024) * v972);
                         v1034 = v1025;
                         v9919 = v11904;
                     } else {
@@ -3349,8 +3316,7 @@ impl Instance {
                         let v1027 = v6 + v1026;
                         let v1028 = v1027.ln();
                         let v1029 = v972 * v1028;
-                        let v11896 = v11828 * v1028;
-                        let v11899 = (Lanes([0.0, v11896[0], 0.0, 0.0, 0.0])) + (((v11892 * v1026) * (v9751 / v1027)) * v972);
+                        let v11899 = (Lanes([0.0, (v11828 * v1028), 0.0, 0.0, 0.0])) + (((v11892 * v1026) * (v9751 / v1027)) * v972);
                         v1034 = v1029;
                         v9919 = v11899;
                     }
@@ -3361,16 +3327,12 @@ impl Instance {
                 let v1032 = (v822 * v692) / v1030;
                 let v11915 = ((v11576 * v692) - ((((v11445 * v1030) * v10982) / v732) * v1032)) / v1030;
                 let v1036 = (v437 * v1033) / v278;
-                let v11917 = v10910 * v1036;
                 let v1037 = v1036 / v1032;
-                let v11921 = v11915 * v1037;
                 let v1039 = (v6 + v1037).sqrt();
-                let v11928 = v11915 * v1039;
                 let v1041 = (v1032 * v1039) - v1032;
                 let v1042 = v6 - v1014;
-                let v11938 = v11825 * v1014;
                 let v1045 = (v1041 * v1042) + (v971 * v1014);
-                let v11942 = (((((Lanes([0.0, v11928[0], 0.0, 0.0, 0.0])) + (((((((v9918 * v437) - (Lanes([0.0, v11917[0], 0.0, 0.0, 0.0]))) / v278) - (Lanes([0.0, v11921[0], 0.0, 0.0, 0.0]))) / v1032) * (v9751 / (v10962 * v1039))) * v1032)) - (Lanes([0.0, v11915[0], 0.0, 0.0, 0.0]))) * v1042) + ((v9915 * v10982) * v1041)) + ((Lanes([0.0, v11938[0], 0.0, 0.0, 0.0])) + (v9915 * v971));
+                let v11942 = (((((Lanes([0.0, (v11915 * v1039), 0.0, 0.0, 0.0])) + (((((((v9918 * v437) - (Lanes([0.0, (v10910 * v1036), 0.0, 0.0, 0.0]))) / v278) - (Lanes([0.0, (v11915 * v1037), 0.0, 0.0, 0.0]))) / v1032) * (v9751 / (v10962 * v1039))) * v1032)) - (Lanes([0.0, v11915, 0.0, 0.0, 0.0]))) * v1042) + ((v9915 * v10982) * v1041)) + ((Lanes([0.0, (v11825 * v1014), 0.0, 0.0, 0.0])) + (v9915 * v971));
                 let v1046 = v689 / v1045;
                 let v11945 = (v11639 - (v11942 * v1046)) / v1045;
                 let v1060: f64;
@@ -3429,8 +3391,7 @@ impl Instance {
                 let v12010 = (Lanes([0.0, 0.0, 0.0, v12007[0], v12007[1]])) + ((((((v9921 * (v707 * (v1080.powf(v11660)))) * (v869 * (v1082.powf(v11664)))) * v1084) * v10982) / v1083) * v873);
                 let v12011 = Lanes([v9886[0], 0.0, v9886[1], v9886[2]]);
                 let v1087 = (v695 - v973) / v724;
-                let v12014 = v11432 * v1087;
-                let v12017 = ((v12011 - (Lanes([0.0, v11829[0], 0.0, 0.0]))) - (Lanes([0.0, v12014[0], 0.0, 0.0]))) / v724;
+                let v12017 = ((v12011 - (Lanes([0.0, v11829, 0.0, 0.0]))) - (Lanes([0.0, (v11432 * v1087), 0.0, 0.0]))) / v724;
                 let v1088 = if v1087 > v407 { 1.0 } else { 0.0 };
                 let v1095: f64;
                 let v9922: Lanes<4>;
@@ -3455,18 +3416,15 @@ impl Instance {
                     v1095 = v1096;
                     v9922 = v9923;
                 }
-                let v12023 = v11531 * v1095;
-                let v12028 = (Lanes([0.0, v11441[0], 0.0, 0.0])) - ((Lanes([0.0, v12023[0], 0.0, 0.0])) + (v9922 * v793));
+                let v12028 = (Lanes([0.0, v11441, 0.0, 0.0])) - ((Lanes([0.0, (v11531 * v1095), 0.0, 0.0])) + (v9922 * v793));
                 let v1100 = ((v723 - v1085) - (v731 - (v793 * v1095))) / v971;
-                let v12031 = v11825 * v1100;
-                let v12034 = (((v11721 - v12010) - (Lanes([v12028[0], v12028[1], v12028[2], v12028[3], 0.0]))) - (Lanes([0.0, v12031[0], 0.0, 0.0, 0.0]))) / v971;
+                let v12034 = (((v11721 - v12010) - (Lanes([v12028[0], v12028[1], v12028[2], v12028[3], 0.0]))) - (Lanes([0.0, (v11825 * v1100), 0.0, 0.0, 0.0]))) / v971;
                 let v1101 = if v1100 > v407 { 1.0 } else { 0.0 };
                 let v1136: f64;
                 let v9924: Lanes<5>;
                 if v1101 != 0.0 {
                     let v1102 = v972 * v1100;
-                    let v12047 = v11828 * v1100;
-                    let v12050 = (Lanes([0.0, v12047[0], 0.0, 0.0, 0.0])) + (v12034 * v972);
+                    let v12050 = (Lanes([0.0, (v11828 * v1100), 0.0, 0.0, 0.0])) + (v12034 * v972);
                     v1136 = v1102;
                     v9924 = v12050;
                 } else {
@@ -3476,8 +3434,7 @@ impl Instance {
                     if v1104 != 0.0 {
                         let v1105 = v1100.exp();
                         let v1106 = v972 * v1105;
-                        let v12043 = v11828 * v1105;
-                        let v12046 = (Lanes([0.0, v12043[0], 0.0, 0.0, 0.0])) + ((v12034 * v1105) * v972);
+                        let v12046 = (Lanes([0.0, (v11828 * v1105), 0.0, 0.0, 0.0])) + ((v12034 * v1105) * v972);
                         v1137 = v1106;
                         v9925 = v12046;
                     } else {
@@ -3485,8 +3442,7 @@ impl Instance {
                         let v1108 = v6 + v1107;
                         let v1109 = v1108.ln();
                         let v1110 = v972 * v1109;
-                        let v12038 = v11828 * v1109;
-                        let v12041 = (Lanes([0.0, v12038[0], 0.0, 0.0, 0.0])) + (((v12034 * v1107) * (v9751 / v1108)) * v972);
+                        let v12041 = (Lanes([0.0, (v11828 * v1109), 0.0, 0.0, 0.0])) + (((v12034 * v1107) * (v9751 / v1108)) * v972);
                         v1137 = v1110;
                         v9925 = v12041;
                     }
@@ -3494,8 +3450,7 @@ impl Instance {
                     v9924 = v9925;
                 }
                 let v1112 = (v723 - v973) / v724;
-                let v12052 = v11432 * v1112;
-                let v12055 = ((v11721 - v11851) - (Lanes([0.0, v12052[0], 0.0, 0.0, 0.0]))) / v724;
+                let v12055 = ((v11721 - v11851) - (Lanes([0.0, (v11432 * v1112), 0.0, 0.0, 0.0]))) / v724;
                 let v1113 = if v1112 > v407 { 1.0 } else { 0.0 };
                 let v1120: f64;
                 let v9926: Lanes<5>;
@@ -3520,17 +3475,14 @@ impl Instance {
                     v1120 = v1121;
                     v9926 = v9927;
                 }
-                let v12061 = v11531 * v1120;
                 let v1125 = ((v695 - v1065) - (v731 - (v793 * v1120))) / v971;
-                let v12067 = v11825 * v1125;
-                let v12070 = (((v11711 - v11976) - (v11885 - ((Lanes([0.0, v12061[0], 0.0, 0.0, 0.0])) + (v9926 * v793)))) - (Lanes([0.0, v12067[0], 0.0, 0.0, 0.0]))) / v971;
+                let v12070 = (((v11711 - v11976) - (v11885 - ((Lanes([0.0, (v11531 * v1120), 0.0, 0.0, 0.0])) + (v9926 * v793)))) - (Lanes([0.0, (v11825 * v1125), 0.0, 0.0, 0.0]))) / v971;
                 let v1126 = if v1125 > v407 { 1.0 } else { 0.0 };
                 let v1144: f64;
                 let v9928: Lanes<5>;
                 if v1126 != 0.0 {
                     let v1127 = v972 * v1125;
-                    let v12083 = v11828 * v1125;
-                    let v12086 = (Lanes([0.0, v12083[0], 0.0, 0.0, 0.0])) + (v12070 * v972);
+                    let v12086 = (Lanes([0.0, (v11828 * v1125), 0.0, 0.0, 0.0])) + (v12070 * v972);
                     v1144 = v1127;
                     v9928 = v12086;
                 } else {
@@ -3540,8 +3492,7 @@ impl Instance {
                     if v1129 != 0.0 {
                         let v1130 = v1125.exp();
                         let v1131 = v972 * v1130;
-                        let v12079 = v11828 * v1130;
-                        let v12082 = (Lanes([0.0, v12079[0], 0.0, 0.0, 0.0])) + ((v12070 * v1130) * v972);
+                        let v12082 = (Lanes([0.0, (v11828 * v1130), 0.0, 0.0, 0.0])) + ((v12070 * v1130) * v972);
                         v1145 = v1131;
                         v9929 = v12082;
                     } else {
@@ -3549,8 +3500,7 @@ impl Instance {
                         let v1133 = v6 + v1132;
                         let v1134 = v1133.ln();
                         let v1135 = v972 * v1134;
-                        let v12074 = v11828 * v1134;
-                        let v12077 = (Lanes([0.0, v12074[0], 0.0, 0.0, 0.0])) + (((v12070 * v1132) * (v9751 / v1133)) * v972);
+                        let v12077 = (Lanes([0.0, (v11828 * v1134), 0.0, 0.0, 0.0])) + (((v12070 * v1132) * (v9751 / v1133)) * v972);
                         v1145 = v1135;
                         v9929 = v12077;
                     }
@@ -3590,8 +3540,7 @@ impl Instance {
                     let v1186 = v731 - (v1184 * v724);
                     let v12131 = v11441 - (v11432 * v1184);
                     let v1188 = (v697 - v1186) / v971;
-                    let v12135 = v11825 * v1188;
-                    let v12138 = (((Lanes([v9887[0], 0.0, v9887[1], v9887[2]])) - (Lanes([0.0, v12131[0], 0.0, 0.0]))) - (Lanes([0.0, v12135[0], 0.0, 0.0]))) / v971;
+                    let v12138 = (((Lanes([v9887[0], 0.0, v9887[1], v9887[2]])) - (Lanes([0.0, v12131, 0.0, 0.0]))) - (Lanes([0.0, (v11825 * v1188), 0.0, 0.0]))) / v971;
                     let v1189 = if v1188 > v407 { 1.0 } else { 0.0 };
                     let v1199: f64;
                     let v9932: Lanes<4>;
@@ -3622,11 +3571,9 @@ impl Instance {
                     let v1197 = v1196 * v306;
                     let v1198 = v1197 * v971;
                     let v1201 = v1198 * v1199;
-                    let v12147 = (((v10918 * v1196) * v971) + (v11825 * v1197)) * v1199;
-                    let v12150 = (Lanes([0.0, v12147[0], 0.0, 0.0])) + (v9932 * v1198);
+                    let v12150 = (Lanes([0.0, ((((v10918 * v1196) * v971) + (v11825 * v1197)) * v1199), 0.0, 0.0])) + (v9932 * v1198);
                     let v1203 = (v691 - v1186) / v971;
-                    let v12154 = v11825 * v1203;
-                    let v12157 = (((Lanes([v11413[0], 0.0, v11413[1]])) - (Lanes([0.0, v12131[0], 0.0]))) - (Lanes([0.0, v12154[0], 0.0]))) / v971;
+                    let v12157 = (((Lanes([v11413[0], 0.0, v11413[1]])) - (Lanes([0.0, v12131, 0.0]))) - (Lanes([0.0, (v11825 * v1203), 0.0]))) / v971;
                     let v1204 = if v1203 > v407 { 1.0 } else { 0.0 };
                     let v1213: f64;
                     let v9934: Lanes<3>;
@@ -3656,8 +3603,7 @@ impl Instance {
                     let v1211 = v1196 * v334;
                     let v1212 = v1211 * v971;
                     let v1215 = v1212 * v1213;
-                    let v12166 = (((v10926 * v1196) * v971) + (v11825 * v1211)) * v1213;
-                    let v12169 = (Lanes([0.0, v12166[0], 0.0])) + (v9934 * v1212);
+                    let v12169 = (Lanes([0.0, ((((v10926 * v1196) * v971) + (v11825 * v1211)) * v1213), 0.0])) + (v9934 * v1212);
                     v1235 = v1201;
                     v1236 = v1215;
                     v9930 = v12150;
@@ -3673,10 +3619,8 @@ impl Instance {
                 let v9936: Lanes<4>;
                 if v1216 != 0.0 {
                     let v1217 = v748 * v358;
-                    let v12171 = v11441 - (v11432 * v1217);
                     let v1221 = (v695 - (v731 - (v1217 * v724))) / v971;
-                    let v12174 = v11825 * v1221;
-                    let v12177 = ((v12011 - (Lanes([0.0, v12171[0], 0.0, 0.0]))) - (Lanes([0.0, v12174[0], 0.0, 0.0]))) / v971;
+                    let v12177 = ((v12011 - (Lanes([0.0, (v11441 - (v11432 * v1217)), 0.0, 0.0]))) - (Lanes([0.0, (v11825 * v1221), 0.0, 0.0]))) / v971;
                     let v1222 = if v1221 > v407 { 1.0 } else { 0.0 };
                     let v1232: f64;
                     let v9937: Lanes<4>;
@@ -3706,8 +3650,7 @@ impl Instance {
                     let v1230 = (v1178 * v335) * v699;
                     let v1231 = v1230 * v971;
                     let v1234 = v1231 * v1232;
-                    let v12183 = (v11825 * v1230) * v1232;
-                    let v12186 = (Lanes([0.0, v12183[0], 0.0, 0.0])) + (v9937 * v1231);
+                    let v12186 = (Lanes([0.0, ((v11825 * v1230) * v1232), 0.0, 0.0])) + (v9937 * v1231);
                     v1237 = v1234;
                     v9936 = v12186;
                 } else {
@@ -3782,21 +3725,21 @@ impl Instance {
             let v9952: Lanes<4>;
             if v679 != 0.0 {
                 let v1245 = v1243 * (v574 - v673);
-                let v12225 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9778[0]]))) * v1243;
+                let v12225 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9778]))) * v1243;
                 let v12226 = v12225 * v11018;
                 let v1247 = (ddt(53508, v1241)) + (ddt(53512, v1245));
                 let v12228 = (v9888 * v11018) + (Lanes([0.0, 0.0, v12226[0], v12226[1], 0.0]));
                 let v9623 = v1241 + v1245;
                 let v12230 = v9888 + (Lanes([0.0, 0.0, v12225[0], v12225[1], 0.0]));
                 let v1251 = v1243 * (v574 - v532);
-                let v12235 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9769[0]]))) * v1243;
+                let v12235 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9769]))) * v1243;
                 let v12236 = v12235 * v11018;
                 let v1253 = (ddt(53515, v1248)) + (ddt(53519, v1251));
                 let v12238 = (v9889 * v11018) + (Lanes([0.0, 0.0, v12236[0], 0.0, v12236[1]]));
                 let v9625 = v1248 + v1251;
                 let v12240 = v9889 + (Lanes([0.0, 0.0, v12235[0], 0.0, v12235[1]]));
                 let v1257 = v1243 * (v349 - v673);
-                let v12245 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9778[0]]))) * v1243;
+                let v12245 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9778]))) * v1243;
                 let v12246 = v12245 * v11018;
                 let v1259 = (ddt(53522, v1254)) + (ddt(53526, v1257));
                 let v12248 = (v9890 * v11018) + (Lanes([v12246[0], 0.0, 0.0, v12246[1]]));
@@ -3804,7 +3747,7 @@ impl Instance {
                 let v12250 = v9890 + (Lanes([v12245[0], 0.0, 0.0, v12245[1]]));
                 let v12251 = v9891 * v11018;
                 let v1264 = v1243 * (v574 - v337);
-                let v12255 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9754[0]]))) * v1243;
+                let v12255 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9754]))) * v1243;
                 let v12256 = v12255 * v11018;
                 let v1266 = (ddt(53530, v1261)) + (ddt(53534, v1264));
                 let v12259 = (Lanes([v12251[0], v12251[1], v12251[2], 0.0, v12251[3]])) + (Lanes([0.0, 0.0, v12256[0], v12256[1], 0.0]));
@@ -3843,21 +3786,21 @@ impl Instance {
                 v9952 = v11415;
             } else {
                 let v1269 = v1243 * (v349 - v673);
-                let v12194 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9778[0]]))) * v1243;
+                let v12194 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9778]))) * v1243;
                 let v12195 = v12194 * v11018;
                 let v1271 = (ddt(53537, v1241)) + (ddt(53541, v1269));
                 let v12197 = (v9888 * v11018) + (Lanes([v12195[0], 0.0, 0.0, v12195[1], 0.0]));
                 let v9631 = v1241 + v1269;
                 let v12199 = v9888 + (Lanes([v12194[0], 0.0, 0.0, v12194[1], 0.0]));
                 let v1274 = v1243 * (v349 - v532);
-                let v12204 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9769[0]]))) * v1243;
+                let v12204 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9769]))) * v1243;
                 let v12205 = v12204 * v11018;
                 let v1276 = (ddt(53544, v1248)) + (ddt(53548, v1274));
                 let v12207 = (v9889 * v11018) + (Lanes([v12205[0], 0.0, 0.0, 0.0, v12205[1]]));
                 let v9633 = v1248 + v1274;
                 let v12209 = v9889 + (Lanes([v12204[0], 0.0, 0.0, 0.0, v12204[1]]));
                 let v1279 = v1243 * (v574 - v673);
-                let v12214 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9778[0]]))) * v1243;
+                let v12214 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9778]))) * v1243;
                 let v12215 = v12214 * v11018;
                 let v1281 = (ddt(53551, v1254)) + (ddt(53555, v1279));
                 let v12217 = (v9890 * v11018) + (Lanes([0.0, 0.0, v12215[0], v12215[1]]));
@@ -3945,7 +3888,7 @@ impl Instance {
                 let v12292 = (((v10854 * v725) * v1318) * v10982) / v1317;
                 let v12293 = v9960 * v1299;
                 let v1320 = v1318 + (v1299 * v1314);
-                let v12296 = (Lanes([v12292[0], 0.0, 0.0])) + (Lanes([0.0, v12293[0], v12293[1]]));
+                let v12296 = (Lanes([v12292, 0.0, 0.0])) + (Lanes([0.0, v12293[0], v12293[1]]));
                 let v12297 = v9782 * v1306;
                 let v1322 = v1296 + (v1306 * v92);
                 let v1323 = v96.powf(v712);
@@ -3969,18 +3912,16 @@ impl Instance {
                 let v1333 = v1298 - (v1331 * v0);
                 let v12319 = (((v9961 * v0) * v10982) * v1314) + (v9960 * v1333);
                 let v1335 = v1322 - (v1333 * v1314);
-                let v12322 = (Lanes([v12297[0], 0.0, 0.0])) - (Lanes([0.0, v12319[0], v12319[1]]));
+                let v12322 = (Lanes([v12297, 0.0, 0.0])) - (Lanes([0.0, v12319[0], v12319[1]]));
                 let v1336 = v437 * v1320;
                 let v1337 = v1336 * v90;
-                let v12325 = v10854 * v1336;
-                let v12327 = ((v12296 * v437) * v90) + (Lanes([v12325[0], 0.0, 0.0]));
+                let v12327 = ((v12296 * v437) * v90) + (Lanes([(v10854 * v1336), 0.0, 0.0]));
                 let v1338 = v271 * v1337;
-                let v12328 = v10908 * v1337;
-                let v12331 = (Lanes([v12328[0], 0.0, 0.0])) + (v12327 * v271);
+                let v12331 = (Lanes([(v10908 * v1337), 0.0, 0.0])) + (v12327 * v271);
                 let v1340 = (v748 * v1316) / v437;
                 let v12333 = (v12288 * v748) / v437;
                 let v1341 = v1335 - v1340;
-                let v12335 = v12322 - (Lanes([v12333[0], 0.0, 0.0]));
+                let v12335 = v12322 - (Lanes([v12333, 0.0, 0.0]));
                 let v1357: f64;
                 let v9962: Lanes<4>;
                 if v344 != 0.0 {
@@ -4003,8 +3944,7 @@ impl Instance {
                 }
                 let v12357 = Lanes([0.0, v12335[0], 0.0, v12335[1], v12335[2]]);
                 let v1359 = (v1357 - v1341) / v1316;
-                let v12359 = v12288 * v1359;
-                let v12362 = (((Lanes([v9962[0], 0.0, v9962[1], v9962[2], v9962[3]])) - v12357) - (Lanes([0.0, v12359[0], 0.0, 0.0, 0.0]))) / v1316;
+                let v12362 = (((Lanes([v9962[0], 0.0, v9962[1], v9962[2], v9962[3]])) - v12357) - (Lanes([0.0, (v12288 * v1359), 0.0, 0.0, 0.0]))) / v1316;
                 let v1360 = if v1359 > v407 { 1.0 } else { 0.0 };
                 let v1384: f64;
                 let v9963: Lanes<5>;
@@ -4052,11 +3992,10 @@ impl Instance {
                 let v1382 = v748 * v57;
                 let v1383 = v1382 * v1316;
                 let v12387 = v12288 * v1382;
-                let v12388 = v12387 * v1384;
                 let v12392 = Lanes([0.0, v12322[0], 0.0, v12322[1], v12322[2]]);
                 let v1389 = (v1381 - (v1335 - (v1383 * v1384))) / v1337;
                 let v12396 = v12327 * v1389;
-                let v12399 = (((Lanes([v9965[0], 0.0, v9965[1], v9965[2], v9965[3]])) - (v12392 - ((Lanes([0.0, v12388[0], 0.0, 0.0, 0.0])) + (v9963 * v1383)))) - (Lanes([0.0, v12396[0], 0.0, v12396[1], v12396[2]]))) / v1337;
+                let v12399 = (((Lanes([v9965[0], 0.0, v9965[1], v9965[2], v9965[3]])) - (v12392 - ((Lanes([0.0, (v12387 * v1384), 0.0, 0.0, 0.0])) + (v9963 * v1383)))) - (Lanes([0.0, v12396[0], 0.0, v12396[1], v12396[2]]))) / v1337;
                 let v1390 = if v1389 > v407 { 1.0 } else { 0.0 };
                 let v1400: f64;
                 let v9966: Lanes<5>;
@@ -4091,36 +4030,30 @@ impl Instance {
                     v9966 = v9967;
                 }
                 let v1403 = (v1304 * v1400) / v271;
-                let v12417 = v10908 * v1403;
                 let v1404 = v6 + v1403;
                 let v1405 = v1323 * v1404;
-                let v12421 = v12301 * v1404;
                 let v1406 = v1302 / v1405;
-                let v12427 = ((((Lanes([0.0, v12421[0], 0.0, 0.0, 0.0])) + ((((v9966 * v1304) - (Lanes([0.0, v12417[0], 0.0, 0.0, 0.0]))) / v271) * v1323)) * v1406) * v10982) / v1405;
+                let v12427 = ((((Lanes([0.0, (v12301 * v1404), 0.0, 0.0, 0.0])) + ((((v9966 * v1304) - (Lanes([0.0, (v10908 * v1403), 0.0, 0.0, 0.0]))) / v271) * v1323)) * v1406) * v10982) / v1405;
                 let v1410 = v6 + (v713 * v47);
                 let v1411 = (v6 + (v713 * v4)) / v1410;
                 let v1412 = v1301 * v1411;
                 let v12432 = ((((v9782 * v713) * v1411) * v10982) / v1410) * v1301;
                 let v1415 = v6 + ((v714 * v1314) / v1289);
-                let v12435 = v12432 * v1415;
                 let v12436 = ((v9960 * v714) / v1289) * v1412;
-                let v12439 = (Lanes([v12435[0], 0.0, 0.0])) + (Lanes([0.0, v12436[0], v12436[1]]));
+                let v12439 = (Lanes([(v12432 * v1415), 0.0, 0.0])) + (Lanes([0.0, v12436[0], v12436[1]]));
                 let v1418 = (v1305 * v1400) / v271;
-                let v12441 = v10908 * v1418;
                 let v1419 = v6 + v1418;
                 let v1420 = (v1412 * v1415) / v1419;
-                let v12448 = ((Lanes([0.0, v12439[0], 0.0, v12439[1], v12439[2]])) - ((((v9966 * v1305) - (Lanes([0.0, v12441[0], 0.0, 0.0, 0.0]))) / v271) * v1420)) / v1419;
+                let v12448 = ((Lanes([0.0, v12439[0], 0.0, v12439[1], v12439[2]])) - ((((v9966 * v1305) - (Lanes([0.0, (v10908 * v1418), 0.0, 0.0, 0.0]))) / v271) * v1420)) / v1419;
                 let v1421 = v437 * v1384;
                 let v1422 = v1421 * v90;
-                let v12451 = v10854 * v1421;
                 let v1425 = v6 - v1384;
                 let v12458 = v9963 * v10982;
                 let v1427 = ((v1422 * v1406) / v1289) + (v1425 * v1420);
-                let v12462 = ((((((v9963 * v437) * v90) + (Lanes([0.0, v12451[0], 0.0, 0.0, 0.0]))) * v1406) + (v12427 * v1422)) / v1289) + ((v12458 * v1420) + (v12448 * v1425));
+                let v12462 = ((((((v9963 * v437) * v90) + (Lanes([0.0, (v10854 * v1421), 0.0, 0.0, 0.0]))) * v1406) + (v12427 * v1422)) / v1289) + ((v12458 * v1420) + (v12448 * v1425));
                 let v1429 = (v1420 * v1289) / v1406;
                 let v12466 = ((v12448 * v1289) - (v12427 * v1429)) / v1406;
                 let v1431 = (v437 * v1400) / v271;
-                let v12468 = v10908 * v1431;
                 let v1432 = v1431 / v1429;
                 let v1434 = (v6 + v1432).sqrt();
                 let v1436 = (v1429 * v1434) - v1429;
@@ -4130,7 +4063,7 @@ impl Instance {
                 let v1439 = (v1429 * v1425) + v1438;
                 let v12489 = ((v12466 * v1425) + (v12458 * v1429)) + v12488;
                 let v1441 = (v1436 * v1425) + v1438;
-                let v12493 = (((((v12466 * v1434) + (((((((v9966 * v437) - (Lanes([0.0, v12468[0], 0.0, 0.0, 0.0]))) / v271) - (v12466 * v1432)) / v1429) * (v9751 / (v10962 * v1434))) * v1429)) - v12466) * v1425) + (v12458 * v1436)) + v12488;
+                let v12493 = (((((v12466 * v1434) + (((((((v9966 * v437) - (Lanes([0.0, (v10908 * v1431), 0.0, 0.0, 0.0]))) / v271) - (v12466 * v1432)) / v1429) * (v9751 / (v10962 * v1434))) * v1429)) - v12466) * v1425) + (v12458 * v1436)) + v12488;
                 let v1442 = v675 / v1441;
                 let v12495 = Lanes([0.0, 0.0, 0.0, v11381[0], v11381[1]]);
                 let v12497 = (v12495 - (v12493 * v1442)) / v1441;
@@ -4196,8 +4129,7 @@ impl Instance {
                 let v12566 = (Lanes([0.0, 0.0, 0.0, v12563[0], v12563[1]])) + ((((((v9969 * (v1303 * (v1478.powf(v12516)))) * (v1459 * (v1480.powf(v12520)))) * v1482) * v10982) / v1481) * v1463);
                 let v12567 = Lanes([v9884[0], 0.0, v9884[1], v9884[2], 0.0]);
                 let v1485 = (v1291 - v1341) / v1316;
-                let v12569 = v12288 * v1485;
-                let v12572 = ((v12567 - v12357) - (Lanes([0.0, v12569[0], 0.0, 0.0, 0.0]))) / v1316;
+                let v12572 = ((v12567 - v12357) - (Lanes([0.0, (v12288 * v1485), 0.0, 0.0, 0.0]))) / v1316;
                 let v1486 = if v1485 > v407 { 1.0 } else { 0.0 };
                 let v1493: f64;
                 let v9970: Lanes<5>;
@@ -4223,10 +4155,9 @@ impl Instance {
                     v9970 = v9971;
                 }
                 let v12577 = Lanes([v12287[0], 0.0, v12287[1], v12287[2], v12287[3]]);
-                let v12579 = v12387 * v1493;
                 let v1498 = ((v1315 - v1483) - (v1335 - (v1383 * v1493))) / v1337;
                 let v12585 = v12327 * v1498;
-                let v12588 = (((v12577 - v12566) - (v12392 - ((Lanes([0.0, v12579[0], 0.0, 0.0, 0.0])) + (v9970 * v1383)))) - (Lanes([0.0, v12585[0], 0.0, v12585[1], v12585[2]]))) / v1337;
+                let v12588 = (((v12577 - v12566) - (v12392 - ((Lanes([0.0, (v12387 * v1493), 0.0, 0.0, 0.0])) + (v9970 * v1383)))) - (Lanes([0.0, v12585[0], 0.0, v12585[1], v12585[2]]))) / v1337;
                 let v1499 = if v1498 > v407 { 1.0 } else { 0.0 };
                 let v1534: f64;
                 let v9972: Lanes<5>;
@@ -4261,8 +4192,7 @@ impl Instance {
                     v9972 = v9973;
                 }
                 let v1510 = (v1315 - v1341) / v1316;
-                let v12606 = v12288 * v1510;
-                let v12609 = ((v12577 - v12357) - (Lanes([0.0, v12606[0], 0.0, 0.0, 0.0]))) / v1316;
+                let v12609 = ((v12577 - v12357) - (Lanes([0.0, (v12288 * v1510), 0.0, 0.0, 0.0]))) / v1316;
                 let v1511 = if v1510 > v407 { 1.0 } else { 0.0 };
                 let v1518: f64;
                 let v9974: Lanes<5>;
@@ -4287,10 +4217,9 @@ impl Instance {
                     v1518 = v1519;
                     v9974 = v9975;
                 }
-                let v12615 = v12387 * v1518;
                 let v1523 = ((v1291 - v1462) - (v1335 - (v1383 * v1518))) / v1337;
                 let v12621 = v12327 * v1523;
-                let v12624 = (((v12567 - v12530) - (v12392 - ((Lanes([0.0, v12615[0], 0.0, 0.0, 0.0])) + (v9974 * v1383)))) - (Lanes([0.0, v12621[0], 0.0, v12621[1], v12621[2]]))) / v1337;
+                let v12624 = (((v12567 - v12530) - (v12392 - ((Lanes([0.0, (v12387 * v1518), 0.0, 0.0, 0.0])) + (v9974 * v1383)))) - (Lanes([0.0, v12621[0], 0.0, v12621[1], v12621[2]]))) / v1337;
                 let v1524 = if v1523 > v407 { 1.0 } else { 0.0 };
                 let v1536: f64;
                 let v9976: Lanes<5>;
@@ -4325,9 +4254,8 @@ impl Instance {
                     v9976 = v9977;
                 }
                 let v1539 = (v1534 - v1536) / v271;
-                let v12642 = v10908 * v1539;
                 let v1540 = v1539 / v1439;
-                let v12648 = ((((v9972 - v9976) - (Lanes([0.0, v12642[0], 0.0, 0.0, 0.0]))) / v271) - (v12489 * v1540)) / v1439;
+                let v12648 = ((((v9972 - v9976) - (Lanes([0.0, (v10908 * v1539), 0.0, 0.0, 0.0]))) / v271) - (v12489 * v1540)) / v1439;
                 let v1548: f64;
                 let v9978: Lanes<5>;
                 if v344 != 0.0 {
@@ -4379,10 +4307,9 @@ impl Instance {
                     v1579 = v1578;
                     v9979 = v12696;
                 }
-                let v12707 = Lanes([0.0, v12685[0], 0.0, 0.0, 0.0]);
+                let v12707 = Lanes([0.0, v12685, 0.0, 0.0, 0.0]);
                 let v1581 = (v1579 - v1563) / v1316;
-                let v12709 = v12288 * v1581;
-                let v12712 = (((Lanes([v9979[0], 0.0, v9979[1], v9979[2], v9979[3]])) - v12707) - (Lanes([0.0, v12709[0], 0.0, 0.0, 0.0]))) / v1316;
+                let v12712 = (((Lanes([v9979[0], 0.0, v9979[1], v9979[2], v9979[3]])) - v12707) - (Lanes([0.0, (v12288 * v1581), 0.0, 0.0, 0.0]))) / v1316;
                 let v1582 = if v1581 > v407 { 1.0 } else { 0.0 };
                 let v1604: f64;
                 let v9980: Lanes<5>;
@@ -4427,18 +4354,15 @@ impl Instance {
                     v1603 = v1602;
                     v9982 = v12727;
                 }
-                let v12737 = v12387 * v1604;
-                let v12741 = Lanes([0.0, v12297[0], 0.0, 0.0, 0.0]);
+                let v12741 = Lanes([0.0, v12297, 0.0, 0.0, 0.0]);
                 let v1609 = (v1603 - (v1322 - (v1383 * v1604))) / v1561;
-                let v12745 = v12681 * v1609;
-                let v12748 = (((Lanes([v9982[0], 0.0, v9982[1], v9982[2], v9982[3]])) - (v12741 - ((Lanes([0.0, v12737[0], 0.0, 0.0, 0.0])) + (v9980 * v1383)))) - (Lanes([0.0, v12745[0], 0.0, 0.0, 0.0]))) / v1561;
+                let v12748 = (((Lanes([v9982[0], 0.0, v9982[1], v9982[2], v9982[3]])) - (v12741 - ((Lanes([0.0, (v12387 * v1604), 0.0, 0.0, 0.0])) + (v9980 * v1383)))) - (Lanes([0.0, (v12681 * v1609), 0.0, 0.0, 0.0]))) / v1561;
                 let v1610 = if v1609 > v407 { 1.0 } else { 0.0 };
                 let v1623: f64;
                 let v9983: Lanes<5>;
                 if v1610 != 0.0 {
                     let v1611 = v1562 * v1609;
-                    let v12761 = v12684 * v1609;
-                    let v12764 = (Lanes([0.0, v12761[0], 0.0, 0.0, 0.0])) + (v12748 * v1562);
+                    let v12764 = (Lanes([0.0, (v12684 * v1609), 0.0, 0.0, 0.0])) + (v12748 * v1562);
                     v1623 = v1611;
                     v9983 = v12764;
                 } else {
@@ -4448,8 +4372,7 @@ impl Instance {
                     if v1613 != 0.0 {
                         let v1614 = v1609.exp();
                         let v1615 = v1562 * v1614;
-                        let v12757 = v12684 * v1614;
-                        let v12760 = (Lanes([0.0, v12757[0], 0.0, 0.0, 0.0])) + ((v12748 * v1614) * v1562);
+                        let v12760 = (Lanes([0.0, (v12684 * v1614), 0.0, 0.0, 0.0])) + ((v12748 * v1614) * v1562);
                         v1624 = v1615;
                         v9984 = v12760;
                     } else {
@@ -4457,8 +4380,7 @@ impl Instance {
                         let v1617 = v6 + v1616;
                         let v1618 = v1617.ln();
                         let v1619 = v1562 * v1618;
-                        let v12752 = v12684 * v1618;
-                        let v12755 = (Lanes([0.0, v12752[0], 0.0, 0.0, 0.0])) + (((v12748 * v1616) * (v9751 / v1617)) * v1562);
+                        let v12755 = (Lanes([0.0, (v12684 * v1618), 0.0, 0.0, 0.0])) + (((v12748 * v1616) * (v9751 / v1617)) * v1562);
                         v1624 = v1619;
                         v9984 = v12755;
                     }
@@ -4469,16 +4391,12 @@ impl Instance {
                 let v1622 = (v1412 * v1289) / v1620;
                 let v12771 = ((v12432 * v1289) - ((((v12301 * v1620) * v10982) / v1323) * v1622)) / v1620;
                 let v1626 = (v437 * v1623) / v271;
-                let v12773 = v10908 * v1626;
                 let v1627 = v1626 / v1622;
-                let v12777 = v12771 * v1627;
                 let v1629 = (v6 + v1627).sqrt();
-                let v12784 = v12771 * v1629;
                 let v1631 = (v1622 * v1629) - v1622;
                 let v1632 = v6 - v1604;
-                let v12794 = v12681 * v1604;
                 let v1635 = (v1631 * v1632) + (v1561 * v1604);
-                let v12798 = (((((Lanes([0.0, v12784[0], 0.0, 0.0, 0.0])) + (((((((v9983 * v437) - (Lanes([0.0, v12773[0], 0.0, 0.0, 0.0]))) / v271) - (Lanes([0.0, v12777[0], 0.0, 0.0, 0.0]))) / v1622) * (v9751 / (v10962 * v1629))) * v1622)) - (Lanes([0.0, v12771[0], 0.0, 0.0, 0.0]))) * v1632) + ((v9980 * v10982) * v1631)) + ((Lanes([0.0, v12794[0], 0.0, 0.0, 0.0])) + (v9980 * v1561));
+                let v12798 = (((((Lanes([0.0, (v12771 * v1629), 0.0, 0.0, 0.0])) + (((((((v9983 * v437) - (Lanes([0.0, (v10908 * v1626), 0.0, 0.0, 0.0]))) / v271) - (Lanes([0.0, (v12771 * v1627), 0.0, 0.0, 0.0]))) / v1622) * (v9751 / (v10962 * v1629))) * v1622)) - (Lanes([0.0, v12771, 0.0, 0.0, 0.0]))) * v1632) + ((v9980 * v10982) * v1631)) + ((Lanes([0.0, (v12681 * v1604), 0.0, 0.0, 0.0])) + (v9980 * v1561));
                 let v1636 = v675 / v1635;
                 let v12801 = (v12495 - (v12798 * v1636)) / v1635;
                 let v1650: f64;
@@ -4537,8 +4455,7 @@ impl Instance {
                 let v12866 = (Lanes([0.0, 0.0, 0.0, v12863[0], v12863[1]])) + ((((((v9986 * (v1303 * (v1670.powf(v12516)))) * (v1459 * (v1672.powf(v12520)))) * v1674) * v10982) / v1673) * v1463);
                 let v12867 = Lanes([v9884[0], 0.0, v9884[1], v9884[2]]);
                 let v1677 = (v1291 - v1563) / v1316;
-                let v12870 = v12288 * v1677;
-                let v12873 = ((v12867 - (Lanes([0.0, v12685[0], 0.0, 0.0]))) - (Lanes([0.0, v12870[0], 0.0, 0.0]))) / v1316;
+                let v12873 = ((v12867 - (Lanes([0.0, v12685, 0.0, 0.0]))) - (Lanes([0.0, (v12288 * v1677), 0.0, 0.0]))) / v1316;
                 let v1678 = if v1677 > v407 { 1.0 } else { 0.0 };
                 let v1685: f64;
                 let v9987: Lanes<4>;
@@ -4563,18 +4480,15 @@ impl Instance {
                     v1685 = v1686;
                     v9987 = v9988;
                 }
-                let v12879 = v12387 * v1685;
-                let v12884 = (Lanes([0.0, v12297[0], 0.0, 0.0])) - ((Lanes([0.0, v12879[0], 0.0, 0.0])) + (v9987 * v1383));
+                let v12884 = (Lanes([0.0, v12297, 0.0, 0.0])) - ((Lanes([0.0, (v12387 * v1685), 0.0, 0.0])) + (v9987 * v1383));
                 let v1690 = ((v1315 - v1675) - (v1322 - (v1383 * v1685))) / v1561;
-                let v12887 = v12681 * v1690;
-                let v12890 = (((v12577 - v12866) - (Lanes([v12884[0], v12884[1], v12884[2], v12884[3], 0.0]))) - (Lanes([0.0, v12887[0], 0.0, 0.0, 0.0]))) / v1561;
+                let v12890 = (((v12577 - v12866) - (Lanes([v12884[0], v12884[1], v12884[2], v12884[3], 0.0]))) - (Lanes([0.0, (v12681 * v1690), 0.0, 0.0, 0.0]))) / v1561;
                 let v1691 = if v1690 > v407 { 1.0 } else { 0.0 };
                 let v1726: f64;
                 let v9989: Lanes<5>;
                 if v1691 != 0.0 {
                     let v1692 = v1562 * v1690;
-                    let v12903 = v12684 * v1690;
-                    let v12906 = (Lanes([0.0, v12903[0], 0.0, 0.0, 0.0])) + (v12890 * v1562);
+                    let v12906 = (Lanes([0.0, (v12684 * v1690), 0.0, 0.0, 0.0])) + (v12890 * v1562);
                     v1726 = v1692;
                     v9989 = v12906;
                 } else {
@@ -4584,8 +4498,7 @@ impl Instance {
                     if v1694 != 0.0 {
                         let v1695 = v1690.exp();
                         let v1696 = v1562 * v1695;
-                        let v12899 = v12684 * v1695;
-                        let v12902 = (Lanes([0.0, v12899[0], 0.0, 0.0, 0.0])) + ((v12890 * v1695) * v1562);
+                        let v12902 = (Lanes([0.0, (v12684 * v1695), 0.0, 0.0, 0.0])) + ((v12890 * v1695) * v1562);
                         v1727 = v1696;
                         v9990 = v12902;
                     } else {
@@ -4593,8 +4506,7 @@ impl Instance {
                         let v1698 = v6 + v1697;
                         let v1699 = v1698.ln();
                         let v1700 = v1562 * v1699;
-                        let v12894 = v12684 * v1699;
-                        let v12897 = (Lanes([0.0, v12894[0], 0.0, 0.0, 0.0])) + (((v12890 * v1697) * (v9751 / v1698)) * v1562);
+                        let v12897 = (Lanes([0.0, (v12684 * v1699), 0.0, 0.0, 0.0])) + (((v12890 * v1697) * (v9751 / v1698)) * v1562);
                         v1727 = v1700;
                         v9990 = v12897;
                     }
@@ -4602,8 +4514,7 @@ impl Instance {
                     v9989 = v9990;
                 }
                 let v1702 = (v1315 - v1563) / v1316;
-                let v12908 = v12288 * v1702;
-                let v12911 = ((v12577 - v12707) - (Lanes([0.0, v12908[0], 0.0, 0.0, 0.0]))) / v1316;
+                let v12911 = ((v12577 - v12707) - (Lanes([0.0, (v12288 * v1702), 0.0, 0.0, 0.0]))) / v1316;
                 let v1703 = if v1702 > v407 { 1.0 } else { 0.0 };
                 let v1710: f64;
                 let v9991: Lanes<5>;
@@ -4628,17 +4539,14 @@ impl Instance {
                     v1710 = v1711;
                     v9991 = v9992;
                 }
-                let v12917 = v12387 * v1710;
                 let v1715 = ((v1291 - v1655) - (v1322 - (v1383 * v1710))) / v1561;
-                let v12923 = v12681 * v1715;
-                let v12926 = (((v12567 - v12832) - (v12741 - ((Lanes([0.0, v12917[0], 0.0, 0.0, 0.0])) + (v9991 * v1383)))) - (Lanes([0.0, v12923[0], 0.0, 0.0, 0.0]))) / v1561;
+                let v12926 = (((v12567 - v12832) - (v12741 - ((Lanes([0.0, (v12387 * v1710), 0.0, 0.0, 0.0])) + (v9991 * v1383)))) - (Lanes([0.0, (v12681 * v1715), 0.0, 0.0, 0.0]))) / v1561;
                 let v1716 = if v1715 > v407 { 1.0 } else { 0.0 };
                 let v1732: f64;
                 let v9993: Lanes<5>;
                 if v1716 != 0.0 {
                     let v1717 = v1562 * v1715;
-                    let v12939 = v12684 * v1715;
-                    let v12942 = (Lanes([0.0, v12939[0], 0.0, 0.0, 0.0])) + (v12926 * v1562);
+                    let v12942 = (Lanes([0.0, (v12684 * v1715), 0.0, 0.0, 0.0])) + (v12926 * v1562);
                     v1732 = v1717;
                     v9993 = v12942;
                 } else {
@@ -4648,8 +4556,7 @@ impl Instance {
                     if v1719 != 0.0 {
                         let v1720 = v1715.exp();
                         let v1721 = v1562 * v1720;
-                        let v12935 = v12684 * v1720;
-                        let v12938 = (Lanes([0.0, v12935[0], 0.0, 0.0, 0.0])) + ((v12926 * v1720) * v1562);
+                        let v12938 = (Lanes([0.0, (v12684 * v1720), 0.0, 0.0, 0.0])) + ((v12926 * v1720) * v1562);
                         v1733 = v1721;
                         v9994 = v12938;
                     } else {
@@ -4657,8 +4564,7 @@ impl Instance {
                         let v1723 = v6 + v1722;
                         let v1724 = v1723.ln();
                         let v1725 = v1562 * v1724;
-                        let v12930 = v12684 * v1724;
-                        let v12933 = (Lanes([0.0, v12930[0], 0.0, 0.0, 0.0])) + (((v12926 * v1722) * (v9751 / v1723)) * v1562);
+                        let v12933 = (Lanes([0.0, (v12684 * v1724), 0.0, 0.0, 0.0])) + (((v12926 * v1722) * (v9751 / v1723)) * v1562);
                         v1733 = v1725;
                         v9994 = v12933;
                     }
@@ -4698,8 +4604,7 @@ impl Instance {
                     let v1770 = v1322 - (v1768 * v1316);
                     let v12987 = v12297 - (v12288 * v1768);
                     let v1772 = (v1293 - v1770) / v1561;
-                    let v12991 = v12681 * v1772;
-                    let v12994 = (((Lanes([v9885[0], 0.0, v9885[1], v9885[2]])) - (Lanes([0.0, v12987[0], 0.0, 0.0]))) - (Lanes([0.0, v12991[0], 0.0, 0.0]))) / v1561;
+                    let v12994 = (((Lanes([v9885[0], 0.0, v9885[1], v9885[2]])) - (Lanes([0.0, v12987, 0.0, 0.0]))) - (Lanes([0.0, (v12681 * v1772), 0.0, 0.0]))) / v1561;
                     let v1773 = if v1772 > v407 { 1.0 } else { 0.0 };
                     let v1783: f64;
                     let v9997: Lanes<4>;
@@ -4730,11 +4635,9 @@ impl Instance {
                     let v1781 = v1780 * v299;
                     let v1782 = v1781 * v1561;
                     let v1785 = v1782 * v1783;
-                    let v13003 = (((v10916 * v1780) * v1561) + (v12681 * v1781)) * v1783;
-                    let v13006 = (Lanes([0.0, v13003[0], 0.0, 0.0])) + (v9997 * v1782);
+                    let v13006 = (Lanes([0.0, ((((v10916 * v1780) * v1561) + (v12681 * v1781)) * v1783), 0.0, 0.0])) + (v9997 * v1782);
                     let v1787 = (v677 - v1770) / v1561;
-                    let v13010 = v12681 * v1787;
-                    let v13013 = (((Lanes([v11385[0], 0.0, v11385[1]])) - (Lanes([0.0, v12987[0], 0.0]))) - (Lanes([0.0, v13010[0], 0.0]))) / v1561;
+                    let v13013 = (((Lanes([v11385[0], 0.0, v11385[1]])) - (Lanes([0.0, v12987, 0.0]))) - (Lanes([0.0, (v12681 * v1787), 0.0]))) / v1561;
                     let v1788 = if v1787 > v407 { 1.0 } else { 0.0 };
                     let v1797: f64;
                     let v9999: Lanes<3>;
@@ -4764,8 +4667,7 @@ impl Instance {
                     let v1795 = v1780 * v327;
                     let v1796 = v1795 * v1561;
                     let v1799 = v1796 * v1797;
-                    let v13022 = (((v10924 * v1780) * v1561) + (v12681 * v1795)) * v1797;
-                    let v13025 = (Lanes([0.0, v13022[0], 0.0])) + (v9999 * v1796);
+                    let v13025 = (Lanes([0.0, ((((v10924 * v1780) * v1561) + (v12681 * v1795)) * v1797), 0.0])) + (v9999 * v1796);
                     v1819 = v1785;
                     v1820 = v1799;
                     v9995 = v13006;
@@ -4781,10 +4683,8 @@ impl Instance {
                 let v10001: Lanes<4>;
                 if v1800 != 0.0 {
                     let v1801 = v748 * v358;
-                    let v13027 = v12297 - (v12288 * v1801);
                     let v1805 = (v1291 - (v1322 - (v1801 * v1316))) / v1561;
-                    let v13030 = v12681 * v1805;
-                    let v13033 = ((v12867 - (Lanes([0.0, v13027[0], 0.0, 0.0]))) - (Lanes([0.0, v13030[0], 0.0, 0.0]))) / v1561;
+                    let v13033 = ((v12867 - (Lanes([0.0, (v12297 - (v12288 * v1801)), 0.0, 0.0]))) - (Lanes([0.0, (v12681 * v1805), 0.0, 0.0]))) / v1561;
                     let v1806 = if v1805 > v407 { 1.0 } else { 0.0 };
                     let v1816: f64;
                     let v10002: Lanes<4>;
@@ -4814,8 +4714,7 @@ impl Instance {
                     let v1814 = (v1762 * v335) * v1295;
                     let v1815 = v1814 * v1561;
                     let v1818 = v1815 * v1816;
-                    let v13039 = (v12681 * v1814) * v1816;
-                    let v13042 = (Lanes([0.0, v13039[0], 0.0, 0.0])) + (v10002 * v1815);
+                    let v13042 = (Lanes([0.0, ((v12681 * v1814) * v1816), 0.0, 0.0])) + (v10002 * v1815);
                     v1821 = v1818;
                     v10001 = v13042;
                 } else {
@@ -4890,21 +4789,21 @@ impl Instance {
             let v10017: Lanes<4>;
             if v664 != 0.0 {
                 let v1828 = v1243 * (v574 - v658);
-                let v13081 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9777[0]]))) * v1243;
+                let v13081 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9777]))) * v1243;
                 let v13082 = v13081 * v11018;
                 let v1830 = (ddt(54963, v1825)) + (ddt(54967, v1828));
                 let v13084 = (v9953 * v11018) + (Lanes([0.0, 0.0, v13082[0], v13082[1], 0.0]));
                 let v9638 = v1825 + v1828;
                 let v13086 = v9953 + (Lanes([0.0, 0.0, v13081[0], v13081[1], 0.0]));
                 let v1834 = v1243 * (v574 - v673);
-                let v13091 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9778[0]]))) * v1243;
+                let v13091 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9778]))) * v1243;
                 let v13092 = v13091 * v11018;
                 let v1836 = (ddt(54970, v1831)) + (ddt(54974, v1834));
                 let v13094 = (v9954 * v11018) + (Lanes([0.0, 0.0, v13092[0], 0.0, v13092[1]]));
                 let v9640 = v1831 + v1834;
                 let v13096 = v9954 + (Lanes([0.0, 0.0, v13091[0], 0.0, v13091[1]]));
                 let v1840 = v1243 * (v349 - v658);
-                let v13101 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9777[0]]))) * v1243;
+                let v13101 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9777]))) * v1243;
                 let v13102 = v13101 * v11018;
                 let v1842 = (ddt(54977, v1837)) + (ddt(54981, v1840));
                 let v13104 = (v9955 * v11018) + (Lanes([v13102[0], 0.0, 0.0, v13102[1]]));
@@ -4912,7 +4811,7 @@ impl Instance {
                 let v13106 = v9955 + (Lanes([v13101[0], 0.0, 0.0, v13101[1]]));
                 let v13107 = v9956 * v11018;
                 let v1847 = v1243 * (v574 - v337);
-                let v13111 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9754[0]]))) * v1243;
+                let v13111 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9754]))) * v1243;
                 let v13112 = v13111 * v11018;
                 let v1849 = (ddt(54985, v1844)) + (ddt(54989, v1847));
                 let v13115 = (Lanes([v13107[0], v13107[1], v13107[2], 0.0, v13107[3]])) + (Lanes([0.0, 0.0, v13112[0], v13112[1], 0.0]));
@@ -4951,21 +4850,21 @@ impl Instance {
                 v10017 = v12271;
             } else {
                 let v1852 = v1243 * (v349 - v658);
-                let v13050 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9777[0]]))) * v1243;
+                let v13050 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9777]))) * v1243;
                 let v13051 = v13050 * v11018;
                 let v1854 = (ddt(54992, v1825)) + (ddt(54996, v1852));
                 let v13053 = (v9953 * v11018) + (Lanes([v13051[0], 0.0, 0.0, v13051[1], 0.0]));
                 let v9646 = v1825 + v1852;
                 let v13055 = v9953 + (Lanes([v13050[0], 0.0, 0.0, v13050[1], 0.0]));
                 let v1857 = v1243 * (v349 - v673);
-                let v13060 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9778[0]]))) * v1243;
+                let v13060 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9778]))) * v1243;
                 let v13061 = v13060 * v11018;
                 let v1859 = (ddt(54999, v1831)) + (ddt(55003, v1857));
                 let v13063 = (v9954 * v11018) + (Lanes([v13061[0], 0.0, 0.0, 0.0, v13061[1]]));
                 let v9648 = v1831 + v1857;
                 let v13065 = v9954 + (Lanes([v13060[0], 0.0, 0.0, 0.0, v13060[1]]));
                 let v1862 = v1243 * (v574 - v658);
-                let v13070 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9777[0]]))) * v1243;
+                let v13070 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9777]))) * v1243;
                 let v13071 = v13070 * v11018;
                 let v1864 = (ddt(55006, v1837)) + (ddt(55010, v1862));
                 let v13073 = (v9955 * v11018) + (Lanes([0.0, 0.0, v13071[0], v13071[1]]));
@@ -5053,7 +4952,7 @@ impl Instance {
                 let v13148 = (((v10854 * v725) * v1901) * v10982) / v1900;
                 let v13149 = v10025 * v1882;
                 let v1903 = v1901 + (v1882 * v1897);
-                let v13152 = (Lanes([v13148[0], 0.0, 0.0])) + (Lanes([0.0, v13149[0], v13149[1]]));
+                let v13152 = (Lanes([v13148, 0.0, 0.0])) + (Lanes([0.0, v13149[0], v13149[1]]));
                 let v13153 = v9782 * v1889;
                 let v1905 = v1879 + (v1889 * v92);
                 let v1906 = v96.powf(v712);
@@ -5077,18 +4976,16 @@ impl Instance {
                 let v1916 = v1881 - (v1914 * v0);
                 let v13175 = (((v10026 * v0) * v10982) * v1897) + (v10025 * v1916);
                 let v1918 = v1905 - (v1916 * v1897);
-                let v13178 = (Lanes([v13153[0], 0.0, 0.0])) - (Lanes([0.0, v13175[0], v13175[1]]));
+                let v13178 = (Lanes([v13153, 0.0, 0.0])) - (Lanes([0.0, v13175[0], v13175[1]]));
                 let v1919 = v437 * v1903;
                 let v1920 = v1919 * v90;
-                let v13181 = v10854 * v1919;
-                let v13183 = ((v13152 * v437) * v90) + (Lanes([v13181[0], 0.0, 0.0]));
+                let v13183 = ((v13152 * v437) * v90) + (Lanes([(v10854 * v1919), 0.0, 0.0]));
                 let v1921 = v264 * v1920;
-                let v13184 = v10906 * v1920;
-                let v13187 = (Lanes([v13184[0], 0.0, 0.0])) + (v13183 * v264);
+                let v13187 = (Lanes([(v10906 * v1920), 0.0, 0.0])) + (v13183 * v264);
                 let v1923 = (v748 * v1899) / v437;
                 let v13189 = (v13144 * v748) / v437;
                 let v1924 = v1918 - v1923;
-                let v13191 = v13178 - (Lanes([v13189[0], 0.0, 0.0]));
+                let v13191 = v13178 - (Lanes([v13189, 0.0, 0.0]));
                 let v1940: f64;
                 let v10027: Lanes<4>;
                 if v344 != 0.0 {
@@ -5111,8 +5008,7 @@ impl Instance {
                 }
                 let v13213 = Lanes([0.0, v13191[0], 0.0, v13191[1], v13191[2]]);
                 let v1942 = (v1940 - v1924) / v1899;
-                let v13215 = v13144 * v1942;
-                let v13218 = (((Lanes([v10027[0], 0.0, v10027[1], v10027[2], v10027[3]])) - v13213) - (Lanes([0.0, v13215[0], 0.0, 0.0, 0.0]))) / v1899;
+                let v13218 = (((Lanes([v10027[0], 0.0, v10027[1], v10027[2], v10027[3]])) - v13213) - (Lanes([0.0, (v13144 * v1942), 0.0, 0.0, 0.0]))) / v1899;
                 let v1943 = if v1942 > v407 { 1.0 } else { 0.0 };
                 let v1967: f64;
                 let v10028: Lanes<5>;
@@ -5160,11 +5056,10 @@ impl Instance {
                 let v1965 = v748 * v57;
                 let v1966 = v1965 * v1899;
                 let v13243 = v13144 * v1965;
-                let v13244 = v13243 * v1967;
                 let v13248 = Lanes([0.0, v13178[0], 0.0, v13178[1], v13178[2]]);
                 let v1972 = (v1964 - (v1918 - (v1966 * v1967))) / v1920;
                 let v13252 = v13183 * v1972;
-                let v13255 = (((Lanes([v10030[0], 0.0, v10030[1], v10030[2], v10030[3]])) - (v13248 - ((Lanes([0.0, v13244[0], 0.0, 0.0, 0.0])) + (v10028 * v1966)))) - (Lanes([0.0, v13252[0], 0.0, v13252[1], v13252[2]]))) / v1920;
+                let v13255 = (((Lanes([v10030[0], 0.0, v10030[1], v10030[2], v10030[3]])) - (v13248 - ((Lanes([0.0, (v13243 * v1967), 0.0, 0.0, 0.0])) + (v10028 * v1966)))) - (Lanes([0.0, v13252[0], 0.0, v13252[1], v13252[2]]))) / v1920;
                 let v1973 = if v1972 > v407 { 1.0 } else { 0.0 };
                 let v1983: f64;
                 let v10031: Lanes<5>;
@@ -5199,36 +5094,30 @@ impl Instance {
                     v10031 = v10032;
                 }
                 let v1986 = (v1887 * v1983) / v264;
-                let v13273 = v10906 * v1986;
                 let v1987 = v6 + v1986;
                 let v1988 = v1906 * v1987;
-                let v13277 = v13157 * v1987;
                 let v1989 = v1885 / v1988;
-                let v13283 = ((((Lanes([0.0, v13277[0], 0.0, 0.0, 0.0])) + ((((v10031 * v1887) - (Lanes([0.0, v13273[0], 0.0, 0.0, 0.0]))) / v264) * v1906)) * v1989) * v10982) / v1988;
+                let v13283 = ((((Lanes([0.0, (v13157 * v1987), 0.0, 0.0, 0.0])) + ((((v10031 * v1887) - (Lanes([0.0, (v10906 * v1986), 0.0, 0.0, 0.0]))) / v264) * v1906)) * v1989) * v10982) / v1988;
                 let v1993 = v6 + (v713 * v47);
                 let v1994 = (v6 + (v713 * v4)) / v1993;
                 let v1995 = v1884 * v1994;
                 let v13288 = ((((v9782 * v713) * v1994) * v10982) / v1993) * v1884;
                 let v1998 = v6 + ((v714 * v1897) / v1872);
-                let v13291 = v13288 * v1998;
                 let v13292 = ((v10025 * v714) / v1872) * v1995;
-                let v13295 = (Lanes([v13291[0], 0.0, 0.0])) + (Lanes([0.0, v13292[0], v13292[1]]));
+                let v13295 = (Lanes([(v13288 * v1998), 0.0, 0.0])) + (Lanes([0.0, v13292[0], v13292[1]]));
                 let v2001 = (v1888 * v1983) / v264;
-                let v13297 = v10906 * v2001;
                 let v2002 = v6 + v2001;
                 let v2003 = (v1995 * v1998) / v2002;
-                let v13304 = ((Lanes([0.0, v13295[0], 0.0, v13295[1], v13295[2]])) - ((((v10031 * v1888) - (Lanes([0.0, v13297[0], 0.0, 0.0, 0.0]))) / v264) * v2003)) / v2002;
+                let v13304 = ((Lanes([0.0, v13295[0], 0.0, v13295[1], v13295[2]])) - ((((v10031 * v1888) - (Lanes([0.0, (v10906 * v2001), 0.0, 0.0, 0.0]))) / v264) * v2003)) / v2002;
                 let v2004 = v437 * v1967;
                 let v2005 = v2004 * v90;
-                let v13307 = v10854 * v2004;
                 let v2008 = v6 - v1967;
                 let v13314 = v10028 * v10982;
                 let v2010 = ((v2005 * v1989) / v1872) + (v2008 * v2003);
-                let v13318 = ((((((v10028 * v437) * v90) + (Lanes([0.0, v13307[0], 0.0, 0.0, 0.0]))) * v1989) + (v13283 * v2005)) / v1872) + ((v13314 * v2003) + (v13304 * v2008));
+                let v13318 = ((((((v10028 * v437) * v90) + (Lanes([0.0, (v10854 * v2004), 0.0, 0.0, 0.0]))) * v1989) + (v13283 * v2005)) / v1872) + ((v13314 * v2003) + (v13304 * v2008));
                 let v2012 = (v2003 * v1872) / v1989;
                 let v13322 = ((v13304 * v1872) - (v13283 * v2012)) / v1989;
                 let v2014 = (v437 * v1983) / v264;
-                let v13324 = v10906 * v2014;
                 let v2015 = v2014 / v2012;
                 let v2017 = (v6 + v2015).sqrt();
                 let v2019 = (v2012 * v2017) - v2012;
@@ -5238,7 +5127,7 @@ impl Instance {
                 let v2022 = (v2012 * v2008) + v2021;
                 let v13345 = ((v13322 * v2008) + (v13314 * v2012)) + v13344;
                 let v2024 = (v2019 * v2008) + v2021;
-                let v13349 = (((((v13322 * v2017) + (((((((v10031 * v437) - (Lanes([0.0, v13324[0], 0.0, 0.0, 0.0]))) / v264) - (v13322 * v2015)) / v2012) * (v9751 / (v10962 * v2017))) * v2012)) - v13322) * v2008) + (v13314 * v2019)) + v13344;
+                let v13349 = (((((v13322 * v2017) + (((((((v10031 * v437) - (Lanes([0.0, (v10906 * v2014), 0.0, 0.0, 0.0]))) / v264) - (v13322 * v2015)) / v2012) * (v9751 / (v10962 * v2017))) * v2012)) - v13322) * v2008) + (v13314 * v2019)) + v13344;
                 let v2025 = v660 / v2024;
                 let v13351 = Lanes([0.0, 0.0, 0.0, v11353[0], v11353[1]]);
                 let v13353 = (v13351 - (v13349 * v2025)) / v2024;
@@ -5304,8 +5193,7 @@ impl Instance {
                 let v13422 = (Lanes([0.0, 0.0, 0.0, v13419[0], v13419[1]])) + ((((((v10034 * (v1886 * (v2061.powf(v13372)))) * (v2042 * (v2063.powf(v13376)))) * v2065) * v10982) / v2064) * v2046);
                 let v13423 = Lanes([v9882[0], 0.0, v9882[1], v9882[2], 0.0]);
                 let v2068 = (v1874 - v1924) / v1899;
-                let v13425 = v13144 * v2068;
-                let v13428 = ((v13423 - v13213) - (Lanes([0.0, v13425[0], 0.0, 0.0, 0.0]))) / v1899;
+                let v13428 = ((v13423 - v13213) - (Lanes([0.0, (v13144 * v2068), 0.0, 0.0, 0.0]))) / v1899;
                 let v2069 = if v2068 > v407 { 1.0 } else { 0.0 };
                 let v2076: f64;
                 let v10035: Lanes<5>;
@@ -5331,10 +5219,9 @@ impl Instance {
                     v10035 = v10036;
                 }
                 let v13433 = Lanes([v13143[0], 0.0, v13143[1], v13143[2], v13143[3]]);
-                let v13435 = v13243 * v2076;
                 let v2081 = ((v1898 - v2066) - (v1918 - (v1966 * v2076))) / v1920;
                 let v13441 = v13183 * v2081;
-                let v13444 = (((v13433 - v13422) - (v13248 - ((Lanes([0.0, v13435[0], 0.0, 0.0, 0.0])) + (v10035 * v1966)))) - (Lanes([0.0, v13441[0], 0.0, v13441[1], v13441[2]]))) / v1920;
+                let v13444 = (((v13433 - v13422) - (v13248 - ((Lanes([0.0, (v13243 * v2076), 0.0, 0.0, 0.0])) + (v10035 * v1966)))) - (Lanes([0.0, v13441[0], 0.0, v13441[1], v13441[2]]))) / v1920;
                 let v2082 = if v2081 > v407 { 1.0 } else { 0.0 };
                 let v2117: f64;
                 let v10037: Lanes<5>;
@@ -5369,8 +5256,7 @@ impl Instance {
                     v10037 = v10038;
                 }
                 let v2093 = (v1898 - v1924) / v1899;
-                let v13462 = v13144 * v2093;
-                let v13465 = ((v13433 - v13213) - (Lanes([0.0, v13462[0], 0.0, 0.0, 0.0]))) / v1899;
+                let v13465 = ((v13433 - v13213) - (Lanes([0.0, (v13144 * v2093), 0.0, 0.0, 0.0]))) / v1899;
                 let v2094 = if v2093 > v407 { 1.0 } else { 0.0 };
                 let v2101: f64;
                 let v10039: Lanes<5>;
@@ -5395,10 +5281,9 @@ impl Instance {
                     v2101 = v2102;
                     v10039 = v10040;
                 }
-                let v13471 = v13243 * v2101;
                 let v2106 = ((v1874 - v2045) - (v1918 - (v1966 * v2101))) / v1920;
                 let v13477 = v13183 * v2106;
-                let v13480 = (((v13423 - v13386) - (v13248 - ((Lanes([0.0, v13471[0], 0.0, 0.0, 0.0])) + (v10039 * v1966)))) - (Lanes([0.0, v13477[0], 0.0, v13477[1], v13477[2]]))) / v1920;
+                let v13480 = (((v13423 - v13386) - (v13248 - ((Lanes([0.0, (v13243 * v2101), 0.0, 0.0, 0.0])) + (v10039 * v1966)))) - (Lanes([0.0, v13477[0], 0.0, v13477[1], v13477[2]]))) / v1920;
                 let v2107 = if v2106 > v407 { 1.0 } else { 0.0 };
                 let v2119: f64;
                 let v10041: Lanes<5>;
@@ -5433,9 +5318,8 @@ impl Instance {
                     v10041 = v10042;
                 }
                 let v2122 = (v2117 - v2119) / v264;
-                let v13498 = v10906 * v2122;
                 let v2123 = v2122 / v2022;
-                let v13504 = ((((v10037 - v10041) - (Lanes([0.0, v13498[0], 0.0, 0.0, 0.0]))) / v264) - (v13345 * v2123)) / v2022;
+                let v13504 = ((((v10037 - v10041) - (Lanes([0.0, (v10906 * v2122), 0.0, 0.0, 0.0]))) / v264) - (v13345 * v2123)) / v2022;
                 let v2131: f64;
                 let v10043: Lanes<5>;
                 if v344 != 0.0 {
@@ -5487,10 +5371,9 @@ impl Instance {
                     v2162 = v2161;
                     v10044 = v13552;
                 }
-                let v13563 = Lanes([0.0, v13541[0], 0.0, 0.0, 0.0]);
+                let v13563 = Lanes([0.0, v13541, 0.0, 0.0, 0.0]);
                 let v2164 = (v2162 - v2146) / v1899;
-                let v13565 = v13144 * v2164;
-                let v13568 = (((Lanes([v10044[0], 0.0, v10044[1], v10044[2], v10044[3]])) - v13563) - (Lanes([0.0, v13565[0], 0.0, 0.0, 0.0]))) / v1899;
+                let v13568 = (((Lanes([v10044[0], 0.0, v10044[1], v10044[2], v10044[3]])) - v13563) - (Lanes([0.0, (v13144 * v2164), 0.0, 0.0, 0.0]))) / v1899;
                 let v2165 = if v2164 > v407 { 1.0 } else { 0.0 };
                 let v2187: f64;
                 let v10045: Lanes<5>;
@@ -5535,18 +5418,15 @@ impl Instance {
                     v2186 = v2185;
                     v10047 = v13583;
                 }
-                let v13593 = v13243 * v2187;
-                let v13597 = Lanes([0.0, v13153[0], 0.0, 0.0, 0.0]);
+                let v13597 = Lanes([0.0, v13153, 0.0, 0.0, 0.0]);
                 let v2192 = (v2186 - (v1905 - (v1966 * v2187))) / v2144;
-                let v13601 = v13537 * v2192;
-                let v13604 = (((Lanes([v10047[0], 0.0, v10047[1], v10047[2], v10047[3]])) - (v13597 - ((Lanes([0.0, v13593[0], 0.0, 0.0, 0.0])) + (v10045 * v1966)))) - (Lanes([0.0, v13601[0], 0.0, 0.0, 0.0]))) / v2144;
+                let v13604 = (((Lanes([v10047[0], 0.0, v10047[1], v10047[2], v10047[3]])) - (v13597 - ((Lanes([0.0, (v13243 * v2187), 0.0, 0.0, 0.0])) + (v10045 * v1966)))) - (Lanes([0.0, (v13537 * v2192), 0.0, 0.0, 0.0]))) / v2144;
                 let v2193 = if v2192 > v407 { 1.0 } else { 0.0 };
                 let v2206: f64;
                 let v10048: Lanes<5>;
                 if v2193 != 0.0 {
                     let v2194 = v2145 * v2192;
-                    let v13617 = v13540 * v2192;
-                    let v13620 = (Lanes([0.0, v13617[0], 0.0, 0.0, 0.0])) + (v13604 * v2145);
+                    let v13620 = (Lanes([0.0, (v13540 * v2192), 0.0, 0.0, 0.0])) + (v13604 * v2145);
                     v2206 = v2194;
                     v10048 = v13620;
                 } else {
@@ -5556,8 +5436,7 @@ impl Instance {
                     if v2196 != 0.0 {
                         let v2197 = v2192.exp();
                         let v2198 = v2145 * v2197;
-                        let v13613 = v13540 * v2197;
-                        let v13616 = (Lanes([0.0, v13613[0], 0.0, 0.0, 0.0])) + ((v13604 * v2197) * v2145);
+                        let v13616 = (Lanes([0.0, (v13540 * v2197), 0.0, 0.0, 0.0])) + ((v13604 * v2197) * v2145);
                         v2207 = v2198;
                         v10049 = v13616;
                     } else {
@@ -5565,8 +5444,7 @@ impl Instance {
                         let v2200 = v6 + v2199;
                         let v2201 = v2200.ln();
                         let v2202 = v2145 * v2201;
-                        let v13608 = v13540 * v2201;
-                        let v13611 = (Lanes([0.0, v13608[0], 0.0, 0.0, 0.0])) + (((v13604 * v2199) * (v9751 / v2200)) * v2145);
+                        let v13611 = (Lanes([0.0, (v13540 * v2201), 0.0, 0.0, 0.0])) + (((v13604 * v2199) * (v9751 / v2200)) * v2145);
                         v2207 = v2202;
                         v10049 = v13611;
                     }
@@ -5577,16 +5455,12 @@ impl Instance {
                 let v2205 = (v1995 * v1872) / v2203;
                 let v13627 = ((v13288 * v1872) - ((((v13157 * v2203) * v10982) / v1906) * v2205)) / v2203;
                 let v2209 = (v437 * v2206) / v264;
-                let v13629 = v10906 * v2209;
                 let v2210 = v2209 / v2205;
-                let v13633 = v13627 * v2210;
                 let v2212 = (v6 + v2210).sqrt();
-                let v13640 = v13627 * v2212;
                 let v2214 = (v2205 * v2212) - v2205;
                 let v2215 = v6 - v2187;
-                let v13650 = v13537 * v2187;
                 let v2218 = (v2214 * v2215) + (v2144 * v2187);
-                let v13654 = (((((Lanes([0.0, v13640[0], 0.0, 0.0, 0.0])) + (((((((v10048 * v437) - (Lanes([0.0, v13629[0], 0.0, 0.0, 0.0]))) / v264) - (Lanes([0.0, v13633[0], 0.0, 0.0, 0.0]))) / v2205) * (v9751 / (v10962 * v2212))) * v2205)) - (Lanes([0.0, v13627[0], 0.0, 0.0, 0.0]))) * v2215) + ((v10045 * v10982) * v2214)) + ((Lanes([0.0, v13650[0], 0.0, 0.0, 0.0])) + (v10045 * v2144));
+                let v13654 = (((((Lanes([0.0, (v13627 * v2212), 0.0, 0.0, 0.0])) + (((((((v10048 * v437) - (Lanes([0.0, (v10906 * v2209), 0.0, 0.0, 0.0]))) / v264) - (Lanes([0.0, (v13627 * v2210), 0.0, 0.0, 0.0]))) / v2205) * (v9751 / (v10962 * v2212))) * v2205)) - (Lanes([0.0, v13627, 0.0, 0.0, 0.0]))) * v2215) + ((v10045 * v10982) * v2214)) + ((Lanes([0.0, (v13537 * v2187), 0.0, 0.0, 0.0])) + (v10045 * v2144));
                 let v2219 = v660 / v2218;
                 let v13657 = (v13351 - (v13654 * v2219)) / v2218;
                 let v2233: f64;
@@ -5645,8 +5519,7 @@ impl Instance {
                 let v13722 = (Lanes([0.0, 0.0, 0.0, v13719[0], v13719[1]])) + ((((((v10051 * (v1886 * (v2253.powf(v13372)))) * (v2042 * (v2255.powf(v13376)))) * v2257) * v10982) / v2256) * v2046);
                 let v13723 = Lanes([v9882[0], 0.0, v9882[1], v9882[2]]);
                 let v2260 = (v1874 - v2146) / v1899;
-                let v13726 = v13144 * v2260;
-                let v13729 = ((v13723 - (Lanes([0.0, v13541[0], 0.0, 0.0]))) - (Lanes([0.0, v13726[0], 0.0, 0.0]))) / v1899;
+                let v13729 = ((v13723 - (Lanes([0.0, v13541, 0.0, 0.0]))) - (Lanes([0.0, (v13144 * v2260), 0.0, 0.0]))) / v1899;
                 let v2261 = if v2260 > v407 { 1.0 } else { 0.0 };
                 let v2268: f64;
                 let v10052: Lanes<4>;
@@ -5671,18 +5544,15 @@ impl Instance {
                     v2268 = v2269;
                     v10052 = v10053;
                 }
-                let v13735 = v13243 * v2268;
-                let v13740 = (Lanes([0.0, v13153[0], 0.0, 0.0])) - ((Lanes([0.0, v13735[0], 0.0, 0.0])) + (v10052 * v1966));
+                let v13740 = (Lanes([0.0, v13153, 0.0, 0.0])) - ((Lanes([0.0, (v13243 * v2268), 0.0, 0.0])) + (v10052 * v1966));
                 let v2273 = ((v1898 - v2258) - (v1905 - (v1966 * v2268))) / v2144;
-                let v13743 = v13537 * v2273;
-                let v13746 = (((v13433 - v13722) - (Lanes([v13740[0], v13740[1], v13740[2], v13740[3], 0.0]))) - (Lanes([0.0, v13743[0], 0.0, 0.0, 0.0]))) / v2144;
+                let v13746 = (((v13433 - v13722) - (Lanes([v13740[0], v13740[1], v13740[2], v13740[3], 0.0]))) - (Lanes([0.0, (v13537 * v2273), 0.0, 0.0, 0.0]))) / v2144;
                 let v2274 = if v2273 > v407 { 1.0 } else { 0.0 };
                 let v2309: f64;
                 let v10054: Lanes<5>;
                 if v2274 != 0.0 {
                     let v2275 = v2145 * v2273;
-                    let v13759 = v13540 * v2273;
-                    let v13762 = (Lanes([0.0, v13759[0], 0.0, 0.0, 0.0])) + (v13746 * v2145);
+                    let v13762 = (Lanes([0.0, (v13540 * v2273), 0.0, 0.0, 0.0])) + (v13746 * v2145);
                     v2309 = v2275;
                     v10054 = v13762;
                 } else {
@@ -5692,8 +5562,7 @@ impl Instance {
                     if v2277 != 0.0 {
                         let v2278 = v2273.exp();
                         let v2279 = v2145 * v2278;
-                        let v13755 = v13540 * v2278;
-                        let v13758 = (Lanes([0.0, v13755[0], 0.0, 0.0, 0.0])) + ((v13746 * v2278) * v2145);
+                        let v13758 = (Lanes([0.0, (v13540 * v2278), 0.0, 0.0, 0.0])) + ((v13746 * v2278) * v2145);
                         v2310 = v2279;
                         v10055 = v13758;
                     } else {
@@ -5701,8 +5570,7 @@ impl Instance {
                         let v2281 = v6 + v2280;
                         let v2282 = v2281.ln();
                         let v2283 = v2145 * v2282;
-                        let v13750 = v13540 * v2282;
-                        let v13753 = (Lanes([0.0, v13750[0], 0.0, 0.0, 0.0])) + (((v13746 * v2280) * (v9751 / v2281)) * v2145);
+                        let v13753 = (Lanes([0.0, (v13540 * v2282), 0.0, 0.0, 0.0])) + (((v13746 * v2280) * (v9751 / v2281)) * v2145);
                         v2310 = v2283;
                         v10055 = v13753;
                     }
@@ -5710,8 +5578,7 @@ impl Instance {
                     v10054 = v10055;
                 }
                 let v2285 = (v1898 - v2146) / v1899;
-                let v13764 = v13144 * v2285;
-                let v13767 = ((v13433 - v13563) - (Lanes([0.0, v13764[0], 0.0, 0.0, 0.0]))) / v1899;
+                let v13767 = ((v13433 - v13563) - (Lanes([0.0, (v13144 * v2285), 0.0, 0.0, 0.0]))) / v1899;
                 let v2286 = if v2285 > v407 { 1.0 } else { 0.0 };
                 let v2293: f64;
                 let v10056: Lanes<5>;
@@ -5736,17 +5603,14 @@ impl Instance {
                     v2293 = v2294;
                     v10056 = v10057;
                 }
-                let v13773 = v13243 * v2293;
                 let v2298 = ((v1874 - v2238) - (v1905 - (v1966 * v2293))) / v2144;
-                let v13779 = v13537 * v2298;
-                let v13782 = (((v13423 - v13688) - (v13597 - ((Lanes([0.0, v13773[0], 0.0, 0.0, 0.0])) + (v10056 * v1966)))) - (Lanes([0.0, v13779[0], 0.0, 0.0, 0.0]))) / v2144;
+                let v13782 = (((v13423 - v13688) - (v13597 - ((Lanes([0.0, (v13243 * v2293), 0.0, 0.0, 0.0])) + (v10056 * v1966)))) - (Lanes([0.0, (v13537 * v2298), 0.0, 0.0, 0.0]))) / v2144;
                 let v2299 = if v2298 > v407 { 1.0 } else { 0.0 };
                 let v2315: f64;
                 let v10058: Lanes<5>;
                 if v2299 != 0.0 {
                     let v2300 = v2145 * v2298;
-                    let v13795 = v13540 * v2298;
-                    let v13798 = (Lanes([0.0, v13795[0], 0.0, 0.0, 0.0])) + (v13782 * v2145);
+                    let v13798 = (Lanes([0.0, (v13540 * v2298), 0.0, 0.0, 0.0])) + (v13782 * v2145);
                     v2315 = v2300;
                     v10058 = v13798;
                 } else {
@@ -5756,8 +5620,7 @@ impl Instance {
                     if v2302 != 0.0 {
                         let v2303 = v2298.exp();
                         let v2304 = v2145 * v2303;
-                        let v13791 = v13540 * v2303;
-                        let v13794 = (Lanes([0.0, v13791[0], 0.0, 0.0, 0.0])) + ((v13782 * v2303) * v2145);
+                        let v13794 = (Lanes([0.0, (v13540 * v2303), 0.0, 0.0, 0.0])) + ((v13782 * v2303) * v2145);
                         v2316 = v2304;
                         v10059 = v13794;
                     } else {
@@ -5765,8 +5628,7 @@ impl Instance {
                         let v2306 = v6 + v2305;
                         let v2307 = v2306.ln();
                         let v2308 = v2145 * v2307;
-                        let v13786 = v13540 * v2307;
-                        let v13789 = (Lanes([0.0, v13786[0], 0.0, 0.0, 0.0])) + (((v13782 * v2305) * (v9751 / v2306)) * v2145);
+                        let v13789 = (Lanes([0.0, (v13540 * v2307), 0.0, 0.0, 0.0])) + (((v13782 * v2305) * (v9751 / v2306)) * v2145);
                         v2316 = v2308;
                         v10059 = v13789;
                     }
@@ -5806,8 +5668,7 @@ impl Instance {
                     let v2353 = v1905 - (v2351 * v1899);
                     let v13843 = v13153 - (v13144 * v2351);
                     let v2355 = (v1876 - v2353) / v2144;
-                    let v13847 = v13537 * v2355;
-                    let v13850 = (((Lanes([v9883[0], 0.0, v9883[1], v9883[2]])) - (Lanes([0.0, v13843[0], 0.0, 0.0]))) - (Lanes([0.0, v13847[0], 0.0, 0.0]))) / v2144;
+                    let v13850 = (((Lanes([v9883[0], 0.0, v9883[1], v9883[2]])) - (Lanes([0.0, v13843, 0.0, 0.0]))) - (Lanes([0.0, (v13537 * v2355), 0.0, 0.0]))) / v2144;
                     let v2356 = if v2355 > v407 { 1.0 } else { 0.0 };
                     let v2366: f64;
                     let v10062: Lanes<4>;
@@ -5838,11 +5699,9 @@ impl Instance {
                     let v2364 = v2363 * v292;
                     let v2365 = v2364 * v2144;
                     let v2368 = v2365 * v2366;
-                    let v13859 = (((v10914 * v2363) * v2144) + (v13537 * v2364)) * v2366;
-                    let v13862 = (Lanes([0.0, v13859[0], 0.0, 0.0])) + (v10062 * v2365);
+                    let v13862 = (Lanes([0.0, ((((v10914 * v2363) * v2144) + (v13537 * v2364)) * v2366), 0.0, 0.0])) + (v10062 * v2365);
                     let v2370 = (v662 - v2353) / v2144;
-                    let v13866 = v13537 * v2370;
-                    let v13869 = (((Lanes([v11357[0], 0.0, v11357[1]])) - (Lanes([0.0, v13843[0], 0.0]))) - (Lanes([0.0, v13866[0], 0.0]))) / v2144;
+                    let v13869 = (((Lanes([v11357[0], 0.0, v11357[1]])) - (Lanes([0.0, v13843, 0.0]))) - (Lanes([0.0, (v13537 * v2370), 0.0]))) / v2144;
                     let v2371 = if v2370 > v407 { 1.0 } else { 0.0 };
                     let v2380: f64;
                     let v10064: Lanes<3>;
@@ -5872,8 +5731,7 @@ impl Instance {
                     let v2378 = v2363 * v320;
                     let v2379 = v2378 * v2144;
                     let v2382 = v2379 * v2380;
-                    let v13878 = (((v10922 * v2363) * v2144) + (v13537 * v2378)) * v2380;
-                    let v13881 = (Lanes([0.0, v13878[0], 0.0])) + (v10064 * v2379);
+                    let v13881 = (Lanes([0.0, ((((v10922 * v2363) * v2144) + (v13537 * v2378)) * v2380), 0.0])) + (v10064 * v2379);
                     v2402 = v2368;
                     v2403 = v2382;
                     v10060 = v13862;
@@ -5889,10 +5747,8 @@ impl Instance {
                 let v10066: Lanes<4>;
                 if v2383 != 0.0 {
                     let v2384 = v748 * v358;
-                    let v13883 = v13153 - (v13144 * v2384);
                     let v2388 = (v1874 - (v1905 - (v2384 * v1899))) / v2144;
-                    let v13886 = v13537 * v2388;
-                    let v13889 = ((v13723 - (Lanes([0.0, v13883[0], 0.0, 0.0]))) - (Lanes([0.0, v13886[0], 0.0, 0.0]))) / v2144;
+                    let v13889 = ((v13723 - (Lanes([0.0, (v13153 - (v13144 * v2384)), 0.0, 0.0]))) - (Lanes([0.0, (v13537 * v2388), 0.0, 0.0]))) / v2144;
                     let v2389 = if v2388 > v407 { 1.0 } else { 0.0 };
                     let v2399: f64;
                     let v10067: Lanes<4>;
@@ -5922,8 +5778,7 @@ impl Instance {
                     let v2397 = (v2345 * v335) * v1878;
                     let v2398 = v2397 * v2144;
                     let v2401 = v2398 * v2399;
-                    let v13895 = (v13537 * v2397) * v2399;
-                    let v13898 = (Lanes([0.0, v13895[0], 0.0, 0.0])) + (v10067 * v2398);
+                    let v13898 = (Lanes([0.0, ((v13537 * v2397) * v2399), 0.0, 0.0])) + (v10067 * v2398);
                     v2404 = v2401;
                     v10066 = v13898;
                 } else {
@@ -5998,21 +5853,21 @@ impl Instance {
             let v10082: Lanes<4>;
             if v649 != 0.0 {
                 let v2411 = v1243 * (v574 - v643);
-                let v13937 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9776[0]]))) * v1243;
+                let v13937 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9776]))) * v1243;
                 let v13938 = v13937 * v11018;
                 let v2413 = (ddt(56418, v2408)) + (ddt(56422, v2411));
                 let v13940 = (v10018 * v11018) + (Lanes([0.0, 0.0, v13938[0], v13938[1], 0.0]));
                 let v9653 = v2408 + v2411;
                 let v13942 = v10018 + (Lanes([0.0, 0.0, v13937[0], v13937[1], 0.0]));
                 let v2417 = v1243 * (v574 - v658);
-                let v13947 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9777[0]]))) * v1243;
+                let v13947 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9777]))) * v1243;
                 let v13948 = v13947 * v11018;
                 let v2419 = (ddt(56425, v2414)) + (ddt(56429, v2417));
                 let v13950 = (v10019 * v11018) + (Lanes([0.0, 0.0, v13948[0], 0.0, v13948[1]]));
                 let v9655 = v2414 + v2417;
                 let v13952 = v10019 + (Lanes([0.0, 0.0, v13947[0], 0.0, v13947[1]]));
                 let v2423 = v1243 * (v349 - v643);
-                let v13957 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9776[0]]))) * v1243;
+                let v13957 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9776]))) * v1243;
                 let v13958 = v13957 * v11018;
                 let v2425 = (ddt(56432, v2420)) + (ddt(56436, v2423));
                 let v13960 = (v10020 * v11018) + (Lanes([v13958[0], 0.0, 0.0, v13958[1]]));
@@ -6020,7 +5875,7 @@ impl Instance {
                 let v13962 = v10020 + (Lanes([v13957[0], 0.0, 0.0, v13957[1]]));
                 let v13963 = v10021 * v11018;
                 let v2430 = v1243 * (v574 - v337);
-                let v13967 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9754[0]]))) * v1243;
+                let v13967 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9754]))) * v1243;
                 let v13968 = v13967 * v11018;
                 let v2432 = (ddt(56440, v2427)) + (ddt(56444, v2430));
                 let v13971 = (Lanes([v13963[0], v13963[1], v13963[2], 0.0, v13963[3]])) + (Lanes([0.0, 0.0, v13968[0], v13968[1], 0.0]));
@@ -6059,21 +5914,21 @@ impl Instance {
                 v10082 = v13127;
             } else {
                 let v2435 = v1243 * (v349 - v643);
-                let v13906 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9776[0]]))) * v1243;
+                let v13906 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9776]))) * v1243;
                 let v13907 = v13906 * v11018;
                 let v2437 = (ddt(56447, v2408)) + (ddt(56451, v2435));
                 let v13909 = (v10018 * v11018) + (Lanes([v13907[0], 0.0, 0.0, v13907[1], 0.0]));
                 let v9661 = v2408 + v2435;
                 let v13911 = v10018 + (Lanes([v13906[0], 0.0, 0.0, v13906[1], 0.0]));
                 let v2440 = v1243 * (v349 - v658);
-                let v13916 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9777[0]]))) * v1243;
+                let v13916 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9777]))) * v1243;
                 let v13917 = v13916 * v11018;
                 let v2442 = (ddt(56454, v2414)) + (ddt(56458, v2440));
                 let v13919 = (v10019 * v11018) + (Lanes([v13917[0], 0.0, 0.0, 0.0, v13917[1]]));
                 let v9663 = v2414 + v2440;
                 let v13921 = v10019 + (Lanes([v13916[0], 0.0, 0.0, 0.0, v13916[1]]));
                 let v2445 = v1243 * (v574 - v643);
-                let v13926 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9776[0]]))) * v1243;
+                let v13926 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9776]))) * v1243;
                 let v13927 = v13926 * v11018;
                 let v2447 = (ddt(56461, v2420)) + (ddt(56465, v2445));
                 let v13929 = (v10020 * v11018) + (Lanes([0.0, 0.0, v13927[0], v13927[1]]));
@@ -6161,7 +6016,7 @@ impl Instance {
                 let v14004 = (((v10854 * v725) * v2484) * v10982) / v2483;
                 let v14005 = v10090 * v2465;
                 let v2486 = v2484 + (v2465 * v2480);
-                let v14008 = (Lanes([v14004[0], 0.0, 0.0])) + (Lanes([0.0, v14005[0], v14005[1]]));
+                let v14008 = (Lanes([v14004, 0.0, 0.0])) + (Lanes([0.0, v14005[0], v14005[1]]));
                 let v14009 = v9782 * v2472;
                 let v2488 = v2462 + (v2472 * v92);
                 let v2489 = v96.powf(v712);
@@ -6185,18 +6040,16 @@ impl Instance {
                 let v2499 = v2464 - (v2497 * v0);
                 let v14031 = (((v10091 * v0) * v10982) * v2480) + (v10090 * v2499);
                 let v2501 = v2488 - (v2499 * v2480);
-                let v14034 = (Lanes([v14009[0], 0.0, 0.0])) - (Lanes([0.0, v14031[0], v14031[1]]));
+                let v14034 = (Lanes([v14009, 0.0, 0.0])) - (Lanes([0.0, v14031[0], v14031[1]]));
                 let v2502 = v437 * v2486;
                 let v2503 = v2502 * v90;
-                let v14037 = v10854 * v2502;
-                let v14039 = ((v14008 * v437) * v90) + (Lanes([v14037[0], 0.0, 0.0]));
+                let v14039 = ((v14008 * v437) * v90) + (Lanes([(v10854 * v2502), 0.0, 0.0]));
                 let v2504 = v257 * v2503;
-                let v14040 = v10904 * v2503;
-                let v14043 = (Lanes([v14040[0], 0.0, 0.0])) + (v14039 * v257);
+                let v14043 = (Lanes([(v10904 * v2503), 0.0, 0.0])) + (v14039 * v257);
                 let v2506 = (v748 * v2482) / v437;
                 let v14045 = (v14000 * v748) / v437;
                 let v2507 = v2501 - v2506;
-                let v14047 = v14034 - (Lanes([v14045[0], 0.0, 0.0]));
+                let v14047 = v14034 - (Lanes([v14045, 0.0, 0.0]));
                 let v2523: f64;
                 let v10092: Lanes<4>;
                 if v344 != 0.0 {
@@ -6219,8 +6072,7 @@ impl Instance {
                 }
                 let v14069 = Lanes([0.0, v14047[0], v14047[1], 0.0, v14047[2]]);
                 let v2525 = (v2523 - v2507) / v2482;
-                let v14071 = v14000 * v2525;
-                let v14074 = (((Lanes([v10092[0], 0.0, v10092[1], v10092[2], v10092[3]])) - v14069) - (Lanes([0.0, v14071[0], 0.0, 0.0, 0.0]))) / v2482;
+                let v14074 = (((Lanes([v10092[0], 0.0, v10092[1], v10092[2], v10092[3]])) - v14069) - (Lanes([0.0, (v14000 * v2525), 0.0, 0.0, 0.0]))) / v2482;
                 let v2526 = if v2525 > v407 { 1.0 } else { 0.0 };
                 let v2550: f64;
                 let v10093: Lanes<5>;
@@ -6268,11 +6120,10 @@ impl Instance {
                 let v2548 = v748 * v57;
                 let v2549 = v2548 * v2482;
                 let v14099 = v14000 * v2548;
-                let v14100 = v14099 * v2550;
                 let v14104 = Lanes([0.0, v14034[0], v14034[1], 0.0, v14034[2]]);
                 let v2555 = (v2547 - (v2501 - (v2549 * v2550))) / v2503;
                 let v14108 = v14039 * v2555;
-                let v14111 = (((Lanes([v10095[0], 0.0, v10095[1], v10095[2], v10095[3]])) - (v14104 - ((Lanes([0.0, v14100[0], 0.0, 0.0, 0.0])) + (v10093 * v2549)))) - (Lanes([0.0, v14108[0], v14108[1], 0.0, v14108[2]]))) / v2503;
+                let v14111 = (((Lanes([v10095[0], 0.0, v10095[1], v10095[2], v10095[3]])) - (v14104 - ((Lanes([0.0, (v14099 * v2550), 0.0, 0.0, 0.0])) + (v10093 * v2549)))) - (Lanes([0.0, v14108[0], v14108[1], 0.0, v14108[2]]))) / v2503;
                 let v2556 = if v2555 > v407 { 1.0 } else { 0.0 };
                 let v2566: f64;
                 let v10096: Lanes<5>;
@@ -6307,36 +6158,30 @@ impl Instance {
                     v10096 = v10097;
                 }
                 let v2569 = (v2470 * v2566) / v257;
-                let v14129 = v10904 * v2569;
                 let v2570 = v6 + v2569;
                 let v2571 = v2489 * v2570;
-                let v14133 = v14013 * v2570;
                 let v2572 = v2468 / v2571;
-                let v14139 = ((((Lanes([0.0, v14133[0], 0.0, 0.0, 0.0])) + ((((v10096 * v2470) - (Lanes([0.0, v14129[0], 0.0, 0.0, 0.0]))) / v257) * v2489)) * v2572) * v10982) / v2571;
+                let v14139 = ((((Lanes([0.0, (v14013 * v2570), 0.0, 0.0, 0.0])) + ((((v10096 * v2470) - (Lanes([0.0, (v10904 * v2569), 0.0, 0.0, 0.0]))) / v257) * v2489)) * v2572) * v10982) / v2571;
                 let v2576 = v6 + (v713 * v47);
                 let v2577 = (v6 + (v713 * v4)) / v2576;
                 let v2578 = v2467 * v2577;
                 let v14144 = ((((v9782 * v713) * v2577) * v10982) / v2576) * v2467;
                 let v2581 = v6 + ((v714 * v2480) / v2455);
-                let v14147 = v14144 * v2581;
                 let v14148 = ((v10090 * v714) / v2455) * v2578;
-                let v14151 = (Lanes([v14147[0], 0.0, 0.0])) + (Lanes([0.0, v14148[0], v14148[1]]));
+                let v14151 = (Lanes([(v14144 * v2581), 0.0, 0.0])) + (Lanes([0.0, v14148[0], v14148[1]]));
                 let v2584 = (v2471 * v2566) / v257;
-                let v14153 = v10904 * v2584;
                 let v2585 = v6 + v2584;
                 let v2586 = (v2578 * v2581) / v2585;
-                let v14160 = ((Lanes([0.0, v14151[0], v14151[1], 0.0, v14151[2]])) - ((((v10096 * v2471) - (Lanes([0.0, v14153[0], 0.0, 0.0, 0.0]))) / v257) * v2586)) / v2585;
+                let v14160 = ((Lanes([0.0, v14151[0], v14151[1], 0.0, v14151[2]])) - ((((v10096 * v2471) - (Lanes([0.0, (v10904 * v2584), 0.0, 0.0, 0.0]))) / v257) * v2586)) / v2585;
                 let v2587 = v437 * v2550;
                 let v2588 = v2587 * v90;
-                let v14163 = v10854 * v2587;
                 let v2591 = v6 - v2550;
                 let v14170 = v10093 * v10982;
                 let v2593 = ((v2588 * v2572) / v2455) + (v2591 * v2586);
-                let v14174 = ((((((v10093 * v437) * v90) + (Lanes([0.0, v14163[0], 0.0, 0.0, 0.0]))) * v2572) + (v14139 * v2588)) / v2455) + ((v14170 * v2586) + (v14160 * v2591));
+                let v14174 = ((((((v10093 * v437) * v90) + (Lanes([0.0, (v10854 * v2587), 0.0, 0.0, 0.0]))) * v2572) + (v14139 * v2588)) / v2455) + ((v14170 * v2586) + (v14160 * v2591));
                 let v2595 = (v2586 * v2455) / v2572;
                 let v14178 = ((v14160 * v2455) - (v14139 * v2595)) / v2572;
                 let v2597 = (v437 * v2566) / v257;
-                let v14180 = v10904 * v2597;
                 let v2598 = v2597 / v2595;
                 let v2600 = (v6 + v2598).sqrt();
                 let v2602 = (v2595 * v2600) - v2595;
@@ -6346,7 +6191,7 @@ impl Instance {
                 let v2605 = (v2595 * v2591) + v2604;
                 let v14201 = ((v14178 * v2591) + (v14170 * v2595)) + v14200;
                 let v2607 = (v2602 * v2591) + v2604;
-                let v14205 = (((((v14178 * v2600) + (((((((v10096 * v437) - (Lanes([0.0, v14180[0], 0.0, 0.0, 0.0]))) / v257) - (v14178 * v2598)) / v2595) * (v9751 / (v10962 * v2600))) * v2595)) - v14178) * v2591) + (v14170 * v2602)) + v14200;
+                let v14205 = (((((v14178 * v2600) + (((((((v10096 * v437) - (Lanes([0.0, (v10904 * v2597), 0.0, 0.0, 0.0]))) / v257) - (v14178 * v2598)) / v2595) * (v9751 / (v10962 * v2600))) * v2595)) - v14178) * v2591) + (v14170 * v2602)) + v14200;
                 let v2608 = v645 / v2607;
                 let v14207 = Lanes([0.0, 0.0, v11325[0], 0.0, v11325[1]]);
                 let v14209 = (v14207 - (v14205 * v2608)) / v2607;
@@ -6412,8 +6257,7 @@ impl Instance {
                 let v14278 = (Lanes([0.0, 0.0, v14275[0], 0.0, v14275[1]])) + ((((((v10099 * (v2469 * (v2644.powf(v14228)))) * (v2625 * (v2646.powf(v14232)))) * v2648) * v10982) / v2647) * v2629);
                 let v14279 = Lanes([v9880[0], 0.0, v9880[1], v9880[2], 0.0]);
                 let v2651 = (v2457 - v2507) / v2482;
-                let v14281 = v14000 * v2651;
-                let v14284 = ((v14279 - v14069) - (Lanes([0.0, v14281[0], 0.0, 0.0, 0.0]))) / v2482;
+                let v14284 = ((v14279 - v14069) - (Lanes([0.0, (v14000 * v2651), 0.0, 0.0, 0.0]))) / v2482;
                 let v2652 = if v2651 > v407 { 1.0 } else { 0.0 };
                 let v2659: f64;
                 let v10100: Lanes<5>;
@@ -6439,10 +6283,9 @@ impl Instance {
                     v10100 = v10101;
                 }
                 let v14289 = Lanes([v13999[0], 0.0, v13999[1], v13999[2], v13999[3]]);
-                let v14291 = v14099 * v2659;
                 let v2664 = ((v2481 - v2649) - (v2501 - (v2549 * v2659))) / v2503;
                 let v14297 = v14039 * v2664;
-                let v14300 = (((v14289 - v14278) - (v14104 - ((Lanes([0.0, v14291[0], 0.0, 0.0, 0.0])) + (v10100 * v2549)))) - (Lanes([0.0, v14297[0], v14297[1], 0.0, v14297[2]]))) / v2503;
+                let v14300 = (((v14289 - v14278) - (v14104 - ((Lanes([0.0, (v14099 * v2659), 0.0, 0.0, 0.0])) + (v10100 * v2549)))) - (Lanes([0.0, v14297[0], v14297[1], 0.0, v14297[2]]))) / v2503;
                 let v2665 = if v2664 > v407 { 1.0 } else { 0.0 };
                 let v2700: f64;
                 let v10102: Lanes<5>;
@@ -6477,8 +6320,7 @@ impl Instance {
                     v10102 = v10103;
                 }
                 let v2676 = (v2481 - v2507) / v2482;
-                let v14318 = v14000 * v2676;
-                let v14321 = ((v14289 - v14069) - (Lanes([0.0, v14318[0], 0.0, 0.0, 0.0]))) / v2482;
+                let v14321 = ((v14289 - v14069) - (Lanes([0.0, (v14000 * v2676), 0.0, 0.0, 0.0]))) / v2482;
                 let v2677 = if v2676 > v407 { 1.0 } else { 0.0 };
                 let v2684: f64;
                 let v10104: Lanes<5>;
@@ -6503,10 +6345,9 @@ impl Instance {
                     v2684 = v2685;
                     v10104 = v10105;
                 }
-                let v14327 = v14099 * v2684;
                 let v2689 = ((v2457 - v2628) - (v2501 - (v2549 * v2684))) / v2503;
                 let v14333 = v14039 * v2689;
-                let v14336 = (((v14279 - v14242) - (v14104 - ((Lanes([0.0, v14327[0], 0.0, 0.0, 0.0])) + (v10104 * v2549)))) - (Lanes([0.0, v14333[0], v14333[1], 0.0, v14333[2]]))) / v2503;
+                let v14336 = (((v14279 - v14242) - (v14104 - ((Lanes([0.0, (v14099 * v2684), 0.0, 0.0, 0.0])) + (v10104 * v2549)))) - (Lanes([0.0, v14333[0], v14333[1], 0.0, v14333[2]]))) / v2503;
                 let v2690 = if v2689 > v407 { 1.0 } else { 0.0 };
                 let v2702: f64;
                 let v10106: Lanes<5>;
@@ -6541,9 +6382,8 @@ impl Instance {
                     v10106 = v10107;
                 }
                 let v2705 = (v2700 - v2702) / v257;
-                let v14354 = v10904 * v2705;
                 let v2706 = v2705 / v2605;
-                let v14360 = ((((v10102 - v10106) - (Lanes([0.0, v14354[0], 0.0, 0.0, 0.0]))) / v257) - (v14201 * v2706)) / v2605;
+                let v14360 = ((((v10102 - v10106) - (Lanes([0.0, (v10904 * v2705), 0.0, 0.0, 0.0]))) / v257) - (v14201 * v2706)) / v2605;
                 let v2714: f64;
                 let v10108: Lanes<5>;
                 if v344 != 0.0 {
@@ -6595,10 +6435,9 @@ impl Instance {
                     v2745 = v2744;
                     v10109 = v14408;
                 }
-                let v14419 = Lanes([0.0, v14397[0], 0.0, 0.0, 0.0]);
+                let v14419 = Lanes([0.0, v14397, 0.0, 0.0, 0.0]);
                 let v2747 = (v2745 - v2729) / v2482;
-                let v14421 = v14000 * v2747;
-                let v14424 = (((Lanes([v10109[0], 0.0, v10109[1], v10109[2], v10109[3]])) - v14419) - (Lanes([0.0, v14421[0], 0.0, 0.0, 0.0]))) / v2482;
+                let v14424 = (((Lanes([v10109[0], 0.0, v10109[1], v10109[2], v10109[3]])) - v14419) - (Lanes([0.0, (v14000 * v2747), 0.0, 0.0, 0.0]))) / v2482;
                 let v2748 = if v2747 > v407 { 1.0 } else { 0.0 };
                 let v2770: f64;
                 let v10110: Lanes<5>;
@@ -6643,18 +6482,15 @@ impl Instance {
                     v2769 = v2768;
                     v10112 = v14439;
                 }
-                let v14449 = v14099 * v2770;
-                let v14453 = Lanes([0.0, v14009[0], 0.0, 0.0, 0.0]);
+                let v14453 = Lanes([0.0, v14009, 0.0, 0.0, 0.0]);
                 let v2775 = (v2769 - (v2488 - (v2549 * v2770))) / v2727;
-                let v14457 = v14393 * v2775;
-                let v14460 = (((Lanes([v10112[0], 0.0, v10112[1], v10112[2], v10112[3]])) - (v14453 - ((Lanes([0.0, v14449[0], 0.0, 0.0, 0.0])) + (v10110 * v2549)))) - (Lanes([0.0, v14457[0], 0.0, 0.0, 0.0]))) / v2727;
+                let v14460 = (((Lanes([v10112[0], 0.0, v10112[1], v10112[2], v10112[3]])) - (v14453 - ((Lanes([0.0, (v14099 * v2770), 0.0, 0.0, 0.0])) + (v10110 * v2549)))) - (Lanes([0.0, (v14393 * v2775), 0.0, 0.0, 0.0]))) / v2727;
                 let v2776 = if v2775 > v407 { 1.0 } else { 0.0 };
                 let v2789: f64;
                 let v10113: Lanes<5>;
                 if v2776 != 0.0 {
                     let v2777 = v2728 * v2775;
-                    let v14473 = v14396 * v2775;
-                    let v14476 = (Lanes([0.0, v14473[0], 0.0, 0.0, 0.0])) + (v14460 * v2728);
+                    let v14476 = (Lanes([0.0, (v14396 * v2775), 0.0, 0.0, 0.0])) + (v14460 * v2728);
                     v2789 = v2777;
                     v10113 = v14476;
                 } else {
@@ -6664,8 +6500,7 @@ impl Instance {
                     if v2779 != 0.0 {
                         let v2780 = v2775.exp();
                         let v2781 = v2728 * v2780;
-                        let v14469 = v14396 * v2780;
-                        let v14472 = (Lanes([0.0, v14469[0], 0.0, 0.0, 0.0])) + ((v14460 * v2780) * v2728);
+                        let v14472 = (Lanes([0.0, (v14396 * v2780), 0.0, 0.0, 0.0])) + ((v14460 * v2780) * v2728);
                         v2790 = v2781;
                         v10114 = v14472;
                     } else {
@@ -6673,8 +6508,7 @@ impl Instance {
                         let v2783 = v6 + v2782;
                         let v2784 = v2783.ln();
                         let v2785 = v2728 * v2784;
-                        let v14464 = v14396 * v2784;
-                        let v14467 = (Lanes([0.0, v14464[0], 0.0, 0.0, 0.0])) + (((v14460 * v2782) * (v9751 / v2783)) * v2728);
+                        let v14467 = (Lanes([0.0, (v14396 * v2784), 0.0, 0.0, 0.0])) + (((v14460 * v2782) * (v9751 / v2783)) * v2728);
                         v2790 = v2785;
                         v10114 = v14467;
                     }
@@ -6685,16 +6519,12 @@ impl Instance {
                 let v2788 = (v2578 * v2455) / v2786;
                 let v14483 = ((v14144 * v2455) - ((((v14013 * v2786) * v10982) / v2489) * v2788)) / v2786;
                 let v2792 = (v437 * v2789) / v257;
-                let v14485 = v10904 * v2792;
                 let v2793 = v2792 / v2788;
-                let v14489 = v14483 * v2793;
                 let v2795 = (v6 + v2793).sqrt();
-                let v14496 = v14483 * v2795;
                 let v2797 = (v2788 * v2795) - v2788;
                 let v2798 = v6 - v2770;
-                let v14506 = v14393 * v2770;
                 let v2801 = (v2797 * v2798) + (v2727 * v2770);
-                let v14510 = (((((Lanes([0.0, v14496[0], 0.0, 0.0, 0.0])) + (((((((v10113 * v437) - (Lanes([0.0, v14485[0], 0.0, 0.0, 0.0]))) / v257) - (Lanes([0.0, v14489[0], 0.0, 0.0, 0.0]))) / v2788) * (v9751 / (v10962 * v2795))) * v2788)) - (Lanes([0.0, v14483[0], 0.0, 0.0, 0.0]))) * v2798) + ((v10110 * v10982) * v2797)) + ((Lanes([0.0, v14506[0], 0.0, 0.0, 0.0])) + (v10110 * v2727));
+                let v14510 = (((((Lanes([0.0, (v14483 * v2795), 0.0, 0.0, 0.0])) + (((((((v10113 * v437) - (Lanes([0.0, (v10904 * v2792), 0.0, 0.0, 0.0]))) / v257) - (Lanes([0.0, (v14483 * v2793), 0.0, 0.0, 0.0]))) / v2788) * (v9751 / (v10962 * v2795))) * v2788)) - (Lanes([0.0, v14483, 0.0, 0.0, 0.0]))) * v2798) + ((v10110 * v10982) * v2797)) + ((Lanes([0.0, (v14393 * v2770), 0.0, 0.0, 0.0])) + (v10110 * v2727));
                 let v2802 = v645 / v2801;
                 let v14513 = (v14207 - (v14510 * v2802)) / v2801;
                 let v2816: f64;
@@ -6753,8 +6583,7 @@ impl Instance {
                 let v14578 = (Lanes([0.0, 0.0, v14575[0], 0.0, v14575[1]])) + ((((((v10116 * (v2469 * (v2836.powf(v14228)))) * (v2625 * (v2838.powf(v14232)))) * v2840) * v10982) / v2839) * v2629);
                 let v14579 = Lanes([v9880[0], 0.0, v9880[1], v9880[2]]);
                 let v2843 = (v2457 - v2729) / v2482;
-                let v14582 = v14000 * v2843;
-                let v14585 = ((v14579 - (Lanes([0.0, v14397[0], 0.0, 0.0]))) - (Lanes([0.0, v14582[0], 0.0, 0.0]))) / v2482;
+                let v14585 = ((v14579 - (Lanes([0.0, v14397, 0.0, 0.0]))) - (Lanes([0.0, (v14000 * v2843), 0.0, 0.0]))) / v2482;
                 let v2844 = if v2843 > v407 { 1.0 } else { 0.0 };
                 let v2851: f64;
                 let v10117: Lanes<4>;
@@ -6779,18 +6608,15 @@ impl Instance {
                     v2851 = v2852;
                     v10117 = v10118;
                 }
-                let v14591 = v14099 * v2851;
-                let v14596 = (Lanes([0.0, v14009[0], 0.0, 0.0])) - ((Lanes([0.0, v14591[0], 0.0, 0.0])) + (v10117 * v2549));
+                let v14596 = (Lanes([0.0, v14009, 0.0, 0.0])) - ((Lanes([0.0, (v14099 * v2851), 0.0, 0.0])) + (v10117 * v2549));
                 let v2856 = ((v2481 - v2841) - (v2488 - (v2549 * v2851))) / v2727;
-                let v14599 = v14393 * v2856;
-                let v14602 = (((v14289 - v14578) - (Lanes([v14596[0], v14596[1], v14596[2], v14596[3], 0.0]))) - (Lanes([0.0, v14599[0], 0.0, 0.0, 0.0]))) / v2727;
+                let v14602 = (((v14289 - v14578) - (Lanes([v14596[0], v14596[1], v14596[2], v14596[3], 0.0]))) - (Lanes([0.0, (v14393 * v2856), 0.0, 0.0, 0.0]))) / v2727;
                 let v2857 = if v2856 > v407 { 1.0 } else { 0.0 };
                 let v2892: f64;
                 let v10119: Lanes<5>;
                 if v2857 != 0.0 {
                     let v2858 = v2728 * v2856;
-                    let v14615 = v14396 * v2856;
-                    let v14618 = (Lanes([0.0, v14615[0], 0.0, 0.0, 0.0])) + (v14602 * v2728);
+                    let v14618 = (Lanes([0.0, (v14396 * v2856), 0.0, 0.0, 0.0])) + (v14602 * v2728);
                     v2892 = v2858;
                     v10119 = v14618;
                 } else {
@@ -6800,8 +6626,7 @@ impl Instance {
                     if v2860 != 0.0 {
                         let v2861 = v2856.exp();
                         let v2862 = v2728 * v2861;
-                        let v14611 = v14396 * v2861;
-                        let v14614 = (Lanes([0.0, v14611[0], 0.0, 0.0, 0.0])) + ((v14602 * v2861) * v2728);
+                        let v14614 = (Lanes([0.0, (v14396 * v2861), 0.0, 0.0, 0.0])) + ((v14602 * v2861) * v2728);
                         v2893 = v2862;
                         v10120 = v14614;
                     } else {
@@ -6809,8 +6634,7 @@ impl Instance {
                         let v2864 = v6 + v2863;
                         let v2865 = v2864.ln();
                         let v2866 = v2728 * v2865;
-                        let v14606 = v14396 * v2865;
-                        let v14609 = (Lanes([0.0, v14606[0], 0.0, 0.0, 0.0])) + (((v14602 * v2863) * (v9751 / v2864)) * v2728);
+                        let v14609 = (Lanes([0.0, (v14396 * v2865), 0.0, 0.0, 0.0])) + (((v14602 * v2863) * (v9751 / v2864)) * v2728);
                         v2893 = v2866;
                         v10120 = v14609;
                     }
@@ -6818,8 +6642,7 @@ impl Instance {
                     v10119 = v10120;
                 }
                 let v2868 = (v2481 - v2729) / v2482;
-                let v14620 = v14000 * v2868;
-                let v14623 = ((v14289 - v14419) - (Lanes([0.0, v14620[0], 0.0, 0.0, 0.0]))) / v2482;
+                let v14623 = ((v14289 - v14419) - (Lanes([0.0, (v14000 * v2868), 0.0, 0.0, 0.0]))) / v2482;
                 let v2869 = if v2868 > v407 { 1.0 } else { 0.0 };
                 let v2876: f64;
                 let v10121: Lanes<5>;
@@ -6844,17 +6667,14 @@ impl Instance {
                     v2876 = v2877;
                     v10121 = v10122;
                 }
-                let v14629 = v14099 * v2876;
                 let v2881 = ((v2457 - v2821) - (v2488 - (v2549 * v2876))) / v2727;
-                let v14635 = v14393 * v2881;
-                let v14638 = (((v14279 - v14544) - (v14453 - ((Lanes([0.0, v14629[0], 0.0, 0.0, 0.0])) + (v10121 * v2549)))) - (Lanes([0.0, v14635[0], 0.0, 0.0, 0.0]))) / v2727;
+                let v14638 = (((v14279 - v14544) - (v14453 - ((Lanes([0.0, (v14099 * v2876), 0.0, 0.0, 0.0])) + (v10121 * v2549)))) - (Lanes([0.0, (v14393 * v2881), 0.0, 0.0, 0.0]))) / v2727;
                 let v2882 = if v2881 > v407 { 1.0 } else { 0.0 };
                 let v2898: f64;
                 let v10123: Lanes<5>;
                 if v2882 != 0.0 {
                     let v2883 = v2728 * v2881;
-                    let v14651 = v14396 * v2881;
-                    let v14654 = (Lanes([0.0, v14651[0], 0.0, 0.0, 0.0])) + (v14638 * v2728);
+                    let v14654 = (Lanes([0.0, (v14396 * v2881), 0.0, 0.0, 0.0])) + (v14638 * v2728);
                     v2898 = v2883;
                     v10123 = v14654;
                 } else {
@@ -6864,8 +6684,7 @@ impl Instance {
                     if v2885 != 0.0 {
                         let v2886 = v2881.exp();
                         let v2887 = v2728 * v2886;
-                        let v14647 = v14396 * v2886;
-                        let v14650 = (Lanes([0.0, v14647[0], 0.0, 0.0, 0.0])) + ((v14638 * v2886) * v2728);
+                        let v14650 = (Lanes([0.0, (v14396 * v2886), 0.0, 0.0, 0.0])) + ((v14638 * v2886) * v2728);
                         v2899 = v2887;
                         v10124 = v14650;
                     } else {
@@ -6873,8 +6692,7 @@ impl Instance {
                         let v2889 = v6 + v2888;
                         let v2890 = v2889.ln();
                         let v2891 = v2728 * v2890;
-                        let v14642 = v14396 * v2890;
-                        let v14645 = (Lanes([0.0, v14642[0], 0.0, 0.0, 0.0])) + (((v14638 * v2888) * (v9751 / v2889)) * v2728);
+                        let v14645 = (Lanes([0.0, (v14396 * v2890), 0.0, 0.0, 0.0])) + (((v14638 * v2888) * (v9751 / v2889)) * v2728);
                         v2899 = v2891;
                         v10124 = v14645;
                     }
@@ -6914,8 +6732,7 @@ impl Instance {
                     let v2936 = v2488 - (v2934 * v2482);
                     let v14699 = v14009 - (v14000 * v2934);
                     let v2938 = (v2459 - v2936) / v2727;
-                    let v14703 = v14393 * v2938;
-                    let v14706 = (((Lanes([v9881[0], 0.0, v9881[1], v9881[2]])) - (Lanes([0.0, v14699[0], 0.0, 0.0]))) - (Lanes([0.0, v14703[0], 0.0, 0.0]))) / v2727;
+                    let v14706 = (((Lanes([v9881[0], 0.0, v9881[1], v9881[2]])) - (Lanes([0.0, v14699, 0.0, 0.0]))) - (Lanes([0.0, (v14393 * v2938), 0.0, 0.0]))) / v2727;
                     let v2939 = if v2938 > v407 { 1.0 } else { 0.0 };
                     let v2949: f64;
                     let v10127: Lanes<4>;
@@ -6946,11 +6763,9 @@ impl Instance {
                     let v2947 = v2946 * v285;
                     let v2948 = v2947 * v2727;
                     let v2951 = v2948 * v2949;
-                    let v14715 = (((v10912 * v2946) * v2727) + (v14393 * v2947)) * v2949;
-                    let v14718 = (Lanes([0.0, v14715[0], 0.0, 0.0])) + (v10127 * v2948);
+                    let v14718 = (Lanes([0.0, ((((v10912 * v2946) * v2727) + (v14393 * v2947)) * v2949), 0.0, 0.0])) + (v10127 * v2948);
                     let v2953 = (v647 - v2936) / v2727;
-                    let v14722 = v14393 * v2953;
-                    let v14725 = (((Lanes([v11329[0], 0.0, v11329[1]])) - (Lanes([0.0, v14699[0], 0.0]))) - (Lanes([0.0, v14722[0], 0.0]))) / v2727;
+                    let v14725 = (((Lanes([v11329[0], 0.0, v11329[1]])) - (Lanes([0.0, v14699, 0.0]))) - (Lanes([0.0, (v14393 * v2953), 0.0]))) / v2727;
                     let v2954 = if v2953 > v407 { 1.0 } else { 0.0 };
                     let v2963: f64;
                     let v10129: Lanes<3>;
@@ -6980,8 +6795,7 @@ impl Instance {
                     let v2961 = v2946 * v313;
                     let v2962 = v2961 * v2727;
                     let v2965 = v2962 * v2963;
-                    let v14734 = (((v10920 * v2946) * v2727) + (v14393 * v2961)) * v2963;
-                    let v14737 = (Lanes([0.0, v14734[0], 0.0])) + (v10129 * v2962);
+                    let v14737 = (Lanes([0.0, ((((v10920 * v2946) * v2727) + (v14393 * v2961)) * v2963), 0.0])) + (v10129 * v2962);
                     v2985 = v2951;
                     v2986 = v2965;
                     v10125 = v14718;
@@ -6997,10 +6811,8 @@ impl Instance {
                 let v10131: Lanes<4>;
                 if v2966 != 0.0 {
                     let v2967 = v748 * v358;
-                    let v14739 = v14009 - (v14000 * v2967);
                     let v2971 = (v2457 - (v2488 - (v2967 * v2482))) / v2727;
-                    let v14742 = v14393 * v2971;
-                    let v14745 = ((v14579 - (Lanes([0.0, v14739[0], 0.0, 0.0]))) - (Lanes([0.0, v14742[0], 0.0, 0.0]))) / v2727;
+                    let v14745 = ((v14579 - (Lanes([0.0, (v14009 - (v14000 * v2967)), 0.0, 0.0]))) - (Lanes([0.0, (v14393 * v2971), 0.0, 0.0]))) / v2727;
                     let v2972 = if v2971 > v407 { 1.0 } else { 0.0 };
                     let v2982: f64;
                     let v10132: Lanes<4>;
@@ -7030,8 +6842,7 @@ impl Instance {
                     let v2980 = (v2928 * v335) * v2461;
                     let v2981 = v2980 * v2727;
                     let v2984 = v2981 * v2982;
-                    let v14751 = (v14393 * v2980) * v2982;
-                    let v14754 = (Lanes([0.0, v14751[0], 0.0, 0.0])) + (v10132 * v2981);
+                    let v14754 = (Lanes([0.0, ((v14393 * v2980) * v2982), 0.0, 0.0])) + (v10132 * v2981);
                     v2987 = v2984;
                     v10131 = v14754;
                 } else {
@@ -7106,21 +6917,21 @@ impl Instance {
             let v10147: Lanes<4>;
             if v634 != 0.0 {
                 let v2994 = v1243 * (v574 - v336);
-                let v14793 = ((Lanes([0.0, v9771[0]])) - (Lanes([v9753[0], 0.0]))) * v1243;
+                let v14793 = ((Lanes([0.0, v9771])) - (Lanes([v9753, 0.0]))) * v1243;
                 let v14794 = v14793 * v11018;
                 let v2996 = (ddt(57873, v2991)) + (ddt(57877, v2994));
                 let v14796 = (v10083 * v11018) + (Lanes([0.0, 0.0, v14794[0], v14794[1], 0.0]));
                 let v9668 = v2991 + v2994;
                 let v14798 = v10083 + (Lanes([0.0, 0.0, v14793[0], v14793[1], 0.0]));
                 let v3000 = v1243 * (v574 - v643);
-                let v14803 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9776[0]]))) * v1243;
+                let v14803 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9776]))) * v1243;
                 let v14804 = v14803 * v11018;
                 let v3002 = (ddt(57880, v2997)) + (ddt(57884, v3000));
                 let v14806 = (v10084 * v11018) + (Lanes([0.0, 0.0, 0.0, v14804[0], v14804[1]]));
                 let v9670 = v2997 + v3000;
                 let v14808 = v10084 + (Lanes([0.0, 0.0, 0.0, v14803[0], v14803[1]]));
                 let v3006 = v1243 * (v349 - v336);
-                let v14813 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9753[0]]))) * v1243;
+                let v14813 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9753]))) * v1243;
                 let v14814 = v14813 * v11018;
                 let v3008 = (ddt(57887, v3003)) + (ddt(57891, v3006));
                 let v14816 = (v10085 * v11018) + (Lanes([v14814[0], 0.0, v14814[1], 0.0]));
@@ -7128,7 +6939,7 @@ impl Instance {
                 let v14818 = v10085 + (Lanes([v14813[0], 0.0, v14813[1], 0.0]));
                 let v14819 = v10086 * v11018;
                 let v3013 = v1243 * (v574 - v337);
-                let v14823 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9754[0]]))) * v1243;
+                let v14823 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9754]))) * v1243;
                 let v14824 = v14823 * v11018;
                 let v3015 = (ddt(57895, v3010)) + (ddt(57899, v3013));
                 let v14827 = (Lanes([v14819[0], v14819[1], v14819[2], v14819[3], 0.0])) + (Lanes([0.0, 0.0, 0.0, v14824[0], v14824[1]]));
@@ -7167,21 +6978,21 @@ impl Instance {
                 v10147 = v13983;
             } else {
                 let v3018 = v1243 * (v349 - v336);
-                let v14762 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9753[0]]))) * v1243;
+                let v14762 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9753]))) * v1243;
                 let v14763 = v14762 * v11018;
                 let v3020 = (ddt(57902, v2991)) + (ddt(57906, v3018));
                 let v14765 = (v10083 * v11018) + (Lanes([v14763[0], 0.0, v14763[1], 0.0, 0.0]));
                 let v9676 = v2991 + v3018;
                 let v14767 = v10083 + (Lanes([v14762[0], 0.0, v14762[1], 0.0, 0.0]));
                 let v3023 = v1243 * (v349 - v643);
-                let v14772 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9776[0]]))) * v1243;
+                let v14772 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9776]))) * v1243;
                 let v14773 = v14772 * v11018;
                 let v3025 = (ddt(57909, v2997)) + (ddt(57913, v3023));
                 let v14775 = (v10084 * v11018) + (Lanes([v14773[0], 0.0, 0.0, 0.0, v14773[1]]));
                 let v9678 = v2997 + v3023;
                 let v14777 = v10084 + (Lanes([v14772[0], 0.0, 0.0, 0.0, v14772[1]]));
                 let v3028 = v1243 * (v574 - v336);
-                let v14782 = ((Lanes([0.0, v9771[0]])) - (Lanes([v9753[0], 0.0]))) * v1243;
+                let v14782 = ((Lanes([0.0, v9771])) - (Lanes([v9753, 0.0]))) * v1243;
                 let v14783 = v14782 * v11018;
                 let v3030 = (ddt(57916, v3003)) + (ddt(57920, v3028));
                 let v14785 = (v10085 * v11018) + (Lanes([0.0, 0.0, v14783[0], v14783[1]]));
@@ -7269,7 +7080,7 @@ impl Instance {
                 let v14860 = (((v10854 * v725) * v3067) * v10982) / v3066;
                 let v14861 = v10155 * v3048;
                 let v3069 = v3067 + (v3048 * v3063);
-                let v14864 = (Lanes([v14860[0], 0.0, 0.0])) + (Lanes([0.0, v14861[0], v14861[1]]));
+                let v14864 = (Lanes([v14860, 0.0, 0.0])) + (Lanes([0.0, v14861[0], v14861[1]]));
                 let v14865 = v9782 * v3055;
                 let v3071 = v3045 + (v3055 * v92);
                 let v3072 = v96.powf(v712);
@@ -7293,18 +7104,16 @@ impl Instance {
                 let v3082 = v3047 - (v3080 * v0);
                 let v14887 = (((v10156 * v0) * v10982) * v3063) + (v10155 * v3082);
                 let v3084 = v3071 - (v3082 * v3063);
-                let v14890 = (Lanes([v14865[0], 0.0, 0.0])) - (Lanes([0.0, v14887[0], v14887[1]]));
+                let v14890 = (Lanes([v14865, 0.0, 0.0])) - (Lanes([0.0, v14887[0], v14887[1]]));
                 let v3085 = v437 * v3069;
                 let v3086 = v3085 * v90;
-                let v14893 = v10854 * v3085;
-                let v14895 = ((v14864 * v437) * v90) + (Lanes([v14893[0], 0.0, 0.0]));
+                let v14895 = ((v14864 * v437) * v90) + (Lanes([(v10854 * v3085), 0.0, 0.0]));
                 let v3087 = v173 * v3086;
-                let v14896 = v10880 * v3086;
-                let v14899 = (Lanes([v14896[0], 0.0, 0.0])) + (v14895 * v173);
+                let v14899 = (Lanes([(v10880 * v3086), 0.0, 0.0])) + (v14895 * v173);
                 let v3089 = (v748 * v3065) / v437;
                 let v14901 = (v14856 * v748) / v437;
                 let v3090 = v3084 - v3089;
-                let v14903 = v14890 - (Lanes([v14901[0], 0.0, 0.0]));
+                let v14903 = v14890 - (Lanes([v14901, 0.0, 0.0]));
                 let v3106: f64;
                 let v10157: Lanes<4>;
                 if v344 != 0.0 {
@@ -7327,8 +7136,7 @@ impl Instance {
                 }
                 let v14925 = Lanes([0.0, v14903[0], 0.0, v14903[1], v14903[2]]);
                 let v3108 = (v3106 - v3090) / v3065;
-                let v14927 = v14856 * v3108;
-                let v14930 = (((Lanes([v10157[0], 0.0, v10157[1], v10157[2], v10157[3]])) - v14925) - (Lanes([0.0, v14927[0], 0.0, 0.0, 0.0]))) / v3065;
+                let v14930 = (((Lanes([v10157[0], 0.0, v10157[1], v10157[2], v10157[3]])) - v14925) - (Lanes([0.0, (v14856 * v3108), 0.0, 0.0, 0.0]))) / v3065;
                 let v3109 = if v3108 > v407 { 1.0 } else { 0.0 };
                 let v3133: f64;
                 let v10158: Lanes<5>;
@@ -7376,11 +7184,10 @@ impl Instance {
                 let v3131 = v748 * v57;
                 let v3132 = v3131 * v3065;
                 let v14955 = v14856 * v3131;
-                let v14956 = v14955 * v3133;
                 let v14960 = Lanes([0.0, v14890[0], 0.0, v14890[1], v14890[2]]);
                 let v3138 = (v3130 - (v3084 - (v3132 * v3133))) / v3086;
                 let v14964 = v14895 * v3138;
-                let v14967 = (((Lanes([v10160[0], 0.0, v10160[1], v10160[2], v10160[3]])) - (v14960 - ((Lanes([0.0, v14956[0], 0.0, 0.0, 0.0])) + (v10158 * v3132)))) - (Lanes([0.0, v14964[0], 0.0, v14964[1], v14964[2]]))) / v3086;
+                let v14967 = (((Lanes([v10160[0], 0.0, v10160[1], v10160[2], v10160[3]])) - (v14960 - ((Lanes([0.0, (v14955 * v3133), 0.0, 0.0, 0.0])) + (v10158 * v3132)))) - (Lanes([0.0, v14964[0], 0.0, v14964[1], v14964[2]]))) / v3086;
                 let v3139 = if v3138 > v407 { 1.0 } else { 0.0 };
                 let v3149: f64;
                 let v10161: Lanes<5>;
@@ -7415,36 +7222,30 @@ impl Instance {
                     v10161 = v10162;
                 }
                 let v3152 = (v3053 * v3149) / v173;
-                let v14985 = v10880 * v3152;
                 let v3153 = v6 + v3152;
                 let v3154 = v3072 * v3153;
-                let v14989 = v14869 * v3153;
                 let v3155 = v3051 / v3154;
-                let v14995 = ((((Lanes([0.0, v14989[0], 0.0, 0.0, 0.0])) + ((((v10161 * v3053) - (Lanes([0.0, v14985[0], 0.0, 0.0, 0.0]))) / v173) * v3072)) * v3155) * v10982) / v3154;
+                let v14995 = ((((Lanes([0.0, (v14869 * v3153), 0.0, 0.0, 0.0])) + ((((v10161 * v3053) - (Lanes([0.0, (v10880 * v3152), 0.0, 0.0, 0.0]))) / v173) * v3072)) * v3155) * v10982) / v3154;
                 let v3159 = v6 + (v713 * v47);
                 let v3160 = (v6 + (v713 * v4)) / v3159;
                 let v3161 = v3050 * v3160;
                 let v15000 = ((((v9782 * v713) * v3160) * v10982) / v3159) * v3050;
                 let v3164 = v6 + ((v714 * v3063) / v3038);
-                let v15003 = v15000 * v3164;
                 let v15004 = ((v10155 * v714) / v3038) * v3161;
-                let v15007 = (Lanes([v15003[0], 0.0, 0.0])) + (Lanes([0.0, v15004[0], v15004[1]]));
+                let v15007 = (Lanes([(v15000 * v3164), 0.0, 0.0])) + (Lanes([0.0, v15004[0], v15004[1]]));
                 let v3167 = (v3054 * v3149) / v173;
-                let v15009 = v10880 * v3167;
                 let v3168 = v6 + v3167;
                 let v3169 = (v3161 * v3164) / v3168;
-                let v15016 = ((Lanes([0.0, v15007[0], 0.0, v15007[1], v15007[2]])) - ((((v10161 * v3054) - (Lanes([0.0, v15009[0], 0.0, 0.0, 0.0]))) / v173) * v3169)) / v3168;
+                let v15016 = ((Lanes([0.0, v15007[0], 0.0, v15007[1], v15007[2]])) - ((((v10161 * v3054) - (Lanes([0.0, (v10880 * v3167), 0.0, 0.0, 0.0]))) / v173) * v3169)) / v3168;
                 let v3170 = v437 * v3133;
                 let v3171 = v3170 * v90;
-                let v15019 = v10854 * v3170;
                 let v3174 = v6 - v3133;
                 let v15026 = v10158 * v10982;
                 let v3176 = ((v3171 * v3155) / v3038) + (v3174 * v3169);
-                let v15030 = ((((((v10158 * v437) * v90) + (Lanes([0.0, v15019[0], 0.0, 0.0, 0.0]))) * v3155) + (v14995 * v3171)) / v3038) + ((v15026 * v3169) + (v15016 * v3174));
+                let v15030 = ((((((v10158 * v437) * v90) + (Lanes([0.0, (v10854 * v3170), 0.0, 0.0, 0.0]))) * v3155) + (v14995 * v3171)) / v3038) + ((v15026 * v3169) + (v15016 * v3174));
                 let v3178 = (v3169 * v3038) / v3155;
                 let v15034 = ((v15016 * v3038) - (v14995 * v3178)) / v3155;
                 let v3180 = (v437 * v3149) / v173;
-                let v15036 = v10880 * v3180;
                 let v3181 = v3180 / v3178;
                 let v3183 = (v6 + v3181).sqrt();
                 let v3185 = (v3178 * v3183) - v3178;
@@ -7454,7 +7255,7 @@ impl Instance {
                 let v3188 = (v3178 * v3174) + v3187;
                 let v15057 = ((v15034 * v3174) + (v15026 * v3178)) + v15056;
                 let v3190 = (v3185 * v3174) + v3187;
-                let v15061 = (((((v15034 * v3183) + (((((((v10161 * v437) - (Lanes([0.0, v15036[0], 0.0, 0.0, 0.0]))) / v173) - (v15034 * v3181)) / v3178) * (v9751 / (v10962 * v3183))) * v3178)) - v15034) * v3174) + (v15026 * v3185)) + v15056;
+                let v15061 = (((((v15034 * v3183) + (((((((v10161 * v437) - (Lanes([0.0, (v10880 * v3180), 0.0, 0.0, 0.0]))) / v173) - (v15034 * v3181)) / v3178) * (v9751 / (v10962 * v3183))) * v3178)) - v15034) * v3174) + (v15026 * v3185)) + v15056;
                 let v3191 = v585 / v3190;
                 let v15063 = Lanes([0.0, 0.0, 0.0, v11213[0], v11213[1]]);
                 let v15065 = (v15063 - (v15061 * v3191)) / v3190;
@@ -7520,8 +7321,7 @@ impl Instance {
                 let v15134 = (Lanes([0.0, 0.0, 0.0, v15131[0], v15131[1]])) + ((((((v10164 * (v3052 * (v3227.powf(v15084)))) * (v3208 * (v3229.powf(v15088)))) * v3231) * v10982) / v3230) * v3212);
                 let v15135 = Lanes([v9872[0], 0.0, v9872[1], 0.0, v9872[2]]);
                 let v3234 = (v3040 - v3090) / v3065;
-                let v15137 = v14856 * v3234;
-                let v15140 = ((v15135 - v14925) - (Lanes([0.0, v15137[0], 0.0, 0.0, 0.0]))) / v3065;
+                let v15140 = ((v15135 - v14925) - (Lanes([0.0, (v14856 * v3234), 0.0, 0.0, 0.0]))) / v3065;
                 let v3235 = if v3234 > v407 { 1.0 } else { 0.0 };
                 let v3242: f64;
                 let v10165: Lanes<5>;
@@ -7547,10 +7347,9 @@ impl Instance {
                     v10165 = v10166;
                 }
                 let v15145 = Lanes([v14855[0], 0.0, v14855[1], v14855[2], v14855[3]]);
-                let v15147 = v14955 * v3242;
                 let v3247 = ((v3064 - v3232) - (v3084 - (v3132 * v3242))) / v3086;
                 let v15153 = v14895 * v3247;
-                let v15156 = (((v15145 - v15134) - (v14960 - ((Lanes([0.0, v15147[0], 0.0, 0.0, 0.0])) + (v10165 * v3132)))) - (Lanes([0.0, v15153[0], 0.0, v15153[1], v15153[2]]))) / v3086;
+                let v15156 = (((v15145 - v15134) - (v14960 - ((Lanes([0.0, (v14955 * v3242), 0.0, 0.0, 0.0])) + (v10165 * v3132)))) - (Lanes([0.0, v15153[0], 0.0, v15153[1], v15153[2]]))) / v3086;
                 let v3248 = if v3247 > v407 { 1.0 } else { 0.0 };
                 let v3283: f64;
                 let v10167: Lanes<5>;
@@ -7585,8 +7384,7 @@ impl Instance {
                     v10167 = v10168;
                 }
                 let v3259 = (v3064 - v3090) / v3065;
-                let v15174 = v14856 * v3259;
-                let v15177 = ((v15145 - v14925) - (Lanes([0.0, v15174[0], 0.0, 0.0, 0.0]))) / v3065;
+                let v15177 = ((v15145 - v14925) - (Lanes([0.0, (v14856 * v3259), 0.0, 0.0, 0.0]))) / v3065;
                 let v3260 = if v3259 > v407 { 1.0 } else { 0.0 };
                 let v3267: f64;
                 let v10169: Lanes<5>;
@@ -7611,10 +7409,9 @@ impl Instance {
                     v3267 = v3268;
                     v10169 = v10170;
                 }
-                let v15183 = v14955 * v3267;
                 let v3272 = ((v3040 - v3211) - (v3084 - (v3132 * v3267))) / v3086;
                 let v15189 = v14895 * v3272;
-                let v15192 = (((v15135 - v15098) - (v14960 - ((Lanes([0.0, v15183[0], 0.0, 0.0, 0.0])) + (v10169 * v3132)))) - (Lanes([0.0, v15189[0], 0.0, v15189[1], v15189[2]]))) / v3086;
+                let v15192 = (((v15135 - v15098) - (v14960 - ((Lanes([0.0, (v14955 * v3267), 0.0, 0.0, 0.0])) + (v10169 * v3132)))) - (Lanes([0.0, v15189[0], 0.0, v15189[1], v15189[2]]))) / v3086;
                 let v3273 = if v3272 > v407 { 1.0 } else { 0.0 };
                 let v3285: f64;
                 let v10171: Lanes<5>;
@@ -7649,9 +7446,8 @@ impl Instance {
                     v10171 = v10172;
                 }
                 let v3288 = (v3283 - v3285) / v173;
-                let v15210 = v10880 * v3288;
                 let v3289 = v3288 / v3188;
-                let v15216 = ((((v10167 - v10171) - (Lanes([0.0, v15210[0], 0.0, 0.0, 0.0]))) / v173) - (v15057 * v3289)) / v3188;
+                let v15216 = ((((v10167 - v10171) - (Lanes([0.0, (v10880 * v3288), 0.0, 0.0, 0.0]))) / v173) - (v15057 * v3289)) / v3188;
                 let v3297: f64;
                 let v10173: Lanes<5>;
                 if v344 != 0.0 {
@@ -7703,10 +7499,9 @@ impl Instance {
                     v3328 = v3327;
                     v10174 = v15264;
                 }
-                let v15275 = Lanes([0.0, v15253[0], 0.0, 0.0, 0.0]);
+                let v15275 = Lanes([0.0, v15253, 0.0, 0.0, 0.0]);
                 let v3330 = (v3328 - v3312) / v3065;
-                let v15277 = v14856 * v3330;
-                let v15280 = (((Lanes([v10174[0], 0.0, v10174[1], v10174[2], v10174[3]])) - v15275) - (Lanes([0.0, v15277[0], 0.0, 0.0, 0.0]))) / v3065;
+                let v15280 = (((Lanes([v10174[0], 0.0, v10174[1], v10174[2], v10174[3]])) - v15275) - (Lanes([0.0, (v14856 * v3330), 0.0, 0.0, 0.0]))) / v3065;
                 let v3331 = if v3330 > v407 { 1.0 } else { 0.0 };
                 let v3353: f64;
                 let v10175: Lanes<5>;
@@ -7751,18 +7546,15 @@ impl Instance {
                     v3352 = v3351;
                     v10177 = v15295;
                 }
-                let v15305 = v14955 * v3353;
-                let v15309 = Lanes([0.0, v14865[0], 0.0, 0.0, 0.0]);
+                let v15309 = Lanes([0.0, v14865, 0.0, 0.0, 0.0]);
                 let v3358 = (v3352 - (v3071 - (v3132 * v3353))) / v3310;
-                let v15313 = v15249 * v3358;
-                let v15316 = (((Lanes([v10177[0], 0.0, v10177[1], v10177[2], v10177[3]])) - (v15309 - ((Lanes([0.0, v15305[0], 0.0, 0.0, 0.0])) + (v10175 * v3132)))) - (Lanes([0.0, v15313[0], 0.0, 0.0, 0.0]))) / v3310;
+                let v15316 = (((Lanes([v10177[0], 0.0, v10177[1], v10177[2], v10177[3]])) - (v15309 - ((Lanes([0.0, (v14955 * v3353), 0.0, 0.0, 0.0])) + (v10175 * v3132)))) - (Lanes([0.0, (v15249 * v3358), 0.0, 0.0, 0.0]))) / v3310;
                 let v3359 = if v3358 > v407 { 1.0 } else { 0.0 };
                 let v3372: f64;
                 let v10178: Lanes<5>;
                 if v3359 != 0.0 {
                     let v3360 = v3311 * v3358;
-                    let v15329 = v15252 * v3358;
-                    let v15332 = (Lanes([0.0, v15329[0], 0.0, 0.0, 0.0])) + (v15316 * v3311);
+                    let v15332 = (Lanes([0.0, (v15252 * v3358), 0.0, 0.0, 0.0])) + (v15316 * v3311);
                     v3372 = v3360;
                     v10178 = v15332;
                 } else {
@@ -7772,8 +7564,7 @@ impl Instance {
                     if v3362 != 0.0 {
                         let v3363 = v3358.exp();
                         let v3364 = v3311 * v3363;
-                        let v15325 = v15252 * v3363;
-                        let v15328 = (Lanes([0.0, v15325[0], 0.0, 0.0, 0.0])) + ((v15316 * v3363) * v3311);
+                        let v15328 = (Lanes([0.0, (v15252 * v3363), 0.0, 0.0, 0.0])) + ((v15316 * v3363) * v3311);
                         v3373 = v3364;
                         v10179 = v15328;
                     } else {
@@ -7781,8 +7572,7 @@ impl Instance {
                         let v3366 = v6 + v3365;
                         let v3367 = v3366.ln();
                         let v3368 = v3311 * v3367;
-                        let v15320 = v15252 * v3367;
-                        let v15323 = (Lanes([0.0, v15320[0], 0.0, 0.0, 0.0])) + (((v15316 * v3365) * (v9751 / v3366)) * v3311);
+                        let v15323 = (Lanes([0.0, (v15252 * v3367), 0.0, 0.0, 0.0])) + (((v15316 * v3365) * (v9751 / v3366)) * v3311);
                         v3373 = v3368;
                         v10179 = v15323;
                     }
@@ -7793,16 +7583,12 @@ impl Instance {
                 let v3371 = (v3161 * v3038) / v3369;
                 let v15339 = ((v15000 * v3038) - ((((v14869 * v3369) * v10982) / v3072) * v3371)) / v3369;
                 let v3375 = (v437 * v3372) / v173;
-                let v15341 = v10880 * v3375;
                 let v3376 = v3375 / v3371;
-                let v15345 = v15339 * v3376;
                 let v3378 = (v6 + v3376).sqrt();
-                let v15352 = v15339 * v3378;
                 let v3380 = (v3371 * v3378) - v3371;
                 let v3381 = v6 - v3353;
-                let v15362 = v15249 * v3353;
                 let v3384 = (v3380 * v3381) + (v3310 * v3353);
-                let v15366 = (((((Lanes([0.0, v15352[0], 0.0, 0.0, 0.0])) + (((((((v10178 * v437) - (Lanes([0.0, v15341[0], 0.0, 0.0, 0.0]))) / v173) - (Lanes([0.0, v15345[0], 0.0, 0.0, 0.0]))) / v3371) * (v9751 / (v10962 * v3378))) * v3371)) - (Lanes([0.0, v15339[0], 0.0, 0.0, 0.0]))) * v3381) + ((v10175 * v10982) * v3380)) + ((Lanes([0.0, v15362[0], 0.0, 0.0, 0.0])) + (v10175 * v3310));
+                let v15366 = (((((Lanes([0.0, (v15339 * v3378), 0.0, 0.0, 0.0])) + (((((((v10178 * v437) - (Lanes([0.0, (v10880 * v3375), 0.0, 0.0, 0.0]))) / v173) - (Lanes([0.0, (v15339 * v3376), 0.0, 0.0, 0.0]))) / v3371) * (v9751 / (v10962 * v3378))) * v3371)) - (Lanes([0.0, v15339, 0.0, 0.0, 0.0]))) * v3381) + ((v10175 * v10982) * v3380)) + ((Lanes([0.0, (v15249 * v3353), 0.0, 0.0, 0.0])) + (v10175 * v3310));
                 let v3385 = v585 / v3384;
                 let v15369 = (v15063 - (v15366 * v3385)) / v3384;
                 let v3399: f64;
@@ -7861,8 +7647,7 @@ impl Instance {
                 let v15434 = (Lanes([0.0, 0.0, 0.0, v15431[0], v15431[1]])) + ((((((v10181 * (v3052 * (v3419.powf(v15084)))) * (v3208 * (v3421.powf(v15088)))) * v3423) * v10982) / v3422) * v3212);
                 let v15435 = Lanes([v9872[0], 0.0, v9872[1], v9872[2]]);
                 let v3426 = (v3040 - v3312) / v3065;
-                let v15438 = v14856 * v3426;
-                let v15441 = ((v15435 - (Lanes([0.0, v15253[0], 0.0, 0.0]))) - (Lanes([0.0, v15438[0], 0.0, 0.0]))) / v3065;
+                let v15441 = ((v15435 - (Lanes([0.0, v15253, 0.0, 0.0]))) - (Lanes([0.0, (v14856 * v3426), 0.0, 0.0]))) / v3065;
                 let v3427 = if v3426 > v407 { 1.0 } else { 0.0 };
                 let v3434: f64;
                 let v10182: Lanes<4>;
@@ -7887,18 +7672,15 @@ impl Instance {
                     v3434 = v3435;
                     v10182 = v10183;
                 }
-                let v15447 = v14955 * v3434;
-                let v15452 = (Lanes([0.0, v14865[0], 0.0, 0.0])) - ((Lanes([0.0, v15447[0], 0.0, 0.0])) + (v10182 * v3132));
+                let v15452 = (Lanes([0.0, v14865, 0.0, 0.0])) - ((Lanes([0.0, (v14955 * v3434), 0.0, 0.0])) + (v10182 * v3132));
                 let v3439 = ((v3064 - v3424) - (v3071 - (v3132 * v3434))) / v3310;
-                let v15455 = v15249 * v3439;
-                let v15458 = (((v15145 - v15434) - (Lanes([v15452[0], v15452[1], v15452[2], 0.0, v15452[3]]))) - (Lanes([0.0, v15455[0], 0.0, 0.0, 0.0]))) / v3310;
+                let v15458 = (((v15145 - v15434) - (Lanes([v15452[0], v15452[1], v15452[2], 0.0, v15452[3]]))) - (Lanes([0.0, (v15249 * v3439), 0.0, 0.0, 0.0]))) / v3310;
                 let v3440 = if v3439 > v407 { 1.0 } else { 0.0 };
                 let v3475: f64;
                 let v10184: Lanes<5>;
                 if v3440 != 0.0 {
                     let v3441 = v3311 * v3439;
-                    let v15471 = v15252 * v3439;
-                    let v15474 = (Lanes([0.0, v15471[0], 0.0, 0.0, 0.0])) + (v15458 * v3311);
+                    let v15474 = (Lanes([0.0, (v15252 * v3439), 0.0, 0.0, 0.0])) + (v15458 * v3311);
                     v3475 = v3441;
                     v10184 = v15474;
                 } else {
@@ -7908,8 +7690,7 @@ impl Instance {
                     if v3443 != 0.0 {
                         let v3444 = v3439.exp();
                         let v3445 = v3311 * v3444;
-                        let v15467 = v15252 * v3444;
-                        let v15470 = (Lanes([0.0, v15467[0], 0.0, 0.0, 0.0])) + ((v15458 * v3444) * v3311);
+                        let v15470 = (Lanes([0.0, (v15252 * v3444), 0.0, 0.0, 0.0])) + ((v15458 * v3444) * v3311);
                         v3476 = v3445;
                         v10185 = v15470;
                     } else {
@@ -7917,8 +7698,7 @@ impl Instance {
                         let v3447 = v6 + v3446;
                         let v3448 = v3447.ln();
                         let v3449 = v3311 * v3448;
-                        let v15462 = v15252 * v3448;
-                        let v15465 = (Lanes([0.0, v15462[0], 0.0, 0.0, 0.0])) + (((v15458 * v3446) * (v9751 / v3447)) * v3311);
+                        let v15465 = (Lanes([0.0, (v15252 * v3448), 0.0, 0.0, 0.0])) + (((v15458 * v3446) * (v9751 / v3447)) * v3311);
                         v3476 = v3449;
                         v10185 = v15465;
                     }
@@ -7926,8 +7706,7 @@ impl Instance {
                     v10184 = v10185;
                 }
                 let v3451 = (v3064 - v3312) / v3065;
-                let v15476 = v14856 * v3451;
-                let v15479 = ((v15145 - v15275) - (Lanes([0.0, v15476[0], 0.0, 0.0, 0.0]))) / v3065;
+                let v15479 = ((v15145 - v15275) - (Lanes([0.0, (v14856 * v3451), 0.0, 0.0, 0.0]))) / v3065;
                 let v3452 = if v3451 > v407 { 1.0 } else { 0.0 };
                 let v3459: f64;
                 let v10186: Lanes<5>;
@@ -7952,17 +7731,14 @@ impl Instance {
                     v3459 = v3460;
                     v10186 = v10187;
                 }
-                let v15485 = v14955 * v3459;
                 let v3464 = ((v3040 - v3404) - (v3071 - (v3132 * v3459))) / v3310;
-                let v15491 = v15249 * v3464;
-                let v15494 = (((v15135 - v15400) - (v15309 - ((Lanes([0.0, v15485[0], 0.0, 0.0, 0.0])) + (v10186 * v3132)))) - (Lanes([0.0, v15491[0], 0.0, 0.0, 0.0]))) / v3310;
+                let v15494 = (((v15135 - v15400) - (v15309 - ((Lanes([0.0, (v14955 * v3459), 0.0, 0.0, 0.0])) + (v10186 * v3132)))) - (Lanes([0.0, (v15249 * v3464), 0.0, 0.0, 0.0]))) / v3310;
                 let v3465 = if v3464 > v407 { 1.0 } else { 0.0 };
                 let v3481: f64;
                 let v10188: Lanes<5>;
                 if v3465 != 0.0 {
                     let v3466 = v3311 * v3464;
-                    let v15507 = v15252 * v3464;
-                    let v15510 = (Lanes([0.0, v15507[0], 0.0, 0.0, 0.0])) + (v15494 * v3311);
+                    let v15510 = (Lanes([0.0, (v15252 * v3464), 0.0, 0.0, 0.0])) + (v15494 * v3311);
                     v3481 = v3466;
                     v10188 = v15510;
                 } else {
@@ -7972,8 +7748,7 @@ impl Instance {
                     if v3468 != 0.0 {
                         let v3469 = v3464.exp();
                         let v3470 = v3311 * v3469;
-                        let v15503 = v15252 * v3469;
-                        let v15506 = (Lanes([0.0, v15503[0], 0.0, 0.0, 0.0])) + ((v15494 * v3469) * v3311);
+                        let v15506 = (Lanes([0.0, (v15252 * v3469), 0.0, 0.0, 0.0])) + ((v15494 * v3469) * v3311);
                         v3482 = v3470;
                         v10189 = v15506;
                     } else {
@@ -7981,8 +7756,7 @@ impl Instance {
                         let v3472 = v6 + v3471;
                         let v3473 = v3472.ln();
                         let v3474 = v3311 * v3473;
-                        let v15498 = v15252 * v3473;
-                        let v15501 = (Lanes([0.0, v15498[0], 0.0, 0.0, 0.0])) + (((v15494 * v3471) * (v9751 / v3472)) * v3311);
+                        let v15501 = (Lanes([0.0, (v15252 * v3473), 0.0, 0.0, 0.0])) + (((v15494 * v3471) * (v9751 / v3472)) * v3311);
                         v3482 = v3474;
                         v10189 = v15501;
                     }
@@ -8022,8 +7796,7 @@ impl Instance {
                     let v3519 = v3071 - (v3517 * v3065);
                     let v15555 = v14865 - (v14856 * v3517);
                     let v3521 = (v3042 - v3519) / v3310;
-                    let v15559 = v15249 * v3521;
-                    let v15562 = (((Lanes([v9873[0], 0.0, v9873[1], v9873[2]])) - (Lanes([0.0, v15555[0], 0.0, 0.0]))) - (Lanes([0.0, v15559[0], 0.0, 0.0]))) / v3310;
+                    let v15562 = (((Lanes([v9873[0], 0.0, v9873[1], v9873[2]])) - (Lanes([0.0, v15555, 0.0, 0.0]))) - (Lanes([0.0, (v15249 * v3521), 0.0, 0.0]))) / v3310;
                     let v3522 = if v3521 > v407 { 1.0 } else { 0.0 };
                     let v3532: f64;
                     let v10192: Lanes<4>;
@@ -8054,11 +7827,9 @@ impl Instance {
                     let v3530 = v3529 * v201;
                     let v3531 = v3530 * v3310;
                     let v3534 = v3531 * v3532;
-                    let v15571 = (((v10888 * v3529) * v3310) + (v15249 * v3530)) * v3532;
-                    let v15574 = (Lanes([0.0, v15571[0], 0.0, 0.0])) + (v10192 * v3531);
+                    let v15574 = (Lanes([0.0, ((((v10888 * v3529) * v3310) + (v15249 * v3530)) * v3532), 0.0, 0.0])) + (v10192 * v3531);
                     let v3536 = (v588 - v3519) / v3310;
-                    let v15578 = v15249 * v3536;
-                    let v15581 = (((Lanes([v11217[0], 0.0, v11217[1]])) - (Lanes([0.0, v15555[0], 0.0]))) - (Lanes([0.0, v15578[0], 0.0]))) / v3310;
+                    let v15581 = (((Lanes([v11217[0], 0.0, v11217[1]])) - (Lanes([0.0, v15555, 0.0]))) - (Lanes([0.0, (v15249 * v3536), 0.0]))) / v3310;
                     let v3537 = if v3536 > v407 { 1.0 } else { 0.0 };
                     let v3546: f64;
                     let v10194: Lanes<3>;
@@ -8088,8 +7859,7 @@ impl Instance {
                     let v3544 = v3529 * v229;
                     let v3545 = v3544 * v3310;
                     let v3548 = v3545 * v3546;
-                    let v15590 = (((v10896 * v3529) * v3310) + (v15249 * v3544)) * v3546;
-                    let v15593 = (Lanes([0.0, v15590[0], 0.0])) + (v10194 * v3545);
+                    let v15593 = (Lanes([0.0, ((((v10896 * v3529) * v3310) + (v15249 * v3544)) * v3546), 0.0])) + (v10194 * v3545);
                     v3568 = v3534;
                     v3569 = v3548;
                     v10190 = v15574;
@@ -8105,10 +7875,8 @@ impl Instance {
                 let v10196: Lanes<4>;
                 if v3549 != 0.0 {
                     let v3550 = v748 * v358;
-                    let v15595 = v14865 - (v14856 * v3550);
                     let v3554 = (v3040 - (v3071 - (v3550 * v3065))) / v3310;
-                    let v15598 = v15249 * v3554;
-                    let v15601 = ((v15435 - (Lanes([0.0, v15595[0], 0.0, 0.0]))) - (Lanes([0.0, v15598[0], 0.0, 0.0]))) / v3310;
+                    let v15601 = ((v15435 - (Lanes([0.0, (v14865 - (v14856 * v3550)), 0.0, 0.0]))) - (Lanes([0.0, (v15249 * v3554), 0.0, 0.0]))) / v3310;
                     let v3555 = if v3554 > v407 { 1.0 } else { 0.0 };
                     let v3565: f64;
                     let v10197: Lanes<4>;
@@ -8138,8 +7906,7 @@ impl Instance {
                     let v3563 = (v3511 * v335) * v3044;
                     let v3564 = v3563 * v3310;
                     let v3567 = v3564 * v3565;
-                    let v15607 = (v15249 * v3563) * v3565;
-                    let v15610 = (Lanes([0.0, v15607[0], 0.0, 0.0])) + (v10197 * v3564);
+                    let v15610 = (Lanes([0.0, ((v15249 * v3563) * v3565), 0.0, 0.0])) + (v10197 * v3564);
                     v3570 = v3567;
                     v10196 = v15610;
                 } else {
@@ -8214,14 +7981,14 @@ impl Instance {
             let v10212: Lanes<4>;
             if v573 != 0.0 {
                 let v3577 = v1243 * (v574 - v575);
-                let v15648 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9772[0]]))) * v1243;
+                let v15648 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9772]))) * v1243;
                 let v15649 = v15648 * v11018;
                 let v3579 = (ddt(59328, v3574)) + (ddt(59332, v3577));
                 let v15651 = (v10148 * v11018) + (Lanes([0.0, 0.0, v15649[0], 0.0, v15649[1]]));
                 let v9683 = v3574 + v3577;
                 let v15653 = v10148 + (Lanes([0.0, 0.0, v15648[0], 0.0, v15648[1]]));
                 let v3583 = v1243 * (v574 - v337);
-                let v15658 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9754[0]]))) * v1243;
+                let v15658 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9754]))) * v1243;
                 let v15659 = v15658 * v11018;
                 let v3585 = (ddt(59335, v3580)) + (ddt(59339, v3583));
                 let v15660 = Lanes([0.0, 0.0, v15659[0], v15659[1], 0.0]);
@@ -8230,7 +7997,7 @@ impl Instance {
                 let v15662 = Lanes([0.0, 0.0, v15658[0], v15658[1], 0.0]);
                 let v15663 = v10149 + v15662;
                 let v3589 = v1243 * (v349 - v575);
-                let v15668 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9772[0]]))) * v1243;
+                let v15668 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9772]))) * v1243;
                 let v15669 = v15668 * v11018;
                 let v3591 = (ddt(59342, v3586)) + (ddt(59346, v3589));
                 let v15671 = (v10150 * v11018) + (Lanes([v15669[0], 0.0, 0.0, v15669[1]]));
@@ -8274,21 +8041,21 @@ impl Instance {
                 v10212 = v14839;
             } else {
                 let v3599 = v1243 * (v349 - v575);
-                let v15618 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9772[0]]))) * v1243;
+                let v15618 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9772]))) * v1243;
                 let v15619 = v15618 * v11018;
                 let v3601 = (ddt(59357, v3574)) + (ddt(59361, v3599));
                 let v15621 = (v10148 * v11018) + (Lanes([v15619[0], 0.0, 0.0, 0.0, v15619[1]]));
                 let v9691 = v3574 + v3599;
                 let v15623 = v10148 + (Lanes([v15618[0], 0.0, 0.0, 0.0, v15618[1]]));
                 let v3604 = v1243 * (v349 - v337);
-                let v15628 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9754[0]]))) * v1243;
+                let v15628 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9754]))) * v1243;
                 let v15629 = v15628 * v11018;
                 let v3606 = (ddt(59364, v3580)) + (ddt(59368, v3604));
                 let v15631 = (v10149 * v11018) + (Lanes([v15629[0], 0.0, 0.0, v15629[1], 0.0]));
                 let v9693 = v3580 + v3604;
                 let v15633 = v10149 + (Lanes([v15628[0], 0.0, 0.0, v15628[1], 0.0]));
                 let v3609 = v1243 * (v574 - v575);
-                let v15638 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9772[0]]))) * v1243;
+                let v15638 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9772]))) * v1243;
                 let v15639 = v15638 * v11018;
                 let v3611 = (ddt(59371, v3586)) + (ddt(59375, v3609));
                 let v15641 = (v10150 * v11018) + (Lanes([0.0, 0.0, v15639[0], v15639[1]]));
@@ -8376,7 +8143,7 @@ impl Instance {
                 let v15708 = (((v10854 * v725) * v3648) * v10982) / v3647;
                 let v15709 = v10220 * v3629;
                 let v3650 = v3648 + (v3629 * v3644);
-                let v15712 = (Lanes([v15708[0], 0.0, 0.0])) + (Lanes([0.0, v15709[0], v15709[1]]));
+                let v15712 = (Lanes([v15708, 0.0, 0.0])) + (Lanes([0.0, v15709[0], v15709[1]]));
                 let v15713 = v9782 * v3636;
                 let v3652 = v3626 + (v3636 * v92);
                 let v3653 = v96.powf(v712);
@@ -8400,18 +8167,16 @@ impl Instance {
                 let v3663 = v3628 - (v3661 * v0);
                 let v15735 = (((v10221 * v0) * v10982) * v3644) + (v10220 * v3663);
                 let v3665 = v3652 - (v3663 * v3644);
-                let v15738 = (Lanes([v15713[0], 0.0, 0.0])) - (Lanes([0.0, v15735[0], v15735[1]]));
+                let v15738 = (Lanes([v15713, 0.0, 0.0])) - (Lanes([0.0, v15735[0], v15735[1]]));
                 let v3666 = v437 * v3650;
                 let v3667 = v3666 * v90;
-                let v15741 = v10854 * v3666;
-                let v15743 = ((v15712 * v437) * v90) + (Lanes([v15741[0], 0.0, 0.0]));
+                let v15743 = ((v15712 * v437) * v90) + (Lanes([(v10854 * v3666), 0.0, 0.0]));
                 let v3668 = v180 * v3667;
-                let v15744 = v10882 * v3667;
-                let v15747 = (Lanes([v15744[0], 0.0, 0.0])) + (v15743 * v180);
+                let v15747 = (Lanes([(v10882 * v3667), 0.0, 0.0])) + (v15743 * v180);
                 let v3670 = (v748 * v3646) / v437;
                 let v15749 = (v15704 * v748) / v437;
                 let v3671 = v3665 - v3670;
-                let v15751 = v15738 - (Lanes([v15749[0], 0.0, 0.0]));
+                let v15751 = v15738 - (Lanes([v15749, 0.0, 0.0]));
                 let v3687: f64;
                 let v10222: Lanes<4>;
                 if v344 != 0.0 {
@@ -8434,8 +8199,7 @@ impl Instance {
                 }
                 let v15773 = Lanes([0.0, v15751[0], 0.0, v15751[1], v15751[2]]);
                 let v3689 = (v3687 - v3671) / v3646;
-                let v15775 = v15704 * v3689;
-                let v15778 = (((Lanes([v10222[0], 0.0, v10222[1], v10222[2], v10222[3]])) - v15773) - (Lanes([0.0, v15775[0], 0.0, 0.0, 0.0]))) / v3646;
+                let v15778 = (((Lanes([v10222[0], 0.0, v10222[1], v10222[2], v10222[3]])) - v15773) - (Lanes([0.0, (v15704 * v3689), 0.0, 0.0, 0.0]))) / v3646;
                 let v3690 = if v3689 > v407 { 1.0 } else { 0.0 };
                 let v3714: f64;
                 let v10223: Lanes<5>;
@@ -8483,11 +8247,10 @@ impl Instance {
                 let v3712 = v748 * v57;
                 let v3713 = v3712 * v3646;
                 let v15803 = v15704 * v3712;
-                let v15804 = v15803 * v3714;
                 let v15808 = Lanes([0.0, v15738[0], 0.0, v15738[1], v15738[2]]);
                 let v3719 = (v3711 - (v3665 - (v3713 * v3714))) / v3667;
                 let v15812 = v15743 * v3719;
-                let v15815 = (((Lanes([v10225[0], 0.0, v10225[1], v10225[2], v10225[3]])) - (v15808 - ((Lanes([0.0, v15804[0], 0.0, 0.0, 0.0])) + (v10223 * v3713)))) - (Lanes([0.0, v15812[0], 0.0, v15812[1], v15812[2]]))) / v3667;
+                let v15815 = (((Lanes([v10225[0], 0.0, v10225[1], v10225[2], v10225[3]])) - (v15808 - ((Lanes([0.0, (v15803 * v3714), 0.0, 0.0, 0.0])) + (v10223 * v3713)))) - (Lanes([0.0, v15812[0], 0.0, v15812[1], v15812[2]]))) / v3667;
                 let v3720 = if v3719 > v407 { 1.0 } else { 0.0 };
                 let v3730: f64;
                 let v10226: Lanes<5>;
@@ -8522,36 +8285,30 @@ impl Instance {
                     v10226 = v10227;
                 }
                 let v3733 = (v3634 * v3730) / v180;
-                let v15833 = v10882 * v3733;
                 let v3734 = v6 + v3733;
                 let v3735 = v3653 * v3734;
-                let v15837 = v15717 * v3734;
                 let v3736 = v3632 / v3735;
-                let v15843 = ((((Lanes([0.0, v15837[0], 0.0, 0.0, 0.0])) + ((((v10226 * v3634) - (Lanes([0.0, v15833[0], 0.0, 0.0, 0.0]))) / v180) * v3653)) * v3736) * v10982) / v3735;
+                let v15843 = ((((Lanes([0.0, (v15717 * v3734), 0.0, 0.0, 0.0])) + ((((v10226 * v3634) - (Lanes([0.0, (v10882 * v3733), 0.0, 0.0, 0.0]))) / v180) * v3653)) * v3736) * v10982) / v3735;
                 let v3740 = v6 + (v713 * v47);
                 let v3741 = (v6 + (v713 * v4)) / v3740;
                 let v3742 = v3631 * v3741;
                 let v15848 = ((((v9782 * v713) * v3741) * v10982) / v3740) * v3631;
                 let v3745 = v6 + ((v714 * v3644) / v3619);
-                let v15851 = v15848 * v3745;
                 let v15852 = ((v10220 * v714) / v3619) * v3742;
-                let v15855 = (Lanes([v15851[0], 0.0, 0.0])) + (Lanes([0.0, v15852[0], v15852[1]]));
+                let v15855 = (Lanes([(v15848 * v3745), 0.0, 0.0])) + (Lanes([0.0, v15852[0], v15852[1]]));
                 let v3748 = (v3635 * v3730) / v180;
-                let v15857 = v10882 * v3748;
                 let v3749 = v6 + v3748;
                 let v3750 = (v3742 * v3745) / v3749;
-                let v15864 = ((Lanes([0.0, v15855[0], 0.0, v15855[1], v15855[2]])) - ((((v10226 * v3635) - (Lanes([0.0, v15857[0], 0.0, 0.0, 0.0]))) / v180) * v3750)) / v3749;
+                let v15864 = ((Lanes([0.0, v15855[0], 0.0, v15855[1], v15855[2]])) - ((((v10226 * v3635) - (Lanes([0.0, (v10882 * v3748), 0.0, 0.0, 0.0]))) / v180) * v3750)) / v3749;
                 let v3751 = v437 * v3714;
                 let v3752 = v3751 * v90;
-                let v15867 = v10854 * v3751;
                 let v3755 = v6 - v3714;
                 let v15874 = v10223 * v10982;
                 let v3757 = ((v3752 * v3736) / v3619) + (v3755 * v3750);
-                let v15878 = ((((((v10223 * v437) * v90) + (Lanes([0.0, v15867[0], 0.0, 0.0, 0.0]))) * v3736) + (v15843 * v3752)) / v3619) + ((v15874 * v3750) + (v15864 * v3755));
+                let v15878 = ((((((v10223 * v437) * v90) + (Lanes([0.0, (v10854 * v3751), 0.0, 0.0, 0.0]))) * v3736) + (v15843 * v3752)) / v3619) + ((v15874 * v3750) + (v15864 * v3755));
                 let v3759 = (v3750 * v3619) / v3736;
                 let v15882 = ((v15864 * v3619) - (v15843 * v3759)) / v3736;
                 let v3761 = (v437 * v3730) / v180;
-                let v15884 = v10882 * v3761;
                 let v3762 = v3761 / v3759;
                 let v3764 = (v6 + v3762).sqrt();
                 let v3766 = (v3759 * v3764) - v3759;
@@ -8561,7 +8318,7 @@ impl Instance {
                 let v3769 = (v3759 * v3755) + v3768;
                 let v15905 = ((v15882 * v3755) + (v15874 * v3759)) + v15904;
                 let v3771 = (v3766 * v3755) + v3768;
-                let v15909 = (((((v15882 * v3764) + (((((((v10226 * v437) - (Lanes([0.0, v15884[0], 0.0, 0.0, 0.0]))) / v180) - (v15882 * v3762)) / v3759) * (v9751 / (v10962 * v3764))) * v3759)) - v15882) * v3755) + (v15874 * v3766)) + v15904;
+                let v15909 = (((((v15882 * v3764) + (((((((v10226 * v437) - (Lanes([0.0, (v10882 * v3761), 0.0, 0.0, 0.0]))) / v180) - (v15882 * v3762)) / v3759) * (v9751 / (v10962 * v3764))) * v3759)) - v15882) * v3755) + (v15874 * v3766)) + v15904;
                 let v3772 = v601 / v3771;
                 let v15911 = Lanes([0.0, 0.0, 0.0, v11241[0], v11241[1]]);
                 let v15913 = (v15911 - (v15909 * v3772)) / v3771;
@@ -8627,8 +8384,7 @@ impl Instance {
                 let v15982 = (Lanes([0.0, 0.0, 0.0, v15979[0], v15979[1]])) + ((((((v10229 * (v3633 * (v3808.powf(v15932)))) * (v3789 * (v3810.powf(v15936)))) * v3812) * v10982) / v3811) * v3793);
                 let v15983 = Lanes([v9874[0], 0.0, v9874[1], 0.0, v9874[2]]);
                 let v3815 = (v3621 - v3671) / v3646;
-                let v15985 = v15704 * v3815;
-                let v15988 = ((v15983 - v15773) - (Lanes([0.0, v15985[0], 0.0, 0.0, 0.0]))) / v3646;
+                let v15988 = ((v15983 - v15773) - (Lanes([0.0, (v15704 * v3815), 0.0, 0.0, 0.0]))) / v3646;
                 let v3816 = if v3815 > v407 { 1.0 } else { 0.0 };
                 let v3823: f64;
                 let v10230: Lanes<5>;
@@ -8654,10 +8410,9 @@ impl Instance {
                     v10230 = v10231;
                 }
                 let v15993 = Lanes([v15703[0], 0.0, v15703[1], v15703[2], v15703[3]]);
-                let v15995 = v15803 * v3823;
                 let v3828 = ((v3645 - v3813) - (v3665 - (v3713 * v3823))) / v3667;
                 let v16001 = v15743 * v3828;
-                let v16004 = (((v15993 - v15982) - (v15808 - ((Lanes([0.0, v15995[0], 0.0, 0.0, 0.0])) + (v10230 * v3713)))) - (Lanes([0.0, v16001[0], 0.0, v16001[1], v16001[2]]))) / v3667;
+                let v16004 = (((v15993 - v15982) - (v15808 - ((Lanes([0.0, (v15803 * v3823), 0.0, 0.0, 0.0])) + (v10230 * v3713)))) - (Lanes([0.0, v16001[0], 0.0, v16001[1], v16001[2]]))) / v3667;
                 let v3829 = if v3828 > v407 { 1.0 } else { 0.0 };
                 let v3864: f64;
                 let v10232: Lanes<5>;
@@ -8692,8 +8447,7 @@ impl Instance {
                     v10232 = v10233;
                 }
                 let v3840 = (v3645 - v3671) / v3646;
-                let v16022 = v15704 * v3840;
-                let v16025 = ((v15993 - v15773) - (Lanes([0.0, v16022[0], 0.0, 0.0, 0.0]))) / v3646;
+                let v16025 = ((v15993 - v15773) - (Lanes([0.0, (v15704 * v3840), 0.0, 0.0, 0.0]))) / v3646;
                 let v3841 = if v3840 > v407 { 1.0 } else { 0.0 };
                 let v3848: f64;
                 let v10234: Lanes<5>;
@@ -8718,10 +8472,9 @@ impl Instance {
                     v3848 = v3849;
                     v10234 = v10235;
                 }
-                let v16031 = v15803 * v3848;
                 let v3853 = ((v3621 - v3792) - (v3665 - (v3713 * v3848))) / v3667;
                 let v16037 = v15743 * v3853;
-                let v16040 = (((v15983 - v15946) - (v15808 - ((Lanes([0.0, v16031[0], 0.0, 0.0, 0.0])) + (v10234 * v3713)))) - (Lanes([0.0, v16037[0], 0.0, v16037[1], v16037[2]]))) / v3667;
+                let v16040 = (((v15983 - v15946) - (v15808 - ((Lanes([0.0, (v15803 * v3848), 0.0, 0.0, 0.0])) + (v10234 * v3713)))) - (Lanes([0.0, v16037[0], 0.0, v16037[1], v16037[2]]))) / v3667;
                 let v3854 = if v3853 > v407 { 1.0 } else { 0.0 };
                 let v3866: f64;
                 let v10236: Lanes<5>;
@@ -8756,9 +8509,8 @@ impl Instance {
                     v10236 = v10237;
                 }
                 let v3869 = (v3864 - v3866) / v180;
-                let v16058 = v10882 * v3869;
                 let v3870 = v3869 / v3769;
-                let v16064 = ((((v10232 - v10236) - (Lanes([0.0, v16058[0], 0.0, 0.0, 0.0]))) / v180) - (v15905 * v3870)) / v3769;
+                let v16064 = ((((v10232 - v10236) - (Lanes([0.0, (v10882 * v3869), 0.0, 0.0, 0.0]))) / v180) - (v15905 * v3870)) / v3769;
                 let v3878: f64;
                 let v10238: Lanes<5>;
                 if v344 != 0.0 {
@@ -8810,10 +8562,9 @@ impl Instance {
                     v3909 = v3908;
                     v10239 = v16112;
                 }
-                let v16123 = Lanes([0.0, v16101[0], 0.0, 0.0, 0.0]);
+                let v16123 = Lanes([0.0, v16101, 0.0, 0.0, 0.0]);
                 let v3911 = (v3909 - v3893) / v3646;
-                let v16125 = v15704 * v3911;
-                let v16128 = (((Lanes([v10239[0], 0.0, v10239[1], v10239[2], v10239[3]])) - v16123) - (Lanes([0.0, v16125[0], 0.0, 0.0, 0.0]))) / v3646;
+                let v16128 = (((Lanes([v10239[0], 0.0, v10239[1], v10239[2], v10239[3]])) - v16123) - (Lanes([0.0, (v15704 * v3911), 0.0, 0.0, 0.0]))) / v3646;
                 let v3912 = if v3911 > v407 { 1.0 } else { 0.0 };
                 let v3934: f64;
                 let v10240: Lanes<5>;
@@ -8858,18 +8609,15 @@ impl Instance {
                     v3933 = v3932;
                     v10242 = v16143;
                 }
-                let v16153 = v15803 * v3934;
-                let v16157 = Lanes([0.0, v15713[0], 0.0, 0.0, 0.0]);
+                let v16157 = Lanes([0.0, v15713, 0.0, 0.0, 0.0]);
                 let v3939 = (v3933 - (v3652 - (v3713 * v3934))) / v3891;
-                let v16161 = v16097 * v3939;
-                let v16164 = (((Lanes([v10242[0], 0.0, v10242[1], v10242[2], v10242[3]])) - (v16157 - ((Lanes([0.0, v16153[0], 0.0, 0.0, 0.0])) + (v10240 * v3713)))) - (Lanes([0.0, v16161[0], 0.0, 0.0, 0.0]))) / v3891;
+                let v16164 = (((Lanes([v10242[0], 0.0, v10242[1], v10242[2], v10242[3]])) - (v16157 - ((Lanes([0.0, (v15803 * v3934), 0.0, 0.0, 0.0])) + (v10240 * v3713)))) - (Lanes([0.0, (v16097 * v3939), 0.0, 0.0, 0.0]))) / v3891;
                 let v3940 = if v3939 > v407 { 1.0 } else { 0.0 };
                 let v3953: f64;
                 let v10243: Lanes<5>;
                 if v3940 != 0.0 {
                     let v3941 = v3892 * v3939;
-                    let v16177 = v16100 * v3939;
-                    let v16180 = (Lanes([0.0, v16177[0], 0.0, 0.0, 0.0])) + (v16164 * v3892);
+                    let v16180 = (Lanes([0.0, (v16100 * v3939), 0.0, 0.0, 0.0])) + (v16164 * v3892);
                     v3953 = v3941;
                     v10243 = v16180;
                 } else {
@@ -8879,8 +8627,7 @@ impl Instance {
                     if v3943 != 0.0 {
                         let v3944 = v3939.exp();
                         let v3945 = v3892 * v3944;
-                        let v16173 = v16100 * v3944;
-                        let v16176 = (Lanes([0.0, v16173[0], 0.0, 0.0, 0.0])) + ((v16164 * v3944) * v3892);
+                        let v16176 = (Lanes([0.0, (v16100 * v3944), 0.0, 0.0, 0.0])) + ((v16164 * v3944) * v3892);
                         v3954 = v3945;
                         v10244 = v16176;
                     } else {
@@ -8888,8 +8635,7 @@ impl Instance {
                         let v3947 = v6 + v3946;
                         let v3948 = v3947.ln();
                         let v3949 = v3892 * v3948;
-                        let v16168 = v16100 * v3948;
-                        let v16171 = (Lanes([0.0, v16168[0], 0.0, 0.0, 0.0])) + (((v16164 * v3946) * (v9751 / v3947)) * v3892);
+                        let v16171 = (Lanes([0.0, (v16100 * v3948), 0.0, 0.0, 0.0])) + (((v16164 * v3946) * (v9751 / v3947)) * v3892);
                         v3954 = v3949;
                         v10244 = v16171;
                     }
@@ -8900,16 +8646,12 @@ impl Instance {
                 let v3952 = (v3742 * v3619) / v3950;
                 let v16187 = ((v15848 * v3619) - ((((v15717 * v3950) * v10982) / v3653) * v3952)) / v3950;
                 let v3956 = (v437 * v3953) / v180;
-                let v16189 = v10882 * v3956;
                 let v3957 = v3956 / v3952;
-                let v16193 = v16187 * v3957;
                 let v3959 = (v6 + v3957).sqrt();
-                let v16200 = v16187 * v3959;
                 let v3961 = (v3952 * v3959) - v3952;
                 let v3962 = v6 - v3934;
-                let v16210 = v16097 * v3934;
                 let v3965 = (v3961 * v3962) + (v3891 * v3934);
-                let v16214 = (((((Lanes([0.0, v16200[0], 0.0, 0.0, 0.0])) + (((((((v10243 * v437) - (Lanes([0.0, v16189[0], 0.0, 0.0, 0.0]))) / v180) - (Lanes([0.0, v16193[0], 0.0, 0.0, 0.0]))) / v3952) * (v9751 / (v10962 * v3959))) * v3952)) - (Lanes([0.0, v16187[0], 0.0, 0.0, 0.0]))) * v3962) + ((v10240 * v10982) * v3961)) + ((Lanes([0.0, v16210[0], 0.0, 0.0, 0.0])) + (v10240 * v3891));
+                let v16214 = (((((Lanes([0.0, (v16187 * v3959), 0.0, 0.0, 0.0])) + (((((((v10243 * v437) - (Lanes([0.0, (v10882 * v3956), 0.0, 0.0, 0.0]))) / v180) - (Lanes([0.0, (v16187 * v3957), 0.0, 0.0, 0.0]))) / v3952) * (v9751 / (v10962 * v3959))) * v3952)) - (Lanes([0.0, v16187, 0.0, 0.0, 0.0]))) * v3962) + ((v10240 * v10982) * v3961)) + ((Lanes([0.0, (v16097 * v3934), 0.0, 0.0, 0.0])) + (v10240 * v3891));
                 let v3966 = v601 / v3965;
                 let v16217 = (v15911 - (v16214 * v3966)) / v3965;
                 let v3980: f64;
@@ -8968,8 +8710,7 @@ impl Instance {
                 let v16282 = (Lanes([0.0, 0.0, 0.0, v16279[0], v16279[1]])) + ((((((v10246 * (v3633 * (v4000.powf(v15932)))) * (v3789 * (v4002.powf(v15936)))) * v4004) * v10982) / v4003) * v3793);
                 let v16283 = Lanes([v9874[0], 0.0, v9874[1], v9874[2]]);
                 let v4007 = (v3621 - v3893) / v3646;
-                let v16286 = v15704 * v4007;
-                let v16289 = ((v16283 - (Lanes([0.0, v16101[0], 0.0, 0.0]))) - (Lanes([0.0, v16286[0], 0.0, 0.0]))) / v3646;
+                let v16289 = ((v16283 - (Lanes([0.0, v16101, 0.0, 0.0]))) - (Lanes([0.0, (v15704 * v4007), 0.0, 0.0]))) / v3646;
                 let v4008 = if v4007 > v407 { 1.0 } else { 0.0 };
                 let v4015: f64;
                 let v10247: Lanes<4>;
@@ -8994,18 +8735,15 @@ impl Instance {
                     v4015 = v4016;
                     v10247 = v10248;
                 }
-                let v16295 = v15803 * v4015;
-                let v16300 = (Lanes([0.0, v15713[0], 0.0, 0.0])) - ((Lanes([0.0, v16295[0], 0.0, 0.0])) + (v10247 * v3713));
+                let v16300 = (Lanes([0.0, v15713, 0.0, 0.0])) - ((Lanes([0.0, (v15803 * v4015), 0.0, 0.0])) + (v10247 * v3713));
                 let v4020 = ((v3645 - v4005) - (v3652 - (v3713 * v4015))) / v3891;
-                let v16303 = v16097 * v4020;
-                let v16306 = (((v15993 - v16282) - (Lanes([v16300[0], v16300[1], v16300[2], 0.0, v16300[3]]))) - (Lanes([0.0, v16303[0], 0.0, 0.0, 0.0]))) / v3891;
+                let v16306 = (((v15993 - v16282) - (Lanes([v16300[0], v16300[1], v16300[2], 0.0, v16300[3]]))) - (Lanes([0.0, (v16097 * v4020), 0.0, 0.0, 0.0]))) / v3891;
                 let v4021 = if v4020 > v407 { 1.0 } else { 0.0 };
                 let v4056: f64;
                 let v10249: Lanes<5>;
                 if v4021 != 0.0 {
                     let v4022 = v3892 * v4020;
-                    let v16319 = v16100 * v4020;
-                    let v16322 = (Lanes([0.0, v16319[0], 0.0, 0.0, 0.0])) + (v16306 * v3892);
+                    let v16322 = (Lanes([0.0, (v16100 * v4020), 0.0, 0.0, 0.0])) + (v16306 * v3892);
                     v4056 = v4022;
                     v10249 = v16322;
                 } else {
@@ -9015,8 +8753,7 @@ impl Instance {
                     if v4024 != 0.0 {
                         let v4025 = v4020.exp();
                         let v4026 = v3892 * v4025;
-                        let v16315 = v16100 * v4025;
-                        let v16318 = (Lanes([0.0, v16315[0], 0.0, 0.0, 0.0])) + ((v16306 * v4025) * v3892);
+                        let v16318 = (Lanes([0.0, (v16100 * v4025), 0.0, 0.0, 0.0])) + ((v16306 * v4025) * v3892);
                         v4057 = v4026;
                         v10250 = v16318;
                     } else {
@@ -9024,8 +8761,7 @@ impl Instance {
                         let v4028 = v6 + v4027;
                         let v4029 = v4028.ln();
                         let v4030 = v3892 * v4029;
-                        let v16310 = v16100 * v4029;
-                        let v16313 = (Lanes([0.0, v16310[0], 0.0, 0.0, 0.0])) + (((v16306 * v4027) * (v9751 / v4028)) * v3892);
+                        let v16313 = (Lanes([0.0, (v16100 * v4029), 0.0, 0.0, 0.0])) + (((v16306 * v4027) * (v9751 / v4028)) * v3892);
                         v4057 = v4030;
                         v10250 = v16313;
                     }
@@ -9033,8 +8769,7 @@ impl Instance {
                     v10249 = v10250;
                 }
                 let v4032 = (v3645 - v3893) / v3646;
-                let v16324 = v15704 * v4032;
-                let v16327 = ((v15993 - v16123) - (Lanes([0.0, v16324[0], 0.0, 0.0, 0.0]))) / v3646;
+                let v16327 = ((v15993 - v16123) - (Lanes([0.0, (v15704 * v4032), 0.0, 0.0, 0.0]))) / v3646;
                 let v4033 = if v4032 > v407 { 1.0 } else { 0.0 };
                 let v4040: f64;
                 let v10251: Lanes<5>;
@@ -9059,17 +8794,14 @@ impl Instance {
                     v4040 = v4041;
                     v10251 = v10252;
                 }
-                let v16333 = v15803 * v4040;
                 let v4045 = ((v3621 - v3985) - (v3652 - (v3713 * v4040))) / v3891;
-                let v16339 = v16097 * v4045;
-                let v16342 = (((v15983 - v16248) - (v16157 - ((Lanes([0.0, v16333[0], 0.0, 0.0, 0.0])) + (v10251 * v3713)))) - (Lanes([0.0, v16339[0], 0.0, 0.0, 0.0]))) / v3891;
+                let v16342 = (((v15983 - v16248) - (v16157 - ((Lanes([0.0, (v15803 * v4040), 0.0, 0.0, 0.0])) + (v10251 * v3713)))) - (Lanes([0.0, (v16097 * v4045), 0.0, 0.0, 0.0]))) / v3891;
                 let v4046 = if v4045 > v407 { 1.0 } else { 0.0 };
                 let v4062: f64;
                 let v10253: Lanes<5>;
                 if v4046 != 0.0 {
                     let v4047 = v3892 * v4045;
-                    let v16355 = v16100 * v4045;
-                    let v16358 = (Lanes([0.0, v16355[0], 0.0, 0.0, 0.0])) + (v16342 * v3892);
+                    let v16358 = (Lanes([0.0, (v16100 * v4045), 0.0, 0.0, 0.0])) + (v16342 * v3892);
                     v4062 = v4047;
                     v10253 = v16358;
                 } else {
@@ -9079,8 +8811,7 @@ impl Instance {
                     if v4049 != 0.0 {
                         let v4050 = v4045.exp();
                         let v4051 = v3892 * v4050;
-                        let v16351 = v16100 * v4050;
-                        let v16354 = (Lanes([0.0, v16351[0], 0.0, 0.0, 0.0])) + ((v16342 * v4050) * v3892);
+                        let v16354 = (Lanes([0.0, (v16100 * v4050), 0.0, 0.0, 0.0])) + ((v16342 * v4050) * v3892);
                         v4063 = v4051;
                         v10254 = v16354;
                     } else {
@@ -9088,8 +8819,7 @@ impl Instance {
                         let v4053 = v6 + v4052;
                         let v4054 = v4053.ln();
                         let v4055 = v3892 * v4054;
-                        let v16346 = v16100 * v4054;
-                        let v16349 = (Lanes([0.0, v16346[0], 0.0, 0.0, 0.0])) + (((v16342 * v4052) * (v9751 / v4053)) * v3892);
+                        let v16349 = (Lanes([0.0, (v16100 * v4054), 0.0, 0.0, 0.0])) + (((v16342 * v4052) * (v9751 / v4053)) * v3892);
                         v4063 = v4055;
                         v10254 = v16349;
                     }
@@ -9129,8 +8859,7 @@ impl Instance {
                     let v4100 = v3652 - (v4098 * v3646);
                     let v16403 = v15713 - (v15704 * v4098);
                     let v4102 = (v3623 - v4100) / v3891;
-                    let v16407 = v16097 * v4102;
-                    let v16410 = (((Lanes([v9875[0], 0.0, v9875[1], v9875[2]])) - (Lanes([0.0, v16403[0], 0.0, 0.0]))) - (Lanes([0.0, v16407[0], 0.0, 0.0]))) / v3891;
+                    let v16410 = (((Lanes([v9875[0], 0.0, v9875[1], v9875[2]])) - (Lanes([0.0, v16403, 0.0, 0.0]))) - (Lanes([0.0, (v16097 * v4102), 0.0, 0.0]))) / v3891;
                     let v4103 = if v4102 > v407 { 1.0 } else { 0.0 };
                     let v4113: f64;
                     let v10257: Lanes<4>;
@@ -9161,11 +8890,9 @@ impl Instance {
                     let v4111 = v4110 * v208;
                     let v4112 = v4111 * v3891;
                     let v4115 = v4112 * v4113;
-                    let v16419 = (((v10890 * v4110) * v3891) + (v16097 * v4111)) * v4113;
-                    let v16422 = (Lanes([0.0, v16419[0], 0.0, 0.0])) + (v10257 * v4112);
+                    let v16422 = (Lanes([0.0, ((((v10890 * v4110) * v3891) + (v16097 * v4111)) * v4113), 0.0, 0.0])) + (v10257 * v4112);
                     let v4117 = (v603 - v4100) / v3891;
-                    let v16426 = v16097 * v4117;
-                    let v16429 = (((Lanes([v11245[0], 0.0, v11245[1]])) - (Lanes([0.0, v16403[0], 0.0]))) - (Lanes([0.0, v16426[0], 0.0]))) / v3891;
+                    let v16429 = (((Lanes([v11245[0], 0.0, v11245[1]])) - (Lanes([0.0, v16403, 0.0]))) - (Lanes([0.0, (v16097 * v4117), 0.0]))) / v3891;
                     let v4118 = if v4117 > v407 { 1.0 } else { 0.0 };
                     let v4127: f64;
                     let v10259: Lanes<3>;
@@ -9195,8 +8922,7 @@ impl Instance {
                     let v4125 = v4110 * v236;
                     let v4126 = v4125 * v3891;
                     let v4129 = v4126 * v4127;
-                    let v16438 = (((v10898 * v4110) * v3891) + (v16097 * v4125)) * v4127;
-                    let v16441 = (Lanes([0.0, v16438[0], 0.0])) + (v10259 * v4126);
+                    let v16441 = (Lanes([0.0, ((((v10898 * v4110) * v3891) + (v16097 * v4125)) * v4127), 0.0])) + (v10259 * v4126);
                     v4149 = v4115;
                     v4150 = v4129;
                     v10255 = v16422;
@@ -9212,10 +8938,8 @@ impl Instance {
                 let v10261: Lanes<4>;
                 if v4130 != 0.0 {
                     let v4131 = v748 * v358;
-                    let v16443 = v15713 - (v15704 * v4131);
                     let v4135 = (v3621 - (v3652 - (v4131 * v3646))) / v3891;
-                    let v16446 = v16097 * v4135;
-                    let v16449 = ((v16283 - (Lanes([0.0, v16443[0], 0.0, 0.0]))) - (Lanes([0.0, v16446[0], 0.0, 0.0]))) / v3891;
+                    let v16449 = ((v16283 - (Lanes([0.0, (v15713 - (v15704 * v4131)), 0.0, 0.0]))) - (Lanes([0.0, (v16097 * v4135), 0.0, 0.0]))) / v3891;
                     let v4136 = if v4135 > v407 { 1.0 } else { 0.0 };
                     let v4146: f64;
                     let v10262: Lanes<4>;
@@ -9245,8 +8969,7 @@ impl Instance {
                     let v4144 = (v4092 * v335) * v3625;
                     let v4145 = v4144 * v3891;
                     let v4148 = v4145 * v4146;
-                    let v16455 = (v16097 * v4144) * v4146;
-                    let v16458 = (Lanes([0.0, v16455[0], 0.0, 0.0])) + (v10262 * v4145);
+                    let v16458 = (Lanes([0.0, ((v16097 * v4144) * v4146), 0.0, 0.0])) + (v10262 * v4145);
                     v4151 = v4148;
                     v10261 = v16458;
                 } else {
@@ -9321,21 +9044,21 @@ impl Instance {
             let v10277: Lanes<4>;
             if v590 != 0.0 {
                 let v4158 = v1243 * (v574 - v591);
-                let v16497 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9774[0]]))) * v1243;
+                let v16497 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9774]))) * v1243;
                 let v16498 = v16497 * v11018;
                 let v4160 = (ddt(60783, v4155)) + (ddt(60787, v4158));
                 let v16500 = (v10213 * v11018) + (Lanes([0.0, 0.0, v16498[0], 0.0, v16498[1]]));
                 let v9698 = v4155 + v4158;
                 let v16502 = v10213 + (Lanes([0.0, 0.0, v16497[0], 0.0, v16497[1]]));
                 let v4164 = v1243 * (v574 - v575);
-                let v16507 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9772[0]]))) * v1243;
+                let v16507 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9772]))) * v1243;
                 let v16508 = v16507 * v11018;
                 let v4166 = (ddt(60790, v4161)) + (ddt(60794, v4164));
                 let v16510 = (v10214 * v11018) + (Lanes([0.0, 0.0, v16508[0], v16508[1], 0.0]));
                 let v9700 = v4161 + v4164;
                 let v16512 = v10214 + (Lanes([0.0, 0.0, v16507[0], v16507[1], 0.0]));
                 let v4170 = v1243 * (v349 - v591);
-                let v16517 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9774[0]]))) * v1243;
+                let v16517 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9774]))) * v1243;
                 let v16518 = v16517 * v11018;
                 let v4172 = (ddt(60797, v4167)) + (ddt(60801, v4170));
                 let v16520 = (v10215 * v11018) + (Lanes([v16518[0], 0.0, 0.0, v16518[1]]));
@@ -9343,7 +9066,7 @@ impl Instance {
                 let v16522 = v10215 + (Lanes([v16517[0], 0.0, 0.0, v16517[1]]));
                 let v16523 = v10216 * v11018;
                 let v4177 = v1243 * (v574 - v337);
-                let v16527 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9754[0]]))) * v1243;
+                let v16527 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9754]))) * v1243;
                 let v16528 = v16527 * v11018;
                 let v4179 = (ddt(60805, v4174)) + (ddt(60809, v4177));
                 let v16531 = (Lanes([v16523[0], v16523[1], v16523[2], 0.0, v16523[3]])) + (Lanes([0.0, 0.0, v16528[0], v16528[1], 0.0]));
@@ -9382,21 +9105,21 @@ impl Instance {
                 v10277 = v15687;
             } else {
                 let v4182 = v1243 * (v349 - v591);
-                let v16466 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9774[0]]))) * v1243;
+                let v16466 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9774]))) * v1243;
                 let v16467 = v16466 * v11018;
                 let v4184 = (ddt(60812, v4155)) + (ddt(60816, v4182));
                 let v16469 = (v10213 * v11018) + (Lanes([v16467[0], 0.0, 0.0, 0.0, v16467[1]]));
                 let v9706 = v4155 + v4182;
                 let v16471 = v10213 + (Lanes([v16466[0], 0.0, 0.0, 0.0, v16466[1]]));
                 let v4187 = v1243 * (v349 - v575);
-                let v16476 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9772[0]]))) * v1243;
+                let v16476 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9772]))) * v1243;
                 let v16477 = v16476 * v11018;
                 let v4189 = (ddt(60819, v4161)) + (ddt(60823, v4187));
                 let v16479 = (v10214 * v11018) + (Lanes([v16477[0], 0.0, 0.0, v16477[1], 0.0]));
                 let v9708 = v4161 + v4187;
                 let v16481 = v10214 + (Lanes([v16476[0], 0.0, 0.0, v16476[1], 0.0]));
                 let v4192 = v1243 * (v574 - v591);
-                let v16486 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9774[0]]))) * v1243;
+                let v16486 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9774]))) * v1243;
                 let v16487 = v16486 * v11018;
                 let v4194 = (ddt(60826, v4167)) + (ddt(60830, v4192));
                 let v16489 = (v10215 * v11018) + (Lanes([0.0, 0.0, v16487[0], v16487[1]]));
@@ -9484,7 +9207,7 @@ impl Instance {
                 let v16564 = (((v10854 * v725) * v4231) * v10982) / v4230;
                 let v16565 = v10285 * v4212;
                 let v4233 = v4231 + (v4212 * v4227);
-                let v16568 = (Lanes([v16564[0], 0.0, 0.0])) + (Lanes([0.0, v16565[0], v16565[1]]));
+                let v16568 = (Lanes([v16564, 0.0, 0.0])) + (Lanes([0.0, v16565[0], v16565[1]]));
                 let v16569 = v9782 * v4219;
                 let v4235 = v4209 + (v4219 * v92);
                 let v4236 = v96.powf(v712);
@@ -9508,18 +9231,16 @@ impl Instance {
                 let v4246 = v4211 - (v4244 * v0);
                 let v16591 = (((v10286 * v0) * v10982) * v4227) + (v10285 * v4246);
                 let v4248 = v4235 - (v4246 * v4227);
-                let v16594 = (Lanes([v16569[0], 0.0, 0.0])) - (Lanes([0.0, v16591[0], v16591[1]]));
+                let v16594 = (Lanes([v16569, 0.0, 0.0])) - (Lanes([0.0, v16591[0], v16591[1]]));
                 let v4249 = v437 * v4233;
                 let v4250 = v4249 * v90;
-                let v16597 = v10854 * v4249;
-                let v16599 = ((v16568 * v437) * v90) + (Lanes([v16597[0], 0.0, 0.0]));
+                let v16599 = ((v16568 * v437) * v90) + (Lanes([(v10854 * v4249), 0.0, 0.0]));
                 let v4251 = v187 * v4250;
-                let v16600 = v10884 * v4250;
-                let v16603 = (Lanes([v16600[0], 0.0, 0.0])) + (v16599 * v187);
+                let v16603 = (Lanes([(v10884 * v4250), 0.0, 0.0])) + (v16599 * v187);
                 let v4253 = (v748 * v4229) / v437;
                 let v16605 = (v16560 * v748) / v437;
                 let v4254 = v4248 - v4253;
-                let v16607 = v16594 - (Lanes([v16605[0], 0.0, 0.0]));
+                let v16607 = v16594 - (Lanes([v16605, 0.0, 0.0]));
                 let v4270: f64;
                 let v10287: Lanes<4>;
                 if v344 != 0.0 {
@@ -9542,8 +9263,7 @@ impl Instance {
                 }
                 let v16629 = Lanes([0.0, v16607[0], 0.0, v16607[1], v16607[2]]);
                 let v4272 = (v4270 - v4254) / v4229;
-                let v16631 = v16560 * v4272;
-                let v16634 = (((Lanes([v10287[0], 0.0, v10287[1], v10287[2], v10287[3]])) - v16629) - (Lanes([0.0, v16631[0], 0.0, 0.0, 0.0]))) / v4229;
+                let v16634 = (((Lanes([v10287[0], 0.0, v10287[1], v10287[2], v10287[3]])) - v16629) - (Lanes([0.0, (v16560 * v4272), 0.0, 0.0, 0.0]))) / v4229;
                 let v4273 = if v4272 > v407 { 1.0 } else { 0.0 };
                 let v4297: f64;
                 let v10288: Lanes<5>;
@@ -9591,11 +9311,10 @@ impl Instance {
                 let v4295 = v748 * v57;
                 let v4296 = v4295 * v4229;
                 let v16659 = v16560 * v4295;
-                let v16660 = v16659 * v4297;
                 let v16664 = Lanes([0.0, v16594[0], 0.0, v16594[1], v16594[2]]);
                 let v4302 = (v4294 - (v4248 - (v4296 * v4297))) / v4250;
                 let v16668 = v16599 * v4302;
-                let v16671 = (((Lanes([v10290[0], 0.0, v10290[1], v10290[2], v10290[3]])) - (v16664 - ((Lanes([0.0, v16660[0], 0.0, 0.0, 0.0])) + (v10288 * v4296)))) - (Lanes([0.0, v16668[0], 0.0, v16668[1], v16668[2]]))) / v4250;
+                let v16671 = (((Lanes([v10290[0], 0.0, v10290[1], v10290[2], v10290[3]])) - (v16664 - ((Lanes([0.0, (v16659 * v4297), 0.0, 0.0, 0.0])) + (v10288 * v4296)))) - (Lanes([0.0, v16668[0], 0.0, v16668[1], v16668[2]]))) / v4250;
                 let v4303 = if v4302 > v407 { 1.0 } else { 0.0 };
                 let v4313: f64;
                 let v10291: Lanes<5>;
@@ -9630,36 +9349,30 @@ impl Instance {
                     v10291 = v10292;
                 }
                 let v4316 = (v4217 * v4313) / v187;
-                let v16689 = v10884 * v4316;
                 let v4317 = v6 + v4316;
                 let v4318 = v4236 * v4317;
-                let v16693 = v16573 * v4317;
                 let v4319 = v4215 / v4318;
-                let v16699 = ((((Lanes([0.0, v16693[0], 0.0, 0.0, 0.0])) + ((((v10291 * v4217) - (Lanes([0.0, v16689[0], 0.0, 0.0, 0.0]))) / v187) * v4236)) * v4319) * v10982) / v4318;
+                let v16699 = ((((Lanes([0.0, (v16573 * v4317), 0.0, 0.0, 0.0])) + ((((v10291 * v4217) - (Lanes([0.0, (v10884 * v4316), 0.0, 0.0, 0.0]))) / v187) * v4236)) * v4319) * v10982) / v4318;
                 let v4323 = v6 + (v713 * v47);
                 let v4324 = (v6 + (v713 * v4)) / v4323;
                 let v4325 = v4214 * v4324;
                 let v16704 = ((((v9782 * v713) * v4324) * v10982) / v4323) * v4214;
                 let v4328 = v6 + ((v714 * v4227) / v4202);
-                let v16707 = v16704 * v4328;
                 let v16708 = ((v10285 * v714) / v4202) * v4325;
-                let v16711 = (Lanes([v16707[0], 0.0, 0.0])) + (Lanes([0.0, v16708[0], v16708[1]]));
+                let v16711 = (Lanes([(v16704 * v4328), 0.0, 0.0])) + (Lanes([0.0, v16708[0], v16708[1]]));
                 let v4331 = (v4218 * v4313) / v187;
-                let v16713 = v10884 * v4331;
                 let v4332 = v6 + v4331;
                 let v4333 = (v4325 * v4328) / v4332;
-                let v16720 = ((Lanes([0.0, v16711[0], 0.0, v16711[1], v16711[2]])) - ((((v10291 * v4218) - (Lanes([0.0, v16713[0], 0.0, 0.0, 0.0]))) / v187) * v4333)) / v4332;
+                let v16720 = ((Lanes([0.0, v16711[0], 0.0, v16711[1], v16711[2]])) - ((((v10291 * v4218) - (Lanes([0.0, (v10884 * v4331), 0.0, 0.0, 0.0]))) / v187) * v4333)) / v4332;
                 let v4334 = v437 * v4297;
                 let v4335 = v4334 * v90;
-                let v16723 = v10854 * v4334;
                 let v4338 = v6 - v4297;
                 let v16730 = v10288 * v10982;
                 let v4340 = ((v4335 * v4319) / v4202) + (v4338 * v4333);
-                let v16734 = ((((((v10288 * v437) * v90) + (Lanes([0.0, v16723[0], 0.0, 0.0, 0.0]))) * v4319) + (v16699 * v4335)) / v4202) + ((v16730 * v4333) + (v16720 * v4338));
+                let v16734 = ((((((v10288 * v437) * v90) + (Lanes([0.0, (v10854 * v4334), 0.0, 0.0, 0.0]))) * v4319) + (v16699 * v4335)) / v4202) + ((v16730 * v4333) + (v16720 * v4338));
                 let v4342 = (v4333 * v4202) / v4319;
                 let v16738 = ((v16720 * v4202) - (v16699 * v4342)) / v4319;
                 let v4344 = (v437 * v4313) / v187;
-                let v16740 = v10884 * v4344;
                 let v4345 = v4344 / v4342;
                 let v4347 = (v6 + v4345).sqrt();
                 let v4349 = (v4342 * v4347) - v4342;
@@ -9669,7 +9382,7 @@ impl Instance {
                 let v4352 = (v4342 * v4338) + v4351;
                 let v16761 = ((v16738 * v4338) + (v16730 * v4342)) + v16760;
                 let v4354 = (v4349 * v4338) + v4351;
-                let v16765 = (((((v16738 * v4347) + (((((((v10291 * v437) - (Lanes([0.0, v16740[0], 0.0, 0.0, 0.0]))) / v187) - (v16738 * v4345)) / v4342) * (v9751 / (v10962 * v4347))) * v4342)) - v16738) * v4338) + (v16730 * v4349)) + v16760;
+                let v16765 = (((((v16738 * v4347) + (((((((v10291 * v437) - (Lanes([0.0, (v10884 * v4344), 0.0, 0.0, 0.0]))) / v187) - (v16738 * v4345)) / v4342) * (v9751 / (v10962 * v4347))) * v4342)) - v16738) * v4338) + (v16730 * v4349)) + v16760;
                 let v4355 = v616 / v4354;
                 let v16767 = Lanes([0.0, 0.0, 0.0, v11269[0], v11269[1]]);
                 let v16769 = (v16767 - (v16765 * v4355)) / v4354;
@@ -9735,8 +9448,7 @@ impl Instance {
                 let v16838 = (Lanes([0.0, 0.0, 0.0, v16835[0], v16835[1]])) + ((((((v10294 * (v4216 * (v4391.powf(v16788)))) * (v4372 * (v4393.powf(v16792)))) * v4395) * v10982) / v4394) * v4376);
                 let v16839 = Lanes([v9876[0], 0.0, v9876[1], 0.0, v9876[2]]);
                 let v4398 = (v4204 - v4254) / v4229;
-                let v16841 = v16560 * v4398;
-                let v16844 = ((v16839 - v16629) - (Lanes([0.0, v16841[0], 0.0, 0.0, 0.0]))) / v4229;
+                let v16844 = ((v16839 - v16629) - (Lanes([0.0, (v16560 * v4398), 0.0, 0.0, 0.0]))) / v4229;
                 let v4399 = if v4398 > v407 { 1.0 } else { 0.0 };
                 let v4406: f64;
                 let v10295: Lanes<5>;
@@ -9762,10 +9474,9 @@ impl Instance {
                     v10295 = v10296;
                 }
                 let v16849 = Lanes([v16559[0], 0.0, v16559[1], v16559[2], v16559[3]]);
-                let v16851 = v16659 * v4406;
                 let v4411 = ((v4228 - v4396) - (v4248 - (v4296 * v4406))) / v4250;
                 let v16857 = v16599 * v4411;
-                let v16860 = (((v16849 - v16838) - (v16664 - ((Lanes([0.0, v16851[0], 0.0, 0.0, 0.0])) + (v10295 * v4296)))) - (Lanes([0.0, v16857[0], 0.0, v16857[1], v16857[2]]))) / v4250;
+                let v16860 = (((v16849 - v16838) - (v16664 - ((Lanes([0.0, (v16659 * v4406), 0.0, 0.0, 0.0])) + (v10295 * v4296)))) - (Lanes([0.0, v16857[0], 0.0, v16857[1], v16857[2]]))) / v4250;
                 let v4412 = if v4411 > v407 { 1.0 } else { 0.0 };
                 let v4447: f64;
                 let v10297: Lanes<5>;
@@ -9800,8 +9511,7 @@ impl Instance {
                     v10297 = v10298;
                 }
                 let v4423 = (v4228 - v4254) / v4229;
-                let v16878 = v16560 * v4423;
-                let v16881 = ((v16849 - v16629) - (Lanes([0.0, v16878[0], 0.0, 0.0, 0.0]))) / v4229;
+                let v16881 = ((v16849 - v16629) - (Lanes([0.0, (v16560 * v4423), 0.0, 0.0, 0.0]))) / v4229;
                 let v4424 = if v4423 > v407 { 1.0 } else { 0.0 };
                 let v4431: f64;
                 let v10299: Lanes<5>;
@@ -9826,10 +9536,9 @@ impl Instance {
                     v4431 = v4432;
                     v10299 = v10300;
                 }
-                let v16887 = v16659 * v4431;
                 let v4436 = ((v4204 - v4375) - (v4248 - (v4296 * v4431))) / v4250;
                 let v16893 = v16599 * v4436;
-                let v16896 = (((v16839 - v16802) - (v16664 - ((Lanes([0.0, v16887[0], 0.0, 0.0, 0.0])) + (v10299 * v4296)))) - (Lanes([0.0, v16893[0], 0.0, v16893[1], v16893[2]]))) / v4250;
+                let v16896 = (((v16839 - v16802) - (v16664 - ((Lanes([0.0, (v16659 * v4431), 0.0, 0.0, 0.0])) + (v10299 * v4296)))) - (Lanes([0.0, v16893[0], 0.0, v16893[1], v16893[2]]))) / v4250;
                 let v4437 = if v4436 > v407 { 1.0 } else { 0.0 };
                 let v4449: f64;
                 let v10301: Lanes<5>;
@@ -9864,9 +9573,8 @@ impl Instance {
                     v10301 = v10302;
                 }
                 let v4452 = (v4447 - v4449) / v187;
-                let v16914 = v10884 * v4452;
                 let v4453 = v4452 / v4352;
-                let v16920 = ((((v10297 - v10301) - (Lanes([0.0, v16914[0], 0.0, 0.0, 0.0]))) / v187) - (v16761 * v4453)) / v4352;
+                let v16920 = ((((v10297 - v10301) - (Lanes([0.0, (v10884 * v4452), 0.0, 0.0, 0.0]))) / v187) - (v16761 * v4453)) / v4352;
                 let v4461: f64;
                 let v10303: Lanes<5>;
                 if v344 != 0.0 {
@@ -9918,10 +9626,9 @@ impl Instance {
                     v4492 = v4491;
                     v10304 = v16968;
                 }
-                let v16979 = Lanes([0.0, v16957[0], 0.0, 0.0, 0.0]);
+                let v16979 = Lanes([0.0, v16957, 0.0, 0.0, 0.0]);
                 let v4494 = (v4492 - v4476) / v4229;
-                let v16981 = v16560 * v4494;
-                let v16984 = (((Lanes([v10304[0], 0.0, v10304[1], v10304[2], v10304[3]])) - v16979) - (Lanes([0.0, v16981[0], 0.0, 0.0, 0.0]))) / v4229;
+                let v16984 = (((Lanes([v10304[0], 0.0, v10304[1], v10304[2], v10304[3]])) - v16979) - (Lanes([0.0, (v16560 * v4494), 0.0, 0.0, 0.0]))) / v4229;
                 let v4495 = if v4494 > v407 { 1.0 } else { 0.0 };
                 let v4517: f64;
                 let v10305: Lanes<5>;
@@ -9966,18 +9673,15 @@ impl Instance {
                     v4516 = v4515;
                     v10307 = v16999;
                 }
-                let v17009 = v16659 * v4517;
-                let v17013 = Lanes([0.0, v16569[0], 0.0, 0.0, 0.0]);
+                let v17013 = Lanes([0.0, v16569, 0.0, 0.0, 0.0]);
                 let v4522 = (v4516 - (v4235 - (v4296 * v4517))) / v4474;
-                let v17017 = v16953 * v4522;
-                let v17020 = (((Lanes([v10307[0], 0.0, v10307[1], v10307[2], v10307[3]])) - (v17013 - ((Lanes([0.0, v17009[0], 0.0, 0.0, 0.0])) + (v10305 * v4296)))) - (Lanes([0.0, v17017[0], 0.0, 0.0, 0.0]))) / v4474;
+                let v17020 = (((Lanes([v10307[0], 0.0, v10307[1], v10307[2], v10307[3]])) - (v17013 - ((Lanes([0.0, (v16659 * v4517), 0.0, 0.0, 0.0])) + (v10305 * v4296)))) - (Lanes([0.0, (v16953 * v4522), 0.0, 0.0, 0.0]))) / v4474;
                 let v4523 = if v4522 > v407 { 1.0 } else { 0.0 };
                 let v4536: f64;
                 let v10308: Lanes<5>;
                 if v4523 != 0.0 {
                     let v4524 = v4475 * v4522;
-                    let v17033 = v16956 * v4522;
-                    let v17036 = (Lanes([0.0, v17033[0], 0.0, 0.0, 0.0])) + (v17020 * v4475);
+                    let v17036 = (Lanes([0.0, (v16956 * v4522), 0.0, 0.0, 0.0])) + (v17020 * v4475);
                     v4536 = v4524;
                     v10308 = v17036;
                 } else {
@@ -9987,8 +9691,7 @@ impl Instance {
                     if v4526 != 0.0 {
                         let v4527 = v4522.exp();
                         let v4528 = v4475 * v4527;
-                        let v17029 = v16956 * v4527;
-                        let v17032 = (Lanes([0.0, v17029[0], 0.0, 0.0, 0.0])) + ((v17020 * v4527) * v4475);
+                        let v17032 = (Lanes([0.0, (v16956 * v4527), 0.0, 0.0, 0.0])) + ((v17020 * v4527) * v4475);
                         v4537 = v4528;
                         v10309 = v17032;
                     } else {
@@ -9996,8 +9699,7 @@ impl Instance {
                         let v4530 = v6 + v4529;
                         let v4531 = v4530.ln();
                         let v4532 = v4475 * v4531;
-                        let v17024 = v16956 * v4531;
-                        let v17027 = (Lanes([0.0, v17024[0], 0.0, 0.0, 0.0])) + (((v17020 * v4529) * (v9751 / v4530)) * v4475);
+                        let v17027 = (Lanes([0.0, (v16956 * v4531), 0.0, 0.0, 0.0])) + (((v17020 * v4529) * (v9751 / v4530)) * v4475);
                         v4537 = v4532;
                         v10309 = v17027;
                     }
@@ -10008,16 +9710,12 @@ impl Instance {
                 let v4535 = (v4325 * v4202) / v4533;
                 let v17043 = ((v16704 * v4202) - ((((v16573 * v4533) * v10982) / v4236) * v4535)) / v4533;
                 let v4539 = (v437 * v4536) / v187;
-                let v17045 = v10884 * v4539;
                 let v4540 = v4539 / v4535;
-                let v17049 = v17043 * v4540;
                 let v4542 = (v6 + v4540).sqrt();
-                let v17056 = v17043 * v4542;
                 let v4544 = (v4535 * v4542) - v4535;
                 let v4545 = v6 - v4517;
-                let v17066 = v16953 * v4517;
                 let v4548 = (v4544 * v4545) + (v4474 * v4517);
-                let v17070 = (((((Lanes([0.0, v17056[0], 0.0, 0.0, 0.0])) + (((((((v10308 * v437) - (Lanes([0.0, v17045[0], 0.0, 0.0, 0.0]))) / v187) - (Lanes([0.0, v17049[0], 0.0, 0.0, 0.0]))) / v4535) * (v9751 / (v10962 * v4542))) * v4535)) - (Lanes([0.0, v17043[0], 0.0, 0.0, 0.0]))) * v4545) + ((v10305 * v10982) * v4544)) + ((Lanes([0.0, v17066[0], 0.0, 0.0, 0.0])) + (v10305 * v4474));
+                let v17070 = (((((Lanes([0.0, (v17043 * v4542), 0.0, 0.0, 0.0])) + (((((((v10308 * v437) - (Lanes([0.0, (v10884 * v4539), 0.0, 0.0, 0.0]))) / v187) - (Lanes([0.0, (v17043 * v4540), 0.0, 0.0, 0.0]))) / v4535) * (v9751 / (v10962 * v4542))) * v4535)) - (Lanes([0.0, v17043, 0.0, 0.0, 0.0]))) * v4545) + ((v10305 * v10982) * v4544)) + ((Lanes([0.0, (v16953 * v4517), 0.0, 0.0, 0.0])) + (v10305 * v4474));
                 let v4549 = v616 / v4548;
                 let v17073 = (v16767 - (v17070 * v4549)) / v4548;
                 let v4563: f64;
@@ -10076,8 +9774,7 @@ impl Instance {
                 let v17138 = (Lanes([0.0, 0.0, 0.0, v17135[0], v17135[1]])) + ((((((v10311 * (v4216 * (v4583.powf(v16788)))) * (v4372 * (v4585.powf(v16792)))) * v4587) * v10982) / v4586) * v4376);
                 let v17139 = Lanes([v9876[0], 0.0, v9876[1], v9876[2]]);
                 let v4590 = (v4204 - v4476) / v4229;
-                let v17142 = v16560 * v4590;
-                let v17145 = ((v17139 - (Lanes([0.0, v16957[0], 0.0, 0.0]))) - (Lanes([0.0, v17142[0], 0.0, 0.0]))) / v4229;
+                let v17145 = ((v17139 - (Lanes([0.0, v16957, 0.0, 0.0]))) - (Lanes([0.0, (v16560 * v4590), 0.0, 0.0]))) / v4229;
                 let v4591 = if v4590 > v407 { 1.0 } else { 0.0 };
                 let v4598: f64;
                 let v10312: Lanes<4>;
@@ -10102,18 +9799,15 @@ impl Instance {
                     v4598 = v4599;
                     v10312 = v10313;
                 }
-                let v17151 = v16659 * v4598;
-                let v17156 = (Lanes([0.0, v16569[0], 0.0, 0.0])) - ((Lanes([0.0, v17151[0], 0.0, 0.0])) + (v10312 * v4296));
+                let v17156 = (Lanes([0.0, v16569, 0.0, 0.0])) - ((Lanes([0.0, (v16659 * v4598), 0.0, 0.0])) + (v10312 * v4296));
                 let v4603 = ((v4228 - v4588) - (v4235 - (v4296 * v4598))) / v4474;
-                let v17159 = v16953 * v4603;
-                let v17162 = (((v16849 - v17138) - (Lanes([v17156[0], v17156[1], v17156[2], 0.0, v17156[3]]))) - (Lanes([0.0, v17159[0], 0.0, 0.0, 0.0]))) / v4474;
+                let v17162 = (((v16849 - v17138) - (Lanes([v17156[0], v17156[1], v17156[2], 0.0, v17156[3]]))) - (Lanes([0.0, (v16953 * v4603), 0.0, 0.0, 0.0]))) / v4474;
                 let v4604 = if v4603 > v407 { 1.0 } else { 0.0 };
                 let v4639: f64;
                 let v10314: Lanes<5>;
                 if v4604 != 0.0 {
                     let v4605 = v4475 * v4603;
-                    let v17175 = v16956 * v4603;
-                    let v17178 = (Lanes([0.0, v17175[0], 0.0, 0.0, 0.0])) + (v17162 * v4475);
+                    let v17178 = (Lanes([0.0, (v16956 * v4603), 0.0, 0.0, 0.0])) + (v17162 * v4475);
                     v4639 = v4605;
                     v10314 = v17178;
                 } else {
@@ -10123,8 +9817,7 @@ impl Instance {
                     if v4607 != 0.0 {
                         let v4608 = v4603.exp();
                         let v4609 = v4475 * v4608;
-                        let v17171 = v16956 * v4608;
-                        let v17174 = (Lanes([0.0, v17171[0], 0.0, 0.0, 0.0])) + ((v17162 * v4608) * v4475);
+                        let v17174 = (Lanes([0.0, (v16956 * v4608), 0.0, 0.0, 0.0])) + ((v17162 * v4608) * v4475);
                         v4640 = v4609;
                         v10315 = v17174;
                     } else {
@@ -10132,8 +9825,7 @@ impl Instance {
                         let v4611 = v6 + v4610;
                         let v4612 = v4611.ln();
                         let v4613 = v4475 * v4612;
-                        let v17166 = v16956 * v4612;
-                        let v17169 = (Lanes([0.0, v17166[0], 0.0, 0.0, 0.0])) + (((v17162 * v4610) * (v9751 / v4611)) * v4475);
+                        let v17169 = (Lanes([0.0, (v16956 * v4612), 0.0, 0.0, 0.0])) + (((v17162 * v4610) * (v9751 / v4611)) * v4475);
                         v4640 = v4613;
                         v10315 = v17169;
                     }
@@ -10141,8 +9833,7 @@ impl Instance {
                     v10314 = v10315;
                 }
                 let v4615 = (v4228 - v4476) / v4229;
-                let v17180 = v16560 * v4615;
-                let v17183 = ((v16849 - v16979) - (Lanes([0.0, v17180[0], 0.0, 0.0, 0.0]))) / v4229;
+                let v17183 = ((v16849 - v16979) - (Lanes([0.0, (v16560 * v4615), 0.0, 0.0, 0.0]))) / v4229;
                 let v4616 = if v4615 > v407 { 1.0 } else { 0.0 };
                 let v4623: f64;
                 let v10316: Lanes<5>;
@@ -10167,17 +9858,14 @@ impl Instance {
                     v4623 = v4624;
                     v10316 = v10317;
                 }
-                let v17189 = v16659 * v4623;
                 let v4628 = ((v4204 - v4568) - (v4235 - (v4296 * v4623))) / v4474;
-                let v17195 = v16953 * v4628;
-                let v17198 = (((v16839 - v17104) - (v17013 - ((Lanes([0.0, v17189[0], 0.0, 0.0, 0.0])) + (v10316 * v4296)))) - (Lanes([0.0, v17195[0], 0.0, 0.0, 0.0]))) / v4474;
+                let v17198 = (((v16839 - v17104) - (v17013 - ((Lanes([0.0, (v16659 * v4623), 0.0, 0.0, 0.0])) + (v10316 * v4296)))) - (Lanes([0.0, (v16953 * v4628), 0.0, 0.0, 0.0]))) / v4474;
                 let v4629 = if v4628 > v407 { 1.0 } else { 0.0 };
                 let v4645: f64;
                 let v10318: Lanes<5>;
                 if v4629 != 0.0 {
                     let v4630 = v4475 * v4628;
-                    let v17211 = v16956 * v4628;
-                    let v17214 = (Lanes([0.0, v17211[0], 0.0, 0.0, 0.0])) + (v17198 * v4475);
+                    let v17214 = (Lanes([0.0, (v16956 * v4628), 0.0, 0.0, 0.0])) + (v17198 * v4475);
                     v4645 = v4630;
                     v10318 = v17214;
                 } else {
@@ -10187,8 +9875,7 @@ impl Instance {
                     if v4632 != 0.0 {
                         let v4633 = v4628.exp();
                         let v4634 = v4475 * v4633;
-                        let v17207 = v16956 * v4633;
-                        let v17210 = (Lanes([0.0, v17207[0], 0.0, 0.0, 0.0])) + ((v17198 * v4633) * v4475);
+                        let v17210 = (Lanes([0.0, (v16956 * v4633), 0.0, 0.0, 0.0])) + ((v17198 * v4633) * v4475);
                         v4646 = v4634;
                         v10319 = v17210;
                     } else {
@@ -10196,8 +9883,7 @@ impl Instance {
                         let v4636 = v6 + v4635;
                         let v4637 = v4636.ln();
                         let v4638 = v4475 * v4637;
-                        let v17202 = v16956 * v4637;
-                        let v17205 = (Lanes([0.0, v17202[0], 0.0, 0.0, 0.0])) + (((v17198 * v4635) * (v9751 / v4636)) * v4475);
+                        let v17205 = (Lanes([0.0, (v16956 * v4637), 0.0, 0.0, 0.0])) + (((v17198 * v4635) * (v9751 / v4636)) * v4475);
                         v4646 = v4638;
                         v10319 = v17205;
                     }
@@ -10237,8 +9923,7 @@ impl Instance {
                     let v4683 = v4235 - (v4681 * v4229);
                     let v17259 = v16569 - (v16560 * v4681);
                     let v4685 = (v4206 - v4683) / v4474;
-                    let v17263 = v16953 * v4685;
-                    let v17266 = (((Lanes([v9877[0], 0.0, v9877[1], v9877[2]])) - (Lanes([0.0, v17259[0], 0.0, 0.0]))) - (Lanes([0.0, v17263[0], 0.0, 0.0]))) / v4474;
+                    let v17266 = (((Lanes([v9877[0], 0.0, v9877[1], v9877[2]])) - (Lanes([0.0, v17259, 0.0, 0.0]))) - (Lanes([0.0, (v16953 * v4685), 0.0, 0.0]))) / v4474;
                     let v4686 = if v4685 > v407 { 1.0 } else { 0.0 };
                     let v4696: f64;
                     let v10322: Lanes<4>;
@@ -10269,11 +9954,9 @@ impl Instance {
                     let v4694 = v4693 * v215;
                     let v4695 = v4694 * v4474;
                     let v4698 = v4695 * v4696;
-                    let v17275 = (((v10892 * v4693) * v4474) + (v16953 * v4694)) * v4696;
-                    let v17278 = (Lanes([0.0, v17275[0], 0.0, 0.0])) + (v10322 * v4695);
+                    let v17278 = (Lanes([0.0, ((((v10892 * v4693) * v4474) + (v16953 * v4694)) * v4696), 0.0, 0.0])) + (v10322 * v4695);
                     let v4700 = (v618 - v4683) / v4474;
-                    let v17282 = v16953 * v4700;
-                    let v17285 = (((Lanes([v11273[0], 0.0, v11273[1]])) - (Lanes([0.0, v17259[0], 0.0]))) - (Lanes([0.0, v17282[0], 0.0]))) / v4474;
+                    let v17285 = (((Lanes([v11273[0], 0.0, v11273[1]])) - (Lanes([0.0, v17259, 0.0]))) - (Lanes([0.0, (v16953 * v4700), 0.0]))) / v4474;
                     let v4701 = if v4700 > v407 { 1.0 } else { 0.0 };
                     let v4710: f64;
                     let v10324: Lanes<3>;
@@ -10303,8 +9986,7 @@ impl Instance {
                     let v4708 = v4693 * v243;
                     let v4709 = v4708 * v4474;
                     let v4712 = v4709 * v4710;
-                    let v17294 = (((v10900 * v4693) * v4474) + (v16953 * v4708)) * v4710;
-                    let v17297 = (Lanes([0.0, v17294[0], 0.0])) + (v10324 * v4709);
+                    let v17297 = (Lanes([0.0, ((((v10900 * v4693) * v4474) + (v16953 * v4708)) * v4710), 0.0])) + (v10324 * v4709);
                     v4732 = v4698;
                     v4733 = v4712;
                     v10320 = v17278;
@@ -10320,10 +10002,8 @@ impl Instance {
                 let v10326: Lanes<4>;
                 if v4713 != 0.0 {
                     let v4714 = v748 * v358;
-                    let v17299 = v16569 - (v16560 * v4714);
                     let v4718 = (v4204 - (v4235 - (v4714 * v4229))) / v4474;
-                    let v17302 = v16953 * v4718;
-                    let v17305 = ((v17139 - (Lanes([0.0, v17299[0], 0.0, 0.0]))) - (Lanes([0.0, v17302[0], 0.0, 0.0]))) / v4474;
+                    let v17305 = ((v17139 - (Lanes([0.0, (v16569 - (v16560 * v4714)), 0.0, 0.0]))) - (Lanes([0.0, (v16953 * v4718), 0.0, 0.0]))) / v4474;
                     let v4719 = if v4718 > v407 { 1.0 } else { 0.0 };
                     let v4729: f64;
                     let v10327: Lanes<4>;
@@ -10353,8 +10033,7 @@ impl Instance {
                     let v4727 = (v4675 * v335) * v4208;
                     let v4728 = v4727 * v4474;
                     let v4731 = v4728 * v4729;
-                    let v17311 = (v16953 * v4727) * v4729;
-                    let v17314 = (Lanes([0.0, v17311[0], 0.0, 0.0])) + (v10327 * v4728);
+                    let v17314 = (Lanes([0.0, ((v16953 * v4727) * v4729), 0.0, 0.0])) + (v10327 * v4728);
                     v4734 = v4731;
                     v10326 = v17314;
                 } else {
@@ -10429,21 +10108,21 @@ impl Instance {
             let v10342: Lanes<4>;
             if v605 != 0.0 {
                 let v4741 = v1243 * (v574 - v606);
-                let v17353 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9775[0]]))) * v1243;
+                let v17353 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9775]))) * v1243;
                 let v17354 = v17353 * v11018;
                 let v4743 = (ddt(62238, v4738)) + (ddt(62242, v4741));
                 let v17356 = (v10278 * v11018) + (Lanes([0.0, 0.0, v17354[0], 0.0, v17354[1]]));
                 let v9713 = v4738 + v4741;
                 let v17358 = v10278 + (Lanes([0.0, 0.0, v17353[0], 0.0, v17353[1]]));
                 let v4747 = v1243 * (v574 - v591);
-                let v17363 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9774[0]]))) * v1243;
+                let v17363 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9774]))) * v1243;
                 let v17364 = v17363 * v11018;
                 let v4749 = (ddt(62245, v4744)) + (ddt(62249, v4747));
                 let v17366 = (v10279 * v11018) + (Lanes([0.0, 0.0, v17364[0], v17364[1], 0.0]));
                 let v9715 = v4744 + v4747;
                 let v17368 = v10279 + (Lanes([0.0, 0.0, v17363[0], v17363[1], 0.0]));
                 let v4753 = v1243 * (v349 - v606);
-                let v17373 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9775[0]]))) * v1243;
+                let v17373 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9775]))) * v1243;
                 let v17374 = v17373 * v11018;
                 let v4755 = (ddt(62252, v4750)) + (ddt(62256, v4753));
                 let v17376 = (v10280 * v11018) + (Lanes([v17374[0], 0.0, 0.0, v17374[1]]));
@@ -10451,7 +10130,7 @@ impl Instance {
                 let v17378 = v10280 + (Lanes([v17373[0], 0.0, 0.0, v17373[1]]));
                 let v17379 = v10281 * v11018;
                 let v4760 = v1243 * (v574 - v337);
-                let v17383 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9754[0]]))) * v1243;
+                let v17383 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9754]))) * v1243;
                 let v17384 = v17383 * v11018;
                 let v4762 = (ddt(62260, v4757)) + (ddt(62264, v4760));
                 let v17387 = (Lanes([v17379[0], v17379[1], v17379[2], 0.0, v17379[3]])) + (Lanes([0.0, 0.0, v17384[0], v17384[1], 0.0]));
@@ -10490,21 +10169,21 @@ impl Instance {
                 v10342 = v16543;
             } else {
                 let v4765 = v1243 * (v349 - v606);
-                let v17322 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9775[0]]))) * v1243;
+                let v17322 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9775]))) * v1243;
                 let v17323 = v17322 * v11018;
                 let v4767 = (ddt(62267, v4738)) + (ddt(62271, v4765));
                 let v17325 = (v10278 * v11018) + (Lanes([v17323[0], 0.0, 0.0, 0.0, v17323[1]]));
                 let v9721 = v4738 + v4765;
                 let v17327 = v10278 + (Lanes([v17322[0], 0.0, 0.0, 0.0, v17322[1]]));
                 let v4770 = v1243 * (v349 - v591);
-                let v17332 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9774[0]]))) * v1243;
+                let v17332 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9774]))) * v1243;
                 let v17333 = v17332 * v11018;
                 let v4772 = (ddt(62274, v4744)) + (ddt(62278, v4770));
                 let v17335 = (v10279 * v11018) + (Lanes([v17333[0], 0.0, 0.0, v17333[1], 0.0]));
                 let v9723 = v4744 + v4770;
                 let v17337 = v10279 + (Lanes([v17332[0], 0.0, 0.0, v17332[1], 0.0]));
                 let v4775 = v1243 * (v574 - v606);
-                let v17342 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9775[0]]))) * v1243;
+                let v17342 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9775]))) * v1243;
                 let v17343 = v17342 * v11018;
                 let v4777 = (ddt(62281, v4750)) + (ddt(62285, v4775));
                 let v17345 = (v10280 * v11018) + (Lanes([0.0, 0.0, v17343[0], v17343[1]]));
@@ -10592,7 +10271,7 @@ impl Instance {
                 let v17420 = (((v10854 * v725) * v4814) * v10982) / v4813;
                 let v17421 = v10350 * v4795;
                 let v4816 = v4814 + (v4795 * v4810);
-                let v17424 = (Lanes([v17420[0], 0.0, 0.0])) + (Lanes([0.0, v17421[0], v17421[1]]));
+                let v17424 = (Lanes([v17420, 0.0, 0.0])) + (Lanes([0.0, v17421[0], v17421[1]]));
                 let v17425 = v9782 * v4802;
                 let v4818 = v4792 + (v4802 * v92);
                 let v4819 = v96.powf(v712);
@@ -10616,18 +10295,16 @@ impl Instance {
                 let v4829 = v4794 - (v4827 * v0);
                 let v17447 = (((v10351 * v0) * v10982) * v4810) + (v10350 * v4829);
                 let v4831 = v4818 - (v4829 * v4810);
-                let v17450 = (Lanes([v17425[0], 0.0, 0.0])) - (Lanes([0.0, v17447[0], v17447[1]]));
+                let v17450 = (Lanes([v17425, 0.0, 0.0])) - (Lanes([0.0, v17447[0], v17447[1]]));
                 let v4832 = v437 * v4816;
                 let v4833 = v4832 * v90;
-                let v17453 = v10854 * v4832;
-                let v17455 = ((v17424 * v437) * v90) + (Lanes([v17453[0], 0.0, 0.0]));
+                let v17455 = ((v17424 * v437) * v90) + (Lanes([(v10854 * v4832), 0.0, 0.0]));
                 let v4834 = v194 * v4833;
-                let v17456 = v10886 * v4833;
-                let v17459 = (Lanes([v17456[0], 0.0, 0.0])) + (v17455 * v194);
+                let v17459 = (Lanes([(v10886 * v4833), 0.0, 0.0])) + (v17455 * v194);
                 let v4836 = (v748 * v4812) / v437;
                 let v17461 = (v17416 * v748) / v437;
                 let v4837 = v4831 - v4836;
-                let v17463 = v17450 - (Lanes([v17461[0], 0.0, 0.0]));
+                let v17463 = v17450 - (Lanes([v17461, 0.0, 0.0]));
                 let v4853: f64;
                 let v10352: Lanes<4>;
                 if v344 != 0.0 {
@@ -10650,8 +10327,7 @@ impl Instance {
                 }
                 let v17485 = Lanes([0.0, v17463[0], 0.0, v17463[1], v17463[2]]);
                 let v4855 = (v4853 - v4837) / v4812;
-                let v17487 = v17416 * v4855;
-                let v17490 = (((Lanes([v10352[0], 0.0, v10352[1], v10352[2], v10352[3]])) - v17485) - (Lanes([0.0, v17487[0], 0.0, 0.0, 0.0]))) / v4812;
+                let v17490 = (((Lanes([v10352[0], 0.0, v10352[1], v10352[2], v10352[3]])) - v17485) - (Lanes([0.0, (v17416 * v4855), 0.0, 0.0, 0.0]))) / v4812;
                 let v4856 = if v4855 > v407 { 1.0 } else { 0.0 };
                 let v4880: f64;
                 let v10353: Lanes<5>;
@@ -10699,11 +10375,10 @@ impl Instance {
                 let v4878 = v748 * v57;
                 let v4879 = v4878 * v4812;
                 let v17515 = v17416 * v4878;
-                let v17516 = v17515 * v4880;
                 let v17520 = Lanes([0.0, v17450[0], 0.0, v17450[1], v17450[2]]);
                 let v4885 = (v4877 - (v4831 - (v4879 * v4880))) / v4833;
                 let v17524 = v17455 * v4885;
-                let v17527 = (((Lanes([v10355[0], 0.0, v10355[1], v10355[2], v10355[3]])) - (v17520 - ((Lanes([0.0, v17516[0], 0.0, 0.0, 0.0])) + (v10353 * v4879)))) - (Lanes([0.0, v17524[0], 0.0, v17524[1], v17524[2]]))) / v4833;
+                let v17527 = (((Lanes([v10355[0], 0.0, v10355[1], v10355[2], v10355[3]])) - (v17520 - ((Lanes([0.0, (v17515 * v4880), 0.0, 0.0, 0.0])) + (v10353 * v4879)))) - (Lanes([0.0, v17524[0], 0.0, v17524[1], v17524[2]]))) / v4833;
                 let v4886 = if v4885 > v407 { 1.0 } else { 0.0 };
                 let v4896: f64;
                 let v10356: Lanes<5>;
@@ -10738,36 +10413,30 @@ impl Instance {
                     v10356 = v10357;
                 }
                 let v4899 = (v4800 * v4896) / v194;
-                let v17545 = v10886 * v4899;
                 let v4900 = v6 + v4899;
                 let v4901 = v4819 * v4900;
-                let v17549 = v17429 * v4900;
                 let v4902 = v4798 / v4901;
-                let v17555 = ((((Lanes([0.0, v17549[0], 0.0, 0.0, 0.0])) + ((((v10356 * v4800) - (Lanes([0.0, v17545[0], 0.0, 0.0, 0.0]))) / v194) * v4819)) * v4902) * v10982) / v4901;
+                let v17555 = ((((Lanes([0.0, (v17429 * v4900), 0.0, 0.0, 0.0])) + ((((v10356 * v4800) - (Lanes([0.0, (v10886 * v4899), 0.0, 0.0, 0.0]))) / v194) * v4819)) * v4902) * v10982) / v4901;
                 let v4906 = v6 + (v713 * v47);
                 let v4907 = (v6 + (v713 * v4)) / v4906;
                 let v4908 = v4797 * v4907;
                 let v17560 = ((((v9782 * v713) * v4907) * v10982) / v4906) * v4797;
                 let v4911 = v6 + ((v714 * v4810) / v4785);
-                let v17563 = v17560 * v4911;
                 let v17564 = ((v10350 * v714) / v4785) * v4908;
-                let v17567 = (Lanes([v17563[0], 0.0, 0.0])) + (Lanes([0.0, v17564[0], v17564[1]]));
+                let v17567 = (Lanes([(v17560 * v4911), 0.0, 0.0])) + (Lanes([0.0, v17564[0], v17564[1]]));
                 let v4914 = (v4801 * v4896) / v194;
-                let v17569 = v10886 * v4914;
                 let v4915 = v6 + v4914;
                 let v4916 = (v4908 * v4911) / v4915;
-                let v17576 = ((Lanes([0.0, v17567[0], 0.0, v17567[1], v17567[2]])) - ((((v10356 * v4801) - (Lanes([0.0, v17569[0], 0.0, 0.0, 0.0]))) / v194) * v4916)) / v4915;
+                let v17576 = ((Lanes([0.0, v17567[0], 0.0, v17567[1], v17567[2]])) - ((((v10356 * v4801) - (Lanes([0.0, (v10886 * v4914), 0.0, 0.0, 0.0]))) / v194) * v4916)) / v4915;
                 let v4917 = v437 * v4880;
                 let v4918 = v4917 * v90;
-                let v17579 = v10854 * v4917;
                 let v4921 = v6 - v4880;
                 let v17586 = v10353 * v10982;
                 let v4923 = ((v4918 * v4902) / v4785) + (v4921 * v4916);
-                let v17590 = ((((((v10353 * v437) * v90) + (Lanes([0.0, v17579[0], 0.0, 0.0, 0.0]))) * v4902) + (v17555 * v4918)) / v4785) + ((v17586 * v4916) + (v17576 * v4921));
+                let v17590 = ((((((v10353 * v437) * v90) + (Lanes([0.0, (v10854 * v4917), 0.0, 0.0, 0.0]))) * v4902) + (v17555 * v4918)) / v4785) + ((v17586 * v4916) + (v17576 * v4921));
                 let v4925 = (v4916 * v4785) / v4902;
                 let v17594 = ((v17576 * v4785) - (v17555 * v4925)) / v4902;
                 let v4927 = (v437 * v4896) / v194;
-                let v17596 = v10886 * v4927;
                 let v4928 = v4927 / v4925;
                 let v4930 = (v6 + v4928).sqrt();
                 let v4932 = (v4925 * v4930) - v4925;
@@ -10777,7 +10446,7 @@ impl Instance {
                 let v4935 = (v4925 * v4921) + v4934;
                 let v17617 = ((v17594 * v4921) + (v17586 * v4925)) + v17616;
                 let v4937 = (v4932 * v4921) + v4934;
-                let v17621 = (((((v17594 * v4930) + (((((((v10356 * v437) - (Lanes([0.0, v17596[0], 0.0, 0.0, 0.0]))) / v194) - (v17594 * v4928)) / v4925) * (v9751 / (v10962 * v4930))) * v4925)) - v17594) * v4921) + (v17586 * v4932)) + v17616;
+                let v17621 = (((((v17594 * v4930) + (((((((v10356 * v437) - (Lanes([0.0, (v10886 * v4927), 0.0, 0.0, 0.0]))) / v194) - (v17594 * v4928)) / v4925) * (v9751 / (v10962 * v4930))) * v4925)) - v17594) * v4921) + (v17586 * v4932)) + v17616;
                 let v4938 = v630 / v4937;
                 let v17623 = Lanes([0.0, 0.0, 0.0, v11297[0], v11297[1]]);
                 let v17625 = (v17623 - (v17621 * v4938)) / v4937;
@@ -10843,8 +10512,7 @@ impl Instance {
                 let v17694 = (Lanes([0.0, 0.0, 0.0, v17691[0], v17691[1]])) + ((((((v10359 * (v4799 * (v4974.powf(v17644)))) * (v4955 * (v4976.powf(v17648)))) * v4978) * v10982) / v4977) * v4959);
                 let v17695 = Lanes([v9878[0], 0.0, v9878[1], 0.0, v9878[2]]);
                 let v4981 = (v4787 - v4837) / v4812;
-                let v17697 = v17416 * v4981;
-                let v17700 = ((v17695 - v17485) - (Lanes([0.0, v17697[0], 0.0, 0.0, 0.0]))) / v4812;
+                let v17700 = ((v17695 - v17485) - (Lanes([0.0, (v17416 * v4981), 0.0, 0.0, 0.0]))) / v4812;
                 let v4982 = if v4981 > v407 { 1.0 } else { 0.0 };
                 let v4989: f64;
                 let v10360: Lanes<5>;
@@ -10870,10 +10538,9 @@ impl Instance {
                     v10360 = v10361;
                 }
                 let v17705 = Lanes([v17415[0], 0.0, v17415[1], v17415[2], v17415[3]]);
-                let v17707 = v17515 * v4989;
                 let v4994 = ((v4811 - v4979) - (v4831 - (v4879 * v4989))) / v4833;
                 let v17713 = v17455 * v4994;
-                let v17716 = (((v17705 - v17694) - (v17520 - ((Lanes([0.0, v17707[0], 0.0, 0.0, 0.0])) + (v10360 * v4879)))) - (Lanes([0.0, v17713[0], 0.0, v17713[1], v17713[2]]))) / v4833;
+                let v17716 = (((v17705 - v17694) - (v17520 - ((Lanes([0.0, (v17515 * v4989), 0.0, 0.0, 0.0])) + (v10360 * v4879)))) - (Lanes([0.0, v17713[0], 0.0, v17713[1], v17713[2]]))) / v4833;
                 let v4995 = if v4994 > v407 { 1.0 } else { 0.0 };
                 let v5030: f64;
                 let v10362: Lanes<5>;
@@ -10908,8 +10575,7 @@ impl Instance {
                     v10362 = v10363;
                 }
                 let v5006 = (v4811 - v4837) / v4812;
-                let v17734 = v17416 * v5006;
-                let v17737 = ((v17705 - v17485) - (Lanes([0.0, v17734[0], 0.0, 0.0, 0.0]))) / v4812;
+                let v17737 = ((v17705 - v17485) - (Lanes([0.0, (v17416 * v5006), 0.0, 0.0, 0.0]))) / v4812;
                 let v5007 = if v5006 > v407 { 1.0 } else { 0.0 };
                 let v5014: f64;
                 let v10364: Lanes<5>;
@@ -10934,10 +10600,9 @@ impl Instance {
                     v5014 = v5015;
                     v10364 = v10365;
                 }
-                let v17743 = v17515 * v5014;
                 let v5019 = ((v4787 - v4958) - (v4831 - (v4879 * v5014))) / v4833;
                 let v17749 = v17455 * v5019;
-                let v17752 = (((v17695 - v17658) - (v17520 - ((Lanes([0.0, v17743[0], 0.0, 0.0, 0.0])) + (v10364 * v4879)))) - (Lanes([0.0, v17749[0], 0.0, v17749[1], v17749[2]]))) / v4833;
+                let v17752 = (((v17695 - v17658) - (v17520 - ((Lanes([0.0, (v17515 * v5014), 0.0, 0.0, 0.0])) + (v10364 * v4879)))) - (Lanes([0.0, v17749[0], 0.0, v17749[1], v17749[2]]))) / v4833;
                 let v5020 = if v5019 > v407 { 1.0 } else { 0.0 };
                 let v5032: f64;
                 let v10366: Lanes<5>;
@@ -10972,9 +10637,8 @@ impl Instance {
                     v10366 = v10367;
                 }
                 let v5035 = (v5030 - v5032) / v194;
-                let v17770 = v10886 * v5035;
                 let v5036 = v5035 / v4935;
-                let v17776 = ((((v10362 - v10366) - (Lanes([0.0, v17770[0], 0.0, 0.0, 0.0]))) / v194) - (v17617 * v5036)) / v4935;
+                let v17776 = ((((v10362 - v10366) - (Lanes([0.0, (v10886 * v5035), 0.0, 0.0, 0.0]))) / v194) - (v17617 * v5036)) / v4935;
                 let v5044: f64;
                 let v10368: Lanes<5>;
                 if v344 != 0.0 {
@@ -11026,10 +10690,9 @@ impl Instance {
                     v5075 = v5074;
                     v10369 = v17824;
                 }
-                let v17835 = Lanes([0.0, v17813[0], 0.0, 0.0, 0.0]);
+                let v17835 = Lanes([0.0, v17813, 0.0, 0.0, 0.0]);
                 let v5077 = (v5075 - v5059) / v4812;
-                let v17837 = v17416 * v5077;
-                let v17840 = (((Lanes([v10369[0], 0.0, v10369[1], v10369[2], v10369[3]])) - v17835) - (Lanes([0.0, v17837[0], 0.0, 0.0, 0.0]))) / v4812;
+                let v17840 = (((Lanes([v10369[0], 0.0, v10369[1], v10369[2], v10369[3]])) - v17835) - (Lanes([0.0, (v17416 * v5077), 0.0, 0.0, 0.0]))) / v4812;
                 let v5078 = if v5077 > v407 { 1.0 } else { 0.0 };
                 let v5100: f64;
                 let v10370: Lanes<5>;
@@ -11074,18 +10737,15 @@ impl Instance {
                     v5099 = v5098;
                     v10372 = v17855;
                 }
-                let v17865 = v17515 * v5100;
-                let v17869 = Lanes([0.0, v17425[0], 0.0, 0.0, 0.0]);
+                let v17869 = Lanes([0.0, v17425, 0.0, 0.0, 0.0]);
                 let v5105 = (v5099 - (v4818 - (v4879 * v5100))) / v5057;
-                let v17873 = v17809 * v5105;
-                let v17876 = (((Lanes([v10372[0], 0.0, v10372[1], v10372[2], v10372[3]])) - (v17869 - ((Lanes([0.0, v17865[0], 0.0, 0.0, 0.0])) + (v10370 * v4879)))) - (Lanes([0.0, v17873[0], 0.0, 0.0, 0.0]))) / v5057;
+                let v17876 = (((Lanes([v10372[0], 0.0, v10372[1], v10372[2], v10372[3]])) - (v17869 - ((Lanes([0.0, (v17515 * v5100), 0.0, 0.0, 0.0])) + (v10370 * v4879)))) - (Lanes([0.0, (v17809 * v5105), 0.0, 0.0, 0.0]))) / v5057;
                 let v5106 = if v5105 > v407 { 1.0 } else { 0.0 };
                 let v5119: f64;
                 let v10373: Lanes<5>;
                 if v5106 != 0.0 {
                     let v5107 = v5058 * v5105;
-                    let v17889 = v17812 * v5105;
-                    let v17892 = (Lanes([0.0, v17889[0], 0.0, 0.0, 0.0])) + (v17876 * v5058);
+                    let v17892 = (Lanes([0.0, (v17812 * v5105), 0.0, 0.0, 0.0])) + (v17876 * v5058);
                     v5119 = v5107;
                     v10373 = v17892;
                 } else {
@@ -11095,8 +10755,7 @@ impl Instance {
                     if v5109 != 0.0 {
                         let v5110 = v5105.exp();
                         let v5111 = v5058 * v5110;
-                        let v17885 = v17812 * v5110;
-                        let v17888 = (Lanes([0.0, v17885[0], 0.0, 0.0, 0.0])) + ((v17876 * v5110) * v5058);
+                        let v17888 = (Lanes([0.0, (v17812 * v5110), 0.0, 0.0, 0.0])) + ((v17876 * v5110) * v5058);
                         v5120 = v5111;
                         v10374 = v17888;
                     } else {
@@ -11104,8 +10763,7 @@ impl Instance {
                         let v5113 = v6 + v5112;
                         let v5114 = v5113.ln();
                         let v5115 = v5058 * v5114;
-                        let v17880 = v17812 * v5114;
-                        let v17883 = (Lanes([0.0, v17880[0], 0.0, 0.0, 0.0])) + (((v17876 * v5112) * (v9751 / v5113)) * v5058);
+                        let v17883 = (Lanes([0.0, (v17812 * v5114), 0.0, 0.0, 0.0])) + (((v17876 * v5112) * (v9751 / v5113)) * v5058);
                         v5120 = v5115;
                         v10374 = v17883;
                     }
@@ -11116,16 +10774,12 @@ impl Instance {
                 let v5118 = (v4908 * v4785) / v5116;
                 let v17899 = ((v17560 * v4785) - ((((v17429 * v5116) * v10982) / v4819) * v5118)) / v5116;
                 let v5122 = (v437 * v5119) / v194;
-                let v17901 = v10886 * v5122;
                 let v5123 = v5122 / v5118;
-                let v17905 = v17899 * v5123;
                 let v5125 = (v6 + v5123).sqrt();
-                let v17912 = v17899 * v5125;
                 let v5127 = (v5118 * v5125) - v5118;
                 let v5128 = v6 - v5100;
-                let v17922 = v17809 * v5100;
                 let v5131 = (v5127 * v5128) + (v5057 * v5100);
-                let v17926 = (((((Lanes([0.0, v17912[0], 0.0, 0.0, 0.0])) + (((((((v10373 * v437) - (Lanes([0.0, v17901[0], 0.0, 0.0, 0.0]))) / v194) - (Lanes([0.0, v17905[0], 0.0, 0.0, 0.0]))) / v5118) * (v9751 / (v10962 * v5125))) * v5118)) - (Lanes([0.0, v17899[0], 0.0, 0.0, 0.0]))) * v5128) + ((v10370 * v10982) * v5127)) + ((Lanes([0.0, v17922[0], 0.0, 0.0, 0.0])) + (v10370 * v5057));
+                let v17926 = (((((Lanes([0.0, (v17899 * v5125), 0.0, 0.0, 0.0])) + (((((((v10373 * v437) - (Lanes([0.0, (v10886 * v5122), 0.0, 0.0, 0.0]))) / v194) - (Lanes([0.0, (v17899 * v5123), 0.0, 0.0, 0.0]))) / v5118) * (v9751 / (v10962 * v5125))) * v5118)) - (Lanes([0.0, v17899, 0.0, 0.0, 0.0]))) * v5128) + ((v10370 * v10982) * v5127)) + ((Lanes([0.0, (v17809 * v5100), 0.0, 0.0, 0.0])) + (v10370 * v5057));
                 let v5132 = v630 / v5131;
                 let v17929 = (v17623 - (v17926 * v5132)) / v5131;
                 let v5146: f64;
@@ -11184,8 +10838,7 @@ impl Instance {
                 let v17994 = (Lanes([0.0, 0.0, 0.0, v17991[0], v17991[1]])) + ((((((v10376 * (v4799 * (v5166.powf(v17644)))) * (v4955 * (v5168.powf(v17648)))) * v5170) * v10982) / v5169) * v4959);
                 let v17995 = Lanes([v9878[0], 0.0, v9878[1], v9878[2]]);
                 let v5173 = (v4787 - v5059) / v4812;
-                let v17998 = v17416 * v5173;
-                let v18001 = ((v17995 - (Lanes([0.0, v17813[0], 0.0, 0.0]))) - (Lanes([0.0, v17998[0], 0.0, 0.0]))) / v4812;
+                let v18001 = ((v17995 - (Lanes([0.0, v17813, 0.0, 0.0]))) - (Lanes([0.0, (v17416 * v5173), 0.0, 0.0]))) / v4812;
                 let v5174 = if v5173 > v407 { 1.0 } else { 0.0 };
                 let v5181: f64;
                 let v10377: Lanes<4>;
@@ -11210,18 +10863,15 @@ impl Instance {
                     v5181 = v5182;
                     v10377 = v10378;
                 }
-                let v18007 = v17515 * v5181;
-                let v18012 = (Lanes([0.0, v17425[0], 0.0, 0.0])) - ((Lanes([0.0, v18007[0], 0.0, 0.0])) + (v10377 * v4879));
+                let v18012 = (Lanes([0.0, v17425, 0.0, 0.0])) - ((Lanes([0.0, (v17515 * v5181), 0.0, 0.0])) + (v10377 * v4879));
                 let v5186 = ((v4811 - v5171) - (v4818 - (v4879 * v5181))) / v5057;
-                let v18015 = v17809 * v5186;
-                let v18018 = (((v17705 - v17994) - (Lanes([v18012[0], v18012[1], v18012[2], 0.0, v18012[3]]))) - (Lanes([0.0, v18015[0], 0.0, 0.0, 0.0]))) / v5057;
+                let v18018 = (((v17705 - v17994) - (Lanes([v18012[0], v18012[1], v18012[2], 0.0, v18012[3]]))) - (Lanes([0.0, (v17809 * v5186), 0.0, 0.0, 0.0]))) / v5057;
                 let v5187 = if v5186 > v407 { 1.0 } else { 0.0 };
                 let v5222: f64;
                 let v10379: Lanes<5>;
                 if v5187 != 0.0 {
                     let v5188 = v5058 * v5186;
-                    let v18031 = v17812 * v5186;
-                    let v18034 = (Lanes([0.0, v18031[0], 0.0, 0.0, 0.0])) + (v18018 * v5058);
+                    let v18034 = (Lanes([0.0, (v17812 * v5186), 0.0, 0.0, 0.0])) + (v18018 * v5058);
                     v5222 = v5188;
                     v10379 = v18034;
                 } else {
@@ -11231,8 +10881,7 @@ impl Instance {
                     if v5190 != 0.0 {
                         let v5191 = v5186.exp();
                         let v5192 = v5058 * v5191;
-                        let v18027 = v17812 * v5191;
-                        let v18030 = (Lanes([0.0, v18027[0], 0.0, 0.0, 0.0])) + ((v18018 * v5191) * v5058);
+                        let v18030 = (Lanes([0.0, (v17812 * v5191), 0.0, 0.0, 0.0])) + ((v18018 * v5191) * v5058);
                         v5223 = v5192;
                         v10380 = v18030;
                     } else {
@@ -11240,8 +10889,7 @@ impl Instance {
                         let v5194 = v6 + v5193;
                         let v5195 = v5194.ln();
                         let v5196 = v5058 * v5195;
-                        let v18022 = v17812 * v5195;
-                        let v18025 = (Lanes([0.0, v18022[0], 0.0, 0.0, 0.0])) + (((v18018 * v5193) * (v9751 / v5194)) * v5058);
+                        let v18025 = (Lanes([0.0, (v17812 * v5195), 0.0, 0.0, 0.0])) + (((v18018 * v5193) * (v9751 / v5194)) * v5058);
                         v5223 = v5196;
                         v10380 = v18025;
                     }
@@ -11249,8 +10897,7 @@ impl Instance {
                     v10379 = v10380;
                 }
                 let v5198 = (v4811 - v5059) / v4812;
-                let v18036 = v17416 * v5198;
-                let v18039 = ((v17705 - v17835) - (Lanes([0.0, v18036[0], 0.0, 0.0, 0.0]))) / v4812;
+                let v18039 = ((v17705 - v17835) - (Lanes([0.0, (v17416 * v5198), 0.0, 0.0, 0.0]))) / v4812;
                 let v5199 = if v5198 > v407 { 1.0 } else { 0.0 };
                 let v5206: f64;
                 let v10381: Lanes<5>;
@@ -11275,17 +10922,14 @@ impl Instance {
                     v5206 = v5207;
                     v10381 = v10382;
                 }
-                let v18045 = v17515 * v5206;
                 let v5211 = ((v4787 - v5151) - (v4818 - (v4879 * v5206))) / v5057;
-                let v18051 = v17809 * v5211;
-                let v18054 = (((v17695 - v17960) - (v17869 - ((Lanes([0.0, v18045[0], 0.0, 0.0, 0.0])) + (v10381 * v4879)))) - (Lanes([0.0, v18051[0], 0.0, 0.0, 0.0]))) / v5057;
+                let v18054 = (((v17695 - v17960) - (v17869 - ((Lanes([0.0, (v17515 * v5206), 0.0, 0.0, 0.0])) + (v10381 * v4879)))) - (Lanes([0.0, (v17809 * v5211), 0.0, 0.0, 0.0]))) / v5057;
                 let v5212 = if v5211 > v407 { 1.0 } else { 0.0 };
                 let v5228: f64;
                 let v10383: Lanes<5>;
                 if v5212 != 0.0 {
                     let v5213 = v5058 * v5211;
-                    let v18067 = v17812 * v5211;
-                    let v18070 = (Lanes([0.0, v18067[0], 0.0, 0.0, 0.0])) + (v18054 * v5058);
+                    let v18070 = (Lanes([0.0, (v17812 * v5211), 0.0, 0.0, 0.0])) + (v18054 * v5058);
                     v5228 = v5213;
                     v10383 = v18070;
                 } else {
@@ -11295,8 +10939,7 @@ impl Instance {
                     if v5215 != 0.0 {
                         let v5216 = v5211.exp();
                         let v5217 = v5058 * v5216;
-                        let v18063 = v17812 * v5216;
-                        let v18066 = (Lanes([0.0, v18063[0], 0.0, 0.0, 0.0])) + ((v18054 * v5216) * v5058);
+                        let v18066 = (Lanes([0.0, (v17812 * v5216), 0.0, 0.0, 0.0])) + ((v18054 * v5216) * v5058);
                         v5229 = v5217;
                         v10384 = v18066;
                     } else {
@@ -11304,8 +10947,7 @@ impl Instance {
                         let v5219 = v6 + v5218;
                         let v5220 = v5219.ln();
                         let v5221 = v5058 * v5220;
-                        let v18058 = v17812 * v5220;
-                        let v18061 = (Lanes([0.0, v18058[0], 0.0, 0.0, 0.0])) + (((v18054 * v5218) * (v9751 / v5219)) * v5058);
+                        let v18061 = (Lanes([0.0, (v17812 * v5220), 0.0, 0.0, 0.0])) + (((v18054 * v5218) * (v9751 / v5219)) * v5058);
                         v5229 = v5221;
                         v10384 = v18061;
                     }
@@ -11345,8 +10987,7 @@ impl Instance {
                     let v5266 = v4818 - (v5264 * v4812);
                     let v18115 = v17425 - (v17416 * v5264);
                     let v5268 = (v4789 - v5266) / v5057;
-                    let v18119 = v17809 * v5268;
-                    let v18122 = (((Lanes([v9879[0], 0.0, v9879[1], v9879[2]])) - (Lanes([0.0, v18115[0], 0.0, 0.0]))) - (Lanes([0.0, v18119[0], 0.0, 0.0]))) / v5057;
+                    let v18122 = (((Lanes([v9879[0], 0.0, v9879[1], v9879[2]])) - (Lanes([0.0, v18115, 0.0, 0.0]))) - (Lanes([0.0, (v17809 * v5268), 0.0, 0.0]))) / v5057;
                     let v5269 = if v5268 > v407 { 1.0 } else { 0.0 };
                     let v5279: f64;
                     let v10387: Lanes<4>;
@@ -11377,11 +11018,9 @@ impl Instance {
                     let v5277 = v5276 * v222;
                     let v5278 = v5277 * v5057;
                     let v5281 = v5278 * v5279;
-                    let v18131 = (((v10894 * v5276) * v5057) + (v17809 * v5277)) * v5279;
-                    let v18134 = (Lanes([0.0, v18131[0], 0.0, 0.0])) + (v10387 * v5278);
+                    let v18134 = (Lanes([0.0, ((((v10894 * v5276) * v5057) + (v17809 * v5277)) * v5279), 0.0, 0.0])) + (v10387 * v5278);
                     let v5283 = (v632 - v5266) / v5057;
-                    let v18138 = v17809 * v5283;
-                    let v18141 = (((Lanes([v11301[0], 0.0, v11301[1]])) - (Lanes([0.0, v18115[0], 0.0]))) - (Lanes([0.0, v18138[0], 0.0]))) / v5057;
+                    let v18141 = (((Lanes([v11301[0], 0.0, v11301[1]])) - (Lanes([0.0, v18115, 0.0]))) - (Lanes([0.0, (v17809 * v5283), 0.0]))) / v5057;
                     let v5284 = if v5283 > v407 { 1.0 } else { 0.0 };
                     let v5293: f64;
                     let v10389: Lanes<3>;
@@ -11411,8 +11050,7 @@ impl Instance {
                     let v5291 = v5276 * v250;
                     let v5292 = v5291 * v5057;
                     let v5295 = v5292 * v5293;
-                    let v18150 = (((v10902 * v5276) * v5057) + (v17809 * v5291)) * v5293;
-                    let v18153 = (Lanes([0.0, v18150[0], 0.0])) + (v10389 * v5292);
+                    let v18153 = (Lanes([0.0, ((((v10902 * v5276) * v5057) + (v17809 * v5291)) * v5293), 0.0])) + (v10389 * v5292);
                     v5315 = v5281;
                     v5316 = v5295;
                     v10385 = v18134;
@@ -11428,10 +11066,8 @@ impl Instance {
                 let v10391: Lanes<4>;
                 if v5296 != 0.0 {
                     let v5297 = v748 * v358;
-                    let v18155 = v17425 - (v17416 * v5297);
                     let v5301 = (v4787 - (v4818 - (v5297 * v4812))) / v5057;
-                    let v18158 = v17809 * v5301;
-                    let v18161 = ((v17995 - (Lanes([0.0, v18155[0], 0.0, 0.0]))) - (Lanes([0.0, v18158[0], 0.0, 0.0]))) / v5057;
+                    let v18161 = ((v17995 - (Lanes([0.0, (v17425 - (v17416 * v5297)), 0.0, 0.0]))) - (Lanes([0.0, (v17809 * v5301), 0.0, 0.0]))) / v5057;
                     let v5302 = if v5301 > v407 { 1.0 } else { 0.0 };
                     let v5312: f64;
                     let v10392: Lanes<4>;
@@ -11461,8 +11097,7 @@ impl Instance {
                     let v5310 = (v5258 * v335) * v4791;
                     let v5311 = v5310 * v5057;
                     let v5314 = v5311 * v5312;
-                    let v18167 = (v17809 * v5310) * v5312;
-                    let v18170 = (Lanes([0.0, v18167[0], 0.0, 0.0])) + (v10392 * v5311);
+                    let v18170 = (Lanes([0.0, ((v17809 * v5310) * v5312), 0.0, 0.0])) + (v10392 * v5311);
                     v5317 = v5314;
                     v10391 = v18170;
                 } else {
@@ -11537,21 +11172,21 @@ impl Instance {
             let v10407: Lanes<4>;
             if v620 != 0.0 {
                 let v5324 = v1243 * (v574 - v383);
-                let v18209 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9759[0]]))) * v1243;
+                let v18209 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9759]))) * v1243;
                 let v18210 = v18209 * v11018;
                 let v5326 = (ddt(63693, v5321)) + (ddt(63697, v5324));
                 let v18212 = (v10343 * v11018) + (Lanes([0.0, 0.0, v18210[0], 0.0, v18210[1]]));
                 let v9728 = v5321 + v5324;
                 let v18214 = v10343 + (Lanes([0.0, 0.0, v18209[0], 0.0, v18209[1]]));
                 let v5330 = v1243 * (v574 - v606);
-                let v18219 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9775[0]]))) * v1243;
+                let v18219 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9775]))) * v1243;
                 let v18220 = v18219 * v11018;
                 let v5332 = (ddt(63700, v5327)) + (ddt(63704, v5330));
                 let v18222 = (v10344 * v11018) + (Lanes([0.0, 0.0, v18220[0], v18220[1], 0.0]));
                 let v9730 = v5327 + v5330;
                 let v18224 = v10344 + (Lanes([0.0, 0.0, v18219[0], v18219[1], 0.0]));
                 let v5336 = v1243 * (v349 - v383);
-                let v18229 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9759[0]]))) * v1243;
+                let v18229 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9759]))) * v1243;
                 let v18230 = v18229 * v11018;
                 let v5338 = (ddt(63707, v5333)) + (ddt(63711, v5336));
                 let v18232 = (v10345 * v11018) + (Lanes([v18230[0], 0.0, 0.0, v18230[1]]));
@@ -11559,7 +11194,7 @@ impl Instance {
                 let v18234 = v10345 + (Lanes([v18229[0], 0.0, 0.0, v18229[1]]));
                 let v18235 = v10346 * v11018;
                 let v5343 = v1243 * (v574 - v337);
-                let v18239 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9754[0]]))) * v1243;
+                let v18239 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9754]))) * v1243;
                 let v18240 = v18239 * v11018;
                 let v5345 = (ddt(63715, v5340)) + (ddt(63719, v5343));
                 let v18243 = (Lanes([v18235[0], v18235[1], v18235[2], 0.0, v18235[3]])) + (Lanes([0.0, 0.0, v18240[0], v18240[1], 0.0]));
@@ -11598,21 +11233,21 @@ impl Instance {
                 v10407 = v17399;
             } else {
                 let v5348 = v1243 * (v349 - v383);
-                let v18178 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9759[0]]))) * v1243;
+                let v18178 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9759]))) * v1243;
                 let v18179 = v18178 * v11018;
                 let v5350 = (ddt(63722, v5321)) + (ddt(63726, v5348));
                 let v18181 = (v10343 * v11018) + (Lanes([v18179[0], 0.0, 0.0, 0.0, v18179[1]]));
                 let v9736 = v5321 + v5348;
                 let v18183 = v10343 + (Lanes([v18178[0], 0.0, 0.0, 0.0, v18178[1]]));
                 let v5353 = v1243 * (v349 - v606);
-                let v18188 = ((Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9775[0]]))) * v1243;
+                let v18188 = ((Lanes([v9758, 0.0])) - (Lanes([0.0, v9775]))) * v1243;
                 let v18189 = v18188 * v11018;
                 let v5355 = (ddt(63729, v5327)) + (ddt(63733, v5353));
                 let v18191 = (v10344 * v11018) + (Lanes([v18189[0], 0.0, 0.0, v18189[1], 0.0]));
                 let v9738 = v5327 + v5353;
                 let v18193 = v10344 + (Lanes([v18188[0], 0.0, 0.0, v18188[1], 0.0]));
                 let v5358 = v1243 * (v574 - v383);
-                let v18198 = ((Lanes([v9771[0], 0.0])) - (Lanes([0.0, v9759[0]]))) * v1243;
+                let v18198 = ((Lanes([v9771, 0.0])) - (Lanes([0.0, v9759]))) * v1243;
                 let v18199 = v18198 * v11018;
                 let v5360 = (ddt(63736, v5333)) + (ddt(63740, v5358));
                 let v18201 = (v10345 * v11018) + (Lanes([0.0, 0.0, v18199[0], v18199[1]]));
@@ -11687,10 +11322,9 @@ impl Instance {
                 let v18270 = v10854 * v5373;
                 let v5390 = v725 * v90;
                 let v5391 = v5370 / v5390;
-                let v18274 = (((v10854 * v725) * v5391) * v10982) / v5390;
                 let v18275 = v10410 * v5372;
                 let v5393 = v5391 + (v5372 * v5387);
-                let v18278 = (Lanes([v18274[0], 0.0, 0.0])) + (Lanes([0.0, v18275[0], v18275[1]]));
+                let v18278 = (Lanes([((((v10854 * v725) * v5391) * v10982) / v5390), 0.0, 0.0])) + (Lanes([0.0, v18275[0], v18275[1]]));
                 let v18279 = v9782 * v5379;
                 let v5395 = v376 + (v5379 * v92);
                 let v5396 = v96.powf(v712);
@@ -11714,17 +11348,15 @@ impl Instance {
                 let v5406 = v5371 - (v5404 * v0);
                 let v18301 = (((v10411 * v0) * v10982) * v5387) + (v10410 * v5406);
                 let v5408 = v5395 - (v5406 * v5387);
-                let v18304 = (Lanes([v18279[0], 0.0, 0.0])) - (Lanes([0.0, v18301[0], v18301[1]]));
+                let v18304 = (Lanes([v18279, 0.0, 0.0])) - (Lanes([0.0, v18301[0], v18301[1]]));
                 let v5409 = v437 * v5393;
                 let v5410 = v5409 * v90;
-                let v18307 = v10854 * v5409;
-                let v18309 = ((v18278 * v437) * v90) + (Lanes([v18307[0], 0.0, 0.0]));
+                let v18309 = ((v18278 * v437) * v90) + (Lanes([(v10854 * v5409), 0.0, 0.0]));
                 let v5411 = v377 * v5410;
                 let v18310 = v18309 * v377;
                 let v5413 = (v748 * v5389) / v437;
-                let v18312 = (v18270 * v748) / v437;
                 let v5414 = v5408 - v5413;
-                let v18314 = v18304 - (Lanes([v18312[0], 0.0, 0.0]));
+                let v18314 = v18304 - (Lanes([((v18270 * v748) / v437), 0.0, 0.0]));
                 let v5430: f64;
                 let v10412: Lanes<4>;
                 if v344 != 0.0 {
@@ -11747,8 +11379,7 @@ impl Instance {
                 }
                 let v18336 = Lanes([0.0, 0.0, v18314[0], v18314[1], v18314[2]]);
                 let v5432 = (v5430 - v5414) / v5389;
-                let v18338 = v18270 * v5432;
-                let v18341 = (((Lanes([v10412[0], v10412[1], 0.0, v10412[2], v10412[3]])) - v18336) - (Lanes([0.0, 0.0, v18338[0], 0.0, 0.0]))) / v5389;
+                let v18341 = (((Lanes([v10412[0], v10412[1], 0.0, v10412[2], v10412[3]])) - v18336) - (Lanes([0.0, 0.0, (v18270 * v5432), 0.0, 0.0]))) / v5389;
                 let v5433 = if v5432 > v407 { 1.0 } else { 0.0 };
                 let v5457: f64;
                 let v10413: Lanes<5>;
@@ -11796,11 +11427,10 @@ impl Instance {
                 let v5455 = v748 * v57;
                 let v5456 = v5455 * v5389;
                 let v18366 = v18270 * v5455;
-                let v18367 = v18366 * v5457;
                 let v18371 = Lanes([0.0, 0.0, v18304[0], v18304[1], v18304[2]]);
                 let v5462 = (v5454 - (v5408 - (v5456 * v5457))) / v5410;
                 let v18375 = v18309 * v5462;
-                let v18378 = (((Lanes([v10415[0], v10415[1], 0.0, v10415[2], v10415[3]])) - (v18371 - ((Lanes([0.0, 0.0, v18367[0], 0.0, 0.0])) + (v10413 * v5456)))) - (Lanes([0.0, 0.0, v18375[0], v18375[1], v18375[2]]))) / v5410;
+                let v18378 = (((Lanes([v10415[0], v10415[1], 0.0, v10415[2], v10415[3]])) - (v18371 - ((Lanes([0.0, 0.0, (v18366 * v5457), 0.0, 0.0])) + (v10413 * v5456)))) - (Lanes([0.0, 0.0, v18375[0], v18375[1], v18375[2]]))) / v5410;
                 let v5463 = if v5462 > v407 { 1.0 } else { 0.0 };
                 let v5473: f64;
                 let v10416: Lanes<5>;
@@ -11836,26 +11466,23 @@ impl Instance {
                 }
                 let v5477 = v6 + ((v5377 * v5473) / v377);
                 let v5478 = v5396 * v5477;
-                let v18397 = v18283 * v5477;
                 let v5479 = v5375 / v5478;
-                let v18403 = ((((Lanes([0.0, 0.0, v18397[0], 0.0, 0.0])) + (((v10416 * v5377) / v377) * v5396)) * v5479) * v10982) / v5478;
+                let v18403 = ((((Lanes([0.0, 0.0, (v18283 * v5477), 0.0, 0.0])) + (((v10416 * v5377) / v377) * v5396)) * v5479) * v10982) / v5478;
                 let v5483 = v6 + (v713 * v47);
                 let v5484 = (v6 + (v713 * v4)) / v5483;
                 let v5485 = v5374 * v5484;
                 let v5488 = v6 + ((v714 * v5387) / v30);
-                let v18411 = (((((v9782 * v713) * v5484) * v10982) / v5483) * v5374) * v5488;
                 let v18412 = ((v10410 * v714) / v30) * v5485;
-                let v18415 = (Lanes([v18411[0], 0.0, 0.0])) + (Lanes([0.0, v18412[0], v18412[1]]));
+                let v18415 = (Lanes([((((((v9782 * v713) * v5484) * v10982) / v5483) * v5374) * v5488), 0.0, 0.0])) + (Lanes([0.0, v18412[0], v18412[1]]));
                 let v5492 = v6 + ((v5378 * v5473) / v377);
                 let v5493 = (v5485 * v5488) / v5492;
                 let v18421 = ((Lanes([0.0, 0.0, v18415[0], v18415[1], v18415[2]])) - (((v10416 * v5378) / v377) * v5493)) / v5492;
                 let v5494 = v437 * v5457;
                 let v5495 = v5494 * v90;
-                let v18424 = v10854 * v5494;
                 let v5498 = v6 - v5457;
                 let v18431 = v10413 * v10982;
                 let v5500 = ((v5495 * v5479) / v30) + (v5498 * v5493);
-                let v18435 = ((((((v10413 * v437) * v90) + (Lanes([0.0, 0.0, v18424[0], 0.0, 0.0]))) * v5479) + (v18403 * v5495)) / v30) + ((v18431 * v5493) + (v18421 * v5498));
+                let v18435 = ((((((v10413 * v437) * v90) + (Lanes([0.0, 0.0, (v10854 * v5494), 0.0, 0.0]))) * v5479) + (v18403 * v5495)) / v30) + ((v18431 * v5493) + (v18421 * v5498));
                 let v5502 = (v5493 * v30) / v5479;
                 let v18439 = ((v18421 * v30) - (v18403 * v5502)) / v5479;
                 let v5505 = ((v437 * v5473) / v377) / v5502;
@@ -11931,8 +11558,7 @@ impl Instance {
                 let v18536 = (Lanes([0.0, 0.0, 0.0, v18533[0], v18533[1]])) + ((((((v10419 * (v5376 * (v5551.powf(v18486)))) * (v5532 * (v5553.powf(v18490)))) * v5555) * v10982) / v5554) * v5536);
                 let v18537 = Lanes([v10983[0], v10983[1], 0.0, 0.0, v10983[2]]);
                 let v5558 = (v388 - v5414) / v5389;
-                let v18539 = v18270 * v5558;
-                let v18542 = ((v18537 - v18336) - (Lanes([0.0, 0.0, v18539[0], 0.0, 0.0]))) / v5389;
+                let v18542 = ((v18537 - v18336) - (Lanes([0.0, 0.0, (v18270 * v5558), 0.0, 0.0]))) / v5389;
                 let v5559 = if v5558 > v407 { 1.0 } else { 0.0 };
                 let v5566: f64;
                 let v10420: Lanes<5>;
@@ -11958,10 +11584,9 @@ impl Instance {
                     v10420 = v10421;
                 }
                 let v18547 = Lanes([v18269[0], v18269[1], 0.0, v18269[2], v18269[3]]);
-                let v18549 = v18366 * v5566;
                 let v5571 = ((v5388 - v5556) - (v5408 - (v5456 * v5566))) / v5410;
                 let v18555 = v18309 * v5571;
-                let v18558 = (((v18547 - v18536) - (v18371 - ((Lanes([0.0, 0.0, v18549[0], 0.0, 0.0])) + (v10420 * v5456)))) - (Lanes([0.0, 0.0, v18555[0], v18555[1], v18555[2]]))) / v5410;
+                let v18558 = (((v18547 - v18536) - (v18371 - ((Lanes([0.0, 0.0, (v18366 * v5566), 0.0, 0.0])) + (v10420 * v5456)))) - (Lanes([0.0, 0.0, v18555[0], v18555[1], v18555[2]]))) / v5410;
                 let v5572 = if v5571 > v407 { 1.0 } else { 0.0 };
                 let v5607: f64;
                 let v10422: Lanes<5>;
@@ -11996,8 +11621,7 @@ impl Instance {
                     v10422 = v10423;
                 }
                 let v5583 = (v5388 - v5414) / v5389;
-                let v18576 = v18270 * v5583;
-                let v18579 = ((v18547 - v18336) - (Lanes([0.0, 0.0, v18576[0], 0.0, 0.0]))) / v5389;
+                let v18579 = ((v18547 - v18336) - (Lanes([0.0, 0.0, (v18270 * v5583), 0.0, 0.0]))) / v5389;
                 let v5584 = if v5583 > v407 { 1.0 } else { 0.0 };
                 let v5591: f64;
                 let v10424: Lanes<5>;
@@ -12022,10 +11646,9 @@ impl Instance {
                     v5591 = v5592;
                     v10424 = v10425;
                 }
-                let v18585 = v18366 * v5591;
                 let v5596 = ((v388 - v5535) - (v5408 - (v5456 * v5591))) / v5410;
                 let v18591 = v18309 * v5596;
-                let v18594 = (((v18537 - v18500) - (v18371 - ((Lanes([0.0, 0.0, v18585[0], 0.0, 0.0])) + (v10424 * v5456)))) - (Lanes([0.0, 0.0, v18591[0], v18591[1], v18591[2]]))) / v5410;
+                let v18594 = (((v18537 - v18500) - (v18371 - ((Lanes([0.0, 0.0, (v18366 * v5591), 0.0, 0.0])) + (v10424 * v5456)))) - (Lanes([0.0, 0.0, v18591[0], v18591[1], v18591[2]]))) / v5410;
                 let v5597 = if v5596 > v407 { 1.0 } else { 0.0 };
                 let v5609: f64;
                 let v10426: Lanes<5>;
@@ -12295,10 +11918,9 @@ impl Instance {
                 let v18664 = v10854 * v5813;
                 let v5829 = v725 * v90;
                 let v5830 = v5810 / v5829;
-                let v18668 = (((v10854 * v725) * v5830) * v10982) / v5829;
                 let v18669 = v10431 * v5812;
                 let v5832 = v5830 + (v5812 * v5826);
-                let v18672 = (Lanes([v18668[0], 0.0, 0.0])) + (Lanes([0.0, v18669[0], v18669[1]]));
+                let v18672 = (Lanes([((((v10854 * v725) * v5830) * v10982) / v5829), 0.0, 0.0])) + (Lanes([0.0, v18669[0], v18669[1]]));
                 let v18673 = v9782 * v5379;
                 let v5834 = v558 + (v5379 * v92);
                 let v5835 = v96.powf(v712);
@@ -12322,17 +11944,15 @@ impl Instance {
                 let v5845 = v5811 - (v5843 * v0);
                 let v18695 = (((v10432 * v0) * v10982) * v5826) + (v10431 * v5845);
                 let v5847 = v5834 - (v5845 * v5826);
-                let v18698 = (Lanes([v18673[0], 0.0, 0.0])) - (Lanes([0.0, v18695[0], v18695[1]]));
+                let v18698 = (Lanes([v18673, 0.0, 0.0])) - (Lanes([0.0, v18695[0], v18695[1]]));
                 let v5848 = v437 * v5832;
                 let v5849 = v5848 * v90;
-                let v18701 = v10854 * v5848;
-                let v18703 = ((v18672 * v437) * v90) + (Lanes([v18701[0], 0.0, 0.0]));
+                let v18703 = ((v18672 * v437) * v90) + (Lanes([(v10854 * v5848), 0.0, 0.0]));
                 let v5850 = v561 * v5849;
                 let v18704 = v18703 * v561;
                 let v5852 = (v748 * v5828) / v437;
-                let v18706 = (v18664 * v748) / v437;
                 let v5853 = v5847 - v5852;
-                let v18708 = v18698 - (Lanes([v18706[0], 0.0, 0.0]));
+                let v18708 = v18698 - (Lanes([((v18664 * v748) / v437), 0.0, 0.0]));
                 let v5869: f64;
                 let v10433: Lanes<6>;
                 if v344 != 0.0 {
@@ -12355,8 +11975,7 @@ impl Instance {
                 }
                 let v18729 = Lanes([0.0, 0.0, v18708[0], v18708[1], v18708[2], 0.0]);
                 let v5871 = (v5869 - v5853) / v5828;
-                let v18731 = v18664 * v5871;
-                let v18734 = ((v10433 - v18729) - (Lanes([0.0, 0.0, v18731[0], 0.0, 0.0, 0.0]))) / v5828;
+                let v18734 = ((v10433 - v18729) - (Lanes([0.0, 0.0, (v18664 * v5871), 0.0, 0.0, 0.0]))) / v5828;
                 let v5872 = if v5871 > v407 { 1.0 } else { 0.0 };
                 let v5896: f64;
                 let v10434: Lanes<6>;
@@ -12404,11 +12023,10 @@ impl Instance {
                 let v5894 = v748 * v57;
                 let v5895 = v5894 * v5828;
                 let v18759 = v18664 * v5894;
-                let v18760 = v18759 * v5896;
                 let v18764 = Lanes([0.0, 0.0, v18698[0], v18698[1], v18698[2], 0.0]);
                 let v5901 = (v5893 - (v5847 - (v5895 * v5896))) / v5849;
                 let v18767 = v18703 * v5901;
-                let v18770 = ((v10436 - (v18764 - ((Lanes([0.0, 0.0, v18760[0], 0.0, 0.0, 0.0])) + (v10434 * v5895)))) - (Lanes([0.0, 0.0, v18767[0], v18767[1], v18767[2], 0.0]))) / v5849;
+                let v18770 = ((v10436 - (v18764 - ((Lanes([0.0, 0.0, (v18759 * v5896), 0.0, 0.0, 0.0])) + (v10434 * v5895)))) - (Lanes([0.0, 0.0, v18767[0], v18767[1], v18767[2], 0.0]))) / v5849;
                 let v5902 = if v5901 > v407 { 1.0 } else { 0.0 };
                 let v5912: f64;
                 let v10437: Lanes<6>;
@@ -12444,26 +12062,23 @@ impl Instance {
                 }
                 let v5916 = v6 + ((v5817 * v5912) / v561);
                 let v5917 = v5835 * v5916;
-                let v18789 = v18677 * v5916;
                 let v5918 = v5815 / v5917;
-                let v18795 = ((((Lanes([0.0, 0.0, v18789[0], 0.0, 0.0, 0.0])) + (((v10437 * v5817) / v561) * v5835)) * v5918) * v10982) / v5917;
+                let v18795 = ((((Lanes([0.0, 0.0, (v18677 * v5916), 0.0, 0.0, 0.0])) + (((v10437 * v5817) / v561) * v5835)) * v5918) * v10982) / v5917;
                 let v5922 = v6 + (v713 * v47);
                 let v5923 = (v6 + (v713 * v4)) / v5922;
                 let v5924 = v5814 * v5923;
                 let v5927 = v6 + ((v714 * v5826) / v36);
-                let v18803 = (((((v9782 * v713) * v5923) * v10982) / v5922) * v5814) * v5927;
                 let v18804 = ((v10431 * v714) / v36) * v5924;
-                let v18807 = (Lanes([v18803[0], 0.0, 0.0])) + (Lanes([0.0, v18804[0], v18804[1]]));
+                let v18807 = (Lanes([((((((v9782 * v713) * v5923) * v10982) / v5922) * v5814) * v5927), 0.0, 0.0])) + (Lanes([0.0, v18804[0], v18804[1]]));
                 let v5931 = v6 + ((v5818 * v5912) / v561);
                 let v5932 = (v5924 * v5927) / v5931;
                 let v18813 = ((Lanes([0.0, 0.0, v18807[0], v18807[1], v18807[2], 0.0])) - (((v10437 * v5818) / v561) * v5932)) / v5931;
                 let v5933 = v437 * v5896;
                 let v5934 = v5933 * v90;
-                let v18816 = v10854 * v5933;
                 let v5937 = v6 - v5896;
                 let v18823 = v10434 * v10982;
                 let v5939 = ((v5934 * v5918) / v36) + (v5937 * v5932);
-                let v18827 = ((((((v10434 * v437) * v90) + (Lanes([0.0, 0.0, v18816[0], 0.0, 0.0, 0.0]))) * v5918) + (v18795 * v5934)) / v36) + ((v18823 * v5932) + (v18813 * v5937));
+                let v18827 = ((((((v10434 * v437) * v90) + (Lanes([0.0, 0.0, (v10854 * v5933), 0.0, 0.0, 0.0]))) * v5918) + (v18795 * v5934)) / v36) + ((v18823 * v5932) + (v18813 * v5937));
                 let v5941 = (v5932 * v36) / v5918;
                 let v18831 = ((v18813 * v36) - (v18795 * v5941)) / v5918;
                 let v5944 = ((v437 * v5912) / v561) / v5941;
@@ -12538,8 +12153,7 @@ impl Instance {
                 let v18924 = v18892 * v5994;
                 let v18927 = (Lanes([0.0, 0.0, 0.0, v18924[0], v18924[1], 0.0])) + ((((((v10440 * (v5816 * (v5990.powf(v18877)))) * (v5971 * (v5992.powf(v18881)))) * v5994) * v10982) / v5993) * v5975);
                 let v5997 = (v571 - v5853) / v5828;
-                let v18929 = v18664 * v5997;
-                let v18932 = ((v18661 - v18729) - (Lanes([0.0, 0.0, v18929[0], 0.0, 0.0, 0.0]))) / v5828;
+                let v18932 = ((v18661 - v18729) - (Lanes([0.0, 0.0, (v18664 * v5997), 0.0, 0.0, 0.0]))) / v5828;
                 let v5998 = if v5997 > v407 { 1.0 } else { 0.0 };
                 let v6005: f64;
                 let v10441: Lanes<6>;
@@ -12564,10 +12178,9 @@ impl Instance {
                     v6005 = v6006;
                     v10441 = v10442;
                 }
-                let v18938 = v18759 * v6005;
                 let v6010 = ((v5827 - v5995) - (v5847 - (v5895 * v6005))) / v5849;
                 let v18944 = v18703 * v6010;
-                let v18947 = (((v18663 - v18927) - (v18764 - ((Lanes([0.0, 0.0, v18938[0], 0.0, 0.0, 0.0])) + (v10441 * v5895)))) - (Lanes([0.0, 0.0, v18944[0], v18944[1], v18944[2], 0.0]))) / v5849;
+                let v18947 = (((v18663 - v18927) - (v18764 - ((Lanes([0.0, 0.0, (v18759 * v6005), 0.0, 0.0, 0.0])) + (v10441 * v5895)))) - (Lanes([0.0, 0.0, v18944[0], v18944[1], v18944[2], 0.0]))) / v5849;
                 let v6011 = if v6010 > v407 { 1.0 } else { 0.0 };
                 let v6046: f64;
                 let v10443: Lanes<6>;
@@ -12602,8 +12215,7 @@ impl Instance {
                     v10443 = v10444;
                 }
                 let v6022 = (v5827 - v5853) / v5828;
-                let v18965 = v18664 * v6022;
-                let v18968 = ((v18663 - v18729) - (Lanes([0.0, 0.0, v18965[0], 0.0, 0.0, 0.0]))) / v5828;
+                let v18968 = ((v18663 - v18729) - (Lanes([0.0, 0.0, (v18664 * v6022), 0.0, 0.0, 0.0]))) / v5828;
                 let v6023 = if v6022 > v407 { 1.0 } else { 0.0 };
                 let v6030: f64;
                 let v10445: Lanes<6>;
@@ -12628,10 +12240,9 @@ impl Instance {
                     v6030 = v6031;
                     v10445 = v10446;
                 }
-                let v18974 = v18759 * v6030;
                 let v6035 = ((v571 - v5974) - (v5847 - (v5895 * v6030))) / v5849;
                 let v18980 = v18703 * v6035;
-                let v18983 = (((v18661 - v18891) - (v18764 - ((Lanes([0.0, 0.0, v18974[0], 0.0, 0.0, 0.0])) + (v10445 * v5895)))) - (Lanes([0.0, 0.0, v18980[0], v18980[1], v18980[2], 0.0]))) / v5849;
+                let v18983 = (((v18661 - v18891) - (v18764 - ((Lanes([0.0, 0.0, (v18759 * v6030), 0.0, 0.0, 0.0])) + (v10445 * v5895)))) - (Lanes([0.0, 0.0, v18980[0], v18980[1], v18980[2], 0.0]))) / v5849;
                 let v6036 = if v6035 > v407 { 1.0 } else { 0.0 };
                 let v6048: f64;
                 let v10447: Lanes<6>;
@@ -12896,7 +12507,7 @@ impl Instance {
             let v19056 = (((v10854 * v725) * v6271) * v10982) / v6270;
             let v19057 = v10450 * v6252;
             let v6273 = v6271 + (v6252 * v6267);
-            let v19060 = (Lanes([v19056[0], 0.0, 0.0])) + (Lanes([0.0, v19057[0], v19057[1]]));
+            let v19060 = (Lanes([v19056, 0.0, 0.0])) + (Lanes([0.0, v19057[0], v19057[1]]));
             let v19061 = v9782 * v5379;
             let v6275 = v6248 + (v5379 * v92);
             let v6276 = v96.powf(v712);
@@ -12920,18 +12531,16 @@ impl Instance {
             let v6286 = v6250 - (v6284 * v6251);
             let v19083 = (((v10451 * v6251) * v10982) * v6267) + (v10450 * v6286);
             let v6288 = v6275 - (v6286 * v6267);
-            let v19086 = (Lanes([v19061[0], 0.0, 0.0])) - (Lanes([0.0, v19083[0], v19083[1]]));
+            let v19086 = (Lanes([v19061, 0.0, 0.0])) - (Lanes([0.0, v19083[0], v19083[1]]));
             let v6289 = v437 * v6273;
             let v6290 = v6289 * v90;
-            let v19089 = v10854 * v6289;
-            let v19091 = ((v19060 * v437) * v90) + (Lanes([v19089[0], 0.0, 0.0]));
+            let v19091 = ((v19060 * v437) * v90) + (Lanes([(v10854 * v6289), 0.0, 0.0]));
             let v6291 = v166 * v6290;
-            let v19092 = v10878 * v6290;
-            let v19095 = (Lanes([v19092[0], 0.0, 0.0])) + (v19091 * v166);
+            let v19095 = (Lanes([(v10878 * v6290), 0.0, 0.0])) + (v19091 * v166);
             let v6293 = (v748 * v6269) / v437;
             let v19097 = (v19052 * v748) / v437;
             let v6294 = v6288 - v6293;
-            let v19099 = v19086 - (Lanes([v19097[0], 0.0, 0.0]));
+            let v19099 = v19086 - (Lanes([v19097, 0.0, 0.0]));
             let v6310: f64;
             let v10452: Lanes<3>;
             if v344 != 0.0 {
@@ -12954,8 +12563,7 @@ impl Instance {
             }
             let v19121 = Lanes([v19099[0], v19099[1], 0.0, v19099[2]]);
             let v6312 = (v6310 - v6294) / v6269;
-            let v19123 = v19052 * v6312;
-            let v19126 = (((Lanes([0.0, v10452[0], v10452[1], v10452[2]])) - v19121) - (Lanes([v19123[0], 0.0, 0.0, 0.0]))) / v6269;
+            let v19126 = (((Lanes([0.0, v10452[0], v10452[1], v10452[2]])) - v19121) - (Lanes([(v19052 * v6312), 0.0, 0.0, 0.0]))) / v6269;
             let v6313 = if v6312 > v407 { 1.0 } else { 0.0 };
             let v6337: f64;
             let v10453: Lanes<4>;
@@ -13003,11 +12611,10 @@ impl Instance {
             let v6335 = v748 * v57;
             let v6336 = v6335 * v6269;
             let v19152 = v19052 * v6335;
-            let v19153 = v19152 * v6337;
             let v19157 = Lanes([v19086[0], v19086[1], 0.0, v19086[2]]);
             let v6342 = (v6334 - (v6288 - (v6336 * v6337))) / v6290;
             let v19161 = v19091 * v6342;
-            let v19164 = (((Lanes([0.0, v10455[0], v10455[1], v10455[2]])) - (v19157 - ((Lanes([v19153[0], 0.0, 0.0, 0.0])) + (v10453 * v6336)))) - (Lanes([v19161[0], v19161[1], 0.0, v19161[2]]))) / v6290;
+            let v19164 = (((Lanes([0.0, v10455[0], v10455[1], v10455[2]])) - (v19157 - ((Lanes([(v19152 * v6337), 0.0, 0.0, 0.0])) + (v10453 * v6336)))) - (Lanes([v19161[0], v19161[1], 0.0, v19161[2]]))) / v6290;
             let v6343 = if v6342 > v407 { 1.0 } else { 0.0 };
             let v6353: f64;
             let v10456: Lanes<4>;
@@ -13042,36 +12649,30 @@ impl Instance {
                 v10456 = v10457;
             }
             let v6356 = (v6256 * v6353) / v166;
-            let v19182 = v10878 * v6356;
             let v6357 = v6 + v6356;
             let v6358 = v6276 * v6357;
-            let v19186 = v19065 * v6357;
             let v6359 = v379 / v6358;
-            let v19192 = ((((Lanes([v19186[0], 0.0, 0.0, 0.0])) + ((((v10456 * v6256) - (Lanes([v19182[0], 0.0, 0.0, 0.0]))) / v166) * v6276)) * v6359) * v10982) / v6358;
+            let v19192 = ((((Lanes([(v19065 * v6357), 0.0, 0.0, 0.0])) + ((((v10456 * v6256) - (Lanes([(v10878 * v6356), 0.0, 0.0, 0.0]))) / v166) * v6276)) * v6359) * v10982) / v6358;
             let v6363 = v6 + (v713 * v47);
             let v6364 = (v6 + (v713 * v4)) / v6363;
             let v6365 = v6254 * v6364;
             let v19197 = ((((v9782 * v713) * v6364) * v10982) / v6363) * v6254;
             let v6368 = v6 + ((v714 * v6267) / v6247);
-            let v19200 = v19197 * v6368;
             let v19201 = ((v10450 * v714) / v6247) * v6365;
-            let v19204 = (Lanes([v19200[0], 0.0, 0.0])) + (Lanes([0.0, v19201[0], v19201[1]]));
+            let v19204 = (Lanes([(v19197 * v6368), 0.0, 0.0])) + (Lanes([0.0, v19201[0], v19201[1]]));
             let v6371 = (v6257 * v6353) / v166;
-            let v19206 = v10878 * v6371;
             let v6372 = v6 + v6371;
             let v6373 = (v6365 * v6368) / v6372;
-            let v19213 = ((Lanes([v19204[0], v19204[1], 0.0, v19204[2]])) - ((((v10456 * v6257) - (Lanes([v19206[0], 0.0, 0.0, 0.0]))) / v166) * v6373)) / v6372;
+            let v19213 = ((Lanes([v19204[0], v19204[1], 0.0, v19204[2]])) - ((((v10456 * v6257) - (Lanes([(v10878 * v6371), 0.0, 0.0, 0.0]))) / v166) * v6373)) / v6372;
             let v6374 = v437 * v6337;
             let v6375 = v6374 * v90;
-            let v19216 = v10854 * v6374;
             let v6378 = v6 - v6337;
             let v19223 = v10453 * v10982;
             let v6380 = ((v6375 * v6359) / v6247) + (v6378 * v6373);
-            let v19227 = ((((((v10453 * v437) * v90) + (Lanes([v19216[0], 0.0, 0.0, 0.0]))) * v6359) + (v19192 * v6375)) / v6247) + ((v19223 * v6373) + (v19213 * v6378));
+            let v19227 = ((((((v10453 * v437) * v90) + (Lanes([(v10854 * v6374), 0.0, 0.0, 0.0]))) * v6359) + (v19192 * v6375)) / v6247) + ((v19223 * v6373) + (v19213 * v6378));
             let v6382 = (v6373 * v6247) / v6359;
             let v19231 = ((v19213 * v6247) - (v19192 * v6382)) / v6359;
             let v6384 = (v437 * v6353) / v166;
-            let v19233 = v10878 * v6384;
             let v6385 = v6384 / v6382;
             let v6387 = (v6 + v6385).sqrt();
             let v6389 = (v6382 * v6387) - v6382;
@@ -13081,7 +12682,7 @@ impl Instance {
             let v6392 = (v6382 * v6378) + v6391;
             let v19254 = ((v19231 * v6378) + (v19223 * v6382)) + v19253;
             let v6394 = (v6389 * v6378) + v6391;
-            let v19258 = (((((v19231 * v6387) + (((((((v10456 * v437) - (Lanes([v19233[0], 0.0, 0.0, 0.0]))) / v166) - (v19231 * v6385)) / v6382) * (v9751 / (v10962 * v6387))) * v6382)) - v19231) * v6378) + (v19223 * v6389)) + v19253;
+            let v19258 = (((((v19231 * v6387) + (((((((v10456 * v437) - (Lanes([(v10878 * v6384), 0.0, 0.0, 0.0]))) / v166) - (v19231 * v6385)) / v6382) * (v9751 / (v10962 * v6387))) * v6382)) - v19231) * v6378) + (v19223 * v6389)) + v19253;
             let v6395 = v339 / v6394;
             let v19260 = Lanes([0.0, v10930[0], 0.0, v10930[1]]);
             let v19262 = (v19260 - (v19258 * v6395)) / v6394;
@@ -13147,8 +12748,7 @@ impl Instance {
             let v19331 = (Lanes([0.0, v19328[0], 0.0, v19328[1]])) + ((((((v10459 * (v6255 * (v6431.powf(v19281)))) * (v6412 * (v6433.powf(v19285)))) * v6435) * v10982) / v6434) * v6416);
             let v19332 = Lanes([0.0, 0.0, v10934[0], v10934[1]]);
             let v6438 = (v342 - v6294) / v6269;
-            let v19334 = v19052 * v6438;
-            let v19337 = ((v19332 - v19121) - (Lanes([v19334[0], 0.0, 0.0, 0.0]))) / v6269;
+            let v19337 = ((v19332 - v19121) - (Lanes([(v19052 * v6438), 0.0, 0.0, 0.0]))) / v6269;
             let v6439 = if v6438 > v407 { 1.0 } else { 0.0 };
             let v6446: f64;
             let v10460: Lanes<4>;
@@ -13174,10 +12774,9 @@ impl Instance {
                 v10460 = v10461;
             }
             let v19342 = Lanes([0.0, v19051[0], v19051[1], v19051[2]]);
-            let v19344 = v19152 * v6446;
             let v6451 = ((v6268 - v6436) - (v6288 - (v6336 * v6446))) / v6290;
             let v19350 = v19091 * v6451;
-            let v19353 = (((v19342 - v19331) - (v19157 - ((Lanes([v19344[0], 0.0, 0.0, 0.0])) + (v10460 * v6336)))) - (Lanes([v19350[0], v19350[1], 0.0, v19350[2]]))) / v6290;
+            let v19353 = (((v19342 - v19331) - (v19157 - ((Lanes([(v19152 * v6446), 0.0, 0.0, 0.0])) + (v10460 * v6336)))) - (Lanes([v19350[0], v19350[1], 0.0, v19350[2]]))) / v6290;
             let v6452 = if v6451 > v407 { 1.0 } else { 0.0 };
             let v6487: f64;
             let v10462: Lanes<4>;
@@ -13212,8 +12811,7 @@ impl Instance {
                 v10462 = v10463;
             }
             let v6463 = (v6268 - v6294) / v6269;
-            let v19371 = v19052 * v6463;
-            let v19374 = ((v19342 - v19121) - (Lanes([v19371[0], 0.0, 0.0, 0.0]))) / v6269;
+            let v19374 = ((v19342 - v19121) - (Lanes([(v19052 * v6463), 0.0, 0.0, 0.0]))) / v6269;
             let v6464 = if v6463 > v407 { 1.0 } else { 0.0 };
             let v6471: f64;
             let v10464: Lanes<4>;
@@ -13238,10 +12836,9 @@ impl Instance {
                 v6471 = v6472;
                 v10464 = v10465;
             }
-            let v19380 = v19152 * v6471;
             let v6476 = ((v342 - v6415) - (v6288 - (v6336 * v6471))) / v6290;
             let v19386 = v19091 * v6476;
-            let v19389 = (((v19332 - v19295) - (v19157 - ((Lanes([v19380[0], 0.0, 0.0, 0.0])) + (v10464 * v6336)))) - (Lanes([v19386[0], v19386[1], 0.0, v19386[2]]))) / v6290;
+            let v19389 = (((v19332 - v19295) - (v19157 - ((Lanes([(v19152 * v6471), 0.0, 0.0, 0.0])) + (v10464 * v6336)))) - (Lanes([v19386[0], v19386[1], 0.0, v19386[2]]))) / v6290;
             let v6477 = if v6476 > v407 { 1.0 } else { 0.0 };
             let v6489: f64;
             let v10466: Lanes<4>;
@@ -13276,9 +12873,8 @@ impl Instance {
                 v10466 = v10467;
             }
             let v6492 = (v6487 - v6489) / v166;
-            let v19407 = v10878 * v6492;
             let v6493 = v6492 / v6392;
-            let v19413 = ((((v10462 - v10466) - (Lanes([v19407[0], 0.0, 0.0, 0.0]))) / v166) - (v19254 * v6493)) / v6392;
+            let v19413 = ((((v10462 - v10466) - (Lanes([(v10878 * v6492), 0.0, 0.0, 0.0]))) / v166) - (v19254 * v6493)) / v6392;
             let v6501: f64;
             let v10468: Lanes<4>;
             if v344 != 0.0 {
@@ -13334,10 +12930,9 @@ impl Instance {
                 v6533 = v6532;
                 v10469 = v19466;
             }
-            let v19477 = Lanes([v19455[0], 0.0, 0.0, 0.0]);
+            let v19477 = Lanes([v19455, 0.0, 0.0, 0.0]);
             let v6535 = (v6533 - v6517) / v6269;
-            let v19479 = v19052 * v6535;
-            let v19482 = (((Lanes([0.0, v10469[0], v10469[1], v10469[2]])) - v19477) - (Lanes([v19479[0], 0.0, 0.0, 0.0]))) / v6269;
+            let v19482 = (((Lanes([0.0, v10469[0], v10469[1], v10469[2]])) - v19477) - (Lanes([(v19052 * v6535), 0.0, 0.0, 0.0]))) / v6269;
             let v6536 = if v6535 > v407 { 1.0 } else { 0.0 };
             let v6558: f64;
             let v10470: Lanes<4>;
@@ -13382,18 +12977,15 @@ impl Instance {
                 v6557 = v6556;
                 v10472 = v19497;
             }
-            let v19507 = v19152 * v6558;
-            let v19511 = Lanes([v19061[0], 0.0, 0.0, 0.0]);
+            let v19511 = Lanes([v19061, 0.0, 0.0, 0.0]);
             let v6563 = (v6557 - (v6275 - (v6336 * v6558))) / v6515;
-            let v19515 = v19451 * v6563;
-            let v19518 = (((Lanes([0.0, v10472[0], v10472[1], v10472[2]])) - (v19511 - ((Lanes([v19507[0], 0.0, 0.0, 0.0])) + (v10470 * v6336)))) - (Lanes([v19515[0], 0.0, 0.0, 0.0]))) / v6515;
+            let v19518 = (((Lanes([0.0, v10472[0], v10472[1], v10472[2]])) - (v19511 - ((Lanes([(v19152 * v6558), 0.0, 0.0, 0.0])) + (v10470 * v6336)))) - (Lanes([(v19451 * v6563), 0.0, 0.0, 0.0]))) / v6515;
             let v6564 = if v6563 > v407 { 1.0 } else { 0.0 };
             let v6577: f64;
             let v10473: Lanes<4>;
             if v6564 != 0.0 {
                 let v6565 = v6516 * v6563;
-                let v19531 = v19454 * v6563;
-                let v19534 = (Lanes([v19531[0], 0.0, 0.0, 0.0])) + (v19518 * v6516);
+                let v19534 = (Lanes([(v19454 * v6563), 0.0, 0.0, 0.0])) + (v19518 * v6516);
                 v6577 = v6565;
                 v10473 = v19534;
             } else {
@@ -13403,8 +12995,7 @@ impl Instance {
                 if v6567 != 0.0 {
                     let v6568 = v6563.exp();
                     let v6569 = v6516 * v6568;
-                    let v19527 = v19454 * v6568;
-                    let v19530 = (Lanes([v19527[0], 0.0, 0.0, 0.0])) + ((v19518 * v6568) * v6516);
+                    let v19530 = (Lanes([(v19454 * v6568), 0.0, 0.0, 0.0])) + ((v19518 * v6568) * v6516);
                     v6578 = v6569;
                     v10474 = v19530;
                 } else {
@@ -13412,8 +13003,7 @@ impl Instance {
                     let v6571 = v6 + v6570;
                     let v6572 = v6571.ln();
                     let v6573 = v6516 * v6572;
-                    let v19522 = v19454 * v6572;
-                    let v19525 = (Lanes([v19522[0], 0.0, 0.0, 0.0])) + (((v19518 * v6570) * (v9751 / v6571)) * v6516);
+                    let v19525 = (Lanes([(v19454 * v6572), 0.0, 0.0, 0.0])) + (((v19518 * v6570) * (v9751 / v6571)) * v6516);
                     v6578 = v6573;
                     v10474 = v19525;
                 }
@@ -13424,16 +13014,12 @@ impl Instance {
             let v6576 = (v6365 * v6247) / v6574;
             let v19541 = ((v19197 * v6247) - ((((v19065 * v6574) * v10982) / v6276) * v6576)) / v6574;
             let v6580 = (v437 * v6577) / v166;
-            let v19543 = v10878 * v6580;
             let v6581 = v6580 / v6576;
-            let v19547 = v19541 * v6581;
             let v6583 = (v6 + v6581).sqrt();
-            let v19554 = v19541 * v6583;
             let v6585 = (v6576 * v6583) - v6576;
             let v6586 = v6 - v6558;
-            let v19564 = v19451 * v6558;
             let v6589 = (v6585 * v6586) + (v6515 * v6558);
-            let v19568 = (((((Lanes([v19554[0], 0.0, 0.0, 0.0])) + (((((((v10473 * v437) - (Lanes([v19543[0], 0.0, 0.0, 0.0]))) / v166) - (Lanes([v19547[0], 0.0, 0.0, 0.0]))) / v6576) * (v9751 / (v10962 * v6583))) * v6576)) - (Lanes([v19541[0], 0.0, 0.0, 0.0]))) * v6586) + ((v10470 * v10982) * v6585)) + ((Lanes([v19564[0], 0.0, 0.0, 0.0])) + (v10470 * v6515));
+            let v19568 = (((((Lanes([(v19541 * v6583), 0.0, 0.0, 0.0])) + (((((((v10473 * v437) - (Lanes([(v10878 * v6580), 0.0, 0.0, 0.0]))) / v166) - (Lanes([(v19541 * v6581), 0.0, 0.0, 0.0]))) / v6576) * (v9751 / (v10962 * v6583))) * v6576)) - (Lanes([v19541, 0.0, 0.0, 0.0]))) * v6586) + ((v10470 * v10982) * v6585)) + ((Lanes([(v19451 * v6558), 0.0, 0.0, 0.0])) + (v10470 * v6515));
             let v6590 = v339 / v6589;
             let v19571 = (v19260 - (v19568 * v6590)) / v6589;
             let v6604: f64;
@@ -13492,8 +13078,7 @@ impl Instance {
             let v19636 = (Lanes([0.0, v19633[0], 0.0, v19633[1]])) + ((((((v10476 * (v6255 * (v6624.powf(v19281)))) * (v6412 * (v6626.powf(v19285)))) * v6628) * v10982) / v6627) * v6416);
             let v19637 = Lanes([0.0, v10934[0], v10934[1]]);
             let v6631 = (v342 - v6517) / v6269;
-            let v19640 = v19052 * v6631;
-            let v19643 = ((v19637 - (Lanes([v19455[0], 0.0, 0.0]))) - (Lanes([v19640[0], 0.0, 0.0]))) / v6269;
+            let v19643 = ((v19637 - (Lanes([v19455, 0.0, 0.0]))) - (Lanes([(v19052 * v6631), 0.0, 0.0]))) / v6269;
             let v6632 = if v6631 > v407 { 1.0 } else { 0.0 };
             let v6639: f64;
             let v10477: Lanes<3>;
@@ -13518,18 +13103,15 @@ impl Instance {
                 v6639 = v6640;
                 v10477 = v10478;
             }
-            let v19650 = v19152 * v6639;
-            let v19655 = (Lanes([v19061[0], 0.0, 0.0])) - ((Lanes([v19650[0], 0.0, 0.0])) + (v10477 * v6336));
+            let v19655 = (Lanes([v19061, 0.0, 0.0])) - ((Lanes([(v19152 * v6639), 0.0, 0.0])) + (v10477 * v6336));
             let v6644 = ((v6268 - v6629) - (v6275 - (v6336 * v6639))) / v6515;
-            let v19658 = v19451 * v6644;
-            let v19661 = (((v19342 - v19636) - (Lanes([v19655[0], 0.0, v19655[1], v19655[2]]))) - (Lanes([v19658[0], 0.0, 0.0, 0.0]))) / v6515;
+            let v19661 = (((v19342 - v19636) - (Lanes([v19655[0], 0.0, v19655[1], v19655[2]]))) - (Lanes([(v19451 * v6644), 0.0, 0.0, 0.0]))) / v6515;
             let v6645 = if v6644 > v407 { 1.0 } else { 0.0 };
             let v6680: f64;
             let v10479: Lanes<4>;
             if v6645 != 0.0 {
                 let v6646 = v6516 * v6644;
-                let v19674 = v19454 * v6644;
-                let v19677 = (Lanes([v19674[0], 0.0, 0.0, 0.0])) + (v19661 * v6516);
+                let v19677 = (Lanes([(v19454 * v6644), 0.0, 0.0, 0.0])) + (v19661 * v6516);
                 v6680 = v6646;
                 v10479 = v19677;
             } else {
@@ -13539,8 +13121,7 @@ impl Instance {
                 if v6648 != 0.0 {
                     let v6649 = v6644.exp();
                     let v6650 = v6516 * v6649;
-                    let v19670 = v19454 * v6649;
-                    let v19673 = (Lanes([v19670[0], 0.0, 0.0, 0.0])) + ((v19661 * v6649) * v6516);
+                    let v19673 = (Lanes([(v19454 * v6649), 0.0, 0.0, 0.0])) + ((v19661 * v6649) * v6516);
                     v6681 = v6650;
                     v10480 = v19673;
                 } else {
@@ -13548,8 +13129,7 @@ impl Instance {
                     let v6652 = v6 + v6651;
                     let v6653 = v6652.ln();
                     let v6654 = v6516 * v6653;
-                    let v19665 = v19454 * v6653;
-                    let v19668 = (Lanes([v19665[0], 0.0, 0.0, 0.0])) + (((v19661 * v6651) * (v9751 / v6652)) * v6516);
+                    let v19668 = (Lanes([(v19454 * v6653), 0.0, 0.0, 0.0])) + (((v19661 * v6651) * (v9751 / v6652)) * v6516);
                     v6681 = v6654;
                     v10480 = v19668;
                 }
@@ -13557,8 +13137,7 @@ impl Instance {
                 v10479 = v10480;
             }
             let v6656 = (v6268 - v6517) / v6269;
-            let v19679 = v19052 * v6656;
-            let v19682 = ((v19342 - v19477) - (Lanes([v19679[0], 0.0, 0.0, 0.0]))) / v6269;
+            let v19682 = ((v19342 - v19477) - (Lanes([(v19052 * v6656), 0.0, 0.0, 0.0]))) / v6269;
             let v6657 = if v6656 > v407 { 1.0 } else { 0.0 };
             let v6664: f64;
             let v10481: Lanes<4>;
@@ -13583,17 +13162,14 @@ impl Instance {
                 v6664 = v6665;
                 v10481 = v10482;
             }
-            let v19688 = v19152 * v6664;
             let v6669 = ((v342 - v6609) - (v6275 - (v6336 * v6664))) / v6515;
-            let v19694 = v19451 * v6669;
-            let v19697 = (((v19332 - v19602) - (v19511 - ((Lanes([v19688[0], 0.0, 0.0, 0.0])) + (v10481 * v6336)))) - (Lanes([v19694[0], 0.0, 0.0, 0.0]))) / v6515;
+            let v19697 = (((v19332 - v19602) - (v19511 - ((Lanes([(v19152 * v6664), 0.0, 0.0, 0.0])) + (v10481 * v6336)))) - (Lanes([(v19451 * v6669), 0.0, 0.0, 0.0]))) / v6515;
             let v6670 = if v6669 > v407 { 1.0 } else { 0.0 };
             let v6686: f64;
             let v10483: Lanes<4>;
             if v6670 != 0.0 {
                 let v6671 = v6516 * v6669;
-                let v19710 = v19454 * v6669;
-                let v19713 = (Lanes([v19710[0], 0.0, 0.0, 0.0])) + (v19697 * v6516);
+                let v19713 = (Lanes([(v19454 * v6669), 0.0, 0.0, 0.0])) + (v19697 * v6516);
                 v6686 = v6671;
                 v10483 = v19713;
             } else {
@@ -13603,8 +13179,7 @@ impl Instance {
                 if v6673 != 0.0 {
                     let v6674 = v6669.exp();
                     let v6675 = v6516 * v6674;
-                    let v19706 = v19454 * v6674;
-                    let v19709 = (Lanes([v19706[0], 0.0, 0.0, 0.0])) + ((v19697 * v6674) * v6516);
+                    let v19709 = (Lanes([(v19454 * v6674), 0.0, 0.0, 0.0])) + ((v19697 * v6674) * v6516);
                     v6687 = v6675;
                     v10484 = v19709;
                 } else {
@@ -13612,8 +13187,7 @@ impl Instance {
                     let v6677 = v6 + v6676;
                     let v6678 = v6677.ln();
                     let v6679 = v6516 * v6678;
-                    let v19701 = v19454 * v6678;
-                    let v19704 = (Lanes([v19701[0], 0.0, 0.0, 0.0])) + (((v19697 * v6676) * (v9751 / v6677)) * v6516);
+                    let v19704 = (Lanes([(v19454 * v6678), 0.0, 0.0, 0.0])) + (((v19697 * v6676) * (v9751 / v6677)) * v6516);
                     v6687 = v6679;
                     v10484 = v19704;
                 }
@@ -13693,8 +13267,8 @@ impl Instance {
             let v10486: Lanes<10>;
             let v10487: Lanes<2>;
             let v10488: Lanes<3>;
-            let v10489: Lanes<1>;
-            let v10490: Lanes<1>;
+            let v10489: f64;
+            let v10490: f64;
             if v6745 != 0.0 {
                 let v19789 = v10929 * v1;
                 let v6749 = v6513 + (v1 * v338);
@@ -13714,25 +13288,23 @@ impl Instance {
                 v10489 = v19795;
                 v10490 = v19796;
             } else {
-                let v19769 = (Lanes([v19447[0], v19447[1], v19447[2], v19447[3], v19447[4], v19447[5], v19447[6], v19447[7], 0.0])) - (Lanes([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, v9779[0]]));
+                let v19769 = (Lanes([v19447[0], v19447[1], v19447[2], v19447[3], v19447[4], v19447[5], v19447[6], v19447[7], 0.0])) - (Lanes([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, v9779]));
                 let v6753 = v6751 * v6752;
                 let v19770 = v9780 * v6751;
-                let v19771 = v19770 * v11018;
                 let v6755 = (v6513 - v6743) - (ddt(67938, v6753));
-                let v19774 = (Lanes([v19769[0], v19769[1], v19769[2], v19769[3], v19769[4], v19769[5], v19769[6], v19769[7], 0.0, v19769[8]])) - (Lanes([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, v19771[0], 0.0]));
+                let v19774 = (Lanes([v19769[0], v19769[1], v19769[2], v19769[3], v19769[4], v19769[5], v19769[6], v19769[7], 0.0, v19769[8]])) - (Lanes([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, (v19770 * v11018), 0.0]));
                 let v9743 = -v6753;
                 let v19775 = v19770 * v10982;
                 let v6757 = v6751 / v97;
                 let v6758 = v6757 * v6743;
                 let v19779 = v9779 * v6757;
-                let v19780 = v19779 * v11018;
                 let v6760 = (v6752 - v6743) - (ddt(67948, v6758));
-                let v19782 = ((Lanes([v9780[0], 0.0])) - (Lanes([0.0, v9779[0]]))) - (Lanes([0.0, v19780[0]]));
+                let v19782 = ((Lanes([v9780, 0.0])) - (Lanes([0.0, v9779]))) - (Lanes([0.0, (v19779 * v11018)]));
                 let v9745 = -v6758;
                 let v19783 = v19779 * v10982;
                 let v19784 = v10929 * v1;
                 let v6762 = v6743 + (v1 * v338);
-                let v19787 = (Lanes([0.0, 0.0, v9779[0]])) + (Lanes([v19784[0], v19784[1], 0.0]));
+                let v19787 = (Lanes([0.0, 0.0, v9779])) + (Lanes([v19784[0], v19784[1], 0.0]));
                 v9538 = v0;
                 v9539 = v0;
                 v9540 = v0;
@@ -13756,7 +13328,7 @@ impl Instance {
             let v9747 = v6720 + v6764;
             let v19803 = v19760 + (Lanes([0.0, 0.0, v19798[0], v19798[1], 0.0, 0.0, 0.0, 0.0]));
             let v6768 = v340 - v336;
-            let v19807 = (Lanes([0.0, v9755[0]])) - (Lanes([v9753[0], 0.0]));
+            let v19807 = (Lanes([0.0, v9755])) - (Lanes([v9753, 0.0]));
             let v6769 = v1243 * v6768;
             let v19808 = v19807 * v1243;
             let v19809 = v19808 * v11018;
@@ -13783,7 +13355,7 @@ impl Instance {
             let v10498: Lanes<3>;
             if v6773 != 0.0 {
                 let v6774 = v340 - v383;
-                let v19819 = (Lanes([v9755[0], 0.0])) - (Lanes([0.0, v9759[0]]));
+                let v19819 = (Lanes([v9755, 0.0])) - (Lanes([0.0, v9759]));
                 let v6775 = v335 * v6774;
                 let v19820 = v19819 * v335;
                 let v6783 = v6 - v6782;
@@ -13795,7 +13367,7 @@ impl Instance {
                 let v19824 = (((v10854 * v6794) * v10982) / v90) * v6795;
                 let v6797 = if v6796 > v407 { 1.0 } else { 0.0 };
                 let v6806: f64;
-                let v10499: Lanes<1>;
+                let v10499: f64;
                 if v6797 != 0.0 {
                     let v6801 = v6798 * (v6 + (v6796 - v407));
                     let v19826 = v19824 * v6798;
@@ -13804,7 +13376,7 @@ impl Instance {
                 } else {
                     let v6803 = if v6796 < v6802 { 1.0 } else { 0.0 };
                     let v6807: f64;
-                    let v10500: Lanes<1>;
+                    let v10500: f64;
                     if v6803 != 0.0 {
                         v6807 = v6804;
                         v10500 = v10838;
@@ -13821,7 +13393,7 @@ impl Instance {
                 let v19827 = v19820 * v10982;
                 let v19828 = v19827 * v6780;
                 let v6811 = (v6780 * (v6808 - v6781)) + v6796;
-                let v19830 = Lanes([v19824[0], 0.0, 0.0]);
+                let v19830 = Lanes([v19824, 0.0, 0.0]);
                 let v19831 = (Lanes([0.0, v19828[0], v19828[1]])) + v19830;
                 let v6814 = ((-v6780) * v6781) + v6796;
                 let v6815 = if v6811 > v407 { 1.0 } else { 0.0 };
@@ -13850,7 +13422,7 @@ impl Instance {
                 }
                 let v6826 = if v6814 > v407 { 1.0 } else { 0.0 };
                 let v6835: f64;
-                let v10503: Lanes<1>;
+                let v10503: f64;
                 if v6826 != 0.0 {
                     let v6830 = v6827 * (v6 + (v6814 - v407));
                     let v19835 = v19824 * v6827;
@@ -13859,7 +13431,7 @@ impl Instance {
                 } else {
                     let v6832 = if v6814 < v6831 { 1.0 } else { 0.0 };
                     let v6836: f64;
-                    let v10504: Lanes<1>;
+                    let v10504: f64;
                     if v6832 != 0.0 {
                         v6836 = v6833;
                         v10504 = v10838;
@@ -13873,16 +13445,15 @@ impl Instance {
                     v10503 = v10504;
                 }
                 let v6837 = v6824 - v6835;
-                let v19837 = v10501 - (Lanes([v10503[0], 0.0, 0.0]));
+                let v19837 = v10501 - (Lanes([v10503, 0.0, 0.0]));
                 let v6838 = v6508 * v6785;
                 let v6839 = v6838 * v98;
                 let v19838 = v10858 * v6838;
                 let v6840 = v6779 / v90;
                 let v19841 = ((v10854 * v6840) * v10982) / v90;
-                let v19842 = v19841 * v6775;
                 let v19843 = v19820 * v6840;
                 let v6842 = (v6840 * v6775) + v6796;
-                let v19847 = ((Lanes([v19842[0], 0.0, 0.0])) + (Lanes([0.0, v19843[0], v19843[1]]))) + v19830;
+                let v19847 = ((Lanes([(v19841 * v6775), 0.0, 0.0])) + (Lanes([0.0, v19843[0], v19843[1]]))) + v19830;
                 let v6843 = if v6842 > v407 { 1.0 } else { 0.0 };
                 let v6852: f64;
                 let v10505: Lanes<3>;
@@ -13913,15 +13484,14 @@ impl Instance {
                 if v6854 != 0.0 {
                     let v6857 = (v6852 - (v6786 * v6837)) - v6806;
                     let v6858 = v6839 * v6857;
-                    let v19927 = v19838 * v6857;
-                    let v19930 = (Lanes([v19927[0], 0.0, 0.0])) + (((v10505 - (v19837 * v6786)) - (Lanes([v10499[0], 0.0, 0.0]))) * v6839);
+                    let v19930 = (Lanes([(v19838 * v6857), 0.0, 0.0])) + (((v10505 - (v19837 * v6786)) - (Lanes([v10499, 0.0, 0.0]))) * v6839);
                     v6985 = v6858;
                     v10507 = v19930;
                 } else {
                     let v6862 = (v6780 * ((-v6776) - v6781)) + v6796;
                     let v6863 = if v6862 > v407 { 1.0 } else { 0.0 };
                     let v6872: f64;
-                    let v10508: Lanes<1>;
+                    let v10508: f64;
                     if v6863 != 0.0 {
                         let v6867 = v6864 * (v6 + (v6862 - v407));
                         let v19851 = v19824 * v6864;
@@ -13930,7 +13500,7 @@ impl Instance {
                     } else {
                         let v6869 = if v6862 < v6868 { 1.0 } else { 0.0 };
                         let v6873: f64;
-                        let v10509: Lanes<1>;
+                        let v10509: f64;
                         if v6869 != 0.0 {
                             v6873 = v6870;
                             v10509 = v10838;
@@ -13949,7 +13519,7 @@ impl Instance {
                     let v19854 = (v19841 * v6776) + v19824;
                     let v6877 = if v6876 > v407 { 1.0 } else { 0.0 };
                     let v6886: f64;
-                    let v10510: Lanes<1>;
+                    let v10510: f64;
                     if v6877 != 0.0 {
                         let v6881 = v6878 * (v6 + (v6876 - v407));
                         let v19856 = v19854 * v6878;
@@ -13958,7 +13528,7 @@ impl Instance {
                     } else {
                         let v6883 = if v6876 < v6882 { 1.0 } else { 0.0 };
                         let v6887: f64;
-                        let v10511: Lanes<1>;
+                        let v10511: f64;
                         if v6883 != 0.0 {
                             v6887 = v6884;
                             v10511 = v10838;
@@ -13978,10 +13548,9 @@ impl Instance {
                     let v6891 = v6786 * v6837;
                     let v19860 = v19837 * v6786;
                     let v6893 = (v6852 - v6891) - v6806;
-                    let v19862 = Lanes([v10499[0], 0.0, 0.0]);
+                    let v19862 = Lanes([v10499, 0.0, 0.0]);
                     let v6894 = v6839 * v6893;
-                    let v19864 = v19838 * v6893;
-                    let v19867 = (Lanes([v19864[0], 0.0, 0.0])) + (((v10505 - v19860) - v19862) * v6839);
+                    let v19867 = (Lanes([(v19838 * v6893), 0.0, 0.0])) + (((v10505 - v19860) - v19862) * v6839);
                     let v6895 = if v6778 > v0 { 1.0 } else { 0.0 };
                     let v6948: f64;
                     let v10512: Lanes<3>;
@@ -13992,7 +13561,7 @@ impl Instance {
                         let v19876 = (v19874 * v6776) + v19824;
                         let v6900 = if v6899 > v407 { 1.0 } else { 0.0 };
                         let v6909: f64;
-                        let v10513: Lanes<1>;
+                        let v10513: f64;
                         if v6900 != 0.0 {
                             let v6904 = v6901 * (v6 + (v6899 - v407));
                             let v19878 = v19876 * v6901;
@@ -14001,7 +13570,7 @@ impl Instance {
                         } else {
                             let v6906 = if v6899 < v6905 { 1.0 } else { 0.0 };
                             let v6910: f64;
-                            let v10514: Lanes<1>;
+                            let v10514: f64;
                             if v6906 != 0.0 {
                                 v6910 = v6907;
                                 v10514 = v10838;
@@ -14016,10 +13585,9 @@ impl Instance {
                         }
                         let v6912 = (v6909 - v6888) - v6806;
                         let v19880 = (v10513 - v19857) - v10499;
-                        let v19881 = v19874 * v6775;
                         let v19882 = v19820 * v6897;
                         let v6914 = (v6897 * v6775) + v6796;
-                        let v19886 = ((Lanes([v19881[0], 0.0, 0.0])) + (Lanes([0.0, v19882[0], v19882[1]]))) + v19830;
+                        let v19886 = ((Lanes([(v19874 * v6775), 0.0, 0.0])) + (Lanes([0.0, v19882[0], v19882[1]]))) + v19830;
                         let v6915 = if v6914 > v407 { 1.0 } else { 0.0 };
                         let v6924: f64;
                         let v10515: Lanes<3>;
@@ -14047,24 +13615,20 @@ impl Instance {
                         let v6927 = (v6839 * v6890) / v6912;
                         let v6929 = (v6924 - v6891) - v6806;
                         let v6930 = v6927 * v6929;
-                        let v19897 = ((((v19838 * v6890) + (v19859 * v6839)) - (v19880 * v6927)) / v6912) * v6929;
-                        let v19900 = (Lanes([v19897[0], 0.0, 0.0])) + (((v10515 - v19860) - v19862) * v6927);
+                        let v19900 = (Lanes([(((((v19838 * v6890) + (v19859 * v6839)) - (v19880 * v6927)) / v6912) * v6929), 0.0, 0.0])) + (((v10515 - v19860) - v19862) * v6927);
                         v6948 = v6930;
                         v10512 = v19900;
                     } else {
                         let v6931 = v6839 * v6890;
-                        let v19870 = (v19838 * v6890) + (v19859 * v6839);
-                        let v19871 = Lanes([v19870[0], 0.0, 0.0]);
+                        let v19871 = Lanes([((v19838 * v6890) + (v19859 * v6839)), 0.0, 0.0]);
                         v6948 = v6931;
                         v10512 = v19871;
                     }
                     let v6932 = v6777 * v6777;
                     let v6933 = v6932 * v90;
                     let v19901 = v10854 * v6932;
-                    let v19903 = (v19901 / v437) * v10982;
                     let v6937 = (v6775 - (v6776 - (v6933 / v437))) / v6933;
-                    let v19907 = v19901 * v6937;
-                    let v19910 = (((Lanes([0.0, v19820[0], v19820[1]])) - (Lanes([v19903[0], 0.0, 0.0]))) - (Lanes([v19907[0], 0.0, 0.0]))) / v6933;
+                    let v19910 = (((Lanes([0.0, v19820[0], v19820[1]])) - (Lanes([((v19901 / v437) * v10982), 0.0, 0.0]))) - (Lanes([(v19901 * v6937), 0.0, 0.0]))) / v6933;
                     let v6938 = if v6937 > v407 { 1.0 } else { 0.0 };
                     let v6944: f64;
                     let v10517: Lanes<3>;
@@ -14126,9 +13690,8 @@ impl Instance {
                 let v6970 = v6791 / v90;
                 let v19958 = ((v10854 * v6970) * v10982) / v90;
                 let v6971 = v6970 * v6964;
-                let v19959 = v19958 * v6964;
                 let v19960 = ((v19827 - (((v10519 * (v6788 * (v6959.powf(v19944)))) * (v6962 * (v6961.powf(v19948)))) * v6964)) / v6963) * v6970;
-                let v19963 = (Lanes([v19959[0], 0.0, 0.0])) + (Lanes([0.0, v19960[0], v19960[1]]));
+                let v19963 = (Lanes([(v19958 * v6964), 0.0, 0.0])) + (Lanes([0.0, v19960[0], v19960[1]]));
                 let v6972 = if v6971 > v407 { 1.0 } else { 0.0 };
                 let v6981: f64;
                 let v10520: Lanes<3>;
@@ -14154,17 +13717,16 @@ impl Instance {
                     v10520 = v10521;
                 }
                 let v6983 = v6981 - v6;
-                let v19966 = v19955 * v6983;
                 let v6986 = v6985 + (v6969 * v6983);
-                let v19970 = v10507 + ((Lanes([v19966[0], 0.0, 0.0])) + (v10520 * v6969));
+                let v19970 = v10507 + ((Lanes([(v19955 * v6983), 0.0, 0.0])) + (v10520 * v6969));
                 let v6987 = v340 - v532;
-                let v19973 = (Lanes([v9755[0], 0.0])) - (Lanes([0.0, v9769[0]]));
+                let v19973 = (Lanes([v9755, 0.0])) - (Lanes([0.0, v9769]));
                 let v6988 = v335 * v6987;
                 let v19974 = v19973 * v335;
                 let v6996 = v6783 * v6995;
                 let v7001 = v6783 * v7000;
                 let v7011: f64;
-                let v10522: Lanes<1>;
+                let v10522: f64;
                 if v6797 != 0.0 {
                     let v7006 = v7003 * (v6 + (v6796 - v407));
                     let v19976 = v19824 * v7003;
@@ -14173,7 +13735,7 @@ impl Instance {
                 } else {
                     let v7008 = if v6796 < v7007 { 1.0 } else { 0.0 };
                     let v7012: f64;
-                    let v10523: Lanes<1>;
+                    let v10523: f64;
                     if v7008 != 0.0 {
                         v7012 = v7009;
                         v10523 = v10838;
@@ -14190,7 +13752,7 @@ impl Instance {
                 let v19977 = v19974 * v10982;
                 let v19978 = v19977 * v6993;
                 let v7016 = (v6993 * (v7013 - v6994)) + v6796;
-                let v19980 = Lanes([v19824[0], 0.0, 0.0]);
+                let v19980 = Lanes([v19824, 0.0, 0.0]);
                 let v19981 = (Lanes([0.0, v19978[0], v19978[1]])) + v19980;
                 let v7019 = ((-v6993) * v6994) + v6796;
                 let v7020 = if v7016 > v407 { 1.0 } else { 0.0 };
@@ -14219,7 +13781,7 @@ impl Instance {
                 }
                 let v7031 = if v7019 > v407 { 1.0 } else { 0.0 };
                 let v7040: f64;
-                let v10526: Lanes<1>;
+                let v10526: f64;
                 if v7031 != 0.0 {
                     let v7035 = v7032 * (v6 + (v7019 - v407));
                     let v19985 = v19824 * v7032;
@@ -14228,7 +13790,7 @@ impl Instance {
                 } else {
                     let v7037 = if v7019 < v7036 { 1.0 } else { 0.0 };
                     let v7041: f64;
-                    let v10527: Lanes<1>;
+                    let v10527: f64;
                     if v7037 != 0.0 {
                         v7041 = v7038;
                         v10527 = v10838;
@@ -14242,16 +13804,15 @@ impl Instance {
                     v10526 = v10527;
                 }
                 let v7042 = v7029 - v7040;
-                let v19987 = v10524 - (Lanes([v10526[0], 0.0, 0.0]));
+                let v19987 = v10524 - (Lanes([v10526, 0.0, 0.0]));
                 let v7043 = v6508 * v6996;
                 let v7044 = v7043 * v98;
                 let v19988 = v10858 * v7043;
                 let v7045 = v6992 / v90;
                 let v19991 = ((v10854 * v7045) * v10982) / v90;
-                let v19992 = v19991 * v6988;
                 let v19993 = v19974 * v7045;
                 let v7047 = (v7045 * v6988) + v6796;
-                let v19997 = ((Lanes([v19992[0], 0.0, 0.0])) + (Lanes([0.0, v19993[0], v19993[1]]))) + v19980;
+                let v19997 = ((Lanes([(v19991 * v6988), 0.0, 0.0])) + (Lanes([0.0, v19993[0], v19993[1]]))) + v19980;
                 let v7048 = if v7047 > v407 { 1.0 } else { 0.0 };
                 let v7057: f64;
                 let v10528: Lanes<3>;
@@ -14282,15 +13843,14 @@ impl Instance {
                 if v7059 != 0.0 {
                     let v7062 = (v7057 - (v6997 * v7042)) - v7011;
                     let v7063 = v7044 * v7062;
-                    let v20077 = v19988 * v7062;
-                    let v20080 = (Lanes([v20077[0], 0.0, 0.0])) + (((v10528 - (v19987 * v6997)) - (Lanes([v10522[0], 0.0, 0.0]))) * v7044);
+                    let v20080 = (Lanes([(v19988 * v7062), 0.0, 0.0])) + (((v10528 - (v19987 * v6997)) - (Lanes([v10522, 0.0, 0.0]))) * v7044);
                     v7187 = v7063;
                     v10530 = v20080;
                 } else {
                     let v7067 = (v6993 * ((-v6989) - v6994)) + v6796;
                     let v7068 = if v7067 > v407 { 1.0 } else { 0.0 };
                     let v7077: f64;
-                    let v10531: Lanes<1>;
+                    let v10531: f64;
                     if v7068 != 0.0 {
                         let v7072 = v7069 * (v6 + (v7067 - v407));
                         let v20001 = v19824 * v7069;
@@ -14299,7 +13859,7 @@ impl Instance {
                     } else {
                         let v7074 = if v7067 < v7073 { 1.0 } else { 0.0 };
                         let v7078: f64;
-                        let v10532: Lanes<1>;
+                        let v10532: f64;
                         if v7074 != 0.0 {
                             v7078 = v7075;
                             v10532 = v10838;
@@ -14318,7 +13878,7 @@ impl Instance {
                     let v20004 = (v19991 * v6989) + v19824;
                     let v7082 = if v7081 > v407 { 1.0 } else { 0.0 };
                     let v7091: f64;
-                    let v10533: Lanes<1>;
+                    let v10533: f64;
                     if v7082 != 0.0 {
                         let v7086 = v7083 * (v6 + (v7081 - v407));
                         let v20006 = v20004 * v7083;
@@ -14327,7 +13887,7 @@ impl Instance {
                     } else {
                         let v7088 = if v7081 < v7087 { 1.0 } else { 0.0 };
                         let v7092: f64;
-                        let v10534: Lanes<1>;
+                        let v10534: f64;
                         if v7088 != 0.0 {
                             v7092 = v7089;
                             v10534 = v10838;
@@ -14347,10 +13907,9 @@ impl Instance {
                     let v7096 = v6997 * v7042;
                     let v20010 = v19987 * v6997;
                     let v7098 = (v7057 - v7096) - v7011;
-                    let v20012 = Lanes([v10522[0], 0.0, 0.0]);
+                    let v20012 = Lanes([v10522, 0.0, 0.0]);
                     let v7099 = v7044 * v7098;
-                    let v20014 = v19988 * v7098;
-                    let v20017 = (Lanes([v20014[0], 0.0, 0.0])) + (((v10528 - v20010) - v20012) * v7044);
+                    let v20017 = (Lanes([(v19988 * v7098), 0.0, 0.0])) + (((v10528 - v20010) - v20012) * v7044);
                     let v7100 = if v6991 > v0 { 1.0 } else { 0.0 };
                     let v7153: f64;
                     let v10535: Lanes<3>;
@@ -14361,7 +13920,7 @@ impl Instance {
                         let v20026 = (v20024 * v6989) + v19824;
                         let v7105 = if v7104 > v407 { 1.0 } else { 0.0 };
                         let v7114: f64;
-                        let v10536: Lanes<1>;
+                        let v10536: f64;
                         if v7105 != 0.0 {
                             let v7109 = v7106 * (v6 + (v7104 - v407));
                             let v20028 = v20026 * v7106;
@@ -14370,7 +13929,7 @@ impl Instance {
                         } else {
                             let v7111 = if v7104 < v7110 { 1.0 } else { 0.0 };
                             let v7115: f64;
-                            let v10537: Lanes<1>;
+                            let v10537: f64;
                             if v7111 != 0.0 {
                                 v7115 = v7112;
                                 v10537 = v10838;
@@ -14385,10 +13944,9 @@ impl Instance {
                         }
                         let v7117 = (v7114 - v7093) - v7011;
                         let v20030 = (v10536 - v20007) - v10522;
-                        let v20031 = v20024 * v6988;
                         let v20032 = v19974 * v7102;
                         let v7119 = (v7102 * v6988) + v6796;
-                        let v20036 = ((Lanes([v20031[0], 0.0, 0.0])) + (Lanes([0.0, v20032[0], v20032[1]]))) + v19980;
+                        let v20036 = ((Lanes([(v20024 * v6988), 0.0, 0.0])) + (Lanes([0.0, v20032[0], v20032[1]]))) + v19980;
                         let v7120 = if v7119 > v407 { 1.0 } else { 0.0 };
                         let v7129: f64;
                         let v10538: Lanes<3>;
@@ -14416,24 +13974,20 @@ impl Instance {
                         let v7132 = (v7044 * v7095) / v7117;
                         let v7134 = (v7129 - v7096) - v7011;
                         let v7135 = v7132 * v7134;
-                        let v20047 = ((((v19988 * v7095) + (v20009 * v7044)) - (v20030 * v7132)) / v7117) * v7134;
-                        let v20050 = (Lanes([v20047[0], 0.0, 0.0])) + (((v10538 - v20010) - v20012) * v7132);
+                        let v20050 = (Lanes([(((((v19988 * v7095) + (v20009 * v7044)) - (v20030 * v7132)) / v7117) * v7134), 0.0, 0.0])) + (((v10538 - v20010) - v20012) * v7132);
                         v7153 = v7135;
                         v10535 = v20050;
                     } else {
                         let v7136 = v7044 * v7095;
-                        let v20020 = (v19988 * v7095) + (v20009 * v7044);
-                        let v20021 = Lanes([v20020[0], 0.0, 0.0]);
+                        let v20021 = Lanes([((v19988 * v7095) + (v20009 * v7044)), 0.0, 0.0]);
                         v7153 = v7136;
                         v10535 = v20021;
                     }
                     let v7137 = v6990 * v6990;
                     let v7138 = v7137 * v90;
                     let v20051 = v10854 * v7137;
-                    let v20053 = (v20051 / v437) * v10982;
                     let v7142 = (v6988 - (v6989 - (v7138 / v437))) / v7138;
-                    let v20057 = v20051 * v7142;
-                    let v20060 = (((Lanes([0.0, v19974[0], v19974[1]])) - (Lanes([v20053[0], 0.0, 0.0]))) - (Lanes([v20057[0], 0.0, 0.0]))) / v7138;
+                    let v20060 = (((Lanes([0.0, v19974[0], v19974[1]])) - (Lanes([((v20051 / v437) * v10982), 0.0, 0.0]))) - (Lanes([(v20051 * v7142), 0.0, 0.0]))) / v7138;
                     let v7143 = if v7142 > v407 { 1.0 } else { 0.0 };
                     let v7149: f64;
                     let v10540: Lanes<3>;
@@ -14494,9 +14048,8 @@ impl Instance {
                 let v7172 = v7002 / v90;
                 let v20108 = ((v10854 * v7172) * v10982) / v90;
                 let v7173 = v7172 * v7169;
-                let v20109 = v20108 * v7169;
                 let v20110 = ((v19977 - (((v10542 * (v6999 * (v7164.powf(v20094)))) * (v7167 * (v7166.powf(v20098)))) * v7169)) / v7168) * v7172;
-                let v20113 = (Lanes([v20109[0], 0.0, 0.0])) + (Lanes([0.0, v20110[0], v20110[1]]));
+                let v20113 = (Lanes([(v20108 * v7169), 0.0, 0.0])) + (Lanes([0.0, v20110[0], v20110[1]]));
                 let v7174 = if v7173 > v407 { 1.0 } else { 0.0 };
                 let v7183: f64;
                 let v10543: Lanes<3>;
@@ -14522,7 +14075,6 @@ impl Instance {
                     v10543 = v10544;
                 }
                 let v7185 = v7183 - v6;
-                let v20116 = v20105 * v7185;
                 let v7189 = v1 * v6774;
                 let v20121 = v19819 * v1;
                 let v7190 = v6986 + v7189;
@@ -14532,7 +14084,7 @@ impl Instance {
                 let v20124 = v19973 * v1;
                 let v7192 = (v7187 + (v7171 * v7185)) + v7191;
                 let v20125 = Lanes([0.0, v20124[0], v20124[1]]);
-                let v20126 = (v10530 + ((Lanes([v20116[0], 0.0, 0.0])) + (v10543 * v7171))) + v20125;
+                let v20126 = (v10530 + ((Lanes([(v20105 * v7185), 0.0, 0.0])) + (v10543 * v7171))) + v20125;
                 let v7194 = if v7193 == v6 { 1.0 } else { 0.0 };
                 let v9547: f64;
                 let v9549: f64;
@@ -14541,7 +14093,7 @@ impl Instance {
                 if v7194 != 0.0 {
                     let v7198 = v6783 * v7197;
                     let v7208: f64;
-                    let v10547: Lanes<1>;
+                    let v10547: f64;
                     if v6797 != 0.0 {
                         let v7203 = v7200 * (v6 + (v6796 - v407));
                         let v20128 = v19824 * v7200;
@@ -14550,7 +14102,7 @@ impl Instance {
                     } else {
                         let v7205 = if v6796 < v7204 { 1.0 } else { 0.0 };
                         let v7209: f64;
-                        let v10548: Lanes<1>;
+                        let v10548: f64;
                         if v7205 != 0.0 {
                             v7209 = v7206;
                             v10548 = v10838;
@@ -14587,7 +14139,7 @@ impl Instance {
                         v10549 = v10550;
                     }
                     let v7228: f64;
-                    let v10551: Lanes<1>;
+                    let v10551: f64;
                     if v6826 != 0.0 {
                         let v7223 = v7220 * (v6 + (v6814 - v407));
                         let v20132 = v19824 * v7220;
@@ -14596,7 +14148,7 @@ impl Instance {
                     } else {
                         let v7225 = if v6814 < v7224 { 1.0 } else { 0.0 };
                         let v7229: f64;
-                        let v10552: Lanes<1>;
+                        let v10552: f64;
                         if v7225 != 0.0 {
                             v7229 = v7226;
                             v10552 = v10838;
@@ -14610,7 +14162,7 @@ impl Instance {
                         v10551 = v10552;
                     }
                     let v7230 = v7218 - v7228;
-                    let v20134 = v10549 - (Lanes([v10551[0], 0.0, 0.0]));
+                    let v20134 = v10549 - (Lanes([v10551, 0.0, 0.0]));
                     let v7231 = v6508 * v0;
                     let v7232 = v7231 * v98;
                     let v20135 = v10858 * v7231;
@@ -14642,15 +14194,14 @@ impl Instance {
                     if v7243 != 0.0 {
                         let v7246 = (v7241 - (v0 * v7230)) - v7208;
                         let v7247 = v7232 * v7246;
-                        let v20204 = v20135 * v7246;
-                        let v20207 = (Lanes([v20204[0], 0.0, 0.0])) + (((v10553 - (v20134 * v0)) - (Lanes([v10547[0], 0.0, 0.0]))) * v7232);
+                        let v20207 = (Lanes([(v20135 * v7246), 0.0, 0.0])) + (((v10553 - (v20134 * v0)) - (Lanes([v10547, 0.0, 0.0]))) * v7232);
                         v7363 = v7247;
                         v10555 = v20207;
                     } else {
                         let v7251 = (v6780 * ((-v6776) - v6781)) + v6796;
                         let v7252 = if v7251 > v407 { 1.0 } else { 0.0 };
                         let v7261: f64;
-                        let v10556: Lanes<1>;
+                        let v10556: f64;
                         if v7252 != 0.0 {
                             let v7256 = v7253 * (v6 + (v7251 - v407));
                             let v20139 = v19824 * v7253;
@@ -14659,7 +14210,7 @@ impl Instance {
                         } else {
                             let v7258 = if v7251 < v7257 { 1.0 } else { 0.0 };
                             let v7262: f64;
-                            let v10557: Lanes<1>;
+                            let v10557: f64;
                             if v7258 != 0.0 {
                                 v7262 = v7259;
                                 v10557 = v10838;
@@ -14678,7 +14229,7 @@ impl Instance {
                         let v20142 = (v19841 * v6776) + v19824;
                         let v7266 = if v7265 > v407 { 1.0 } else { 0.0 };
                         let v7275: f64;
-                        let v10558: Lanes<1>;
+                        let v10558: f64;
                         if v7266 != 0.0 {
                             let v7270 = v7267 * (v6 + (v7265 - v407));
                             let v20144 = v20142 * v7267;
@@ -14687,7 +14238,7 @@ impl Instance {
                         } else {
                             let v7272 = if v7265 < v7271 { 1.0 } else { 0.0 };
                             let v7276: f64;
-                            let v10559: Lanes<1>;
+                            let v10559: f64;
                             if v7272 != 0.0 {
                                 v7276 = v7273;
                                 v10559 = v10838;
@@ -14707,15 +14258,14 @@ impl Instance {
                         let v7280 = v0 * v7230;
                         let v20148 = v20134 * v0;
                         let v7282 = (v7241 - v7280) - v7208;
-                        let v20150 = Lanes([v10547[0], 0.0, 0.0]);
+                        let v20150 = Lanes([v10547, 0.0, 0.0]);
                         let v7283 = v7232 * v7282;
-                        let v20152 = v20135 * v7282;
-                        let v20155 = (Lanes([v20152[0], 0.0, 0.0])) + (((v10553 - v20148) - v20150) * v7232);
+                        let v20155 = (Lanes([(v20135 * v7282), 0.0, 0.0])) + (((v10553 - v20148) - v20150) * v7232);
                         let v7329: f64;
                         let v10560: Lanes<3>;
                         if v7284 != 0.0 {
                             let v7293: f64;
-                            let v10561: Lanes<1>;
+                            let v10561: f64;
                             if v7266 != 0.0 {
                                 let v7288 = v7285 * (v6 + (v7265 - v407));
                                 let v20161 = v20142 * v7285;
@@ -14724,7 +14274,7 @@ impl Instance {
                             } else {
                                 let v7290 = if v7265 < v7289 { 1.0 } else { 0.0 };
                                 let v7294: f64;
-                                let v10562: Lanes<1>;
+                                let v10562: f64;
                                 if v7290 != 0.0 {
                                     v7294 = v7291;
                                     v10562 = v10838;
@@ -14765,24 +14315,20 @@ impl Instance {
                             let v7308 = (v7232 * v7279) / v7296;
                             let v7310 = (v7305 - v7280) - v7208;
                             let v7311 = v7308 * v7310;
-                            let v20174 = ((((v20135 * v7279) + (v20147 * v7232)) - (v20163 * v7308)) / v7296) * v7310;
-                            let v20177 = (Lanes([v20174[0], 0.0, 0.0])) + (((v10563 - v20148) - v20150) * v7308);
+                            let v20177 = (Lanes([(((((v20135 * v7279) + (v20147 * v7232)) - (v20163 * v7308)) / v7296) * v7310), 0.0, 0.0])) + (((v10563 - v20148) - v20150) * v7308);
                             v7329 = v7311;
                             v10560 = v20177;
                         } else {
                             let v7312 = v7232 * v7279;
-                            let v20158 = (v20135 * v7279) + (v20147 * v7232);
-                            let v20159 = Lanes([v20158[0], 0.0, 0.0]);
+                            let v20159 = Lanes([((v20135 * v7279) + (v20147 * v7232)), 0.0, 0.0]);
                             v7329 = v7312;
                             v10560 = v20159;
                         }
                         let v7313 = v6777 * v6777;
                         let v7314 = v7313 * v90;
                         let v20178 = v10854 * v7313;
-                        let v20180 = (v20178 / v437) * v10982;
                         let v7318 = (v6775 - (v6776 - (v7314 / v437))) / v7314;
-                        let v20184 = v20178 * v7318;
-                        let v20187 = (((Lanes([0.0, v19820[0], v19820[1]])) - (Lanes([v20180[0], 0.0, 0.0]))) - (Lanes([v20184[0], 0.0, 0.0]))) / v7314;
+                        let v20187 = (((Lanes([0.0, v19820[0], v19820[1]])) - (Lanes([((v20178 / v437) * v10982), 0.0, 0.0]))) - (Lanes([(v20178 * v7318), 0.0, 0.0]))) / v7314;
                         let v7319 = if v7318 > v407 { 1.0 } else { 0.0 };
                         let v7325: f64;
                         let v10565: Lanes<3>;
@@ -14840,9 +14386,8 @@ impl Instance {
                     let v20232 = v10858 * v7346;
                     let v7348 = v7199 / v90;
                     let v7349 = v7348 * v7345;
-                    let v20236 = (((v10854 * v7348) * v10982) / v90) * v7345;
                     let v20237 = ((v19827 - (((v10567 * (v7196 * (v7340.powf((v7196 - v9751))))) * (v7343 * (v7342.powf((v7343 - v9751))))) * v7345)) / v7344) * v7348;
-                    let v20240 = (Lanes([v20236[0], 0.0, 0.0])) + (Lanes([0.0, v20237[0], v20237[1]]));
+                    let v20240 = (Lanes([((((v10854 * v7348) * v10982) / v90) * v7345), 0.0, 0.0])) + (Lanes([0.0, v20237[0], v20237[1]]));
                     let v7350 = if v7349 > v407 { 1.0 } else { 0.0 };
                     let v7359: f64;
                     let v10568: Lanes<3>;
@@ -14868,12 +14413,11 @@ impl Instance {
                         v10568 = v10569;
                     }
                     let v7361 = v7359 - v6;
-                    let v20243 = v20232 * v7361;
                     let v7364 = v7363 + (v7347 * v7361);
-                    let v20247 = v10555 + ((Lanes([v20243[0], 0.0, 0.0])) + (v10568 * v7347));
+                    let v20247 = v10555 + ((Lanes([(v20232 * v7361), 0.0, 0.0])) + (v10568 * v7347));
                     let v7368 = v6783 * v7367;
                     let v7378: f64;
-                    let v10570: Lanes<1>;
+                    let v10570: f64;
                     if v6797 != 0.0 {
                         let v7373 = v7370 * (v6 + (v6796 - v407));
                         let v20249 = v19824 * v7370;
@@ -14882,7 +14426,7 @@ impl Instance {
                     } else {
                         let v7375 = if v6796 < v7374 { 1.0 } else { 0.0 };
                         let v7379: f64;
-                        let v10571: Lanes<1>;
+                        let v10571: f64;
                         if v7375 != 0.0 {
                             v7379 = v7376;
                             v10571 = v10838;
@@ -14919,7 +14463,7 @@ impl Instance {
                         v10572 = v10573;
                     }
                     let v7398: f64;
-                    let v10574: Lanes<1>;
+                    let v10574: f64;
                     if v7031 != 0.0 {
                         let v7393 = v7390 * (v6 + (v7019 - v407));
                         let v20253 = v19824 * v7390;
@@ -14928,7 +14472,7 @@ impl Instance {
                     } else {
                         let v7395 = if v7019 < v7394 { 1.0 } else { 0.0 };
                         let v7399: f64;
-                        let v10575: Lanes<1>;
+                        let v10575: f64;
                         if v7395 != 0.0 {
                             v7399 = v7396;
                             v10575 = v10838;
@@ -14942,7 +14486,7 @@ impl Instance {
                         v10574 = v10575;
                     }
                     let v7400 = v7388 - v7398;
-                    let v20255 = v10572 - (Lanes([v10574[0], 0.0, 0.0]));
+                    let v20255 = v10572 - (Lanes([v10574, 0.0, 0.0]));
                     let v7409: f64;
                     let v10576: Lanes<3>;
                     if v7048 != 0.0 {
@@ -14971,15 +14515,14 @@ impl Instance {
                     if v7411 != 0.0 {
                         let v7414 = (v7409 - (v0 * v7400)) - v7378;
                         let v7415 = v7232 * v7414;
-                        let v20324 = v20135 * v7414;
-                        let v20327 = (Lanes([v20324[0], 0.0, 0.0])) + (((v10576 - (v20255 * v0)) - (Lanes([v10570[0], 0.0, 0.0]))) * v7232);
+                        let v20327 = (Lanes([(v20135 * v7414), 0.0, 0.0])) + (((v10576 - (v20255 * v0)) - (Lanes([v10570, 0.0, 0.0]))) * v7232);
                         v7531 = v7415;
                         v10578 = v20327;
                     } else {
                         let v7419 = (v6993 * ((-v6989) - v6994)) + v6796;
                         let v7420 = if v7419 > v407 { 1.0 } else { 0.0 };
                         let v7429: f64;
-                        let v10579: Lanes<1>;
+                        let v10579: f64;
                         if v7420 != 0.0 {
                             let v7424 = v7421 * (v6 + (v7419 - v407));
                             let v20259 = v19824 * v7421;
@@ -14988,7 +14531,7 @@ impl Instance {
                         } else {
                             let v7426 = if v7419 < v7425 { 1.0 } else { 0.0 };
                             let v7430: f64;
-                            let v10580: Lanes<1>;
+                            let v10580: f64;
                             if v7426 != 0.0 {
                                 v7430 = v7427;
                                 v10580 = v10838;
@@ -15007,7 +14550,7 @@ impl Instance {
                         let v20262 = (v19991 * v6989) + v19824;
                         let v7434 = if v7433 > v407 { 1.0 } else { 0.0 };
                         let v7443: f64;
-                        let v10581: Lanes<1>;
+                        let v10581: f64;
                         if v7434 != 0.0 {
                             let v7438 = v7435 * (v6 + (v7433 - v407));
                             let v20264 = v20262 * v7435;
@@ -15016,7 +14559,7 @@ impl Instance {
                         } else {
                             let v7440 = if v7433 < v7439 { 1.0 } else { 0.0 };
                             let v7444: f64;
-                            let v10582: Lanes<1>;
+                            let v10582: f64;
                             if v7440 != 0.0 {
                                 v7444 = v7441;
                                 v10582 = v10838;
@@ -15036,15 +14579,14 @@ impl Instance {
                         let v7448 = v0 * v7400;
                         let v20268 = v20255 * v0;
                         let v7450 = (v7409 - v7448) - v7378;
-                        let v20270 = Lanes([v10570[0], 0.0, 0.0]);
+                        let v20270 = Lanes([v10570, 0.0, 0.0]);
                         let v7451 = v7232 * v7450;
-                        let v20272 = v20135 * v7450;
-                        let v20275 = (Lanes([v20272[0], 0.0, 0.0])) + (((v10576 - v20268) - v20270) * v7232);
+                        let v20275 = (Lanes([(v20135 * v7450), 0.0, 0.0])) + (((v10576 - v20268) - v20270) * v7232);
                         let v7497: f64;
                         let v10583: Lanes<3>;
                         if v7452 != 0.0 {
                             let v7461: f64;
-                            let v10584: Lanes<1>;
+                            let v10584: f64;
                             if v7434 != 0.0 {
                                 let v7456 = v7453 * (v6 + (v7433 - v407));
                                 let v20281 = v20262 * v7453;
@@ -15053,7 +14595,7 @@ impl Instance {
                             } else {
                                 let v7458 = if v7433 < v7457 { 1.0 } else { 0.0 };
                                 let v7462: f64;
-                                let v10585: Lanes<1>;
+                                let v10585: f64;
                                 if v7458 != 0.0 {
                                     v7462 = v7459;
                                     v10585 = v10838;
@@ -15094,24 +14636,20 @@ impl Instance {
                             let v7476 = (v7232 * v7447) / v7464;
                             let v7478 = (v7473 - v7448) - v7378;
                             let v7479 = v7476 * v7478;
-                            let v20294 = ((((v20135 * v7447) + (v20267 * v7232)) - (v20283 * v7476)) / v7464) * v7478;
-                            let v20297 = (Lanes([v20294[0], 0.0, 0.0])) + (((v10586 - v20268) - v20270) * v7476);
+                            let v20297 = (Lanes([(((((v20135 * v7447) + (v20267 * v7232)) - (v20283 * v7476)) / v7464) * v7478), 0.0, 0.0])) + (((v10586 - v20268) - v20270) * v7476);
                             v7497 = v7479;
                             v10583 = v20297;
                         } else {
                             let v7480 = v7232 * v7447;
-                            let v20278 = (v20135 * v7447) + (v20267 * v7232);
-                            let v20279 = Lanes([v20278[0], 0.0, 0.0]);
+                            let v20279 = Lanes([((v20135 * v7447) + (v20267 * v7232)), 0.0, 0.0]);
                             v7497 = v7480;
                             v10583 = v20279;
                         }
                         let v7481 = v6990 * v6990;
                         let v7482 = v7481 * v90;
                         let v20298 = v10854 * v7481;
-                        let v20300 = (v20298 / v437) * v10982;
                         let v7486 = (v6988 - (v6989 - (v7482 / v437))) / v7482;
-                        let v20304 = v20298 * v7486;
-                        let v20307 = (((Lanes([0.0, v19974[0], v19974[1]])) - (Lanes([v20300[0], 0.0, 0.0]))) - (Lanes([v20304[0], 0.0, 0.0]))) / v7482;
+                        let v20307 = (((Lanes([0.0, v19974[0], v19974[1]])) - (Lanes([((v20298 / v437) * v10982), 0.0, 0.0]))) - (Lanes([(v20298 * v7486), 0.0, 0.0]))) / v7482;
                         let v7487 = if v7486 > v407 { 1.0 } else { 0.0 };
                         let v7493: f64;
                         let v10588: Lanes<3>;
@@ -15169,9 +14707,8 @@ impl Instance {
                     let v20352 = v10858 * v7514;
                     let v7516 = v7369 / v90;
                     let v7517 = v7516 * v7513;
-                    let v20356 = (((v10854 * v7516) * v10982) / v90) * v7513;
                     let v20357 = ((v19977 - (((v10590 * (v7366 * (v7508.powf((v7366 - v9751))))) * (v7511 * (v7510.powf((v7511 - v9751))))) * v7513)) / v7512) * v7516;
-                    let v20360 = (Lanes([v20356[0], 0.0, 0.0])) + (Lanes([0.0, v20357[0], v20357[1]]));
+                    let v20360 = (Lanes([((((v10854 * v7516) * v10982) / v90) * v7513), 0.0, 0.0])) + (Lanes([0.0, v20357[0], v20357[1]]));
                     let v7518 = if v7517 > v407 { 1.0 } else { 0.0 };
                     let v7527: f64;
                     let v10591: Lanes<3>;
@@ -15197,11 +14734,10 @@ impl Instance {
                         v10591 = v10592;
                     }
                     let v7529 = v7527 - v6;
-                    let v20363 = v20352 * v7529;
                     let v7533 = v7364 + v7189;
                     let v20368 = v20247 + v20122;
                     let v7534 = (v7531 + (v7515 * v7529)) + v7191;
-                    let v20369 = (v10578 + ((Lanes([v20363[0], 0.0, 0.0])) + (v10591 * v7515))) + v20125;
+                    let v20369 = (v10578 + ((Lanes([(v20352 * v7529), 0.0, 0.0])) + (v10591 * v7515))) + v20125;
                     v9547 = v7533;
                     v9549 = v7534;
                     v10545 = v20368;
@@ -15225,7 +14761,7 @@ impl Instance {
                     let v7536 = v6782 * v6784;
                     let v7537 = v6782 * v6789;
                     let v7546: f64;
-                    let v10597: Lanes<1>;
+                    let v10597: f64;
                     if v6797 != 0.0 {
                         let v7541 = v7538 * (v6 + (v6796 - v407));
                         let v20371 = v19824 * v7538;
@@ -15234,7 +14770,7 @@ impl Instance {
                     } else {
                         let v7543 = if v6796 < v7542 { 1.0 } else { 0.0 };
                         let v7547: f64;
-                        let v10598: Lanes<1>;
+                        let v10598: f64;
                         if v7543 != 0.0 {
                             v7547 = v7544;
                             v10598 = v10838;
@@ -15251,7 +14787,7 @@ impl Instance {
                     let v20372 = v10934 * v10982;
                     let v20373 = v20372 * v6780;
                     let v7551 = (v6780 * (v7548 - v6781)) + v6796;
-                    let v20375 = Lanes([v19824[0], 0.0, 0.0]);
+                    let v20375 = Lanes([v19824, 0.0, 0.0]);
                     let v20376 = (Lanes([0.0, v20373[0], v20373[1]])) + v20375;
                     let v7552 = if v7551 > v407 { 1.0 } else { 0.0 };
                     let v7561: f64;
@@ -15278,7 +14814,7 @@ impl Instance {
                         v10599 = v10600;
                     }
                     let v7571: f64;
-                    let v10601: Lanes<1>;
+                    let v10601: f64;
                     if v6826 != 0.0 {
                         let v7566 = v7563 * (v6 + (v6814 - v407));
                         let v20380 = v19824 * v7563;
@@ -15287,7 +14823,7 @@ impl Instance {
                     } else {
                         let v7568 = if v6814 < v7567 { 1.0 } else { 0.0 };
                         let v7572: f64;
-                        let v10602: Lanes<1>;
+                        let v10602: f64;
                         if v7568 != 0.0 {
                             v7572 = v7569;
                             v10602 = v10838;
@@ -15301,14 +14837,13 @@ impl Instance {
                         v10601 = v10602;
                     }
                     let v7573 = v7561 - v7571;
-                    let v20382 = v10599 - (Lanes([v10601[0], 0.0, 0.0]));
+                    let v20382 = v10599 - (Lanes([v10601, 0.0, 0.0]));
                     let v7574 = v6508 * v7536;
                     let v7575 = v7574 * v98;
                     let v20383 = v10858 * v7574;
-                    let v20384 = v19841 * v342;
                     let v20385 = v10934 * v6840;
                     let v7577 = (v6840 * v342) + v6796;
-                    let v20389 = ((Lanes([v20384[0], 0.0, 0.0])) + (Lanes([0.0, v20385[0], v20385[1]]))) + v20375;
+                    let v20389 = ((Lanes([(v19841 * v342), 0.0, 0.0])) + (Lanes([0.0, v20385[0], v20385[1]]))) + v20375;
                     let v7578 = if v7577 > v407 { 1.0 } else { 0.0 };
                     let v7587: f64;
                     let v10603: Lanes<3>;
@@ -15338,15 +14873,14 @@ impl Instance {
                     if v6854 != 0.0 {
                         let v7591 = (v7587 - (v6786 * v7573)) - v7546;
                         let v7592 = v7575 * v7591;
-                        let v20468 = v20383 * v7591;
-                        let v20471 = (Lanes([v20468[0], 0.0, 0.0])) + (((v10603 - (v20382 * v6786)) - (Lanes([v10597[0], 0.0, 0.0]))) * v7575);
+                        let v20471 = (Lanes([(v20383 * v7591), 0.0, 0.0])) + (((v10603 - (v20382 * v6786)) - (Lanes([v10597, 0.0, 0.0]))) * v7575);
                         v7714 = v7592;
                         v10605 = v20471;
                     } else {
                         let v7596 = (v6780 * ((-v6776) - v6781)) + v6796;
                         let v7597 = if v7596 > v407 { 1.0 } else { 0.0 };
                         let v7606: f64;
-                        let v10606: Lanes<1>;
+                        let v10606: f64;
                         if v7597 != 0.0 {
                             let v7601 = v7598 * (v6 + (v7596 - v407));
                             let v20393 = v19824 * v7598;
@@ -15355,7 +14889,7 @@ impl Instance {
                         } else {
                             let v7603 = if v7596 < v7602 { 1.0 } else { 0.0 };
                             let v7607: f64;
-                            let v10607: Lanes<1>;
+                            let v10607: f64;
                             if v7603 != 0.0 {
                                 v7607 = v7604;
                                 v10607 = v10838;
@@ -15374,7 +14908,7 @@ impl Instance {
                         let v20396 = (v19841 * v6776) + v19824;
                         let v7611 = if v7610 > v407 { 1.0 } else { 0.0 };
                         let v7620: f64;
-                        let v10608: Lanes<1>;
+                        let v10608: f64;
                         if v7611 != 0.0 {
                             let v7615 = v7612 * (v6 + (v7610 - v407));
                             let v20398 = v20396 * v7612;
@@ -15383,7 +14917,7 @@ impl Instance {
                         } else {
                             let v7617 = if v7610 < v7616 { 1.0 } else { 0.0 };
                             let v7621: f64;
-                            let v10609: Lanes<1>;
+                            let v10609: f64;
                             if v7617 != 0.0 {
                                 v7621 = v7618;
                                 v10609 = v10838;
@@ -15403,10 +14937,9 @@ impl Instance {
                         let v7625 = v6786 * v7573;
                         let v20402 = v20382 * v6786;
                         let v7627 = (v7587 - v7625) - v7546;
-                        let v20404 = Lanes([v10597[0], 0.0, 0.0]);
+                        let v20404 = Lanes([v10597, 0.0, 0.0]);
                         let v7628 = v7575 * v7627;
-                        let v20406 = v20383 * v7627;
-                        let v20409 = (Lanes([v20406[0], 0.0, 0.0])) + (((v10603 - v20402) - v20404) * v7575);
+                        let v20409 = (Lanes([(v20383 * v7627), 0.0, 0.0])) + (((v10603 - v20402) - v20404) * v7575);
                         let v7629 = if v6778 > v0 { 1.0 } else { 0.0 };
                         let v7682: f64;
                         let v10610: Lanes<3>;
@@ -15417,7 +14950,7 @@ impl Instance {
                             let v20418 = (v20416 * v6776) + v19824;
                             let v7634 = if v7633 > v407 { 1.0 } else { 0.0 };
                             let v7643: f64;
-                            let v10611: Lanes<1>;
+                            let v10611: f64;
                             if v7634 != 0.0 {
                                 let v7638 = v7635 * (v6 + (v7633 - v407));
                                 let v20420 = v20418 * v7635;
@@ -15426,7 +14959,7 @@ impl Instance {
                             } else {
                                 let v7640 = if v7633 < v7639 { 1.0 } else { 0.0 };
                                 let v7644: f64;
-                                let v10612: Lanes<1>;
+                                let v10612: f64;
                                 if v7640 != 0.0 {
                                     v7644 = v7641;
                                     v10612 = v10838;
@@ -15441,10 +14974,9 @@ impl Instance {
                             }
                             let v7646 = (v7643 - v7622) - v7546;
                             let v20422 = (v10611 - v20399) - v10597;
-                            let v20423 = v20416 * v342;
                             let v20424 = v10934 * v7631;
                             let v7648 = (v7631 * v342) + v6796;
-                            let v20428 = ((Lanes([v20423[0], 0.0, 0.0])) + (Lanes([0.0, v20424[0], v20424[1]]))) + v20375;
+                            let v20428 = ((Lanes([(v20416 * v342), 0.0, 0.0])) + (Lanes([0.0, v20424[0], v20424[1]]))) + v20375;
                             let v7649 = if v7648 > v407 { 1.0 } else { 0.0 };
                             let v7658: f64;
                             let v10613: Lanes<3>;
@@ -15472,24 +15004,20 @@ impl Instance {
                             let v7661 = (v7575 * v7624) / v7646;
                             let v7663 = (v7658 - v7625) - v7546;
                             let v7664 = v7661 * v7663;
-                            let v20439 = ((((v20383 * v7624) + (v20401 * v7575)) - (v20422 * v7661)) / v7646) * v7663;
-                            let v20442 = (Lanes([v20439[0], 0.0, 0.0])) + (((v10613 - v20402) - v20404) * v7661);
+                            let v20442 = (Lanes([(((((v20383 * v7624) + (v20401 * v7575)) - (v20422 * v7661)) / v7646) * v7663), 0.0, 0.0])) + (((v10613 - v20402) - v20404) * v7661);
                             v7682 = v7664;
                             v10610 = v20442;
                         } else {
                             let v7665 = v7575 * v7624;
-                            let v20412 = (v20383 * v7624) + (v20401 * v7575);
-                            let v20413 = Lanes([v20412[0], 0.0, 0.0]);
+                            let v20413 = Lanes([((v20383 * v7624) + (v20401 * v7575)), 0.0, 0.0]);
                             v7682 = v7665;
                             v10610 = v20413;
                         }
                         let v7666 = v6777 * v6777;
                         let v7667 = v7666 * v90;
                         let v20443 = v10854 * v7666;
-                        let v20445 = (v20443 / v437) * v10982;
                         let v7671 = (v342 - (v6776 - (v7667 / v437))) / v7667;
-                        let v20448 = v20443 * v7671;
-                        let v20451 = ((v19637 - (Lanes([v20445[0], 0.0, 0.0]))) - (Lanes([v20448[0], 0.0, 0.0]))) / v7667;
+                        let v20451 = ((v19637 - (Lanes([((v20443 / v437) * v10982), 0.0, 0.0]))) - (Lanes([(v20443 * v7671), 0.0, 0.0]))) / v7667;
                         let v7672 = if v7671 > v407 { 1.0 } else { 0.0 };
                         let v7678: f64;
                         let v10615: Lanes<3>;
@@ -15545,9 +15073,8 @@ impl Instance {
                     let v7699 = v7698 * v98;
                     let v20494 = v10858 * v7698;
                     let v7700 = v6970 * v7697;
-                    let v20495 = v19958 * v7697;
                     let v20496 = ((v20372 - (((v10617 * (v6788 * (v7693.powf(v19944)))) * (v6962 * (v7695.powf(v19948)))) * v7697)) / v7696) * v6970;
-                    let v20499 = (Lanes([v20495[0], 0.0, 0.0])) + (Lanes([0.0, v20496[0], v20496[1]]));
+                    let v20499 = (Lanes([(v19958 * v7697), 0.0, 0.0])) + (Lanes([0.0, v20496[0], v20496[1]]));
                     let v7701 = if v7700 > v407 { 1.0 } else { 0.0 };
                     let v7710: f64;
                     let v10618: Lanes<3>;
@@ -15573,15 +15100,14 @@ impl Instance {
                         v10618 = v10619;
                     }
                     let v7712 = v7710 - v6;
-                    let v20502 = v20494 * v7712;
                     let v7715 = v7714 + (v7699 * v7712);
-                    let v20506 = v10605 + ((Lanes([v20502[0], 0.0, 0.0])) + (v10618 * v7699));
+                    let v20506 = v10605 + ((Lanes([(v20494 * v7712), 0.0, 0.0])) + (v10618 * v7699));
                     let v7716 = v335 * v6768;
                     let v20507 = v19807 * v335;
                     let v7717 = v6782 * v6995;
                     let v7718 = v6782 * v7000;
                     let v7727: f64;
-                    let v10620: Lanes<1>;
+                    let v10620: f64;
                     if v6797 != 0.0 {
                         let v7722 = v7719 * (v6 + (v6796 - v407));
                         let v20509 = v19824 * v7719;
@@ -15590,7 +15116,7 @@ impl Instance {
                     } else {
                         let v7724 = if v6796 < v7723 { 1.0 } else { 0.0 };
                         let v7728: f64;
-                        let v10621: Lanes<1>;
+                        let v10621: f64;
                         if v7724 != 0.0 {
                             v7728 = v7725;
                             v10621 = v10838;
@@ -15607,7 +15133,7 @@ impl Instance {
                     let v20510 = v20507 * v10982;
                     let v20511 = v20510 * v6993;
                     let v7732 = (v6993 * (v7729 - v6994)) + v6796;
-                    let v20513 = Lanes([v19824[0], 0.0, 0.0]);
+                    let v20513 = Lanes([v19824, 0.0, 0.0]);
                     let v20514 = (Lanes([0.0, v20511[0], v20511[1]])) + v20513;
                     let v7733 = if v7732 > v407 { 1.0 } else { 0.0 };
                     let v7742: f64;
@@ -15634,7 +15160,7 @@ impl Instance {
                         v10622 = v10623;
                     }
                     let v7752: f64;
-                    let v10624: Lanes<1>;
+                    let v10624: f64;
                     if v7031 != 0.0 {
                         let v7747 = v7744 * (v6 + (v7019 - v407));
                         let v20518 = v19824 * v7744;
@@ -15643,7 +15169,7 @@ impl Instance {
                     } else {
                         let v7749 = if v7019 < v7748 { 1.0 } else { 0.0 };
                         let v7753: f64;
-                        let v10625: Lanes<1>;
+                        let v10625: f64;
                         if v7749 != 0.0 {
                             v7753 = v7750;
                             v10625 = v10838;
@@ -15657,14 +15183,13 @@ impl Instance {
                         v10624 = v10625;
                     }
                     let v7754 = v7742 - v7752;
-                    let v20520 = v10622 - (Lanes([v10624[0], 0.0, 0.0]));
+                    let v20520 = v10622 - (Lanes([v10624, 0.0, 0.0]));
                     let v7755 = v6508 * v7717;
                     let v7756 = v7755 * v98;
                     let v20521 = v10858 * v7755;
-                    let v20522 = v19991 * v7716;
                     let v20523 = v20507 * v7045;
                     let v7758 = (v7045 * v7716) + v6796;
-                    let v20527 = ((Lanes([v20522[0], 0.0, 0.0])) + (Lanes([0.0, v20523[0], v20523[1]]))) + v20513;
+                    let v20527 = ((Lanes([(v19991 * v7716), 0.0, 0.0])) + (Lanes([0.0, v20523[0], v20523[1]]))) + v20513;
                     let v7759 = if v7758 > v407 { 1.0 } else { 0.0 };
                     let v7768: f64;
                     let v10626: Lanes<3>;
@@ -15694,15 +15219,14 @@ impl Instance {
                     if v7059 != 0.0 {
                         let v7772 = (v7768 - (v6997 * v7754)) - v7727;
                         let v7773 = v7756 * v7772;
-                        let v20607 = v20521 * v7772;
-                        let v20610 = (Lanes([v20607[0], 0.0, 0.0])) + (((v10626 - (v20520 * v6997)) - (Lanes([v10620[0], 0.0, 0.0]))) * v7756);
+                        let v20610 = (Lanes([(v20521 * v7772), 0.0, 0.0])) + (((v10626 - (v20520 * v6997)) - (Lanes([v10620, 0.0, 0.0]))) * v7756);
                         v7895 = v7773;
                         v10628 = v20610;
                     } else {
                         let v7777 = (v6993 * ((-v6989) - v6994)) + v6796;
                         let v7778 = if v7777 > v407 { 1.0 } else { 0.0 };
                         let v7787: f64;
-                        let v10629: Lanes<1>;
+                        let v10629: f64;
                         if v7778 != 0.0 {
                             let v7782 = v7779 * (v6 + (v7777 - v407));
                             let v20531 = v19824 * v7779;
@@ -15711,7 +15235,7 @@ impl Instance {
                         } else {
                             let v7784 = if v7777 < v7783 { 1.0 } else { 0.0 };
                             let v7788: f64;
-                            let v10630: Lanes<1>;
+                            let v10630: f64;
                             if v7784 != 0.0 {
                                 v7788 = v7785;
                                 v10630 = v10838;
@@ -15730,7 +15254,7 @@ impl Instance {
                         let v20534 = (v19991 * v6989) + v19824;
                         let v7792 = if v7791 > v407 { 1.0 } else { 0.0 };
                         let v7801: f64;
-                        let v10631: Lanes<1>;
+                        let v10631: f64;
                         if v7792 != 0.0 {
                             let v7796 = v7793 * (v6 + (v7791 - v407));
                             let v20536 = v20534 * v7793;
@@ -15739,7 +15263,7 @@ impl Instance {
                         } else {
                             let v7798 = if v7791 < v7797 { 1.0 } else { 0.0 };
                             let v7802: f64;
-                            let v10632: Lanes<1>;
+                            let v10632: f64;
                             if v7798 != 0.0 {
                                 v7802 = v7799;
                                 v10632 = v10838;
@@ -15759,10 +15283,9 @@ impl Instance {
                         let v7806 = v6997 * v7754;
                         let v20540 = v20520 * v6997;
                         let v7808 = (v7768 - v7806) - v7727;
-                        let v20542 = Lanes([v10620[0], 0.0, 0.0]);
+                        let v20542 = Lanes([v10620, 0.0, 0.0]);
                         let v7809 = v7756 * v7808;
-                        let v20544 = v20521 * v7808;
-                        let v20547 = (Lanes([v20544[0], 0.0, 0.0])) + (((v10626 - v20540) - v20542) * v7756);
+                        let v20547 = (Lanes([(v20521 * v7808), 0.0, 0.0])) + (((v10626 - v20540) - v20542) * v7756);
                         let v7810 = if v6991 > v0 { 1.0 } else { 0.0 };
                         let v7863: f64;
                         let v10633: Lanes<3>;
@@ -15773,7 +15296,7 @@ impl Instance {
                             let v20556 = (v20554 * v6989) + v19824;
                             let v7815 = if v7814 > v407 { 1.0 } else { 0.0 };
                             let v7824: f64;
-                            let v10634: Lanes<1>;
+                            let v10634: f64;
                             if v7815 != 0.0 {
                                 let v7819 = v7816 * (v6 + (v7814 - v407));
                                 let v20558 = v20556 * v7816;
@@ -15782,7 +15305,7 @@ impl Instance {
                             } else {
                                 let v7821 = if v7814 < v7820 { 1.0 } else { 0.0 };
                                 let v7825: f64;
-                                let v10635: Lanes<1>;
+                                let v10635: f64;
                                 if v7821 != 0.0 {
                                     v7825 = v7822;
                                     v10635 = v10838;
@@ -15797,10 +15320,9 @@ impl Instance {
                             }
                             let v7827 = (v7824 - v7803) - v7727;
                             let v20560 = (v10634 - v20537) - v10620;
-                            let v20561 = v20554 * v7716;
                             let v20562 = v20507 * v7812;
                             let v7829 = (v7812 * v7716) + v6796;
-                            let v20566 = ((Lanes([v20561[0], 0.0, 0.0])) + (Lanes([0.0, v20562[0], v20562[1]]))) + v20513;
+                            let v20566 = ((Lanes([(v20554 * v7716), 0.0, 0.0])) + (Lanes([0.0, v20562[0], v20562[1]]))) + v20513;
                             let v7830 = if v7829 > v407 { 1.0 } else { 0.0 };
                             let v7839: f64;
                             let v10636: Lanes<3>;
@@ -15828,24 +15350,20 @@ impl Instance {
                             let v7842 = (v7756 * v7805) / v7827;
                             let v7844 = (v7839 - v7806) - v7727;
                             let v7845 = v7842 * v7844;
-                            let v20577 = ((((v20521 * v7805) + (v20539 * v7756)) - (v20560 * v7842)) / v7827) * v7844;
-                            let v20580 = (Lanes([v20577[0], 0.0, 0.0])) + (((v10636 - v20540) - v20542) * v7842);
+                            let v20580 = (Lanes([(((((v20521 * v7805) + (v20539 * v7756)) - (v20560 * v7842)) / v7827) * v7844), 0.0, 0.0])) + (((v10636 - v20540) - v20542) * v7842);
                             v7863 = v7845;
                             v10633 = v20580;
                         } else {
                             let v7846 = v7756 * v7805;
-                            let v20550 = (v20521 * v7805) + (v20539 * v7756);
-                            let v20551 = Lanes([v20550[0], 0.0, 0.0]);
+                            let v20551 = Lanes([((v20521 * v7805) + (v20539 * v7756)), 0.0, 0.0]);
                             v7863 = v7846;
                             v10633 = v20551;
                         }
                         let v7847 = v6990 * v6990;
                         let v7848 = v7847 * v90;
                         let v20581 = v10854 * v7847;
-                        let v20583 = (v20581 / v437) * v10982;
                         let v7852 = (v7716 - (v6989 - (v7848 / v437))) / v7848;
-                        let v20587 = v20581 * v7852;
-                        let v20590 = (((Lanes([0.0, v20507[0], v20507[1]])) - (Lanes([v20583[0], 0.0, 0.0]))) - (Lanes([v20587[0], 0.0, 0.0]))) / v7848;
+                        let v20590 = (((Lanes([0.0, v20507[0], v20507[1]])) - (Lanes([((v20581 / v437) * v10982), 0.0, 0.0]))) - (Lanes([(v20581 * v7852), 0.0, 0.0]))) / v7848;
                         let v7853 = if v7852 > v407 { 1.0 } else { 0.0 };
                         let v7859: f64;
                         let v10638: Lanes<3>;
@@ -15901,9 +15419,8 @@ impl Instance {
                     let v7880 = v7879 * v98;
                     let v20633 = v10858 * v7879;
                     let v7881 = v7172 * v7878;
-                    let v20634 = v20108 * v7878;
                     let v20635 = ((v20510 - (((v10640 * (v6999 * (v7874.powf(v20094)))) * (v7167 * (v7876.powf(v20098)))) * v7878)) / v7877) * v7172;
-                    let v20638 = (Lanes([v20634[0], 0.0, 0.0])) + (Lanes([0.0, v20635[0], v20635[1]]));
+                    let v20638 = (Lanes([(v20108 * v7878), 0.0, 0.0])) + (Lanes([0.0, v20635[0], v20635[1]]));
                     let v7882 = if v7881 > v407 { 1.0 } else { 0.0 };
                     let v7891: f64;
                     let v10641: Lanes<3>;
@@ -15929,7 +15446,6 @@ impl Instance {
                         v10641 = v10642;
                     }
                     let v7893 = v7891 - v6;
-                    let v20641 = v20633 * v7893;
                     let v7897 = v1 * v341;
                     let v20646 = v10933 * v1;
                     let v7898 = v7715 + v7897;
@@ -15939,7 +15455,7 @@ impl Instance {
                     let v20649 = v19807 * v1;
                     let v7900 = (v7895 + (v7880 * v7893)) + v7899;
                     let v20650 = Lanes([0.0, v20649[0], v20649[1]]);
-                    let v20651 = (v10628 + ((Lanes([v20641[0], 0.0, 0.0])) + (v10641 * v7880))) + v20650;
+                    let v20651 = (v10628 + ((Lanes([(v20633 * v7893), 0.0, 0.0])) + (v10641 * v7880))) + v20650;
                     let v9556: f64;
                     let v9559: f64;
                     let v10643: Lanes<3>;
@@ -15947,7 +15463,7 @@ impl Instance {
                     if v7194 != 0.0 {
                         let v7901 = v6782 * v7197;
                         let v7910: f64;
-                        let v10645: Lanes<1>;
+                        let v10645: f64;
                         if v6797 != 0.0 {
                             let v7905 = v7902 * (v6 + (v6796 - v407));
                             let v20653 = v19824 * v7902;
@@ -15956,7 +15472,7 @@ impl Instance {
                         } else {
                             let v7907 = if v6796 < v7906 { 1.0 } else { 0.0 };
                             let v7911: f64;
-                            let v10646: Lanes<1>;
+                            let v10646: f64;
                             if v7907 != 0.0 {
                                 v7911 = v7908;
                                 v10646 = v10838;
@@ -15993,7 +15509,7 @@ impl Instance {
                             v10647 = v10648;
                         }
                         let v7930: f64;
-                        let v10649: Lanes<1>;
+                        let v10649: f64;
                         if v6826 != 0.0 {
                             let v7925 = v7922 * (v6 + (v6814 - v407));
                             let v20657 = v19824 * v7922;
@@ -16002,7 +15518,7 @@ impl Instance {
                         } else {
                             let v7927 = if v6814 < v7926 { 1.0 } else { 0.0 };
                             let v7931: f64;
-                            let v10650: Lanes<1>;
+                            let v10650: f64;
                             if v7927 != 0.0 {
                                 v7931 = v7928;
                                 v10650 = v10838;
@@ -16016,7 +15532,7 @@ impl Instance {
                             v10649 = v10650;
                         }
                         let v7932 = v7920 - v7930;
-                        let v20659 = v10647 - (Lanes([v10649[0], 0.0, 0.0]));
+                        let v20659 = v10647 - (Lanes([v10649, 0.0, 0.0]));
                         let v7933 = v6508 * v0;
                         let v7934 = v7933 * v98;
                         let v20660 = v10858 * v7933;
@@ -16048,15 +15564,14 @@ impl Instance {
                         if v7945 != 0.0 {
                             let v7948 = (v7943 - (v0 * v7932)) - v7910;
                             let v7949 = v7934 * v7948;
-                            let v20728 = v20660 * v7948;
-                            let v20731 = (Lanes([v20728[0], 0.0, 0.0])) + (((v10651 - (v20659 * v0)) - (Lanes([v10645[0], 0.0, 0.0]))) * v7934);
+                            let v20731 = (Lanes([(v20660 * v7948), 0.0, 0.0])) + (((v10651 - (v20659 * v0)) - (Lanes([v10645, 0.0, 0.0]))) * v7934);
                             v8065 = v7949;
                             v10653 = v20731;
                         } else {
                             let v7953 = (v6780 * ((-v6776) - v6781)) + v6796;
                             let v7954 = if v7953 > v407 { 1.0 } else { 0.0 };
                             let v7963: f64;
-                            let v10654: Lanes<1>;
+                            let v10654: f64;
                             if v7954 != 0.0 {
                                 let v7958 = v7955 * (v6 + (v7953 - v407));
                                 let v20664 = v19824 * v7955;
@@ -16065,7 +15580,7 @@ impl Instance {
                             } else {
                                 let v7960 = if v7953 < v7959 { 1.0 } else { 0.0 };
                                 let v7964: f64;
-                                let v10655: Lanes<1>;
+                                let v10655: f64;
                                 if v7960 != 0.0 {
                                     v7964 = v7961;
                                     v10655 = v10838;
@@ -16084,7 +15599,7 @@ impl Instance {
                             let v20667 = (v19841 * v6776) + v19824;
                             let v7968 = if v7967 > v407 { 1.0 } else { 0.0 };
                             let v7977: f64;
-                            let v10656: Lanes<1>;
+                            let v10656: f64;
                             if v7968 != 0.0 {
                                 let v7972 = v7969 * (v6 + (v7967 - v407));
                                 let v20669 = v20667 * v7969;
@@ -16093,7 +15608,7 @@ impl Instance {
                             } else {
                                 let v7974 = if v7967 < v7973 { 1.0 } else { 0.0 };
                                 let v7978: f64;
-                                let v10657: Lanes<1>;
+                                let v10657: f64;
                                 if v7974 != 0.0 {
                                     v7978 = v7975;
                                     v10657 = v10838;
@@ -16113,15 +15628,14 @@ impl Instance {
                             let v7982 = v0 * v7932;
                             let v20673 = v20659 * v0;
                             let v7984 = (v7943 - v7982) - v7910;
-                            let v20675 = Lanes([v10645[0], 0.0, 0.0]);
+                            let v20675 = Lanes([v10645, 0.0, 0.0]);
                             let v7985 = v7934 * v7984;
-                            let v20677 = v20660 * v7984;
-                            let v20680 = (Lanes([v20677[0], 0.0, 0.0])) + (((v10651 - v20673) - v20675) * v7934);
+                            let v20680 = (Lanes([(v20660 * v7984), 0.0, 0.0])) + (((v10651 - v20673) - v20675) * v7934);
                             let v8031: f64;
                             let v10658: Lanes<3>;
                             if v7986 != 0.0 {
                                 let v7995: f64;
-                                let v10659: Lanes<1>;
+                                let v10659: f64;
                                 if v7968 != 0.0 {
                                     let v7990 = v7987 * (v6 + (v7967 - v407));
                                     let v20686 = v20667 * v7987;
@@ -16130,7 +15644,7 @@ impl Instance {
                                 } else {
                                     let v7992 = if v7967 < v7991 { 1.0 } else { 0.0 };
                                     let v7996: f64;
-                                    let v10660: Lanes<1>;
+                                    let v10660: f64;
                                     if v7992 != 0.0 {
                                         v7996 = v7993;
                                         v10660 = v10838;
@@ -16171,24 +15685,20 @@ impl Instance {
                                 let v8010 = (v7934 * v7981) / v7998;
                                 let v8012 = (v8007 - v7982) - v7910;
                                 let v8013 = v8010 * v8012;
-                                let v20699 = ((((v20660 * v7981) + (v20672 * v7934)) - (v20688 * v8010)) / v7998) * v8012;
-                                let v20702 = (Lanes([v20699[0], 0.0, 0.0])) + (((v10661 - v20673) - v20675) * v8010);
+                                let v20702 = (Lanes([(((((v20660 * v7981) + (v20672 * v7934)) - (v20688 * v8010)) / v7998) * v8012), 0.0, 0.0])) + (((v10661 - v20673) - v20675) * v8010);
                                 v8031 = v8013;
                                 v10658 = v20702;
                             } else {
                                 let v8014 = v7934 * v7981;
-                                let v20683 = (v20660 * v7981) + (v20672 * v7934);
-                                let v20684 = Lanes([v20683[0], 0.0, 0.0]);
+                                let v20684 = Lanes([((v20660 * v7981) + (v20672 * v7934)), 0.0, 0.0]);
                                 v8031 = v8014;
                                 v10658 = v20684;
                             }
                             let v8015 = v6777 * v6777;
                             let v8016 = v8015 * v90;
                             let v20703 = v10854 * v8015;
-                            let v20705 = (v20703 / v437) * v10982;
                             let v8020 = (v342 - (v6776 - (v8016 / v437))) / v8016;
-                            let v20708 = v20703 * v8020;
-                            let v20711 = ((v19637 - (Lanes([v20705[0], 0.0, 0.0]))) - (Lanes([v20708[0], 0.0, 0.0]))) / v8016;
+                            let v20711 = ((v19637 - (Lanes([((v20703 / v437) * v10982), 0.0, 0.0]))) - (Lanes([(v20703 * v8020), 0.0, 0.0]))) / v8016;
                             let v8021 = if v8020 > v407 { 1.0 } else { 0.0 };
                             let v8027: f64;
                             let v10663: Lanes<3>;
@@ -16246,9 +15756,8 @@ impl Instance {
                         let v20756 = v10858 * v8048;
                         let v8050 = v7199 / v90;
                         let v8051 = v8050 * v8047;
-                        let v20760 = (((v10854 * v8050) * v10982) / v90) * v8047;
                         let v20761 = ((v20372 - (((v10665 * (v7196 * (v8042.powf((v7196 - v9751))))) * (v8045 * (v8044.powf((v8045 - v9751))))) * v8047)) / v8046) * v8050;
-                        let v20764 = (Lanes([v20760[0], 0.0, 0.0])) + (Lanes([0.0, v20761[0], v20761[1]]));
+                        let v20764 = (Lanes([((((v10854 * v8050) * v10982) / v90) * v8047), 0.0, 0.0])) + (Lanes([0.0, v20761[0], v20761[1]]));
                         let v8052 = if v8051 > v407 { 1.0 } else { 0.0 };
                         let v8061: f64;
                         let v10666: Lanes<3>;
@@ -16274,12 +15783,11 @@ impl Instance {
                             v10666 = v10667;
                         }
                         let v8063 = v8061 - v6;
-                        let v20767 = v20756 * v8063;
                         let v8066 = v8065 + (v8049 * v8063);
-                        let v20771 = v10653 + ((Lanes([v20767[0], 0.0, 0.0])) + (v10666 * v8049));
+                        let v20771 = v10653 + ((Lanes([(v20756 * v8063), 0.0, 0.0])) + (v10666 * v8049));
                         let v8067 = v6782 * v7367;
                         let v8076: f64;
-                        let v10668: Lanes<1>;
+                        let v10668: f64;
                         if v6797 != 0.0 {
                             let v8071 = v8068 * (v6 + (v6796 - v407));
                             let v20773 = v19824 * v8068;
@@ -16288,7 +15796,7 @@ impl Instance {
                         } else {
                             let v8073 = if v6796 < v8072 { 1.0 } else { 0.0 };
                             let v8077: f64;
-                            let v10669: Lanes<1>;
+                            let v10669: f64;
                             if v8073 != 0.0 {
                                 v8077 = v8074;
                                 v10669 = v10838;
@@ -16325,7 +15833,7 @@ impl Instance {
                             v10670 = v10671;
                         }
                         let v8096: f64;
-                        let v10672: Lanes<1>;
+                        let v10672: f64;
                         if v7031 != 0.0 {
                             let v8091 = v8088 * (v6 + (v7019 - v407));
                             let v20777 = v19824 * v8088;
@@ -16334,7 +15842,7 @@ impl Instance {
                         } else {
                             let v8093 = if v7019 < v8092 { 1.0 } else { 0.0 };
                             let v8097: f64;
-                            let v10673: Lanes<1>;
+                            let v10673: f64;
                             if v8093 != 0.0 {
                                 v8097 = v8094;
                                 v10673 = v10838;
@@ -16348,7 +15856,7 @@ impl Instance {
                             v10672 = v10673;
                         }
                         let v8098 = v8086 - v8096;
-                        let v20779 = v10670 - (Lanes([v10672[0], 0.0, 0.0]));
+                        let v20779 = v10670 - (Lanes([v10672, 0.0, 0.0]));
                         let v8107: f64;
                         let v10674: Lanes<3>;
                         if v7759 != 0.0 {
@@ -16377,15 +15885,14 @@ impl Instance {
                         if v8109 != 0.0 {
                             let v8112 = (v8107 - (v0 * v8098)) - v8076;
                             let v8113 = v7934 * v8112;
-                            let v20848 = v20660 * v8112;
-                            let v20851 = (Lanes([v20848[0], 0.0, 0.0])) + (((v10674 - (v20779 * v0)) - (Lanes([v10668[0], 0.0, 0.0]))) * v7934);
+                            let v20851 = (Lanes([(v20660 * v8112), 0.0, 0.0])) + (((v10674 - (v20779 * v0)) - (Lanes([v10668, 0.0, 0.0]))) * v7934);
                             v8229 = v8113;
                             v10676 = v20851;
                         } else {
                             let v8117 = (v6993 * ((-v6989) - v6994)) + v6796;
                             let v8118 = if v8117 > v407 { 1.0 } else { 0.0 };
                             let v8127: f64;
-                            let v10677: Lanes<1>;
+                            let v10677: f64;
                             if v8118 != 0.0 {
                                 let v8122 = v8119 * (v6 + (v8117 - v407));
                                 let v20783 = v19824 * v8119;
@@ -16394,7 +15901,7 @@ impl Instance {
                             } else {
                                 let v8124 = if v8117 < v8123 { 1.0 } else { 0.0 };
                                 let v8128: f64;
-                                let v10678: Lanes<1>;
+                                let v10678: f64;
                                 if v8124 != 0.0 {
                                     v8128 = v8125;
                                     v10678 = v10838;
@@ -16413,7 +15920,7 @@ impl Instance {
                             let v20786 = (v19991 * v6989) + v19824;
                             let v8132 = if v8131 > v407 { 1.0 } else { 0.0 };
                             let v8141: f64;
-                            let v10679: Lanes<1>;
+                            let v10679: f64;
                             if v8132 != 0.0 {
                                 let v8136 = v8133 * (v6 + (v8131 - v407));
                                 let v20788 = v20786 * v8133;
@@ -16422,7 +15929,7 @@ impl Instance {
                             } else {
                                 let v8138 = if v8131 < v8137 { 1.0 } else { 0.0 };
                                 let v8142: f64;
-                                let v10680: Lanes<1>;
+                                let v10680: f64;
                                 if v8138 != 0.0 {
                                     v8142 = v8139;
                                     v10680 = v10838;
@@ -16442,15 +15949,14 @@ impl Instance {
                             let v8146 = v0 * v8098;
                             let v20792 = v20779 * v0;
                             let v8148 = (v8107 - v8146) - v8076;
-                            let v20794 = Lanes([v10668[0], 0.0, 0.0]);
+                            let v20794 = Lanes([v10668, 0.0, 0.0]);
                             let v8149 = v7934 * v8148;
-                            let v20796 = v20660 * v8148;
-                            let v20799 = (Lanes([v20796[0], 0.0, 0.0])) + (((v10674 - v20792) - v20794) * v7934);
+                            let v20799 = (Lanes([(v20660 * v8148), 0.0, 0.0])) + (((v10674 - v20792) - v20794) * v7934);
                             let v8195: f64;
                             let v10681: Lanes<3>;
                             if v8150 != 0.0 {
                                 let v8159: f64;
-                                let v10682: Lanes<1>;
+                                let v10682: f64;
                                 if v8132 != 0.0 {
                                     let v8154 = v8151 * (v6 + (v8131 - v407));
                                     let v20805 = v20786 * v8151;
@@ -16459,7 +15965,7 @@ impl Instance {
                                 } else {
                                     let v8156 = if v8131 < v8155 { 1.0 } else { 0.0 };
                                     let v8160: f64;
-                                    let v10683: Lanes<1>;
+                                    let v10683: f64;
                                     if v8156 != 0.0 {
                                         v8160 = v8157;
                                         v10683 = v10838;
@@ -16500,24 +16006,20 @@ impl Instance {
                                 let v8174 = (v7934 * v8145) / v8162;
                                 let v8176 = (v8171 - v8146) - v8076;
                                 let v8177 = v8174 * v8176;
-                                let v20818 = ((((v20660 * v8145) + (v20791 * v7934)) - (v20807 * v8174)) / v8162) * v8176;
-                                let v20821 = (Lanes([v20818[0], 0.0, 0.0])) + (((v10684 - v20792) - v20794) * v8174);
+                                let v20821 = (Lanes([(((((v20660 * v8145) + (v20791 * v7934)) - (v20807 * v8174)) / v8162) * v8176), 0.0, 0.0])) + (((v10684 - v20792) - v20794) * v8174);
                                 v8195 = v8177;
                                 v10681 = v20821;
                             } else {
                                 let v8178 = v7934 * v8145;
-                                let v20802 = (v20660 * v8145) + (v20791 * v7934);
-                                let v20803 = Lanes([v20802[0], 0.0, 0.0]);
+                                let v20803 = Lanes([((v20660 * v8145) + (v20791 * v7934)), 0.0, 0.0]);
                                 v8195 = v8178;
                                 v10681 = v20803;
                             }
                             let v8179 = v6990 * v6990;
                             let v8180 = v8179 * v90;
                             let v20822 = v10854 * v8179;
-                            let v20824 = (v20822 / v437) * v10982;
                             let v8184 = (v7716 - (v6989 - (v8180 / v437))) / v8180;
-                            let v20828 = v20822 * v8184;
-                            let v20831 = (((Lanes([0.0, v20507[0], v20507[1]])) - (Lanes([v20824[0], 0.0, 0.0]))) - (Lanes([v20828[0], 0.0, 0.0]))) / v8180;
+                            let v20831 = (((Lanes([0.0, v20507[0], v20507[1]])) - (Lanes([((v20822 / v437) * v10982), 0.0, 0.0]))) - (Lanes([(v20822 * v8184), 0.0, 0.0]))) / v8180;
                             let v8185 = if v8184 > v407 { 1.0 } else { 0.0 };
                             let v8191: f64;
                             let v10686: Lanes<3>;
@@ -16575,9 +16077,8 @@ impl Instance {
                         let v20876 = v10858 * v8212;
                         let v8214 = v7369 / v90;
                         let v8215 = v8214 * v8211;
-                        let v20880 = (((v10854 * v8214) * v10982) / v90) * v8211;
                         let v20881 = ((v20510 - (((v10688 * (v7366 * (v8206.powf((v7366 - v9751))))) * (v8209 * (v8208.powf((v8209 - v9751))))) * v8211)) / v8210) * v8214;
-                        let v20884 = (Lanes([v20880[0], 0.0, 0.0])) + (Lanes([0.0, v20881[0], v20881[1]]));
+                        let v20884 = (Lanes([((((v10854 * v8214) * v10982) / v90) * v8211), 0.0, 0.0])) + (Lanes([0.0, v20881[0], v20881[1]]));
                         let v8216 = if v8215 > v407 { 1.0 } else { 0.0 };
                         let v8225: f64;
                         let v10689: Lanes<3>;
@@ -16603,11 +16104,10 @@ impl Instance {
                             v10689 = v10690;
                         }
                         let v8227 = v8225 - v6;
-                        let v20887 = v20876 * v8227;
                         let v8231 = v8066 + v7897;
                         let v20892 = v20771 + v20647;
                         let v8232 = (v8229 + (v8213 * v8227)) + v7899;
-                        let v20893 = (v10676 + ((Lanes([v20887[0], 0.0, 0.0])) + (v10689 * v8213))) + v20650;
+                        let v20893 = (v10676 + ((Lanes([(v20876 * v8227), 0.0, 0.0])) + (v10689 * v8213))) + v20650;
                         v9556 = v8231;
                         v9559 = v8232;
                         v10643 = v20892;
@@ -16684,7 +16184,7 @@ impl Instance {
             let v10695: Lanes<2>;
             if v8234 != 0.0 {
                 let v8235 = v340 - v574;
-                let v20898 = (Lanes([0.0, v9755[0]])) - (Lanes([v9771[0], 0.0]));
+                let v20898 = (Lanes([0.0, v9755])) - (Lanes([v9771, 0.0]));
                 let v8236 = v335 * v8235;
                 let v20899 = v20898 * v335;
                 let v8243 = v6 - v8242;
@@ -16695,7 +16195,7 @@ impl Instance {
                 let v20903 = v20902 * v8251;
                 let v8253 = if v8252 > v407 { 1.0 } else { 0.0 };
                 let v8262: f64;
-                let v10696: Lanes<1>;
+                let v10696: f64;
                 if v8253 != 0.0 {
                     let v8257 = v8254 * (v6 + (v8252 - v407));
                     let v20905 = v20903 * v8254;
@@ -16704,7 +16204,7 @@ impl Instance {
                 } else {
                     let v8259 = if v8252 < v8258 { 1.0 } else { 0.0 };
                     let v8263: f64;
-                    let v10697: Lanes<1>;
+                    let v10697: f64;
                     if v8259 != 0.0 {
                         v8263 = v8260;
                         v10697 = v10838;
@@ -16723,7 +16223,7 @@ impl Instance {
                 let v20907 = v20906 * v1163;
                 let v8267 = v8266 + v8252;
                 let v20908 = Lanes([0.0, v20907[0], v20907[1]]);
-                let v20909 = Lanes([v20903[0], 0.0, 0.0]);
+                let v20909 = Lanes([v20903, 0.0, 0.0]);
                 let v20910 = v20908 + v20909;
                 let v8269 = v8268 + v8252;
                 let v8270 = if v8267 > v407 { 1.0 } else { 0.0 };
@@ -16752,7 +16252,7 @@ impl Instance {
                 }
                 let v8281 = if v8269 > v407 { 1.0 } else { 0.0 };
                 let v8290: f64;
-                let v10700: Lanes<1>;
+                let v10700: f64;
                 if v8281 != 0.0 {
                     let v8285 = v8282 * (v6 + (v8269 - v407));
                     let v20914 = v20903 * v8282;
@@ -16761,7 +16261,7 @@ impl Instance {
                 } else {
                     let v8287 = if v8269 < v8286 { 1.0 } else { 0.0 };
                     let v8291: f64;
-                    let v10701: Lanes<1>;
+                    let v10701: f64;
                     if v8287 != 0.0 {
                         v8291 = v8288;
                         v10701 = v10838;
@@ -16775,17 +16275,16 @@ impl Instance {
                     v10700 = v10701;
                 }
                 let v8292 = v8279 - v8290;
-                let v20916 = v10698 - (Lanes([v10700[0], 0.0, 0.0]));
+                let v20916 = v10698 - (Lanes([v10700, 0.0, 0.0]));
                 let v8294 = (v335 * v8244) * v23;
                 let v8295 = v8294 * v8245;
                 let v8296 = v8295 * v98;
                 let v20917 = v10858 * v8295;
                 let v8297 = v8240 / v90;
                 let v20920 = ((v10854 * v8297) * v10982) / v90;
-                let v20921 = v20920 * v8236;
                 let v20922 = v20899 * v8297;
                 let v8299 = (v8297 * v8236) + v8252;
-                let v20926 = ((Lanes([v20921[0], 0.0, 0.0])) + (Lanes([0.0, v20922[0], v20922[1]]))) + v20909;
+                let v20926 = ((Lanes([(v20920 * v8236), 0.0, 0.0])) + (Lanes([0.0, v20922[0], v20922[1]]))) + v20909;
                 let v8300 = if v8299 > v407 { 1.0 } else { 0.0 };
                 let v8309: f64;
                 let v10702: Lanes<3>;
@@ -16816,15 +16315,14 @@ impl Instance {
                 if v8311 != 0.0 {
                     let v8314 = (v8309 - (v0 * v8292)) - v8262;
                     let v8315 = v8296 * v8314;
-                    let v21006 = v20917 * v8314;
-                    let v21009 = (Lanes([v21006[0], 0.0, 0.0])) + (((v10702 - (v20916 * v0)) - (Lanes([v10696[0], 0.0, 0.0]))) * v8296);
+                    let v21009 = (Lanes([(v20917 * v8314), 0.0, 0.0])) + (((v10702 - (v20916 * v0)) - (Lanes([v10696, 0.0, 0.0]))) * v8296);
                     v8442 = v8315;
                     v10704 = v21009;
                 } else {
                     let v8319 = (v1163 * ((-v8237) - v8241)) + v8252;
                     let v8320 = if v8319 > v407 { 1.0 } else { 0.0 };
                     let v8329: f64;
-                    let v10705: Lanes<1>;
+                    let v10705: f64;
                     if v8320 != 0.0 {
                         let v8324 = v8321 * (v6 + (v8319 - v407));
                         let v20930 = v20903 * v8321;
@@ -16833,7 +16331,7 @@ impl Instance {
                     } else {
                         let v8326 = if v8319 < v8325 { 1.0 } else { 0.0 };
                         let v8330: f64;
-                        let v10706: Lanes<1>;
+                        let v10706: f64;
                         if v8326 != 0.0 {
                             v8330 = v8327;
                             v10706 = v10838;
@@ -16852,7 +16350,7 @@ impl Instance {
                     let v20933 = (v20920 * v8237) + v20903;
                     let v8334 = if v8333 > v407 { 1.0 } else { 0.0 };
                     let v8343: f64;
-                    let v10707: Lanes<1>;
+                    let v10707: f64;
                     if v8334 != 0.0 {
                         let v8338 = v8335 * (v6 + (v8333 - v407));
                         let v20935 = v20933 * v8335;
@@ -16861,7 +16359,7 @@ impl Instance {
                     } else {
                         let v8340 = if v8333 < v8339 { 1.0 } else { 0.0 };
                         let v8344: f64;
-                        let v10708: Lanes<1>;
+                        let v10708: f64;
                         if v8340 != 0.0 {
                             v8344 = v8341;
                             v10708 = v10838;
@@ -16881,10 +16379,9 @@ impl Instance {
                     let v8348 = v0 * v8292;
                     let v20939 = v20916 * v0;
                     let v8350 = (v8309 - v8348) - v8262;
-                    let v20941 = Lanes([v10696[0], 0.0, 0.0]);
+                    let v20941 = Lanes([v10696, 0.0, 0.0]);
                     let v8351 = v8296 * v8350;
-                    let v20943 = v20917 * v8350;
-                    let v20946 = (Lanes([v20943[0], 0.0, 0.0])) + (((v10702 - v20939) - v20941) * v8296);
+                    let v20946 = (Lanes([(v20917 * v8350), 0.0, 0.0])) + (((v10702 - v20939) - v20941) * v8296);
                     let v8352 = if v8239 > v0 { 1.0 } else { 0.0 };
                     let v8405: f64;
                     let v10709: Lanes<3>;
@@ -16895,7 +16392,7 @@ impl Instance {
                         let v20955 = (v20953 * v8237) + v20903;
                         let v8357 = if v8356 > v407 { 1.0 } else { 0.0 };
                         let v8366: f64;
-                        let v10710: Lanes<1>;
+                        let v10710: f64;
                         if v8357 != 0.0 {
                             let v8361 = v8358 * (v6 + (v8356 - v407));
                             let v20957 = v20955 * v8358;
@@ -16904,7 +16401,7 @@ impl Instance {
                         } else {
                             let v8363 = if v8356 < v8362 { 1.0 } else { 0.0 };
                             let v8367: f64;
-                            let v10711: Lanes<1>;
+                            let v10711: f64;
                             if v8363 != 0.0 {
                                 v8367 = v8364;
                                 v10711 = v10838;
@@ -16919,10 +16416,9 @@ impl Instance {
                         }
                         let v8369 = (v8366 - v8345) - v8262;
                         let v20959 = (v10710 - v20936) - v10696;
-                        let v20960 = v20953 * v8236;
                         let v20961 = v20899 * v8354;
                         let v8371 = (v8354 * v8236) + v8252;
-                        let v20965 = ((Lanes([v20960[0], 0.0, 0.0])) + (Lanes([0.0, v20961[0], v20961[1]]))) + v20909;
+                        let v20965 = ((Lanes([(v20953 * v8236), 0.0, 0.0])) + (Lanes([0.0, v20961[0], v20961[1]]))) + v20909;
                         let v8372 = if v8371 > v407 { 1.0 } else { 0.0 };
                         let v8381: f64;
                         let v10712: Lanes<3>;
@@ -16950,24 +16446,20 @@ impl Instance {
                         let v8384 = (v8296 * v8347) / v8369;
                         let v8386 = (v8381 - v8348) - v8262;
                         let v8387 = v8384 * v8386;
-                        let v20976 = ((((v20917 * v8347) + (v20938 * v8296)) - (v20959 * v8384)) / v8369) * v8386;
-                        let v20979 = (Lanes([v20976[0], 0.0, 0.0])) + (((v10712 - v20939) - v20941) * v8384);
+                        let v20979 = (Lanes([(((((v20917 * v8347) + (v20938 * v8296)) - (v20959 * v8384)) / v8369) * v8386), 0.0, 0.0])) + (((v10712 - v20939) - v20941) * v8384);
                         v8405 = v8387;
                         v10709 = v20979;
                     } else {
                         let v8388 = v8296 * v8347;
-                        let v20949 = (v20917 * v8347) + (v20938 * v8296);
-                        let v20950 = Lanes([v20949[0], 0.0, 0.0]);
+                        let v20950 = Lanes([((v20917 * v8347) + (v20938 * v8296)), 0.0, 0.0]);
                         v8405 = v8388;
                         v10709 = v20950;
                     }
                     let v8389 = v8238 * v8238;
                     let v8390 = v8389 * v90;
                     let v20980 = v10854 * v8389;
-                    let v20982 = (v20980 / v437) * v10982;
                     let v8394 = (v8236 - (v8237 - (v8390 / v437))) / v8390;
-                    let v20986 = v20980 * v8394;
-                    let v20989 = (((Lanes([0.0, v20899[0], v20899[1]])) - (Lanes([v20982[0], 0.0, 0.0]))) - (Lanes([v20986[0], 0.0, 0.0]))) / v8390;
+                    let v20989 = (((Lanes([0.0, v20899[0], v20899[1]])) - (Lanes([((v20980 / v437) * v10982), 0.0, 0.0]))) - (Lanes([(v20980 * v8394), 0.0, 0.0]))) / v8390;
                     let v8395 = if v8394 > v407 { 1.0 } else { 0.0 };
                     let v8401: f64;
                     let v10714: Lanes<3>;
@@ -17026,9 +16518,8 @@ impl Instance {
                 let v21034 = v10858 * v8425;
                 let v8427 = v8249 / v90;
                 let v8428 = v8427 * v8421;
-                let v21038 = (((v10854 * v8427) * v10982) / v90) * v8421;
                 let v21039 = ((v20906 - (((v10716 * (v8247 * (v8416.powf((v8247 - v9751))))) * (v8419 * (v8418.powf((v8419 - v9751))))) * v8421)) / v8420) * v8427;
-                let v21042 = (Lanes([v21038[0], 0.0, 0.0])) + (Lanes([0.0, v21039[0], v21039[1]]));
+                let v21042 = (Lanes([((((v10854 * v8427) * v10982) / v90) * v8421), 0.0, 0.0])) + (Lanes([0.0, v21039[0], v21039[1]]));
                 let v8429 = if v8428 > v407 { 1.0 } else { 0.0 };
                 let v8438: f64;
                 let v10717: Lanes<3>;
@@ -17054,12 +16545,11 @@ impl Instance {
                     v10717 = v10718;
                 }
                 let v8440 = v8438 - v6;
-                let v21045 = v21034 * v8440;
                 let v8444 = v1 * v8235;
                 let v21050 = v20898 * v1;
                 let v8445 = (v8442 + (v8426 * v8440)) + v8444;
                 let v21051 = Lanes([0.0, v21050[0], v21050[1]]);
-                let v21052 = (v10704 + ((Lanes([v21045[0], 0.0, 0.0])) + (v10717 * v8426))) + v21051;
+                let v21052 = (v10704 + ((Lanes([(v21034 * v8440), 0.0, 0.0])) + (v10717 * v8426))) + v21051;
                 let v8447 = if v8446 == v6 { 1.0 } else { 0.0 };
                 let v9562: f64;
                 let v10719: Lanes<3>;
@@ -17068,7 +16558,7 @@ impl Instance {
                     let v21053 = v20902 * v8453;
                     let v8455 = if v8454 > v407 { 1.0 } else { 0.0 };
                     let v8464: f64;
-                    let v10720: Lanes<1>;
+                    let v10720: f64;
                     if v8455 != 0.0 {
                         let v8459 = v8456 * (v6 + (v8454 - v407));
                         let v21055 = v21053 * v8456;
@@ -17077,7 +16567,7 @@ impl Instance {
                     } else {
                         let v8461 = if v8454 < v8460 { 1.0 } else { 0.0 };
                         let v8465: f64;
-                        let v10721: Lanes<1>;
+                        let v10721: f64;
                         if v8461 != 0.0 {
                             v8465 = v8462;
                             v10721 = v10838;
@@ -17091,7 +16581,7 @@ impl Instance {
                         v10720 = v10721;
                     }
                     let v8466 = v8266 + v8454;
-                    let v21056 = Lanes([v21053[0], 0.0, 0.0]);
+                    let v21056 = Lanes([v21053, 0.0, 0.0]);
                     let v21057 = v20908 + v21056;
                     let v8468 = v8467 + v8454;
                     let v8469 = if v8466 > v407 { 1.0 } else { 0.0 };
@@ -17120,7 +16610,7 @@ impl Instance {
                     }
                     let v8480 = if v8468 > v407 { 1.0 } else { 0.0 };
                     let v8489: f64;
-                    let v10724: Lanes<1>;
+                    let v10724: f64;
                     if v8480 != 0.0 {
                         let v8484 = v8481 * (v6 + (v8468 - v407));
                         let v21061 = v21053 * v8481;
@@ -17129,7 +16619,7 @@ impl Instance {
                     } else {
                         let v8486 = if v8468 < v8485 { 1.0 } else { 0.0 };
                         let v8490: f64;
-                        let v10725: Lanes<1>;
+                        let v10725: f64;
                         if v8486 != 0.0 {
                             v8490 = v8487;
                             v10725 = v10838;
@@ -17143,14 +16633,13 @@ impl Instance {
                         v10724 = v10725;
                     }
                     let v8491 = v8478 - v8489;
-                    let v21063 = v10722 - (Lanes([v10724[0], 0.0, 0.0]));
+                    let v21063 = v10722 - (Lanes([v10724, 0.0, 0.0]));
                     let v8492 = v8294 * v0;
                     let v8493 = v8492 * v98;
                     let v21064 = v10858 * v8492;
-                    let v21065 = v20902 * v8236;
                     let v21066 = v20899 * v8250;
                     let v8495 = (v8250 * v8236) + v8454;
-                    let v21070 = ((Lanes([v21065[0], 0.0, 0.0])) + (Lanes([0.0, v21066[0], v21066[1]]))) + v21056;
+                    let v21070 = ((Lanes([(v20902 * v8236), 0.0, 0.0])) + (Lanes([0.0, v21066[0], v21066[1]]))) + v21056;
                     let v8496 = if v8495 > v407 { 1.0 } else { 0.0 };
                     let v8505: f64;
                     let v10726: Lanes<3>;
@@ -17180,15 +16669,14 @@ impl Instance {
                     if v8507 != 0.0 {
                         let v8510 = (v8505 - (v0 * v8491)) - v8464;
                         let v8511 = v8493 * v8510;
-                        let v21148 = v21064 * v8510;
-                        let v21151 = (Lanes([v21148[0], 0.0, 0.0])) + (((v10726 - (v21063 * v0)) - (Lanes([v10720[0], 0.0, 0.0]))) * v8493);
+                        let v21151 = (Lanes([(v21064 * v8510), 0.0, 0.0])) + (((v10726 - (v21063 * v0)) - (Lanes([v10720, 0.0, 0.0]))) * v8493);
                         v8631 = v8511;
                         v10728 = v21151;
                     } else {
                         let v8513 = v8512 + v8454;
                         let v8514 = if v8513 > v407 { 1.0 } else { 0.0 };
                         let v8523: f64;
-                        let v10729: Lanes<1>;
+                        let v10729: f64;
                         if v8514 != 0.0 {
                             let v8518 = v8515 * (v6 + (v8513 - v407));
                             let v21074 = v21053 * v8515;
@@ -17197,7 +16685,7 @@ impl Instance {
                         } else {
                             let v8520 = if v8513 < v8519 { 1.0 } else { 0.0 };
                             let v8524: f64;
-                            let v10730: Lanes<1>;
+                            let v10730: f64;
                             if v8520 != 0.0 {
                                 v8524 = v8521;
                                 v10730 = v10838;
@@ -17216,7 +16704,7 @@ impl Instance {
                         let v21076 = v20902 + v21053;
                         let v8527 = if v8526 > v407 { 1.0 } else { 0.0 };
                         let v8536: f64;
-                        let v10731: Lanes<1>;
+                        let v10731: f64;
                         if v8527 != 0.0 {
                             let v8531 = v8528 * (v6 + (v8526 - v407));
                             let v21078 = v21076 * v8528;
@@ -17225,7 +16713,7 @@ impl Instance {
                         } else {
                             let v8533 = if v8526 < v8532 { 1.0 } else { 0.0 };
                             let v8537: f64;
-                            let v10732: Lanes<1>;
+                            let v10732: f64;
                             if v8533 != 0.0 {
                                 v8537 = v8534;
                                 v10732 = v10838;
@@ -17245,10 +16733,9 @@ impl Instance {
                         let v8541 = v0 * v8491;
                         let v21082 = v21063 * v0;
                         let v8543 = (v8505 - v8541) - v8464;
-                        let v21084 = Lanes([v10720[0], 0.0, 0.0]);
+                        let v21084 = Lanes([v10720, 0.0, 0.0]);
                         let v8544 = v8493 * v8543;
-                        let v21086 = v21064 * v8543;
-                        let v21089 = (Lanes([v21086[0], 0.0, 0.0])) + (((v10726 - v21082) - v21084) * v8493);
+                        let v21089 = (Lanes([(v21064 * v8543), 0.0, 0.0])) + (((v10726 - v21082) - v21084) * v8493);
                         let v8597: f64;
                         let v10733: Lanes<3>;
                         if v8545 != 0.0 {
@@ -17258,7 +16745,7 @@ impl Instance {
                             let v21097 = v21096 + v21053;
                             let v8549 = if v8548 > v407 { 1.0 } else { 0.0 };
                             let v8558: f64;
-                            let v10734: Lanes<1>;
+                            let v10734: f64;
                             if v8549 != 0.0 {
                                 let v8553 = v8550 * (v6 + (v8548 - v407));
                                 let v21099 = v21097 * v8550;
@@ -17267,7 +16754,7 @@ impl Instance {
                             } else {
                                 let v8555 = if v8548 < v8554 { 1.0 } else { 0.0 };
                                 let v8559: f64;
-                                let v10735: Lanes<1>;
+                                let v10735: f64;
                                 if v8555 != 0.0 {
                                     v8559 = v8556;
                                     v10735 = v10838;
@@ -17282,10 +16769,9 @@ impl Instance {
                             }
                             let v8561 = (v8558 - v8538) - v8464;
                             let v21101 = (v10734 - v21079) - v10720;
-                            let v21102 = v21096 * v8236;
                             let v21103 = v20899 * v8547;
                             let v8563 = (v8547 * v8236) + v8454;
-                            let v21107 = ((Lanes([v21102[0], 0.0, 0.0])) + (Lanes([0.0, v21103[0], v21103[1]]))) + v21056;
+                            let v21107 = ((Lanes([(v21096 * v8236), 0.0, 0.0])) + (Lanes([0.0, v21103[0], v21103[1]]))) + v21056;
                             let v8564 = if v8563 > v407 { 1.0 } else { 0.0 };
                             let v8573: f64;
                             let v10736: Lanes<3>;
@@ -17313,23 +16799,19 @@ impl Instance {
                             let v8576 = (v8493 * v8540) / v8561;
                             let v8578 = (v8573 - v8541) - v8464;
                             let v8579 = v8576 * v8578;
-                            let v21118 = ((((v21064 * v8540) + (v21081 * v8493)) - (v21101 * v8576)) / v8561) * v8578;
-                            let v21121 = (Lanes([v21118[0], 0.0, 0.0])) + (((v10736 - v21082) - v21084) * v8576);
+                            let v21121 = (Lanes([(((((v21064 * v8540) + (v21081 * v8493)) - (v21101 * v8576)) / v8561) * v8578), 0.0, 0.0])) + (((v10736 - v21082) - v21084) * v8576);
                             v8597 = v8579;
                             v10733 = v21121;
                         } else {
                             let v8580 = v8493 * v8540;
-                            let v21092 = (v21064 * v8540) + (v21081 * v8493);
-                            let v21093 = Lanes([v21092[0], 0.0, 0.0]);
+                            let v21093 = Lanes([((v21064 * v8540) + (v21081 * v8493)), 0.0, 0.0]);
                             v8597 = v8580;
                             v10733 = v21093;
                         }
                         let v8582 = v8581 * v90;
                         let v21122 = v10854 * v8581;
-                        let v21124 = (v21122 / v437) * v10982;
                         let v8586 = (v8236 - (v6 - (v8582 / v437))) / v8582;
-                        let v21128 = v21122 * v8586;
-                        let v21131 = (((Lanes([0.0, v20899[0], v20899[1]])) - (Lanes([v21124[0], 0.0, 0.0]))) - (Lanes([v21128[0], 0.0, 0.0]))) / v8582;
+                        let v21131 = (((Lanes([0.0, v20899[0], v20899[1]])) - (Lanes([((v21122 / v437) * v10982), 0.0, 0.0]))) - (Lanes([(v21122 * v8586), 0.0, 0.0]))) / v8582;
                         let v8587 = if v8586 > v407 { 1.0 } else { 0.0 };
                         let v8593: f64;
                         let v10738: Lanes<3>;
@@ -17387,9 +16869,8 @@ impl Instance {
                     let v21176 = v10858 * v8614;
                     let v8616 = v8452 / v90;
                     let v8617 = v8616 * v8613;
-                    let v21180 = (((v10854 * v8616) * v10982) / v90) * v8613;
                     let v21181 = ((v20906 - (((v10740 * (v8450 * (v8608.powf((v8450 - v9751))))) * (v8611 * (v8610.powf((v8611 - v9751))))) * v8613)) / v8612) * v8616;
-                    let v21184 = (Lanes([v21180[0], 0.0, 0.0])) + (Lanes([0.0, v21181[0], v21181[1]]));
+                    let v21184 = (Lanes([((((v10854 * v8616) * v10982) / v90) * v8613), 0.0, 0.0])) + (Lanes([0.0, v21181[0], v21181[1]]));
                     let v8618 = if v8617 > v407 { 1.0 } else { 0.0 };
                     let v8627: f64;
                     let v10741: Lanes<3>;
@@ -17415,9 +16896,8 @@ impl Instance {
                         v10741 = v10742;
                     }
                     let v8629 = v8627 - v6;
-                    let v21187 = v21176 * v8629;
                     let v8633 = (v8631 + (v8615 * v8629)) + v8444;
-                    let v21192 = (v10728 + ((Lanes([v21187[0], 0.0, 0.0])) + (v10741 * v8615))) + v21051;
+                    let v21192 = (v10728 + ((Lanes([(v21176 * v8629), 0.0, 0.0])) + (v10741 * v8615))) + v21051;
                     v9562 = v8633;
                     v10719 = v21192;
                 } else {
@@ -17618,14 +17098,14 @@ impl Instance {
                 v10694 = v20895;
                 v10695 = v20895;
             }
-            let v21223 = Lanes([0.0, v9756[0]]);
-            let v21224 = Lanes([v9770[0], 0.0]);
+            let v21223 = Lanes([0.0, v9756]);
+            let v21224 = Lanes([v9770, 0.0]);
             let v21225 = v21223 - v21224;
-            let v21228 = (Lanes([0.0, v9756[0]])) - (Lanes([v9755[0], 0.0]));
+            let v21228 = (Lanes([0.0, v9756])) - (Lanes([v9755, 0.0]));
             let v8729 = v335 * ((v345 - v566) + (v345 - v340));
             let v21232 = ((Lanes([0.0, v21225[0], v21225[1]])) + (Lanes([v21228[0], 0.0, v21228[1]]))) * v335;
             let v21233 = v21224 - v21223;
-            let v21236 = (Lanes([0.0, v9770[0]])) - (Lanes([v9755[0], 0.0]));
+            let v21236 = (Lanes([0.0, v9770])) - (Lanes([v9755, 0.0]));
             let v8733 = v335 * ((v566 - v345) + (v566 - v340));
             let v21240 = ((Lanes([0.0, v21233[0], v21233[1]])) + (Lanes([v21236[0], v21236[1], 0.0]))) * v335;
             let v8735 = if v8734 == v6 { 1.0 } else { 0.0 };
@@ -17644,14 +17124,14 @@ impl Instance {
                 let v10764: Lanes<5>;
                 let v10765: Lanes<5>;
                 if v8737 != 0.0 {
-                    let v21244 = Lanes([0.0, v9758[0]]);
-                    let v21245 = Lanes([v9757[0], 0.0]);
+                    let v21244 = Lanes([0.0, v9758]);
+                    let v21245 = Lanes([v9757, 0.0]);
                     let v21246 = v21244 - v21245;
-                    let v21249 = (Lanes([v9758[0], 0.0])) - (Lanes([0.0, v9755[0]]));
+                    let v21249 = (Lanes([v9758, 0.0])) - (Lanes([0.0, v9755]));
                     let v8741 = v335 * ((v349 - v346) + (v349 - v340));
                     let v21253 = ((Lanes([v21246[0], v21246[1], 0.0])) + (Lanes([0.0, v21249[0], v21249[1]]))) * v335;
                     let v21254 = v21245 - v21244;
-                    let v21257 = (Lanes([v9757[0], 0.0])) - (Lanes([0.0, v9755[0]]));
+                    let v21257 = (Lanes([v9757, 0.0])) - (Lanes([0.0, v9755]));
                     let v8745 = v335 * ((v346 - v349) + (v346 - v340));
                     let v21261 = ((Lanes([v21254[0], v21254[1], 0.0])) + (Lanes([v21257[0], 0.0, v21257[1]]))) * v335;
                     let v21262 = Lanes([v21253[0], v21253[1], v21253[2], 0.0, 0.0]);
@@ -17675,7 +17155,7 @@ impl Instance {
                 let v21267 = v21266 * v8751;
                 let v8753 = if v8752 > v407 { 1.0 } else { 0.0 };
                 let v8762: f64;
-                let v10766: Lanes<1>;
+                let v10766: f64;
                 if v8753 != 0.0 {
                     let v8757 = v8754 * (v6 + (v8752 - v407));
                     let v21269 = v21267 * v8754;
@@ -17684,7 +17164,7 @@ impl Instance {
                 } else {
                     let v8759 = if v8752 < v8758 { 1.0 } else { 0.0 };
                     let v8763: f64;
-                    let v10767: Lanes<1>;
+                    let v10767: f64;
                     if v8759 != 0.0 {
                         v8763 = v8760;
                         v10767 = v10838;
@@ -17701,7 +17181,7 @@ impl Instance {
                 let v21270 = v10764 * v10982;
                 let v21271 = v21270 * v8747;
                 let v8767 = (v8747 * (v8764 - v8748)) + v8752;
-                let v21273 = Lanes([0.0, 0.0, v21267[0], 0.0, 0.0, 0.0]);
+                let v21273 = Lanes([0.0, 0.0, v21267, 0.0, 0.0, 0.0]);
                 let v21274 = (Lanes([v21271[0], v21271[1], 0.0, v21271[2], v21271[3], v21271[4]])) + v21273;
                 let v8770 = ((-v8747) * v8748) + v8752;
                 let v8771 = if v8767 > v407 { 1.0 } else { 0.0 };
@@ -17730,7 +17210,7 @@ impl Instance {
                 }
                 let v8782 = if v8770 > v407 { 1.0 } else { 0.0 };
                 let v8791: f64;
-                let v10770: Lanes<1>;
+                let v10770: f64;
                 if v8782 != 0.0 {
                     let v8786 = v8783 * (v6 + (v8770 - v407));
                     let v21278 = v21267 * v8783;
@@ -17739,7 +17219,7 @@ impl Instance {
                 } else {
                     let v8788 = if v8770 < v8787 { 1.0 } else { 0.0 };
                     let v8792: f64;
-                    let v10771: Lanes<1>;
+                    let v10771: f64;
                     if v8788 != 0.0 {
                         v8792 = v8789;
                         v10771 = v10838;
@@ -17753,14 +17233,13 @@ impl Instance {
                     v10770 = v10771;
                 }
                 let v8793 = v8780 - v8791;
-                let v21280 = v10768 - (Lanes([0.0, 0.0, v10770[0], 0.0, 0.0, 0.0]));
+                let v21280 = v10768 - (Lanes([0.0, 0.0, v10770, 0.0, 0.0, 0.0]));
                 let v8794 = v6508 * v8749;
                 let v8795 = v8794 * v98;
                 let v21281 = v10858 * v8794;
-                let v21282 = v21266 * v8746;
                 let v21283 = v10764 * v8750;
                 let v8797 = (v8750 * v8746) + v8752;
-                let v21287 = ((Lanes([0.0, 0.0, v21282[0], 0.0, 0.0, 0.0])) + (Lanes([v21283[0], v21283[1], 0.0, v21283[2], v21283[3], v21283[4]]))) + v21273;
+                let v21287 = ((Lanes([0.0, 0.0, (v21266 * v8746), 0.0, 0.0, 0.0])) + (Lanes([v21283[0], v21283[1], 0.0, v21283[2], v21283[3], v21283[4]]))) + v21273;
                 let v8798 = if v8797 > v407 { 1.0 } else { 0.0 };
                 let v8807: f64;
                 let v10772: Lanes<6>;
@@ -17791,15 +17270,14 @@ impl Instance {
                 if v8809 != 0.0 {
                     let v8811 = (v8807 - v8793) - v8762;
                     let v8812 = v8795 * v8811;
-                    let v21364 = v21281 * v8811;
-                    let v21367 = (Lanes([0.0, 0.0, v21364[0], 0.0, 0.0, 0.0])) + (((v10772 - v21280) - (Lanes([0.0, 0.0, v10766[0], 0.0, 0.0, 0.0]))) * v8795);
+                    let v21367 = (Lanes([0.0, 0.0, (v21281 * v8811), 0.0, 0.0, 0.0])) + (((v10772 - v21280) - (Lanes([0.0, 0.0, v10766, 0.0, 0.0, 0.0]))) * v8795);
                     v8937 = v8812;
                     v10774 = v21367;
                 } else {
                     let v8816 = (v8747 * ((-v6776) - v8748)) + v8752;
                     let v8817 = if v8816 > v407 { 1.0 } else { 0.0 };
                     let v8826: f64;
-                    let v10775: Lanes<1>;
+                    let v10775: f64;
                     if v8817 != 0.0 {
                         let v8821 = v8818 * (v6 + (v8816 - v407));
                         let v21291 = v21267 * v8818;
@@ -17808,7 +17286,7 @@ impl Instance {
                     } else {
                         let v8823 = if v8816 < v8822 { 1.0 } else { 0.0 };
                         let v8827: f64;
-                        let v10776: Lanes<1>;
+                        let v10776: f64;
                         if v8823 != 0.0 {
                             v8827 = v8824;
                             v10776 = v10838;
@@ -17827,7 +17305,7 @@ impl Instance {
                     let v21294 = (v21266 * v6776) + v21267;
                     let v8831 = if v8830 > v407 { 1.0 } else { 0.0 };
                     let v8840: f64;
-                    let v10777: Lanes<1>;
+                    let v10777: f64;
                     if v8831 != 0.0 {
                         let v8835 = v8832 * (v6 + (v8830 - v407));
                         let v21296 = v21294 * v8832;
@@ -17836,7 +17314,7 @@ impl Instance {
                     } else {
                         let v8837 = if v8830 < v8836 { 1.0 } else { 0.0 };
                         let v8841: f64;
-                        let v10778: Lanes<1>;
+                        let v10778: f64;
                         if v8837 != 0.0 {
                             v8841 = v8838;
                             v10778 = v10838;
@@ -17852,10 +17330,9 @@ impl Instance {
                     let v8843 = (v8840 - v8828) - v8762;
                     let v21298 = (v10777 - v21292) - v10766;
                     let v8845 = (v8807 - v8793) - v8762;
-                    let v21300 = Lanes([0.0, 0.0, v10766[0], 0.0, 0.0, 0.0]);
+                    let v21300 = Lanes([0.0, 0.0, v10766, 0.0, 0.0, 0.0]);
                     let v8846 = v8795 * v8845;
-                    let v21302 = v21281 * v8845;
-                    let v21305 = (Lanes([0.0, 0.0, v21302[0], 0.0, 0.0, 0.0])) + (((v10772 - v21280) - v21300) * v8795);
+                    let v21305 = (Lanes([0.0, 0.0, (v21281 * v8845), 0.0, 0.0, 0.0])) + (((v10772 - v21280) - v21300) * v8795);
                     let v8847 = if v6778 > v0 { 1.0 } else { 0.0 };
                     let v8900: f64;
                     let v10779: Lanes<6>;
@@ -17866,7 +17343,7 @@ impl Instance {
                         let v21314 = (v21312 * v6776) + v21267;
                         let v8852 = if v8851 > v407 { 1.0 } else { 0.0 };
                         let v8861: f64;
-                        let v10780: Lanes<1>;
+                        let v10780: f64;
                         if v8852 != 0.0 {
                             let v8856 = v8853 * (v6 + (v8851 - v407));
                             let v21316 = v21314 * v8853;
@@ -17875,7 +17352,7 @@ impl Instance {
                         } else {
                             let v8858 = if v8851 < v8857 { 1.0 } else { 0.0 };
                             let v8862: f64;
-                            let v10781: Lanes<1>;
+                            let v10781: f64;
                             if v8858 != 0.0 {
                                 v8862 = v8859;
                                 v10781 = v10838;
@@ -17890,10 +17367,9 @@ impl Instance {
                         }
                         let v8864 = (v8861 - v8828) - v8762;
                         let v21318 = (v10780 - v21292) - v10766;
-                        let v21319 = v21312 * v8746;
                         let v21320 = v10764 * v8849;
                         let v8866 = (v8849 * v8746) + v8752;
-                        let v21324 = ((Lanes([0.0, 0.0, v21319[0], 0.0, 0.0, 0.0])) + (Lanes([v21320[0], v21320[1], 0.0, v21320[2], v21320[3], v21320[4]]))) + v21273;
+                        let v21324 = ((Lanes([0.0, 0.0, (v21312 * v8746), 0.0, 0.0, 0.0])) + (Lanes([v21320[0], v21320[1], 0.0, v21320[2], v21320[3], v21320[4]]))) + v21273;
                         let v8867 = if v8866 > v407 { 1.0 } else { 0.0 };
                         let v8876: f64;
                         let v10782: Lanes<6>;
@@ -17921,24 +17397,20 @@ impl Instance {
                         let v8879 = (v8795 * v8843) / v8864;
                         let v8881 = (v8876 - v8793) - v8762;
                         let v8882 = v8879 * v8881;
-                        let v21335 = ((((v21281 * v8843) + (v21298 * v8795)) - (v21318 * v8879)) / v8864) * v8881;
-                        let v21338 = (Lanes([0.0, 0.0, v21335[0], 0.0, 0.0, 0.0])) + (((v10782 - v21280) - v21300) * v8879);
+                        let v21338 = (Lanes([0.0, 0.0, (((((v21281 * v8843) + (v21298 * v8795)) - (v21318 * v8879)) / v8864) * v8881), 0.0, 0.0, 0.0])) + (((v10782 - v21280) - v21300) * v8879);
                         v8900 = v8882;
                         v10779 = v21338;
                     } else {
                         let v8883 = v8795 * v8843;
-                        let v21308 = (v21281 * v8843) + (v21298 * v8795);
-                        let v21309 = Lanes([0.0, 0.0, v21308[0], 0.0, 0.0, 0.0]);
+                        let v21309 = Lanes([0.0, 0.0, ((v21281 * v8843) + (v21298 * v8795)), 0.0, 0.0, 0.0]);
                         v8900 = v8883;
                         v10779 = v21309;
                     }
                     let v8884 = v6777 * v6777;
                     let v8885 = v8884 * v90;
                     let v21339 = v10854 * v8884;
-                    let v21341 = (v21339 / v437) * v10982;
                     let v8889 = (v8746 - (v6776 - (v8885 / v437))) / v8885;
-                    let v21345 = v21339 * v8889;
-                    let v21348 = (((Lanes([v10764[0], v10764[1], 0.0, v10764[2], v10764[3], v10764[4]])) - (Lanes([0.0, 0.0, v21341[0], 0.0, 0.0, 0.0]))) - (Lanes([0.0, 0.0, v21345[0], 0.0, 0.0, 0.0]))) / v8885;
+                    let v21348 = (((Lanes([v10764[0], v10764[1], 0.0, v10764[2], v10764[3], v10764[4]])) - (Lanes([0.0, 0.0, ((v21339 / v437) * v10982), 0.0, 0.0, 0.0]))) - (Lanes([0.0, 0.0, (v21339 * v8889), 0.0, 0.0, 0.0]))) / v8885;
                     let v8890 = if v8889 > v407 { 1.0 } else { 0.0 };
                     let v8896: f64;
                     let v10784: Lanes<6>;
@@ -17996,9 +17468,8 @@ impl Instance {
                 let v21392 = v10858 * v8920;
                 let v8922 = v6791 / v90;
                 let v8923 = v8922 * v8916;
-                let v21396 = (((v10854 * v8922) * v10982) / v90) * v8916;
                 let v21397 = ((v21270 - (((v10786 * (v6788 * (v8911.powf((v6788 - v9751))))) * (v8914 * (v8913.powf((v8914 - v9751))))) * v8916)) / v8915) * v8922;
-                let v21400 = (Lanes([0.0, 0.0, v21396[0], 0.0, 0.0, 0.0])) + (Lanes([v21397[0], v21397[1], 0.0, v21397[2], v21397[3], v21397[4]]));
+                let v21400 = (Lanes([0.0, 0.0, ((((v10854 * v8922) * v10982) / v90) * v8916), 0.0, 0.0, 0.0])) + (Lanes([v21397[0], v21397[1], 0.0, v21397[2], v21397[3], v21397[4]]));
                 let v8924 = if v8923 > v407 { 1.0 } else { 0.0 };
                 let v8933: f64;
                 let v10787: Lanes<6>;
@@ -18024,11 +17495,10 @@ impl Instance {
                     v10787 = v10788;
                 }
                 let v8935 = v8933 - v6;
-                let v21403 = v21392 * v8935;
                 let v8938 = v8937 + (v8921 * v8935);
-                let v21407 = v10774 + ((Lanes([0.0, 0.0, v21403[0], 0.0, 0.0, 0.0])) + (v10787 * v8921));
+                let v21407 = v10774 + ((Lanes([0.0, 0.0, (v21392 * v8935), 0.0, 0.0, 0.0])) + (v10787 * v8921));
                 let v8951: f64;
-                let v10789: Lanes<1>;
+                let v10789: f64;
                 if v8753 != 0.0 {
                     let v8946 = v8943 * (v6 + (v8752 - v407));
                     let v21409 = v21267 * v8943;
@@ -18037,7 +17507,7 @@ impl Instance {
                 } else {
                     let v8948 = if v8752 < v8947 { 1.0 } else { 0.0 };
                     let v8952: f64;
-                    let v10790: Lanes<1>;
+                    let v10790: f64;
                     if v8948 != 0.0 {
                         v8952 = v8949;
                         v10790 = v10838;
@@ -18082,7 +17552,7 @@ impl Instance {
                 }
                 let v8971 = if v8959 > v407 { 1.0 } else { 0.0 };
                 let v8980: f64;
-                let v10793: Lanes<1>;
+                let v10793: f64;
                 if v8971 != 0.0 {
                     let v8975 = v8972 * (v6 + (v8959 - v407));
                     let v21417 = v21267 * v8972;
@@ -18091,7 +17561,7 @@ impl Instance {
                 } else {
                     let v8977 = if v8959 < v8976 { 1.0 } else { 0.0 };
                     let v8981: f64;
-                    let v10794: Lanes<1>;
+                    let v10794: f64;
                     if v8977 != 0.0 {
                         v8981 = v8978;
                         v10794 = v10838;
@@ -18105,14 +17575,13 @@ impl Instance {
                     v10793 = v10794;
                 }
                 let v8982 = v8969 - v8980;
-                let v21419 = v10791 - (Lanes([0.0, 0.0, v10793[0], 0.0, 0.0, 0.0]));
+                let v21419 = v10791 - (Lanes([0.0, 0.0, v10793, 0.0, 0.0, 0.0]));
                 let v8983 = v6508 * v8942;
                 let v8984 = v8983 * v98;
                 let v21420 = v10858 * v8983;
-                let v21421 = v21266 * v8939;
                 let v21422 = v10765 * v8750;
                 let v8986 = (v8750 * v8939) + v8752;
-                let v21426 = ((Lanes([0.0, 0.0, v21421[0], 0.0, 0.0, 0.0])) + (Lanes([v21422[0], v21422[1], 0.0, v21422[2], v21422[3], v21422[4]]))) + v21273;
+                let v21426 = ((Lanes([0.0, 0.0, (v21266 * v8939), 0.0, 0.0, 0.0])) + (Lanes([v21422[0], v21422[1], 0.0, v21422[2], v21422[3], v21422[4]]))) + v21273;
                 let v8987 = if v8986 > v407 { 1.0 } else { 0.0 };
                 let v8996: f64;
                 let v10795: Lanes<6>;
@@ -18143,15 +17612,14 @@ impl Instance {
                 if v8998 != 0.0 {
                     let v9000 = (v8996 - v8982) - v8951;
                     let v9001 = v8984 * v9000;
-                    let v21503 = v21420 * v9000;
-                    let v21506 = (Lanes([0.0, 0.0, v21503[0], 0.0, 0.0, 0.0])) + (((v10795 - v21419) - (Lanes([0.0, 0.0, v10789[0], 0.0, 0.0, 0.0]))) * v8984);
+                    let v21506 = (Lanes([0.0, 0.0, (v21420 * v9000), 0.0, 0.0, 0.0])) + (((v10795 - v21419) - (Lanes([0.0, 0.0, v10789, 0.0, 0.0, 0.0]))) * v8984);
                     v9121 = v9001;
                     v10797 = v21506;
                 } else {
                     let v9005 = (v8940 * ((-v6989) - v8941)) + v8752;
                     let v9006 = if v9005 > v407 { 1.0 } else { 0.0 };
                     let v9015: f64;
-                    let v10798: Lanes<1>;
+                    let v10798: f64;
                     if v9006 != 0.0 {
                         let v9010 = v9007 * (v6 + (v9005 - v407));
                         let v21430 = v21267 * v9007;
@@ -18160,7 +17628,7 @@ impl Instance {
                     } else {
                         let v9012 = if v9005 < v9011 { 1.0 } else { 0.0 };
                         let v9016: f64;
-                        let v10799: Lanes<1>;
+                        let v10799: f64;
                         if v9012 != 0.0 {
                             v9016 = v9013;
                             v10799 = v10838;
@@ -18179,7 +17647,7 @@ impl Instance {
                     let v21433 = (v21266 * v6989) + v21267;
                     let v9020 = if v9019 > v407 { 1.0 } else { 0.0 };
                     let v9029: f64;
-                    let v10800: Lanes<1>;
+                    let v10800: f64;
                     if v9020 != 0.0 {
                         let v9024 = v9021 * (v6 + (v9019 - v407));
                         let v21435 = v21433 * v9021;
@@ -18188,7 +17656,7 @@ impl Instance {
                     } else {
                         let v9026 = if v9019 < v9025 { 1.0 } else { 0.0 };
                         let v9030: f64;
-                        let v10801: Lanes<1>;
+                        let v10801: f64;
                         if v9026 != 0.0 {
                             v9030 = v9027;
                             v10801 = v10838;
@@ -18204,10 +17672,9 @@ impl Instance {
                     let v9032 = (v9029 - v9017) - v8951;
                     let v21437 = (v10800 - v21431) - v10789;
                     let v9034 = (v8996 - v8982) - v8951;
-                    let v21439 = Lanes([0.0, 0.0, v10789[0], 0.0, 0.0, 0.0]);
+                    let v21439 = Lanes([0.0, 0.0, v10789, 0.0, 0.0, 0.0]);
                     let v9035 = v8984 * v9034;
-                    let v21441 = v21420 * v9034;
-                    let v21444 = (Lanes([0.0, 0.0, v21441[0], 0.0, 0.0, 0.0])) + (((v10795 - v21419) - v21439) * v8984);
+                    let v21444 = (Lanes([0.0, 0.0, (v21420 * v9034), 0.0, 0.0, 0.0])) + (((v10795 - v21419) - v21439) * v8984);
                     let v9036 = if v6991 > v0 { 1.0 } else { 0.0 };
                     let v9089: f64;
                     let v10802: Lanes<6>;
@@ -18218,7 +17685,7 @@ impl Instance {
                         let v21453 = (v21451 * v6989) + v21267;
                         let v9041 = if v9040 > v407 { 1.0 } else { 0.0 };
                         let v9050: f64;
-                        let v10803: Lanes<1>;
+                        let v10803: f64;
                         if v9041 != 0.0 {
                             let v9045 = v9042 * (v6 + (v9040 - v407));
                             let v21455 = v21453 * v9042;
@@ -18227,7 +17694,7 @@ impl Instance {
                         } else {
                             let v9047 = if v9040 < v9046 { 1.0 } else { 0.0 };
                             let v9051: f64;
-                            let v10804: Lanes<1>;
+                            let v10804: f64;
                             if v9047 != 0.0 {
                                 v9051 = v9048;
                                 v10804 = v10838;
@@ -18242,10 +17709,9 @@ impl Instance {
                         }
                         let v9053 = (v9050 - v9017) - v8951;
                         let v21457 = (v10803 - v21431) - v10789;
-                        let v21458 = v21451 * v8939;
                         let v21459 = v10765 * v9038;
                         let v9055 = (v9038 * v8939) + v8752;
-                        let v21463 = ((Lanes([0.0, 0.0, v21458[0], 0.0, 0.0, 0.0])) + (Lanes([v21459[0], v21459[1], 0.0, v21459[2], v21459[3], v21459[4]]))) + v21273;
+                        let v21463 = ((Lanes([0.0, 0.0, (v21451 * v8939), 0.0, 0.0, 0.0])) + (Lanes([v21459[0], v21459[1], 0.0, v21459[2], v21459[3], v21459[4]]))) + v21273;
                         let v9056 = if v9055 > v407 { 1.0 } else { 0.0 };
                         let v9065: f64;
                         let v10805: Lanes<6>;
@@ -18273,24 +17739,20 @@ impl Instance {
                         let v9068 = (v8984 * v9032) / v9053;
                         let v9070 = (v9065 - v8982) - v8951;
                         let v9071 = v9068 * v9070;
-                        let v21474 = ((((v21420 * v9032) + (v21437 * v8984)) - (v21457 * v9068)) / v9053) * v9070;
-                        let v21477 = (Lanes([0.0, 0.0, v21474[0], 0.0, 0.0, 0.0])) + (((v10805 - v21419) - v21439) * v9068);
+                        let v21477 = (Lanes([0.0, 0.0, (((((v21420 * v9032) + (v21437 * v8984)) - (v21457 * v9068)) / v9053) * v9070), 0.0, 0.0, 0.0])) + (((v10805 - v21419) - v21439) * v9068);
                         v9089 = v9071;
                         v10802 = v21477;
                     } else {
                         let v9072 = v8984 * v9032;
-                        let v21447 = (v21420 * v9032) + (v21437 * v8984);
-                        let v21448 = Lanes([0.0, 0.0, v21447[0], 0.0, 0.0, 0.0]);
+                        let v21448 = Lanes([0.0, 0.0, ((v21420 * v9032) + (v21437 * v8984)), 0.0, 0.0, 0.0]);
                         v9089 = v9072;
                         v10802 = v21448;
                     }
                     let v9073 = v6990 * v6990;
                     let v9074 = v9073 * v90;
                     let v21478 = v10854 * v9073;
-                    let v21480 = (v21478 / v437) * v10982;
                     let v9078 = (v8939 - (v6989 - (v9074 / v437))) / v9074;
-                    let v21484 = v21478 * v9078;
-                    let v21487 = (((Lanes([v10765[0], v10765[1], 0.0, v10765[2], v10765[3], v10765[4]])) - (Lanes([0.0, 0.0, v21480[0], 0.0, 0.0, 0.0]))) - (Lanes([0.0, 0.0, v21484[0], 0.0, 0.0, 0.0]))) / v9074;
+                    let v21487 = (((Lanes([v10765[0], v10765[1], 0.0, v10765[2], v10765[3], v10765[4]])) - (Lanes([0.0, 0.0, ((v21478 / v437) * v10982), 0.0, 0.0, 0.0]))) - (Lanes([0.0, 0.0, (v21478 * v9078), 0.0, 0.0, 0.0]))) / v9074;
                     let v9079 = if v9078 > v407 { 1.0 } else { 0.0 };
                     let v9085: f64;
                     let v10807: Lanes<6>;
@@ -18345,9 +17807,8 @@ impl Instance {
                 let v9105 = v8953 / v9104;
                 let v9106 = v7002 / v90;
                 let v9107 = v9106 * v9105;
-                let v21534 = (((v10854 * v9106) * v10982) / v90) * v9105;
                 let v21535 = ((v21410 - (((v10809 * (v6999 * (v9100.powf((v6999 - v9751))))) * (v9103 * (v9102.powf((v9103 - v9751))))) * v9105)) / v9104) * v9106;
-                let v21538 = (Lanes([0.0, 0.0, v21534[0], 0.0, 0.0, 0.0])) + (Lanes([v21535[0], v21535[1], 0.0, v21535[2], v21535[3], v21535[4]]));
+                let v21538 = (Lanes([0.0, 0.0, ((((v10854 * v9106) * v10982) / v90) * v9105), 0.0, 0.0, 0.0])) + (Lanes([v21535[0], v21535[1], 0.0, v21535[2], v21535[3], v21535[4]]));
                 let v9108 = if v9107 > v407 { 1.0 } else { 0.0 };
                 let v9117: f64;
                 let v10810: Lanes<6>;
@@ -18373,9 +17834,8 @@ impl Instance {
                     v10810 = v10811;
                 }
                 let v9119 = v9117 - v6;
-                let v21541 = v21392 * v9119;
                 let v9122 = v9121 + (v8921 * v9119);
-                let v21545 = v10797 + ((Lanes([0.0, 0.0, v21541[0], 0.0, 0.0, 0.0])) + (v10810 * v8921));
+                let v21545 = v10797 + ((Lanes([0.0, 0.0, (v21392 * v9119), 0.0, 0.0, 0.0])) + (v10810 * v8921));
                 let v9568: f64;
                 let v9570: f64;
                 let v9572: f64;
@@ -18425,10 +17885,9 @@ impl Instance {
             let v9576: f64;
             let v10816: Lanes<3>;
             if v63 != 0.0 {
-                let v21549 = (Lanes([v9757[0], 0.0])) - (Lanes([0.0, v9770[0]]));
+                let v21549 = (Lanes([v9757, 0.0])) - (Lanes([0.0, v9770]));
                 let v9126 = (v346 - v566) / v9124;
-                let v21550 = v9786 * v9126;
-                let v21554 = ((Lanes([v21549[0], 0.0, v21549[1]])) - (Lanes([0.0, v21550[0], 0.0]))) / v9124;
+                let v21554 = ((Lanes([v21549[0], 0.0, v21549[1]])) - (Lanes([0.0, (v9786 * v9126), 0.0]))) / v9124;
                 v9575 = v9126;
                 v9576 = v0;
                 v10816 = v21554;
@@ -18441,10 +17900,9 @@ impl Instance {
             let v9578: f64;
             let v10817: Lanes<3>;
             if v45 != 0.0 {
-                let v21558 = (Lanes([0.0, v9756[0]])) - (Lanes([v9758[0], 0.0]));
+                let v21558 = (Lanes([0.0, v9756])) - (Lanes([v9758, 0.0]));
                 let v9131 = (v345 - v349) / v9129;
-                let v21559 = v9784 * v9131;
-                let v21563 = ((Lanes([v21558[0], 0.0, v21558[1]])) - (Lanes([0.0, v21559[0], 0.0]))) / v9129;
+                let v21563 = ((Lanes([v21558[0], 0.0, v21558[1]])) - (Lanes([0.0, (v9784 * v9131), 0.0]))) / v9129;
                 v9577 = v9131;
                 v9578 = v0;
                 v10817 = v21563;
@@ -18459,7 +17917,7 @@ impl Instance {
             let v10818: Lanes<2>;
             if v9135 != 0.0 {
                 let v9138 = (v397 - v9136) / v82;
-                let v21568 = ((Lanes([v9760[0], 0.0])) - (Lanes([0.0, v9781[0]]))) / v82;
+                let v21568 = ((Lanes([v9760, 0.0])) - (Lanes([0.0, v9781]))) / v82;
                 v9579 = v9138;
                 v9580 = v0;
                 v10818 = v21568;
@@ -18474,7 +17932,7 @@ impl Instance {
             let v10819: Lanes<2>;
             if v9142 != 0.0 {
                 let v9144 = (v9136 - v574) / v86;
-                let v21573 = ((Lanes([v9781[0], 0.0])) - (Lanes([0.0, v9771[0]]))) / v86;
+                let v21573 = ((Lanes([v9781, 0.0])) - (Lanes([0.0, v9771]))) / v86;
                 v9581 = v9144;
                 v9582 = v0;
                 v10819 = v21573;
@@ -18484,7 +17942,7 @@ impl Instance {
                 v10819 = v21569;
             }
             let v9146 = v9136 - v349;
-            let v21576 = (Lanes([0.0, v9781[0]])) - (Lanes([v9758[0], 0.0]));
+            let v21576 = (Lanes([0.0, v9781])) - (Lanes([v9758, 0.0]));
             let v9148 = v9146 - v9147;
             let v9150 = v9148 / v9149;
             let v21577 = v21576 / v9149;
@@ -18492,12 +17950,10 @@ impl Instance {
             let v9172: f64;
             let v10820: Lanes<3>;
             if v9151 != 0.0 {
-                let v21608 = v10871 * v9146;
                 let v21609 = v21576 * v144;
-                let v21613 = v10860 * v9148;
                 let v21614 = v21576 * v106;
                 let v9155 = v6716 * ((v144 * v9146) + (v106 * v9148));
-                let v21619 = (((Lanes([0.0, v21608[0], 0.0])) + (Lanes([v21609[0], 0.0, v21609[1]]))) + ((Lanes([0.0, v21613[0], 0.0])) + (Lanes([v21614[0], 0.0, v21614[1]])))) * v6716;
+                let v21619 = (((Lanes([0.0, (v10871 * v9146), 0.0])) + (Lanes([v21609[0], 0.0, v21609[1]]))) + ((Lanes([0.0, (v10860 * v9148), 0.0])) + (Lanes([v21614[0], 0.0, v21614[1]])))) * v6716;
                 v9172 = v9155;
                 v10820 = v21619;
             } else {
@@ -18505,27 +17961,23 @@ impl Instance {
                 let v9173: f64;
                 let v10821: Lanes<3>;
                 if v9157 != 0.0 {
-                    let v21594 = v10871 * v9146;
                     let v21595 = v21576 * v144;
                     let v9159 = v106 * v9149;
                     let v9160 = v9150.exp();
-                    let v21601 = (v10860 * v9149) * v9160;
                     let v21602 = (v21577 * v9160) * v9159;
                     let v9163 = v6716 * ((v144 * v9146) + (v9159 * v9160));
-                    let v21607 = (((Lanes([0.0, v21594[0], 0.0])) + (Lanes([v21595[0], 0.0, v21595[1]]))) + ((Lanes([0.0, v21601[0], 0.0])) + (Lanes([v21602[0], 0.0, v21602[1]])))) * v6716;
+                    let v21607 = (((Lanes([0.0, (v10871 * v9146), 0.0])) + (Lanes([v21595[0], 0.0, v21595[1]]))) + ((Lanes([0.0, ((v10860 * v9149) * v9160), 0.0])) + (Lanes([v21602[0], 0.0, v21602[1]])))) * v6716;
                     v9173 = v9163;
                     v10821 = v21607;
                 } else {
-                    let v21578 = v10871 * v9146;
                     let v21579 = v21576 * v144;
                     let v9165 = v106 * v9149;
                     let v9166 = v9150.exp();
                     let v9167 = v6 + v9166;
                     let v9168 = v9167.ln();
-                    let v21587 = (v10860 * v9149) * v9168;
                     let v21588 = ((v21577 * v9166) * (v9751 / v9167)) * v9165;
                     let v9171 = v6716 * ((v144 * v9146) + (v9165 * v9168));
-                    let v21593 = (((Lanes([0.0, v21578[0], 0.0])) + (Lanes([v21579[0], 0.0, v21579[1]]))) + ((Lanes([0.0, v21587[0], 0.0])) + (Lanes([v21588[0], 0.0, v21588[1]])))) * v6716;
+                    let v21593 = (((Lanes([0.0, (v10871 * v9146), 0.0])) + (Lanes([v21579[0], 0.0, v21579[1]]))) + ((Lanes([0.0, ((v10860 * v9149) * v9168), 0.0])) + (Lanes([v21588[0], 0.0, v21588[1]])))) * v6716;
                     v9173 = v9171;
                     v10821 = v21593;
                 }
@@ -18535,7 +17987,7 @@ impl Instance {
             let v9174 = ddt(74395, v9172);
             let v21620 = v10820 * v11018;
             let v9175 = v9136 - v346;
-            let v21623 = (Lanes([0.0, v9781[0]])) - (Lanes([v9757[0], 0.0]));
+            let v21623 = (Lanes([0.0, v9781])) - (Lanes([v9757, 0.0]));
             let v9176 = v9175 - v9147;
             let v9177 = v9176 / v9149;
             let v21624 = v21623 / v9149;
@@ -18543,12 +17995,10 @@ impl Instance {
             let v9199: f64;
             let v10822: Lanes<3>;
             if v9178 != 0.0 {
-                let v21655 = v10872 * v9175;
                 let v21656 = v21623 * v147;
-                let v21660 = v10862 * v9176;
                 let v21661 = v21623 * v113;
                 let v9182 = v6716 * ((v147 * v9175) + (v113 * v9176));
-                let v21666 = (((Lanes([0.0, v21655[0], 0.0])) + (Lanes([v21656[0], 0.0, v21656[1]]))) + ((Lanes([0.0, v21660[0], 0.0])) + (Lanes([v21661[0], 0.0, v21661[1]])))) * v6716;
+                let v21666 = (((Lanes([0.0, (v10872 * v9175), 0.0])) + (Lanes([v21656[0], 0.0, v21656[1]]))) + ((Lanes([0.0, (v10862 * v9176), 0.0])) + (Lanes([v21661[0], 0.0, v21661[1]])))) * v6716;
                 v9199 = v9182;
                 v10822 = v21666;
             } else {
@@ -18556,27 +18006,23 @@ impl Instance {
                 let v9200: f64;
                 let v10823: Lanes<3>;
                 if v9184 != 0.0 {
-                    let v21641 = v10872 * v9175;
                     let v21642 = v21623 * v147;
                     let v9186 = v113 * v9149;
                     let v9187 = v9177.exp();
-                    let v21648 = (v10862 * v9149) * v9187;
                     let v21649 = (v21624 * v9187) * v9186;
                     let v9190 = v6716 * ((v147 * v9175) + (v9186 * v9187));
-                    let v21654 = (((Lanes([0.0, v21641[0], 0.0])) + (Lanes([v21642[0], 0.0, v21642[1]]))) + ((Lanes([0.0, v21648[0], 0.0])) + (Lanes([v21649[0], 0.0, v21649[1]])))) * v6716;
+                    let v21654 = (((Lanes([0.0, (v10872 * v9175), 0.0])) + (Lanes([v21642[0], 0.0, v21642[1]]))) + ((Lanes([0.0, ((v10862 * v9149) * v9187), 0.0])) + (Lanes([v21649[0], 0.0, v21649[1]])))) * v6716;
                     v9200 = v9190;
                     v10823 = v21654;
                 } else {
-                    let v21625 = v10872 * v9175;
                     let v21626 = v21623 * v147;
                     let v9192 = v113 * v9149;
                     let v9193 = v9177.exp();
                     let v9194 = v6 + v9193;
                     let v9195 = v9194.ln();
-                    let v21634 = (v10862 * v9149) * v9195;
                     let v21635 = ((v21624 * v9193) * (v9751 / v9194)) * v9192;
                     let v9198 = v6716 * ((v147 * v9175) + (v9192 * v9195));
-                    let v21640 = (((Lanes([0.0, v21625[0], 0.0])) + (Lanes([v21626[0], 0.0, v21626[1]]))) + ((Lanes([0.0, v21634[0], 0.0])) + (Lanes([v21635[0], 0.0, v21635[1]])))) * v6716;
+                    let v21640 = (((Lanes([0.0, (v10872 * v9175), 0.0])) + (Lanes([v21626[0], 0.0, v21626[1]]))) + ((Lanes([0.0, ((v10862 * v9149) * v9195), 0.0])) + (Lanes([v21635[0], 0.0, v21635[1]])))) * v6716;
                     v9200 = v9198;
                     v10823 = v21640;
                 }
@@ -18586,7 +18032,7 @@ impl Instance {
             let v9201 = ddt(74464, v9199);
             let v21667 = v10822 * v11018;
             let v9202 = v349 - v346;
-            let v21670 = (Lanes([0.0, v9758[0]])) - (Lanes([v9757[0], 0.0]));
+            let v21670 = (Lanes([0.0, v9758])) - (Lanes([v9757, 0.0]));
             let v9203 = v9202 - v9147;
             let v9204 = v9203 / v9149;
             let v21671 = v21670 / v9149;
@@ -18594,12 +18040,10 @@ impl Instance {
             let v9226: f64;
             let v10824: Lanes<3>;
             if v9205 != 0.0 {
-                let v21702 = v10873 * v9202;
                 let v21703 = v21670 * v150;
-                let v21707 = v10864 * v9203;
                 let v21708 = v21670 * v120;
                 let v9209 = v6716 * ((v150 * v9202) + (v120 * v9203));
-                let v21713 = (((Lanes([0.0, 0.0, v21702[0]])) + (Lanes([v21703[0], v21703[1], 0.0]))) + ((Lanes([0.0, 0.0, v21707[0]])) + (Lanes([v21708[0], v21708[1], 0.0])))) * v6716;
+                let v21713 = (((Lanes([0.0, 0.0, (v10873 * v9202)])) + (Lanes([v21703[0], v21703[1], 0.0]))) + ((Lanes([0.0, 0.0, (v10864 * v9203)])) + (Lanes([v21708[0], v21708[1], 0.0])))) * v6716;
                 v9226 = v9209;
                 v10824 = v21713;
             } else {
@@ -18607,27 +18051,23 @@ impl Instance {
                 let v9227: f64;
                 let v10825: Lanes<3>;
                 if v9211 != 0.0 {
-                    let v21688 = v10873 * v9202;
                     let v21689 = v21670 * v150;
                     let v9213 = v120 * v9149;
                     let v9214 = v9204.exp();
-                    let v21695 = (v10864 * v9149) * v9214;
                     let v21696 = (v21671 * v9214) * v9213;
                     let v9217 = v6716 * ((v150 * v9202) + (v9213 * v9214));
-                    let v21701 = (((Lanes([0.0, 0.0, v21688[0]])) + (Lanes([v21689[0], v21689[1], 0.0]))) + ((Lanes([0.0, 0.0, v21695[0]])) + (Lanes([v21696[0], v21696[1], 0.0])))) * v6716;
+                    let v21701 = (((Lanes([0.0, 0.0, (v10873 * v9202)])) + (Lanes([v21689[0], v21689[1], 0.0]))) + ((Lanes([0.0, 0.0, ((v10864 * v9149) * v9214)])) + (Lanes([v21696[0], v21696[1], 0.0])))) * v6716;
                     v9227 = v9217;
                     v10825 = v21701;
                 } else {
-                    let v21672 = v10873 * v9202;
                     let v21673 = v21670 * v150;
                     let v9219 = v120 * v9149;
                     let v9220 = v9204.exp();
                     let v9221 = v6 + v9220;
                     let v9222 = v9221.ln();
-                    let v21681 = (v10864 * v9149) * v9222;
                     let v21682 = ((v21671 * v9220) * (v9751 / v9221)) * v9219;
                     let v9225 = v6716 * ((v150 * v9202) + (v9219 * v9222));
-                    let v21687 = (((Lanes([0.0, 0.0, v21672[0]])) + (Lanes([v21673[0], v21673[1], 0.0]))) + ((Lanes([0.0, 0.0, v21681[0]])) + (Lanes([v21682[0], v21682[1], 0.0])))) * v6716;
+                    let v21687 = (((Lanes([0.0, 0.0, (v10873 * v9202)])) + (Lanes([v21673[0], v21673[1], 0.0]))) + ((Lanes([0.0, 0.0, ((v10864 * v9149) * v9222)])) + (Lanes([v21682[0], v21682[1], 0.0])))) * v6716;
                     v9227 = v9225;
                     v10825 = v21687;
                 }
@@ -18637,7 +18077,7 @@ impl Instance {
             let v9228 = ddt(74533, v9226);
             let v21714 = v10824 * v11018;
             let v9229 = v586 - v349;
-            let v21717 = (Lanes([0.0, v9773[0]])) - (Lanes([v9758[0], 0.0]));
+            let v21717 = (Lanes([0.0, v9773])) - (Lanes([v9758, 0.0]));
             let v9230 = v9229 - v9147;
             let v9231 = v9230 / v9149;
             let v21718 = v21717 / v9149;
@@ -18645,12 +18085,10 @@ impl Instance {
             let v9253: f64;
             let v10826: Lanes<3>;
             if v9232 != 0.0 {
-                let v21749 = v10874 * v9229;
                 let v21750 = v21717 * v153;
-                let v21754 = v10866 * v9230;
                 let v21755 = v21717 * v127;
                 let v9236 = v6716 * ((v153 * v9229) + (v127 * v9230));
-                let v21760 = (((Lanes([0.0, 0.0, v21749[0]])) + (Lanes([v21750[0], v21750[1], 0.0]))) + ((Lanes([0.0, 0.0, v21754[0]])) + (Lanes([v21755[0], v21755[1], 0.0])))) * v6716;
+                let v21760 = (((Lanes([0.0, 0.0, (v10874 * v9229)])) + (Lanes([v21750[0], v21750[1], 0.0]))) + ((Lanes([0.0, 0.0, (v10866 * v9230)])) + (Lanes([v21755[0], v21755[1], 0.0])))) * v6716;
                 v9253 = v9236;
                 v10826 = v21760;
             } else {
@@ -18658,27 +18096,23 @@ impl Instance {
                 let v9254: f64;
                 let v10827: Lanes<3>;
                 if v9238 != 0.0 {
-                    let v21735 = v10874 * v9229;
                     let v21736 = v21717 * v153;
                     let v9240 = v127 * v9149;
                     let v9241 = v9231.exp();
-                    let v21742 = (v10866 * v9149) * v9241;
                     let v21743 = (v21718 * v9241) * v9240;
                     let v9244 = v6716 * ((v153 * v9229) + (v9240 * v9241));
-                    let v21748 = (((Lanes([0.0, 0.0, v21735[0]])) + (Lanes([v21736[0], v21736[1], 0.0]))) + ((Lanes([0.0, 0.0, v21742[0]])) + (Lanes([v21743[0], v21743[1], 0.0])))) * v6716;
+                    let v21748 = (((Lanes([0.0, 0.0, (v10874 * v9229)])) + (Lanes([v21736[0], v21736[1], 0.0]))) + ((Lanes([0.0, 0.0, ((v10866 * v9149) * v9241)])) + (Lanes([v21743[0], v21743[1], 0.0])))) * v6716;
                     v9254 = v9244;
                     v10827 = v21748;
                 } else {
-                    let v21719 = v10874 * v9229;
                     let v21720 = v21717 * v153;
                     let v9246 = v127 * v9149;
                     let v9247 = v9231.exp();
                     let v9248 = v6 + v9247;
                     let v9249 = v9248.ln();
-                    let v21728 = (v10866 * v9149) * v9249;
                     let v21729 = ((v21718 * v9247) * (v9751 / v9248)) * v9246;
                     let v9252 = v6716 * ((v153 * v9229) + (v9246 * v9249));
-                    let v21734 = (((Lanes([0.0, 0.0, v21719[0]])) + (Lanes([v21720[0], v21720[1], 0.0]))) + ((Lanes([0.0, 0.0, v21728[0]])) + (Lanes([v21729[0], v21729[1], 0.0])))) * v6716;
+                    let v21734 = (((Lanes([0.0, 0.0, (v10874 * v9229)])) + (Lanes([v21720[0], v21720[1], 0.0]))) + ((Lanes([0.0, 0.0, ((v10866 * v9149) * v9249)])) + (Lanes([v21729[0], v21729[1], 0.0])))) * v6716;
                     v9254 = v9252;
                     v10827 = v21734;
                 }
@@ -18688,7 +18122,7 @@ impl Instance {
             let v9255 = ddt(74602, v9253);
             let v21761 = v10826 * v11018;
             let v9256 = v586 - v346;
-            let v21764 = (Lanes([0.0, v9773[0]])) - (Lanes([v9757[0], 0.0]));
+            let v21764 = (Lanes([0.0, v9773])) - (Lanes([v9757, 0.0]));
             let v9257 = v9256 - v9147;
             let v9258 = v9257 / v9149;
             let v21765 = v21764 / v9149;
@@ -18696,12 +18130,10 @@ impl Instance {
             let v9280: f64;
             let v10828: Lanes<3>;
             if v9259 != 0.0 {
-                let v21796 = v10875 * v9256;
                 let v21797 = v21764 * v156;
-                let v21801 = v10868 * v9257;
                 let v21802 = v21764 * v134;
                 let v9263 = v6716 * ((v156 * v9256) + (v134 * v9257));
-                let v21807 = (((Lanes([0.0, 0.0, v21796[0]])) + (Lanes([v21797[0], v21797[1], 0.0]))) + ((Lanes([0.0, 0.0, v21801[0]])) + (Lanes([v21802[0], v21802[1], 0.0])))) * v6716;
+                let v21807 = (((Lanes([0.0, 0.0, (v10875 * v9256)])) + (Lanes([v21797[0], v21797[1], 0.0]))) + ((Lanes([0.0, 0.0, (v10868 * v9257)])) + (Lanes([v21802[0], v21802[1], 0.0])))) * v6716;
                 v9280 = v9263;
                 v10828 = v21807;
             } else {
@@ -18709,27 +18141,23 @@ impl Instance {
                 let v9281: f64;
                 let v10829: Lanes<3>;
                 if v9265 != 0.0 {
-                    let v21782 = v10875 * v9256;
                     let v21783 = v21764 * v156;
                     let v9267 = v134 * v9149;
                     let v9268 = v9258.exp();
-                    let v21789 = (v10868 * v9149) * v9268;
                     let v21790 = (v21765 * v9268) * v9267;
                     let v9271 = v6716 * ((v156 * v9256) + (v9267 * v9268));
-                    let v21795 = (((Lanes([0.0, 0.0, v21782[0]])) + (Lanes([v21783[0], v21783[1], 0.0]))) + ((Lanes([0.0, 0.0, v21789[0]])) + (Lanes([v21790[0], v21790[1], 0.0])))) * v6716;
+                    let v21795 = (((Lanes([0.0, 0.0, (v10875 * v9256)])) + (Lanes([v21783[0], v21783[1], 0.0]))) + ((Lanes([0.0, 0.0, ((v10868 * v9149) * v9268)])) + (Lanes([v21790[0], v21790[1], 0.0])))) * v6716;
                     v9281 = v9271;
                     v10829 = v21795;
                 } else {
-                    let v21766 = v10875 * v9256;
                     let v21767 = v21764 * v156;
                     let v9273 = v134 * v9149;
                     let v9274 = v9258.exp();
                     let v9275 = v6 + v9274;
                     let v9276 = v9275.ln();
-                    let v21775 = (v10868 * v9149) * v9276;
                     let v21776 = ((v21765 * v9274) * (v9751 / v9275)) * v9273;
                     let v9279 = v6716 * ((v156 * v9256) + (v9273 * v9276));
-                    let v21781 = (((Lanes([0.0, 0.0, v21766[0]])) + (Lanes([v21767[0], v21767[1], 0.0]))) + ((Lanes([0.0, 0.0, v21775[0]])) + (Lanes([v21776[0], v21776[1], 0.0])))) * v6716;
+                    let v21781 = (((Lanes([0.0, 0.0, (v10875 * v9256)])) + (Lanes([v21767[0], v21767[1], 0.0]))) + ((Lanes([0.0, 0.0, ((v10868 * v9149) * v9276)])) + (Lanes([v21776[0], v21776[1], 0.0])))) * v6716;
                     v9281 = v9279;
                     v10829 = v21781;
                 }
@@ -18739,7 +18167,7 @@ impl Instance {
             let v9282 = ddt(74671, v9280);
             let v21808 = v10828 * v11018;
             let v9283 = v9136 - v586;
-            let v21811 = (Lanes([0.0, v9781[0]])) - (Lanes([v9773[0], 0.0]));
+            let v21811 = (Lanes([0.0, v9781])) - (Lanes([v9773, 0.0]));
             let v9284 = v9283 - v9147;
             let v9285 = v9284 / v9149;
             let v21812 = v21811 / v9149;
@@ -18747,12 +18175,10 @@ impl Instance {
             let v9307: f64;
             let v10830: Lanes<3>;
             if v9286 != 0.0 {
-                let v21843 = v10876 * v9283;
                 let v21844 = v21811 * v159;
-                let v21848 = v10870 * v9284;
                 let v21849 = v21811 * v141;
                 let v9290 = v6716 * ((v159 * v9283) + (v141 * v9284));
-                let v21854 = (((Lanes([0.0, v21843[0], 0.0])) + (Lanes([v21844[0], 0.0, v21844[1]]))) + ((Lanes([0.0, v21848[0], 0.0])) + (Lanes([v21849[0], 0.0, v21849[1]])))) * v6716;
+                let v21854 = (((Lanes([0.0, (v10876 * v9283), 0.0])) + (Lanes([v21844[0], 0.0, v21844[1]]))) + ((Lanes([0.0, (v10870 * v9284), 0.0])) + (Lanes([v21849[0], 0.0, v21849[1]])))) * v6716;
                 v9307 = v9290;
                 v10830 = v21854;
             } else {
@@ -18760,27 +18186,23 @@ impl Instance {
                 let v9308: f64;
                 let v10831: Lanes<3>;
                 if v9292 != 0.0 {
-                    let v21829 = v10876 * v9283;
                     let v21830 = v21811 * v159;
                     let v9294 = v141 * v9149;
                     let v9295 = v9285.exp();
-                    let v21836 = (v10870 * v9149) * v9295;
                     let v21837 = (v21812 * v9295) * v9294;
                     let v9298 = v6716 * ((v159 * v9283) + (v9294 * v9295));
-                    let v21842 = (((Lanes([0.0, v21829[0], 0.0])) + (Lanes([v21830[0], 0.0, v21830[1]]))) + ((Lanes([0.0, v21836[0], 0.0])) + (Lanes([v21837[0], 0.0, v21837[1]])))) * v6716;
+                    let v21842 = (((Lanes([0.0, (v10876 * v9283), 0.0])) + (Lanes([v21830[0], 0.0, v21830[1]]))) + ((Lanes([0.0, ((v10870 * v9149) * v9295), 0.0])) + (Lanes([v21837[0], 0.0, v21837[1]])))) * v6716;
                     v9308 = v9298;
                     v10831 = v21842;
                 } else {
-                    let v21813 = v10876 * v9283;
                     let v21814 = v21811 * v159;
                     let v9300 = v141 * v9149;
                     let v9301 = v9285.exp();
                     let v9302 = v6 + v9301;
                     let v9303 = v9302.ln();
-                    let v21822 = (v10870 * v9149) * v9303;
                     let v21823 = ((v21812 * v9301) * (v9751 / v9302)) * v9300;
                     let v9306 = v6716 * ((v159 * v9283) + (v9300 * v9303));
-                    let v21828 = (((Lanes([0.0, v21813[0], 0.0])) + (Lanes([v21814[0], 0.0, v21814[1]]))) + ((Lanes([0.0, v21822[0], 0.0])) + (Lanes([v21823[0], 0.0, v21823[1]])))) * v6716;
+                    let v21828 = (((Lanes([0.0, (v10876 * v9283), 0.0])) + (Lanes([v21814[0], 0.0, v21814[1]]))) + ((Lanes([0.0, ((v10870 * v9149) * v9303), 0.0])) + (Lanes([v21823[0], 0.0, v21823[1]])))) * v6716;
                     v9308 = v9306;
                     v10831 = v21828;
                 }
@@ -18949,11 +18371,10 @@ impl Instance {
             let v10832: Lanes<22>;
             if v63 != 0.0 {
                 let v9369 = v566 - v346;
-                let v21931 = ((Lanes([0.0, v9770[0]])) - (Lanes([v9757[0], 0.0]))) * v9369;
+                let v21931 = ((Lanes([0.0, v9770])) - (Lanes([v9757, 0.0]))) * v9369;
                 let v21932 = v21931 + v21931;
                 let v9371 = (v9369 * v9369) / v9124;
-                let v21933 = v9786 * v9371;
-                let v21937 = ((Lanes([v21932[0], 0.0, v21932[1]])) - (Lanes([0.0, v21933[0], 0.0]))) / v9124;
+                let v21937 = ((Lanes([v21932[0], 0.0, v21932[1]])) - (Lanes([0.0, (v9786 * v9371), 0.0]))) / v9124;
                 let v9372 = v9368 + v9371;
                 let v21939 = v21927 + (Lanes([v21937[0], 0.0, v21937[1], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, v21937[2], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]));
                 v9373 = v9372;
@@ -18966,11 +18387,10 @@ impl Instance {
             let v10833: Lanes<22>;
             if v45 != 0.0 {
                 let v9374 = v345 - v349;
-                let v21943 = ((Lanes([0.0, v9756[0]])) - (Lanes([v9758[0], 0.0]))) * v9374;
+                let v21943 = ((Lanes([0.0, v9756])) - (Lanes([v9758, 0.0]))) * v9374;
                 let v21944 = v21943 + v21943;
                 let v9376 = (v9374 * v9374) / v9129;
-                let v21945 = v9784 * v9376;
-                let v21949 = ((Lanes([v21944[0], 0.0, v21944[1]])) - (Lanes([0.0, v21945[0], 0.0]))) / v9129;
+                let v21949 = ((Lanes([v21944[0], 0.0, v21944[1]])) - (Lanes([0.0, (v9784 * v9376), 0.0]))) / v9129;
                 let v9377 = v9373 + v9376;
                 let v21951 = v10832 + (Lanes([0.0, v21949[0], v21949[1], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, v21949[2], 0.0, 0.0, 0.0, 0.0, 0.0]));
                 v9383 = v9377;
@@ -18985,10 +18405,10 @@ impl Instance {
             let v9611: f64;
             let v9612: f64;
             let v9750: f64;
-            let v10834: Lanes<1>;
+            let v10834: f64;
             let v10835: Lanes<22>;
-            let v10836: Lanes<1>;
-            let v10837: Lanes<1>;
+            let v10836: f64;
+            let v10837: f64;
             if v9379 != 0.0 {
                 let v9381 = v9380 * v8;
                 let v21953 = v9752 * v9380;
@@ -19021,11 +18441,11 @@ impl Instance {
             let v21957 = v9831[0];
             let v21958 = v9831[1];
             let v21959 = v9831[2];
-            let v21960 = v9832[0];
+            let v21960 = v9832;
             let v21961 = v9833[0];
             let v21962 = v9833[1];
-            let v21963 = v9834[0];
-            let v21964 = v9835[0];
+            let v21963 = v9834;
+            let v21964 = v9835;
             let v21965 = v9836[0];
             let v21966 = v9836[1];
             let v21967 = v9837[0];
@@ -19512,7 +18932,7 @@ impl Instance {
             let v22448 = v21855[0];
             let v22449 = v21855[1];
             let v22450 = v21855[2];
-            let v22451 = v10834[0];
+            let v22451 = v10834;
             let v22452 = v10835[0];
             let v22453 = v10835[1];
             let v22454 = v10835[2];
@@ -19535,10 +18955,10 @@ impl Instance {
             let v22471 = v10835[19];
             let v22472 = v10835[20];
             let v22473 = v10835[21];
-            let v22474 = v10836[0];
+            let v22474 = v10836;
             let v22475 = v9846[0];
             let v22476 = v9846[1];
-            let v22477 = v9847[0];
+            let v22477 = v9847;
             let v22478 = v9848[0];
             let v22479 = v9848[1];
             let v22480 = v9849[0];
@@ -19831,8 +19251,8 @@ impl Instance {
             let v22767 = v18253[0];
             let v22768 = v18253[1];
             let v22769 = v18253[2];
-            let v22770 = v10489[0];
-            let v22771 = v10490[0];
+            let v22770 = v10489;
+            let v22771 = v10490;
             let v22772 = v19803[0];
             let v22773 = v19803[1];
             let v22774 = v19803[2];
@@ -19869,7 +19289,7 @@ impl Instance {
             let v22805 = v10830[0];
             let v22806 = v10830[1];
             let v22807 = v10830[2];
-            let v22808 = v10837[0];
+            let v22808 = v10837;
         stamper.stamp_potential_branch_local(Some(22), None, 0, multiplicity);
         stamper.stamp_potential_sparse_local::<0, 0>(
             0,

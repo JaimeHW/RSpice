@@ -1,7 +1,9 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
-use super::state::Instance;
+use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
 use crate::device::veriloga_generated::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 #[inline(always)]
 fn rspice_limexp(x: f64) -> f64 {
@@ -140,12 +142,70 @@ fn rspice_eval_ddt<const STATE_COUNT: usize>(
     }
 }
 
+
+static CANONICAL_MODEL_CACHE: OnceLock<Mutex<HashMap<Box<[u64]>, Weak<CanonicalModelValues>>>> = OnceLock::new();
+
+fn canonical_model_cache() -> &'static Mutex<HashMap<Box<[u64]>, Weak<CanonicalModelValues>>> {
+    CANONICAL_MODEL_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn canonical_model_cache_lookup(key: &[u64]) -> Option<Arc<CanonicalModelValues>> {
+    let mut cache = canonical_model_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let found = cache.get(key).and_then(Weak::upgrade);
+    if found.is_none() {
+        cache.remove(key);
+    }
+    found
+}
+
+fn canonical_model_cache_intern(
+    key: Box<[u64]>,
+    candidate: Arc<CanonicalModelValues>,
+) -> Arc<CanonicalModelValues> {
+    let mut cache = canonical_model_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(existing) = cache.get(key.as_ref()).and_then(Weak::upgrade) {
+        return existing;
+    }
+    cache.retain(|_, values| values.strong_count() > 0);
+    cache.insert(key, Arc::downgrade(&candidate));
+    candidate
+}
+
 impl Instance {
-    fn canonical_instance_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
-        if self.canonical_instance_valid {
+    fn canonical_model_key(&self) -> Box<[u64]> {
+        let mut key = Vec::with_capacity(72);
+        for index in 0..Self::PARAMETER_COUNT {
+            if PARAMETER_MODEL_FLAGS[index] {
+                key.push(self.params.values[index].to_bits());
+                key.push(u64::from(self.param_given[index]));
+            }
+        }
+        key.into_boxed_slice()
+    }
+
+    fn canonical_install_model_values(&mut self, values: Arc<CanonicalModelValues>) {
+        self.canonical_staged[5] = values[0];
+        self.canonical_staged[6] = values[1];
+        self.canonical_staged[1] = values[2];
+        self.canonical_staged[0] = values[3];
+        self.canonical_staged[3] = values[4];
+        self.canonical_model_values = Some(values);
+    }
+
+    fn canonical_model_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
+        if self.canonical_model_values.is_some() {
             return;
         }
-        let produced: [f64; 15] = {
+        let key = self.canonical_model_key();
+        if let Some(values) = canonical_model_cache_lookup(key.as_ref()) {
+            self.canonical_install_model_values(values);
+            return;
+        }
+        let produced: CanonicalModelValues = {
             let parameters = &self.params.values;
             let parameter_given = &*self.param_given;
             let multiplicity = self.multiplicity;
@@ -159,27 +219,10 @@ impl Instance {
                 let v9 = 2.7315e2f64;
                 let v10 = parameters[15];
                 let v12 = parameters[34];
-                let v14 = parameters[3];
-                let v15 = parameters[4];
-                let v17 = parameters[22];
-                let v20 = if parameter_given[1] { 1.0 } else { 0.0 };
-                let v21 = if parameter_given[2] { 1.0 } else { 0.0 };
-                let v23 = if parameter_given[0] { 1.0 } else { 0.0 };
-                let v26 = 5e-1f64;
-                let v28 = 0e0f64;
-                let v30 = parameters[2];
-                let v32 = parameters[1];
-                let v38 = parameters[0];
-                let v42 = parameters[28];
-                let v44 = parameters[26];
+                let v14 = parameters[28];
+                let v15 = 0e0f64;
+                let v17 = parameters[26];
                 let mut out8: f64 = 0.0;
-                let mut out18: f64 = 0.0;
-                let mut out34: f64 = 0.0;
-                let mut out36: f64 = 0.0;
-                let mut out37: f64 = 0.0;
-                let mut out39: f64 = 0.0;
-                let mut out40: f64 = 0.0;
-                let mut out41: f64 = 0.0;
                 let v2 = if v0 != v1 { 1.0 } else { 0.0 };
                 if v3 != 0.0 {
                     let v8 = v7 - (v4 * v5);
@@ -188,65 +231,93 @@ impl Instance {
                 }
                 let v11 = v9 + v10;
                 let v13 = v12 + v7;
-                let v16 = if v14 != 0.0 && v15 != 0.0 { 1.0 } else { 0.0 };
-                let v19: f64;
-                if v16 != 0.0 {
-                    v19 = v17;
-                } else {
-                    let v18 = if v14 != 0.0 || v15 != 0.0 { 1.0 } else { 0.0 };
-                    out18 = v18;
-                    let v29: f64;
-                    if v18 != 0.0 {
-                        let v27 = v17 * v26;
-                        v29 = v27;
-                    } else {
-                        v29 = v28;
-                    }
-                    v19 = v29;
-                }
-                let v25 = if (if v20 != 0.0 && v21 != 0.0 { 1.0 } else { 0.0 }) != 0.0 && (if v23 == 0.0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
-                if v25 != 0.0 {
-                    let v34 = if (if v30 == v28 { 1.0 } else { 0.0 }) != 0.0 || (if v32 == v28 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
-                    out34 = v34;
-                } else {
-                    let v36 = if v21 != 0.0 && (if v20 == 0.0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
-                    out36 = v36;
-                    if v36 != 0.0 {
-                        let v37 = if v30 == v28 { 1.0 } else { 0.0 };
-                        out37 = v37;
-                        if v37 != 0.0 {
-                        } else {
-                            let v40 = if v38 == v28 { 1.0 } else { 0.0 };
-                            out40 = v40;
-                        }
-                    } else {
-                        let v39 = if v38 == v28 { 1.0 } else { 0.0 };
-                        out39 = v39;
-                        if v39 != 0.0 {
-                        } else {
-                            let v41 = if v32 == v28 { 1.0 } else { 0.0 };
-                            out41 = v41;
-                        }
-                    }
-                }
-                let v46 = if (if v42 > v28 { 1.0 } else { 0.0 }) != 0.0 || (if v44 > v28 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
-            [v2, out8, v11, v13, v16, out18, v25, out34, v19, out36, out37, out40, out39, out41, v46]
+                let v19 = if (if v14 > v15 { 1.0 } else { 0.0 }) != 0.0 || (if v17 > v15 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+            [v2, out8, v11, v13, v19]
         };
-        self.canonical_staged[5] = produced[0];
-        self.canonical_staged[6] = produced[1];
-        self.canonical_staged[1] = produced[2];
-        self.canonical_staged[0] = produced[3];
-        self.canonical_staged[12] = produced[4];
-        self.canonical_staged[13] = produced[5];
-        self.canonical_staged[14] = produced[6];
-        self.canonical_staged[15] = produced[7];
-        self.canonical_staged[2] = produced[8];
-        self.canonical_staged[16] = produced[9];
-        self.canonical_staged[17] = produced[10];
-        self.canonical_staged[19] = produced[11];
-        self.canonical_staged[18] = produced[12];
-        self.canonical_staged[20] = produced[13];
-        self.canonical_staged[3] = produced[14];
+        let values = canonical_model_cache_intern(key, Arc::new(produced));
+        self.canonical_install_model_values(values);
+    }
+
+    fn canonical_instance_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
+        if self.canonical_instance_valid {
+            return;
+        }
+        let produced: [f64; 10] = {
+            let parameters = &self.params.values;
+            let parameter_given = &*self.param_given;
+            let multiplicity = self.multiplicity;
+            let staged = &*self.canonical_staged;
+                let v0 = parameters[3];
+                let v1 = parameters[4];
+                let v3 = parameters[22];
+                let v6 = if parameter_given[1] { 1.0 } else { 0.0 };
+                let v7 = if parameter_given[2] { 1.0 } else { 0.0 };
+                let v9 = if parameter_given[0] { 1.0 } else { 0.0 };
+                let v12 = 5e-1f64;
+                let v14 = 0e0f64;
+                let v16 = parameters[2];
+                let v18 = parameters[1];
+                let v24 = parameters[0];
+                let mut out4: f64 = 0.0;
+                let mut out20: f64 = 0.0;
+                let mut out22: f64 = 0.0;
+                let mut out23: f64 = 0.0;
+                let mut out25: f64 = 0.0;
+                let mut out26: f64 = 0.0;
+                let mut out27: f64 = 0.0;
+                let v2 = if v0 != 0.0 && v1 != 0.0 { 1.0 } else { 0.0 };
+                let v5: f64;
+                if v2 != 0.0 {
+                    v5 = v3;
+                } else {
+                    let v4 = if v0 != 0.0 || v1 != 0.0 { 1.0 } else { 0.0 };
+                    out4 = v4;
+                    let v15: f64;
+                    if v4 != 0.0 {
+                        let v13 = v3 * v12;
+                        v15 = v13;
+                    } else {
+                        v15 = v14;
+                    }
+                    v5 = v15;
+                }
+                let v11 = if (if v6 != 0.0 && v7 != 0.0 { 1.0 } else { 0.0 }) != 0.0 && (if v9 == 0.0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+                if v11 != 0.0 {
+                    let v20 = if (if v16 == v14 { 1.0 } else { 0.0 }) != 0.0 || (if v18 == v14 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+                    out20 = v20;
+                } else {
+                    let v22 = if v7 != 0.0 && (if v6 == 0.0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+                    out22 = v22;
+                    if v22 != 0.0 {
+                        let v23 = if v16 == v14 { 1.0 } else { 0.0 };
+                        out23 = v23;
+                        if v23 != 0.0 {
+                        } else {
+                            let v26 = if v24 == v14 { 1.0 } else { 0.0 };
+                            out26 = v26;
+                        }
+                    } else {
+                        let v25 = if v24 == v14 { 1.0 } else { 0.0 };
+                        out25 = v25;
+                        if v25 != 0.0 {
+                        } else {
+                            let v27 = if v18 == v14 { 1.0 } else { 0.0 };
+                            out27 = v27;
+                        }
+                    }
+                }
+            [v2, out4, v11, out20, v5, out22, out23, out26, out25, out27]
+        };
+        self.canonical_staged[12] = produced[0];
+        self.canonical_staged[13] = produced[1];
+        self.canonical_staged[14] = produced[2];
+        self.canonical_staged[15] = produced[3];
+        self.canonical_staged[2] = produced[4];
+        self.canonical_staged[16] = produced[5];
+        self.canonical_staged[17] = produced[6];
+        self.canonical_staged[19] = produced[7];
+        self.canonical_staged[18] = produced[8];
+        self.canonical_staged[20] = produced[9];
         self.canonical_instance_valid = true;
     }
 
@@ -314,6 +385,7 @@ impl Instance {
     }
 
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
+        self.canonical_model_stage(ctx);
         self.canonical_instance_stage(ctx);
         self.canonical_temperature_stage(ctx);
         let parameters = &self.params.values;
@@ -370,8 +442,8 @@ impl Instance {
             let v200 = 1e-1f64;
             let v205 = node_potentials[0];
             let v206 = node_potentials[1];
-            let v208 = Lanes([1e0f64; 1]);
-            let v210 = Lanes([1e0f64; 1]);
+            let v208 = 1e0f64;
+            let v210 = 1e0f64;
             let v216 = parameters[27];
             let v224 = 2e0f64;
             let v226 = 1e0f64;
@@ -715,7 +787,7 @@ impl Instance {
             }
             let v204 = v28 * v203;
             let v207 = v205 - v206;
-            let v212 = (Lanes([v208[0], 0.0])) - (Lanes([0.0, v210[0]]));
+            let v212 = (Lanes([v208, 0.0])) - (Lanes([0.0, v210]));
             let v213 = if v147 != 0.0 && v149 != 0.0 { 1.0 } else { 0.0 };
             let v264: f64;
             let v265: Lanes<2>;
