@@ -92,7 +92,15 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
 }
 
 const ITEM_KEYWORDS: &[&str] = &[
-    "fn ", "struct ", "enum ", "trait ", "type ", "const ", "static ", "unsafe fn ", "async fn ",
+    "fn ",
+    "struct ",
+    "enum ",
+    "trait ",
+    "type ",
+    "const ",
+    "static ",
+    "unsafe fn ",
+    "async fn ",
 ];
 
 /// Whether a line declares a public item or re-export.
@@ -106,7 +114,9 @@ fn is_public_item(line: &str) -> bool {
     if rest.starts_with("use ") {
         return true;
     }
-    ITEM_KEYWORDS.iter().any(|keyword| rest.starts_with(keyword))
+    ITEM_KEYWORDS
+        .iter()
+        .any(|keyword| rest.starts_with(keyword))
 }
 
 fn count_public_items() -> (usize, Vec<(String, usize)>) {

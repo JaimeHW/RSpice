@@ -20,6 +20,12 @@ fn key(project: &str, digest: &str, file_name: &str) -> PathBuf {
     PathBuf::from(format!("__rspice_project__/{project}/{digest}/{file_name}"))
 }
 
+fn pdk_key(source: &str) -> PathBuf {
+    PathBuf::from(format!(
+        "__rspice_pdk__/manifest-digest/archive-digest/{source}/artifact.va"
+    ))
+}
+
 fn registration(
     source_key: PathBuf,
     module_name: &str,
@@ -67,6 +73,51 @@ fn plural_registration_accepts_a_complete_noncolliding_set() {
         .position(|name| name.eq_ignore_ascii_case("in"))
         .expect("input node exists");
     assert!((result.node_voltages[input_index] - 1.0).abs() < 1e-9);
+}
+
+#[test]
+fn signed_pdk_virtual_runtime_registers_and_executes_without_a_file() {
+    let source_key = pdk_key("resistor");
+    assert!(!source_key.exists());
+    register_project_veriloga_runtimes_for_session([registration(
+        source_key.clone(),
+        "pdk_runtime",
+        &["PDK_ALIAS"],
+    )])
+    .expect("signed PDK namespace registers through the sealed runtime boundary");
+    let deck = format!(
+        "signed PDK runtime\nV1 in 0 1\n.veriloga \"{}\" PDK_ALIAS\nX1 in 0 PDK_ALIAS\n.op\n.end\n",
+        source_key.display()
+    );
+    let netlist = Netlist::parse(&deck).expect("parse signed PDK deck");
+    let result = Engine::default()
+        .run_dc_op(&netlist)
+        .expect("signed PDK runtime executes");
+    let input = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("in"))
+        .unwrap();
+    assert!((result.node_voltages[input] - 1.0).abs() < 1e-9);
+}
+
+#[test]
+fn missing_signed_pdk_virtual_runtime_never_falls_back_to_an_ambient_file() {
+    let source_key = pdk_key("missing");
+    let deck = format!(
+        "missing signed PDK runtime\nV1 in 0 1\n.veriloga \"{}\" MISSING\nX1 in 0 MISSING\n.op\n.end\n",
+        source_key.display()
+    );
+    let netlist = Netlist::parse(&deck).expect("parse missing signed PDK deck");
+    let error = Engine::default()
+        .run_dc_op(&netlist)
+        .expect_err("an unregistered signed PDK key must fail closed");
+    assert!(
+        error
+            .to_string()
+            .contains("is not installed for this execution"),
+        "{error}"
+    );
 }
 
 #[test]
