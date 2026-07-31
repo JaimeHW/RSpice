@@ -764,6 +764,44 @@ pub struct ReportAuthoringState {
     #[serde(skip)]
     pub page_title_draft: String,
     #[serde(skip)]
+    pub inline_page_settings_page: Option<crate::results::report_document::ReportPageId>,
+    #[serde(skip)]
+    pub inline_page_title_draft: String,
+    #[serde(skip)]
+    pub selected_report_block: Option<crate::results::report_document::ReportBlockId>,
+    #[serde(skip)]
+    pub add_report_element_open: bool,
+    #[serde(skip)]
+    pub add_report_element_kind: usize,
+    #[serde(skip)]
+    pub add_report_element_title: String,
+    #[serde(skip)]
+    pub add_report_element_primary: String,
+    #[serde(skip)]
+    pub add_report_element_secondary: String,
+    #[serde(skip)]
+    pub add_report_element_tertiary: String,
+    #[serde(skip)]
+    pub add_report_element_style: usize,
+    #[serde(skip)]
+    pub add_report_element_status: usize,
+    #[serde(skip)]
+    pub add_report_element_source_run: usize,
+    #[serde(skip)]
+    pub remove_report_block_open: bool,
+    #[serde(skip)]
+    pub insert_result_document_open: bool,
+    #[serde(skip)]
+    pub insert_result_document_index: usize,
+    #[serde(skip)]
+    pub insert_result_caption: String,
+    #[serde(skip)]
+    pub insert_result_alternative_text: String,
+    #[serde(skip)]
+    pub insert_result_sizing: usize,
+    #[serde(skip)]
+    pub insert_result_frozen: bool,
+    #[serde(skip)]
     pub report_template_draft: usize,
     #[serde(skip)]
     pub page_update_policy_draft: usize,
