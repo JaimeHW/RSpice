@@ -26,7 +26,7 @@ pub(super) fn component_panel(
         return;
     };
     let evidence = component_model_evidence(&app.state, &component);
-    let editable = !app.state.active_view_read_only() && !app.state.schematic.read_only;
+    let editable = !app.state.schematic_edit_read_only();
 
     hero(
         ui,
@@ -96,7 +96,7 @@ pub(super) fn component_view_contract(component: &Component) -> String {
 }
 
 pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Component) {
-    let editable = !app.state.active_view_read_only() && !app.state.schematic.read_only;
+    let editable = !app.state.schematic_edit_read_only();
     let properties = schematic_section_header_action(ui, "Identity", "Properties…", editable);
     if properties.clicked() {
         crate::workbench::app::open_property_editor(&mut app.state, component.id);
@@ -479,7 +479,7 @@ pub(super) fn parameters_section(
     component: &Component,
     evidence: &ComponentModelEvidence,
 ) {
-    let editable = !app.state.active_view_read_only() && !app.state.schematic.read_only;
+    let editable = !app.state.schematic_edit_read_only();
     section_header(
         ui,
         "Simulation parameters",

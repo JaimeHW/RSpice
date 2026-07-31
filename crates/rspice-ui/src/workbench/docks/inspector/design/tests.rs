@@ -870,7 +870,7 @@ fn drawing_sheet_inspector_uses_resolved_geometry_and_canonical_labels() {
         drawing_sheet_source_label(sheet.format.inheritance),
         "inherited · project default"
     );
-    assert_eq!(sheet.format_label(), "ISO A4 landscape");
+    assert_eq!(sheet.format_label(), "ISO A4 · landscape");
     assert_eq!(
         sheet.format.display_unit.format_size_um(
             sheet.geometry.physical.paper.width_um,

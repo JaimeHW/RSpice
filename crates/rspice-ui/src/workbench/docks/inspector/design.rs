@@ -2120,7 +2120,7 @@ const fn drawing_sheet_title_template_name(
 const fn drawing_sheet_source_label(inheritance: DrawingSheetInheritance) -> &'static str {
     match inheritance {
         DrawingSheetInheritance::Explicit => "sheet override",
-        DrawingSheetInheritance::ProjectDefault => "inherited · project",
+        DrawingSheetInheritance::ProjectDefault => "inherited · project default",
         DrawingSheetInheritance::UserDefault => "inherited · personal",
     }
 }

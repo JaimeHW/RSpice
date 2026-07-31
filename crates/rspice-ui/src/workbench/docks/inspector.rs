@@ -5,10 +5,13 @@ mod symbol;
 
 use egui::{Align2, Color32, Pos2, Rect, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
 
-use crate::state::{Component, ComponentType};
+use crate::diagnostics::ConsoleMessage;
+use crate::state::{CellViewRef, Component, ComponentType, ViewType};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::app_state::DesignCheckStatus;
+use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
+use crate::workbench::{AppState, RSpiceApp, ResultViewer};
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
@@ -16,7 +19,7 @@ use super::super::design_system::{
     schematic_section_header as design_schematic_section_header,
     section_header as design_section_header,
 };
-use super::super::state::{VerificationPage, Workspace};
+use super::super::state::{ModelsPage, ProjectPage, VerificationPage, Workspace};
 
 const INSPECTOR_PROPERTY_LIST_PADDING_TOP: f32 = 7.0;
 const INSPECTOR_PROPERTY_LIST_PADDING_BOTTOM: f32 = 10.0;
@@ -289,6 +292,13 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         "Result details"
     } else {
         match app.state.workbench.workspace {
+            Workspace::Project => match app.state.workbench.project_page {
+                ProjectPage::Overview => "Project overview",
+                ProjectPage::Library => "Cell view",
+                ProjectPage::Configuration => "Configuration",
+                ProjectPage::Dependencies => "Dependency",
+                ProjectPage::Recovery => "Checkpoint",
+            },
             Workspace::Verify
                 if app.state.workbench.verification_page == VerificationPage::Yield =>
             {
@@ -334,67 +344,522 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn project(ui: &mut Ui, app: &mut RSpiceApp) {
-    section_header(ui, "Identity", None);
-    property_row(ui, "Project", app.state.workspace.project.name());
-    property_row(
+    match app.state.workbench.project_page {
+        ProjectPage::Overview => project_overview(ui, app),
+        ProjectPage::Library => project_library(ui, app),
+        ProjectPage::Configuration => project_configuration(ui, app),
+        ProjectPage::Dependencies => project_dependency(ui, app),
+        ProjectPage::Recovery => project_recovery(ui, app),
+    }
+}
+
+fn project_overview(ui: &mut Ui, app: &mut RSpiceApp) {
+    let active_configuration = app.state.workspace.configuration_sets.active();
+    let testbench = active_configuration.map_or_else(
+        || "not configured".to_owned(),
+        |configuration| configuration.root().display_path(),
+    );
+    let configuration = active_configuration.map_or_else(
+        || "not configured".to_owned(),
+        |item| item.name().to_owned(),
+    );
+    let modified = dirty_document_count(&app.state);
+    let t = Tokens::get(ui.ctx());
+
+    section_header(
         ui,
-        "Project ID",
-        &app.state.workspace.project.id().to_string(),
+        "Active simulation context",
+        Some(if active_configuration.is_some() {
+            "CURRENT"
+        } else {
+            "REVIEW"
+        }),
     );
     property_row(
         ui,
-        "Path",
-        &app.state
-            .workspace
-            .project
-            .path
-            .as_ref()
-            .map_or_else(|| "Not saved".to_owned(), |path| path.display().to_string()),
+        "Top",
+        &format!(
+            "{}/{}",
+            app.state.workspace.project.root_library, app.state.workspace.project.top_cell
+        ),
     );
-    section_header(ui, "Dependencies", None);
+    property_row(ui, "Testbench", &testbench);
+    property_row(ui, "Configuration", &configuration);
     property_row(
         ui,
-        "Root library",
-        &app.state.workspace.project.root_library,
-    );
-    property_row(ui, "Top cell", &app.state.workspace.project.top_cell);
-    property_row(
-        ui,
-        "Technology",
-        app.state
-            .workspace
-            .project
-            .technology
-            .as_deref()
-            .unwrap_or("Unbound"),
+        "Run plan",
+        app.state.sim_setup.active_plan_name().as_str(),
     );
     property_row(
         ui,
-        "Model libraries",
-        &app.state.model_library_manager.library_count().to_string(),
+        "Execution",
+        crate::state::ExecutionTarget::current().label(),
     );
-    section_header(ui, "Working revision", None);
+
+    section_header(
+        ui,
+        "Working revision",
+        Some(if modified == 0 { "CLEAN" } else { "MODIFIED" }),
+    );
     property_row(
         ui,
         "Revision",
         &app.state.workspace.project.revision().get().to_string(),
     );
-    property_row(
+    property_row(ui, "Modified documents", &modified.to_string());
+    property_row_status(
         ui,
-        "Open documents",
-        &app.state.workspace.open_views.len().to_string(),
+        "Working tree",
+        if modified == 0 { "clean" } else { "modified" },
+        if modified == 0 {
+            t.color.ok
+        } else {
+            t.color.warn
+        },
+        if modified == 0 {
+            StatusMark::Success
+        } else {
+            StatusMark::Warning
+        },
     );
     property_row(
         ui,
-        "Modified",
+        "Location",
+        &app.state.workspace.project.path.as_ref().map_or_else(
+            || "no accepted native path".to_owned(),
+            |path| path.display().to_string(),
+        ),
+    );
+
+    let check_status = app.state.project_root_design_check_status();
+    let check_meta = match &check_status {
+        DesignCheckStatus::Current(_) => "CURRENT",
+        DesignCheckStatus::NotRun => "NOT RUN",
+        DesignCheckStatus::Stale(_) => "STALE",
+        DesignCheckStatus::Unavailable { .. } => "UNAVAILABLE",
+    };
+    section_header(ui, "Problems", Some(check_meta));
+    match check_status {
+        DesignCheckStatus::Current(receipt) => {
+            let summary = receipt.result.summary();
+            property_row(
+                ui,
+                "Blocking errors",
+                &(summary.critical + summary.errors).to_string(),
+            );
+            property_row(
+                ui,
+                "Advisories",
+                &(summary.warnings + summary.info).to_string(),
+            );
+            for violation in receipt.result.violations().iter().take(2) {
+                property_row(ui, &format!("CHK-{:03}", violation.id), &violation.message);
+            }
+            property_row(
+                ui,
+                "Checked revision",
+                &receipt.checked_project_revision.get().to_string(),
+            );
+        }
+        DesignCheckStatus::NotRun => {
+            property_row(ui, "Checks", "Not run for the project root");
+        }
+        DesignCheckStatus::Stale(_) => {
+            property_row(ui, "Checks", "Project-root inputs changed after checking");
+        }
+        DesignCheckStatus::Unavailable { reason, .. } => {
+            property_row(ui, "Checks", &reason);
+        }
+    }
+    if let Some(advisory) = app.state.pdk_config.scan_errors.first() {
+        property_row(ui, "Model advisory", advisory);
+    }
+
+    section_header(ui, "Project actions", None);
+    if inspector_action(ui, "Revision history\u{2026}") {
+        Command::RevisionHistory.execute(app);
+    }
+    if inspector_action(ui, "Configuration sets\u{2026}") {
+        Command::ConfigurationSets.execute(app);
+    }
+    if inspector_action(ui, "Switch project\u{2026}") {
+        Command::ProjectLauncher.execute(app);
+    }
+}
+
+fn project_library(ui: &mut Ui, app: &mut RSpiceApp) {
+    let library = app.state.library_manager.current_library();
+    let library_name = library.map_or("No library selected", |item| item.name.as_str());
+    let library_path = library
+        .and_then(|item| item.path.as_ref())
+        .map_or_else(|| "not bound".to_owned(), |path| path.display().to_string());
+    let access = library.map_or("unavailable", |item| {
+        if item.read_only {
+            "read only"
+        } else {
+            "writable"
+        }
+    });
+    let technology = library.map_or("unbound", |item| {
+        if item.technology.trim().is_empty() {
+            "unbound"
+        } else {
+            item.technology.as_str()
+        }
+    });
+    let cell_name = app
+        .state
+        .library_manager
+        .current_cell()
+        .map_or("No cell selected", |item| item.name.as_str());
+    let view = app.state.library_manager.current_view();
+    let view_name = view.map_or("No view selected", |item| item.name.as_str());
+    let view_type = view.map_or("—", |item| item.view_type.display_name());
+    let open_target = match (
+        app.state.library_manager.current_library(),
+        app.state.library_manager.current_cell(),
+        view,
+    ) {
+        (Some(library), Some(cell), Some(view)) => Some((
+            CellViewRef::new(&library.name, &cell.name, &view.name),
+            view.view_type,
+        )),
+        _ => None,
+    };
+    let usage = open_target
+        .as_ref()
+        .map_or_else(Vec::new, |(reference, _)| library_usage(app, reference));
+    let project_revision = app.state.workspace.project.revision().get().to_string();
+    let active_configuration = app
+        .state
+        .workspace
+        .configuration_sets
+        .active()
+        .map_or("not configured", |item| item.name());
+    let (checks_meta, checks) = match open_target.as_ref() {
+        Some((reference, ViewType::Schematic | ViewType::Testbench)) => {
+            match app.state.design_check_status(reference) {
+                DesignCheckStatus::Current(receipt) => {
+                    let summary = receipt.result.summary();
+                    (
+                        "CURRENT",
+                        format!(
+                            "{} errors \u{00b7} {} advisories",
+                            summary.critical + summary.errors,
+                            summary.warnings + summary.info
+                        ),
+                    )
+                }
+                DesignCheckStatus::NotRun => ("NOT RUN", "not run".to_owned()),
+                DesignCheckStatus::Stale(_) => ("STALE", "inputs changed".to_owned()),
+                DesignCheckStatus::Unavailable { reason, .. } => ("UNAVAILABLE", reason),
+            }
+        }
+        Some(_) => ("N/A", "not applicable to this view type".to_owned()),
+        None => ("NO VIEW", "select a cell view".to_owned()),
+    };
+
+    section_header(ui, "Selection", Some(&access.to_ascii_uppercase()));
+    property_row(ui, "Library", library_name);
+    property_row(ui, "Cell", cell_name);
+    property_row(ui, "View", view_name);
+    property_row(ui, "View type", view_type);
+
+    section_header(ui, "Ownership & binding", None);
+    property_row(ui, "Revision", &project_revision);
+    property_row(ui, "Access", access);
+    property_row(ui, "Technology", technology);
+    property_row(ui, "Source", &library_path);
+    property_row(
+        ui,
+        "State",
+        if view.is_some_and(|item| item.modified) {
+            "modified"
+        } else {
+            "current"
+        },
+    );
+
+    section_header(ui, "Validation", Some(checks_meta));
+    property_row(ui, "Checks", &checks);
+    property_row(ui, "Configuration", active_configuration);
+    property_row(ui, "Consumers", &usage.len().to_string());
+    property_row(
+        ui,
+        "Where used",
+        usage.first().map_or("project root", String::as_str),
+    );
+
+    section_header(ui, "Actions", None);
+    if inspector_action_enabled(ui, "Open selected view", open_target.is_some())
+        && let Some((reference, view_type)) = open_target.as_ref()
+    {
+        app.state.open_workspace_view(reference.clone());
+        let workspace = match view_type {
+            ViewType::Verilog | ViewType::VerilogA | ViewType::Spice => Workspace::Netlist,
+            ViewType::Config => {
+                app.state.workbench.project_page = ProjectPage::Configuration;
+                Workspace::Project
+            }
+            _ => Workspace::Design,
+        };
+        Command::OpenWorkspace(workspace).execute(app);
+    }
+    if inspector_action_enabled(ui, "Where used & impact\u{2026}", open_target.is_some())
+        && let Some((reference, _)) = open_target.as_ref()
+    {
+        app.state.push_user_message(ConsoleMessage::info(format!(
+            "{} has {} loaded schematic consumer{}: {}",
+            reference.display_path(),
+            usage.len(),
+            if usage.len() == 1 { "" } else { "s" },
+            if usage.is_empty() {
+                "none".to_owned()
+            } else {
+                usage.join(", ")
+            }
+        )));
+        Command::OpenConsole.execute(app);
+    }
+    if inspector_action(ui, "Revision history\u{2026}") {
+        Command::RevisionHistory.execute(app);
+    }
+}
+
+fn project_configuration(ui: &mut Ui, app: &mut RSpiceApp) {
+    let active = app.state.workspace.configuration_sets.active();
+    let name = active.map_or_else(
+        || "No active configuration".to_owned(),
+        |item| item.name().to_owned(),
+    );
+    let testbench = active.map_or_else(
+        || "not configured".to_owned(),
+        |item| item.root().display_path(),
+    );
+    let dut = active.map_or_else(
+        || "not configured".to_owned(),
+        |item| item.dut_path().to_owned(),
+    );
+    let revision = active.map_or_else(|| "—".to_owned(), |item| item.revision().to_string());
+    let overrides = active.map_or(0, |item| item.definition().overrides.len());
+
+    section_header(ui, "Active binding", None);
+    property_row(ui, "Configuration", &name);
+    property_row(ui, "Testbench", &testbench);
+    property_row(ui, "DUT", &dut);
+    property_row(ui, "Revision", &revision);
+
+    section_header(ui, "Netlisting contract", None);
+    property_row(ui, "Overrides", &overrides.to_string());
+    property_row(ui, "Global precedence", "project → configuration → run");
+    property_row(
+        ui,
+        "Binding",
+        if active.is_some() {
+            "resolved"
+        } else {
+            "missing"
+        },
+    );
+
+    section_header(ui, "Actions", None);
+    if inspector_action(ui, "Validate configuration") {
+        Command::PreflightChecks.execute(app);
+    }
+    if inspector_action(ui, "Manage configuration sets\u{2026}") {
+        Command::ConfigurationSets.execute(app);
+    }
+}
+
+fn project_dependency(ui: &mut Ui, app: &mut RSpiceApp) {
+    let selection = app
+        .state
+        .workbench
+        .project_dependency_selection
+        .clone()
+        .unwrap_or_else(|| "No dependency selected".to_owned());
+    let design_library = app.state.library_manager.get_library(&selection);
+    let model_library = app.state.model_library_manager.get_library(&selection);
+
+    section_header(ui, "Resolved dependency", None);
+    property_row(ui, "Name", &selection);
+    if let Some(library) = design_library {
+        property_row(ui, "Type", "Design library");
+        property_row(
+            ui,
+            "Access",
+            if library.read_only {
+                "read only"
+            } else {
+                "writable"
+            },
+        );
+        property_row(ui, "Cells", &library.cell_count().to_string());
+        property_row(
+            ui,
+            "Source",
+            &library.path.as_ref().map_or_else(
+                || "in project".to_owned(),
+                |path| path.display().to_string(),
+            ),
+        );
+    } else if let Some(library) = model_library {
+        property_row(ui, "Type", "Model library");
+        property_row(ui, "Version", &library.version);
+        property_row(ui, "Models", &library.models.len().to_string());
+        property_row(ui, "Corners", &library.corners.len().to_string());
+        property_row(
+            ui,
+            "Execution source",
+            if library.source_authority.has_execution_source() && !library.source_closure.is_empty()
+            {
+                "authenticated"
+            } else {
+                "catalog only"
+            },
+        );
+    } else {
+        property_row(ui, "Status", "Select a dependency in the navigator");
+    }
+
+    section_header(ui, "Project contract", None);
+    property_row(
+        ui,
+        "Technology",
+        if app.state.workspace.project.technology_binding().is_some() {
+            "attached"
+        } else {
+            "not attached"
+        },
+    );
+    property_row(ui, "Missing dependencies", "0");
+
+    section_header(ui, "Actions", None);
+    if inspector_action(ui, "Model & library catalog") {
+        Command::ModelsPage(ModelsPage::Models).execute(app);
+    }
+    if inspector_action(ui, "PDK and model paths\u{2026}") {
+        Command::PdkSettings.execute(app);
+    }
+}
+
+fn project_recovery(ui: &mut Ui, app: &mut RSpiceApp) {
+    let selected = app.state.workbench.project_checkpoint_selection.as_deref();
+    let checkpoint = app
+        .state
+        .dialogs
+        .project_checkpoint_recovery
+        .checkpoints
+        .iter()
+        .find(|item| selected.is_some_and(|id| id == item.checkpoint_id().to_string()));
+    let integrity = app
+        .state
+        .dialogs
+        .project_checkpoint_recovery
+        .error
+        .is_none()
+        && app
+            .state
+            .dialogs
+            .project_checkpoint_recovery
+            .quarantined
+            .is_empty();
+
+    section_header(ui, "Selected checkpoint", None);
+    if let Some(checkpoint) = checkpoint {
+        property_row(ui, "Reason", checkpoint.reason().label());
+        property_row(ui, "Revision", &checkpoint.project_revision().to_string());
+        property_row(
+            ui,
+            "Payload",
+            &format!("{} bytes", checkpoint.snapshot_byte_len()),
+        );
+        property_row(ui, "Checkpoint ID", &checkpoint.checkpoint_id().to_string());
+    } else {
+        property_row(ui, "Selection", "No checkpoint selected");
+    }
+
+    section_header(ui, "Recovery contract", None);
+    property_row(
+        ui,
+        "Integrity",
+        if integrity {
+            "verified"
+        } else {
+            "review required"
+        },
+    );
+    property_row(ui, "Restore mode", "independent project copy");
+    property_row(ui, "Current work", "never overwritten");
+    property_row(
+        ui,
+        "Quarantined",
         &app.state
-            .workspace
-            .open_views
-            .iter()
-            .filter(|view| view.dirty)
-            .count()
+            .dialogs
+            .project_checkpoint_recovery
+            .quarantined
+            .len()
             .to_string(),
     );
+
+    section_header(ui, "Actions", None);
+    if inspector_action(ui, "Save project") {
+        Command::Save.execute(app);
+    }
+    if inspector_action(ui, "Revision history\u{2026}") {
+        Command::RevisionHistory.execute(app);
+    }
+}
+
+fn inspector_action(ui: &mut Ui, label: &str) -> bool {
+    inspector_action_enabled(ui, label, true)
+}
+
+fn inspector_action_enabled(ui: &mut Ui, label: &str, enabled: bool) -> bool {
+    let width = ui.available_width().max(1.0);
+    let response = ui
+        .add_enabled_ui(enabled, |ui| {
+            ui.add_sized([width, 28.0], egui::Button::new(label))
+        })
+        .inner;
+    ui.add_space(4.0);
+    response.clicked()
+}
+
+fn library_usage(app: &RSpiceApp, reference: &CellViewRef) -> Vec<String> {
+    fn collect(
+        schematic: &crate::state::SchematicState,
+        owner: &str,
+        reference: &CellViewRef,
+        consumers: &mut Vec<String>,
+    ) {
+        if schematic.components.iter().any(|component| {
+            component.library_cell.as_ref().is_some_and(|binding| {
+                binding.library.eq_ignore_ascii_case(&reference.library)
+                    && binding.cell.eq_ignore_ascii_case(&reference.cell)
+                    && binding.view.eq_ignore_ascii_case(&reference.view)
+            })
+        }) {
+            consumers.push(owner.to_owned());
+        }
+    }
+
+    let mut consumers = Vec::new();
+    let active_key = app.state.workspace.active_view.key();
+    collect(
+        &app.state.schematic,
+        &app.state.workspace.active_view.display_path(),
+        reference,
+        &mut consumers,
+    );
+    for (key, schematic) in &app.state.workspace.schematic_buffers {
+        if key != &active_key {
+            collect(schematic, key, reference, &mut consumers);
+        }
+    }
+    consumers.sort_by_key(|item| item.to_ascii_lowercase());
+    consumers.dedup();
+    consumers
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -788,38 +1253,56 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         .results
         .valid_selected_trace(&app.state.simulation)
         .cloned();
-    section_header(ui, "Dataset provenance", None);
-    let Some(run_index) = app.state.simulation.active_run_idx else {
+
+    let active_run_index = app.state.simulation.active_run_idx;
+    if let Some(run) = active_run_index.and_then(|index| app.state.simulation.runs.get(index)) {
+        let manifest =
+            crate::workbench::documents::result_document::manifest::ManifestViewModel::from_run(
+                run,
+            );
+        result_dataset_authority(ui, run, &manifest);
+    } else {
+        section_header(ui, "Dataset identity", None);
         property_row(ui, "Selection", "No active dataset");
         property_row(
             ui,
             "Available runs",
             &app.state.simulation.runs.len().to_string(),
         );
+        result_qualification_gaps(ui);
+    }
+
+    if let Some(selected) = selected_trace.as_ref() {
+        selected_result_trace(ui, app, selected);
+    }
+    active_result_pane(ui, app, selected_trace.as_ref());
+
+    // The active viewer owns its engineering readout (measurements, margins,
+    // harmonics, eye metrics, distribution statistics, and so on). It follows
+    // the trace and pane controls, matching the upgraded mockup's hierarchy
+    // without creating a second result-data owner here.
+    ui.add_space(8.0);
+    if app.state.ui.results.viewer != ResultViewer::Manifest {
+        crate::workbench::documents::result_document::right_panel(ui, &mut app.state);
+    }
+
+    let Some(run_index) = active_run_index else {
         return;
     };
     let Some(run) = app.state.simulation.runs.get(run_index) else {
-        property_row(ui, "Selection", "Dataset no longer available");
         return;
     };
-    property_row(ui, "Run", &run.label);
-    property_row(ui, "Run ID", &run.run_id.to_string());
-    property_row(ui, "Dataset ID", &run.dataset_id.to_string());
-    property_row(ui, "Elapsed", &format!("{:.6} s", run.elapsed_time));
-    property_row(ui, "Analyses", &run.analyses.len().to_string());
-    property_row(
-        ui,
-        "Status",
-        if run.success { "Completed" } else { "Failed" },
-    );
+
     if let Some(index) = app.state.simulation.active_analysis_idx
         && let Some(analysis) = run.analyses.get(index)
     {
-        section_header(ui, "Analysis", None);
-        property_row(ui, "Label", &analysis.label);
-        property_row(ui, "Type", &format!("{:?}", analysis.analysis_type));
-        property_row(ui, "Waveforms", &analysis.waveforms.len().to_string());
-        property_row(ui, "Measurements", &analysis.measurements.len().to_string());
+        section_header(ui, "Active analysis provenance", None);
+        property_row(ui, "Analysis", &analysis.label);
+        property_row(
+            ui,
+            "Result digest",
+            &analysis.result_data_digest().to_string(),
+        );
         if let Some(provenance) = &analysis.provenance {
             property_row(
                 ui,
@@ -845,13 +1328,212 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             property_row(ui, "Source identity", "Legacy result · unavailable");
         }
     }
-    if let Some(selected) = selected_trace {
-        section_header(ui, "Selected trace", None);
-        property_row(ui, "Name", &selected.source_name);
-        property_row(ui, "Analysis", &(selected.analysis_index + 1).to_string());
-        property_row(ui, "Dataset", &selected.dataset_id.to_string());
-        if is_schematic_cross_probe_candidate(&selected.source_name) {
-            let signal = selected.source_name;
+}
+
+const RESULT_QUALIFICATION_GAPS: [(&str, &str); 5] = [
+    ("Qualification receipt", "not retained"),
+    ("Requirements mapping", "not retained"),
+    ("Release gates", "not assessed"),
+    ("Sign-off eligibility", "not assessed"),
+    ("Approval authority", "not retained"),
+];
+
+fn result_dataset_authority(
+    ui: &mut Ui,
+    run: &crate::state::SimulationRun,
+    manifest: &crate::workbench::documents::result_document::manifest::ManifestViewModel,
+) {
+    let successful_results = run
+        .analyses
+        .iter()
+        .filter(|analysis| analysis.success)
+        .count();
+
+    section_header(ui, "Dataset identity", None);
+    property_row(ui, "Dataset", &manifest.run_label);
+    property_row(ui, "Dataset ID", &manifest.dataset_id);
+    property_row(ui, "Dataset digest", &manifest.dataset_digest);
+    property_row(ui, "Run ID", &manifest.run_id);
+    property_row(ui, "Run sequence", &manifest.run_sequence);
+    property_row(ui, "Lifecycle", &manifest.lifecycle);
+    property_row(ui, "Duration", &manifest.elapsed_time);
+    property_row(ui, "Execution target", &manifest.execution_target);
+    property_row(
+        ui,
+        "Job ID",
+        &run.job_id
+            .map_or_else(|| "not retained".to_owned(), |id| id.to_string()),
+    );
+
+    section_header(ui, "Retained inventory", None);
+    property_row(
+        ui,
+        "Task receipts",
+        &manifest.authority.as_ref().map_or_else(
+            || "not retained".to_owned(),
+            |_| manifest.task_count.to_string(),
+        ),
+    );
+    property_row(
+        ui,
+        "Retained results",
+        &manifest.retained_result_count.to_string(),
+    );
+    property_row(
+        ui,
+        "Successful results",
+        &format!("{successful_results} / {}", manifest.retained_result_count),
+    );
+    property_row(ui, "Receipt integrity", &manifest.integrity);
+
+    section_header(ui, "Prepared source authority", None);
+    if let Some(authority) = &manifest.authority {
+        property_row(ui, "Source domain", &authority.source_domain);
+        property_row(
+            ui,
+            "Simulation plan",
+            authority
+                .simulation_plan_id
+                .as_deref()
+                .unwrap_or("manual deck · no simulation plan"),
+        );
+        property_row(ui, "Project revision", &authority.project_revision);
+        property_row(
+            ui,
+            "Prepared input digest",
+            &authority.prepared_snapshot_digest,
+        );
+        property_row(
+            ui,
+            "Source content digest",
+            &authority.source_content_digest,
+        );
+        property_row(ui, "Source check", &authority.source_check);
+        property_row(ui, "Source-check digest", &authority.source_check_digest);
+
+        section_header(ui, "Model source digests", None);
+        if authority.model_sources.is_empty() {
+            property_row(ui, "Model identities", "not retained");
+        } else {
+            for (identity, digest) in &authority.model_sources {
+                property_row(ui, identity, digest);
+            }
+        }
+    } else {
+        for label in [
+            "Source domain",
+            "Simulation plan",
+            "Project revision",
+            "Prepared input digest",
+            "Source content digest",
+            "Source check",
+            "Source-check digest",
+        ] {
+            property_row(ui, label, "not retained");
+        }
+        section_header(ui, "Model source digests", None);
+        property_row(ui, "Model identities", "not retained");
+    }
+
+    result_qualification_gaps(ui);
+}
+
+fn result_qualification_gaps(ui: &mut Ui) {
+    section_header(ui, "Qualification and release", None);
+    for (label, value) in RESULT_QUALIFICATION_GAPS {
+        property_row(ui, label, value);
+    }
+}
+
+fn selected_result_trace(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    selected: &crate::workbench::documents::result_document::SelectedResultTrace,
+) {
+    let Some(run) = app.state.simulation.active_run() else {
+        return;
+    };
+    let Some((analysis_index, waveform_index, analysis, waveform)) = selected.resolve(run) else {
+        return;
+    };
+
+    let analysis_label = analysis.label.clone();
+    let waveform_name = waveform.name.clone();
+    let waveform_color = waveform.color.clone();
+    let waveform_visible = waveform.visible;
+    let sample_count = waveform.x.len().min(waveform.y.len());
+    let statistics = finite_trace_statistics(&waveform.y);
+
+    section_header(ui, "Selected trace", None);
+    property_row(ui, "Name", &waveform_name);
+    property_row(ui, "Analysis", &analysis_label);
+    property_row(ui, "Dataset", &selected.dataset_id().to_string());
+    property_row(ui, "Samples", &sample_count.to_string());
+    property_row(
+        ui,
+        "Visibility",
+        if waveform_visible {
+            "visible"
+        } else {
+            "hidden"
+        },
+    );
+    if let Some(statistics) = statistics {
+        property_row(ui, "Minimum", &format_result_scalar(statistics.minimum));
+        property_row(ui, "Maximum", &format_result_scalar(statistics.maximum));
+        property_row(ui, "Mean", &format_result_scalar(statistics.mean));
+        property_row(
+            ui,
+            "Peak-to-peak",
+            &format_result_scalar(statistics.maximum - statistics.minimum),
+        );
+    }
+
+    let t = Tokens::get(ui.ctx());
+    let mut color = crate::workbench::documents::result_document::trace_color(
+        &waveform_color,
+        t.color.traces[waveform_index % t.color.traces.len()],
+    );
+    ui.horizontal(|ui| {
+        ui.label("Colour");
+        if egui::color_picker::color_edit_button_srgba(
+            ui,
+            &mut color,
+            egui::color_picker::Alpha::Opaque,
+        )
+        .changed()
+        {
+            set_selected_trace_color(&mut app.state, selected, color);
+        }
+        ui.label(
+            egui::RichText::new(format!(
+                "#{:02X}{:02X}{:02X}",
+                color.r(),
+                color.g(),
+                color.b()
+            ))
+            .monospace(),
+        );
+    });
+
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .button(if waveform_visible {
+                "Hide trace"
+            } else {
+                "Show trace"
+            })
+            .clicked()
+        {
+            crate::workbench::documents::result_document::toggle_visibility(
+                &mut app.state,
+                analysis_index,
+                waveform_index,
+            );
+        }
+
+        if is_schematic_cross_probe_candidate(selected.source_name()) {
+            let signal = selected.source_name().to_owned();
             let unavailable = schematic_cross_probe_unavailability(&app.state, &signal);
             let mut response =
                 ui.add_enabled(unavailable.is_none(), egui::Button::new("Cross-probe net"));
@@ -866,10 +1548,9 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             "Schematic net located",
                             format!("{signal} cross-probed to {net}."),
                         );
-                        app.state
-                            .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
-                                "Selected conductor {net} from {signal}."
-                            )));
+                        app.state.push_user_message(ConsoleMessage::info(format!(
+                            "Selected conductor {net} from {signal}."
+                        )));
                     }
                     Err(message) => {
                         app.state.ui.toasts.warn_with_title(
@@ -878,16 +1559,162 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             message.clone(),
                         );
                         app.state
-                            .push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                                message,
-                            ));
+                            .push_user_message(ConsoleMessage::warning(message));
                     }
                 }
             }
         }
+    });
+}
+
+fn active_result_pane(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    selected: Option<&crate::workbench::documents::result_document::SelectedResultTrace>,
+) {
+    let viewer = app.state.ui.results.viewer;
+    let Some(run) = app.state.simulation.active_run() else {
+        return;
+    };
+    let analysis_index = selected
+        .and_then(|trace| {
+            trace
+                .resolve(run)
+                .map(|(analysis_index, _, _, _)| analysis_index)
+        })
+        .or(app.state.simulation.active_analysis_idx)
+        .unwrap_or(0);
+    let Some(analysis) = run.analyses.get(analysis_index) else {
+        return;
+    };
+    let pane_label = analysis.label.clone();
+    let bound = analysis.waveforms.len();
+    let visible = analysis
+        .waveforms
+        .iter()
+        .filter(|waveform| waveform.visible)
+        .count();
+    let plot_index = if viewer == crate::workbench::documents::result_document::ResultViewer::Waves
+    {
+        analysis_index
+    } else {
+        0
+    };
+    let view = app.state.ui.results.plot_view(viewer, plot_index);
+    let view_label = if view.is_zoomed() {
+        "manual range"
+    } else {
+        "automatic fit"
+    };
+
+    section_header(ui, "Active pane", Some(viewer.label()));
+    property_row(ui, "Pane", &pane_label);
+    property_row(ui, "Traces", &format!("{visible} visible · {bound} bound"));
+    property_row(ui, "View", view_label);
+    if let Some((minimum, maximum)) = view.x {
+        property_row(
+            ui,
+            "X range",
+            &format!(
+                "{} – {}",
+                format_result_scalar(minimum),
+                format_result_scalar(maximum)
+            ),
+        );
     }
-    ui.add_space(8.0);
-    crate::workbench::documents::result_document::right_panel(ui, &mut app.state);
+    if let Some((minimum, maximum)) = view.y {
+        property_row(
+            ui,
+            "Y range",
+            &format!(
+                "{} – {}",
+                format_result_scalar(minimum),
+                format_result_scalar(maximum)
+            ),
+        );
+    }
+    if ui
+        .add_enabled(view.is_zoomed(), egui::Button::new("Fit active pane"))
+        .clicked()
+    {
+        app.state.ui.results.reset_plot_view(viewer, plot_index);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TraceStatistics {
+    minimum: f64,
+    maximum: f64,
+    mean: f64,
+}
+
+fn finite_trace_statistics(values: &[f64]) -> Option<TraceStatistics> {
+    let mut minimum = f64::INFINITY;
+    let mut maximum = f64::NEG_INFINITY;
+    let mut sum = 0.0;
+    let mut count = 0_u64;
+    for value in values.iter().copied().filter(|value| value.is_finite()) {
+        minimum = minimum.min(value);
+        maximum = maximum.max(value);
+        sum += value;
+        count += 1;
+    }
+    (count != 0).then_some(TraceStatistics {
+        minimum,
+        maximum,
+        mean: sum / count as f64,
+    })
+}
+
+fn format_result_scalar(value: f64) -> String {
+    if value == 0.0 {
+        "0".to_owned()
+    } else if (1.0e-3..1.0e6).contains(&value.abs()) {
+        format!("{value:.7}")
+    } else {
+        format!("{value:.7e}")
+    }
+}
+
+fn set_selected_trace_color(
+    state: &mut AppState,
+    selected: &crate::workbench::documents::result_document::SelectedResultTrace,
+    color: Color32,
+) {
+    let color = format!("#{:02x}{:02x}{:02x}", color.r(), color.g(), color.b());
+    let Some(run_index) = state.simulation.active_run_idx else {
+        return;
+    };
+    let Some((analysis_index, waveform_index)) =
+        state.simulation.runs.get(run_index).and_then(|run| {
+            selected
+                .resolve(run)
+                .map(|(analysis_index, waveform_index, _, _)| (analysis_index, waveform_index))
+        })
+    else {
+        return;
+    };
+    if let Some(waveform) = state
+        .simulation
+        .runs
+        .get_mut(run_index)
+        .and_then(|run| run.analyses.get_mut(analysis_index))
+        .and_then(|analysis| analysis.waveforms.get_mut(waveform_index))
+        .filter(|waveform| waveform.name == selected.source_name())
+    {
+        waveform.color.clone_from(&color);
+    } else {
+        return;
+    }
+    if state.simulation.active_analysis_idx == Some(analysis_index)
+        && let Some(waveform) = state
+            .simulation
+            .waveforms
+            .iter_mut()
+            .find(|waveform| waveform.name == selected.source_name())
+    {
+        waveform.color = color;
+    }
 }
 
 fn is_schematic_cross_probe_candidate(signal: &str) -> bool {
@@ -1451,7 +2278,9 @@ fn models(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
-    use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, DiagnosticSeverity};
+    use crate::workbench::documents::netlist_document::{
+        ActiveNetlistDocument, DiagnosticSeverity,
+    };
 
     let errors = app
         .state
@@ -1563,7 +2392,10 @@ fn diagnostic_section_header(
     );
 }
 
-fn diagnostic_row(ui: &mut Ui, diagnostic: &crate::workbench::documents::netlist_document::Diagnostic) {
+fn diagnostic_row(
+    ui: &mut Ui,
+    diagnostic: &crate::workbench::documents::netlist_document::Diagnostic,
+) {
     const ICON_COLUMN_W: f32 = 14.0;
     const COLUMN_GAP: f32 = 7.0;
     const PADDING_X: f32 = 9.0;
@@ -1607,9 +2439,13 @@ fn diagnostic_row(ui: &mut Ui, diagnostic: &crate::workbench::documents::netlist
     );
 
     let icon = match diagnostic.severity {
-        crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => WorkbenchIcon::Info,
+        crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => {
+            WorkbenchIcon::Info
+        }
         crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning
-        | crate::workbench::documents::netlist_document::DiagnosticSeverity::Error => WorkbenchIcon::Warning,
+        | crate::workbench::documents::netlist_document::DiagnosticSeverity::Error => {
+            WorkbenchIcon::Warning
+        }
     };
     icon.paint(
         ui.painter(),
@@ -1713,7 +2549,8 @@ fn generated_provenance(ui: &mut Ui, state: &AppState) {
 fn owned_source_provenance(ui: &mut Ui, state: &AppState) {
     design_section_header(ui, "Owned source provenance", None);
     let source = &state.simulation.netlist_content;
-    let source_digest = crate::workbench::documents::netlist_document::source_content_digest(source);
+    let source_digest =
+        crate::workbench::documents::netlist_document::source_content_digest(source);
     property_row(
         ui,
         "Source origin",
@@ -1766,8 +2603,9 @@ fn generated_state(state: &AppState) -> &'static str {
     } else if netlist.generated_input_digest != netlist.current_generation_input_digest {
         "stale · refresh pending"
     } else {
-        let digest =
-            crate::workbench::documents::netlist_document::source_content_digest(&netlist.generated_source);
+        let digest = crate::workbench::documents::netlist_document::source_content_digest(
+            &netlist.generated_source,
+        );
         if netlist.validation.as_ref().is_some_and(|receipt| {
             receipt.visible_content_digest == digest
                 && receipt.project_revision == state.workspace.project.revision().get()
@@ -1821,7 +2659,9 @@ fn short_digest(digest: crate::product::ContentDigest) -> String {
     format!("{}…{}", &digest[..8], &digest[digest.len() - 4..])
 }
 
-fn diagnostic_location(diagnostic: &crate::workbench::documents::netlist_document::Diagnostic) -> String {
+fn diagnostic_location(
+    diagnostic: &crate::workbench::documents::netlist_document::Diagnostic,
+) -> String {
     let location = match (
         diagnostic.source_line.or(diagnostic.line),
         diagnostic.column,
@@ -1844,9 +2684,15 @@ fn diagnostic_tone(
     severity: crate::workbench::documents::netlist_document::DiagnosticSeverity,
 ) -> Color32 {
     match severity {
-        crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => tokens.color.info,
-        crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning => tokens.color.warn,
-        crate::workbench::documents::netlist_document::DiagnosticSeverity::Error => tokens.color.err,
+        crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => {
+            tokens.color.info
+        }
+        crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning => {
+            tokens.color.warn
+        }
+        crate::workbench::documents::netlist_document::DiagnosticSeverity::Error => {
+            tokens.color.err
+        }
     }
 }
 
@@ -1910,20 +2756,14 @@ mod tests {
                 "#ffbd2e",
             )]),
         );
-        let dataset_id = app
-            .state
-            .simulation
-            .active_run()
-            .expect("retained run")
-            .dataset_id
-            .clone();
-        app.state.ui.results.selected_trace =
-            Some(crate::workbench::documents::result_document::SelectedResultTrace {
-                dataset_id,
-                analysis_index: 0,
-                waveform_index: 0,
-                source_name: "V(out)".to_owned(),
-            });
+        app.state.ui.results.selected_trace = Some(
+            crate::workbench::documents::result_document::SelectedResultTrace::from_run_indices(
+                app.state.simulation.active_run().expect("retained run"),
+                0,
+                0,
+            )
+            .expect("selected retained trace"),
+        );
         let a = crate::state::Point::new(0, 0);
         let b = crate::state::Point::new(40, 0);
         app.state
@@ -1944,6 +2784,31 @@ mod tests {
     fn inspector_property_lists_keep_mockup_vertical_padding() {
         assert_eq!(INSPECTOR_PROPERTY_LIST_PADDING_TOP, 7.0);
         assert_eq!(INSPECTOR_PROPERTY_LIST_PADDING_BOTTOM, 10.0);
+    }
+
+    #[test]
+    fn result_trace_statistics_ignore_non_finite_samples() {
+        let statistics = finite_trace_statistics(&[f64::NAN, -2.0, 1.0, f64::INFINITY, 4.0])
+            .expect("three finite samples");
+
+        assert_eq!(statistics.minimum, -2.0);
+        assert_eq!(statistics.maximum, 4.0);
+        assert_eq!(statistics.mean, 1.0);
+        assert!(finite_trace_statistics(&[f64::NAN, f64::INFINITY]).is_none());
+    }
+
+    #[test]
+    fn result_qualification_rows_never_infer_unretained_release_authority() {
+        assert_eq!(
+            RESULT_QUALIFICATION_GAPS,
+            [
+                ("Qualification receipt", "not retained"),
+                ("Requirements mapping", "not retained"),
+                ("Release gates", "not assessed"),
+                ("Sign-off eligibility", "not assessed"),
+                ("Approval authority", "not retained"),
+            ]
+        );
     }
 
     #[test]

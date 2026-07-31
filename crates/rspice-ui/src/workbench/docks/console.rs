@@ -11,13 +11,14 @@ use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::session::script_console::ConsoleHistoryItem;
 
-use crate::workbench::commands::CommandAvailability;
-use crate::workbench::commands::vocabulary::{Command, command_catalog};
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::ConsolePage;
+use crate::workbench::commands::CommandAvailability;
+use crate::workbench::commands::vocabulary::{Command, command_catalog};
 
 const CONSOLE_HEADER_HEIGHT: f32 = 31.0;
+const CONSOLE_TAB_HEIGHT: f32 = 26.0;
 const CONSOLE_TOUCH_HEADER_HEIGHT: f32 = 44.0;
 const CONSOLE_ACTION_SIZE: f32 = 27.0;
 const CONSOLE_ACTION_MARGIN_RIGHT: f32 = 3.0;
@@ -101,7 +102,18 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 .id_salt("workbench.console.tabs.scroll")
                 .max_width((ui.available_width() - action_width).max(header_height))
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                .show(ui, |ui| console_tabs(ui, app, problems, header_height));
+                .show(ui, |ui| {
+                    console_tabs(
+                        ui,
+                        app,
+                        problems,
+                        if touch_targets {
+                            header_height
+                        } else {
+                            CONSOLE_TAB_HEIGHT
+                        },
+                    );
+                });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let control_size = if touch_targets {
                     CONSOLE_TOUCH_HEADER_HEIGHT
@@ -1741,6 +1753,7 @@ mod tests {
     #[test]
     fn console_chrome_and_grid_geometry_match_the_mockup() {
         assert_eq!(CONSOLE_HEADER_HEIGHT, 31.0);
+        assert_eq!(CONSOLE_TAB_HEIGHT, 26.0);
         assert_eq!(CONSOLE_TOUCH_HEADER_HEIGHT, 44.0);
         assert_eq!(CONSOLE_ACTION_SIZE, 27.0);
         assert_eq!(CONSOLE_ACTION_MARGIN_RIGHT, 3.0);

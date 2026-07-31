@@ -9,6 +9,7 @@ use netlist::*;
 
 use egui::{Align, Layout, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
 
+use crate::product::DatasetId;
 use crate::state::{CellViewRef, ViewType};
 use crate::state::{NetlistOutline, OutlineEntry, OutlineEntryKind};
 use crate::ui::theme::{self, FontWeight};
@@ -198,7 +199,12 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         egui::Stroke::new(1.0, t.color.border),
     );
     let title = match app.state.workbench.workspace {
-        Workspace::Project => "Project library",
+        Workspace::Project => match app.state.workbench.project_page {
+            ProjectPage::Overview | ProjectPage::Library => "Project",
+            ProjectPage::Configuration => "Configurations",
+            ProjectPage::Dependencies => "Dependencies",
+            ProjectPage::Recovery => "Recovery",
+        },
         Workspace::Design => "Design navigator",
         Workspace::Simulate => "Simulation Studio",
         Workspace::Results => "Data browser",
@@ -242,7 +248,12 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn workspace_search(ui: &mut Ui, app: &mut RSpiceApp, workspace: Workspace) {
     let placeholder = match workspace {
-        Workspace::Project => "Filter libraries, cells, views…",
+        Workspace::Project => match app.state.workbench.project_page {
+            ProjectPage::Overview | ProjectPage::Library => "Filter libraries, cells, views…",
+            ProjectPage::Configuration => "Filter configurations…",
+            ProjectPage::Dependencies => "Filter dependencies…",
+            ProjectPage::Recovery => "Filter checkpoints…",
+        },
         Workspace::Design => "Find instance, net or port…",
         Workspace::Simulate => "Filter setup…",
         Workspace::Results => "Find signal, expression or run…",
@@ -305,30 +316,381 @@ pub(super) fn panel_search(
 }
 
 fn project(ui: &mut Ui, app: &mut RSpiceApp) {
-    ScrollArea::vertical().show(ui, |ui| {
-        section_header(
+    ScrollArea::vertical().show(ui, |ui| match app.state.workbench.project_page {
+        ProjectPage::Overview | ProjectPage::Library => project_library_navigator(ui, app),
+        ProjectPage::Configuration => project_configuration_navigator(ui, app),
+        ProjectPage::Dependencies => project_dependency_navigator(ui, app),
+        ProjectPage::Recovery => project_recovery_navigator(ui, app),
+    });
+}
+
+fn project_library_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
+    let query = app
+        .state
+        .workbench
+        .navigator_query
+        .trim()
+        .to_ascii_lowercase();
+    let libraries = app
+        .state
+        .library_manager
+        .libraries_sorted()
+        .into_iter()
+        .map(|library| {
+            let matches_query = query.is_empty()
+                || library.name.to_ascii_lowercase().contains(&query)
+                || library.cells_sorted().into_iter().any(|cell| {
+                    cell.name.to_ascii_lowercase().contains(&query)
+                        || cell
+                            .views_sorted()
+                            .into_iter()
+                            .any(|view| view.name.to_ascii_lowercase().contains(&query))
+                });
+            (
+                library.name.clone(),
+                library.cell_count(),
+                library.read_only,
+                matches_query,
+            )
+        })
+        .collect::<Vec<_>>();
+    let visible = libraries
+        .iter()
+        .filter(|(_, _, _, visible)| *visible)
+        .count();
+    section_header(
+        ui,
+        "Libraries",
+        Some(&format!("{visible} / {}", libraries.len())),
+    );
+    for (name, cells, read_only, visible) in libraries {
+        if !visible {
+            continue;
+        }
+        let meta = format!("{} {}", cells, if read_only { "ro" } else { "rw" });
+        if nav_row(
             ui,
-            "Design libraries",
-            Some(&app.state.library_manager.library_count().to_string()),
-        );
-        library_tree(ui, app, true);
-        section_header(ui, "Project contracts", None);
-        for page in [
-            ProjectPage::Configuration,
-            ProjectPage::Technology,
-            ProjectPage::Dependencies,
-        ] {
-            if nav_row(
-                ui,
-                WorkbenchIcon::Sliders,
-                page.label(),
-                app.state.workbench.project_page == page,
-                None,
-            ) {
-                app.state.workbench.project_page = page;
+            if read_only {
+                WorkbenchIcon::Folder
+            } else {
+                WorkbenchIcon::Project
+            },
+            &name,
+            app.state.library_manager.selected_library.as_deref() == Some(name.as_str()),
+            Some(&meta),
+        ) {
+            app.state.library_manager.select_library(&name);
+        }
+    }
+
+    let active_configuration = app.state.workspace.configuration_sets.active();
+    section_header(
+        ui,
+        "Active simulation context",
+        Some(if active_configuration.is_some() {
+            "current"
+        } else {
+            "review"
+        }),
+    );
+    nav_property(
+        ui,
+        "Testbench",
+        &active_configuration.map_or_else(
+            || "not configured".to_owned(),
+            |configuration| configuration.root().display_path(),
+        ),
+    );
+    nav_property(
+        ui,
+        "Configuration",
+        active_configuration.map_or("not configured", |configuration| configuration.name()),
+    );
+    nav_property(
+        ui,
+        "Run plan",
+        app.state.sim_setup.active_plan_name().as_str(),
+    );
+    nav_property(
+        ui,
+        "Revision",
+        &app.state.workspace.project.revision().get().to_string(),
+    );
+
+    section_header(ui, "Project source", None);
+    nav_property(
+        ui,
+        "Path",
+        &app.state
+            .workspace
+            .project
+            .path
+            .as_ref()
+            .map_or_else(|| "not saved".to_owned(), |path| path.display().to_string()),
+    );
+    nav_property(
+        ui,
+        "Working tree",
+        if crate::workbench::lifecycle::project_lifecycle::dirty_document_count(&app.state) > 0 {
+            "modified"
+        } else {
+            "clean"
+        },
+    );
+}
+
+fn project_configuration_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
+    let query = app
+        .state
+        .workbench
+        .navigator_query
+        .trim()
+        .to_ascii_lowercase();
+    let active_id = app
+        .state
+        .workspace
+        .configuration_sets
+        .active_configuration_id();
+    let configurations = app
+        .state
+        .workspace
+        .configuration_sets
+        .configurations()
+        .iter()
+        .filter(|configuration| {
+            query.is_empty()
+                || configuration.name().to_ascii_lowercase().contains(&query)
+                || configuration
+                    .root()
+                    .display_path()
+                    .to_ascii_lowercase()
+                    .contains(&query)
+        })
+        .map(|configuration| {
+            (
+                configuration.id(),
+                configuration.name().to_owned(),
+                configuration.revision(),
+            )
+        })
+        .collect::<Vec<_>>();
+    section_header(
+        ui,
+        "Configuration sets",
+        Some(&format!(
+            "{} / {}",
+            configurations.len(),
+            app.state
+                .workspace
+                .configuration_sets
+                .configurations()
+                .len()
+        )),
+    );
+    for (id, name, revision) in configurations {
+        let active = active_id == Some(id);
+        if nav_row(
+            ui,
+            WorkbenchIcon::Sliders,
+            &name,
+            active,
+            Some(if active { "current" } else { "available" }),
+        ) {
+            app.state.workbench.project_page = ProjectPage::Configuration;
+            if !active {
+                Command::ConfigurationSets.execute(app);
             }
         }
-    });
+        if active {
+            nav_property(ui, "Revision", &revision.to_string());
+        }
+    }
+    section_header(ui, "Active binding", None);
+    if let Some(configuration) = app.state.workspace.configuration_sets.active() {
+        nav_property(ui, "Testbench", &configuration.root().display_path());
+        nav_property(ui, "DUT", configuration.dut_path());
+        nav_property(
+            ui,
+            "Overrides",
+            &configuration.definition().overrides.len().to_string(),
+        );
+    } else {
+        muted(ui, "No project configuration is active.");
+    }
+}
+
+fn project_dependency_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
+    let query = app
+        .state
+        .workbench
+        .navigator_query
+        .trim()
+        .to_ascii_lowercase();
+    let mut rows = app
+        .state
+        .library_manager
+        .libraries_sorted()
+        .into_iter()
+        .map(|library| {
+            (
+                library.name.clone(),
+                "Design library",
+                if library.read_only {
+                    "read only"
+                } else {
+                    "writable"
+                },
+                WorkbenchIcon::Project,
+            )
+        })
+        .chain(
+            app.state
+                .model_library_manager
+                .libraries_sorted()
+                .into_iter()
+                .map(|library| {
+                    (
+                        library.name.clone(),
+                        "Model library",
+                        if library.source_authority.has_execution_source()
+                            && !library.source_closure.is_empty()
+                        {
+                            "qualified"
+                        } else {
+                            "catalog"
+                        },
+                        WorkbenchIcon::Models,
+                    )
+                }),
+        )
+        .filter(|(name, kind, status, _)| {
+            query.is_empty()
+                || format!("{name} {kind} {status}")
+                    .to_ascii_lowercase()
+                    .contains(&query)
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| left.0.cmp(&right.0));
+    if app.state.workbench.project_dependency_selection.is_none() {
+        app.state.workbench.project_dependency_selection =
+            rows.first().map(|(name, _, _, _)| name.clone());
+    }
+    section_header(ui, "Resolved closure", Some(&rows.len().to_string()));
+    for (name, _, status, icon) in &rows {
+        if nav_row(
+            ui,
+            *icon,
+            name,
+            app.state.workbench.project_dependency_selection.as_deref() == Some(name.as_str()),
+            Some(status),
+        ) {
+            app.state.workbench.project_dependency_selection = Some(name.clone());
+        }
+    }
+    let unresolved = rows
+        .iter()
+        .filter(|(_, _, status, _)| *status == "catalog")
+        .count();
+    section_header(
+        ui,
+        "Closure contract",
+        Some(if unresolved == 0 {
+            "portable"
+        } else {
+            "review"
+        }),
+    );
+    nav_property(ui, "Missing", "0");
+    nav_property(ui, "Source advisories", &unresolved.to_string());
+    nav_property(
+        ui,
+        "Technology",
+        if app.state.workspace.project.technology_binding().is_some() {
+            "attached"
+        } else {
+            "not attached"
+        },
+    );
+    nav_property(ui, "Manifest", "project dependencies");
+}
+
+fn project_recovery_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
+    let query = app
+        .state
+        .workbench
+        .navigator_query
+        .trim()
+        .to_ascii_lowercase();
+    let checkpoints = app
+        .state
+        .dialogs
+        .project_checkpoint_recovery
+        .checkpoints
+        .iter()
+        .filter(|checkpoint| {
+            query.is_empty()
+                || format!(
+                    "{} {} {}",
+                    checkpoint.reason().label(),
+                    checkpoint.project_revision(),
+                    checkpoint.checkpoint_id()
+                )
+                .to_ascii_lowercase()
+                .contains(&query)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if app.state.workbench.project_checkpoint_selection.is_none() {
+        app.state.workbench.project_checkpoint_selection = checkpoints
+            .first()
+            .map(|checkpoint| checkpoint.checkpoint_id().to_string());
+    }
+    section_header(
+        ui,
+        "Project checkpoints",
+        Some(&checkpoints.len().to_string()),
+    );
+    for checkpoint in &checkpoints {
+        let id = checkpoint.checkpoint_id().to_string();
+        if nav_row(
+            ui,
+            WorkbenchIcon::History,
+            checkpoint.reason().label(),
+            app.state.workbench.project_checkpoint_selection.as_deref() == Some(id.as_str()),
+            Some("restorable"),
+        ) {
+            app.state.workbench.project_checkpoint_selection = Some(id);
+        }
+    }
+    section_header(
+        ui,
+        "Recovery store",
+        Some(
+            if app
+                .state
+                .dialogs
+                .project_checkpoint_recovery
+                .quarantined
+                .is_empty()
+            {
+                "verified"
+            } else {
+                "review"
+            },
+        ),
+    );
+    nav_property(ui, "Protected", &checkpoints.len().to_string());
+    nav_property(
+        ui,
+        "Quarantined",
+        &app.state
+            .dialogs
+            .project_checkpoint_recovery
+            .quarantined
+            .len()
+            .to_string(),
+    );
+    nav_property(ui, "Integrity", "payloads verified on load");
 }
 
 fn library_tree(ui: &mut Ui, app: &mut RSpiceApp, open_documents: bool) {
@@ -548,6 +910,26 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     let query = app.state.workbench.navigator_query.trim().to_lowercase();
     let active_run = app.state.simulation.active_run_idx;
     let active_analysis = app.state.simulation.active_analysis_idx;
+    let selected_trace = app
+        .state
+        .ui
+        .results
+        .valid_selected_trace(&app.state.simulation)
+        .cloned();
+    let expressions = active_analysis
+        .and_then(|analysis_index| app.state.ui.results.exprs.get(&analysis_index))
+        .map(|expressions| {
+            expressions
+                .iter()
+                .enumerate()
+                .filter(|(_, expression)| {
+                    query.is_empty() || expression.text.to_lowercase().contains(&query)
+                })
+                .map(|(expression_index, expression)| (expression_index, expression.clone()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let expression_query_match = !query.is_empty() && !expressions.is_empty();
     let runs = app
         .state
         .simulation
@@ -598,6 +980,11 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         || !signals.is_empty();
                     matches_analysis.then(|| ResultAnalysis {
                         analysis_index,
+                        presentation_key:
+                            crate::workbench::documents::result_document::AnalysisPresentationKey::new(
+                                run.dataset_id,
+                                analysis,
+                            ),
                         label: analysis.label.clone(),
                         short_label: analysis.analysis_type.short_label(),
                         success: analysis.success,
@@ -607,11 +994,14 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                 .collect::<Vec<_>>();
             let matches_run = query.is_empty()
                 || run.label.to_lowercase().contains(&query)
-                || !analyses.is_empty();
+                || !analyses.is_empty()
+                || (active_run == Some(run_index) && expression_query_match);
             matches_run.then(|| ResultRun {
                 run_index,
+                dataset_id: run.dataset_id,
                 label: run.label.clone(),
                 success: run.success,
+                analysis_count: run.analyses.len(),
                 analyses,
             })
         })
@@ -634,12 +1024,12 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         "No dataset, analysis, or signal matches this filter."
                     },
                 );
-                return;
             }
             for run in runs {
                 let run_active = active_run == Some(run.run_index);
-                let run_meta = format!("{} analyses", run.analyses.len());
-                if nav_row_indented(
+                let run_meta = format!("{} analyses", run.analysis_count);
+                let overlaid = app.state.simulation.is_dataset_overlaid(run.dataset_id);
+                let responses = result_dataset_row(
                     ui,
                     if run.success {
                         WorkbenchIcon::Success
@@ -647,12 +1037,24 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         WorkbenchIcon::Warning
                     },
                     &run.label,
-                    run_active && active_analysis.is_none(),
-                    Some(&run_meta),
-                    0,
-                ) {
-                    app.state.simulation.select_run(run.run_index);
-                    app.state.simulation.active_analysis_idx = None;
+                    run_active,
+                    &run_meta,
+                    overlaid,
+                );
+                if responses.selection.clicked() {
+                    select_result_dataset(app, run.run_index);
+                }
+                if responses.overlay.is_some_and(|response| response.clicked()) {
+                    let enabled = app.state.simulation.toggle_dataset_overlay(run.dataset_id);
+                    app.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::info(if enabled {
+                            format!("Overlaying {} on the active result sheet.", run.label)
+                        } else {
+                            format!("Removed {} from the active result sheet.", run.label)
+                        }));
+                }
+                if !run_active && query.is_empty() {
+                    continue;
                 }
                 for analysis in run.analyses {
                     let analysis_active =
@@ -669,12 +1071,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         Some(analysis.short_label),
                         1,
                     ) {
-                        if !run_active {
-                            app.state.simulation.select_run(run.run_index);
-                        }
-                        app.state
-                            .simulation
-                            .select_analysis(analysis.analysis_index);
+                        select_result_analysis(app, run.run_index, analysis.analysis_index);
                     }
                     if analysis_active {
                         for signal in analysis.signals {
@@ -683,21 +1080,40 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                 &signal.color,
                                 t.color.traces[signal.waveform_index % t.color.traces.len()],
                             );
-                            let response = signal_row(
+                            let signal_selected = selected_trace.as_ref().is_some_and(|selected| {
+                                selected.analysis_key() == analysis.presentation_key
+                                    && selected.source_name() == signal.name
+                            });
+                            let row_id = ui.id().with((
+                                "result-signal",
+                                analysis.analysis_index,
+                                signal.waveform_index,
+                            ));
+                            let responses = signal_row(
                                 ui,
+                                row_id,
                                 &signal.name,
                                 signal.value.as_deref(),
                                 color,
+                                signal_selected,
                                 signal.visible,
                             );
-                            if response.clicked() {
+                            if responses.visibility.clicked() {
                                 crate::workbench::documents::result_document::toggle_visibility(
                                     &mut app.state,
                                     analysis.analysis_index,
                                     signal.waveform_index,
                                 );
                             }
-                            locate_on_schematic_menu(&response, app, &signal.name);
+                            if responses.selection.clicked() {
+                                select_result_signal(
+                                    app,
+                                    run.run_index,
+                                    analysis.analysis_index,
+                                    signal.waveform_index,
+                                );
+                            }
+                            locate_on_schematic_menu(&responses.selection, app, &signal.name);
                         }
                     }
                 }
@@ -706,32 +1122,26 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             let Some(analysis_index) = app.state.simulation.active_analysis_idx else {
                 return;
             };
-            let expressions = app
-                .state
-                .ui
-                .results
-                .exprs
-                .get(&analysis_index)
-                .cloned()
-                .unwrap_or_default();
             expression_header(ui, app);
             let mut toggled_expression = None;
-            for (expression_index, expression) in expressions.iter().enumerate() {
-                if !query.is_empty() && !expression.text.to_lowercase().contains(&query) {
-                    continue;
-                }
+            for (expression_index, expression) in &expressions {
                 let t = Tokens::get(ui.ctx());
-                let response = signal_row(
+                let row_id = ui
+                    .id()
+                    .with(("result-expression", analysis_index, *expression_index));
+                let responses = signal_row(
                     ui,
+                    row_id,
                     &expression.text,
                     Some("expression"),
-                    t.color.traces[expression_index % t.color.traces.len()],
+                    t.color.traces[*expression_index % t.color.traces.len()],
+                    false,
                     expression.visible,
                 );
-                if response.clicked() {
-                    toggled_expression = Some(expression_index);
+                if responses.visibility.clicked() {
+                    toggled_expression = Some(*expression_index);
                 }
-                locate_on_schematic_menu(&response, app, &expression.text);
+                locate_on_schematic_menu(&responses.selection, app, &expression.text);
             }
             if let Some(expression_index) = toggled_expression
                 && let Some(expression) = app
@@ -749,13 +1159,192 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
 
 struct ResultRun {
     run_index: usize,
+    dataset_id: DatasetId,
     label: String,
     success: bool,
+    analysis_count: usize,
     analyses: Vec<ResultAnalysis>,
+}
+
+struct ResultDatasetRowResponses {
+    selection: Response,
+    overlay: Option<Response>,
+}
+
+fn result_dataset_row(
+    ui: &mut Ui,
+    icon: WorkbenchIcon,
+    label: &str,
+    selected: bool,
+    meta: &str,
+    overlaid: bool,
+) -> ResultDatasetRowResponses {
+    let t = Tokens::get(ui.ctx());
+    let height = t.metrics.row_h;
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), height),
+        egui::Sense::hover(),
+    );
+    let overlay_width = if selected { 0.0 } else { 30.0 };
+    let selection_rect = egui::Rect::from_min_max(
+        rect.left_top(),
+        egui::pos2(rect.right() - overlay_width, rect.bottom()),
+    );
+    let selection = ui.interact(
+        selection_rect,
+        ui.id().with(("result-dataset-selection", label)),
+        egui::Sense::click(),
+    );
+    selection.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            label,
+        )
+    });
+    let overlay = (!selected).then(|| {
+        let overlay_rect = egui::Rect::from_min_max(
+            egui::pos2(selection_rect.right(), rect.top()),
+            rect.right_bottom(),
+        );
+        let response = ui.interact(
+            overlay_rect,
+            ui.id().with(("result-dataset-overlay", label)),
+            egui::Sense::click(),
+        );
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::Button,
+                ui.is_enabled(),
+                overlaid,
+                format!("Overlay {label}"),
+            )
+        });
+        let dot = egui::Rect::from_center_size(overlay_rect.center(), egui::vec2(10.0, 10.0));
+        ui.painter().circle(
+            dot.center(),
+            4.5,
+            if overlaid {
+                t.color.accent
+            } else {
+                egui::Color32::TRANSPARENT
+            },
+            egui::Stroke::new(
+                1.0,
+                if response.hovered() || overlaid {
+                    t.color.accent
+                } else {
+                    t.color.text_faint
+                },
+            ),
+        );
+        theme::paint_focus_ring(ui, &response, overlay_rect);
+        response
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(if overlaid {
+                format!("Remove {label} from the active result sheet")
+            } else {
+                format!("Overlay {label} on the active result sheet")
+            })
+    });
+    if selected || selection.hovered() {
+        ui.painter().rect_filled(
+            selection_rect,
+            0.0,
+            if selected {
+                t.color.accent_dim
+            } else {
+                t.color.bg_hover
+            },
+        );
+    }
+    if selected {
+        ui.painter().rect_filled(
+            egui::Rect::from_min_max(
+                rect.left_top(),
+                egui::pos2(rect.left() + 2.0, rect.bottom()),
+            ),
+            0.0,
+            t.color.accent,
+        );
+    }
+    let caret_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 12.0, rect.center().y),
+        egui::vec2(9.0, 9.0),
+    );
+    if selected {
+        WorkbenchIcon::ChevronDown.paint(ui.painter(), caret_rect, t.color.text_dim);
+    } else {
+        let stroke = egui::Stroke::new(1.0, t.color.text_faint);
+        ui.painter().line_segment(
+            [
+                egui::pos2(caret_rect.left() + 2.5, caret_rect.top() + 1.5),
+                caret_rect.center(),
+            ],
+            stroke,
+        );
+        ui.painter().line_segment(
+            [
+                caret_rect.center(),
+                egui::pos2(caret_rect.left() + 2.5, caret_rect.bottom() - 1.5),
+            ],
+            stroke,
+        );
+    }
+    icon.paint(
+        ui.painter(),
+        egui::Rect::from_center_size(
+            egui::pos2(rect.left() + 31.0, rect.center().y),
+            egui::vec2(15.0, 15.0),
+        ),
+        if selected {
+            t.color.text
+        } else {
+            t.color.text_dim
+        },
+    );
+    let meta_width = ui
+        .painter()
+        .layout_no_wrap(
+            meta.to_owned(),
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            t.color.text_faint,
+        )
+        .size()
+        .x;
+    let label_left = rect.left() + 45.0;
+    let label_right = selection_rect.right() - 14.0 - meta_width;
+    ui.painter()
+        .with_clip_rect(egui::Rect::from_x_y_ranges(
+            label_left..=label_right.max(label_left),
+            rect.y_range(),
+        ))
+        .text(
+            egui::pos2(label_left, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            label,
+            theme::sans(tokens::FS_0, FontWeight::Regular),
+            if selected {
+                t.color.text
+            } else {
+                t.color.text_dim
+            },
+        );
+    ui.painter().text(
+        egui::pos2(selection_rect.right() - 8.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        meta,
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.text_faint,
+    );
+    theme::paint_focus_ring(ui, &selection, selection_rect);
+    ResultDatasetRowResponses { selection, overlay }
 }
 
 struct ResultAnalysis {
     analysis_index: usize,
+    presentation_key: crate::workbench::documents::result_document::AnalysisPresentationKey,
     label: String,
     short_label: &'static str,
     success: bool,
@@ -827,36 +1416,72 @@ fn expression_header(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
+struct SignalRowResponses {
+    selection: egui::Response,
+    visibility: egui::Response,
+}
+
 fn signal_row(
     ui: &mut Ui,
+    id: egui::Id,
     name: &str,
     value: Option<&str>,
     color: egui::Color32,
+    selected: bool,
     visible: bool,
-) -> egui::Response {
+) -> SignalRowResponses {
     let t = Tokens::get(ui.ctx());
     let row_height = responsive_result_control_height(SIGNAL_ROW_HEIGHT, t.metrics.ctl_h);
-    let (rect, response) = ui.allocate_exact_size(
+    let (rect, _) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), row_height),
-        egui::Sense::click(),
+        egui::Sense::hover(),
     );
-    response.widget_info(|| {
+    let visibility_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 19.0, rect.center().y),
+        egui::vec2(26.0, row_height),
+    )
+    .intersect(rect);
+    let selection_rect = egui::Rect::from_min_max(
+        egui::pos2(visibility_rect.right(), rect.top()),
+        rect.right_bottom(),
+    );
+    let visibility = ui.interact(visibility_rect, id.with("visibility"), egui::Sense::click());
+    visibility.widget_info(|| {
         egui::WidgetInfo::selected(
-            egui::WidgetType::SelectableLabel,
+            egui::WidgetType::Button,
             ui.is_enabled(),
             visible,
             format!("{name} trace visibility"),
         )
     });
-    if visible || response.hovered() {
+    let selection = ui.interact(selection_rect, id.with("selection"), egui::Sense::click());
+    selection.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            name,
+        )
+    });
+    if selected || selection.hovered() || visibility.hovered() {
         ui.painter().rect_filled(
             rect,
             0.0,
-            if visible {
+            if selected {
                 t.color.accent_dim
             } else {
                 t.color.bg_hover
             },
+        );
+    }
+    if selected {
+        ui.painter().rect_filled(
+            egui::Rect::from_min_max(
+                rect.left_top(),
+                egui::pos2(rect.left() + 2.0, rect.bottom()),
+            ),
+            0.0,
+            t.color.accent,
         );
     }
     let swatch = egui::Rect::from_center_size(
@@ -888,8 +1513,61 @@ fn signal_row(
             t.color.text_faint,
         );
     }
-    theme::paint_focus_ring_outset(ui, &response, rect);
-    response.on_hover_text(if visible { "Hide trace" } else { "Show trace" })
+    theme::paint_focus_ring(ui, &visibility, visibility_rect);
+    theme::paint_focus_ring(ui, &selection, selection_rect);
+    let visibility = visibility.on_hover_text(if visible {
+        format!("Hide {name}")
+    } else {
+        format!("Show {name}")
+    });
+    let selection = selection.on_hover_text(format!("Select {name}"));
+    SignalRowResponses {
+        selection,
+        visibility,
+    }
+}
+
+fn select_result_dataset(app: &mut RSpiceApp, run_index: usize) -> bool {
+    if !app.state.simulation.select_run(run_index) {
+        return false;
+    }
+    app.state.ui.results.selected_trace = None;
+    true
+}
+
+fn select_result_analysis(app: &mut RSpiceApp, run_index: usize, analysis_index: usize) -> bool {
+    if app.state.simulation.active_run_idx != Some(run_index)
+        && !select_result_dataset(app, run_index)
+    {
+        return false;
+    }
+    if !app.state.simulation.select_analysis(analysis_index) {
+        return false;
+    }
+    app.state.ui.results.selected_trace = None;
+    true
+}
+
+fn select_result_signal(
+    app: &mut RSpiceApp,
+    run_index: usize,
+    analysis_index: usize,
+    waveform_index: usize,
+) -> bool {
+    let Some(run) = app.state.simulation.runs.get(run_index) else {
+        return false;
+    };
+    let Some(selected) =
+        crate::workbench::documents::result_document::SelectedResultTrace::from_run_indices(
+            run,
+            analysis_index,
+            waveform_index,
+        )
+    else {
+        return false;
+    };
+    app.state.ui.results.selected_trace = Some(selected);
+    true
 }
 
 /// The other direction of the probe loop: from a trace back to the conductor
@@ -1629,7 +2307,6 @@ fn models(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-
 fn nav_row_indented_styled(
     ui: &mut Ui,
     icon: WorkbenchIcon,
@@ -1844,14 +2521,17 @@ mod tests {
         NETLIST_OUTLINE_TOUCH_ROW_HEIGHT, NetlistNavigatorProjection, NetlistNavigatorRowKind,
         PANEL_SEARCH_MARGIN_X, SIGNAL_ROW_HEIGHT, TOUCH_TARGET_HEIGHT, active_mc_sample_trail,
         flow_row_geometry, header, panel_search, panel_search_field_width,
-        responsive_result_control_height, verification_coverage, verification_flow_label,
+        responsive_result_control_height, select_result_analysis, select_result_dataset,
+        select_result_signal, verification_coverage, verification_flow_label,
         verification_navigator_requires_scroll,
     };
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
     use crate::services::yield_manager::{
         DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
     };
-    use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationState};
+    use crate::state::{
+        AnalysisResult, AnalysisType, SimulationRun, SimulationState, WaveformData,
+    };
     use crate::workbench::RSpiceApp;
     use crate::workbench::state::{VerificationPage, Workspace};
 
@@ -2148,6 +2828,63 @@ mod tests {
         assert_eq!(
             responsive_result_control_height(SIGNAL_ROW_HEIGHT, TOUCH_TARGET_HEIGHT),
             TOUCH_TARGET_HEIGHT
+        );
+    }
+
+    fn result_navigator_app() -> RSpiceApp {
+        let mut app = RSpiceApp::test_instance();
+        let transient =
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e"),
+            ]);
+        let ac =
+            AnalysisResult::new(2, AnalysisType::Ac, "AC").with_waveforms(vec![WaveformData::new(
+                "V(in)",
+                vec![1.0, 10.0],
+                vec![1.0, 0.5],
+                "#55aaff",
+            )]);
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(transient);
+        run.add_analysis(ac);
+        app.state.simulation.runs = vec![run];
+        app.state.simulation.active_run_idx = None;
+        app.state.simulation.active_analysis_idx = None;
+        app
+    }
+
+    #[test]
+    fn result_navigator_selection_preserves_dataset_and_visibility_invariants() {
+        let mut app = result_navigator_app();
+
+        assert!(select_result_dataset(&mut app, 0));
+        assert_eq!(app.state.simulation.active_run_idx, Some(0));
+        assert_eq!(app.state.simulation.active_analysis_idx, Some(0));
+
+        let was_visible = app.state.simulation.runs[0].analyses[0].waveforms[0].visible;
+        assert!(select_result_signal(&mut app, 0, 0, 0));
+        let selected = app
+            .state
+            .ui
+            .results
+            .valid_selected_trace(&app.state.simulation)
+            .expect("signal selection resolves against the active dataset");
+        assert_eq!(selected.source_name(), "V(out)");
+        assert_eq!(
+            app.state.simulation.runs[0].analyses[0].waveforms[0].visible,
+            was_visible
+        );
+
+        assert!(select_result_analysis(&mut app, 0, 1));
+        assert_eq!(app.state.simulation.active_run_idx, Some(0));
+        assert_eq!(app.state.simulation.active_analysis_idx, Some(1));
+        assert!(
+            app.state
+                .ui
+                .results
+                .valid_selected_trace(&app.state.simulation)
+                .is_none(),
+            "changing analysis clears the now-invalid signal selection"
         );
     }
 
