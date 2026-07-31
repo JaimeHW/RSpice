@@ -2295,7 +2295,11 @@ impl Default for DrawingSheetProjectSettingsWire {
             presets: settings.presets,
             preset_import_receipts: settings.preset_import_receipts,
             transaction_receipts: settings.transaction_receipts,
-            title_block_field_values: Some(settings.title_block_field_values),
+            // `None` is the schema-presence sentinel. A missing field belongs
+            // to the legacy format and must migrate project-owned values from
+            // `default_format`; an explicitly serialized empty/default map is
+            // still deserialized as `Some`.
+            title_block_field_values: None,
             new_sheet_policy: settings.new_sheet_policy,
             remember_last_explicit_format: settings.remember_last_explicit_format,
             last_explicit_format: settings.last_explicit_format,

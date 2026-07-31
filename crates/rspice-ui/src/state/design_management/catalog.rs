@@ -961,6 +961,26 @@ impl DesignManagementCatalog {
             "design management catalog",
             "catalog".to_owned(),
         )?;
+        // A reviewed candidate may have used several private revision steps
+        // while staging one atomic project publication. A transaction receipt
+        // created during that staging must name the single revision actually
+        // committed here, not a private candidate revision that will never
+        // exist in the live catalog. Historical receipts remain immutable.
+        let committed_revision = candidate.revision;
+        let staged_receipts = candidate
+            .drawing_sheet_settings
+            .transaction_receipts
+            .iter_mut()
+            .filter(|receipt| receipt.catalog_revision > self.revision)
+            .collect::<Vec<_>>();
+        if staged_receipts.len() > 1 {
+            return Err(DesignManagementError::NumericRange(
+                "reviewed drawing sheet transaction receipt count",
+            ));
+        }
+        for receipt in staged_receipts {
+            receipt.catalog_revision = committed_revision;
+        }
         candidate.validate()?;
         let revision = candidate.revision;
         *self = candidate;

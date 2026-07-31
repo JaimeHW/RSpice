@@ -2126,6 +2126,5 @@ fn hash_u64(hasher: &mut Sha256, value: u64) {
     hasher.update(value.to_be_bytes());
 }
 
-
 #[cfg(test)]
 mod tests;

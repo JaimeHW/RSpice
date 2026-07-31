@@ -1849,6 +1849,5 @@ fn parse_error_line(error: &rspice_core::netlist::ParseError) -> Option<usize> {
     }
 }
 
-
 #[cfg(test)]
 mod tests;

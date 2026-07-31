@@ -131,7 +131,6 @@ impl SymbolSourceContract {
         Self::BlankExplicitContract
     }
 
-
     pub const fn is_explicitly_unbound_for_review(&self) -> bool {
         matches!(self, Self::BlankExplicitContract)
     }
@@ -232,7 +231,6 @@ pub enum SymbolGraphicTemplate {
     RectangularIc,
     RfNPort,
 }
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
