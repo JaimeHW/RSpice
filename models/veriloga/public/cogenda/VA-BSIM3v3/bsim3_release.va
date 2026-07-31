@@ -1083,7 +1083,7 @@ module bsim3_va(d, g, s, b);
     real BSIM3pcigbinv,BSIM3eigbinv,BSIM3leigbinv,BSIM3weigbinv,BSIM3peigbinv;
     integer BSIM3pcigbinvGiven,BSIM3eigbinvGiven,BSIM3leigbinvGiven,BSIM3weigbinvGiven,BSIM3peigbinvGiven;
     real BSIM3nigbinv,BSIM3lnigbinv,BSIM3wnigbinv,BSIM3pnigbinv,BSIM3toxe;
-    integer BSIM3nigbinvGiven,BSIM3lnigbinvGiven,BSIM3wnigbinvGiven,BSIM3pnigbinvGiven,BSIM3toxeGiven;
+    integer BSIM3nigbinvGiven,BSIM3lnigbinvGiven,BSIM3wnigbinvGiven,BSIM3pnigbinvGiven,BSIM3toxeGiven,BSIM3toxmGiven;
     real BSIM3vtm0,BSIM3toxref,BSIM3ntox,BSIM3lntox,BSIM3wntox;
     integer BSIM3vtm0Given,BSIM3toxrefGiven,BSIM3ntoxGiven,BSIM3lntoxGiven,BSIM3wntoxGiven;
     real BSIM3pntox,BSIM3pigcd,BSIM3lpigcd,BSIM3wpigcd,BSIM3ppigcd;
@@ -6837,6 +6837,5 @@ module bsim3_va(d, g, s, b);
    
     end
 endmodule 
-
 
 
