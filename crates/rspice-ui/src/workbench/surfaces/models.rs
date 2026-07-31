@@ -1,8 +1,16 @@
 //! Model catalog, symbol contracts, PDK sections, authenticated includes, and
 //! the source-owned model qualification and release gate.
 
+mod bins;
+mod catalog;
+mod corners;
+mod include_manifest;
 mod qualification;
 
+use bins::*;
+use catalog::*;
+use corners::*;
+use include_manifest::*;
 use qualification::*;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -13,8 +21,10 @@ use sha2::{Digest as _, Sha256};
 
 use crate::diagnostics::ConsoleMessage;
 use crate::state::model_library::{
-    DeviceModel, ModelCorrelationState, ModelLibrary, ModelQualificationState,
-    ModelSourceEvidenceBinding, QualificationAnalysis, QualificationPlatform,
+    DeviceModel, ModelBinAuditAxisRange, ModelBinAuditDraft, ModelBinAuditFinding,
+    ModelBinAuditFindingKind, ModelBinAuditReceipt, ModelCorrelationState, ModelDefinitionConflict,
+    ModelLibrary, ModelQualificationState, ModelSourceEvidenceBinding, ModelSubcircuitInterface,
+    PackModelHit, QualificationAnalysis, QualificationPlatform,
 };
 use crate::state::{CellViewRef, ModelBoundSymbolDefinition, SymbolDocument, ViewType};
 use crate::ui::theme::{self, FontWeight};
@@ -22,17 +32,17 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::{
-    open_create_model_bound_symbol_dialog, open_symbol_import_dialog,
-    open_symbol_parameter_form_dialog,
+    open_create_model_bound_symbol_dialog, open_create_subcircuit_bound_symbol_dialog,
+    open_symbol_import_dialog, open_symbol_parameter_form_dialog,
 };
 
-use crate::workbench::commands::{CommandAvailability, vocabulary::Command};
 use super::super::design_system::{
     property_card, property_row, property_row_toned, workspace_title_row,
 };
-use crate::workbench::documents::model_editor::{self, ModelEditorSection};
-use super::super::state::{ModelsPage, Workspace};
+use super::super::state::{ModelCatalogScope, ModelProjectFacet, ModelsPage, Workspace};
 use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
+use crate::workbench::commands::{CommandAvailability, vocabulary::Command};
+use crate::workbench::documents::model_editor::{self, ModelEditorSection};
 
 const TABLE_HEAD_H: f32 = 27.0;
 const TABLE_CARD_HEAD_H: f32 = 37.0;
@@ -73,6 +83,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         ModelsPage::Models => models_catalog(&mut surface, app),
         ModelsPage::Symbols => symbols(&mut surface, app),
         ModelsPage::Corners => corners(&mut surface, app),
+        ModelsPage::Bins => bins(&mut surface, app),
         ModelsPage::Include => include_graph(&mut surface, app),
         ModelsPage::Qualification => qualification(&mut surface, app),
     }
@@ -86,7 +97,9 @@ fn model_tabs(ui: &mut Ui, app: &mut RSpiceApp, current_page: ModelsPage) -> Opt
     let t = Tokens::get(ui.ctx());
     let touch = t.metrics.ctl_h >= 44.0;
     let tab_h = if touch { 44.0 } else { 37.0 };
-    let filter_visible = current_page == ModelsPage::Models;
+    // Models owns a scope-aware query field below this tab strip. A second
+    // global field here would conflate project filtering with pack discovery.
+    let filter_visible = false;
     let strip_h = model_tab_strip_height(touch, filter_visible);
     let surface_w = ui.available_width().max(1.0);
     let filter_outer_w = if filter_visible {
@@ -243,117 +256,6 @@ fn model_tabs(ui: &mut Ui, app: &mut RSpiceApp, current_page: ModelsPage) -> Opt
 
     ui.add_space(1.0);
     selected.filter(|page| *page != current_page)
-}
-
-fn models_catalog(ui: &mut Ui, app: &mut RSpiceApp) {
-    let t = Tokens::get(ui.ctx());
-    let query = app.state.model_library_manager.filter_text.clone();
-    let rows = app
-        .state
-        .model_library_manager
-        .search_models(&query)
-        .into_iter()
-        .map(|(library, model)| {
-            let selected = app.state.workbench.selected_model.as_deref() == Some(&model.name)
-                && app.state.model_library_manager.selected_library.as_deref()
-                    == Some(&library.name);
-            let geometry_invalid = model_geometry_invalid(model);
-            let externally_unpinned =
-                library.root_path.is_some() && library.source_closure.is_empty();
-            let undocumented = model.description.trim().is_empty();
-            let (status, status_color) = if geometry_invalid {
-                ("geometry review", t.color.err)
-            } else if externally_unpinned {
-                ("source unpinned", t.color.err)
-            } else if undocumented {
-                ("documentation", t.color.warn)
-            } else if library.root_path.is_some() {
-                ("source pinned", t.color.ok)
-            } else {
-                ("in memory", t.color.info)
-            };
-            DataRow {
-                key: model_key(&library.name, &model.name),
-                selected,
-                cells: vec![
-                    DataCell::mono(&model.name),
-                    DataCell::plain(format!(
-                        "{} · {}",
-                        model.model_type.display_name(),
-                        model.level.display_name()
-                    )),
-                    DataCell::mono(model_source_label(library, model)),
-                    DataCell::plain(&library.name),
-                    DataCell::plain(model_sections_or_runtime(library, model)),
-                    DataCell::mono_colored("not recorded", t.color.text_faint),
-                    DataCell::mono_colored(status, status_color),
-                ],
-            }
-        })
-        .collect::<Vec<_>>();
-
-    let mut rows = rows;
-    let pack_rows = pack_catalog_rows(app, &query, &t);
-    let pack_truncated = pack_rows.len() >= PACK_ROW_LIMIT;
-    rows.extend(pack_rows);
-
-    let empty_message = if app.state.model_library_manager.pack_definition_count() > 0 {
-        "No models match the active filter, in the loaded libraries or the shipped packs."
-    } else {
-        "No models match the active filter."
-    };
-
-    let columns = [
-        ("Model", 0.15),
-        ("Family", 0.17),
-        ("Source", 0.17),
-        ("Library", 0.14),
-        ("Sections / runtime", 0.18),
-        ("Tests", 0.10),
-        ("Status", 0.09),
-    ];
-    // A truncated result set must say so. Reporting a bounded window as if it
-    // were the whole match set is the failure this table exists to avoid.
-    let mut body = ui.available_size();
-    if pack_truncated {
-        body.y = (body.y - 16.0).max(1.0);
-    }
-
-    if let Some(event) = data_table(
-        ui,
-        "models.catalog",
-        model_catalog_min_width(ui.available_width()),
-        &columns,
-        &rows,
-        body,
-        empty_message,
-    ) {
-        let (library, model) = split_model_key(&event.key);
-        // Shipped-pack rows are keyed by pack id, which is not a loaded
-        // library. Selecting one would leave the inspector bound to whatever
-        // library was selected before while the model name changed underneath
-        // it — showing another library's data under this name. Until a pack
-        // definition can be loaded on demand, such a row is not selectable.
-        if app
-            .state
-            .model_library_manager
-            .get_library(library)
-            .is_some()
-        {
-            app.state.model_library_manager.select_library(library);
-            app.state.workbench.selected_model = Some(model.to_owned());
-        }
-    }
-
-    if pack_truncated {
-        ui.label(
-            egui::RichText::new(format!(
-                "Showing the first {PACK_ROW_LIMIT} shipped-pack matches; narrow the filter to see more."
-            ))
-            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-            .color(t.color.text_faint),
-        );
-    }
 }
 
 fn symbols(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -563,190 +465,7 @@ fn symbols(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
-    let quantity_policy = app.state.ui.preferences.quantity_presentation_policy();
-    let corner_count = app
-        .state
-        .model_library_manager
-        .libraries_sorted()
-        .into_iter()
-        .flat_map(|library| library.corners.keys())
-        .map(|name| name.to_ascii_lowercase())
-        .collect::<BTreeSet<_>>()
-        .len();
-    surface_title(
-        ui,
-        &format!("PDK sections · {corner_count} process corners"),
-        "Corner and section binding",
-        "Inspect exact process bindings and source availability before simulation task expansion.",
-        false,
-        |_| {},
-    );
-
-    let t = Tokens::get(ui.ctx());
-    let mut rows = Vec::new();
-    let mut targets = HashMap::<String, (String, String)>::new();
-    let mut temperatures = BTreeSet::<String>::new();
-    let mut supplies = BTreeSet::<String>::new();
-    let mut resolved = 0usize;
-    let mut unresolved = 0usize;
-    for library in app.state.model_library_manager.libraries_sorted() {
-        let mut corners = library.corners.values().collect::<Vec<_>>();
-        corners.sort_by(|left, right| left.name.cmp(&right.name));
-        for corner in corners {
-            temperatures.insert(format!("{:.6}", corner.temperature));
-            supplies.insert(format!("{:.6}", corner.vdd_factor));
-            let resolved_source = corner.file_path.is_some()
-                || (corner.name.eq_ignore_ascii_case("tt") && library.root_path.is_none());
-            if resolved_source {
-                resolved += 1;
-            } else {
-                unresolved += 1;
-            }
-            let key = model_key(&library.name, &corner.name);
-            targets.insert(key.clone(), (library.name.clone(), corner.name.clone()));
-            let selected = app.state.model_library_manager.selected_library.as_deref()
-                == Some(&library.name)
-                && library.selected_corner.as_deref() == Some(&corner.name);
-            rows.push(DataRow {
-                key,
-                selected,
-                cells: vec![
-                    DataCell::mono(corner.name.to_uppercase()),
-                    DataCell::mono(&corner.nmos_corner),
-                    DataCell::mono(&corner.pmos_corner),
-                    DataCell::mono(
-                        corner
-                            .file_path
-                            .as_deref()
-                            .and_then(Path::file_name)
-                            .and_then(|name| name.to_str())
-                            .unwrap_or("not bound"),
-                    ),
-                    DataCell::mono(
-                        quantity_policy.format_temperature(corner.temperature + 273.15, 3),
-                    ),
-                    DataCell::mono(format!("{:.6}", corner.vdd_factor)),
-                    DataCell::mono_colored(
-                        if resolved_source {
-                            "resolved"
-                        } else {
-                            "unresolved"
-                        },
-                        if resolved_source {
-                            t.color.ok
-                        } else {
-                            t.color.err
-                        },
-                    ),
-                ],
-            });
-        }
-    }
-
-    let available = ui.available_size();
-    let layout = model_table_summary_layout(available, t.metrics.ctl_h >= 44.0);
-    let columns = [
-        ("Corner", 0.11),
-        ("NMOS section", 0.16),
-        ("PMOS section", 0.16),
-        ("Model source", 0.20),
-        ("Temperature", 0.14),
-        ("Supply factor", 0.13),
-        ("Status", 0.10),
-    ];
-    let temperature_axis = if temperatures.is_empty() {
-        "not declared".to_owned()
-    } else {
-        temperatures
-            .iter()
-            .filter_map(|value| value.parse::<f64>().ok())
-            .map(|celsius| quantity_policy.format_temperature(celsius + 273.15, 3))
-            .collect::<Vec<_>>()
-            .join(" / ")
-    };
-    let supply_axis = format_numeric_axis(&supplies, "× nominal");
-    let event = table_summary_composition(
-        ui,
-        "models.corners.composition",
-        available,
-        layout,
-        |ui, table_h| {
-            let event = data_table(
-                ui,
-                "models.corners",
-                GENERAL_TABLE_MIN_W,
-                &columns,
-                &rows,
-                egui::vec2(ui.available_width(), table_h),
-                "No process-corner bindings are present in the loaded model libraries.",
-            );
-            summary_cards(
-                ui,
-                layout.narrow,
-                layout.summary_height,
-                layout.owns_vertical_scroll,
-                SummaryCardSpec::new(
-                    "Binding policy",
-                    &[
-                        ("Resolved bindings", resolved.to_string()),
-                        ("Unresolved bindings", unresolved.to_string()),
-                        ("Missing non-TT section", "fail closed".to_owned()),
-                    ],
-                ),
-                SummaryCardSpec::new(
-                    "Environment axes",
-                    &[
-                        ("Temperature", temperature_axis),
-                        ("Supply factor", supply_axis),
-                        (
-                            "PDK search paths",
-                            app.state.pdk_config.library_paths.len().to_string(),
-                        ),
-                    ],
-                ),
-            );
-            event
-        },
-    );
-    if let Some(event) = event
-        && let Some((library, corner)) = targets.get(&event.key).cloned()
-    {
-        app.state.model_library_manager.select_library(&library);
-        if let Some(library) = app.state.model_library_manager.get_library_mut(&library) {
-            library.select_corner(&corner);
-        }
-    }
-}
-
 fn include_graph(ui: &mut Ui, app: &mut RSpiceApp) {
-    let collapsed_id = ui.make_persistent_id("models.include.collapsed");
-    let mut collapsed = ui
-        .ctx()
-        .data_mut(|data| data.get_temp::<bool>(collapsed_id).unwrap_or(false));
-    let before = collapsed;
-    surface_title(
-        ui,
-        "Include resolution · content addressed",
-        "Model include graph",
-        "Inspect ordered dependency resolution, captured paths, source pins, and cycle diagnostics.",
-        true,
-        |ui| {
-            let label = if collapsed {
-                "Expand transitive"
-            } else {
-                "Collapse transitive"
-            };
-            if Button::new(label).show(ui).clicked() {
-                collapsed = !collapsed;
-            }
-        },
-    );
-    if collapsed != before {
-        ui.ctx()
-            .data_mut(|data| data.insert_temp(collapsed_id, collapsed));
-    }
-
     let libraries = app
         .state
         .model_library_manager
@@ -773,10 +492,74 @@ fn include_graph(ui: &mut Ui, app: &mut RSpiceApp) {
                 .collect(),
         })
         .collect::<Vec<_>>();
+    let selection_is_valid = app
+        .state
+        .workbench
+        .model_include_selected_library
+        .as_deref()
+        .zip(app.state.workbench.model_include_selected_source.as_deref())
+        .is_some_and(|(selected_library, selected_source)| {
+            libraries.iter().any(|library| {
+                library.name == selected_library
+                    && (library.root.as_deref() == Some(selected_source)
+                        || library
+                            .sources
+                            .iter()
+                            .any(|(path, _)| path == selected_source))
+            })
+        });
+    if !selection_is_valid {
+        app.state.workbench.model_include_selected_library = None;
+        app.state.workbench.model_include_selected_source = None;
+    }
+    let mut direct_only = app.state.workbench.model_include_direct_only;
+    surface_title_with_action_reserve(
+        ui,
+        "Include resolution · content addressed",
+        "Model include graph",
+        "Inspect ordered dependency resolution, captured paths, source pins, and cycle diagnostics.",
+        true,
+        360.0,
+        |ui| {
+            let label = if direct_only {
+                "Expand transitive"
+            } else {
+                "Collapse transitive"
+            };
+            if Button::new(label).show(ui).clicked() {
+                direct_only = !direct_only;
+                app.state.workbench.model_include_direct_only = direct_only;
+            }
+            if Button::new("Export manifest")
+                .accent()
+                .enabled(!libraries.is_empty())
+                .show(ui)
+                .clicked()
+            {
+                match export_model_dependency_manifest(app) {
+                    Ok(Some(receipt)) => app.state.ui.toasts.success(
+                        ui.ctx(),
+                        "Dependency manifest exported",
+                        receipt,
+                    ),
+                    Ok(None) => {}
+                    Err(error) => {
+                        app.state.push_user_message(ConsoleMessage::error(format!(
+                            "Model dependency manifest export failed: {error}"
+                        )));
+                        app.state.ui.toasts.error_with_title(
+                            ui.ctx(),
+                            "Dependency manifest export failed",
+                            error,
+                        );
+                    }
+                }
+            }
+        },
+    );
     let diagnostics = include_diagnostics(app);
-    include_graph_content(ui, &libraries, &diagnostics, collapsed);
+    include_graph_content(ui, app, &libraries, &diagnostics, direct_only);
 }
-
 
 fn surface_title(
     ui: &mut Ui,
@@ -1166,6 +949,14 @@ fn data_table(
                     });
                 }
                 if response.has_focus() {
+                    if ui.input(|input| {
+                        input.key_pressed(Key::Enter) || input.key_pressed(Key::Space)
+                    }) {
+                        event = Some(TableEvent {
+                            key: row.key.clone(),
+                            activate: true,
+                        });
+                    }
                     let move_to = ui.input(|input| {
                         if input.key_pressed(Key::Home) {
                             Some(0)
@@ -1579,14 +1370,21 @@ struct IncludeDiagnostics {
     definitions: usize,
     edges: usize,
     duplicate_definitions: usize,
+    conflicts: Vec<ModelDefinitionConflict>,
+    resolution_error: Option<String>,
     cyclic_nodes: usize,
     unpinned_roots: usize,
 }
 
 fn include_diagnostics(app: &RSpiceApp) -> IncludeDiagnostics {
+    let conflicts = app.state.model_library_manager.definition_conflicts();
+    let resolution_error = app
+        .state
+        .model_library_manager
+        .validate_definition_resolution()
+        .err();
     let libraries = app.state.model_library_manager.libraries_sorted();
     let mut sources = HashSet::<PathBuf>::new();
-    let mut names = HashMap::<String, usize>::new();
     let mut edges = Vec::<(PathBuf, PathBuf)>::new();
     let mut unpinned_roots = 0usize;
     for library in &libraries {
@@ -1599,16 +1397,37 @@ fn include_diagnostics(app: &RSpiceApp) -> IncludeDiagnostics {
         for edge in &library.source_edges {
             edges.push((edge.owner.clone(), edge.target.clone()));
         }
-        for name in library.models.keys() {
-            *names.entry(name.to_ascii_lowercase()).or_default() += 1;
+    }
+    let definitions = libraries
+        .iter()
+        .map(|library| library.models.len() + library.subcircuits.len())
+        .sum();
+    let duplicate_models: usize = conflicts
+        .iter()
+        .map(|conflict| conflict.providers.len().saturating_sub(1))
+        .sum();
+    let mut active_subcircuit_names = HashMap::<String, usize>::new();
+    for library in &libraries {
+        for subcircuit in library.subcircuits.values().filter(|subcircuit| {
+            subcircuit.section.is_none()
+                || subcircuit.section.as_deref() == library.selected_corner.as_deref()
+        }) {
+            *active_subcircuit_names
+                .entry(subcircuit.name.to_ascii_lowercase())
+                .or_default() += 1;
         }
     }
-    let duplicate_definitions = names.values().map(|count| count.saturating_sub(1)).sum();
+    let duplicate_subcircuits = active_subcircuit_names
+        .values()
+        .map(|count| count.saturating_sub(1))
+        .sum::<usize>();
     IncludeDiagnostics {
         files: sources.len(),
-        definitions: names.values().sum(),
+        definitions,
         edges: edges.len(),
-        duplicate_definitions,
+        duplicate_definitions: duplicate_models + duplicate_subcircuits,
+        conflicts,
+        resolution_error,
         cyclic_nodes: cyclic_node_count(&edges),
         unpinned_roots,
     }
@@ -1649,12 +1468,16 @@ fn cyclic_node_count(edges: &[(PathBuf, PathBuf)]) -> usize {
 
 fn include_graph_content(
     ui: &mut Ui,
+    app: &mut RSpiceApp,
     libraries: &[IncludeLibrary],
     diagnostics: &IncludeDiagnostics,
     collapsed: bool,
 ) {
     let size = ui.available_size();
     let narrow = size.x <= 1020.0;
+    let selected_library = app.state.workbench.model_include_selected_library.clone();
+    let selected_source = app.state.workbench.model_include_selected_source.clone();
+    let mut requested_selection = None;
     if narrow {
         let (viewport, _) = ui.allocate_exact_size(size, Sense::hover());
         let mut child = ui.new_child(
@@ -1669,9 +1492,18 @@ fn include_graph_content(
                 ui.allocate_ui_with_layout(
                     egui::vec2(viewport.width(), 330.0),
                     Layout::top_down(Align::Min),
-                    |ui| draw_include_graph(ui, libraries, collapsed),
+                    |ui| {
+                        draw_include_graph(
+                            ui,
+                            libraries,
+                            collapsed,
+                            selected_library.as_deref(),
+                            selected_source.as_deref(),
+                            &mut requested_selection,
+                        )
+                    },
                 );
-                draw_include_diagnostics(ui, diagnostics);
+                draw_include_diagnostics(ui, app, diagnostics);
             });
     } else {
         ui.horizontal(|ui| {
@@ -1681,18 +1513,43 @@ fn include_graph_content(
             ui.allocate_ui_with_layout(
                 egui::vec2(graph_w, size.y),
                 Layout::top_down(Align::Min),
-                |ui| draw_include_graph(ui, libraries, collapsed),
+                |ui| {
+                    draw_include_graph(
+                        ui,
+                        libraries,
+                        collapsed,
+                        selected_library.as_deref(),
+                        selected_source.as_deref(),
+                        &mut requested_selection,
+                    )
+                },
             );
             ui.allocate_ui_with_layout(
                 egui::vec2(detail_w, size.y),
                 Layout::top_down(Align::Min),
-                |ui| draw_include_diagnostics(ui, diagnostics),
+                |ui| {
+                    ScrollArea::vertical()
+                        .id_salt("models.include.diagnostics")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| draw_include_diagnostics(ui, app, diagnostics));
+                },
             );
         });
     }
+    if let Some((library, source)) = requested_selection {
+        app.state.workbench.model_include_selected_library = Some(library);
+        app.state.workbench.model_include_selected_source = Some(source);
+    }
 }
 
-fn draw_include_graph(ui: &mut Ui, libraries: &[IncludeLibrary], collapsed: bool) {
+fn draw_include_graph(
+    ui: &mut Ui,
+    libraries: &[IncludeLibrary],
+    collapsed: bool,
+    selected_library: Option<&str>,
+    selected_source: Option<&Path>,
+    requested_selection: &mut Option<(String, PathBuf)>,
+) {
     let t = Tokens::get(ui.ctx());
     let size = ui.available_size();
     let (viewport, _) = ui.allocate_exact_size(size, Sense::hover());
@@ -1729,12 +1586,20 @@ fn draw_include_graph(ui: &mut Ui, libraries: &[IncludeLibrary], collapsed: bool
                     .as_deref()
                     .map(path_display_name)
                     .unwrap_or_else(|| format!("{} · in-memory", library.name));
-                include_node(
+                let root_selected = selected_library == Some(library.name.as_str())
+                    && selected_source == library.root.as_deref();
+                let root_response = include_node(
                     ui,
                     &root_label,
                     &format!("{} · {} pinned files", library.name, library.sources.len()),
                     true,
+                    root_selected,
                 );
+                if root_response.clicked()
+                    && let Some(root) = library.root.clone()
+                {
+                    *requested_selection = Some((library.name.clone(), root));
+                }
                 let root = library.root.as_deref();
                 let visible_edges = library
                     .edges
@@ -1777,12 +1642,18 @@ fn draw_include_graph(ui: &mut Ui, libraries: &[IncludeLibrary], collapsed: bool
                                 .find(|(path, _)| path == target)
                                 .map(|(_, digest)| short_digest(digest))
                                 .unwrap_or_else(|| "digest unavailable".to_owned());
-                            include_node(
+                            let selected = selected_library == Some(library.name.as_str())
+                                && selected_source == Some(target.as_path());
+                            let response = include_node(
                                 ui,
                                 &path_display_name(target),
                                 &format!("{requested} · {digest}"),
                                 false,
+                                selected,
                             );
+                            if response.clicked() {
+                                *requested_selection = Some((library.name.clone(), target.clone()));
+                            }
                         }
                     });
                 }
@@ -1791,22 +1662,41 @@ fn draw_include_graph(ui: &mut Ui, libraries: &[IncludeLibrary], collapsed: bool
         });
 }
 
-fn include_node(ui: &mut Ui, title: &str, detail: &str, root: bool) {
+fn include_node(
+    ui: &mut Ui,
+    title: &str,
+    detail: &str,
+    root: bool,
+    selected: bool,
+) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let width: f32 = if root { 360.0 } else { 230.0 };
     let width = width.min(ui.available_width().max(180.0));
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 52.0), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 52.0), Sense::click());
+    let accessible_label = format!("{title}: {detail}");
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            selected,
+            &accessible_label,
+        )
+    });
     ui.painter().rect(
         rect,
         t.radius,
-        if root {
+        if selected {
+            t.color.bg_active
+        } else if root {
             t.color.accent_dim
+        } else if response.hovered() {
+            t.color.bg_hover
         } else {
             t.color.bg_panel
         },
         Stroke::new(
-            1.0,
-            if root {
+            if selected { 2.0 } else { 1.0 },
+            if selected || root {
                 t.color.accent
             } else {
                 t.color.border_strong
@@ -1838,9 +1728,353 @@ fn include_node(ui: &mut Ui, title: &str, detail: &str, root: bool) {
         theme::mono(tokens::FS_0, FontWeight::Regular),
         t.color.text_dim,
     );
+    response
 }
 
-fn draw_include_diagnostics(ui: &mut Ui, diagnostics: &IncludeDiagnostics) {
+#[derive(Debug, Clone)]
+struct IncludeSelectionDetail {
+    library: String,
+    path: PathBuf,
+    digest: String,
+    authority: &'static str,
+    byte_length: usize,
+    root: bool,
+    incoming_edges: usize,
+    outgoing_edges: usize,
+    definitions: usize,
+}
+
+fn selected_include_source_detail(app: &RSpiceApp) -> Option<IncludeSelectionDetail> {
+    let library_name = app
+        .state
+        .workbench
+        .model_include_selected_library
+        .as_deref()?;
+    let path = app
+        .state
+        .workbench
+        .model_include_selected_source
+        .as_deref()?;
+    let library = app.state.model_library_manager.get_library(library_name)?;
+    let source = library
+        .source_closure
+        .iter()
+        .find(|source| source.path == path)?;
+    let authority = match library.source_authority {
+        crate::state::model_library::ModelSourceAuthority::BuiltIn => "built-in metadata",
+        crate::state::model_library::ModelSourceAuthority::External => {
+            "external · reauthenticated at run"
+        }
+        crate::state::model_library::ModelSourceAuthority::RetainedImport { .. } => {
+            "retained import · digest checked"
+        }
+        crate::state::model_library::ModelSourceAuthority::ProjectOwned { .. } => {
+            "project owned · revision sealed"
+        }
+    };
+    let byte_length = library
+        .source_contents
+        .iter()
+        .find(|content| content.path == path)
+        .map_or(0, |content| content.bytes.len());
+    let definitions = library
+        .models
+        .values()
+        .filter(|model| model.file_path.as_deref() == Some(path))
+        .count()
+        + library
+            .subcircuits
+            .values()
+            .filter(|subcircuit| subcircuit.file_path.as_deref() == Some(path))
+            .count();
+    Some(IncludeSelectionDetail {
+        library: library.name.clone(),
+        path: path.to_path_buf(),
+        digest: source.digest.to_string(),
+        authority,
+        byte_length,
+        root: library.root_path.as_deref() == Some(path),
+        incoming_edges: library
+            .source_edges
+            .iter()
+            .filter(|edge| edge.target == path)
+            .count(),
+        outgoing_edges: library
+            .source_edges
+            .iter()
+            .filter(|edge| edge.owner == path)
+            .count(),
+        definitions,
+    })
+}
+
+fn draw_include_selection(ui: &mut Ui, app: &mut RSpiceApp) {
+    let Some(detail) = selected_include_source_detail(app) else {
+        return;
+    };
+    property_card(ui, "Selected source", |ui| {
+        property_row(ui, "Library", &detail.library);
+        property_row(
+            ui,
+            "File",
+            &if detail.root {
+                format!("{} · root", path_display_name(&detail.path))
+            } else {
+                path_display_name(&detail.path)
+            },
+        );
+        property_row(ui, "Authority", detail.authority);
+        property_row(ui, "SHA-256", &short_digest(&detail.digest));
+        let byte_length = (detail.byte_length > 0)
+            .then(|| format!("{} bytes", detail.byte_length))
+            .unwrap_or_else(|| "not retained".to_owned());
+        property_row(ui, "Retained bytes", &byte_length);
+        property_row(
+            ui,
+            "Graph degree",
+            &format!(
+                "{} incoming · {} outgoing",
+                detail.incoming_edges, detail.outgoing_edges
+            ),
+        );
+        property_row(ui, "Definitions", &detail.definitions.to_string());
+        ui.add_space(5.0);
+        ui.horizontal_wrapped(|ui| {
+            if Button::new("Copy source path").show(ui).clicked() {
+                ui.ctx().copy_text(detail.path.display().to_string());
+                app.state.push_user_message(ConsoleMessage::info(format!(
+                    "Copied model source path '{}'.",
+                    detail.path.display()
+                )));
+            }
+            if Button::new("Browse definitions")
+                .enabled(detail.definitions > 0)
+                .show(ui)
+                .clicked()
+            {
+                app.state.model_library_manager.filter_text = path_display_name(&detail.path);
+                app.state.workbench.model_catalog_scope = ModelCatalogScope::Project;
+                app.state.workbench.model_project_facet = ModelProjectFacet::All;
+                app.state.workbench.models_page = ModelsPage::Models;
+            }
+        });
+    });
+    ui.add_space(8.0);
+}
+
+#[derive(Debug, Clone)]
+struct IncludeDefinitionRow {
+    name: String,
+    kind: &'static str,
+    library: String,
+    source: String,
+    section: String,
+    status: String,
+    exception: bool,
+    resolved: bool,
+}
+
+fn include_definition_rows(app: &RSpiceApp) -> Vec<IncludeDefinitionRow> {
+    let libraries = app.state.model_library_manager.libraries_sorted();
+    let mut multiplicity = HashMap::<(String, &'static str), usize>::new();
+    for library in &libraries {
+        for model in library.models.values() {
+            *multiplicity
+                .entry((model.name.to_ascii_lowercase(), "model"))
+                .or_default() += 1;
+        }
+        for subcircuit in library.subcircuits.values() {
+            let active = subcircuit.section.is_none()
+                || subcircuit.section.as_deref() == library.selected_corner.as_deref();
+            if active {
+                *multiplicity
+                    .entry((subcircuit.name.to_ascii_lowercase(), "subcircuit"))
+                    .or_default() += 1;
+            }
+        }
+    }
+
+    let mut rows = Vec::new();
+    for library in libraries {
+        for model in library.models.values() {
+            let normalized = model.name.to_ascii_lowercase();
+            let duplicate = multiplicity
+                .get(&(normalized.clone(), "model"))
+                .copied()
+                .unwrap_or(0)
+                > 1;
+            let selection = app
+                .state
+                .model_library_manager
+                .definition_resolution(&normalized);
+            let selected = selection.is_some_and(|resolution| {
+                resolution.provider_library == library.name
+                    && resolution.provider_model == model.name
+            });
+            let status = if !duplicate {
+                "unique provider".to_owned()
+            } else if selected {
+                "explicit winning provider".to_owned()
+            } else if selection.is_some() {
+                "non-selected candidate".to_owned()
+            } else {
+                "contested · execution blocked".to_owned()
+            };
+            rows.push(IncludeDefinitionRow {
+                name: model.name.clone(),
+                kind: "model",
+                library: library.name.clone(),
+                source: model
+                    .file_path
+                    .as_deref()
+                    .map(path_display_name)
+                    .unwrap_or_else(|| "in-memory".to_owned()),
+                section: model
+                    .section
+                    .clone()
+                    .unwrap_or_else(|| "top level".to_owned()),
+                status,
+                exception: duplicate,
+                resolved: !duplicate || selection.is_some(),
+            });
+        }
+        for subcircuit in library.subcircuits.values() {
+            let active = subcircuit.section.is_none()
+                || subcircuit.section.as_deref() == library.selected_corner.as_deref();
+            let duplicate = active
+                && multiplicity
+                    .get(&(subcircuit.name.to_ascii_lowercase(), "subcircuit"))
+                    .copied()
+                    .unwrap_or(0)
+                    > 1;
+            rows.push(IncludeDefinitionRow {
+                name: subcircuit.name.clone(),
+                kind: "subcircuit",
+                library: library.name.clone(),
+                source: subcircuit
+                    .file_path
+                    .as_deref()
+                    .map(path_display_name)
+                    .unwrap_or_else(|| "in-memory".to_owned()),
+                section: subcircuit
+                    .section
+                    .clone()
+                    .unwrap_or_else(|| "top-level".to_owned()),
+                status: if !active {
+                    "addressable section · inactive".to_owned()
+                } else if duplicate {
+                    "duplicate interface · execution review required".to_owned()
+                } else {
+                    "unique provider".to_owned()
+                },
+                exception: duplicate,
+                resolved: !duplicate,
+            });
+        }
+    }
+    rows.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+            .then_with(|| left.kind.cmp(right.kind))
+            .then_with(|| left.library.cmp(&right.library))
+            .then_with(|| left.section.cmp(&right.section))
+    });
+    rows
+}
+
+fn draw_include_definition_resolution(ui: &mut Ui, app: &mut RSpiceApp) {
+    let t = Tokens::get(ui.ctx());
+    let rows = include_definition_rows(app);
+    let exception_count = rows.iter().filter(|row| row.exception).count();
+    property_card(ui, "Definition resolution", |ui| {
+        let mut exceptions_only = app.state.workbench.model_include_exceptions_only;
+        let mut query = app.state.workbench.model_include_definition_query.clone();
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .selectable_label(!exceptions_only, "All definitions")
+                .clicked()
+            {
+                exceptions_only = false;
+            }
+            if ui
+                .selectable_label(exceptions_only, format!("Exceptions ({exception_count})"))
+                .clicked()
+            {
+                exceptions_only = true;
+            }
+        });
+        ui.add_space(4.0);
+        let response = ui.add(
+            egui::TextEdit::singleline(&mut query)
+                .hint_text("Filter definition, provider, source, or section…")
+                .desired_width(f32::INFINITY),
+        );
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::TextEdit,
+                ui.is_enabled(),
+                "Filter include-graph definitions",
+            )
+        });
+        app.state.workbench.model_include_exceptions_only = exceptions_only;
+        app.state.workbench.model_include_definition_query = query.clone();
+
+        let query = query.trim().to_ascii_lowercase();
+        let matching = rows
+            .iter()
+            .filter(|row| !exceptions_only || row.exception)
+            .filter(|row| {
+                query.is_empty()
+                    || [
+                        row.name.as_str(),
+                        row.kind,
+                        row.library.as_str(),
+                        row.source.as_str(),
+                        row.section.as_str(),
+                        row.status.as_str(),
+                    ]
+                    .iter()
+                    .any(|value| value.to_ascii_lowercase().contains(&query))
+            })
+            .collect::<Vec<_>>();
+        ui.add_space(5.0);
+        if matching.is_empty() {
+            ui.label(
+                egui::RichText::new("No definitions match the current filter.")
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_dim),
+            );
+            return;
+        }
+        for row in matching.iter().take(100) {
+            property_row_toned(
+                ui,
+                &format!("{} · {}", row.name, row.kind),
+                &format!(
+                    "{} · {} · {} · {}",
+                    row.library, row.source, row.section, row.status
+                ),
+                if row.resolved {
+                    t.color.ok
+                } else {
+                    t.color.err
+                },
+            );
+        }
+        if matching.len() > 100 {
+            property_row(
+                ui,
+                "Additional matching definitions",
+                &(matching.len() - 100).to_string(),
+            );
+        }
+    });
+}
+
+fn draw_include_diagnostics(ui: &mut Ui, app: &mut RSpiceApp, diagnostics: &IncludeDiagnostics) {
+    let t = Tokens::get(ui.ctx());
+    draw_include_selection(ui, app);
     property_card(ui, "Resolution diagnostics", |ui| {
         property_row(ui, "Pinned files", &diagnostics.files.to_string());
         property_row(ui, "Definitions", &diagnostics.definitions.to_string());
@@ -1857,6 +2091,140 @@ fn draw_include_diagnostics(ui: &mut Ui, diagnostics: &IncludeDiagnostics) {
             &diagnostics.unpinned_roots.to_string(),
         );
     });
+    ui.add_space(8.0);
+    draw_include_definition_resolution(ui, app);
+    if !diagnostics.conflicts.is_empty() || diagnostics.resolution_error.is_some() {
+        ui.add_space(8.0);
+        property_card(ui, "Execution resolution", |ui| {
+            for conflict in diagnostics.conflicts.iter().take(50) {
+                let selected = app
+                    .state
+                    .model_library_manager
+                    .definition_resolution(&conflict.normalized_name)
+                    .cloned();
+                let resolved = diagnostics.resolution_error.is_none() && selected.is_some();
+                property_row_toned(
+                    ui,
+                    &conflict.normalized_name,
+                    if resolved {
+                        "resolved by explicit provider precedence"
+                    } else if selected.is_some() {
+                        "provider selected / complete precedence plan invalid"
+                    } else {
+                        "unresolved / simulation blocked"
+                    },
+                    if resolved { t.color.ok } else { t.color.err },
+                );
+                for provider in &conflict.providers {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.add_space(10.0);
+                        let source = provider.source.as_deref().map_or_else(
+                            || provider.library.clone(),
+                            |path| {
+                                let file = path_display_name(path);
+                                provider.source_line.map_or_else(
+                                    || format!("{} / {file}", provider.library),
+                                    |line| format!("{} / {file}:{line}", provider.library),
+                                )
+                            },
+                        );
+                        let is_selected = selected.as_ref().is_some_and(|resolution| {
+                            resolution.provider_library == provider.library
+                                && resolution.provider_model == provider.model
+                        });
+                        ui.label(
+                            egui::RichText::new(if is_selected {
+                                format!("{source} / selected")
+                            } else {
+                                source
+                            })
+                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                            .color(if is_selected {
+                                t.color.ok
+                            } else {
+                                t.color.text_dim
+                            }),
+                        );
+                        let use_label = format!("Use {}", provider.library);
+                        if !is_selected
+                            && Button::new(&use_label)
+                                .enabled(
+                                    app.state.project_lifecycle.project_open
+                                        && !app.state.workbench.safe_mode.project_read_only(),
+                                )
+                                .show(ui)
+                                .clicked()
+                        {
+                            let mut candidate = app.state.model_library_manager.clone();
+                            let result = candidate
+                                .resolve_definition_conflict(
+                                    &conflict.normalized_name,
+                                    &provider.library,
+                                    &provider.model,
+                                )
+                                .and_then(|()| app.publish_model_library_candidate(candidate));
+                            match result {
+                                Ok(()) => {
+                                    app.state.push_user_message(ConsoleMessage::info(format!(
+                                        "Selected exact provider '{}/{}' for contested model '{}'.",
+                                        provider.library, provider.model, conflict.normalized_name
+                                    )))
+                                }
+                                Err(error) => {
+                                    app.state.push_user_message(ConsoleMessage::error(format!(
+                                        "Could not resolve contested model '{}': {error}",
+                                        conflict.normalized_name
+                                    )))
+                                }
+                            }
+                        }
+                    });
+                }
+                if selected.is_some()
+                    && Button::new("Clear provider selection")
+                        .ghost()
+                        .enabled(
+                            app.state.project_lifecycle.project_open
+                                && !app.state.workbench.safe_mode.project_read_only(),
+                        )
+                        .show(ui)
+                        .clicked()
+                {
+                    let mut candidate = app.state.model_library_manager.clone();
+                    candidate.clear_definition_resolution(&conflict.normalized_name);
+                    if let Err(error) = app.publish_model_library_candidate(candidate) {
+                        app.state.push_user_message(ConsoleMessage::error(format!(
+                            "Could not clear provider selection for '{}': {error}",
+                            conflict.normalized_name
+                        )));
+                    }
+                }
+                ui.add_space(5.0);
+            }
+            if diagnostics.conflicts.len() > 50 {
+                property_row(
+                    ui,
+                    "Additional conflicts",
+                    &(diagnostics.conflicts.len() - 50).to_string(),
+                );
+            }
+            if let Some(error) = diagnostics.resolution_error.as_deref() {
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(error)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.err),
+                );
+            } else {
+                property_row_toned(
+                    ui,
+                    "Execution order",
+                    "complete, explicit, and acyclic",
+                    t.color.ok,
+                );
+            }
+        });
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1980,22 +2348,6 @@ fn model_source_label(library: &ModelLibrary, model: &DeviceModel) -> String {
         .unwrap_or_else(|| "in-memory".to_owned())
 }
 
-fn model_sections_or_runtime(library: &ModelLibrary, model: &DeviceModel) -> String {
-    let mut sections: Vec<String> = library
-        .corners
-        .values()
-        .filter(|corner| corner.file_path.is_some())
-        .map(|corner| corner.name.clone())
-        .collect::<Vec<_>>();
-    sections.sort_by_key(|section| section.to_ascii_lowercase());
-    sections.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
-    if sections.is_empty() {
-        model.level.display_name().to_owned()
-    } else {
-        sections.join(" / ")
-    }
-}
-
 fn path_display_name(path: &Path) -> String {
     path.file_name()
         .and_then(|name| name.to_str())
@@ -2009,57 +2361,6 @@ fn short_digest(digest: &str) -> String {
     } else {
         format!("{}…{}", &digest[..8], &digest[digest.len() - 4..])
     }
-}
-
-/// Cap on shipped-pack rows shown for one query.
-///
-/// The packs hold around 199,000 definitions and a two-character query matches
-/// tens of thousands. The catalogue is a browser, so it shows a bounded window
-/// and says so rather than trying to render the whole match set.
-const PACK_ROW_LIMIT: usize = 200;
-
-/// Rows for definitions found in the shipped packs rather than a loaded library.
-///
-/// These are catalogue entries, not parsed models: RSpice knows where each one
-/// lives and nothing more until the deck includes it. They are labelled
-/// "indexed" so the distinction survives into the table, and rows from a pack
-/// whose redistribution is unestablished say so.
-fn pack_catalog_rows(app: &RSpiceApp, query: &str, t: &Tokens) -> Vec<DataRow> {
-    let hits = app
-        .state
-        .model_library_manager
-        .search_pack_models(query, PACK_ROW_LIMIT);
-
-    hits.into_iter()
-        .map(|hit| {
-            let (status, status_color) = if hit.redistributable {
-                ("indexed", t.color.info)
-            } else {
-                ("indexed · unlicensed", t.color.warn)
-            };
-            let source = hit
-                .source
-                .as_ref()
-                .and_then(|path| path.file_name())
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "-".to_owned());
-
-            DataRow {
-                key: model_key(&hit.pack, &hit.name),
-                // Never marked selected: nothing is loaded to select.
-                selected: false,
-                cells: vec![
-                    DataCell::mono(&hit.name),
-                    DataCell::plain(format!("{} · {}", hit.device, hit.kind)),
-                    DataCell::mono(format!("{source}:{}", hit.line)),
-                    DataCell::plain(&hit.pack_name),
-                    DataCell::plain("not loaded"),
-                    DataCell::mono_colored("not recorded", t.color.text_faint),
-                    DataCell::mono_colored(status, status_color),
-                ],
-            }
-        })
-        .collect()
 }
 
 fn model_key(library: &str, item: &str) -> String {
@@ -2094,7 +2395,6 @@ fn format_axis_value(value: f64) -> String {
         .trim_end_matches('.')
         .to_owned()
 }
-
 
 #[cfg(test)]
 mod tests;
