@@ -33,6 +33,60 @@ pub enum ReportPageUpdatePolicy {
     FreezeSelectedRevision,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReportPageInclusion {
+    #[default]
+    Included,
+    ExcludedFromDraft,
+    AppendixOnly,
+}
+
+impl ReportPageInclusion {
+    pub(crate) const fn is_default(&self) -> bool {
+        matches!(self, Self::Included)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case", tag = "mode")]
+pub enum ReportPageEvidenceBinding {
+    #[default]
+    Unbound,
+    ExactDataset {
+        binding: DatasetBinding,
+    },
+    LatestAcceptedRun,
+}
+
+impl ReportPageEvidenceBinding {
+    pub(crate) const fn is_default(&self) -> bool {
+        matches!(self, Self::Unbound)
+    }
+
+    #[must_use]
+    pub const fn exact_dataset(self) -> Option<DatasetBinding> {
+        match self {
+            Self::ExactDataset { binding } => Some(binding),
+            Self::Unbound | Self::LatestAcceptedRun => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReportBlockedGateTextPolicy {
+    #[default]
+    VerbatimFromSource,
+    SummarizeWithLink,
+}
+
+impl ReportBlockedGateTextPolicy {
+    pub(crate) const fn is_default(&self) -> bool {
+        matches!(self, Self::VerbatimFromSource)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlotFigureBlock {
     pub caption: String,

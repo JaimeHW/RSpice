@@ -396,6 +396,10 @@ pub struct ReportAuthoringState {
     #[serde(skip)]
     pub page_title_draft: String,
     #[serde(skip)]
+    pub inline_page_settings_page: Option<crate::results::report_document::ReportPageId>,
+    #[serde(skip)]
+    pub inline_page_title_draft: String,
+    #[serde(skip)]
     pub report_template_draft: usize,
     #[serde(skip)]
     pub page_update_policy_draft: usize,

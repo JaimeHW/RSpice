@@ -870,6 +870,53 @@ fn document_template_and_page_update_policy_are_transactional() {
 }
 
 #[test]
+fn page_publication_settings_are_revisioned_and_exactly_bound() {
+    let (mut document, page_id, _) = document_with_section();
+    let (_, binding) = dataset_snapshot(73);
+    let initial_page_revision = document.page(page_id).unwrap().revision();
+    let second_page_revision = initial_page_revision.next().unwrap();
+    let third_page_revision = second_page_revision.next().unwrap();
+
+    document
+        .transact(
+            document.revision(),
+            vec![
+                ReportEdit::SetPageInclusion {
+                    page_id,
+                    expected_page_revision: initial_page_revision,
+                    inclusion: ReportPageInclusion::AppendixOnly,
+                },
+                ReportEdit::SetPageEvidenceBinding {
+                    page_id,
+                    expected_page_revision: second_page_revision,
+                    evidence_binding: ReportPageEvidenceBinding::ExactDataset { binding },
+                },
+                ReportEdit::SetPageBlockedGateTextPolicy {
+                    page_id,
+                    expected_page_revision: third_page_revision,
+                    policy: ReportBlockedGateTextPolicy::SummarizeWithLink,
+                },
+            ],
+            73,
+        )
+        .unwrap();
+
+    let page = document.page(page_id).unwrap();
+    assert_eq!(page.inclusion(), ReportPageInclusion::AppendixOnly);
+    assert_eq!(
+        page.evidence_binding(),
+        ReportPageEvidenceBinding::ExactDataset { binding }
+    );
+    assert_eq!(
+        page.blocked_gate_text_policy(),
+        ReportBlockedGateTextPolicy::SummarizeWithLink
+    );
+    let restored: ReportDocument =
+        serde_json::from_slice(&serde_json::to_vec(&document).unwrap()).unwrap();
+    assert_eq!(restored, document);
+}
+
+#[test]
 fn invalid_tables_notes_sources_and_duplicate_bindings_fail_closed() {
     let (snapshot, binding) = dataset_snapshot(80);
     let invalid_table = ReportBlockKind::DataTable(DataTableBlock {
@@ -1114,6 +1161,9 @@ fn version_one_initial_snapshots_migrate_without_fabricating_history() {
         revision: ObjectRevision::INITIAL,
         title: "Imported page".to_owned(),
         update_policy: ReportPageUpdatePolicy::RefreshLinkedAutomatically,
+        inclusion: ReportPageInclusion::Included,
+        evidence_binding: ReportPageEvidenceBinding::Unbound,
+        blocked_gate_text_policy: ReportBlockedGateTextPolicy::VerbatimFromSource,
         sections: vec![ReportSection {
             id: ReportSectionId::new(),
             created_at_document_revision: ObjectRevision::INITIAL,
@@ -1373,6 +1423,50 @@ fn schema_two_migration_retains_an_explicit_current_source_baseline() {
         migrated.revision_history().records()[1].prior_revision_identity(),
         Some(migrated.revision_history().records()[0].revision_identity())
     );
+}
+
+#[test]
+fn schema_three_migration_preserves_authenticated_default_page_policies() {
+    let (document, _, _) = document_with_section();
+    let mut schema_three = serde_json::to_value(&document).unwrap();
+    schema_three["schema_version"] = serde_json::json!(3);
+
+    let migrated: ReportDocument = serde_json::from_value(schema_three).unwrap();
+
+    assert_eq!(migrated, document);
+    assert_eq!(migrated.schema_version(), ReportDocument::SCHEMA_VERSION);
+    for page in migrated.pages() {
+        assert_eq!(page.inclusion(), ReportPageInclusion::Included);
+        assert_eq!(page.evidence_binding(), ReportPageEvidenceBinding::Unbound);
+        assert_eq!(
+            page.blocked_gate_text_policy(),
+            ReportBlockedGateTextPolicy::VerbatimFromSource
+        );
+    }
+}
+
+#[test]
+fn schema_three_migration_rejects_mislabeled_schema_four_page_policies() {
+    let (mut document, page_id, _) = document_with_section();
+    let page_revision = document.page(page_id).unwrap().revision();
+    document
+        .transact(
+            document.revision(),
+            vec![ReportEdit::SetPageInclusion {
+                page_id,
+                expected_page_revision: page_revision,
+                inclusion: ReportPageInclusion::AppendixOnly,
+            }],
+            74,
+        )
+        .unwrap();
+    let mut mislabeled = serde_json::to_value(document).unwrap();
+    mislabeled["schema_version"] = serde_json::json!(3);
+
+    assert!(matches!(
+        serde_json::from_value::<ReportDocument>(mislabeled),
+        Err(_)
+    ));
 }
 
 #[test]

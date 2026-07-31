@@ -431,6 +431,15 @@ pub struct ReportPage {
     revision: ObjectRevision,
     title: String,
     update_policy: ReportPageUpdatePolicy,
+    #[serde(default, skip_serializing_if = "ReportPageInclusion::is_default")]
+    inclusion: ReportPageInclusion,
+    #[serde(default, skip_serializing_if = "ReportPageEvidenceBinding::is_default")]
+    evidence_binding: ReportPageEvidenceBinding,
+    #[serde(
+        default,
+        skip_serializing_if = "ReportBlockedGateTextPolicy::is_default"
+    )]
+    blocked_gate_text_policy: ReportBlockedGateTextPolicy,
     sections: Vec<ReportSection>,
 }
 
@@ -461,6 +470,21 @@ impl ReportPage {
     }
 
     #[must_use]
+    pub const fn inclusion(&self) -> ReportPageInclusion {
+        self.inclusion
+    }
+
+    #[must_use]
+    pub const fn evidence_binding(&self) -> ReportPageEvidenceBinding {
+        self.evidence_binding
+    }
+
+    #[must_use]
+    pub const fn blocked_gate_text_policy(&self) -> ReportBlockedGateTextPolicy {
+        self.blocked_gate_text_policy
+    }
+
+    #[must_use]
     pub fn sections(&self) -> &[ReportSection] {
         &self.sections
     }
@@ -487,6 +511,21 @@ pub enum ReportEdit {
         page_id: ReportPageId,
         expected_page_revision: ObjectRevision,
         update_policy: ReportPageUpdatePolicy,
+    },
+    SetPageInclusion {
+        page_id: ReportPageId,
+        expected_page_revision: ObjectRevision,
+        inclusion: ReportPageInclusion,
+    },
+    SetPageEvidenceBinding {
+        page_id: ReportPageId,
+        expected_page_revision: ObjectRevision,
+        evidence_binding: ReportPageEvidenceBinding,
+    },
+    SetPageBlockedGateTextPolicy {
+        page_id: ReportPageId,
+        expected_page_revision: ObjectRevision,
+        policy: ReportBlockedGateTextPolicy,
     },
     MovePage {
         page_id: ReportPageId,
@@ -1027,6 +1066,13 @@ impl<'de> Deserialize<'de> for ReportDocument {
                         .to_owned(),
                 }));
             }
+            (3, ReportRevisionHistoryWireField::Value(history)) => history,
+            (3, ReportRevisionHistoryWireField::Missing) => {
+                return Err(serde::de::Error::custom(ReportError::InvalidValue {
+                    field: "report-document.revision-history",
+                    message: "schema 3 documents must retain their revision history".to_owned(),
+                }));
+            }
             (1 | 2, ReportRevisionHistoryWireField::Missing) => ReportRevisionHistory {
                 origin: ReportRevisionHistoryOrigin::Native,
                 records: Vec::new(),
@@ -1069,7 +1115,7 @@ impl<'de> Deserialize<'de> for ReportDocument {
 }
 
 impl ReportDocument {
-    pub const SCHEMA_VERSION: u16 = 3;
+    pub const SCHEMA_VERSION: u16 = 4;
 
     pub fn new(title: impl Into<String>) -> Result<Self, ReportError> {
         Self::new_with_template(title, ReportTemplate::ReleaseVerification42)
@@ -1621,10 +1667,33 @@ impl ReportDocument {
                 )?;
                 Ok(())
             }
+            3 => {
+                // Schema four adds page-publication policies. Every new field
+                // has a serialization-omitted default matching schema three,
+                // so the authenticated schema-three snapshot and record
+                // digests remain byte-for-byte valid during this metadata-only
+                // upgrade.
+                let uses_schema_four_page_policy = |page: &ReportPage| {
+                    !page.inclusion.is_default()
+                        || !page.evidence_binding.is_default()
+                        || !page.blocked_gate_text_policy.is_default()
+                };
+                if self.pages.iter().any(uses_schema_four_page_policy)
+                    || self
+                        .revision_history
+                        .records
+                        .iter()
+                        .flat_map(|record| record.snapshot.pages.iter())
+                        .any(uses_schema_four_page_policy)
+                {
+                    return Err(ReportError::UnsafeLegacyMigration { version: 3 });
+                }
+                self.schema_version = Self::SCHEMA_VERSION;
+                Ok(())
+            }
             version => Err(ReportError::UnsupportedSchemaVersion(version)),
         }
     }
-
 }
 
 #[derive(Clone, Copy)]
@@ -2203,7 +2272,6 @@ impl From<RevisionError> for ReportError {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests;

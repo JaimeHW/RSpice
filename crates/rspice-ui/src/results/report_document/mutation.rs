@@ -42,6 +42,9 @@ impl ReportDocument {
                     revision: ObjectRevision::INITIAL,
                     title,
                     update_policy: ReportPageUpdatePolicy::RefreshLinkedAutomatically,
+                    inclusion: ReportPageInclusion::Included,
+                    evidence_binding: ReportPageEvidenceBinding::Unbound,
+                    blocked_gate_text_policy: ReportBlockedGateTextPolicy::VerbatimFromSource,
                     sections: Vec::new(),
                 };
                 created.push(ReportEntityRef::Page(page.id));
@@ -81,6 +84,60 @@ impl ReportDocument {
                     return Err(ReportError::NoChanges);
                 }
                 page.update_policy = update_policy;
+                page.revision = page.revision.next()?;
+                changed.push(ReportEntityRef::Page(page_id));
+            }
+            ReportEdit::SetPageInclusion {
+                page_id,
+                expected_page_revision,
+                inclusion,
+            } => {
+                let page = self.page_mut(page_id)?;
+                require_entity_revision(
+                    ReportEntityRef::Page(page_id),
+                    expected_page_revision,
+                    page.revision,
+                )?;
+                if page.inclusion == inclusion {
+                    return Err(ReportError::NoChanges);
+                }
+                page.inclusion = inclusion;
+                page.revision = page.revision.next()?;
+                changed.push(ReportEntityRef::Page(page_id));
+            }
+            ReportEdit::SetPageEvidenceBinding {
+                page_id,
+                expected_page_revision,
+                evidence_binding,
+            } => {
+                let page = self.page_mut(page_id)?;
+                require_entity_revision(
+                    ReportEntityRef::Page(page_id),
+                    expected_page_revision,
+                    page.revision,
+                )?;
+                if page.evidence_binding == evidence_binding {
+                    return Err(ReportError::NoChanges);
+                }
+                page.evidence_binding = evidence_binding;
+                page.revision = page.revision.next()?;
+                changed.push(ReportEntityRef::Page(page_id));
+            }
+            ReportEdit::SetPageBlockedGateTextPolicy {
+                page_id,
+                expected_page_revision,
+                policy,
+            } => {
+                let page = self.page_mut(page_id)?;
+                require_entity_revision(
+                    ReportEntityRef::Page(page_id),
+                    expected_page_revision,
+                    page.revision,
+                )?;
+                if page.blocked_gate_text_policy == policy {
+                    return Err(ReportError::NoChanges);
+                }
+                page.blocked_gate_text_policy = policy;
                 page.revision = page.revision.next()?;
                 changed.push(ReportEntityRef::Page(page_id));
             }

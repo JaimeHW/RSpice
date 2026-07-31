@@ -9,8 +9,9 @@ use std::borrow::Cow;
 use egui::{Align2, Color32, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::results::report_document::{
-    ReportBlockKind, ReportDocument, ReportEdit, ReportEntityRef, ReportPageId,
-    ReportPageUpdatePolicy, ReportReferenceMode, ReportSourceId, ReportTemplate, TableCell,
+    ReportBlockKind, ReportBlockedGateTextPolicy, ReportDocument, ReportEdit, ReportEntityRef,
+    ReportPageEvidenceBinding, ReportPageId, ReportPageInclusion, ReportPageUpdatePolicy,
+    ReportReferenceMode, ReportSourceId, ReportTemplate, TableCell,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -26,9 +27,9 @@ use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
 const DESKTOP_BREAKPOINT: f32 = 1_020.0;
 const STACK_BREAKPOINT: f32 = 820.0;
-const OUTLINE_DESKTOP_WIDTH: f32 = 220.0;
+const OUTLINE_DESKTOP_WIDTH: f32 = 250.0;
 const OUTLINE_TABLET_WIDTH: f32 = 180.0;
-const INSPECTOR_WIDTH: f32 = 280.0;
+const INSPECTOR_WIDTH: f32 = 300.0;
 const PANEL_GAP: f32 = 0.0;
 const OUTLINE_HEADER_HEIGHT: f32 = 39.0;
 const OUTLINE_ROW_HEIGHT: f32 = 34.0;
@@ -68,6 +69,14 @@ enum ComposerLayout {
 enum PageMoveDirection {
     Earlier,
     Later,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PageSettingEdit {
+    Title(String),
+    Inclusion(ReportPageInclusion),
+    EvidenceBinding(ReportPageEvidenceBinding),
+    BlockedGateText(ReportBlockedGateTextPolicy),
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -335,6 +344,158 @@ fn move_selected_page(app: &mut RSpiceApp, direction: PageMoveDirection) {
                 .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
         }
     }
+}
+
+fn commit_page_setting(app: &mut RSpiceApp, page_id: ReportPageId, setting: PageSettingEdit) {
+    if !report_mutation_allowed(&app.state) {
+        let reason = report_mutation_block_reason(&app.state).to_owned();
+        app.state.workbench.report_authoring.transaction_error = Some(reason.clone());
+        app.state
+            .push_user_message(crate::diagnostics::ConsoleMessage::warning(reason));
+        return;
+    }
+    if let PageSettingEdit::Title(title) = &setting
+        && !valid_page_title(title)
+    {
+        app.state.workbench.report_authoring.transaction_error = Some(
+            "The page title must be trimmed, non-empty, single-line text of at most 512 characters."
+                .to_owned(),
+        );
+        return;
+    }
+    let result = active_document_mut(&mut app.state).and_then(|document| {
+        let page = document
+            .page(page_id)
+            .ok_or_else(|| "The selected report page no longer exists.".to_owned())?;
+        let expected_page_revision = page.revision();
+        let (edit, revision_note) = match setting {
+            PageSettingEdit::Title(title) if page.title() != title => (
+                ReportEdit::UpdatePageTitle {
+                    page_id,
+                    expected_page_revision,
+                    title,
+                },
+                "Update report page title",
+            ),
+            PageSettingEdit::Inclusion(inclusion) if page.inclusion() != inclusion => (
+                ReportEdit::SetPageInclusion {
+                    page_id,
+                    expected_page_revision,
+                    inclusion,
+                },
+                "Update report page inclusion",
+            ),
+            PageSettingEdit::EvidenceBinding(evidence_binding)
+                if page.evidence_binding() != evidence_binding =>
+            {
+                (
+                    ReportEdit::SetPageEvidenceBinding {
+                        page_id,
+                        expected_page_revision,
+                        evidence_binding,
+                    },
+                    "Update report page evidence binding",
+                )
+            }
+            PageSettingEdit::BlockedGateText(policy)
+                if page.blocked_gate_text_policy() != policy =>
+            {
+                (
+                    ReportEdit::SetPageBlockedGateTextPolicy {
+                        page_id,
+                        expected_page_revision,
+                        policy,
+                    },
+                    "Update report blocked-gate text policy",
+                )
+            }
+            _ => return Ok(false),
+        };
+        document
+            .transact_with_context(
+                document.revision(),
+                vec![edit],
+                timestamp_unix_ms(),
+                "rspice-local-session",
+                revision_note,
+            )
+            .map(|_| true)
+            .map_err(|error| error.to_string())
+    });
+    match result {
+        Ok(changed) => {
+            app.state.workbench.report_authoring.selected_page = Some(page_id);
+            app.state.workbench.report_authoring.preview_block_page = 0;
+            app.state.workbench.report_authoring.transaction_error = None;
+            app.state.workspace.report_documents_dirty |= changed;
+        }
+        Err(error) => {
+            app.state.workbench.report_authoring.transaction_error = Some(error.clone());
+            app.state
+                .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+        }
+    }
+}
+
+fn evidence_binding_label(state: &AppState, evidence_binding: ReportPageEvidenceBinding) -> String {
+    match evidence_binding {
+        ReportPageEvidenceBinding::Unbound => "Unbound — select evidence".to_owned(),
+        ReportPageEvidenceBinding::LatestAcceptedRun => {
+            "Latest accepted run — resolve on draft build".to_owned()
+        }
+        ReportPageEvidenceBinding::ExactDataset { binding } => state
+            .simulation
+            .runs
+            .iter()
+            .find(|run| {
+                run.dataset_id == binding.dataset_id
+                    && run.dataset_content_digest() == binding.content_digest
+            })
+            .map_or_else(
+                || {
+                    let dataset_id = binding.dataset_id.to_string();
+                    format!(
+                        "Dataset {}… · immutable",
+                        dataset_id.get(..8).unwrap_or(&dataset_id)
+                    )
+                },
+                |run| format!("Run {} · immutable", run.id),
+            ),
+    }
+}
+
+fn evidence_binding_options(
+    state: &AppState,
+    current: ReportPageEvidenceBinding,
+) -> Vec<(String, ReportPageEvidenceBinding)> {
+    let mut options = state
+        .simulation
+        .runs
+        .iter()
+        .filter(|run| !run.analyses.is_empty())
+        .map(|run| {
+            let binding =
+                crate::product::DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
+            (
+                format!("Run {} · immutable", run.id),
+                ReportPageEvidenceBinding::ExactDataset { binding },
+            )
+        })
+        .collect::<Vec<_>>();
+    if !options.iter().any(|(_, option)| *option == current)
+        && matches!(current, ReportPageEvidenceBinding::ExactDataset { .. })
+    {
+        options.push((evidence_binding_label(state, current), current));
+    }
+    options.push((
+        "Latest accepted run — resolve on draft build".to_owned(),
+        ReportPageEvidenceBinding::LatestAcceptedRun,
+    ));
+    options.push((
+        "Unbound — select evidence".to_owned(),
+        ReportPageEvidenceBinding::Unbound,
+    ));
+    options
 }
 
 fn open_create_document(app: &mut RSpiceApp) {
@@ -701,6 +862,7 @@ fn outline(
                         app.state.workbench.report_authoring.preview_block_page = 0;
                     }
                 }
+                page_settings(ui, app, document, selected_page);
             });
     });
     paint_pane_separators(ui, pane.response.rect, separators, t.color.border);
@@ -747,6 +909,174 @@ fn outline_row(ui: &mut Ui, marker: &str, label: &str, selected: bool) -> egui::
     );
     theme::paint_focus_ring(ui, &response, rect);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+fn page_settings(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    document: &ReportDocument,
+    selected_page: Option<ReportPageId>,
+) {
+    let Some(page) = selected_page.and_then(|page_id| document.page(page_id)) else {
+        return;
+    };
+    let page_id = page.id();
+    {
+        let editor = &mut app.state.workbench.report_authoring;
+        if editor.inline_page_settings_page != Some(page_id) {
+            editor.inline_page_settings_page = Some(page_id);
+            editor.inline_page_title_draft = page.title().to_owned();
+            editor.transaction_error = None;
+        }
+    }
+    let t = Tokens::get(ui.ctx());
+    code_inspector_section(ui, "Page settings", None, |ui| {
+        egui::Frame::new()
+            .inner_margin(egui::Margin {
+                left: 10,
+                right: 10,
+                top: 8,
+                bottom: 10,
+            })
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width().max(1.0));
+                report_form_label(ui, "Page title");
+                let title_response = ui.add_sized(
+                    Vec2::new(ui.available_width(), t.metrics.ctl_h),
+                    egui::TextEdit::singleline(
+                        &mut app.state.workbench.report_authoring.inline_page_title_draft,
+                    )
+                    .font(theme::mono(tokens::FS_1, FontWeight::Regular)),
+                );
+                if title_response.has_focus()
+                    && ui.input(|input| input.key_pressed(egui::Key::Escape))
+                {
+                    app.state.workbench.report_authoring.inline_page_title_draft =
+                        page.title().to_owned();
+                    title_response.surrender_focus();
+                } else if title_response.lost_focus() {
+                    let title = app
+                        .state
+                        .workbench
+                        .report_authoring
+                        .inline_page_title_draft
+                        .trim()
+                        .to_owned();
+                    app.state.workbench.report_authoring.inline_page_title_draft = title.clone();
+                    commit_page_setting(app, page_id, PageSettingEdit::Title(title));
+                }
+
+                ui.add_space(8.0);
+                report_form_label(ui, "Include in artifact");
+                const INCLUSION_OPTIONS: [(ReportPageInclusion, &str); 3] = [
+                    (ReportPageInclusion::Included, "Included"),
+                    (
+                        ReportPageInclusion::ExcludedFromDraft,
+                        "Excluded from draft",
+                    ),
+                    (ReportPageInclusion::AppendixOnly, "Appendix only"),
+                ];
+                let inclusion_labels = INCLUSION_OPTIONS
+                    .iter()
+                    .map(|(_, label)| (*label).to_owned())
+                    .collect::<Vec<_>>();
+                let inclusion_current = report_page_inclusion_label(page.inclusion());
+                if let Some(index) = select(
+                    ui,
+                    "report-page-inclusion",
+                    "Include report page in artifact",
+                    inclusion_current,
+                    &inclusion_labels,
+                    ui.available_width(),
+                ) && let Some((inclusion, _)) = INCLUSION_OPTIONS.get(index)
+                {
+                    commit_page_setting(app, page_id, PageSettingEdit::Inclusion(*inclusion));
+                }
+
+                ui.add_space(8.0);
+                report_form_label(ui, "Evidence binding");
+                let evidence_options =
+                    evidence_binding_options(&app.state, page.evidence_binding());
+                let evidence_labels = evidence_options
+                    .iter()
+                    .map(|(label, _)| label.clone())
+                    .collect::<Vec<_>>();
+                let evidence_current = evidence_binding_label(&app.state, page.evidence_binding());
+                if let Some(index) = select(
+                    ui,
+                    "report-page-evidence-binding",
+                    "Report page evidence binding",
+                    &evidence_current,
+                    &evidence_labels,
+                    ui.available_width(),
+                ) && let Some((_, evidence_binding)) = evidence_options.get(index)
+                {
+                    commit_page_setting(
+                        app,
+                        page_id,
+                        PageSettingEdit::EvidenceBinding(*evidence_binding),
+                    );
+                }
+
+                ui.add_space(8.0);
+                report_form_label(ui, "Blocked-gate text");
+                const GATE_TEXT_OPTIONS: [(ReportBlockedGateTextPolicy, &str); 2] = [
+                    (
+                        ReportBlockedGateTextPolicy::VerbatimFromSource,
+                        "State verbatim from source",
+                    ),
+                    (
+                        ReportBlockedGateTextPolicy::SummarizeWithLink,
+                        "Summarize with link",
+                    ),
+                ];
+                let gate_text_labels = GATE_TEXT_OPTIONS
+                    .iter()
+                    .map(|(_, label)| (*label).to_owned())
+                    .collect::<Vec<_>>();
+                let gate_text_current =
+                    report_blocked_gate_text_policy_label(page.blocked_gate_text_policy());
+                if let Some(index) = select(
+                    ui,
+                    "report-page-gate-text",
+                    "Blocked-gate text policy",
+                    gate_text_current,
+                    &gate_text_labels,
+                    ui.available_width(),
+                ) && let Some((policy, _)) = GATE_TEXT_OPTIONS.get(index)
+                {
+                    commit_page_setting(app, page_id, PageSettingEdit::BlockedGateText(*policy));
+                }
+
+                if let Some(error) = app
+                    .state
+                    .workbench
+                    .report_authoring
+                    .transaction_error
+                    .as_deref()
+                {
+                    ui.add_space(8.0);
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(error)
+                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                .color(t.color.err),
+                        )
+                        .wrap(),
+                    );
+                }
+            });
+    });
+}
+
+fn report_form_label(ui: &mut Ui, label: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.label(
+        egui::RichText::new(label)
+            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+            .color(t.color.text_dim),
+    );
+    ui.add_space(4.0);
 }
 
 fn preview(
@@ -1735,6 +2065,23 @@ fn commit_create_document(app: &mut RSpiceApp) {
             .report_authoring
             .create_document_template,
     );
+    let initial_evidence_binding = app
+        .state
+        .simulation
+        .active_run()
+        .filter(|run| !run.analyses.is_empty())
+        .or_else(|| {
+            app.state
+                .simulation
+                .newest_retained_result_run_index()
+                .and_then(|index| app.state.simulation.runs.get(index))
+        })
+        .map(|run| ReportPageEvidenceBinding::ExactDataset {
+            binding: crate::product::DatasetBinding::new(
+                run.dataset_id,
+                run.dataset_content_digest(),
+            ),
+        });
     let result = ReportDocument::new_with_template(title, template)
         .map_err(|error| error.to_string())
         .and_then(|mut document| {
@@ -1753,6 +2100,26 @@ fn commit_create_document(app: &mut RSpiceApp) {
                     format!("Create {} report outline", report_template_label(template)),
                 )
                 .map_err(|error| error.to_string())?;
+            if let Some(evidence_binding) = initial_evidence_binding {
+                let edits = document
+                    .pages()
+                    .iter()
+                    .map(|page| ReportEdit::SetPageEvidenceBinding {
+                        page_id: page.id(),
+                        expected_page_revision: page.revision(),
+                        evidence_binding,
+                    })
+                    .collect();
+                document
+                    .transact_with_context(
+                        document.revision(),
+                        edits,
+                        timestamp_unix_ms(),
+                        "rspice-local-session",
+                        "Bind initial report pages to active result dataset",
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
             Ok(document)
         });
     match result {
@@ -2029,6 +2396,7 @@ fn commit_page_properties(app: &mut RSpiceApp) {
         .page_title_draft
         .trim()
         .to_owned();
+    let inline_title = title.clone();
     let timestamp = timestamp_unix_ms();
     let template =
         report_template_from_index(app.state.workbench.report_authoring.report_template_draft);
@@ -2082,6 +2450,11 @@ fn commit_page_properties(app: &mut RSpiceApp) {
         Ok(changed) => {
             app.state.workbench.report_authoring.selected_page = Some(page_id);
             app.state.workbench.report_authoring.preview_block_page = 0;
+            app.state
+                .workbench
+                .report_authoring
+                .inline_page_settings_page = Some(page_id);
+            app.state.workbench.report_authoring.inline_page_title_draft = inline_title;
             app.state.workbench.report_authoring.page_properties_open = false;
             app.state.workbench.report_authoring.transaction_error = None;
             app.state.workspace.report_documents_dirty |= changed;
@@ -2124,6 +2497,12 @@ fn synchronize_report_selection(state: &mut AppState) {
     } else {
         state.workbench.report_authoring.selected_page = None;
         state.workbench.report_authoring.preview_block_page = 0;
+        state.workbench.report_authoring.inline_page_settings_page = None;
+        state
+            .workbench
+            .report_authoring
+            .inline_page_title_draft
+            .clear();
     }
 }
 
@@ -2234,6 +2613,21 @@ fn page_update_policy_label(policy: ReportPageUpdatePolicy) -> &'static str {
     }
 }
 
+fn report_page_inclusion_label(inclusion: ReportPageInclusion) -> &'static str {
+    match inclusion {
+        ReportPageInclusion::Included => "Included",
+        ReportPageInclusion::ExcludedFromDraft => "Excluded from draft",
+        ReportPageInclusion::AppendixOnly => "Appendix only",
+    }
+}
+
+fn report_blocked_gate_text_policy_label(policy: ReportBlockedGateTextPolicy) -> &'static str {
+    match policy {
+        ReportBlockedGateTextPolicy::VerbatimFromSource => "State verbatim from source",
+        ReportBlockedGateTextPolicy::SummarizeWithLink => "Summarize with link",
+    }
+}
+
 fn page_marker(_index: usize, title: &str) -> &str {
     INITIAL_PAGES
         .iter()
@@ -2251,6 +2645,9 @@ mod tests {
 
     #[test]
     fn responsive_report_builder_matches_mockup_breakpoints() {
+        assert_eq!(OUTLINE_DESKTOP_WIDTH, 250.0);
+        assert_eq!(OUTLINE_TABLET_WIDTH, 180.0);
+        assert_eq!(INSPECTOR_WIDTH, 300.0);
         assert_eq!(
             ComposerLayout::resolve(1_280.0),
             ComposerLayout::ThreeColumn
@@ -2398,6 +2795,103 @@ mod tests {
             document_id
         );
         assert_eq!(app.state.workbench.report_authoring.selected_page, page_id);
+    }
+
+    #[test]
+    fn report_plan_binds_initial_pages_to_the_active_immutable_dataset() {
+        let mut app = RSpiceApp::test_instance();
+        let mut run = crate::state::SimulationRun::new(41);
+        run.add_analysis(crate::state::AnalysisResult::new(
+            1,
+            crate::state::AnalysisType::Transient,
+            "retained transient",
+        ));
+        let expected_binding =
+            crate::product::DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
+        app.state.simulation.runs = vec![run];
+        app.state.simulation.active_run_idx = Some(0);
+        app.state.workbench.report_authoring.create_document_title =
+            "Verification report".to_owned();
+
+        commit_create_document(&mut app);
+
+        let document = active_document(&app.state).expect("active report");
+        assert!(document.pages().iter().all(|page| {
+            page.evidence_binding()
+                == ReportPageEvidenceBinding::ExactDataset {
+                    binding: expected_binding,
+                }
+        }));
+        assert_eq!(
+            document
+                .revision_history()
+                .records()
+                .last()
+                .expect("binding revision")
+                .revision_note(),
+            "Bind initial report pages to active result dataset"
+        );
+    }
+
+    #[test]
+    fn report_page_settings_commit_canonical_revision_checked_transactions() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.report_authoring.create_document_title =
+            "Verification report".to_owned();
+        commit_create_document(&mut app);
+        let page_id = app
+            .state
+            .workbench
+            .report_authoring
+            .selected_page
+            .expect("selected page");
+        let initial_revision = active_document(&app.state)
+            .expect("active report")
+            .revision();
+        app.state.workspace.report_documents_dirty = false;
+
+        commit_page_setting(
+            &mut app,
+            page_id,
+            PageSettingEdit::Title("Decision and release summary".to_owned()),
+        );
+        commit_page_setting(
+            &mut app,
+            page_id,
+            PageSettingEdit::Inclusion(ReportPageInclusion::AppendixOnly),
+        );
+        commit_page_setting(
+            &mut app,
+            page_id,
+            PageSettingEdit::EvidenceBinding(ReportPageEvidenceBinding::LatestAcceptedRun),
+        );
+        commit_page_setting(
+            &mut app,
+            page_id,
+            PageSettingEdit::BlockedGateText(ReportBlockedGateTextPolicy::SummarizeWithLink),
+        );
+
+        let document = active_document(&app.state).expect("active report");
+        let page = document.page(page_id).expect("selected page");
+        assert_eq!(page.title(), "Decision and release summary");
+        assert_eq!(page.inclusion(), ReportPageInclusion::AppendixOnly);
+        assert_eq!(
+            page.evidence_binding(),
+            ReportPageEvidenceBinding::LatestAcceptedRun
+        );
+        assert_eq!(
+            page.blocked_gate_text_policy(),
+            ReportBlockedGateTextPolicy::SummarizeWithLink
+        );
+        assert_eq!(document.revision().get(), initial_revision.get() + 4);
+        assert!(app.state.workspace.report_documents_dirty);
+        assert!(
+            app.state
+                .workbench
+                .report_authoring
+                .transaction_error
+                .is_none()
+        );
     }
 
     #[test]

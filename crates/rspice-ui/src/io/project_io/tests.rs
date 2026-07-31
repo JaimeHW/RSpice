@@ -555,7 +555,8 @@ fn project_file_rejects_unsupported_design_management_schema() {
 #[test]
 fn project_file_round_trips_project_owned_report_documents() {
     use crate::results::report_document::{
-        ReportDocument, ReportEdit, ReportPageUpdatePolicy, ReportTemplate,
+        ReportBlockedGateTextPolicy, ReportDocument, ReportEdit, ReportPageEvidenceBinding,
+        ReportPageInclusion, ReportPageUpdatePolicy, ReportTemplate,
     };
 
     let mut libraries = LibraryManager::with_primitives();
@@ -573,17 +574,43 @@ fn project_file_round_trips_project_owned_report_documents() {
         )
         .expect("add page");
     let page = report.pages()[0].clone();
+    let exact_binding = crate::product::DatasetBinding::new(
+        crate::product::DatasetId::new(),
+        crate::product::ContentDigest::from_bytes([0x6a; 32]),
+    );
+    let second_page_revision = page.revision().next().expect("page revision");
+    let third_page_revision = second_page_revision.next().expect("page revision");
+    let fourth_page_revision = third_page_revision.next().expect("page revision");
     report
         .transact(
             report.revision(),
-            vec![ReportEdit::SetPageUpdatePolicy {
-                page_id: page.id(),
-                expected_page_revision: page.revision(),
-                update_policy: ReportPageUpdatePolicy::FreezeSelectedRevision,
-            }],
+            vec![
+                ReportEdit::SetPageUpdatePolicy {
+                    page_id: page.id(),
+                    expected_page_revision: page.revision(),
+                    update_policy: ReportPageUpdatePolicy::FreezeSelectedRevision,
+                },
+                ReportEdit::SetPageInclusion {
+                    page_id: page.id(),
+                    expected_page_revision: second_page_revision,
+                    inclusion: ReportPageInclusion::AppendixOnly,
+                },
+                ReportEdit::SetPageEvidenceBinding {
+                    page_id: page.id(),
+                    expected_page_revision: third_page_revision,
+                    evidence_binding: ReportPageEvidenceBinding::ExactDataset {
+                        binding: exact_binding,
+                    },
+                },
+                ReportEdit::SetPageBlockedGateTextPolicy {
+                    page_id: page.id(),
+                    expected_page_revision: fourth_page_revision,
+                    policy: ReportBlockedGateTextPolicy::SummarizeWithLink,
+                },
+            ],
             11,
         )
-        .expect("set page policy");
+        .expect("set page publication policies");
     workspace.report_documents.push(report.clone());
     workspace.report_documents_dirty = true;
     let project = ProjectFile::new(workspace, libraries);
@@ -1871,6 +1898,5 @@ fn missing_persisted_lifecycle_restores_as_explicit_legacy_unknown() {
     assert_eq!(restored.execution_target, None);
     assert_eq!(restored.lifecycle, SimulationRunLifecycle::LegacyUnknown);
 }
-
 
 mod migration;
