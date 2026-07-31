@@ -10,6 +10,9 @@ pub(super) struct DialogActionOutcome {
     pub(super) persist_global_veriloga: bool,
 }
 
+pub(super) const LIBRARY_CATALOG_STALE_MESSAGE: &str =
+    "The library catalog changed after this dialog opened. Cancel and reopen the operation.";
+
 pub(super) fn validate_lcv_name(name: &str, field_label: &str) -> Option<String> {
     if name.is_empty() {
         return Some(format!("{field_label} cannot be empty"));

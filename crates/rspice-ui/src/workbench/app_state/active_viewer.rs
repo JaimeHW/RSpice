@@ -38,5 +38,4 @@ impl ActiveViewer {
             Self::PoleZero => "Pole-Zero",
         }
     }
-
 }

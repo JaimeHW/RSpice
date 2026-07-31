@@ -3,6 +3,7 @@
 //! The cases pin that the dialog never misrepresents a print target, and that
 //! the mapping stage stays transactional until publication actually commits.
 
+use super::super::{GovernedSheetPageAuthority, SchematicPageSetupAuthority};
 use super::*;
 
 #[test]
@@ -106,9 +107,9 @@ fn governed_output_page_setup_preserves_authored_sheet_and_saves_hardcopy() {
         .sheet_catalog(&key)
         .unwrap();
     let authored_before = catalog.find(sheet_id).unwrap().page_format().clone();
-    let authority = super::SchematicPageSetupAuthority {
+    let authority = SchematicPageSetupAuthority {
         edit: crate::workbench::app::SchematicEditAuthority::capture(&app.state),
-        governed_sheet: Some(super::GovernedSheetPageAuthority {
+        governed_sheet: Some(GovernedSheetPageAuthority {
             cell_view_key: key.clone(),
             catalog_revision: catalog.revision(),
             sheet_id,
@@ -198,7 +199,7 @@ fn legacy_output_page_setup_does_not_rewrite_document_policy() {
         opened_source: std::sync::Arc::new(resolved.clone()),
         setup: setup_seeded_from_sheet_format(format).unwrap(),
         staged_mapping: StagedPrintMappingPersistence::Document,
-        schematic_authority: Some(super::SchematicPageSetupAuthority {
+        schematic_authority: Some(SchematicPageSetupAuthority {
             edit: crate::workbench::app::SchematicEditAuthority::capture(&app.state),
             governed_sheet: None,
         }),
@@ -236,7 +237,7 @@ fn page_setup_rejects_late_read_only_authority_without_partial_commit() {
             &app.state,
         )
         .expect("legacy schematic resolves");
-    let authority = super::SchematicPageSetupAuthority {
+    let authority = SchematicPageSetupAuthority {
         edit: crate::workbench::app::SchematicEditAuthority::capture(&app.state),
         governed_sheet: None,
     };
@@ -261,7 +262,7 @@ fn page_setup_rejects_late_read_only_authority_without_partial_commit() {
     assert!(
         commit_authenticated_page_setup(&mut app, resolved.clone(), pending)
             .expect_err("late read-only activation revokes Page Setup")
-            .contains("Safe mode")
+            .contains("read-only")
     );
     assert!(
         app.state
@@ -295,9 +296,9 @@ fn governed_page_authority_rejects_catalog_or_active_sheet_drift() {
         .design_management
         .sheet_catalog(&key)
         .unwrap();
-    let authority = super::SchematicPageSetupAuthority {
+    let authority = SchematicPageSetupAuthority {
         edit: crate::workbench::app::SchematicEditAuthority::capture(&app.state),
-        governed_sheet: Some(super::GovernedSheetPageAuthority {
+        governed_sheet: Some(GovernedSheetPageAuthority {
             cell_view_key: key.clone(),
             catalog_revision: catalog.revision(),
             sheet_id,

@@ -7,6 +7,7 @@ use crate::state::{
 use crate::workbench::SurfaceId;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
+use crate::workbench::state::Workspace;
 
 use super::state::{
     DrawingSheetAuthority, DrawingSheetDraft, DrawingSheetSetupState,
@@ -18,7 +19,8 @@ pub(crate) fn drawing_sheet_setup_available(app: &RSpiceApp) -> bool {
 }
 
 fn drawing_sheet_setup_available_for_state(state: &AppState) -> bool {
-    state.workbench.current_route().surface_id() == SurfaceId::Design
+    state.workbench.workspace == Workspace::Design
+        && state.workbench.current_route().surface_id() == SurfaceId::Design
         && !state.schematic_edit_read_only()
         && matches!(
             state.workspace.active_view_type(),
@@ -486,7 +488,15 @@ fn apply_governed_sheet_setup(
                 });
                 continue;
             }
-            let applied_format = sheet_format.with_target_sheet_title_fields(&target_format);
+            let applied_format = if scope == PageSetupScope::Document {
+                // A document-wide format operation must retain the authored
+                // identity and responsibility fields of every target sheet.
+                sheet_format.with_target_sheet_title_fields(&target_format)
+            } else {
+                // Current-sheet Page Setup owns the visible title-field edits
+                // in its draft as well as the physical format.
+                sheet_format.clone()
+            };
             let already_matches = catalog.find(sheet_id).is_some_and(|sheet| {
                 sheet.page_format() == &applied_format
                     || (sheet.page_format().inheritance
@@ -1232,7 +1242,11 @@ mod tests {
             .draft
             .validate()
             .unwrap()
-            .page_format;
+            .page_format
+            .try_update(|draft| {
+                draft.inheritance = crate::state::DrawingSheetInheritance::Explicit;
+            })
+            .unwrap();
 
         apply_drawing_sheet_setup(&mut app).unwrap();
 

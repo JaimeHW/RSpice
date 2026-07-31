@@ -35,7 +35,7 @@ impl SchematicEditAuthority {
     }
 
     pub(crate) fn validate(&self, state: &AppState, command: &str) -> Result<(), String> {
-        if state.schematic.read_only || state.active_view_read_only() {
+        if state.schematic_edit_read_only() {
             return Err("The active schematic is read-only.".to_owned());
         }
         self.validate_presentation(state, command)
@@ -83,6 +83,7 @@ impl SchematicEditAuthority {
 mod tests {
     use super::*;
     use crate::state::{ComponentType, Point};
+    use crate::workbench::state::LocalSafeModeOptions;
 
     #[test]
     fn authority_rejects_geometry_selection_and_view_drift() {
@@ -99,5 +100,26 @@ mod tests {
         state.schematic.components[0].value = "1k".to_owned();
         state.schematic.selection.clear();
         assert!(authority.validate(&state, "Move selection").is_err());
+    }
+
+    #[test]
+    fn authority_revalidates_safe_mode_at_commit_time() {
+        let mut state = AppState::default();
+        let authority = SchematicEditAuthority::capture(&state);
+        state.workbench.safe_mode.activate(
+            LocalSafeModeOptions {
+                open_project_read_only: true,
+                ..Default::default()
+            },
+            String::new(),
+        );
+
+        assert!(authority.validate(&state, "Edit schematic").is_err());
+        assert!(
+            authority
+                .validate_presentation(&state, "Inspect schematic")
+                .is_ok(),
+            "presentation-only transactions remain available in safe mode"
+        );
     }
 }

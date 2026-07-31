@@ -50,8 +50,7 @@ struct ValidationCacheKey {
     query: String,
     dirty: bool,
     preview_error: Option<String>,
-    schematic_read_only: bool,
-    active_view_read_only: bool,
+    schematic_edit_read_only: bool,
     library_revision: u64,
     project_revision: u64,
     design_execution_epoch: u64,
@@ -99,7 +98,7 @@ impl ReplacementValidation {
 }
 
 pub(crate) fn replace_instance_available(state: &AppState) -> bool {
-    if state.schematic.read_only || state.active_view_read_only() {
+    if state.schematic_edit_read_only() {
         return false;
     }
     let Some(component_id) = state.schematic.selection.single_component() else {
@@ -120,7 +119,7 @@ pub(crate) fn replace_instance_available(state: &AppState) -> bool {
 }
 
 pub(crate) fn open_replace_instance_dialog(state: &mut AppState) {
-    if state.schematic.read_only || state.active_view_read_only() {
+    if state.schematic_edit_read_only() {
         state.push_user_message(ConsoleMessage::warning(
             "Replace instance is unavailable because the active schematic is read-only.".to_owned(),
         ));
@@ -502,8 +501,7 @@ fn validation_for_repaint(ctx: &Context, state: &AppState) -> ReplacementValidat
         query: draft.replacement.trim().to_ascii_lowercase(),
         dirty: draft.dirty,
         preview_error: draft.preview_error.clone(),
-        schematic_read_only: state.schematic.read_only,
-        active_view_read_only: state.active_view_read_only(),
+        schematic_edit_read_only: state.schematic_edit_read_only(),
         library_revision: state.library_manager.revision(),
         project_revision: state.workspace.project.revision().get(),
         design_execution_epoch: state.design_execution_epoch,

@@ -323,8 +323,7 @@ impl RSpiceApp {
             .authority
             .as_ref()
             .and_then(|authority| authority.stale_reason(&self.state));
-        let write_allowed = !self.state.schematic.read_only
-            && !self.state.active_view_read_only()
+        let write_allowed = !self.state.schematic_edit_read_only()
             && !self.state.workbench.safe_mode.project_read_only();
         let primary_enabled =
             write_allowed && stale.is_none() && impact.error.is_none() && impact.changed > 0;

@@ -167,6 +167,7 @@ impl PdkSettingsDialogState {
     /// Toggle path enabled state
     pub fn toggle_path_enabled(&mut self, index: usize) {
         self.config.toggle_path_enabled(index);
+        self.rescan();
     }
 
     /// Toggle path recursive state
@@ -180,16 +181,22 @@ impl PdkSettingsDialogState {
             self.config.set_env_override(name, value);
             self.new_env_name.clear();
             self.new_env_value.clear();
+            self.rescan();
         }
     }
 
     /// Remove an environment variable override
     pub fn remove_env_override(&mut self, name: &str) {
         self.config.remove_env_override(name);
+        self.rescan();
     }
 
     /// Apply changes and return the updated config
     pub fn apply(&mut self) -> PdkConfig {
+        // The published configuration must be based on the current enabled
+        // paths and current environment expansion, not on whichever scan
+        // happened to run before the last edit.
+        self.rescan();
         // Save to persistent storage
         if let Err(e) = self.config.save() {
             // The desktop app detaches from a console and the browser build

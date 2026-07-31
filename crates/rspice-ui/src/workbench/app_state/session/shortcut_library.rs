@@ -401,6 +401,17 @@ impl AppState {
             );
             return;
         }
+        #[cfg(target_arch = "wasm32")]
+        if matches!(
+            self.shortcut_library_persistence,
+            ShortcutLibraryPersistenceRuntime::Initializing(_)
+                | ShortcutLibraryPersistenceRuntime::Publishing { .. }
+        ) {
+            if let Some(reason) = self.shortcut_library_persistence.blocked_reason() {
+                log::debug!("Shortcut library persistence transition: {reason}");
+            }
+            return;
+        }
         if let Some(reason) = self.shortcut_library_persistence.blocked_reason() {
             log::warn!("Shortcut library mutations are unavailable: {reason}");
         }

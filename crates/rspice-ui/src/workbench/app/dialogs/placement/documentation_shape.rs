@@ -101,7 +101,7 @@ impl RSpiceApp {
 
 fn validate_draft(state: &AppState) -> DraftValidation {
     let draft = &state.dialogs.documentation_shape;
-    if state.schematic.read_only || state.active_view_read_only() {
+    if state.schematic_edit_read_only() {
         return DraftValidation::Invalid("The active schematic is read-only.".to_owned());
     }
     if draft.design_execution_epoch != state.design_execution_epoch {

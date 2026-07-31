@@ -21,7 +21,7 @@ use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Mode, Tokens};
 use crate::workbench::commands::CommandAvailability;
-use crate::workbench::commands::vocabulary::{Command, command_catalog, CommandPlatform};
+use crate::workbench::commands::vocabulary::{Command, CommandPlatform, command_catalog};
 
 use crate::workbench::app::RSpiceApp;
 
@@ -512,7 +512,10 @@ impl PaletteEntry {
                 app.state.simulation.data_version =
                     app.state.simulation.data_version.wrapping_add(1);
                 app.state.ui.results.viewer = crate::workbench::ResultViewer::Waves;
-                app.state.ui.results.hidden_strips.remove(&analysis_index);
+                app.state
+                    .ui
+                    .results
+                    .restore_analysis_strip(&app.state.simulation, analysis_index);
                 app.state.ui.results.maximized_strip = None;
                 app.state
                     .workbench
@@ -1891,7 +1894,7 @@ mod tests {
         );
         assert_eq!(
             PaletteScope::for_command(Command::ExportWaveformsCsv),
-            PaletteScope::Commands
+            PaletteScope::Results
         );
 
         let help = palette_commands()
@@ -1971,8 +1974,12 @@ mod tests {
             last_window_title: String::new(),
             symbol_library: None,
             simulation_controller: crate::simulation::SimulationController::new(),
-            file_workflow_io: Box::new(crate::workbench::workflows::file_workflow::NativeFileWorkflowIo),
-            export_workflow_io: Box::new(crate::workbench::workflows::export_workflow::NativeExportWorkflowIo),
+            file_workflow_io: Box::new(
+                crate::workbench::workflows::file_workflow::NativeFileWorkflowIo,
+            ),
+            export_workflow_io: Box::new(
+                crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,
+            ),
         }
     }
 
@@ -2219,8 +2226,18 @@ mod tests {
         );
 
         app.state.ui.results.viewer = crate::workbench::ResultViewer::Bode;
-        app.state.ui.results.hidden_strips.insert(1);
-        app.state.ui.results.maximized_strip = Some(0);
+        let hidden_strip =
+            crate::workbench::documents::result_document::AnalysisPresentationKey::new(
+                active_dataset_id,
+                &app.state.simulation.runs[1].analyses[1],
+            );
+        let maximized_strip =
+            crate::workbench::documents::result_document::AnalysisPresentationKey::new(
+                active_dataset_id,
+                &app.state.simulation.runs[1].analyses[0],
+            );
+        app.state.ui.results.hidden_strips.insert(hidden_strip);
+        app.state.ui.results.maximized_strip = Some(maximized_strip);
         let version_before = app.state.simulation.data_version;
         entry.execute(&mut app).expect("open real result signal");
 
@@ -2234,7 +2251,7 @@ mod tests {
             app.state.ui.results.viewer,
             crate::workbench::ResultViewer::Waves
         );
-        assert!(!app.state.ui.results.hidden_strips.contains(&1));
+        assert!(!app.state.ui.results.hidden_strips.contains(&hidden_strip));
         assert_eq!(app.state.ui.results.maximized_strip, None);
         assert_eq!(
             app.state.workbench.workspace,

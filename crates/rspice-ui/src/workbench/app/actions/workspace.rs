@@ -18,6 +18,7 @@ use crate::state::{
 use crate::workbench::SymbolDocumentSnapshot;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
+use crate::workbench::state::WorkspaceDocumentId;
 use std::collections::HashMap;
 
 pub(super) const MAX_FINDING_ROWS: usize = 50;
@@ -635,6 +636,7 @@ impl AppState {
         // connection cache. Rebuild against the same authored/generated
         // symbol geometry that is rendered and netlisted.
         self.rebuild_active_connections_from_symbols();
+        self.refresh_active_design_check_projection();
         self.library_manager
             .select_view(&reference.library, &reference.cell, &reference.view);
     }
@@ -643,6 +645,9 @@ impl AppState {
         self.sync_active_schematic_to_workspace();
         if self.workspace.active_view == reference {
             self.workbench.hierarchy_reference_read_only = false;
+            self.workbench
+                .documents
+                .activate(WorkspaceDocumentId::CellView(reference));
             return;
         }
         self.workbench.hierarchy_reference_read_only = false;
@@ -650,11 +655,15 @@ impl AppState {
         self.ui.canvas_view_center = None;
         let view_type = view_type_for_reference(self, &reference);
         self.workspace.open_as_root(reference.clone(), view_type);
+        self.workbench
+            .documents
+            .activate(WorkspaceDocumentId::CellView(reference.clone()));
         self.library_manager
             .select_view(&reference.library, &reference.cell, &reference.view);
         let schematic_reference = self.workspace.active_schematic_reference();
         self.schematic = schematic_for_workspace(self, &schematic_reference);
         self.bump_active_schematic_epoch();
+        self.refresh_active_design_check_projection();
         self.push_user_message(ConsoleMessage::info(format!(
             "Opened {}",
             reference.display_path()
@@ -683,6 +692,7 @@ impl AppState {
         let schematic_reference = self.workspace.active_schematic_reference();
         self.schematic = schematic_for_workspace(self, &schematic_reference);
         self.bump_active_schematic_epoch();
+        self.refresh_active_design_check_projection();
         self.push_user_message(ConsoleMessage::info(format!(
             "Entered {}",
             reference.display_path()
@@ -738,6 +748,7 @@ impl AppState {
             && self.workspace.project.top_cell == cell
             && view == crate::state::workspace::DEFAULT_SCHEMATIC_VIEW;
         self.workspace.schematic_buffers.remove(&deleted.key());
+        self.workspace.remove_physical_layout_document(&deleted);
         self.workspace
             .open_views
             .retain(|open| open.reference != deleted);
@@ -964,12 +975,18 @@ impl AppState {
             .copy_cell_sheet_catalogs(src_library, cell, dst_library, new_name)
             .map_err(|error| format!("Could not copy the cell's sheet-catalog ownership: {error}"))?
             .copied_sheet_catalogs;
-        if copied_sheet_catalogs > 0 {
-            self.workspace
-                .project
-                .next_revision()
-                .map_err(|error| format!("Could not advance the project revision: {error}"))?;
-        }
+        let candidate_layouts = self
+            .workspace
+            .prepare_copy_physical_layout_cell_documents(src_library, cell, dst_library, new_name)
+            .map_err(|error| format!("Could not copy the cell's physical layouts: {error}"))?;
+        let project_mutation = self.preflight_project_library_mutation(
+            crate::state::ProjectLibraryMutation::CopyCell {
+                source_library: src_library.to_owned(),
+                source_cell: cell.to_owned(),
+                target_library: dst_library.to_owned(),
+                target_cell: new_name.to_owned(),
+            },
+        )?;
 
         copy.name = new_name.to_owned();
         let view_names: Vec<String> = copy.views.keys().cloned().collect();
@@ -988,22 +1005,17 @@ impl AppState {
                 self.workspace.schematic_buffers.insert(new_key, buffer);
             }
         }
+        self.workspace
+            .commit_prepared_physical_layout_catalog(candidate_layouts);
 
         if !copied_source_ids.is_empty() {
             self.workspace.project_sources = candidate_sources;
             self.workspace.project_sources_dirty = true;
         }
         if copied_sheet_catalogs > 0 {
-            self.workspace
-                .project
-                .advance_revision()
-                .expect("the project revision was preflighted without intervening mutation");
             self.workspace.design_management = candidate_design_management;
-            self.workspace.project_metadata_dirty = true;
-            self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
-            self.ui.netlist.current_generation_input_digest = None;
-            self.clear_project_design_history();
         }
+        self.publish_project_library_mutation(project_mutation);
 
         self.library_manager.select_cell(dst_library, new_name);
         Ok(view_count)
@@ -1064,12 +1076,17 @@ impl AppState {
         let design_management_changed = design_management_receipt.affected_sheet_catalogs > 0
             || design_management_receipt.remapped_variant_objects > 0
             || design_management_receipt.remapped_annotation_objects > 0;
-        let design_management_project_revision = design_management_changed
-            .then(|| self.workspace.project.next_revision())
-            .transpose()
-            .map_err(|error| {
-                format!("Could not advance project revision for the cell rename: {error}")
-            })?;
+        let candidate_layouts = self
+            .workspace
+            .prepare_rename_physical_layout_cell_documents(library, cell, new_name)
+            .map_err(|error| format!("Could not rename the cell's physical layouts: {error}"))?;
+        let project_mutation = self.preflight_project_library_mutation(
+            crate::state::ProjectLibraryMutation::RenameCell {
+                library: library.to_owned(),
+                from_cell: cell.to_owned(),
+                to_cell: new_name.to_owned(),
+            },
+        )?;
 
         let library_mut = self
             .library_manager
@@ -1099,6 +1116,8 @@ impl AppState {
                     .insert(format!("{library}/{new_name}/{tail}"), buffer);
             }
         }
+        self.workspace
+            .commit_prepared_physical_layout_catalog(candidate_layouts);
 
         // Open references follow.
         let remap_ref = |reference: &mut CellViewRef| {
@@ -1157,17 +1176,10 @@ impl AppState {
             self.workspace.configuration_sets = candidate_configurations;
             self.workspace.project_metadata_dirty = true;
         }
-        if design_management_project_revision.is_some() {
-            self.workspace
-                .project
-                .advance_revision()
-                .expect("the project revision was preflighted without intervening mutation");
+        if design_management_changed {
             self.workspace.design_management = candidate_design_management;
-            self.workspace.project_metadata_dirty = true;
-            self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
-            self.ui.netlist.current_generation_input_digest = None;
-            self.clear_project_design_history();
         }
+        self.publish_project_library_mutation(project_mutation);
 
         self.library_manager.select_cell(library, new_name);
         Ok(remapped)
@@ -1206,6 +1218,7 @@ impl AppState {
                 .select_view(&reference.library, &reference.cell, &reference.view);
             self.schematic = schematic_for_workspace(self, &reference);
             self.bump_active_schematic_epoch();
+            self.refresh_active_design_check_projection();
         }
     }
 

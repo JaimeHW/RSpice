@@ -12,7 +12,10 @@ use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, DialogTransactionTone, select};
-use crate::workbench::commands::{ShortcutContext, vocabulary::{Command, COMMAND_REGISTRY, CommandPlatform}};
+use crate::workbench::commands::{
+    ShortcutContext,
+    vocabulary::{COMMAND_REGISTRY, Command, CommandPlatform},
+};
 use crate::workbench::shortcuts::MAX_SHORTCUT_SEQUENCE_STROKES;
 use crate::workbench::{
     ChordTimeoutPolicy, ContextPrecedencePolicy, ProtectedShortcutPolicy, ShortcutBindingSlot,
@@ -1110,7 +1113,6 @@ fn capture_button(
     });
     response
 }
-
 
 fn mark_editor_changed(editor: &mut ShortcutEditorState) {
     editor.dirty = editor.draft != editor.original;

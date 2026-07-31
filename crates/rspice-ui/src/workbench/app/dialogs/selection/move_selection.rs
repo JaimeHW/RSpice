@@ -50,7 +50,7 @@ impl DraftValidation {
 /// selection baseline. Commands call this single boundary so palette, menu,
 /// and shortcut activation cannot drift.
 pub(crate) fn open_move_selection_dialog(state: &mut AppState) {
-    if state.schematic.read_only || state.active_view_read_only() {
+    if state.schematic_edit_read_only() {
         state.push_user_message(ConsoleMessage::warning(
             "Move selection is unavailable because the active schematic is read-only.".to_owned(),
         ));
@@ -134,7 +134,7 @@ impl RSpiceApp {
 }
 
 fn validate_draft(state: &AppState) -> DraftValidation {
-    if state.schematic.read_only || state.active_view_read_only() {
+    if state.schematic_edit_read_only() {
         return DraftValidation::Invalid("The active schematic is read-only.".to_owned());
     }
     let draft = &state.dialogs.move_selection;

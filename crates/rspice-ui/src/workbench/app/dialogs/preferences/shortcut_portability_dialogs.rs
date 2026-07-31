@@ -13,6 +13,7 @@ use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, DialogTransactionTone
 use crate::workbench::ShortcutPreferences;
 use crate::workbench::commands::ShortcutContext;
 use crate::workbench::commands::vocabulary::{Command, CommandPlatform};
+use crate::workbench::shortcuts::ShortcutProfileLibrary;
 use crate::workbench::shortcuts::artifacts::{
     DecodedShortcutArtifact, DetectedShortcutArtifact, ImportBindingClass,
     PreparedShortcutArtifact, ReadyShortcutArtifactSource, ShortcutArtifactExportOutcome,
@@ -21,7 +22,6 @@ use crate::workbench::shortcuts::artifacts::{
     VscodeImportReport, build_shortcut_reference_model, plan_shortcut_import,
     prepare_shortcut_artifact, shortcut_library_digest,
 };
-use crate::workbench::shortcuts::ShortcutProfileLibrary;
 
 use super::preferences_shell::{preference_switch, right_aligned};
 

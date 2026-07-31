@@ -46,10 +46,16 @@ impl DraftValidation {
 }
 
 pub(crate) fn open_stretch_selection_dialog(state: &mut AppState) {
-    if state.schematic.read_only || state.active_view_read_only() {
+    if state.schematic_edit_read_only() {
         state.push_user_message(ConsoleMessage::warning(
             "Stretch selection is unavailable because the active schematic is read-only."
                 .to_owned(),
+        ));
+        return;
+    }
+    if !state.schematic.selection.probes.is_empty() {
+        state.push_user_message(ConsoleMessage::warning(
+            "Probe markers cannot be stretched; move the retained probe marker instead.".to_owned(),
         ));
         return;
     }
@@ -130,7 +136,7 @@ impl RSpiceApp {
 }
 
 fn validate_draft(state: &AppState) -> DraftValidation {
-    if state.schematic.read_only || state.active_view_read_only() {
+    if state.schematic_edit_read_only() {
         return DraftValidation::Invalid("The active schematic is read-only.".to_owned());
     }
     let draft = &state.dialogs.stretch_selection;

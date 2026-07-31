@@ -11,21 +11,19 @@
 use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
 use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 use crate::state::{
-    CellViewRef,
-    MAX_SYMBOL_DOCUMENT_BYTES, PinFindingKind, PortSpec, SYMBOL_DOCUMENT_METADATA_KEY,
+    CellViewRef, MAX_SYMBOL_DOCUMENT_BYTES, PinFindingKind, PortSpec, SYMBOL_DOCUMENT_METADATA_KEY,
     SYMBOL_EDITOR_METADATA_KEY, SymbolDocument, SymbolEditorMetadata,
 };
 use crate::workbench::SymbolDocumentSnapshot;
 use crate::workbench::app_state::AppState;
 
 use super::{
-    MAX_FINDING_ROWS, log_severity_from_drc,
-    parse_encoded_ports, remap_symbol_instance_wires, restore_symbol_snapshot_in_view,
-    symbol_metadata_snapshot_from_view, symbol_pin_position_remaps, symbol_snapshot_from_view,
+    MAX_FINDING_ROWS, log_severity_from_drc, parse_encoded_ports, remap_symbol_instance_wires,
+    restore_symbol_snapshot_in_view, symbol_metadata_snapshot_from_view,
+    symbol_pin_position_remaps, symbol_snapshot_from_view,
 };
 
 impl AppState {
-
     pub(crate) fn active_symbol_ports(&self) -> Vec<PortSpec> {
         let reference = &self.workspace.active_view;
         let schematic_ref = CellViewRef::new(&reference.library, &reference.cell, "schematic");

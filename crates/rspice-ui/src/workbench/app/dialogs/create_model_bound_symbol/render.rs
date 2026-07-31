@@ -18,10 +18,7 @@ use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::review_primitives::{configure_field_validation, field_label};
 
 impl RSpiceApp {
-    pub(in crate::workbench) fn render_create_model_bound_symbol_dialog(
-        &mut self,
-        ctx: &Context,
-    ) {
+    pub(in crate::workbench) fn render_create_model_bound_symbol_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.create_model_bound_symbol.open {
             return;
         }

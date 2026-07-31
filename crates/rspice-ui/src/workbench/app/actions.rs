@@ -1044,6 +1044,14 @@ impl RSpiceApp {
     }
 
     pub(in crate::workbench) fn action_edit_copy(&mut self) {
+        if self.state.workbench.workspace == crate::workbench::state::Workspace::Results {
+            if let Some(text) =
+                crate::workbench::documents::result_document::copy_cursor_text(&mut self.state)
+            {
+                self.state.ui.clipboard_text_request = Some(text);
+            }
+            return;
+        }
         crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(&mut self.state);
         self.state.copy_active_schematic_selection();
     }
@@ -1143,6 +1151,39 @@ mod shortcut_ownership_tests {
         assert!(app.state.ui.results.linked_cursors);
         app.execute_shortcut_command(ShortcutCommand::ToggleLinkedCursors);
         assert!(!app.state.ui.results.linked_cursors);
+    }
+
+    #[test]
+    fn copy_shortcut_in_results_copies_cursor_readout_not_schematic_selection() {
+        let mut app = RSpiceApp::test_instance();
+        let analysis =
+            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
+                .with_waveforms(vec![crate::state::WaveformData::new(
+                    "V(out)",
+                    vec![0.0, 1.0],
+                    vec![0.0, 2.0],
+                    "#ffbd2e",
+                )]);
+        let mut run = crate::state::SimulationRun::new(1);
+        run.add_analysis(analysis);
+        app.state.simulation.runs = vec![run];
+        assert!(app.state.simulation.select_run(0));
+        app.state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Results);
+        app.state.ui.results.cursors.a = Some(0.5);
+        app.state.ui.results.cursor_strip = Some(0);
+
+        app.execute_shortcut_command(ShortcutCommand::Copy);
+
+        let copied = app
+            .state
+            .ui
+            .clipboard_text_request
+            .as_deref()
+            .expect("cursor readout copied");
+        assert!(copied.starts_with('A'));
+        assert!(copied.contains("V(out)"));
     }
 
     #[test]

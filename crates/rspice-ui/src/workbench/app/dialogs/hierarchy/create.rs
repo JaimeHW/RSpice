@@ -25,14 +25,14 @@ use crate::ui::widgets::{
     select_mono_with_response,
 };
 
-use crate::workbench::app_state::design_history::{
-    HierarchyExtractionHistoryEntry, validate_hierarchy_target_unreferenced,
-};
 use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
 use crate::workbench::app::dialogs::state::{CreateHierarchyDialogState, CreateHierarchyPortDraft};
 use crate::workbench::app::schematic::hierarchy_reference_impact::validate_hierarchy_reference_impact;
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::design_history::{
+    HierarchyExtractionHistoryEntry, validate_hierarchy_target_unreferenced,
+};
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} CELL / VIEW CONTRACT";
 const TITLE: &str = "Create hierarchical cell";
@@ -55,8 +55,7 @@ const SURFACE_WITHOUT_TABLE_ROWS: f32 = 267.0;
 const TABLE_ROW_HEIGHT: f32 = 28.0;
 
 pub(crate) fn create_hierarchy_available(state: &AppState) -> bool {
-    !state.schematic.read_only
-        && !state.active_view_read_only()
+    !state.schematic_edit_read_only()
         && !state.schematic.selection.components.is_empty()
         && state.schematic.selection.count() == state.schematic.selection.components.len()
         && state.schematic.selection.components.iter().all(|id| {

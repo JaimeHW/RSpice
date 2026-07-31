@@ -6,7 +6,8 @@ use egui::{Context, Rect, vec2};
 
 use super::controller::{
     build_create_symbol_definition, commit_create_model_bound_symbol, inferred_model_pins,
-    open_create_model_bound_symbol_dialog, parse_target, validate_create_symbol_draft,
+    open_create_model_bound_symbol_dialog, open_create_subcircuit_bound_symbol_dialog,
+    parse_target, validate_create_symbol_draft,
 };
 use super::state::*;
 use crate::state::{
@@ -363,6 +364,82 @@ fn accessibility_tree_exposes_the_mockup_dialog_and_complete_actions() {
             "missing action {label}"
         );
     }
+}
+
+#[test]
+fn shipped_subcircuit_opens_an_exact_x_device_pin_contract() {
+    let mut state = state_with_bound_mos_model();
+    let source = std::env::current_dir()
+        .expect("current directory")
+        .join("models/spice/community/ngspice-74xx-logic/upstream/74xx-models.txt");
+    open_create_subcircuit_bound_symbol_dialog(
+        &mut state,
+        "pack-ngspice-74xx-logic-74xx-models".to_owned(),
+        "7400".to_owned(),
+        source,
+        vec![
+            "A".to_owned(),
+            "B".to_owned(),
+            "Y".to_owned(),
+            "VCC".to_owned(),
+            "GND".to_owned(),
+        ],
+        Some("TT".to_owned()),
+        std::collections::BTreeMap::from([
+            ("GAIN".to_owned(), "100".to_owned()),
+            ("MODE".to_owned(), "\"low noise\"".to_owned()),
+            ("SCALE".to_owned(), "{GAIN * 2}".to_owned()),
+        ]),
+    )
+    .expect("subcircuit draft opens");
+
+    let draft = &mut state.dialogs.create_model_bound_symbol;
+    assert!(draft.open);
+    assert_eq!(
+        draft
+            .pins
+            .iter()
+            .map(|pin| pin.name.as_str())
+            .collect::<Vec<_>>(),
+        ["A", "B", "Y", "VCC", "GND"]
+    );
+    assert!(!draft.pin_contract_reviewed);
+    draft.pin_contract_reviewed = true;
+    let definition = build_create_symbol_definition(&state).expect("definition builds");
+    assert_eq!(definition.netlist.device_prefix, "X");
+    assert_eq!(
+        definition
+            .netlist
+            .model
+            .as_ref()
+            .map(|model| model.model.as_str()),
+        Some("7400")
+    );
+    assert_eq!(
+        definition
+            .netlist
+            .model
+            .as_ref()
+            .and_then(|model| model.section.as_deref()),
+        Some("TT")
+    );
+    let fields = &definition.parameter_form.sections[0].fields;
+    assert_eq!(
+        fields
+            .iter()
+            .map(|field| (field.key.as_str(), field.property_type))
+            .collect::<Vec<_>>(),
+        [
+            ("GAIN", crate::state::PropertyType::Number),
+            ("MODE", crate::state::PropertyType::String),
+            ("SCALE", crate::state::PropertyType::Expression),
+        ]
+    );
+    assert!(matches!(
+        fields[2].default,
+        crate::state::SymbolParameterDefault::Expression { ref value }
+            if value == "GAIN * 2"
+    ));
 }
 
 #[test]

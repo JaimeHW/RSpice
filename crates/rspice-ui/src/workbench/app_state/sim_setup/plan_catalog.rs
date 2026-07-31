@@ -184,7 +184,6 @@ impl StoredSimulationPlan {
     pub const fn analysis_plan(&self) -> &SimulationPlan {
         &self.analysis_plan
     }
-
 }
 
 /// Content domains copied into a newly cloned plan.

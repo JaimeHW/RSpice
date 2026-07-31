@@ -18,6 +18,71 @@ pub(crate) enum ViewOperation {
     ResetActiveView,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LibraryDeletionTarget {
+    Cell {
+        library: String,
+        cell: String,
+    },
+    View {
+        library: String,
+        cell: String,
+        view: String,
+    },
+}
+
+impl LibraryDeletionTarget {
+    pub(crate) fn library(&self) -> &str {
+        match self {
+            Self::Cell { library, .. } | Self::View { library, .. } => library,
+        }
+    }
+
+    pub(crate) fn cell(&self) -> &str {
+        match self {
+            Self::Cell { cell, .. } | Self::View { cell, .. } => cell,
+        }
+    }
+
+    pub(crate) fn view(&self) -> Option<&str> {
+        match self {
+            Self::Cell { .. } => None,
+            Self::View { view, .. } => Some(view),
+        }
+    }
+
+    pub(crate) fn display_path(&self) -> String {
+        match self {
+            Self::Cell { library, cell } => format!("{library}/{cell}"),
+            Self::View {
+                library,
+                cell,
+                view,
+            } => format!("{library}/{cell}/{view}"),
+        }
+    }
+
+    pub(crate) const fn kind_label(&self) -> &'static str {
+        match self {
+            Self::Cell { .. } => "Cell",
+            Self::View { .. } => "View",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct LibraryDeletionReviewState {
+    pub(crate) target: Option<LibraryDeletionTarget>,
+    pub(crate) expected_library_revision: u64,
+    pub(crate) error: Option<String>,
+}
+
+impl LibraryDeletionReviewState {
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum FullScreenScope {
     #[default]
@@ -337,6 +402,10 @@ pub struct CommandPaletteState {
 pub(crate) struct TechnologyAttachmentDialogState {
     pub(crate) open: bool,
     pub(crate) selected_library: Option<String>,
+    pub(crate) selected_signed_package: Option<String>,
+    pub(crate) actor_id: String,
+    pub(crate) authority_id: String,
+    pub(crate) reason: String,
     pub(crate) validation_error: Option<String>,
     #[cfg(target_arch = "wasm32")]
     pub(crate) checkpoint_pending: bool,
@@ -363,10 +432,18 @@ impl ProjectCheckpointRecoveryState {
 }
 
 impl TechnologyAttachmentDialogState {
-    pub(crate) fn open(&mut self, selected_library: Option<String>) {
+    pub(crate) fn open(
+        &mut self,
+        selected_library: Option<String>,
+        selected_signed_package: Option<String>,
+    ) {
         *self = Self {
             open: true,
             selected_library,
+            selected_signed_package,
+            actor_id: String::new(),
+            authority_id: String::new(),
+            reason: String::new(),
             validation_error: None,
             #[cfg(target_arch = "wasm32")]
             checkpoint_pending: false,
@@ -2028,6 +2105,8 @@ pub struct DialogState {
     pub new_cell_create_testbench: bool,
     /// New Cell validation error message
     pub new_cell_error: Option<String>,
+    /// Exact library catalog revision captured when New Cell opened.
+    pub(crate) new_cell_library_revision: u64,
     /// New View creation dialog
     pub new_view_dialog: bool,
     /// New View target library
@@ -2040,6 +2119,8 @@ pub struct DialogState {
     pub new_view_type: crate::state::ViewType,
     /// New View validation error message
     pub new_view_error: Option<String>,
+    /// Exact library catalog revision captured when New View opened.
+    pub(crate) new_view_library_revision: u64,
     /// Copy Cell dialog
     pub copy_cell_dialog: bool,
     /// Copy Cell source library
@@ -2052,6 +2133,8 @@ pub struct DialogState {
     pub copy_cell_name: String,
     /// Copy Cell validation error message
     pub copy_cell_error: Option<String>,
+    /// Exact library catalog revision captured when Copy Cell opened.
+    pub(crate) copy_cell_library_revision: u64,
     /// Rename Cell dialog
     pub rename_cell_dialog: bool,
     /// Rename Cell target library
@@ -2062,6 +2145,10 @@ pub struct DialogState {
     pub rename_cell_name: String,
     /// Rename Cell validation error message
     pub rename_cell_error: Option<String>,
+    /// Exact library catalog revision captured when Rename Cell opened.
+    pub(crate) rename_cell_library_revision: u64,
+    /// Exact, revision-bound destructive review for deleting one cell or view.
+    pub(crate) library_deletion_review: LibraryDeletionReviewState,
     /// A saved-file open found a bound, eligible autosave checkpoint; the
     /// restore dialog resolves it before either exact byte snapshot is loaded.
     #[cfg(not(target_arch = "wasm32"))]
@@ -2262,7 +2349,7 @@ impl DialogState {
             || self.new_view_dialog
             || self.copy_cell_dialog
             || self.rename_cell_dialog
-            || self.waveform_calculator_dialog
+            || self.library_deletion_review.target.is_some()
             || self.preferences_open
             || self.hardcopy.open
             || self.drawing_sheet_setup.open
@@ -2339,7 +2426,6 @@ mod tests {
         assert_blocks_shortcuts(|dialogs| dialogs.create_model_bound_symbol.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.symbol_import.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.symbol_parameter_form.open = true);
-        assert_blocks_shortcuts(|dialogs| dialogs.waveform_calculator_dialog = true);
         assert_blocks_shortcuts(|dialogs| dialogs.engineering_table.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.preferences_open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.drawing_sheet_setup.open = true);
@@ -2488,8 +2574,24 @@ mod tests {
         assert_blocks_shortcuts(|dialogs| {
             dialogs.interaction.schematic_delete_confirmation_open = true;
         });
+        assert_blocks_shortcuts(|dialogs| {
+            dialogs.library_deletion_review.target = Some(LibraryDeletionTarget::Cell {
+                library: "work".to_owned(),
+                cell: "filter".to_owned(),
+            });
+        });
         assert_blocks_shortcuts(|dialogs| dialogs.confirmation_dialog.visible = true);
         assert_blocks_shortcuts(|dialogs| dialogs.project_review_dialog.show_close_project());
+    }
+
+    #[test]
+    fn modeless_waveform_calculator_does_not_block_workspace_shortcuts() {
+        let mut dialogs = DialogState::default();
+        dialogs.waveform_calculator_dialog = true;
+        assert!(
+            !dialogs.application_modal_open(),
+            "the modeless calculator must leave plot and workspace shortcuts active"
+        );
     }
 
     #[test]

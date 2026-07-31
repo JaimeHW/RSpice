@@ -23,6 +23,7 @@ pub(in crate::workbench) fn default_analysis_viewers() -> AnalysisWorkspaceState
         fft_state: crate::analysis::fft::FftState::default(),
         smith_chart_state: crate::analysis::smith_chart::SmithChartState::default(),
         histogram_state: crate::analysis::histogram::HistogramState::default(),
+        cache_authority: Default::default(),
     }
 }
 
@@ -72,18 +73,49 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
             },
         );
     }
+    #[cfg(all(not(test), not(target_arch = "wasm32")))]
+    let (mut pdk_config, pdk_load_error) = match crate::state::pdk_config::PdkConfig::load() {
+        Ok(config) => (config, None),
+        Err(error) => (
+            crate::state::pdk_config::PdkConfig::default(),
+            Some(error.to_string()),
+        ),
+    };
+    // Browser PDK state is hydrated asynchronously from IndexedDB by the
+    // application persistence owner. Until that exact read completes, no
+    // persisted trust or package authority is present in the live state.
+    #[cfg(all(not(test), target_arch = "wasm32"))]
+    let (mut pdk_config, pdk_load_error) = (
+        crate::state::pdk_config::PdkConfig::default(),
+        None::<String>,
+    );
+    // Unit tests must never inherit user- or machine-owned trust state. Apart
+    // from making tests nondeterministic, doing so could grant a fixture
+    // authority it did not explicitly provision.
+    #[cfg(test)]
+    let (mut pdk_config, pdk_load_error) = (
+        crate::state::pdk_config::PdkConfig::default(),
+        None::<String>,
+    );
+    let trust_store = pdk_config.publisher_trust_store.clone();
+    let _ = pdk_config
+        .technology_registry
+        .revalidate_installed(&trust_store);
+    let pdk_validation_errors = pdk_config.technology_registry.validation_errors().to_vec();
 
-    AppState {
+    let mut state = AppState {
         schematic,
         simulation: crate::state::SimulationState::default(),
         design_execution_epoch: 0,
         active_schematic_epoch: 0,
         project_design_history: Default::default(),
+        design_checks: Default::default(),
         dialogs: DialogState::default(),
         sim_setup,
         log_buffer: crate::diagnostics::LogBuffer::default(),
         script_console: super::script_console::ScriptConsoleState::default(),
         library_manager,
+        library_edit_locks: crate::state::ProjectLibraryLockAuthority::default(),
         workspace,
         project_lifecycle: crate::workbench::lifecycle::project_lifecycle::ProjectLifecycleState::default(),
         pending_delete_cell: None,
@@ -92,7 +124,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         property_registry: crate::state::PropertyRegistry::new(),
         calculator_panel: super::calculator::CalculatorPanel::new(),
         pdk_settings_dialog: super::pdk_settings::PdkSettingsDialogState::new(),
-        pdk_config: crate::state::pdk_config::PdkConfig::load_or_default(),
+        pdk_config,
         model_library_manager: default_model_library_manager(),
         model_browser_state: crate::properties::model_browser::ModelBrowserState::default(),
         exit_requested: false,
@@ -110,7 +142,18 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         shortcut_library_persistence:
             crate::workbench::app_state::session::shortcut_library::ShortcutLibraryPersistenceRuntime::default(),
         shortcut_library_publication_continuation: None,
+    };
+    if let Some(error) = pdk_load_error {
+        state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+            "PDK configuration could not be loaded; the session started with no configured PDK authority: {error}"
+        )));
     }
+    for error in pdk_validation_errors {
+        state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+            "PDK technology trust blocked during startup: {error}"
+        )));
+    }
+    state
 }
 
 #[cfg(test)]

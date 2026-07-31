@@ -4,7 +4,9 @@
 use std::path::PathBuf;
 
 use crate::state::model_library::ModelType;
-use crate::state::{CellViewRef, PortDirection, PortSpec, SymbolElectricalType, SymbolPinSide};
+use crate::state::{
+    CellViewRef, PortDirection, PortSpec, PropertyType, SymbolElectricalType, SymbolPinSide,
+};
 
 pub(super) const EYEBROW: &str = "SYMBOL LIBRARY \u{00b7} PIN CONTRACT \u{00b7} GRAPHIC VIEW";
 pub(super) const TITLE: &str = "Create model-bound symbol";
@@ -201,6 +203,7 @@ pub(crate) struct CreateSymbolParameterDraft {
     pub(super) key: String,
     pub(super) label: String,
     pub(super) help: String,
+    pub(super) property_type: PropertyType,
     pub(super) default: String,
     pub(super) unit: Option<String>,
     pub(super) minimum: Option<String>,

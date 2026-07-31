@@ -85,6 +85,7 @@ fn wire_geometry_only(state: &AppState) -> bool {
         && selection.net_labels.is_empty()
         && selection.design_notes.is_empty()
         && selection.documentation_shapes.is_empty()
+        && selection.probes.is_empty()
 }
 
 fn resolve_wire_net<'a>(nets: &'a [DesignNet], wire_ids: &[u64]) -> Option<&'a DesignNet> {

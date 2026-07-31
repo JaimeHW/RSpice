@@ -12,8 +12,11 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
-use crate::workbench::workflows::project_workflow::{SaveRequestOutcome, save_active_for_continuation};
+use crate::workbench::workflows::project_workflow::{
+    SaveRequestOutcome, save_active_for_continuation,
+};
 
+use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport;
 use crate::workbench::app::dialogs::operation_primitives::{
     CONTEXT_WIDTH, SURFACE_HEIGHT, TRANSACTION_HEIGHT, ellipsized_text, operation_steps,
@@ -23,7 +26,6 @@ use crate::workbench::app::dialogs::review_primitives::{
     input_field, purpose_line, read_only_field,
 };
 use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
-use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} TRANSACTIONAL VALIDATION";
@@ -279,7 +281,9 @@ impl RSpiceApp {
         let target_view_key = fresh_report.active_view().key();
         if original_journal.is_empty()
             && let Some(accepted) =
-                crate::workbench::lifecycle::project_lifecycle::accepted_active_schematic(&self.state)
+                crate::workbench::lifecycle::project_lifecycle::accepted_active_schematic(
+                    &self.state,
+                )
             && let Err(error) = self.state.schematic.seed_accepted_revision_baseline(
                 &accepted,
                 fresh_report.project_id(),

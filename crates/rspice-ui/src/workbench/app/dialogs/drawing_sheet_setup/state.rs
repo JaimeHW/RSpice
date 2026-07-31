@@ -1287,6 +1287,7 @@ fn automatic_zone_divisions(edge_um: u64) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::SchematicPageSize;
 
     fn valid_draft() -> DrawingSheetDraft {
         let mut draft = DrawingSheetDraft::from_format(&SchematicSheetFormat::default());
@@ -1627,8 +1628,8 @@ mod tests {
         );
 
         let mut draft = valid_draft();
-        draft.width = "60".to_owned();
-        draft.height = "60".to_owned();
+        draft.width = "54".to_owned();
+        draft.height = "54".to_owned();
         draft.margin_top = "10".to_owned();
         draft.margin_right = "10".to_owned();
         draft.margin_bottom = "10".to_owned();

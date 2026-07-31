@@ -368,9 +368,7 @@ fn open_selection_workflow(
     if state.dialogs.selection_workflow.open {
         return false;
     }
-    if kind != SelectionWorkflowKind::SelectAll
-        && (state.schematic.read_only || state.active_view_read_only())
-    {
+    if kind != SelectionWorkflowKind::SelectAll && state.schematic_edit_read_only() {
         state.push_user_message(ConsoleMessage::warning(format!(
             "{} is unavailable because the active schematic is read-only.",
             kind.title()
@@ -1124,6 +1122,13 @@ fn complete_selection_count(schematic: &SchematicState, selection: &Selection) -
                 .documentation_shapes
                 .iter()
                 .filter(|object| selection.has_documentation_shape(object.id))
+                .count(),
+        )
+        .saturating_add(
+            schematic
+                .probes
+                .iter()
+                .filter(|object| selection.has_probe(object.id))
                 .count(),
         )
 }

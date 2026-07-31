@@ -238,10 +238,7 @@ pub(crate) fn open_project_revision_history(state: &mut AppState) {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench) fn render_project_revision_history_dialog(
-        &mut self,
-        ctx: &Context,
-    ) {
+    pub(in crate::workbench) fn render_project_revision_history_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.project_revision_history.open {
             return;
         }
@@ -875,6 +872,14 @@ fn append_model_and_pdk_rows(rows: &mut Vec<ProjectAuditRow>, state: &AppState) 
                     ),
                 }
             }
+            ModelSourceAuthority::RetainedImport { source_id, digest } => (
+                short_text(&digest.to_string()),
+                "authenticated",
+                format!(
+                    "retained import {source_id} \u{00b7} root digest {}",
+                    short_text(&digest.to_string())
+                ),
+            ),
             ModelSourceAuthority::BuiltIn => (
                 nonempty_or(&library.version, "built-in"),
                 "built-in",

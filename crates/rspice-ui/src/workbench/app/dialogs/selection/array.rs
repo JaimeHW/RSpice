@@ -128,7 +128,7 @@ const fn should_focus_first_invalid(previous: u8, current: u8) -> bool {
 }
 
 pub(crate) fn open_array_selection_dialog(state: &mut AppState) {
-    if state.schematic.read_only || state.active_view_read_only() {
+    if state.schematic_edit_read_only() {
         state.push_user_message(ConsoleMessage::warning(
             "Create array is unavailable because the active schematic is read-only.".to_owned(),
         ));

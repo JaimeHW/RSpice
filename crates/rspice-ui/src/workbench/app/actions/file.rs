@@ -69,6 +69,8 @@ impl RSpiceApp {
                     Some(
                         ConfirmationAction::ProjectNew
                             | ConfirmationAction::ProjectOpen
+                            | ConfirmationAction::OpenNetlistProject
+                            | ConfirmationAction::ImportNetlist
                             | ConfirmationAction::CloseProject
                             | ConfirmationAction::Exit
                     )
@@ -80,7 +82,9 @@ impl RSpiceApp {
                     )
                 );
                 let outcome = if project_action {
-                    crate::workbench::workflows::project_workflow::save_all_for_continuation(&mut self.state)
+                    crate::workbench::workflows::project_workflow::save_all_for_continuation(
+                        &mut self.state,
+                    )
                 } else if self.state.project_lifecycle.project_open {
                     crate::workbench::workflows::project_workflow::save_active_for_continuation(
                         &mut self.state,
@@ -259,8 +263,15 @@ impl RSpiceApp {
                     self.restore_workspace_after_project_load();
                 }
             }
+            ConfirmationAction::OpenNetlistProject => {
+                crate::workbench::workflows::netlist_workflow::open_netlist_project(
+                    &mut self.state,
+                );
+            }
             ConfirmationAction::CloseProject => {
-                crate::workbench::workflows::project_workflow::close_project_discard(&mut self.state);
+                crate::workbench::workflows::project_workflow::close_project_discard(
+                    &mut self.state,
+                );
             }
             ConfirmationAction::FileNew => self.do_file_new(),
             ConfirmationAction::FileOpen => self.do_file_open(),
@@ -325,10 +336,11 @@ impl RSpiceApp {
             RecentKind::Project => {
                 #[cfg(not(target_arch = "wasm32"))]
                 {
-                    let opened = crate::workbench::workflows::project_workflow::load_project_from_path(
-                        &mut self.state,
-                        &path,
-                    );
+                    let opened =
+                        crate::workbench::workflows::project_workflow::load_project_from_path(
+                            &mut self.state,
+                            &path,
+                        );
                     if opened {
                         self.restore_workspace_after_project_load();
                     }
@@ -344,7 +356,9 @@ impl RSpiceApp {
             }
             RecentKind::Schematic => {
                 let (state, io) = (&mut self.state, self.file_workflow_io.as_ref());
-                crate::workbench::workflows::file_workflow::load_schematic_from_path_with_io(state, &path, io)
+                crate::workbench::workflows::file_workflow::load_schematic_from_path_with_io(
+                    state, &path, io,
+                )
             }
         };
 
@@ -669,8 +683,10 @@ mod tests {
             .schematic
             .add_component(ComponentType::Resistor, Point::new(7, 3));
         let project_ac_id = insert_ac_analysis(&mut project_source);
-        project_source
-            .remember_recent_file(crate::workbench::app_state::RecentKind::Project, &target_project);
+        project_source.remember_recent_file(
+            crate::workbench::app_state::RecentKind::Project,
+            &target_project,
+        );
         let project_recent = project_source
             .recent_files
             .iter()
@@ -826,9 +842,7 @@ mod tests {
             crate::workbench::lifecycle::project_lifecycle::dirty_document_count(&state),
             0
         );
-        assert!(crate::workbench::workflows::project_workflow::request_close_project(
-            &mut state
-        ));
+        assert!(crate::workbench::workflows::project_workflow::request_close_project(&mut state));
         assert!(matches!(
             state.dialogs.project_review_dialog.request.as_ref(),
             Some(crate::workbench::app::ProjectReviewRequest::CloseProject)
@@ -843,9 +857,7 @@ mod tests {
             crate::workbench::lifecycle::project_lifecycle::dirty_document_count(&state),
             2
         );
-        assert!(crate::workbench::workflows::project_workflow::request_close_project(
-            &mut state
-        ));
+        assert!(crate::workbench::workflows::project_workflow::request_close_project(&mut state));
         assert!(matches!(
             state.dialogs.project_review_dialog.request.as_ref(),
             Some(crate::workbench::app::ProjectReviewRequest::CloseProject)
@@ -853,9 +865,7 @@ mod tests {
 
         let project_id = state.workspace.project.id();
         state.simulation.is_running = true;
-        assert!(!crate::workbench::workflows::project_workflow::close_project_discard(
-            &mut state
-        ));
+        assert!(!crate::workbench::workflows::project_workflow::close_project_discard(&mut state));
         assert!(state.project_lifecycle.project_open);
         assert_eq!(state.workspace.project.id(), project_id);
         assert!(matches!(
@@ -970,9 +980,7 @@ mod tests {
             app.state.dialogs.project_review_dialog.request.as_ref(),
             Some(crate::workbench::app::ProjectReviewRequest::CloseProject)
         ));
-        assert!(crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(
-            &app.state
-        ));
+        assert!(crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&app.state));
         remove_project_artifacts(&path);
     }
 }

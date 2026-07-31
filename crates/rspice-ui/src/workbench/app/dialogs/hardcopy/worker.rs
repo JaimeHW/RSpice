@@ -1167,7 +1167,10 @@ pub(crate) use browser::{
 mod tests {
     use super::*;
     use crate::hardcopy::{
-        BackgroundMode, ColorMapping, FontPolicy, RenderSetup, RenderTarget, ScaleMode,
+        BackgroundMode, Bleed, ColorMapping, DecorationSetup, FontPolicy,
+        OutsideSheetContentPolicy, PageMargins, PhysicalPageSetup, RenderSetup, RenderTarget,
+        ScaleMode, SchematicHardcopyExtent, SchematicHardcopySetup, TilingMode, TilingSetup,
+        Watermark,
     };
     use crate::state::{Point, Wire};
     use crate::workbench::AppState;
@@ -1223,12 +1226,41 @@ mod tests {
 
     fn two_page_setup() -> HardcopySetup {
         let defaults = HardcopySetup::default();
-        HardcopySetup::try_new(
-            defaults.physical_page().clone(),
+        let physical_page = PhysicalPageSetup::try_new(
+            defaults.physical_page().paper().clone(),
+            PageMargins::uniform(crate::hardcopy::Length::ZERO),
+            Bleed::None,
+            defaults.physical_page().orientation(),
+        )
+        .expect("zero-margin worker fixture page is valid");
+        let tiling = TilingSetup::try_new(
+            TilingMode::Manual {
+                columns: 2,
+                rows: 1,
+            },
+            defaults.tiling().overlap(),
+            false,
+        )
+        .expect("two-page tiling is valid");
+        let decorations = DecorationSetup::try_new(false, false, false, Watermark::None)
+            .expect("undecorated worker fixture is valid");
+        let schematic = SchematicHardcopySetup::new(
+            SchematicHardcopyExtent::CompleteSchematicContent,
+            OutsideSheetContentPolicy::ExtendOutput,
+            true,
+            true,
+            true,
+            true,
+            true,
+            false,
+        );
+        HardcopySetup::try_new_with_schematic(
+            physical_page,
             ScaleMode::EngineeringOneToOne,
-            defaults.tiling(),
+            tiling,
             defaults.render().clone(),
-            defaults.decorations().clone(),
+            decorations,
+            schematic,
             defaults.print_mapping().clone(),
         )
         .expect("two-page setup is valid")
@@ -1236,7 +1268,7 @@ mod tests {
 
     fn two_page_svg_setup() -> HardcopySetup {
         let defaults = two_page_setup();
-        HardcopySetup::try_new(
+        HardcopySetup::try_new_with_schematic(
             defaults.physical_page().clone(),
             defaults.scale(),
             defaults.tiling(),
@@ -1250,6 +1282,7 @@ mod tests {
             )
             .expect("SVG render setup is valid"),
             defaults.decorations().clone(),
+            defaults.schematic(),
             defaults.print_mapping().clone(),
         )
         .expect("two-page SVG setup is valid")

@@ -617,16 +617,17 @@ mod tests {
     }
 
     #[test]
-    fn gesture_armed_after_open_rejects_every_candidate_without_cancelling_the_gesture() {
+    fn wire_gesture_started_after_open_rejects_every_candidate_without_cancelling_it() {
         let mut state = AppState::default();
         let original_snap = state.schematic.snap_engine.clone();
         assert!(open_grid_snap_routing_dialog(&mut state));
         state.dialogs.grid_snap_routing.draft.grid_style = GridStyle::Lines;
         state.dialogs.grid_snap_routing.draft.snap_spacing = GridSnapSpacingChoice::Mil25;
         state.schematic.arm_tool(Tool::Wire);
+        state.schematic.wire_drawing.active = true;
 
         let error =
-            commit_grid_snap_routing(&mut state).expect_err("armed wire must block stale apply");
+            commit_grid_snap_routing(&mut state).expect_err("started wire must block stale apply");
 
         assert!(error.message.contains("authoring gesture"));
         assert_eq!(state.schematic.tool, Tool::Wire);

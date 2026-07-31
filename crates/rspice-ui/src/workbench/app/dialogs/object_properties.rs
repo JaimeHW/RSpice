@@ -231,7 +231,7 @@ impl RSpiceApp {
             .clone();
         let discard_confirm = self.state.dialogs.object_properties.discard_confirm;
         let can_commit = self.state.dialogs.object_properties.dirty
-            && !self.state.schematic.read_only
+            && !self.state.schematic_edit_read_only()
             && validation.can_commit();
         let primary_on_enter = !matches!(draft, ObjectPropertiesDraft::DesignNote(_));
 
@@ -470,7 +470,7 @@ fn draft_resolution_key(
 
 fn object_property_session_error(state: &crate::workbench::app_state::AppState) -> Option<String> {
     let dialog = &state.dialogs.object_properties;
-    if state.schematic.read_only || state.active_view_read_only() {
+    if state.schematic_edit_read_only() {
         return Some("The active schematic is read-only; no properties can be applied.".to_owned());
     }
     if dialog.design_execution_epoch != state.design_execution_epoch {

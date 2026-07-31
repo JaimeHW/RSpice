@@ -11,7 +11,9 @@ use crate::state::{
 };
 
 use super::state::*;
-use crate::workbench::app_state::{AppState, publish_symbol_definition_candidate_with_fixture, SymbolDefinitionFixtureDelta};
+use crate::workbench::app_state::{
+    AppState, SymbolDefinitionFixtureDelta, publish_symbol_definition_candidate_with_fixture,
+};
 
 pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
     let library = state
@@ -137,6 +139,81 @@ pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
         expected_library_revision: state.library_manager.revision(),
         ..CreateModelBoundSymbolDialogState::default()
     };
+}
+
+pub(crate) fn open_create_subcircuit_bound_symbol_dialog(
+    state: &mut AppState,
+    source_library: String,
+    subcircuit: String,
+    source_path: std::path::PathBuf,
+    ordered_ports: Vec<String>,
+    section: Option<String>,
+    parameter_defaults: std::collections::BTreeMap<String, String>,
+) -> Result<(), String> {
+    let target_library = state
+        .library_manager
+        .selected_library
+        .as_deref()
+        .and_then(|name| {
+            state
+                .library_manager
+                .get_library(name)
+                .filter(|library| !library.read_only)
+                .map(|library| library.name.clone())
+        })
+        .or_else(|| {
+            state
+                .library_manager
+                .libraries_sorted()
+                .into_iter()
+                .find(|library| !library.read_only)
+                .map(|library| library.name.clone())
+        })
+        .ok_or_else(|| "Subcircuit symbol import requires a writable design library".to_owned())?;
+    if ordered_ports.is_empty() {
+        return Err(format!(
+            "Subcircuit '{subcircuit}' has no explicit ordered terminal contract"
+        ));
+    }
+    let pins = ordered_ports
+        .into_iter()
+        .enumerate()
+        .map(|(index, port)| {
+            CreateSymbolPinDraft::new(
+                port,
+                CreateSymbolPinType::AnalogBidirectional,
+                if index.is_multiple_of(2) {
+                    CreateSymbolPinSide::Left
+                } else {
+                    CreateSymbolPinSide::Right
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    let cell = default_cell_name(&subcircuit);
+    let model_source = CreateSymbolModelSource {
+        library: source_library,
+        model: subcircuit,
+        model_type: ModelType::Other,
+        family: "subcircuit".to_owned(),
+        source_path: Some(source_path),
+        section,
+        instance_parameters: subcircuit_instance_parameters(parameter_defaults),
+        requires_pin_review: true,
+        pins: pins.clone(),
+    };
+    state.dialogs.create_model_bound_symbol = CreateModelBoundSymbolDialogState {
+        open: true,
+        target: format!("{target_library} / {cell}"),
+        source_mode: CreateSymbolSourceMode::Model,
+        model_source: Some(model_source),
+        pins,
+        template: CreateSymbolTemplate::RectangularIc,
+        pin_contract_reviewed: false,
+        expected_library_revision: state.library_manager.revision(),
+        ..CreateModelBoundSymbolDialogState::default()
+    };
+    Ok(())
 }
 
 pub(super) fn validate_create_symbol_draft(state: &AppState) -> Result<(), String> {
@@ -428,15 +505,39 @@ pub(super) fn build_create_symbol_definition(
                         &parameter.key,
                         &format!("Instance parameter '{}'", parameter.key),
                     )?;
+                    let (property_type, default) = match parameter.property_type {
+                        PropertyType::Number => (
+                            PropertyType::Number,
+                            SymbolParameterDefault::Number {
+                                engineering: parameter.default.clone(),
+                                unit: parameter.unit.clone(),
+                            },
+                        ),
+                        PropertyType::String => (
+                            PropertyType::String,
+                            SymbolParameterDefault::String {
+                                value: parameter.default.clone(),
+                            },
+                        ),
+                        PropertyType::Expression => (
+                            PropertyType::Expression,
+                            SymbolParameterDefault::Expression {
+                                value: parameter.default.clone(),
+                            },
+                        ),
+                        PropertyType::Enum | PropertyType::Boolean => {
+                            return Err(format!(
+                                "Instance parameter '{}' has an unsupported generated type",
+                                parameter.key
+                            ));
+                        }
+                    };
                     Ok(SymbolParameterField {
                         key: parameter.key.clone(),
                         label: parameter.label.clone(),
                         help: parameter.help.clone(),
-                        property_type: PropertyType::Number,
-                        default: SymbolParameterDefault::Number {
-                            engineering: parameter.default.clone(),
-                            unit: parameter.unit.clone(),
-                        },
+                        property_type,
+                        default,
                         unit: parameter.unit.clone(),
                         constraints: SymbolParameterConstraints {
                             minimum: parameter.minimum.clone(),
@@ -536,6 +637,60 @@ pub(super) fn build_create_symbol_definition(
     Ok(definition)
 }
 
+fn subcircuit_instance_parameters(
+    defaults: std::collections::BTreeMap<String, String>,
+) -> Vec<CreateSymbolParameterDraft> {
+    defaults
+        .into_iter()
+        .map(|(key, raw)| {
+            let trimmed = raw.trim();
+            let (property_type, default) =
+                if crate::quantity::parse_engineering_value(trimmed).is_ok() {
+                    (PropertyType::Number, trimmed.to_owned())
+                } else if let Some(value) = trimmed
+                    .strip_prefix('{')
+                    .and_then(|value| value.strip_suffix('}'))
+                {
+                    (PropertyType::Expression, value.trim().to_owned())
+                } else if let Some(value) = trimmed
+                    .strip_prefix('"')
+                    .and_then(|value| value.strip_suffix('"'))
+                    .or_else(|| {
+                        trimmed
+                            .strip_prefix('\'')
+                            .and_then(|value| value.strip_suffix('\''))
+                    })
+                {
+                    let mut decoded = String::with_capacity(value.len());
+                    let mut characters = value.chars();
+                    while let Some(character) = characters.next() {
+                        if character == '\\' {
+                            decoded.push(characters.next().unwrap_or('\\'));
+                        } else {
+                            decoded.push(character);
+                        }
+                    }
+                    (PropertyType::String, decoded)
+                } else {
+                    (PropertyType::Expression, trimmed.to_owned())
+                };
+            CreateSymbolParameterDraft {
+                label: key.clone(),
+                help: format!(
+                    "Instance override declared by the imported subcircuit parameter '{key}'."
+                ),
+                key,
+                property_type,
+                default,
+                unit: None,
+                minimum: None,
+                maximum: None,
+                required: false,
+            }
+        })
+        .collect()
+}
+
 fn model_instance_parameters(
     model: &crate::state::model_library::DeviceModel,
 ) -> Vec<CreateSymbolParameterDraft> {
@@ -557,6 +712,7 @@ fn model_instance_parameters(
             key: key.to_owned(),
             label: label.to_owned(),
             help: help.to_owned(),
+            property_type: PropertyType::Number,
             default: default.into(),
             unit: unit.map(str::to_owned),
             minimum,

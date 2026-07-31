@@ -1483,7 +1483,13 @@ mod tests {
             catalog.find(managed).unwrap().page_format(),
             &managed_format
         );
-        assert_eq!(catalog.find(ordinary).unwrap().page_format(), &source);
+        let ordinary_format = catalog.find(ordinary).unwrap().page_format();
+        assert_eq!(ordinary_format.authored_size, source.authored_size);
+        assert_eq!(ordinary_format.orientation, source.orientation);
+        assert_eq!(
+            ordinary_format.title_block.fields[&DrawingSheetTitleFieldId::SheetTitle].value,
+            "Ordinary"
+        );
         assert!(message.contains("Managed"));
         let receipt = app
             .state

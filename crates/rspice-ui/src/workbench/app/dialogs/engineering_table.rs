@@ -13,7 +13,10 @@ use crate::workbench::workflows::export_workflow::{
     ExportWorkflowIo, NativeExportWorkflowIo, SaveDialogConfig,
 };
 
-use crate::workbench::app::{EngineeringTableDialogPage, EngineeringTableExportFormat, EngineeringTableExportScope, RSpiceApp};
+use crate::workbench::app::{
+    EngineeringTableDialogPage, EngineeringTableExportFormat, EngineeringTableExportScope,
+    RSpiceApp,
+};
 use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "VIEW \u{00b7} UNIVERSAL DATA-GRID CONTRACT";
@@ -500,10 +503,12 @@ impl RSpiceApp {
                     #[cfg(target_arch = "wasm32")]
                     {
                         let bytes =
-                            crate::workbench::workflows::export_workflow::deterministic_stored_zip(&[
-                                ("table.csv", text.as_bytes()),
-                                ("schema.json", schema.as_bytes()),
-                            ])?;
+                            crate::workbench::workflows::export_workflow::deterministic_stored_zip(
+                                &[
+                                    ("table.csv", text.as_bytes()),
+                                    ("schema.json", schema.as_bytes()),
+                                ],
+                            )?;
                         io.write_bytes_file_observed(&observed, &bytes, "application/zip")
                     }
                     #[cfg(not(target_arch = "wasm32"))]

@@ -6,7 +6,8 @@
 use crate::diagnostics::{LogAnchor, LogSource};
 use crate::services::drc::{DrcLocation, DrcViolationType};
 use crate::state::{
-    Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point,
+    Cell, CellViewRef, Component, ComponentType, LayoutEdit, LayoutInstance, LayoutObjectId,
+    LayoutOrientation, LayoutPoint, LayoutTransform, Library, LibraryCellInstance, Point,
     PortDirection, PortSpec, ResolvedSymbolSource, Rotation, SYMBOL_DOCUMENT_METADATA_KEY,
     SchematicState, SymbolDocument, SymbolEditorMetadata, SymbolPin, SymbolResolver, View,
     ViewType, Wire,
@@ -51,23 +52,19 @@ fn new_document_defaults_are_resolved_once_and_existing_buffers_are_preserved() 
 }
 
 #[test]
-fn any_angle_document_policy_applies_to_wire_and_bus_authoring() {
+fn new_document_preserves_the_exact_runtime_wire_and_bus_routing_mode() {
     let mut state = AppState::default();
-    state
-        .ui
-        .preferences
-        .set_choice(ChoicePreference::WireJunctionBehavior, 2)
-        .unwrap();
+    state.ui.schematic_routing_mode = crate::state::WireRoutingMode::VerticalFirst;
 
     let created = state.new_schematic_document();
 
     assert_eq!(
         created.wire_drawing.routing_mode,
-        crate::state::WireRoutingMode::Diagonal
+        crate::state::WireRoutingMode::VerticalFirst
     );
     assert_eq!(
         created.bus_drawing.routing_mode,
-        crate::state::WireRoutingMode::Diagonal
+        crate::state::WireRoutingMode::VerticalFirst
     );
 }
 
@@ -94,6 +91,23 @@ fn new_document_inherits_snap_targets_and_reconciles_the_preferred_pitch() {
     );
     assert_eq!(created.grid_size, expected_snap.grid_size);
     assert_eq!(created.snap_engine, expected_snap);
+}
+
+#[test]
+fn schematic_edit_authority_includes_late_safe_mode_project_read_only() {
+    let mut state = AppState::default();
+    assert!(!state.schematic_edit_read_only());
+
+    state.workbench.safe_mode.activate(
+        crate::workbench::state::LocalSafeModeOptions {
+            open_project_read_only: true,
+            ..Default::default()
+        },
+        String::new(),
+    );
+
+    assert!(state.schematic_edit_read_only());
+    assert!(state.deny_read_only_edit());
 }
 
 fn symbol_document(pins: &[(&str, PortDirection, Point)]) -> SymbolDocument {
@@ -971,6 +985,7 @@ fn copy_cell_flushes_live_active_schematic_before_copying_buffers() {
     state
         .schematic
         .add_component(ComponentType::Resistor, Point::new(20, 20));
+    let project_revision_before = state.workspace.project.revision().get();
 
     let copied = state
         .copy_cell("work", "amp", "work", "amp_copy")
@@ -984,6 +999,140 @@ fn copy_cell_flushes_live_active_schematic_before_copying_buffers() {
     assert_eq!(copied, 1);
     assert_eq!(copy.components.len(), 1);
     assert_eq!(copy.components[0].kind, ComponentType::Resistor);
+    assert_eq!(
+        state.workspace.project.revision().get(),
+        project_revision_before + 1
+    );
+    assert!(state.workspace.project_metadata_dirty);
+}
+
+#[test]
+fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters() {
+    let mut state = state_with_work_cell("amp");
+    let amp_layout = CellViewRef::new("work", "amp", "layout");
+    let wrapper_layout = CellViewRef::new("work", "wrapper", "layout");
+    {
+        let library = state
+            .library_manager
+            .get_library_mut("work")
+            .expect("work library");
+        library
+            .get_cell_mut("amp")
+            .expect("amp cell")
+            .add_view(View::new("layout", ViewType::Layout));
+        let mut wrapper = Cell::new("wrapper");
+        wrapper.add_view(View::new("schematic", ViewType::Schematic));
+        wrapper.add_view(View::new("layout", ViewType::Layout));
+        library.add_cell(wrapper);
+    }
+    state.provision_test_project_technology_contract();
+    state
+        .initialize_physical_layout_document(amp_layout.clone())
+        .expect("amp layout initializes from exact project PDK pin");
+    state
+        .initialize_physical_layout_document(wrapper_layout.clone())
+        .expect("wrapper layout initializes from exact project PDK pin");
+
+    let mut wrapper = state
+        .workspace
+        .physical_layout_document(&wrapper_layout)
+        .expect("wrapper layout document")
+        .clone();
+    let wrapper_revision = wrapper.revision();
+    wrapper
+        .apply_transaction(
+            wrapper_revision,
+            &[LayoutEdit::InsertInstance {
+                id: LayoutObjectId::new(),
+                value: LayoutInstance {
+                    master: amp_layout.clone(),
+                    transform: LayoutTransform {
+                        origin: LayoutPoint::new(1_000, 2_000),
+                        orientation: LayoutOrientation::R90,
+                    },
+                    array: None,
+                    terminal_bindings: Default::default(),
+                    properties: Default::default(),
+                },
+            }],
+        )
+        .expect("hierarchical instance transaction");
+    state
+        .workspace
+        .commit_physical_layout_document(wrapper)
+        .expect("hierarchical wrapper layout commits");
+
+    state
+        .copy_cell("work", "amp", "work", "amp_copy")
+        .expect("layout-bearing cell copy succeeds");
+    let copied_layout = CellViewRef::new("work", "amp_copy", "layout");
+    let copied = state
+        .workspace
+        .physical_layout_document(&copied_layout)
+        .expect("copied authoritative layout document");
+    assert_eq!(copied.owner(), &copied_layout);
+    assert_eq!(
+        copied.technology(),
+        state
+            .workspace
+            .physical_layout_document(&amp_layout)
+            .expect("source layout remains")
+            .technology()
+    );
+    assert_eq!(
+        state
+            .workspace
+            .physical_layout_document(&wrapper_layout)
+            .expect("wrapper remains")
+            .instances()
+            .values()
+            .next()
+            .expect("wrapper instance")
+            .master,
+        amp_layout,
+        "copy must not retarget existing hierarchy"
+    );
+
+    state
+        .rename_cell("work", "amp", "amp_renamed")
+        .expect("layout-bearing cell rename succeeds");
+    let renamed_layout = CellViewRef::new("work", "amp_renamed", "layout");
+    assert!(
+        state
+            .workspace
+            .physical_layout_document(&CellViewRef::new("work", "amp", "layout"))
+            .is_none()
+    );
+    assert_eq!(
+        state
+            .workspace
+            .physical_layout_document(&renamed_layout)
+            .expect("renamed authoritative layout document")
+            .owner(),
+        &renamed_layout
+    );
+    assert_eq!(
+        state
+            .workspace
+            .physical_layout_document(&wrapper_layout)
+            .expect("wrapper remains after rename")
+            .instances()
+            .values()
+            .next()
+            .expect("wrapper instance after rename")
+            .master,
+        renamed_layout,
+        "rename must retarget every hierarchical layout reference"
+    );
+    assert!(
+        state
+            .workspace
+            .physical_layout_document(&copied_layout)
+            .is_some(),
+        "independent copied layout remains authoritative"
+    );
+    crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
+        .expect("post-copy/rename project snapshot validates end to end");
 }
 
 #[test]
@@ -1012,10 +1161,32 @@ fn copy_and_rename_cell_keep_veriloga_source_ownership_exact() {
         .configuration_sets
         .clone_configuration(configuration_id, 1, "Characterization")
         .expect("inactive configuration root");
+    let project_revision_before_copy = state.workspace.project.revision().get();
 
     state
         .copy_cell("work", "amp", "work", "amp_copy")
         .expect("copy succeeds");
+    assert_eq!(
+        state.workspace.project.revision().get(),
+        project_revision_before_copy + 1
+    );
+    assert!(matches!(
+        state
+            .workspace
+            .project
+            .library_mutation_audit()
+            .last()
+            .map(|receipt| receipt.mutation()),
+        Some(crate::state::ProjectLibraryMutation::CopyCell {
+            source_library,
+            source_cell,
+            target_library,
+            target_cell,
+        }) if source_library == "work"
+            && source_cell == "amp"
+            && target_library == "work"
+            && target_cell == "amp_copy"
+    ));
     let copied_owner = crate::state::ProjectSourceOwner::cell_view(CellViewRef::new(
         "work", "amp_copy", "behavior",
     ));
@@ -1042,9 +1213,28 @@ fn copy_and_rename_cell_keep_veriloga_source_ownership_exact() {
         .get_bundle(original_id)
         .expect("original source")
         .revision();
+    let project_revision_before_rename = state.workspace.project.revision().get();
     state
         .rename_cell("work", "amp", "amp_renamed")
         .expect("rename succeeds");
+    assert_eq!(
+        state.workspace.project.revision().get(),
+        project_revision_before_rename + 1
+    );
+    assert_eq!(state.workspace.project.library_mutation_audit().len(), 2);
+    assert!(matches!(
+        state
+            .workspace
+            .project
+            .library_mutation_audit()
+            .last()
+            .map(|receipt| receipt.mutation()),
+        Some(crate::state::ProjectLibraryMutation::RenameCell {
+            library,
+            from_cell,
+            to_cell,
+        }) if library == "work" && from_cell == "amp" && to_cell == "amp_renamed"
+    ));
     let renamed_owner = crate::state::ProjectSourceOwner::cell_view(CellViewRef::new(
         "work",
         "amp_renamed",

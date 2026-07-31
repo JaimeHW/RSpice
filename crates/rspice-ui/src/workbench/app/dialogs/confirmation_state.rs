@@ -13,6 +13,8 @@ pub enum ConfirmationAction {
     ProjectNew,
     /// Open another project (discard current workspace)
     ProjectOpen,
+    /// Open a bare SPICE deck as a new netlist-first project.
+    OpenNetlistProject,
     /// Close the current project while leaving RSpice running.
     CloseProject,
     /// Create new schematic (discard current)
@@ -37,6 +39,7 @@ impl ConfirmationAction {
         match self {
             ConfirmationAction::ProjectNew => "Create New Project",
             ConfirmationAction::ProjectOpen => "Open Project",
+            ConfirmationAction::OpenNetlistProject => "Open Netlist Project",
             ConfirmationAction::CloseProject => "Close Project",
             ConfirmationAction::FileNew => "Create New Schematic",
             ConfirmationAction::FileOpen => "Open Schematic",
@@ -52,6 +55,7 @@ impl ConfirmationAction {
         match self {
             ConfirmationAction::ProjectNew
             | ConfirmationAction::ProjectOpen
+            | ConfirmationAction::OpenNetlistProject
             | ConfirmationAction::CloseProject => {
                 "The current project has unsaved changes.\nDo you want to save before continuing?"
             }
@@ -59,9 +63,11 @@ impl ConfirmationAction {
             | ConfirmationAction::FileOpen
             | ConfirmationAction::OpenRecent
             | ConfirmationAction::OpenExample
-            | ConfirmationAction::ImportNetlist
             | ConfirmationAction::Exit => {
                 "The current design has unsaved changes.\nDo you want to save before continuing?"
+            }
+            ConfirmationAction::ImportNetlist => {
+                "The current SPICE source has unsaved changes and will be replaced.\nDo you want to save it before importing another deck?"
             }
         }
     }
@@ -247,6 +253,8 @@ mod tests {
         for action in [
             ConfirmationAction::CloseProject,
             ConfirmationAction::ProjectOpen,
+            ConfirmationAction::OpenNetlistProject,
+            ConfirmationAction::ImportNetlist,
             ConfirmationAction::ProjectNew,
             ConfirmationAction::Exit,
         ] {
@@ -271,6 +279,8 @@ mod tests {
         for action in [
             ConfirmationAction::CloseProject,
             ConfirmationAction::ProjectOpen,
+            ConfirmationAction::OpenNetlistProject,
+            ConfirmationAction::ImportNetlist,
             ConfirmationAction::ProjectNew,
             ConfirmationAction::Exit,
         ] {
