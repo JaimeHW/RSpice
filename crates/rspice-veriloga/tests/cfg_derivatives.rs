@@ -10,16 +10,15 @@
 //! "the step was badly chosen", and a compact model's exponentials make that a
 //! live risk.
 
-use rspice_veriloga::rust_backend::discover_veriloga_sources;
-use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use rspice_veriloga::canonical_ir::cfg::CfgFunction;
 use rspice_veriloga::canonical_ir::cfg_lower::CfgModel;
 use rspice_veriloga::canonical_ir::mir::MirParameterSlot;
 use rspice_veriloga::canonical_ir::{
-    CanonicalValueType,
-    AdSeed, CanonicalIrArtifact, CfgEvalInputs, CfgScalar, ComplexStep, ValueId, differentiate,
-    evaluate_cfg,
+    AdSeed, CanonicalIrArtifact, CanonicalValueType, CfgEvalInputs, CfgScalar, ComplexStep,
+    ValueId, differentiate, evaluate_cfg,
 };
+use rspice_veriloga::rust_backend::discover_veriloga_sources;
+use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -157,11 +156,7 @@ fn every_jacobian_entry_matches_a_richardson_difference() {
         for (equation, residual) in cfg.residuals.iter().enumerate() {
             let row: Vec<f64> = rows[equation]
                 .iter()
-                .map(|entry| {
-                    entry
-                        .and_then(|value| snapshot.value(value))
-                        .unwrap_or(0.0)
-                })
+                .map(|entry| entry.and_then(|value| snapshot.value(value)).unwrap_or(0.0))
                 .collect();
             let scale = row
                 .iter()
@@ -679,7 +674,9 @@ fn draw_parameter(slot: &MirParameterSlot, state: &mut u64) -> f64 {
             // An exclusive bound is stepped off by a share of the span rather
             // than by an epsilon: a parameter sitting one ulp inside `> 0` is
             // inside the range and useless as a bias.
-            let span = range.max.map_or(min.abs().max(1.0), |max| (max - min).abs());
+            let span = range
+                .max
+                .map_or(min.abs().max(1.0), |max| (max - min).abs());
             let floor = if range.min_exclusive {
                 min + 1.0e-3 * span.max(f64::MIN_POSITIVE)
             } else {
@@ -688,7 +685,9 @@ fn draw_parameter(slot: &MirParameterSlot, state: &mut u64) -> f64 {
             value = value.max(floor);
         }
         if let Some(max) = range.max {
-            let span = range.min.map_or(max.abs().max(1.0), |min| (max - min).abs());
+            let span = range
+                .min
+                .map_or(max.abs().max(1.0), |min| (max - min).abs());
             let ceiling = if range.max_exclusive {
                 max - 1.0e-3 * span.max(f64::MIN_POSITIVE)
             } else {
@@ -696,7 +695,7 @@ fn draw_parameter(slot: &MirParameterSlot, state: &mut u64) -> f64 {
             };
             value = value.min(ceiling);
         }
-        if range.exclude.iter().any(|excluded| *excluded == value) {
+        if range.exclude.contains(&value) {
             return default;
         }
     }
@@ -830,8 +829,10 @@ fn every_jacobian_entry_matches_complex_step_at_drawn_bias_points() {
         violations.is_empty(),
         "the rule and complex step disagree:
 {}",
-        violations.join("
-")
+        violations.join(
+            "
+"
+        )
     );
 }
 
@@ -947,8 +948,10 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
         "{} of {entries} compared entries disagree with complex step:
 {}",
         violations.len(),
-        violations.join("
-")
+        violations.join(
+            "
+"
+        )
     );
 }
 

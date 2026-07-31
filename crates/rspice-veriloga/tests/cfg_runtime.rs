@@ -61,8 +61,16 @@ const QUICK_MODELS: &[Model] = &[
 /// The wide MOSFETs. Minutes each, mostly in their own front end and then in
 /// `rustc` on a megabyte of emitted Rust — which is itself one of the numbers.
 const HEAVY_MODELS: &[Model] = &[
-    ("bsimbulk", "cmc/BSIM-BULK107.2.1_02112025/code", "bsimbulk.va"),
-    ("bsimcmg_va", "cmc/BSIM-CMG_112.1.0_04282026/code", "bsimcmg.va"),
+    (
+        "bsimbulk",
+        "cmc/BSIM-BULK107.2.1_02112025/code",
+        "bsimbulk.va",
+    ),
+    (
+        "bsimcmg_va",
+        "cmc/BSIM-CMG_112.1.0_04282026/code",
+        "bsimcmg.va",
+    ),
     (
         "hisimhv_va",
         "cmc/HiSIM_HV_2.5.1_Release_20230209/HiSIM_HV_2.5.1_VA-Code/hisimhv_va",
@@ -196,7 +204,12 @@ fn measure(root: &Path, path: &Path, module: &str) -> Measurement {
     // a lane appends an instruction to the function.
     let mut wanted = cfg.residuals.clone();
     for residual in &cfg.residuals.clone() {
-        wanted.extend(differentiated.derivative_row(*residual).into_iter().flatten());
+        wanted.extend(
+            differentiated
+                .derivative_row(*residual)
+                .into_iter()
+                .flatten(),
+        );
     }
     let (optimized, wanted) = optimize_cfg(&differentiated.function, &wanted);
 
@@ -229,8 +242,7 @@ fn measure(root: &Path, path: &Path, module: &str) -> Measurement {
     // The Newton stage alone, reading what the coarser stages cached.
     let schedule = schedule_cfg(&optimized);
     let census = schedule.census();
-    let newton_share =
-        census[census.len() - 1] as f64 / census.iter().sum::<usize>().max(1) as f64;
+    let newton_share = census[census.len() - 1] as f64 / census.iter().sum::<usize>().max(1) as f64;
     let stages = split_cfg(&optimized, &schedule, &wanted)
         .unwrap_or_else(|error| panic!("{module}: split: {error}"));
     let staged = staged_values(&stages, &bias, module);
@@ -603,7 +615,9 @@ fn compile(root: &Path, path: &Path, module: &str) -> CanonicalIrArtifact {
         .artifact
 }
 
-fn profile_for(path: &Path) -> Option<(Vec<(String, Option<String>)>, Vec<String>)> {
+type CompileProfile = (Vec<(String, Option<String>)>, Vec<String>);
+
+fn profile_for(path: &Path) -> Option<CompileProfile> {
     let directory = path.parent()?;
     discover_veriloga_sources(directory)
         .ok()?

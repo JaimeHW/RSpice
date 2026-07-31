@@ -258,7 +258,9 @@ fn drawn_modules_lower_and_differentiate() {
         let cfg = match CfgModel::from_hir(&artifact.hir, &artifact.mir) {
             Ok(cfg) => cfg,
             Err(diagnostics) => {
-                refusals.push(format!("seed {seed}: lowering refused: {diagnostics:?}\n{source}"));
+                refusals.push(format!(
+                    "seed {seed}: lowering refused: {diagnostics:?}\n{source}"
+                ));
                 continue;
             }
         };
@@ -270,7 +272,9 @@ fn drawn_modules_lower_and_differentiate() {
         match differentiate(&cfg.function, &lanes) {
             Ok(_) => differentiated += 1,
             Err(error) => {
-                refusals.push(format!("seed {seed}: differentiation refused: {error}\n{source}"));
+                refusals.push(format!(
+                    "seed {seed}: differentiation refused: {error}\n{source}"
+                ));
             }
         }
     }

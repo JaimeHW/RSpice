@@ -14,8 +14,8 @@ use rspice_veriloga::canonical_ir::cfg_lower::{CfgModel, CfgNoiseSource};
 use rspice_veriloga::canonical_ir::{
     CanonicalIrArtifact, CanonicalNoiseSourceKind, CfgEvalInputs, ValueId, evaluate_cfg,
 };
-use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use rspice_veriloga::rust_backend::discover_veriloga_sources;
+use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -295,7 +295,10 @@ fn every_lowered_source_corresponds_to_one_plan_source() {
             );
             assert_eq!(
                 matched.table.len(),
-                planned.table.as_ref().map_or(0, |table| table.operands.len()),
+                planned
+                    .table
+                    .as_ref()
+                    .map_or(0, |table| table.operands.len()),
                 "{name}: source {index} table width disagrees"
             );
             assert_eq!(

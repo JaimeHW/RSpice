@@ -55,6 +55,21 @@ endmodule
     )
 }
 
+fn cross_scope_range_model() -> DeviceFixture {
+    DeviceFixture::compile(
+        r#"
+`include "disciplines.vams"
+module cross_scope_ranges(p, n);
+    inout p, n;
+    electrical p, n;
+    (* type = "instance" *) parameter real length = 2.0;
+    parameter real overlap = 1.0 from [0:length);
+    analog I(p, n) <+ overlap * V(p, n);
+endmodule
+"#,
+    )
+}
+
 #[test]
 fn compiled_parameters_preserve_declared_constraints() {
     let model = parameter_model();
@@ -201,6 +216,31 @@ fn computed_ranges_evaluate_against_final_parameter_values() {
         .try_resolve_parameter_defaults()
         .expect_err("computed exclusions must fail setup");
     assert!(error.to_string().contains("explicitly excluded"), "{error}");
+}
+
+#[test]
+fn model_ranges_use_each_instances_completed_geometry() {
+    let model = cross_scope_range_model();
+
+    let mut valid = model.device("CROSS_SCOPE_OK", &[1, 0]);
+    valid
+        .try_set_parameter("length", 3.0)
+        .expect("instance geometry override is valid");
+    valid
+        .try_set_parameter("overlap", 2.5)
+        .expect("model value is provisionally accepted");
+    valid
+        .try_resolve_parameter_defaults()
+        .expect("model range uses the completed instance geometry");
+
+    let mut invalid = model.device("CROSS_SCOPE_BAD", &[1, 0]);
+    invalid
+        .try_set_parameter("length", 0.5)
+        .expect("instance geometry override is provisionally valid");
+    let error = invalid
+        .try_resolve_parameter_defaults()
+        .expect_err("model value must be revalidated against instance geometry");
+    assert!(error.to_string().contains("length=0.5"), "{error}");
 }
 
 #[test]

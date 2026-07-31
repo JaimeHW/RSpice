@@ -364,7 +364,9 @@ fn every_output_is_readable_once_the_stages_have_run() {
             let owner = stages
                 .iter()
                 .find(|stage| stage.outputs[index].is_some())
-                .unwrap_or_else(|| panic!("{name}: output {index} ({output}) is owned by no stage"));
+                .unwrap_or_else(|| {
+                    panic!("{name}: output {index} ({output}) is owned by no stage")
+                });
             if owner.class == last {
                 continue;
             }
@@ -408,7 +410,12 @@ fn pipeline_artifact(
 
     let mut wanted = cfg.residuals.clone();
     for residual in &cfg.residuals.clone() {
-        wanted.extend(differentiated.derivative_row(*residual).into_iter().flatten());
+        wanted.extend(
+            differentiated
+                .derivative_row(*residual)
+                .into_iter()
+                .flatten(),
+        );
     }
     optimize_cfg(&differentiated.function, &wanted)
 }

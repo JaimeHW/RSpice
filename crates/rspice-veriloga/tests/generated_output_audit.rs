@@ -114,7 +114,7 @@ fn generated_veriloga_noise_is_one_pass_and_allocation_free() {
     let mut failures = Vec::new();
 
     scan_generated_rust(&generated_root, &mut |path, source| {
-        if !path.file_name().is_some_and(|name| name == "noise.rs") {
+        if path.file_name().is_none_or(|name| name != "noise.rs") {
             return;
         }
         noise_files += 1;
@@ -168,7 +168,7 @@ fn generated_veriloga_noise_is_a_slice_rather_than_a_second_model() {
     let mut workspaces = Vec::new();
 
     scan_generated_rust(&generated_root, &mut |path, source| {
-        if !path.file_name().is_some_and(|name| name == "noise.rs") {
+        if path.file_name().is_none_or(|name| name != "noise.rs") {
             return;
         }
         total += source.len();

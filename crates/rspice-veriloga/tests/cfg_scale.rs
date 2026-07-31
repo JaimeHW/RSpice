@@ -111,9 +111,10 @@ fn reason(payload: &Box<dyn std::any::Any + Send>) -> String {
     if let Some(message) = payload.downcast_ref::<String>() {
         return message.clone();
     }
-    payload
-        .downcast_ref::<&str>()
-        .map_or_else(|| "panicked with a payload of no known type".to_string(), |message| (*message).to_string())
+    payload.downcast_ref::<&str>().map_or_else(
+        || "panicked with a payload of no known type".to_string(),
+        |message| (*message).to_string(),
+    )
 }
 
 struct Report {
@@ -283,8 +284,10 @@ fn compile(root: &Path, path: &Path, module: &str) -> CanonicalIrArtifact {
         .artifact
 }
 
+type CompileProfile = (Vec<(String, Option<String>)>, Vec<String>);
+
 /// The compile profile discovery already worked out for this source.
-fn profile_for(root: &Path, path: &Path) -> Option<(Vec<(String, Option<String>)>, Vec<String>)> {
+fn profile_for(root: &Path, path: &Path) -> Option<CompileProfile> {
     let directory = path.parent()?;
     let candidates = discover_veriloga_sources(directory).ok()?;
     let _ = root;
