@@ -115,6 +115,7 @@ fn all_block_kinds() -> Vec<ReportBlockKind> {
             caption: "Closed-loop gain".to_owned(),
             alternative_text: "Gain and phase across the requested frequency range.".to_owned(),
             sizing: FigureSizing::FitWidth,
+            source_locator: None,
             reference: ReportReferenceMode::Frozen {
                 snapshot: plot_snapshot,
                 artifact: FrozenReportArtifact::new(
@@ -306,6 +307,10 @@ fn linked_and_frozen_reference_currentness_is_explicit_and_auditable() {
                         caption: "Gain".to_owned(),
                         alternative_text: "Gain versus frequency.".to_owned(),
                         sizing: FigureSizing::FitWidth,
+                        source_locator: Some(ReportFigureSourceLocator {
+                            page_id: 1,
+                            pane_id: 1,
+                        }),
                         reference: ReportReferenceMode::Linked {
                             snapshot: linked_snapshot.clone(),
                         },
@@ -346,6 +351,7 @@ fn linked_and_frozen_reference_currentness_is_explicit_and_auditable() {
             .unwrap(),
         ],
         available_datasets: vec![linked_dataset],
+        figure_artifacts: Vec::new(),
     };
     let first = document.audit_references(&inventory).unwrap();
     assert_eq!(
@@ -398,6 +404,10 @@ fn audit_distinguishes_missing_source_dataset_and_changed_content() {
                     caption: "Noise".to_owned(),
                     alternative_text: "Input-referred noise density.".to_owned(),
                     sizing: FigureSizing::FitWidth,
+                    source_locator: Some(ReportFigureSourceLocator {
+                        page_id: 1,
+                        pane_id: 1,
+                    }),
                     reference: ReportReferenceMode::Linked {
                         snapshot: snapshot.clone(),
                     },
@@ -427,6 +437,7 @@ fn audit_distinguishes_missing_source_dataset_and_changed_content() {
         .audit_references(&ReportReferenceInventory {
             sources: vec![changed_entry.clone()],
             available_datasets: vec![binding],
+            figure_artifacts: Vec::new(),
         })
         .unwrap();
     assert_eq!(
@@ -441,6 +452,7 @@ fn audit_distinguishes_missing_source_dataset_and_changed_content() {
                 ..changed_entry
             }],
             available_datasets: Vec::new(),
+            figure_artifacts: Vec::new(),
         })
         .unwrap();
     assert_eq!(
@@ -1044,6 +1056,7 @@ fn invalid_tables_notes_sources_and_duplicate_bindings_fail_closed() {
         caption: "Wrong source".to_owned(),
         alternative_text: "This must fail source-kind validation.".to_owned(),
         sizing: FigureSizing::Natural,
+        source_locator: None,
         reference: ReportReferenceMode::Linked {
             snapshot: dataset_snapshot(81).0,
         },
@@ -1756,6 +1769,98 @@ fn schema_five_migration_rejects_mislabeled_publication_policy() {
     mislabeled["schema_version"] = serde_json::json!(5);
 
     assert!(serde_json::from_value::<ReportDocument>(mislabeled).is_err());
+}
+
+#[test]
+fn schema_six_migration_preserves_reports_without_figure_locators() {
+    let document = ReportDocument::new("Schema six report").unwrap();
+    let mut schema_six = serde_json::to_value(&document).unwrap();
+    schema_six["schema_version"] = serde_json::json!(6);
+
+    let migrated: ReportDocument = serde_json::from_value(schema_six).unwrap();
+
+    assert_eq!(migrated, document);
+    assert_eq!(migrated.schema_version(), ReportDocument::SCHEMA_VERSION);
+}
+
+#[test]
+fn schema_six_migration_rejects_mislabeled_figure_locator() {
+    let (mut document, _, section_id) = document_with_section();
+    let (snapshot, _) = visualization_snapshot(ObjectRevision::INITIAL, 91);
+    document
+        .transact(
+            document.revision(),
+            vec![ReportEdit::AddBlock {
+                section_id,
+                kind: ReportBlockKind::PlotFigure(PlotFigureBlock {
+                    caption: "Exact pane".to_owned(),
+                    alternative_text: "One exact linked visualization pane.".to_owned(),
+                    sizing: FigureSizing::FitWidth,
+                    source_locator: Some(ReportFigureSourceLocator {
+                        page_id: 1,
+                        pane_id: 2,
+                    }),
+                    reference: ReportReferenceMode::Linked { snapshot },
+                }),
+            }],
+            92,
+        )
+        .unwrap();
+    let mut mislabeled = serde_json::to_value(document).unwrap();
+    mislabeled["schema_version"] = serde_json::json!(6);
+
+    let error = serde_json::from_value::<ReportDocument>(mislabeled).unwrap_err();
+
+    assert!(error.to_string().contains("schema version 6"));
+}
+
+#[test]
+fn schema_six_migration_rejects_linked_figure_without_inventing_a_locator() {
+    fn clear_figure_locators(page: &mut ReportPage) {
+        for section in &mut page.sections {
+            for block in &mut section.blocks {
+                if let ReportBlockKind::PlotFigure(figure) = &mut block.kind {
+                    figure.source_locator = None;
+                }
+            }
+        }
+    }
+
+    let (mut document, _, section_id) = document_with_section();
+    let (snapshot, _) = visualization_snapshot(ObjectRevision::INITIAL, 93);
+    document
+        .transact(
+            document.revision(),
+            vec![ReportEdit::AddBlock {
+                section_id,
+                kind: ReportBlockKind::PlotFigure(PlotFigureBlock {
+                    caption: "Legacy linked figure".to_owned(),
+                    alternative_text: "A schema-six link has no exact pane identity.".to_owned(),
+                    sizing: FigureSizing::FitWidth,
+                    source_locator: Some(ReportFigureSourceLocator {
+                        page_id: 1,
+                        pane_id: 1,
+                    }),
+                    reference: ReportReferenceMode::Linked { snapshot },
+                }),
+            }],
+            94,
+        )
+        .unwrap();
+    document.schema_version = 6;
+    for page in &mut document.pages {
+        clear_figure_locators(page);
+    }
+    for record in &mut document.revision_history.records {
+        for page in &mut record.snapshot.pages {
+            clear_figure_locators(page);
+        }
+    }
+
+    assert!(matches!(
+        document.migrate(),
+        Err(ReportError::UnsafeLegacyMigration { version: 6 })
+    ));
 }
 
 #[test]

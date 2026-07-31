@@ -10,7 +10,8 @@ use super::*;
 use crate::product::{DatasetBinding, DatasetId, ResultDocumentId, VerificationEvidenceId};
 use crate::results::report_document::{
     DataTableBlock, EvidenceBlock, PlotFigureBlock, ReportEdit, ReportEntityRef,
-    ReportReferenceInventoryEntry, ReportReferenceSnapshot, ReportSourceId, TableCell, TableColumn,
+    ReportFigureSourceLocator, ReportReferenceFigureArtifact, ReportReferenceInventoryEntry,
+    ReportReferenceSnapshot, ReportSourceId, TableCell, TableColumn,
 };
 use crate::results::visualization_document::{
     AxisOrientation, AxisScale, ColumnRole, DocumentEdit, EntityRef, NewAxis, NewTrace,
@@ -695,6 +696,7 @@ fn linked_report_table_requires_exact_source_and_dataset_inventory() {
             .unwrap(),
         ],
         available_datasets: Vec::new(),
+        figure_artifacts: Vec::new(),
     };
     assert!(matches!(
         resolve_report_source(ReportHardcopySource {
@@ -712,6 +714,7 @@ fn linked_report_table_requires_exact_source_and_dataset_inventory() {
     let exact_inventory = ReportReferenceInventory {
         sources: missing_dataset.sources.clone(),
         available_datasets: vec![binding],
+        figure_artifacts: Vec::new(),
     };
     let resolved = resolve_report_source(ReportHardcopySource {
         source_key: "report".to_owned(),
@@ -773,6 +776,162 @@ fn frozen_report_evidence_is_self_contained_and_remains_typed() {
 }
 
 #[test]
+fn retained_linked_report_figure_resolves_identically_in_process_and_worker_snapshot() {
+    let binding = DatasetBinding::new(DatasetId::new(), ContentDigest::from_bytes([0x6b; 32]));
+    let dataset = SourceDataset::new(
+        binding,
+        vec![
+            SourceColumn::new(
+                "time",
+                "Time",
+                ValueType::Real,
+                ColumnRole::Coordinate,
+                Some("s".to_owned()),
+            )
+            .unwrap(),
+            SourceColumn::new(
+                "out",
+                "V(out)",
+                ValueType::Real,
+                ColumnRole::Signal,
+                Some("V".to_owned()),
+            )
+            .unwrap(),
+        ],
+        vec![
+            SourceRow::new(vec![TypedValue::Real(0.0), TypedValue::Real(-0.25)]),
+            SourceRow::new(vec![TypedValue::Real(1.0), TypedValue::Real(0.75)]),
+        ],
+    )
+    .unwrap();
+    let mut visualization = VisualizationDocument::new("Retained waveform", vec![dataset]).unwrap();
+    let page_id = visualization.pages()[0].id;
+    let pane_id = visualization.panes()[0].id;
+    let axes = visualization
+        .transact(
+            visualization.revision(),
+            vec![
+                DocumentEdit::AddAxis(NewAxis {
+                    pane_id,
+                    label: "Time".to_owned(),
+                    orientation: AxisOrientation::Horizontal,
+                    scale: AxisScale::Linear,
+                    unit: Some("s".to_owned()),
+                    range: None,
+                }),
+                DocumentEdit::AddAxis(NewAxis {
+                    pane_id,
+                    label: "Voltage".to_owned(),
+                    orientation: AxisOrientation::VerticalLeft,
+                    scale: AxisScale::Linear,
+                    unit: Some("V".to_owned()),
+                    range: None,
+                }),
+            ],
+        )
+        .unwrap();
+    let x_axis = match axes.created[0] {
+        EntityRef::Axis(id) => id,
+        _ => unreachable!(),
+    };
+    let y_axis = match axes.created[1] {
+        EntityRef::Axis(id) => id,
+        _ => unreachable!(),
+    };
+    visualization
+        .transact(
+            visualization.revision(),
+            vec![DocumentEdit::AddTrace(NewTrace {
+                pane_id,
+                binding,
+                signal_key: "out".to_owned(),
+                coordinate_key: "time".to_owned(),
+                x_axis_id: x_axis,
+                y_axis_id: y_axis,
+                label: "V(out)".to_owned(),
+            })],
+        )
+        .unwrap();
+    let snapshot = ReportReferenceSnapshot::new(
+        ReportSourceId::VisualizationDocument {
+            document_id: visualization.id(),
+        },
+        Some(visualization.revision()),
+        visualization.content_digest().unwrap(),
+        vec![binding],
+    )
+    .unwrap();
+    let mut report = report_with_block(ReportBlockKind::PlotFigure(PlotFigureBlock {
+        caption: "Retained waveform".to_owned(),
+        alternative_text: "Voltage versus time".to_owned(),
+        sizing: FigureSizing::FitWidth,
+        source_locator: Some(ReportFigureSourceLocator {
+            page_id: page_id.get(),
+            pane_id: pane_id.get(),
+        }),
+        reference: ReportReferenceMode::Linked {
+            snapshot: snapshot.clone(),
+        },
+    }));
+    let section_id = report.pages()[0].sections()[0].id();
+    report
+        .transact(
+            report.revision(),
+            vec![ReportEdit::AddBlock {
+                section_id,
+                kind: ReportBlockKind::PlotFigure(PlotFigureBlock {
+                    caption: "Frozen follow-up".to_owned(),
+                    alternative_text: "A frozen figure after the linked figure.".to_owned(),
+                    sizing: FigureSizing::Natural,
+                    source_locator: None,
+                    reference: ReportReferenceMode::Frozen {
+                        snapshot,
+                        artifact: FrozenReportArtifact::new("image/png", opaque_rgb8_png(128, 128))
+                            .unwrap(),
+                    },
+                }),
+            }],
+            95,
+        )
+        .unwrap();
+
+    let mut state = AppState::default();
+    let report_id = report.id();
+    state.workspace.visualization_documents.push(visualization);
+    state.workspace.report_documents.push(report);
+    state.workbench.report_authoring.selected_document = Some(report_id);
+    let source_key = format!(
+        "project:{}:report:{}",
+        state.workspace.project.id().as_uuid(),
+        report_id
+    );
+
+    let synchronous =
+        resolve_retained_hardcopy_source(&state, &source_key, HardcopyScope::CompleteReport)
+            .unwrap();
+    let HardcopySemanticDocument::Report(semantic) = synchronous.semantic_document() else {
+        panic!("expected semantic report")
+    };
+    assert_eq!(semantic.figures.len(), 2);
+    assert_eq!(semantic.figures[0].caption, "Retained waveform");
+    assert_eq!(semantic.figures[1].caption, "Frozen follow-up");
+    assert_eq!(semantic.figures[0].media_type, "image/png");
+    assert!(
+        semantic.figures[0]
+            .payload
+            .starts_with(b"\x89PNG\r\n\x1a\n")
+    );
+
+    let prepared =
+        prepare_retained_hardcopy_resolution(&state, &source_key, HardcopyScope::CompleteReport)
+            .unwrap();
+    let worker_bytes = prepared.to_worker_snapshot_json().unwrap();
+    let restored =
+        PreparedRetainedHardcopyResolution::from_worker_snapshot_json(&worker_bytes).unwrap();
+    assert_eq!(restored.resolve_owned().unwrap(), synchronous);
+}
+
+#[test]
 fn frozen_png_figure_is_fully_validated_and_retained_semantically() {
     let binding = DatasetBinding::new(DatasetId::new(), ContentDigest::from_bytes([0x52; 32]));
     let snapshot = ReportReferenceSnapshot::new(
@@ -789,6 +948,7 @@ fn frozen_png_figure_is_fully_validated_and_retained_semantically() {
         caption: "Authenticated locus".to_owned(),
         alternative_text: "Exact retained visualization.".to_owned(),
         sizing: FigureSizing::FitWidth,
+        source_locator: None,
         reference: ReportReferenceMode::Frozen {
             snapshot: snapshot.clone(),
             artifact: FrozenReportArtifact::new("image/png", png.clone()).unwrap(),
@@ -815,14 +975,20 @@ fn frozen_png_figure_is_fully_validated_and_retained_semantically() {
     );
     assert_eq!(semantic.figures[0].caption, "Authenticated locus");
 
+    let linked_locator = ReportFigureSourceLocator {
+        page_id: 1,
+        pane_id: 1,
+    };
     let linked = report_with_block(ReportBlockKind::PlotFigure(PlotFigureBlock {
         caption: "Linked".to_owned(),
         alternative_text: "Identity only".to_owned(),
         sizing: FigureSizing::FitPage,
+        source_locator: Some(linked_locator.clone()),
         reference: ReportReferenceMode::Linked {
             snapshot: snapshot.clone(),
         },
     }));
+    let linked_block_id = linked.pages()[0].sections()[0].blocks()[0].id();
     let linked_inventory = ReportReferenceInventory {
         sources: vec![
             ReportReferenceInventoryEntry::new(
@@ -834,19 +1000,29 @@ fn frozen_png_figure_is_fully_validated_and_retained_semantically() {
             .unwrap(),
         ],
         available_datasets: snapshot.dataset_bindings.clone(),
+        figure_artifacts: vec![
+            ReportReferenceFigureArtifact::new(
+                linked_block_id,
+                snapshot.clone(),
+                linked_locator,
+                FrozenReportArtifact::new("image/png", png.clone()).unwrap(),
+            )
+            .unwrap(),
+        ],
     };
-    assert!(matches!(
-        resolve_report_source(ReportHardcopySource {
-            source_key: "linked-report".to_owned(),
-            document: &linked,
-            reference_inventory: Some(&linked_inventory),
-            scope: HardcopyScope::CompleteReport,
-        }),
-        Err(HardcopySourceError::UnsupportedAuthenticatedReportBlock {
-            kind: "linked plot figure",
-            ..
-        })
-    ));
+    let linked_resolved = resolve_report_source(ReportHardcopySource {
+        source_key: "linked-report".to_owned(),
+        document: &linked,
+        reference_inventory: Some(&linked_inventory),
+        scope: HardcopyScope::CompleteReport,
+    })
+    .unwrap();
+    let HardcopySemanticDocument::Report(linked_semantic) = linked_resolved.semantic_document()
+    else {
+        panic!("expected linked semantic report")
+    };
+    assert_eq!(linked_semantic.figures.len(), 1);
+    assert_eq!(linked_semantic.figures[0].payload, png);
 
     let mut trailing = opaque_rgb8_png(128, 128);
     trailing.extend_from_slice(b"trailing");
@@ -854,6 +1030,7 @@ fn frozen_png_figure_is_fully_validated_and_retained_semantically() {
         caption: "Invalid".to_owned(),
         alternative_text: "Trailing data".to_owned(),
         sizing: FigureSizing::Natural,
+        source_locator: None,
         reference: ReportReferenceMode::Frozen {
             snapshot,
             artifact: FrozenReportArtifact::new("image/png", trailing).unwrap(),

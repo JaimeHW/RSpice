@@ -96,7 +96,7 @@ pub(crate) const MAX_WORKER_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub(super) const WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-pub(super) const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 3;
+pub(super) const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 4;
 const SCHEMATIC_EDGE_ALLOWANCE_UNITS: i64 = 16;
 const SYMBOL_EDGE_ALLOWANCE_UNITS: i64 = 10;
 const PLOT_INSET_UM: i64 = 12_700;
@@ -657,11 +657,13 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
                 .iter()
                 .find(|document| document.id() == document_id)
                 .ok_or_else(|| HardcopySourceError::SourceNotRetained(source_key.to_owned()))?;
+            let reference_inventory = report_inventory::reference_inventory(state, document)?;
             return Ok(PreparedRetainedHardcopyResolution {
                 payload: PreparedRetainedHardcopyPayload::Report {
                     project_id,
                     source_key: source_key.to_owned(),
                     document: document.clone(),
+                    reference_inventory,
                     scope,
                 },
             });
@@ -1996,12 +1998,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
                 .iter()
                 .find(|document| document.id() == document_id)
                 .ok_or_else(|| HardcopySourceError::SourceNotRetained(source_key.to_owned()))?;
-            return resolve_report_source(ReportHardcopySource {
-                source_key: source_key.to_owned(),
-                document,
-                reference_inventory: None,
-                scope,
-            });
+            return report_inventory::resolve(state, document, scope);
         }
     }
 

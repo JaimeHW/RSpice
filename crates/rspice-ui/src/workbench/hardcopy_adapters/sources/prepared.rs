@@ -80,6 +80,7 @@ pub(super) enum PreparedRetainedHardcopyPayload {
         project_id: ProjectId,
         source_key: String,
         document: ReportDocument,
+        reference_inventory: ReportReferenceInventory,
         scope: HardcopyScope,
     },
     SourceSet {
@@ -445,6 +446,7 @@ pub(super) enum PreparedRetainedHardcopyWorkerPayload {
         project_id: ProjectId,
         source_key: String,
         document: CanonicalHardcopyOwner,
+        reference_inventory: ReportReferenceInventory,
         scope: HardcopyScope,
     },
     SourceSet {
@@ -631,11 +633,13 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 project_id,
                 source_key,
                 document,
+                reference_inventory,
                 scope,
             } => Self::Report {
                 project_id,
                 source_key,
                 document: CanonicalHardcopyOwner::capture("prepared report document", &document)?,
+                reference_inventory,
                 scope,
             },
             PreparedRetainedHardcopyPayload::SourceSet {
@@ -770,6 +774,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
             Self::Report {
                 project_id,
                 source_key,
+                reference_inventory,
                 scope,
                 ..
             } => {
@@ -783,6 +788,9 @@ impl PreparedRetainedHardcopyWorkerPayload {
                         "report worker source has an unsupported scope".to_owned(),
                     ));
                 }
+                reference_inventory.validate().map_err(|error| {
+                    HardcopySourceError::InvalidPreparedWorkerSnapshot(error.to_string())
+                })?;
             }
             Self::SourceSet {
                 source_set,
@@ -954,6 +962,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 project_id,
                 source_key,
                 document,
+                reference_inventory,
                 scope,
             } => {
                 let document = document.restore::<ReportDocument>("prepared report document")?;
@@ -968,6 +977,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     project_id,
                     source_key,
                     document,
+                    reference_inventory,
                     scope,
                 }
             }
@@ -1454,11 +1464,12 @@ impl PreparedRetainedHardcopyResolution {
                 project_id: _,
                 source_key,
                 document,
+                reference_inventory,
                 scope,
             } => resolve_report_source(ReportHardcopySource {
                 source_key,
                 document: &document,
-                reference_inventory: None,
+                reference_inventory: Some(&reference_inventory),
                 scope,
             }),
             PreparedRetainedHardcopyPayload::SourceSet {

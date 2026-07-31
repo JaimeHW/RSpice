@@ -187,10 +187,18 @@ impl ReportBlockedGateTextPolicy {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReportFigureSourceLocator {
+    pub page_id: u64,
+    pub pane_id: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlotFigureBlock {
     pub caption: String,
     pub alternative_text: String,
     pub sizing: FigureSizing,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_locator: Option<ReportFigureSourceLocator>,
     pub reference: ReportReferenceMode,
 }
 
@@ -417,6 +425,26 @@ impl ReportBlockKind {
                     return Err(ReportError::InvalidReferenceKind {
                         block: "plot-figure",
                         expected: "visualization-document",
+                    });
+                }
+                if matches!(block.reference, ReportReferenceMode::Linked { .. })
+                    && block.source_locator.is_none()
+                {
+                    return Err(ReportError::InvalidValue {
+                        field: "plot-figure.source-locator",
+                        message:
+                            "linked visualization figures require an exact page and pane locator"
+                                .to_owned(),
+                    });
+                }
+                if block
+                    .source_locator
+                    .as_ref()
+                    .is_some_and(|locator| locator.page_id == 0 || locator.pane_id == 0)
+                {
+                    return Err(ReportError::InvalidValue {
+                        field: "plot-figure.source-locator",
+                        message: "page and pane stable IDs must both be non-zero".to_owned(),
                     });
                 }
             }

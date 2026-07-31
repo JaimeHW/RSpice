@@ -848,8 +848,7 @@ pub fn resolve_report_source(
         return Err(HardcopySourceError::EmptyContent);
     }
     let mut authenticated_references = Vec::new();
-    let mut figures = Vec::new();
-    let mut linked_figures = Vec::new();
+    let mut figure_blocks = Vec::new();
     let mut contains_linked_reference = false;
     for block in record
         .snapshot()
@@ -862,24 +861,7 @@ pub fn resolve_report_source(
             continue;
         };
         if let ReportBlockKind::PlotFigure(figure) = block.kind() {
-            match reference {
-                ReportReferenceMode::Frozen { artifact, .. } => {
-                    let (width_pixels, height_pixels) =
-                        validate_frozen_report_png(block.id(), artifact)?;
-                    figures.push(SemanticReportFigure {
-                        block_id: block.id(),
-                        artifact_digest: artifact.content_digest(),
-                        media_type: artifact.media_type().to_owned(),
-                        payload: artifact.payload().to_vec(),
-                        width_pixels,
-                        height_pixels,
-                        caption: figure.caption.clone(),
-                        alternative_text: figure.alternative_text.clone(),
-                        sizing: figure.sizing,
-                    });
-                }
-                ReportReferenceMode::Linked { .. } => linked_figures.push(block.id()),
-            }
+            figure_blocks.push((block.id(), figure.clone()));
         }
         contains_linked_reference |= matches!(reference, ReportReferenceMode::Linked { .. });
         authenticated_references.push(SemanticReportReference {
@@ -918,13 +900,53 @@ pub fn resolve_report_source(
             });
         }
     }
-    if let Some(block_id) = linked_figures.first().copied() {
-        return Err(HardcopySourceError::UnsupportedAuthenticatedReportBlock {
+    let mut figures = Vec::with_capacity(figure_blocks.len());
+    for (block_id, figure) in figure_blocks {
+        let artifact = match &figure.reference {
+            ReportReferenceMode::Frozen { artifact, .. } => artifact,
+            ReportReferenceMode::Linked { .. } => {
+                let matches = inventory
+                    .figure_artifacts
+                    .iter()
+                    .filter(|artifact| artifact.block_id() == block_id)
+                    .collect::<Vec<_>>();
+                let [resolved] = matches.as_slice() else {
+                    return Err(HardcopySourceError::UnsupportedAuthenticatedReportBlock {
+                        block_id,
+                        kind: "linked plot figure",
+                        reason: if matches.is_empty() {
+                            "the exact linked figure payload is absent from the retained source inventory"
+                                .to_owned()
+                        } else {
+                            "the retained source inventory contains ambiguous linked figure payloads"
+                                .to_owned()
+                        },
+                    });
+                };
+                if resolved.source() != figure.reference.snapshot()
+                    || figure.source_locator.as_ref() != Some(resolved.source_locator())
+                {
+                    return Err(HardcopySourceError::UnsupportedAuthenticatedReportBlock {
+                        block_id,
+                        kind: "linked plot figure",
+                        reason: "the resolved figure payload does not match the block source snapshot and page/pane locator"
+                            .to_owned(),
+                    });
+                }
+                resolved.artifact()
+            }
+        };
+        let (width_pixels, height_pixels) = validate_frozen_report_png(block_id, artifact)?;
+        figures.push(SemanticReportFigure {
             block_id,
-            kind: "linked plot figure",
-            reason:
-                "the source inventory authenticates identity but supplies no exact semantic or raster figure payload"
-                    .to_owned(),
+            artifact_digest: artifact.content_digest(),
+            media_type: artifact.media_type().to_owned(),
+            payload: artifact.payload().to_vec(),
+            width_pixels,
+            height_pixels,
+            caption: figure.caption,
+            alternative_text: figure.alternative_text,
+            sizing: figure.sizing,
         });
     }
     let page_count = i64::try_from(record.snapshot().pages().len())

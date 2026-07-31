@@ -6,19 +6,23 @@
 
 use std::borrow::Cow;
 
-use egui::{Align2, Color32, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
+use egui::{Align, Align2, Color32, Layout, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
 use egui_extras::{Column, TableBuilder};
 
 use crate::results::report_document::{
-    DataTableBlock, DatasheetBlock, DatasheetField, EvidenceBlock, FigureSizing,
-    FrozenReportArtifact, PlotFigureBlock, ProseBlock, ProseStyle, ReportBlockId, ReportBlockKind,
-    ReportBlockedGateTextPolicy, ReportDocument, ReportDraftMarking, ReportEdit, ReportEntityRef,
+    DataTableBlock, DatasheetBlock, DatasheetField, EvidenceBlock, FigureSizing, PlotFigureBlock,
+    ProseBlock, ProseStyle, ReportBlockId, ReportBlockKind, ReportBlockedGateTextPolicy,
+    ReportDocument, ReportDraftMarking, ReportEdit, ReportEntityRef, ReportFigureSourceLocator,
     ReportOutputFormats, ReportPageEvidenceBinding, ReportPageId, ReportPageInclusion,
     ReportPageNumbering, ReportPageUpdatePolicy, ReportPublicationPageSize,
     ReportPublicationProfile, ReportPublicationTemplate, ReportReferenceMode,
     ReportReferenceSnapshot, ReportSourceId, ReportTablePrecision, ReportTemplate,
     RequirementDisposition, RequirementEntry, RequirementsBlock, ReviewNoteBlock, ReviewNoteStatus,
     SpecificationDisposition, SpecificationEntry, SpecificationsBlock, TableCell, TableColumn,
+};
+use crate::results::visualization_document::{PageId, PaneId};
+use crate::results::visualization_raster::{
+    VisualizationRasterProfile, render_visualization_report_figure,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -38,6 +42,7 @@ const OUTLINE_DESKTOP_WIDTH: f32 = 250.0;
 const OUTLINE_TABLET_WIDTH: f32 = 180.0;
 const INSPECTOR_WIDTH: f32 = 300.0;
 const PANEL_GAP: f32 = 0.0;
+const TITLE_ACTION_STACK_BREAKPOINT: f32 = 560.0;
 const OUTLINE_HEADER_HEIGHT: f32 = 39.0;
 const OUTLINE_ROW_HEIGHT: f32 = 34.0;
 const PREVIEW_MIN_HEIGHT: f32 = 420.0;
@@ -173,6 +178,14 @@ struct PaneSeparators {
     top: bool,
     right: bool,
     bottom: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReportFigureOption {
+    document_index: usize,
+    page_id: PageId,
+    pane_id: PaneId,
+    label: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -739,14 +752,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 
         synchronize_report_selection(&mut app.state);
 
-        workspace_title_row(ui, |ui| {
-            code_workspace_heading(
-                ui,
-                "REPORT AUTHORING · ENGINEERING DRAFT",
-                "Engineering report composer",
-                "Author and save the versioned report document, its page order, and page properties.",
-            );
-        });
+        report_title_row(ui, app);
 
         let Some(document) = active_document(&app.state).cloned() else {
             empty_report_workspace(ui, app);
@@ -769,21 +775,11 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     ui.allocate_ui_with_layout(
                         Vec2::new(OUTLINE_DESKTOP_WIDTH, available.y),
                         egui::Layout::top_down(egui::Align::Min),
-                        |ui| {
-                            outline(
-                                ui,
-                                app,
-                                &document,
-                                selected_page,
-                                outline_separators,
-                            )
-                        },
+                        |ui| outline(ui, app, &document, selected_page, outline_separators),
                     );
-                    let preview_width = (available.x
-                        - OUTLINE_DESKTOP_WIDTH
-                        - INSPECTOR_WIDTH
-                        - PANEL_GAP * 2.0)
-                        .max(1.0);
+                    let preview_width =
+                        (available.x - OUTLINE_DESKTOP_WIDTH - INSPECTOR_WIDTH - PANEL_GAP * 2.0)
+                            .max(1.0);
                     ui.allocate_ui_with_layout(
                         Vec2::new(preview_width, available.y),
                         egui::Layout::top_down(egui::Align::Min),
@@ -806,15 +802,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                             ui.allocate_ui_with_layout(
                                 Vec2::new(OUTLINE_TABLET_WIDTH, heights.outline),
                                 egui::Layout::top_down(egui::Align::Min),
-                                |ui| {
-                                    outline(
-                                        ui,
-                                        app,
-                                        &document,
-                                        selected_page,
-                                        outline_separators,
-                                    )
-                                },
+                                |ui| outline(ui, app, &document, selected_page, outline_separators),
                             );
                             ui.allocate_ui_with_layout(
                                 Vec2::new(
@@ -822,23 +810,13 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                                     heights.preview,
                                 ),
                                 egui::Layout::top_down(egui::Align::Min),
-                                |ui| {
-                                    preview(
-                                        ui,
-                                        app,
-                                        &document,
-                                        selected_page,
-                                        preview_separators,
-                                    )
-                                },
+                                |ui| preview(ui, app, &document, selected_page, preview_separators),
                             );
                         });
                         ui.allocate_ui_with_layout(
                             Vec2::new(local_width, heights.inspector),
                             egui::Layout::top_down(egui::Align::Min),
-                            |ui| {
-                                inspector(ui, app, &document, selected_page, inspector_separators)
-                            },
+                            |ui| inspector(ui, app, &document, selected_page, inspector_separators),
                         );
                     });
             }
@@ -850,35 +828,17 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                         ui.allocate_ui_with_layout(
                             Vec2::new(local_width, heights.outline),
                             egui::Layout::top_down(egui::Align::Min),
-                            |ui| {
-                                outline(
-                                    ui,
-                                    app,
-                                    &document,
-                                    selected_page,
-                                    outline_separators,
-                                )
-                            },
+                            |ui| outline(ui, app, &document, selected_page, outline_separators),
                         );
                         ui.allocate_ui_with_layout(
                             Vec2::new(local_width, heights.preview),
                             egui::Layout::top_down(egui::Align::Min),
-                            |ui| {
-                                preview(
-                                    ui,
-                                    app,
-                                    &document,
-                                    selected_page,
-                                    preview_separators,
-                                )
-                            },
+                            |ui| preview(ui, app, &document, selected_page, preview_separators),
                         );
                         ui.allocate_ui_with_layout(
                             Vec2::new(local_width, heights.inspector),
                             egui::Layout::top_down(egui::Align::Min),
-                            |ui| {
-                                inspector(ui, app, &document, selected_page, inspector_separators)
-                            },
+                            |ui| inspector(ui, app, &document, selected_page, inspector_separators),
                         );
                     });
             }
@@ -891,6 +851,94 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     remove_report_block_dialog(ui.ctx(), app);
     insert_result_document_dialog(ui.ctx(), app);
     add_report_element_dialog(ui.ctx(), app);
+}
+
+fn report_title_row(ui: &mut Ui, app: &mut RSpiceApp) {
+    workspace_title_row(ui, |ui| {
+        if ui.available_width() <= TITLE_ACTION_STACK_BREAKPOINT {
+            report_title_heading(ui);
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                let width = ((ui.available_width() - 6.0) * 0.5).max(1.0);
+                report_release_button(ui, app, width);
+                report_plan_button(ui, app, width);
+            });
+        } else {
+            let release_width = report_title_button_width(ui, "Release closure", false);
+            let plan_width = report_title_button_width(ui, "Plan report artifact…", true);
+            let actions_width = release_width + 6.0 + plan_width;
+            let heading_width = (ui.available_width() - actions_width - 12.0).max(1.0);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                ui.allocate_ui_with_layout(
+                    Vec2::new(heading_width, 0.0),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        ui.set_width(heading_width);
+                        report_title_heading(ui);
+                    },
+                );
+                ui.add_space(6.0);
+                report_release_button(ui, app, 0.0);
+                report_plan_button(ui, app, 0.0);
+            });
+        }
+    });
+}
+
+fn report_title_heading(ui: &mut Ui) {
+    code_workspace_heading(
+        ui,
+        "REPORT AUTHORING · ENGINEERING DRAFT",
+        "Engineering report composer",
+        "Author traceable pages, locked run references, publication plots and machine-readable appendices. Release closure alone owns package assembly and promotion.",
+    );
+}
+
+fn report_release_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
+    let mut button = Button::new("Release closure");
+    if width > 0.0 {
+        button = button.min_width(width).max_width(width);
+    }
+    if button.show(ui).clicked() {
+        open_release_cockpit(app);
+    }
+}
+
+fn report_plan_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
+    let writable = report_mutation_allowed(&app.state);
+    let mut button = Button::new("Plan report artifact…")
+        .accent()
+        .enabled(writable);
+    if width > 0.0 {
+        button = button.min_width(width).max_width(width);
+    }
+    let response = button
+        .show(ui)
+        .on_disabled_hover_text(report_mutation_block_reason(&app.state));
+    if response.clicked() {
+        open_create_document(app);
+    }
+}
+
+fn report_title_button_width(ui: &Ui, label: &str, accent: bool) -> f32 {
+    let t = Tokens::get(ui.ctx());
+    let font = theme::sans(
+        tokens::FS_0,
+        if accent {
+            FontWeight::SemiBold
+        } else {
+            FontWeight::Regular
+        },
+    );
+    let content = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), font, t.color.text)
+        .size()
+        .x
+        + 20.0;
+    content.max(if t.metrics.ctl_h >= 44.0 { 44.0 } else { 0.0 })
 }
 
 fn empty_report_workspace(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -1641,6 +1689,7 @@ fn page_elements(
         .report_authoring
         .selected_report_block
         .is_some_and(|block_id| document.block(block_id).is_some());
+    let retained_figure_available = !report_figure_options(&app.state).is_empty();
     ui.horizontal_wrapped(|ui| {
         let add = Button::new("Add element…")
             .enabled(writable)
@@ -1665,7 +1714,7 @@ fn page_elements(
             app.state.workbench.report_authoring.transaction_error = None;
         }
         let insert = Button::new("Insert result document…")
-            .enabled(writable && !app.state.workspace.visualization_documents.is_empty())
+            .enabled(writable && retained_figure_available)
             .show(ui)
             .on_disabled_hover_text(if writable {
                 "Create or retain a result document before inserting it into this report page."
@@ -3456,19 +3505,40 @@ fn commit_remove_report_block(app: &mut RSpiceApp) {
     }
 }
 
+fn report_figure_options(state: &AppState) -> Vec<ReportFigureOption> {
+    let mut options = Vec::new();
+    for (document_index, document) in state.workspace.visualization_documents.iter().enumerate() {
+        for page in document.pages() {
+            let mut panes = document
+                .panes()
+                .iter()
+                .filter(|pane| pane.page_id == page.id)
+                .collect::<Vec<_>>();
+            panes.sort_by_key(|pane| (pane.order, pane.id.get()));
+            options.extend(panes.into_iter().map(|pane| ReportFigureOption {
+                document_index,
+                page_id: page.id,
+                pane_id: pane.id,
+                label: format!("{} · {} · {}", document.title(), page.title, pane.title),
+            }));
+        }
+    }
+    options
+}
+
 fn open_insert_result_document(app: &mut RSpiceApp) {
-    if !report_mutation_allowed(&app.state)
-        || app.state.workspace.visualization_documents.is_empty()
-    {
+    let options = report_figure_options(&app.state);
+    if !report_mutation_allowed(&app.state) || options.is_empty() {
         return;
     }
-    let source = &app.state.workspace.visualization_documents[0];
+    let first = &options[0];
+    let source = &app.state.workspace.visualization_documents[first.document_index];
     let editor = &mut app.state.workbench.report_authoring;
     editor.insert_result_document_index = 0;
-    editor.insert_result_caption = source.title().to_owned();
+    editor.insert_result_caption = first.label.clone();
     editor.insert_result_alternative_text = format!(
-        "Result document {} at immutable revision {}.",
-        source.title(),
+        "Result figure {} at immutable visualization revision {}.",
+        first.label,
         source.revision().get()
     );
     editor.insert_result_sizing = 0;
@@ -3487,18 +3557,10 @@ fn insert_result_document_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
         return;
     }
     const SIZING_LABELS: [&str; 3] = ["Fit width", "Fit page", "Natural size"];
-    let source_options = app
-        .state
-        .workspace
-        .visualization_documents
+    let figure_options = report_figure_options(&app.state);
+    let source_options = figure_options
         .iter()
-        .map(|document| {
-            format!(
-                "{} · revision {} · immutable source",
-                document.title(),
-                document.revision().get()
-            )
-        })
+        .map(|option| option.label.clone())
         .collect::<Vec<_>>();
     let source_index = app
         .state
@@ -3567,6 +3629,23 @@ fn insert_result_document_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
                     .workbench
                     .report_authoring
                     .insert_result_document_index = index;
+                if let Some(option) = figure_options.get(index) {
+                    let revision = app.state.workspace.visualization_documents
+                        [option.document_index]
+                        .revision()
+                        .get();
+                    app.state
+                        .workbench
+                        .report_authoring
+                        .insert_result_caption = option.label.clone();
+                    app.state
+                        .workbench
+                        .report_authoring
+                        .insert_result_alternative_text = format!(
+                        "Result figure {} at immutable visualization revision {revision}.",
+                        option.label
+                    );
+                }
             }
         });
         ui.add_space(8.0);
@@ -3634,7 +3713,7 @@ fn insert_result_document_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
             .report_authoring
             .insert_result_frozen
         {
-            "The exact validated visualization source is embedded and digest-authenticated."
+            "The exact source snapshot and deterministic publication PNG are embedded and digest-authenticated."
         } else {
             "The block remains linked to one exact immutable visualization revision."
         });
@@ -3668,16 +3747,22 @@ fn commit_insert_result_document(app: &mut RSpiceApp) {
             Some(report_mutation_block_reason(&app.state).to_owned());
         return;
     }
-    let source_index = app
+    let option_index = app
         .state
         .workbench
         .report_authoring
         .insert_result_document_index;
+    let figure_options = report_figure_options(&app.state);
+    let Some(option) = figure_options.get(option_index).cloned() else {
+        app.state.workbench.report_authoring.transaction_error =
+            Some("The selected result figure no longer exists.".to_owned());
+        return;
+    };
     let Some(source) = app
         .state
         .workspace
         .visualization_documents
-        .get(source_index)
+        .get(option.document_index)
         .cloned()
     else {
         app.state.workbench.report_authoring.transaction_error =
@@ -3731,24 +3816,25 @@ fn commit_insert_result_document(app: &mut RSpiceApp) {
         }
     };
     let reference = if app.state.workbench.report_authoring.insert_result_frozen {
-        let payload = match serde_json::to_vec(&source) {
-            Ok(payload) => payload,
+        let raster = match render_visualization_report_figure(
+            &source,
+            &snapshot,
+            option.page_id,
+            option.pane_id,
+            &VisualizationRasterProfile::default(),
+        ) {
+            Ok(raster) => raster,
             Err(error) => {
-                app.state.workbench.report_authoring.transaction_error =
-                    Some(format!("The result document could not be frozen: {error}"));
+                app.state.workbench.report_authoring.transaction_error = Some(format!(
+                    "The selected result figure cannot be frozen for publication: {error}"
+                ));
                 return;
             }
         };
-        let artifact =
-            match FrozenReportArtifact::new("application/vnd.rspice.visualization+json", payload) {
-                Ok(artifact) => artifact,
-                Err(error) => {
-                    app.state.workbench.report_authoring.transaction_error =
-                        Some(error.to_string());
-                    return;
-                }
-            };
-        ReportReferenceMode::Frozen { snapshot, artifact }
+        ReportReferenceMode::Frozen {
+            snapshot,
+            artifact: raster.artifact().clone(),
+        }
     } else {
         ReportReferenceMode::Linked { snapshot }
     };
@@ -3773,6 +3859,10 @@ fn commit_insert_result_document(app: &mut RSpiceApp) {
                         caption,
                         alternative_text,
                         sizing,
+                        source_locator: Some(ReportFigureSourceLocator {
+                            page_id: option.page_id.get(),
+                            pane_id: option.pane_id.get(),
+                        }),
                         reference,
                     }),
                 }],
@@ -4613,6 +4703,8 @@ mod tests {
         let source_id = source.id();
         let source_revision = source.revision();
         let source_digest = source.content_digest().unwrap();
+        let expected_page_id = source.pages()[0].id.get();
+        let expected_pane_id = source.panes()[0].id.get();
         app.state.workspace.visualization_documents.push(source);
 
         open_insert_result_document(&mut app);
@@ -4641,6 +4733,13 @@ mod tests {
         assert_eq!(snapshot.source_revision, Some(source_revision));
         assert_eq!(snapshot.content_digest, source_digest);
         assert_eq!(snapshot.dataset_bindings, vec![binding]);
+        assert_eq!(
+            figure.source_locator,
+            Some(ReportFigureSourceLocator {
+                page_id: expected_page_id,
+                pane_id: expected_pane_id,
+            })
+        );
         assert!(report_reference_resolves(&app.state, &figure.reference));
     }
 

@@ -660,16 +660,92 @@ impl ReportReferenceInventoryEntry {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReportReferenceFigureArtifact {
+    block_id: ReportBlockId,
+    source: ReportReferenceSnapshot,
+    source_locator: ReportFigureSourceLocator,
+    artifact: FrozenReportArtifact,
+}
+
+impl ReportReferenceFigureArtifact {
+    pub fn new(
+        block_id: ReportBlockId,
+        source: ReportReferenceSnapshot,
+        source_locator: ReportFigureSourceLocator,
+        artifact: FrozenReportArtifact,
+    ) -> Result<Self, ReportError> {
+        let value = Self {
+            block_id,
+            source,
+            source_locator,
+            artifact,
+        };
+        value.validate()?;
+        Ok(value)
+    }
+
+    #[must_use]
+    pub const fn block_id(&self) -> ReportBlockId {
+        self.block_id
+    }
+
+    #[must_use]
+    pub const fn source(&self) -> &ReportReferenceSnapshot {
+        &self.source
+    }
+
+    #[must_use]
+    pub const fn source_locator(&self) -> &ReportFigureSourceLocator {
+        &self.source_locator
+    }
+
+    #[must_use]
+    pub const fn artifact(&self) -> &FrozenReportArtifact {
+        &self.artifact
+    }
+
+    fn validate(&self) -> Result<(), ReportError> {
+        self.source.validate()?;
+        if !matches!(
+            &self.source.source,
+            ReportSourceId::VisualizationDocument { .. }
+        ) {
+            return Err(ReportError::InvalidReferenceKind {
+                block: "report-reference-figure-artifact",
+                expected: "visualization-document",
+            });
+        }
+        if self.source_locator.page_id == 0 || self.source_locator.pane_id == 0 {
+            return Err(ReportError::InvalidValue {
+                field: "report-reference-figure-artifact.source-locator",
+                message: "page and pane stable IDs must both be non-zero".to_owned(),
+            });
+        }
+        self.artifact.validate()?;
+        if self.artifact.media_type() != "image/png" {
+            return Err(ReportError::InvalidValue {
+                field: "report-reference-figure-artifact.media-type",
+                message: "resolved report figure artifacts must use image/png".to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ReportReferenceInventory {
     pub sources: Vec<ReportReferenceInventoryEntry>,
     pub available_datasets: Vec<DatasetBinding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub figure_artifacts: Vec<ReportReferenceFigureArtifact>,
 }
 
 impl ReportReferenceInventory {
     pub fn validate(&self) -> Result<(), ReportError> {
         if self.sources.len() > MAX_BLOCKS_TOTAL
             || self.available_datasets.len() > MAX_DATASET_BINDINGS
+            || self.figure_artifacts.len() > MAX_BLOCKS_TOTAL
         {
             return Err(ReportError::InvalidValue {
                 field: "reference-inventory",
@@ -688,6 +764,34 @@ impl ReportReferenceInventory {
                 dataset_bindings: source.dataset_bindings.clone(),
             }
             .validate()?;
+        }
+        let mut figure_blocks = HashSet::with_capacity(self.figure_artifacts.len());
+        for figure in &self.figure_artifacts {
+            figure.validate()?;
+            if !figure_blocks.insert(figure.block_id()) {
+                return Err(ReportError::InvalidValue {
+                    field: "reference-inventory.figure-artifacts",
+                    message: format!(
+                        "report block {} has more than one resolved figure artifact",
+                        figure.block_id()
+                    ),
+                });
+            }
+            let snapshot = figure.source();
+            if !self.sources.iter().any(|source| {
+                source.source == snapshot.source
+                    && source.source_revision == snapshot.source_revision
+                    && source.content_digest == snapshot.content_digest
+                    && source.dataset_bindings == snapshot.dataset_bindings
+            }) {
+                return Err(ReportError::InvalidValue {
+                    field: "reference-inventory.figure-artifacts",
+                    message: format!(
+                        "report block {} figure payload has no exact source inventory entry",
+                        figure.block_id()
+                    ),
+                });
+            }
         }
         validate_dataset_bindings(&self.available_datasets)
     }
@@ -1123,8 +1227,8 @@ impl<'de> Deserialize<'de> for ReportDocument {
                         .to_owned(),
                 }));
             }
-            (3..=5, ReportRevisionHistoryWireField::Value(history)) => history,
-            (version @ (3..=5), ReportRevisionHistoryWireField::Missing) => {
+            (3..=6, ReportRevisionHistoryWireField::Value(history)) => history,
+            (version @ (3..=6), ReportRevisionHistoryWireField::Missing) => {
                 return Err(serde::de::Error::custom(ReportError::InvalidValue {
                     field: "report-document.revision-history",
                     message: format!(
@@ -1176,7 +1280,7 @@ impl<'de> Deserialize<'de> for ReportDocument {
 }
 
 impl ReportDocument {
-    pub const SCHEMA_VERSION: u16 = 6;
+    pub const SCHEMA_VERSION: u16 = 7;
 
     pub fn new(title: impl Into<String>) -> Result<Self, ReportError> {
         Self::new_with_template(title, ReportTemplate::ReleaseVerification42)
@@ -1817,6 +1921,42 @@ impl ReportDocument {
                     })
                 {
                     return Err(ReportError::UnsafeLegacyMigration { version: 5 });
+                }
+                self.schema_version = 6;
+                self.migrate()
+            }
+            6 => {
+                // Schema seven adds an exact visualization page/pane locator
+                // to linked plot figures. An authentic schema-six linked
+                // figure cannot supply that identity, and selecting a pane
+                // during migration would invent engineering provenance. A
+                // locator inside a schema-six envelope is likewise a
+                // mislabeled schema-seven document. Both forms fail closed.
+                let has_unmigratable_figure = |page: &ReportPage| {
+                    page.sections
+                        .iter()
+                        .flat_map(|section| section.blocks.iter())
+                        .any(|block| {
+                            matches!(
+                                &block.kind,
+                                ReportBlockKind::PlotFigure(figure)
+                                    if figure.source_locator.is_some()
+                                        || matches!(
+                                            &figure.reference,
+                                            ReportReferenceMode::Linked { .. }
+                                        )
+                            )
+                        })
+                };
+                if self.pages.iter().any(has_unmigratable_figure)
+                    || self
+                        .revision_history
+                        .records
+                        .iter()
+                        .flat_map(|record| record.snapshot.pages.iter())
+                        .any(has_unmigratable_figure)
+                {
+                    return Err(ReportError::UnsafeLegacyMigration { version: 6 });
                 }
                 self.schema_version = Self::SCHEMA_VERSION;
                 Ok(())
