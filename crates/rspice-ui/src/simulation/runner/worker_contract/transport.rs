@@ -613,11 +613,9 @@ impl WorkerPssOperatingPointTransport {
         let mut waveforms = Vec::with_capacity(self.result_waveforms.len());
         for waveform in self.result_waveforms {
             node_names.push(waveform.node_name);
-            waveforms.push(
-                rspice_core::analysis::pss::PeriodicWaveform::from_values(
-                    waveform.values.into_vec(buffers)?,
-                ),
-            );
+            waveforms.push(rspice_core::analysis::pss::PeriodicWaveform::from_values(
+                waveform.values.into_vec(buffers)?,
+            ));
         }
         let result_floquet_multipliers = worker_join_complex(
             "PSS result Floquet",

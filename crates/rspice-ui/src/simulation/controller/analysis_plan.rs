@@ -41,13 +41,7 @@ impl SimulationController {
                 return invalid_saved_output_reports(outputs.len(), errors.join("; "));
             }
         };
-        if let Err(error) = state
-            .model_library_manager
-            .validate_attached_technology(state.workspace.project.technology_binding())
-        {
-            return invalid_saved_output_reports(outputs.len(), error);
-        }
-        let sealed_models = match state.model_library_manager.seal_execution_sources() {
+        let sealed_models = match state.seal_project_execution_model_sources() {
             Ok(sealed) => sealed,
             Err(error) => {
                 return invalid_saved_output_reports(outputs.len(), error);

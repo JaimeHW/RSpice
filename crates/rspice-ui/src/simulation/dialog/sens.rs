@@ -11,7 +11,6 @@ pub enum SensType {
     Ac,
 }
 
-
 /// Sensitivity analysis configuration
 #[derive(Debug, Clone)]
 pub struct SensConfig {

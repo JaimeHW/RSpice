@@ -12,7 +12,6 @@ pub enum McDistribution {
     WorstCase,
 }
 
-
 /// Base analysis to run for MC
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum McBaseAnalysis {
@@ -22,7 +21,6 @@ pub enum McBaseAnalysis {
     Dc,
     Op,
 }
-
 
 /// Monte Carlo analysis configuration
 #[derive(Debug, Clone)]

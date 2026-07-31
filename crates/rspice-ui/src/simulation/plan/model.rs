@@ -2217,6 +2217,5 @@ impl SimulationPlan {
     }
 }
 
-
 #[cfg(test)]
 mod tests;

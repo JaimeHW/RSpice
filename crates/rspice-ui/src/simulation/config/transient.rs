@@ -75,6 +75,4 @@ impl TransientAnalysisConfig {
             Err(errors)
         }
     }
-
 }
-

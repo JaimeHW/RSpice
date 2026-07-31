@@ -1873,9 +1873,9 @@ mod tests {
             iterations: 3,
             residual_norm: 1.0e-10,
             time: time.clone(),
-            waveforms: vec![
-                rspice_core::analysis::pss::PeriodicWaveform::from_values(values.clone()),
-            ],
+            waveforms: vec![rspice_core::analysis::pss::PeriodicWaveform::from_values(
+                values.clone(),
+            )],
             node_names: vec!["out".to_owned()],
             period_detected: false,
             floquet_multipliers: vec![num_complex::Complex64::new(0.9, 0.0)],

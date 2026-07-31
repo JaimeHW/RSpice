@@ -67,7 +67,6 @@ impl StbConfig {
         }
         Ok(())
     }
-
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]

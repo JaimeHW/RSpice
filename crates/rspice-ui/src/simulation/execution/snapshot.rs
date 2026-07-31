@@ -1038,7 +1038,7 @@ impl PreparedRunSnapshot {
             .map_err(|error| {
                 PreparationError::new(
                     PreparationStage::ModelBindings,
-                    format!("Project Verilog-A runtime set is invalid: {error}"),
+                    format!("Sealed Verilog-A runtime set is invalid: {error}"),
                 )
             })?;
         let parsed_netlist =
@@ -1046,6 +1046,17 @@ impl PreparedRunSnapshot {
                 PreparationError::new(
                     PreparationStage::Netlist,
                     format!("Prepared executable netlist is invalid: {error}"),
+                )
+            })?;
+        let mut model_bin_config = rspice_core::SimulationConfig::default();
+        model_bin_config.temperature =
+            rspice_core::constants::celsius_to_kelvin(parts.reference_temperature_celsius);
+        rspice_core::Engine::new(model_bin_config)
+            .validate_model_bin_contracts(&parsed_netlist)
+            .map_err(|error| {
+                PreparationError::new(
+                    PreparationStage::ModelBindings,
+                    format!("Prepared model-bin resolution is invalid: {error}"),
                 )
             })?;
         let expected_veriloga_bindings = parts
@@ -1088,14 +1099,14 @@ impl PreparedRunSnapshot {
         if observed_veriloga_bindings != expected_veriloga_bindings {
             return Err(PreparationError::new(
                 PreparationStage::ModelBindings,
-                "Every executable Verilog-A directive must match exactly one sealed project runtime",
+                "Every executable Verilog-A directive must match exactly one sealed runtime",
             ));
         }
         for runtime in parts.project_veriloga_runtimes.iter() {
             runtime.validate().map_err(|error| {
                 PreparationError::new(
                     PreparationStage::ModelBindings,
-                    format!("Project Verilog-A runtime is invalid: {error}"),
+                    format!("Sealed Verilog-A runtime is invalid: {error}"),
                 )
             })?;
             let directive = crate::simulation::veriloga::project_veriloga_directive(
@@ -1111,13 +1122,13 @@ impl PreparedRunSnapshot {
                 return Err(PreparationError::new(
                     PreparationStage::ModelBindings,
                     format!(
-                        "Prepared project Verilog-A runtime '{}' must be referenced exactly once by the executable netlist (found {directive_count})",
+                        "Prepared sealed Verilog-A runtime '{}' must be referenced exactly once by the executable netlist (found {directive_count})",
                         runtime.netlist_alias()
                     ),
                 ));
             }
             parts.model_identities.push(ModelSourceIdentity::new(
-                format!("project-veriloga:{}", runtime.source_key()),
+                runtime.provenance_label(),
                 runtime.artifact_digest(),
             ));
         }
@@ -2051,7 +2062,6 @@ fn process_tag(process: ProcessCorner) -> u8 {
         ProcessCorner::FS => 4,
     }
 }
-
 
 #[cfg(test)]
 mod tests;

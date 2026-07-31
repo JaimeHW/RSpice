@@ -50,7 +50,6 @@ impl DcOpResult {
                 .find_map(|(name, value)| name.eq_ignore_ascii_case(node).then_some(*value))
         })
     }
-
 }
 
 /// Operating point data for a device

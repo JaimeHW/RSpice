@@ -1,10 +1,9 @@
-//! Project-owned Verilog-A runtimes prepared for an executable deck.
+//! Sealed Verilog-A runtimes prepared for an executable deck.
 //!
 //! A prepared runtime is engine state: an immutable, worker-transferable
-//! model bound to one exact project source identity. It lived in the Code &
-//! Automation workspace because that is where compilation is triggered from,
-//! which forced `simulation` to reach up into the application shell for the
-//! runtimes it executes.
+//! model bound to one exact project-source or signed-PDK identity. Project
+//! compilation is triggered from the Code & Automation workspace; PDK sources
+//! are compiled only from the authenticated package closure.
 //!
 //! Construction stays with the type, because the validation *is* the type's
 //! invariant. What stays in the workspace is only the adapter that unpacks an
@@ -30,12 +29,10 @@ pub struct VerilogASourceOperationToken {
     pub requested_module_digest: Option<crate::product::ContentDigest>,
 }
 
-
-
-/// Immutable, worker-transferable Verilog-A runtime bound to one exact
-/// project-owned source identity. The virtual source key is content addressed
-/// and project scoped, so neither another open project nor an ambient file can
-/// satisfy the directive accidentally.
+/// Immutable, worker-transferable Verilog-A runtime bound to one exact sealed
+/// source identity. Project sources and signed PDK sources use disjoint,
+/// content-addressed virtual namespaces, so ambient files can never satisfy a
+/// prepared directive accidentally.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PreparedVerilogARuntime {
     source_key: String,
@@ -138,6 +135,27 @@ impl PreparedVerilogARuntime {
         Ok(runtime)
     }
 
+    fn try_from_signed_pdk_compilation(
+        package: &crate::state::pdk_config::PdkTechnologyBinding,
+        archive_digest: crate::product::ContentDigest,
+        binding: &crate::state::pdk_config::SealedPdkVerilogABinding,
+        compilation: &rspice_veriloga::VirtualRuntimeCompilation,
+    ) -> Result<Self, String> {
+        let source_key = format!(
+            "__rspice_pdk__/{}/{}/{}/{}.va",
+            package.manifest_digest,
+            archive_digest,
+            binding.source_id,
+            binding.root_artifact_digest
+        );
+        Self::try_from_virtual_compilation(
+            source_key,
+            archive_digest,
+            binding.netlist_alias.clone(),
+            compilation,
+        )
+    }
+
     pub fn install(&self) -> Result<(), String> {
         rspice_core::register_project_veriloga_runtimes_for_session([self.registration()?])
     }
@@ -158,11 +176,16 @@ impl PreparedVerilogARuntime {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if !self.source_key.starts_with("__rspice_project__/")
+        if !(self.source_key.starts_with("__rspice_project__/")
+            || self.source_key.starts_with("__rspice_pdk__/"))
             || self.source_key.contains('\\')
             || self.source_key.chars().any(char::is_control)
+            || self
+                .source_key
+                .split('/')
+                .any(|component| component.is_empty() || matches!(component, "." | ".."))
         {
-            return Err("Verilog-A runtime has an invalid project virtual source key".to_owned());
+            return Err("Verilog-A runtime has an invalid sealed virtual source key".to_owned());
         }
         if self.module_name.trim().is_empty() || self.module_name.chars().any(char::is_control) {
             return Err("Verilog-A runtime has an invalid module identity".to_owned());
@@ -221,6 +244,15 @@ impl PreparedVerilogARuntime {
         &self.netlist_alias
     }
 
+    pub(crate) fn provenance_label(&self) -> String {
+        let authority = if self.source_key.starts_with("__rspice_pdk__/") {
+            "signed-pdk-veriloga"
+        } else {
+            "project-veriloga"
+        };
+        format!("{authority}:{}", self.source_key)
+    }
+
     pub fn terminal_names(&self) -> Result<Vec<String>, String> {
         self.validate()?;
         let model: rspice_veriloga::CompiledModel = serde_json::from_str(&self.model_json)
@@ -243,8 +275,8 @@ pub(crate) fn veriloga_selected_module_digest(module_name: &str) -> crate::produ
     crate::product::ContentDigest::from_bytes(hasher.finalize().into())
 }
 
-/// Canonically ordered set of every project-owned Verilog-A runtime required
-/// by one immutable executable deck. The set rejects case-folded key/alias
+/// Canonically ordered set of every sealed Verilog-A runtime required by one
+/// immutable executable deck. The set rejects case-folded key/alias
 /// collisions before worker transfer so model selection cannot depend on
 /// discovery order.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -321,6 +353,13 @@ impl PreparedVerilogARuntimeSet {
             .collect::<Result<Vec<_>, _>>()?;
         rspice_core::register_project_veriloga_runtimes_for_session(registrations)
     }
+
+    pub(crate) fn try_extend(
+        self,
+        additional: impl IntoIterator<Item = PreparedVerilogARuntime>,
+    ) -> Result<Self, String> {
+        Self::try_new(self.runtimes.into_iter().chain(additional).collect())
+    }
 }
 
 pub(crate) fn compile_project_source_bundle_runtime(
@@ -368,7 +407,79 @@ pub(crate) fn compile_project_source_bundle_runtime(
     )
 }
 
-/// Insert one project Verilog-A directive before the terminal `.end` card.
+pub(crate) fn compile_signed_pdk_source_runtime(
+    package: &crate::state::pdk_config::PdkTechnologyBinding,
+    archive_digest: crate::product::ContentDigest,
+    artifacts: &[crate::state::pdk_config::SealedPdkVerilogAArtifact],
+    binding: &crate::state::pdk_config::SealedPdkVerilogABinding,
+) -> Result<PreparedVerilogARuntime, String> {
+    if artifacts.is_empty() {
+        return Err(format!(
+            "Signed PDK Verilog-A source '{}' has no authenticated artifacts",
+            binding.source_id
+        ));
+    }
+    let mut root_seen = false;
+    let mut files = Vec::with_capacity(artifacts.len());
+    for artifact in artifacts {
+        let actual = crate::product::ContentDigest::from_bytes(
+            Sha256::digest(artifact.source.as_bytes()).into(),
+        );
+        if actual != artifact.digest {
+            return Err(format!(
+                "Signed PDK Verilog-A artifact '{}' no longer matches digest {}",
+                artifact.path, artifact.digest
+            ));
+        }
+        if artifact
+            .path
+            .eq_ignore_ascii_case(&binding.root_artifact_path)
+        {
+            if artifact.path != binding.root_artifact_path
+                || artifact.digest != binding.root_artifact_digest
+            {
+                return Err(format!(
+                    "Signed PDK Verilog-A root '{}' no longer matches its exact manifest identity",
+                    binding.root_artifact_path
+                ));
+            }
+            root_seen = true;
+        }
+        files.push(rspice_veriloga::VirtualSourceFile::new(
+            &artifact.path,
+            &artifact.source,
+        ));
+    }
+    if !root_seen {
+        return Err(format!(
+            "Signed PDK Verilog-A root '{}' is absent from the authenticated closure",
+            binding.root_artifact_path
+        ));
+    }
+    let bundle = rspice_veriloga::VirtualSourceBundle::new(&binding.root_artifact_path, files)
+        .map_err(|error| {
+            format!(
+                "Signed PDK Verilog-A bundle '{}' is invalid: {error}",
+                binding.source_id
+            )
+        })?;
+    let compilation = rspice_veriloga::VerilogACompiler::default()
+        .compile_virtual_runtime(&bundle, &binding.module_name, pdk_virtual_compile_limits())
+        .map_err(|error| {
+            format!(
+                "Could not compile signed PDK Verilog-A source '{}' module '{}': {error}",
+                binding.source_id, binding.module_name
+            )
+        })?;
+    PreparedVerilogARuntime::try_from_signed_pdk_compilation(
+        package,
+        archive_digest,
+        binding,
+        &compilation,
+    )
+}
+
+/// Insert one sealed Verilog-A directive before the terminal `.end` card.
 /// The exact same helper is used by the retained generated artifact and the
 /// immutable prepared-run source, preventing display/execution drift.
 pub fn project_veriloga_directive(source_key: &str, module_name: &str) -> String {
@@ -440,5 +551,18 @@ pub(crate) fn project_virtual_compile_limits() -> rspice_veriloga::VirtualCompil
         // bundle accepted by the editor cannot be rejected only at execution.
         max_expanded_bytes: crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES.saturating_mul(2),
         ..rspice_veriloga::VirtualCompileLimits::default()
+    }
+}
+
+fn pdk_virtual_compile_limits() -> rspice_veriloga::VirtualCompileLimits {
+    rspice_veriloga::VirtualCompileLimits {
+        max_files: crate::state::pdk_config::MAX_PDK_ARTIFACTS,
+        max_path_bytes: 1_024,
+        max_file_bytes: crate::state::pdk_config::MAX_PDK_ARTIFACT_BYTES,
+        max_total_source_bytes: crate::state::pdk_config::MAX_PDK_TOTAL_ARTIFACT_BYTES,
+        max_include_depth: 64,
+        max_expanded_bytes: crate::state::pdk_config::MAX_PDK_TOTAL_ARTIFACT_BYTES
+            .saturating_mul(2),
+        max_module_name_bytes: 128,
     }
 }

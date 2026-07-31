@@ -760,7 +760,6 @@ impl<'a> NetlistGenerator<'a> {
     pub fn ground_net_id(&self) -> Option<usize> {
         self.ground_net
     }
-
 }
 fn chrono_lite_timestamp() -> String {
     // Use system time for a basic timestamp

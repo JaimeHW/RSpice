@@ -119,12 +119,81 @@ fn fixture_dir(label: &str) -> PathBuf {
 
 fn runnable_state() -> AppState {
     let mut state = AppState::default();
+    state.provision_test_project_technology_contract();
     crate::workbench::examples::load_example("Voltage Divider", &mut state.schematic);
     let mut drc = DrcResult::new();
     drc.completed = true;
     state.dialogs.drc_results = Some(drc);
     state.dialogs.drc_checked_version = state.schematic.topology_version();
     state
+}
+
+#[test]
+fn prepared_project_run_materializes_exact_signed_pdk_reference_models() {
+    let mut state = runnable_state();
+    let mut controller = SimulationController::new();
+    let snapshot = controller
+        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+        .expect("project run seals signed PDK model sources");
+    controller
+        .authorize_snapshot(snapshot)
+        .expect("authorize exact project snapshot");
+    let dispatch = controller
+        .consume_snapshot_for_dispatch(&mut state)
+        .expect("freeze project dispatch");
+    let executable = dispatch.executable_netlist();
+    assert!(executable.contains(".model nmos_demo nmos level=1 vto=0.55"));
+    assert!(!executable.contains("vto=0.60"));
+    assert!(!executable.to_ascii_lowercase().contains(".lib tt"));
+    assert!(executable.contains("demo180 2.3.1"));
+}
+
+#[test]
+fn receipt_backed_manual_project_deck_uses_signed_pdk_models_without_host_paths() {
+    let mut state = AppState::default();
+    state.provision_test_project_technology_contract();
+    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.workspace.netlist_source =
+        Some("signed project deck\nV1 d 0 1\nM1 d d 0 0 nmos_demo\n.op\n.end\n".to_owned());
+    let mut controller = SimulationController::new();
+    let snapshot = controller
+        .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+        .expect("governed manual project deck seals signed PDK sources");
+    controller
+        .authorize_snapshot(snapshot)
+        .expect("authorize exact governed manual deck");
+    let dispatch = controller
+        .consume_snapshot_for_dispatch(&mut state)
+        .expect("freeze governed manual dispatch");
+    let executable = dispatch.executable_netlist();
+    assert!(executable.contains(".model nmos_demo nmos level=1 vto=0.55"));
+    assert!(!executable.contains("vto=0.60"));
+    assert!(!contains_external_include_directive(executable));
+    assert!(!executable.contains("/rspice-pdk/"));
+}
+
+#[test]
+fn governed_manual_deck_dispatches_signed_pdk_veriloga_runtime_without_host_paths() {
+    let mut state = AppState::default();
+    state.provision_test_project_veriloga_technology_contract();
+    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.workspace.netlist_source =
+        Some("signed Verilog-A project deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
+    let mut controller = SimulationController::new();
+    let snapshot = controller
+        .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+        .expect("governed manual deck prepares the signed Verilog-A runtime");
+    controller
+        .authorize_snapshot(snapshot)
+        .expect("authorize exact signed Verilog-A snapshot");
+    let dispatch = controller
+        .consume_snapshot_for_dispatch(&mut state)
+        .expect("freeze signed Verilog-A dispatch");
+    let executable = dispatch.executable_netlist();
+    assert!(executable.contains(".veriloga \"__rspice_pdk__/"));
+    assert!(executable.contains(" pdk_resistor_model"));
+    assert!(!executable.contains("veriloga/pdk_resistor.va"));
+    assert!(!contains_external_include_directive(executable));
 }
 
 fn prepared_pss_task(

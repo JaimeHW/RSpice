@@ -106,7 +106,6 @@ impl AnalysisRunType {
             AnalysisRunType::DcMismatch => "DC Mismatch Contribution",
         }
     }
-
 }
 
 // =============================================================================

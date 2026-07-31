@@ -334,4 +334,3 @@ impl SimulationOptions {
         lines.join("\n")
     }
 }
-

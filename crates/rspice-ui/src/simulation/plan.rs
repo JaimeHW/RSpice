@@ -15,8 +15,7 @@ pub use config::{
 };
 pub use kind::{AnalysisAvailability, AnalysisKind};
 pub use model::{
-    AnalysisDependency, AnalysisInstance, AnalysisLifecycleCommand,
-    AnalysisLifecycleReceipt, AnalysisLifecycleState, AnalysisPlanError, AnalysisPlanIssue,
-    FrozenAnalysisInstance, FrozenSimulationPlan, SimulationPlan,
-    SimulationPlanConfigurationReceipt,
+    AnalysisDependency, AnalysisInstance, AnalysisLifecycleCommand, AnalysisLifecycleReceipt,
+    AnalysisLifecycleState, AnalysisPlanError, AnalysisPlanIssue, FrozenAnalysisInstance,
+    FrozenSimulationPlan, SimulationPlan, SimulationPlanConfigurationReceipt,
 };
