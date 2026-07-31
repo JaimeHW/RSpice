@@ -458,18 +458,7 @@ impl SemanticAnalyzer {
                 let default_reads_instance = param.default.as_ref().is_some_and(|expression| {
                     Self::references_identifiers(expression, &instance_parameter_names)
                 });
-                let range_reads_instance = param.range.as_ref().is_some_and(|range| {
-                    range
-                        .bounds
-                        .iter()
-                        .flat_map(|bound| [bound.lower.as_ref(), bound.upper.as_ref()])
-                        .flatten()
-                        .chain(range.exclude.iter())
-                        .any(|expression| {
-                            Self::references_identifiers(expression, &instance_parameter_names)
-                        })
-                });
-                if default_reads_instance || range_reads_instance {
+                if default_reads_instance {
                     self.record_error_at(
                         SemanticErrorKind::UnsupportedFeature(format!(
                             "model parameter '{}' cannot depend on an instance parameter",
