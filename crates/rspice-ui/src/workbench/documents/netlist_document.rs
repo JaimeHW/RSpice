@@ -362,4 +362,3 @@ pub(super) fn refresh_diff_pips_from_baseline(state: &mut AppState) {
     state.ui.netlist.edited_lines =
         baseline::changed_lines_against_baseline(&state.simulation.netlist_content, baseline);
 }
-

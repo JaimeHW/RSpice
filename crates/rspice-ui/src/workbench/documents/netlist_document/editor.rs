@@ -488,13 +488,14 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
     }
 
     let buffer = state.simulation.netlist_content.clone();
-    let materialized = if state.ui.netlist.active_document
-        == super::ActiveNetlistDocument::OwnedSource
-    {
-        crate::workbench::workflows::netlist_workflow::compose_owned_netlist_execution_source(state, &buffer)
-    } else {
-        Ok(buffer.clone())
-    };
+    let materialized =
+        if state.ui.netlist.active_document == super::ActiveNetlistDocument::OwnedSource {
+            crate::workbench::workflows::netlist_workflow::compose_owned_netlist_execution_source(
+                state, &buffer,
+            )
+        } else {
+            Ok(buffer.clone())
+        };
     let source_path = match state.ui.netlist.active_document {
         super::ActiveNetlistDocument::OwnedSource => state.workspace.netlist_source_path.as_deref(),
         super::ActiveNetlistDocument::Generated => state.schematic.current_file.as_deref(),

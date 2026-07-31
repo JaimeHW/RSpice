@@ -19,7 +19,7 @@ use crate::ui::widgets::{chip, measurement_table, section_header};
 use crate::workbench::AppState;
 
 use super::waves::{StripModel, cached_models};
-use super::well_hint;
+use super::{AnalysisPresentationKey, TracePresentationKey, well_hint};
 
 /// Width of the leading row-index column.
 const INDEX_W: f32 = 68.0;
@@ -45,13 +45,14 @@ pub const STRIDES: [usize; 5] = [1, 2, 5, 10, 100];
 /// avoid.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableView {
-    /// Analysis index the table reads.
-    pub analysis_index: usize,
+    /// Stable analysis the table reads. `None` follows the first available
+    /// analysis until the user explicitly chooses one.
+    pub analysis: Option<AnalysisPresentationKey>,
     /// Show every `stride`-th retained row.
     pub stride: usize,
     /// Selected trace indices (into the model's active-run prefix). Empty
     /// means "every visible signal", capped at [`TABLE_MAX_COLUMNS`].
-    pub columns: Vec<usize>,
+    pub columns: Vec<TracePresentationKey>,
     /// Restrict the rows to a window centred on cursor A.
     pub around_cursor: bool,
 }
@@ -59,7 +60,7 @@ pub struct TableView {
 impl Default for TableView {
     fn default() -> Self {
         Self {
-            analysis_index: 0,
+            analysis: None,
             stride: 1,
             columns: Vec::new(),
             around_cursor: false,
@@ -79,15 +80,18 @@ impl TableView {
 
     /// Toggle one trace's column. Selecting the last remaining column off
     /// returns to the automatic selection rather than an empty table.
-    pub fn toggle_column(&mut self, trace_index: usize, automatic: &[usize]) {
+    pub fn toggle_column(
+        &mut self,
+        trace: TracePresentationKey,
+        automatic: &[TracePresentationKey],
+    ) {
         if self.columns.is_empty() {
             self.columns = automatic.to_vec();
         }
-        if let Some(at) = self.columns.iter().position(|&index| index == trace_index) {
+        if let Some(at) = self.columns.iter().position(|key| *key == trace) {
             self.columns.remove(at);
         } else if self.columns.len() < TABLE_MAX_COLUMNS {
-            self.columns.push(trace_index);
-            self.columns.sort_unstable();
+            self.columns.push(trace);
         }
         if self.columns.is_empty() {
             self.columns = automatic.to_vec();
@@ -97,9 +101,10 @@ impl TableView {
 
 /// Trace indices the table shows when the user has chosen none: every
 /// visible signal in the active run, up to the column cap.
-fn automatic_columns(model: &StripModel) -> Vec<usize> {
+fn automatic_columns(model: &StripModel) -> Vec<TracePresentationKey> {
     model
         .visible_signal_indices()
+        .filter_map(|index| model.trace_presentation_key(index))
         .take(TABLE_MAX_COLUMNS)
         .collect()
 }
@@ -154,7 +159,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let view = state.ui.results.table.clone();
     let Some(model) = models
         .iter()
-        .find(|model| model.analysis_index() == view.analysis_index)
+        .find(|model| Some(model.analysis_key()) == view.analysis)
         .or_else(|| models.first())
     else {
         well_hint(ui, "The active run has no tabular analyses");
@@ -163,12 +168,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     let automatic = automatic_columns(model);
     let columns: Vec<usize> = if view.columns.is_empty() {
-        automatic.clone()
+        automatic
+            .iter()
+            .filter_map(|key| model.trace_index_for_key(key))
+            .collect()
     } else {
         view.columns
             .iter()
-            .copied()
-            .filter(|index| *index < model.trace_count())
+            .filter_map(|key| model.trace_index_for_key(key))
             .collect()
     };
     if columns.is_empty() {
@@ -308,7 +315,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             }
         });
 
-    state.ui.results.table.analysis_index = model.analysis_index();
+    state.ui.results.table.analysis = Some(model.analysis_key());
     state.ui.results.table_status = Some(status_line(rows.len(), retained, &view, cursor));
 }
 
@@ -322,10 +329,10 @@ pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
         presentation.complex_number_display(),
         &t,
     );
-    let analysis_index = state.ui.results.table.analysis_index;
+    let analysis_key = state.ui.results.table.analysis;
     let model = models
         .iter()
-        .find(|model| model.analysis_index() == analysis_index)
+        .find(|model| Some(model.analysis_key()) == analysis_key)
         .or_else(|| models.first());
 
     // Analysis picker — only when there is a choice to make.
@@ -335,18 +342,18 @@ pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
         let label = active.table_label();
         ui.menu_button(elide_label(&label), |ui| {
             for candidate in models.iter() {
-                let selected = candidate.analysis_index() == active.analysis_index();
+                let selected = candidate.analysis_key() == active.analysis_key();
                 if ui
                     .selectable_label(selected, candidate.table_label())
                     .clicked()
                 {
                     let table = &mut state.ui.results.table;
-                    if table.analysis_index != candidate.analysis_index() {
+                    if table.analysis != Some(candidate.analysis_key()) {
                         // Columns index into the analysis they were chosen
                         // for; carrying them over would rename the data.
                         table.columns.clear();
                     }
-                    table.analysis_index = candidate.analysis_index();
+                    table.analysis = Some(candidate.analysis_key());
                     ui.close();
                 }
             }
@@ -362,7 +369,8 @@ pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
 
     // Around-cursor is offered only when there is a cursor to centre on,
     // so the control can never promise a window it cannot produce.
-    let has_cursor = state.ui.results.cursor_strip == Some(analysis_index)
+    let has_cursor = model
+        .is_some_and(|model| state.ui.results.cursor_strip == Some(model.analysis_index()))
         && state.ui.results.cursors.a.is_some();
     let around = state.ui.results.table.around_cursor;
     let response = ui
@@ -378,7 +386,7 @@ pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
     }
 
     if let Some(active) = model {
-        let automatic: Vec<usize> = automatic_columns(active);
+        let automatic = automatic_columns(active);
         let chosen = state.ui.results.table.columns.clone();
         let effective = if chosen.is_empty() {
             automatic.clone()
@@ -390,9 +398,12 @@ pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
                 let Some((name, _)) = active.trace_heading(index) else {
                     continue;
                 };
-                let on = effective.contains(&index);
+                let Some(key) = active.trace_presentation_key(index) else {
+                    continue;
+                };
+                let on = effective.contains(&key);
                 if ui.selectable_label(on, name).clicked() {
-                    state.ui.results.table.toggle_column(index, &automatic);
+                    state.ui.results.table.toggle_column(key, &automatic);
                 }
             }
             if effective.len() >= TABLE_MAX_COLUMNS {
@@ -432,10 +443,10 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         presentation.complex_number_display(),
         &t,
     );
-    let analysis_index = state.ui.results.table.analysis_index;
+    let analysis_key = state.ui.results.table.analysis;
     let Some(model) = models
         .iter()
-        .find(|model| model.analysis_index() == analysis_index)
+        .find(|model| Some(model.analysis_key()) == analysis_key)
         .or_else(|| models.first())
     else {
         return;
@@ -572,21 +583,48 @@ mod tests {
     #[test]
     fn the_column_chooser_never_leaves_the_table_empty() {
         let mut view = TableView::default();
-        let automatic = vec![0, 1];
+        let first = TracePresentationKey {
+            source_name: "V(a)".to_owned(),
+            kind: 0,
+            family_group: 0,
+        };
+        let second = TracePresentationKey {
+            source_name: "V(b)".to_owned(),
+            kind: 0,
+            family_group: 0,
+        };
+        let automatic = vec![first.clone(), second.clone()];
 
         // Turning the last chosen column off returns to the automatic set
         // rather than rendering a table of nothing.
-        view.toggle_column(0, &automatic);
-        assert_eq!(view.columns, vec![1]);
-        view.toggle_column(1, &automatic);
+        view.toggle_column(first, &automatic);
+        assert_eq!(view.columns, vec![second.clone()]);
+        view.toggle_column(second, &automatic);
         assert_eq!(view.columns, automatic);
     }
 
     #[test]
     fn the_column_chooser_stops_at_the_layout_cap() {
         let mut view = TableView::default();
-        view.columns = (0..TABLE_MAX_COLUMNS).collect();
-        view.toggle_column(TABLE_MAX_COLUMNS + 1, &[0]);
+        view.columns = (0..TABLE_MAX_COLUMNS)
+            .map(|index| TracePresentationKey {
+                source_name: format!("V({index})"),
+                kind: 0,
+                family_group: 0,
+            })
+            .collect();
+        view.toggle_column(
+            TracePresentationKey {
+                source_name: "V(extra)".to_owned(),
+                kind: 0,
+                family_group: 0,
+            },
+            &[TracePresentationKey {
+                source_name: "V(0)".to_owned(),
+                kind: 0,
+                family_group: 0,
+            }],
+        );
         assert_eq!(
             view.columns.len(),
             TABLE_MAX_COLUMNS,

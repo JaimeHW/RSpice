@@ -172,8 +172,22 @@ fn marker_fixture() -> AppState {
     state
 }
 
+fn marker_identity(state: &AppState) -> (AnalysisPresentationKey, WaveformPresentationKey) {
+    let run = state.simulation.active_run().expect("active marker run");
+    let analysis = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+    let waveform = WaveformPresentationKey {
+        analysis,
+        trace: TracePresentationKey {
+            source_name: "V(out)".to_owned(),
+            kind: TraceKind::Value as u8,
+            family_group: 0,
+        },
+    };
+    (analysis, waveform)
+}
+
 #[test]
-fn a_marker_reattaches_to_its_signal_after_a_re_run() {
+fn a_marker_never_migrates_to_a_different_dataset_after_a_re_run() {
     let waveforms = || {
         vec![WaveformData::new(
             "V(out)",
@@ -211,30 +225,26 @@ fn a_marker_reattaches_to_its_signal_after_a_re_run() {
         None,
         &HashSet::new(),
     );
-    let reattached = second[0]
+    let migrated = second[0]
         .traces
         .iter()
-        .find(|trace| !trace.overlay && anchor_key(&second[0], trace) == anchor)
-        .expect("the marker's anchor still names the signal after a re-run");
-    let anchor = anchor_key(&second[0], reattached);
-
-    // Every run of a signal shares its anchor — a marker names the
-    // signal, not one solve of it — while the decimation key an overlay
-    // run draws under stays separated, so two runs' envelopes can never
-    // serve each other.
-    assert_eq!(run_mixed_key(anchor, 7, false), anchor);
-    assert_ne!(run_mixed_key(anchor, 7, true), anchor);
+        .find(|trace| !trace.overlay && anchor_key(&second[0], trace) == anchor);
+    assert!(
+        migrated.is_none(),
+        "a marker owned by the prior immutable dataset must not relabel itself as the new run"
+    );
 }
 
 #[test]
 fn markers_alone_keep_a_compact_readout_strip_on_screen() {
     let mut state = marker_fixture();
+    let (analysis, waveform) = marker_identity(&state);
     assert_eq!(readout_strip_height(&state), 0.0);
 
     state
         .ui
         .results
-        .add_marker(0, 0x51, "V(out)".to_owned(), 0.5);
+        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5);
     assert_eq!(
         readout_strip_height(&state),
         READOUT_HEADER_H + MARKER_ROW_H,
@@ -242,13 +252,14 @@ fn markers_alone_keep_a_compact_readout_strip_on_screen() {
     );
 
     // A closed strip takes its markers off screen with it.
-    state.ui.results.hidden_strips.insert(0);
+    state.ui.results.hidden_strips.insert(analysis);
     assert_eq!(readout_strip_height(&state), 0.0);
 }
 
 #[test]
 fn the_strip_carries_cursors_and_markers_together() {
     let mut state = marker_fixture();
+    let (analysis, waveform) = marker_identity(&state);
     state.ui.results.cursors.place(0.5);
     state.ui.results.cursor_strip = Some(0);
     let cursors_only = readout_strip_height(&state);
@@ -257,7 +268,7 @@ fn the_strip_carries_cursors_and_markers_together() {
     state
         .ui
         .results
-        .add_marker(0, 0x51, "V(out)".to_owned(), 0.5);
+        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5);
     assert_eq!(
         readout_strip_height(&state),
         cursors_only + READOUT_HEADER_H + MARKER_ROW_H
@@ -267,6 +278,7 @@ fn the_strip_carries_cursors_and_markers_together() {
 #[test]
 fn markers_outlive_the_tool_that_placed_them() {
     let mut state = marker_fixture();
+    let (analysis, waveform) = marker_identity(&state);
     assert!(
         !state.ui.results.marker_tool.is_armed(),
         "annotating is deliberate — the tool is off until asked for"
@@ -275,7 +287,7 @@ fn markers_outlive_the_tool_that_placed_them() {
     let id = state
         .ui
         .results
-        .add_marker(0, 0x51, "V(out)".to_owned(), 0.5);
+        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5);
     state.ui.results.toggle_marker_tool();
 
     assert!(!state.ui.results.marker_tool.is_armed());
@@ -290,10 +302,11 @@ fn markers_outlive_the_tool_that_placed_them() {
 #[test]
 fn removing_a_marker_takes_its_open_note_editor_with_it() {
     let mut state = marker_fixture();
+    let (analysis, waveform) = marker_identity(&state);
     let first = state
         .ui
         .results
-        .add_marker(0, 0x51, "V(out)".to_owned(), 0.5);
+        .add_marker(analysis, waveform.clone(), "V(out)".to_owned(), 0.5);
     state.ui.results.editing_marker = Some(first);
 
     state.ui.results.remove_marker(first);
@@ -305,7 +318,7 @@ fn removing_a_marker_takes_its_open_note_editor_with_it() {
     let second = state
         .ui
         .results
-        .add_marker(0, 0x51, "V(out)".to_owned(), 0.9);
+        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.9);
     assert_ne!(first, second);
 }
 
@@ -327,10 +340,19 @@ fn only_a_spec_marker_declines_to_report_a_trace_value() {
 
 #[test]
 fn a_marker_tag_names_the_note_only_when_there_is_one() {
+    let analysis_result = AnalysisResult::new(1, AnalysisType::Transient, "marker analysis");
+    let analysis = AnalysisPresentationKey::new(DatasetId::new(), &analysis_result);
     let mut marker = ResultMarker {
         id: 3,
-        analysis_index: 0,
-        anchor: 0x51,
+        analysis,
+        anchor: WaveformPresentationKey {
+            analysis,
+            trace: TracePresentationKey {
+                source_name: "V(out)".to_owned(),
+                kind: TraceKind::Value as u8,
+                family_group: 0,
+            },
+        },
         trace_name: "V(out)".to_owned(),
         x: 0.0,
         kind: MarkerKind::Note,

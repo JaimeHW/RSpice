@@ -1,0 +1,863 @@
+//! Immutable dataset manifest.
+//!
+//! This is a dataset-native projection of retained run authority. It does not
+//! create a visualization document, execute an analysis, or infer release
+//! qualification that the run did not retain.
+
+use egui::{Ui, WidgetInfo, WidgetType};
+
+use crate::state::{
+    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload,
+    AnalysisResultSourceDomain, AnalysisType, SimulationRun, SimulationRunLifecycle,
+};
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::{measurement_table, section_header};
+use crate::workbench::AppState;
+
+use super::well_hint;
+
+const MIN_TABLE_WIDTH: f32 = 1_030.0;
+const TABLE_HEAD_HEIGHT: f32 = 27.0;
+const TABLE_ROW_HEIGHT: f32 = 44.0;
+const COLUMN_WEIGHTS: [f32; 7] = [0.12, 0.14, 0.07, 0.17, 0.20, 0.12, 0.18];
+const COLUMN_TITLES: [&str; 7] = [
+    "ANALYSIS",
+    "EXPANSION",
+    "TASKS",
+    "DOMAIN AXIS",
+    "STORED VALUES",
+    "PRECISION",
+    "ELIGIBILITY",
+];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ManifestRow {
+    pub analysis: String,
+    pub expansion: String,
+    pub tasks: String,
+    pub domain_axis: String,
+    pub stored_values: String,
+    pub precision: String,
+    pub eligibility: String,
+    pub task_identity: Option<String>,
+    pub config_digest: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ManifestAuthority {
+    pub source_domain: String,
+    pub simulation_plan_id: Option<String>,
+    pub project_revision: String,
+    pub prepared_snapshot_digest: String,
+    pub source_content_digest: String,
+    pub source_check: String,
+    pub source_check_digest: String,
+    pub model_sources: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ManifestViewModel {
+    pub dataset_id: String,
+    pub dataset_digest: String,
+    pub run_id: String,
+    pub run_sequence: String,
+    pub run_label: String,
+    pub lifecycle: String,
+    pub execution_target: String,
+    pub elapsed_time: String,
+    pub inventory_status: String,
+    pub integrity: String,
+    pub qualification: String,
+    pub task_count: usize,
+    pub retained_result_count: usize,
+    pub rows: Vec<ManifestRow>,
+    pub authority: Option<ManifestAuthority>,
+}
+
+impl ManifestViewModel {
+    #[must_use]
+    pub(crate) fn from_run(run: &SimulationRun) -> Self {
+        let provenance_validation = run.validate_provenance();
+        let prepared = run.prepared_receipt();
+        let rows = match prepared {
+            Some(receipt) if provenance_validation.is_ok() => receipt
+                .tasks()
+                .iter()
+                .enumerate()
+                .map(|(index, task)| {
+                    let result = run.analyses.get(index);
+                    ManifestRow {
+                        analysis: task.result_analysis_type().display_name().to_owned(),
+                        expansion: result
+                            .map_or_else(|| "not retained".to_owned(), expansion_label),
+                        tasks: "1".to_owned(),
+                        domain_axis: domain_meta(task.result_analysis_type()).axis.to_owned(),
+                        stored_values: result
+                            .map_or_else(|| "not retained".to_owned(), stored_values_label),
+                        precision: result.map_or_else(
+                            || {
+                                domain_meta(task.result_analysis_type())
+                                    .precision
+                                    .to_owned()
+                            },
+                            precision_label,
+                        ),
+                        eligibility: result.map_or_else(
+                            || missing_result_status(run.lifecycle).to_owned(),
+                            |analysis| {
+                                if analysis.success {
+                                    "authenticated result".to_owned()
+                                } else {
+                                    "failed".to_owned()
+                                }
+                            },
+                        ),
+                        task_identity: Some(task.instance_id().to_string()),
+                        config_digest: Some(task.config_digest().to_string()),
+                    }
+                })
+                .collect(),
+            Some(receipt) => receipt
+                .tasks()
+                .iter()
+                .map(|task| ManifestRow {
+                    analysis: task.result_analysis_type().display_name().to_owned(),
+                    expansion: "association withheld".to_owned(),
+                    tasks: "1".to_owned(),
+                    domain_axis: domain_meta(task.result_analysis_type()).axis.to_owned(),
+                    stored_values: "integrity mismatch".to_owned(),
+                    precision: domain_meta(task.result_analysis_type())
+                        .precision
+                        .to_owned(),
+                    eligibility: "blocked by receipt mismatch".to_owned(),
+                    task_identity: Some(task.instance_id().to_string()),
+                    config_digest: Some(task.config_digest().to_string()),
+                })
+                .collect(),
+            None => run
+                .analyses
+                .iter()
+                .map(|analysis| ManifestRow {
+                    analysis: analysis.analysis_type.display_name().to_owned(),
+                    expansion: expansion_label(analysis),
+                    tasks: "1".to_owned(),
+                    domain_axis: domain_meta(analysis.analysis_type).axis.to_owned(),
+                    stored_values: stored_values_label(analysis),
+                    precision: precision_label(analysis),
+                    eligibility: if analysis.success {
+                        "legacy · no prepared receipt".to_owned()
+                    } else {
+                        "failed · no prepared receipt".to_owned()
+                    },
+                    task_identity: analysis
+                        .provenance()
+                        .map(|provenance| provenance.source_instance_id().to_string()),
+                    config_digest: None,
+                })
+                .collect(),
+        };
+
+        let integrity = match (&prepared, provenance_validation) {
+            (Some(_), Ok(())) => "prepared receipt valid".to_owned(),
+            (Some(_), Err(error)) => format!("blocked · {error}"),
+            (None, Ok(())) => "legacy provenance valid".to_owned(),
+            (None, Err(_)) if run.provenance().is_none() => {
+                "unsealed · no authoritative provenance".to_owned()
+            }
+            (None, Err(error)) => format!("blocked · {error}"),
+        };
+        let authority = prepared.map(|receipt| {
+            let source_check = if receipt.source_check_receipt().is_schematic_drc() {
+                "schematic DRC"
+            } else {
+                "manual source check"
+            };
+            ManifestAuthority {
+                source_domain: source_domain_label(receipt.source_domain()).to_owned(),
+                simulation_plan_id: receipt.simulation_plan_id().map(|id| id.to_string()),
+                project_revision: receipt.project_revision().get().to_string(),
+                prepared_snapshot_digest: receipt.prepared_snapshot_digest().to_string(),
+                source_content_digest: receipt.source_content_digest().to_string(),
+                source_check: source_check.to_owned(),
+                source_check_digest: receipt.source_check_receipt().digest().to_string(),
+                model_sources: receipt
+                    .project_model_sources()
+                    .iter()
+                    .map(|model| {
+                        (
+                            format!(
+                                "{} · {} · revision {}",
+                                model.model_name(),
+                                model.source_id(),
+                                model.revision().get()
+                            ),
+                            model.content_digest().to_string(),
+                        )
+                    })
+                    .collect(),
+            }
+        });
+        let task_count = prepared.map_or(run.analyses.len(), |receipt| receipt.tasks().len());
+
+        Self {
+            dataset_id: run.dataset_id.to_string(),
+            dataset_digest: run.dataset_content_digest().to_string(),
+            run_id: run.run_id.to_string(),
+            run_sequence: run.id.to_string(),
+            run_label: run.label.clone(),
+            lifecycle: lifecycle_label(run.lifecycle).to_owned(),
+            execution_target: run.execution_target.map_or_else(
+                || "not retained".to_owned(),
+                |target| target.label().to_owned(),
+            ),
+            elapsed_time: format!("{:.3} s", run.elapsed_time),
+            inventory_status: if run.lifecycle.is_terminal() {
+                "locked manifest".to_owned()
+            } else {
+                "live manifest · digest changes until terminal".to_owned()
+            },
+            integrity,
+            qualification: "not retained · non-sign-off".to_owned(),
+            task_count,
+            retained_result_count: run.analyses.len(),
+            rows,
+            authority,
+        }
+    }
+}
+
+pub(crate) fn show(ui: &mut Ui, state: &AppState) {
+    let Some(run) = state.simulation.active_run() else {
+        well_hint(ui, "No retained dataset is selected");
+        return;
+    };
+    let manifest = ManifestViewModel::from_run(run);
+    let t = Tokens::get(ui.ctx());
+
+    let header = ui
+        .horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Frozen analysis inventory · {}",
+                        manifest.run_label
+                    ))
+                    .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
+                    .color(t.color.text),
+                );
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} retained results across {} frozen tasks",
+                        manifest.retained_result_count, manifest.task_count
+                    ))
+                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                    .color(t.color.text_dim),
+                );
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} · {}",
+                        manifest.lifecycle, manifest.inventory_status
+                    ))
+                    .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
+                    .color(if run.lifecycle.is_terminal() {
+                        t.color.ok
+                    } else {
+                        t.color.warn
+                    }),
+                );
+            });
+        })
+        .response;
+    ui.ctx().accesskit_node_builder(header.id, |node| {
+        node.set_role(egui::accesskit::Role::Heading);
+        node.set_label("Frozen analysis inventory");
+    });
+    ui.add_space(tokens::SP_4);
+
+    let table_height = (ui.available_height() - 42.0).max(80.0);
+    ui.allocate_ui(egui::vec2(ui.available_width(), table_height), |ui| {
+        egui::ScrollArea::both()
+            .id_salt("rspice.results.dataset-manifest")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.set_min_width(MIN_TABLE_WIDTH.max(ui.available_width()));
+                paint_header_row(ui);
+                for row in &manifest.rows {
+                    paint_manifest_row(ui, row);
+                }
+                if manifest.rows.is_empty() {
+                    let (rect, response) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), TABLE_ROW_HEIGHT),
+                        egui::Sense::hover(),
+                    );
+                    response.widget_info(|| {
+                        WidgetInfo::labeled(
+                            WidgetType::Label,
+                            ui.is_enabled(),
+                            "No analysis tasks are retained",
+                        )
+                    });
+                    ui.painter().text(
+                        rect.left_center() + egui::vec2(tokens::SP_5, 0.0),
+                        egui::Align2::LEFT_CENTER,
+                        "No analysis tasks are retained",
+                        theme::sans(tokens::FS_1, FontWeight::Regular),
+                        t.color.text_dim,
+                    );
+                }
+            });
+    });
+
+    ui.add_space(tokens::SP_3);
+    ui.label(
+        egui::RichText::new(format!(
+            "Bound to dataset content digest {} · this view does not execute or recompute analyses.",
+            manifest.dataset_digest
+        ))
+        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+        .color(t.color.text_faint),
+    );
+}
+
+pub(crate) fn right_panel(ui: &mut Ui, state: &AppState) {
+    let Some(run) = state.simulation.active_run() else {
+        return;
+    };
+    let manifest = ManifestViewModel::from_run(run);
+
+    section_header(ui, "Dataset identity", None);
+    let identity = [
+        ("Dataset", manifest.dataset_id.as_str()),
+        ("Content digest", manifest.dataset_digest.as_str()),
+        ("Run", manifest.run_id.as_str()),
+        ("Run sequence", manifest.run_sequence.as_str()),
+        ("Lifecycle", manifest.lifecycle.as_str()),
+        ("Execution target", manifest.execution_target.as_str()),
+        ("Duration", manifest.elapsed_time.as_str()),
+    ];
+    measurement_table(ui, &identity);
+
+    section_header(ui, "Integrity and eligibility", None);
+    let task_count = manifest.task_count.to_string();
+    let retained_result_count = manifest.retained_result_count.to_string();
+    let integrity = [
+        ("Receipt", manifest.integrity.as_str()),
+        ("Qualification", manifest.qualification.as_str()),
+        ("Frozen tasks", task_count.as_str()),
+        ("Retained results", retained_result_count.as_str()),
+    ];
+    measurement_table(ui, &integrity);
+
+    if let Some(authority) = &manifest.authority {
+        section_header(ui, "Prepared source authority", None);
+        let plan = authority
+            .simulation_plan_id
+            .as_deref()
+            .unwrap_or("manual deck · no simulation plan");
+        let source = [
+            ("Source domain", authority.source_domain.as_str()),
+            ("Simulation plan", plan),
+            ("Project revision", authority.project_revision.as_str()),
+            (
+                "Prepared snapshot",
+                authority.prepared_snapshot_digest.as_str(),
+            ),
+            ("Source content", authority.source_content_digest.as_str()),
+            ("Source check", authority.source_check.as_str()),
+            ("Check digest", authority.source_check_digest.as_str()),
+        ];
+        measurement_table(ui, &source);
+
+        if !authority.model_sources.is_empty() {
+            section_header(ui, "Model source digests", None);
+            let rows: Vec<(&str, &str)> = authority
+                .model_sources
+                .iter()
+                .map(|(name, digest)| (name.as_str(), digest.as_str()))
+                .collect();
+            measurement_table(ui, &rows);
+        }
+    }
+}
+
+fn paint_header_row(ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), TABLE_HEAD_HEIGHT),
+        egui::Sense::hover(),
+    );
+    response.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::Label,
+            ui.is_enabled(),
+            "Analysis manifest columns",
+        )
+    });
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
+    paint_cells(
+        ui,
+        rect,
+        &COLUMN_TITLES,
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text_faint,
+    );
+}
+
+fn paint_manifest_row(ui: &mut Ui, row: &ManifestRow) {
+    let t = Tokens::get(ui.ctx());
+    let cells = [
+        row.analysis.as_str(),
+        row.expansion.as_str(),
+        row.tasks.as_str(),
+        row.domain_axis.as_str(),
+        row.stored_values.as_str(),
+        row.precision.as_str(),
+        row.eligibility.as_str(),
+    ];
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), TABLE_ROW_HEIGHT),
+        egui::Sense::hover(),
+    );
+    response.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::Label,
+            ui.is_enabled(),
+            format!(
+                "{}; {}; {}; {}",
+                row.analysis, row.domain_axis, row.stored_values, row.eligibility
+            ),
+        )
+    });
+    if row.task_identity.is_some() || row.config_digest.is_some() {
+        let mut details = Vec::new();
+        if let Some(identity) = &row.task_identity {
+            details.push(format!("Task {identity}"));
+        }
+        if let Some(digest) = &row.config_digest {
+            details.push(format!("Configuration digest {digest}"));
+        }
+        response.clone().on_hover_text(details.join("\n"));
+    }
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Row);
+    });
+    if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+    }
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        egui::Stroke::new(1.0, t.color.border),
+    );
+    paint_cells(
+        ui,
+        rect,
+        &cells,
+        theme::sans(tokens::FS_1, FontWeight::Regular),
+        t.color.text,
+    );
+}
+
+fn paint_cells(
+    ui: &Ui,
+    rect: egui::Rect,
+    cells: &[&str; 7],
+    font: egui::FontId,
+    color: egui::Color32,
+) {
+    let mut left = rect.left();
+    for (index, (value, weight)) in cells.iter().zip(COLUMN_WEIGHTS).enumerate() {
+        let width = if index + 1 == cells.len() {
+            rect.right() - left
+        } else {
+            rect.width() * weight
+        };
+        let cell = egui::Rect::from_min_size(
+            egui::pos2(left, rect.top()),
+            egui::vec2(width.max(1.0), rect.height()),
+        );
+        let text_rect = cell.shrink2(egui::vec2(tokens::SP_4, tokens::SP_2));
+        let galley =
+            ui.painter()
+                .layout((*value).to_owned(), font.clone(), color, text_rect.width());
+        ui.painter().with_clip_rect(text_rect).galley(
+            egui::pos2(
+                text_rect.left(),
+                text_rect.center().y - galley.size().y * 0.5,
+            ),
+            galley,
+            color,
+        );
+        if index + 1 < cells.len() {
+            ui.painter().vline(
+                cell.right() - 0.5,
+                cell.y_range(),
+                egui::Stroke::new(1.0, Tokens::get(ui.ctx()).color.border),
+            );
+        }
+        left = cell.right();
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DomainMeta {
+    axis: &'static str,
+    precision: &'static str,
+}
+
+const fn domain_meta(analysis: AnalysisType) -> DomainMeta {
+    use AnalysisType as A;
+    match analysis {
+        A::DcOp => DomainMeta {
+            axis: "scalar operating point",
+            precision: "f64",
+        },
+        A::DcSweep | A::Parametric | A::DcMismatch => DomainMeta {
+            axis: "swept source or parameter",
+            precision: "f64",
+        },
+        A::Ac | A::Stb => DomainMeta {
+            axis: "log frequency",
+            precision: "complex128",
+        },
+        A::Disto => DomainMeta {
+            axis: "tone product",
+            precision: "complex128",
+        },
+        A::Transient | A::TransientNoise => DomainMeta {
+            axis: "adaptive time",
+            precision: "f64",
+        },
+        A::Noise => DomainMeta {
+            axis: "log frequency",
+            precision: "f64",
+        },
+        A::PoleZero => DomainMeta {
+            axis: "complex plane",
+            precision: "complex128",
+        },
+        A::Tf => DomainMeta {
+            axis: "frequency or operating point",
+            precision: "complex128",
+        },
+        A::Sensitivity => DomainMeta {
+            axis: "parameter vector",
+            precision: "f64",
+        },
+        A::Pac | A::Pxf | A::Pstb | A::Qpac | A::Qpxf => DomainMeta {
+            axis: "translated frequency",
+            precision: "complex128",
+        },
+        A::Pnoise | A::Qpnoise | A::Hbnoise => DomainMeta {
+            axis: "offset frequency",
+            precision: "f64",
+        },
+        A::MonteCarlo => DomainMeta {
+            axis: "sample family",
+            precision: "f64",
+        },
+        A::Corner => DomainMeta {
+            axis: "PVT family",
+            precision: "f64 / complex128",
+        },
+        A::Reliability => DomainMeta {
+            axis: "mission age",
+            precision: "f64",
+        },
+        A::Optimization => DomainMeta {
+            axis: "iteration / candidate",
+            precision: "f64",
+        },
+        A::Soa => DomainMeta {
+            axis: "device / rule",
+            precision: "f64",
+        },
+        A::SParameter | A::Hbsp | A::Psp => DomainMeta {
+            axis: "frequency",
+            precision: "complex128",
+        },
+        A::Envelope => DomainMeta {
+            axis: "slow time",
+            precision: "complex128",
+        },
+        A::Fourier => DomainMeta {
+            axis: "harmonic index",
+            precision: "complex128",
+        },
+        A::HarmonicBalance => DomainMeta {
+            axis: "tone family",
+            precision: "complex128",
+        },
+        A::Pss | A::Qpss => DomainMeta {
+            axis: "periodic phase",
+            precision: "f64",
+        },
+    }
+}
+
+fn precision_label(analysis: &AnalysisResult) -> String {
+    if analysis
+        .waveforms
+        .iter()
+        .any(|waveform| waveform.complex.is_some())
+        || matches!(
+            analysis.result_payload.as_ref(),
+            Some(AnalysisResultPayload::PoleZero { .. })
+        )
+    {
+        "complex128".to_owned()
+    } else {
+        domain_meta(analysis.analysis_type).precision.to_owned()
+    }
+}
+
+fn stored_values_label(analysis: &AnalysisResult) -> String {
+    let mut parts = Vec::new();
+    if !analysis.waveforms.is_empty() {
+        let samples: usize = analysis
+            .waveforms
+            .iter()
+            .map(|waveform| waveform.x.len().min(waveform.y.len()))
+            .sum();
+        parts.push(format!(
+            "{} waveform{} / {samples} samples",
+            analysis.waveforms.len(),
+            plural(analysis.waveforms.len())
+        ));
+    }
+    if let Some(op) = &analysis.dc_op {
+        parts.push(format!(
+            "{} nodes / {} branches / {} power values",
+            op.node_voltages.len(),
+            op.branch_currents.len(),
+            op.power_dissipation.len()
+        ));
+    }
+    if analysis.device_op.is_some() {
+        parts.push("device OP report".to_owned());
+    }
+    if let Some(noise) = &analysis.noise_summary {
+        parts.push(format!(
+            "{} noise contributor{}",
+            noise.rows.len(),
+            plural(noise.rows.len())
+        ));
+    }
+    if let Some(family) = &analysis.family_metadata {
+        parts.push(family_values_label(family));
+    }
+    if let Some(payload) = &analysis.result_payload {
+        parts.push(payload_values_label(payload));
+    }
+    if !analysis.measurements.is_empty() {
+        parts.push(format!(
+            "{} measurement{}",
+            analysis.measurements.len(),
+            plural(analysis.measurements.len())
+        ));
+    }
+    if !analysis.saved_output_receipts.is_empty() {
+        parts.push(format!(
+            "{} saved-output receipt{}",
+            analysis.saved_output_receipts.len(),
+            plural(analysis.saved_output_receipts.len())
+        ));
+    }
+    if parts.is_empty() {
+        if analysis.success {
+            "no retained values".to_owned()
+        } else {
+            "failed · no retained values".to_owned()
+        }
+    } else {
+        parts.join(" · ")
+    }
+}
+
+fn family_values_label(family: &AnalysisResultFamilyMetadata) -> String {
+    match family {
+        AnalysisResultFamilyMetadata::Parametric { sweep_values, .. } => {
+            format!("{} sweep points", sweep_values.len())
+        }
+        AnalysisResultFamilyMetadata::Corner { x_values, .. } => {
+            format!("{} corner points", x_values.len())
+        }
+        AnalysisResultFamilyMetadata::MonteCarlo {
+            runs_completed,
+            variables,
+            ..
+        } => format!("{runs_completed} samples / {} variables", variables.len()),
+        AnalysisResultFamilyMetadata::Reliability { years } => {
+            format!("{} mission ages", years.len())
+        }
+        AnalysisResultFamilyMetadata::Optimization { iterations, .. } => {
+            format!("{} iterations", iterations.len())
+        }
+        AnalysisResultFamilyMetadata::Soa { time } => {
+            format!("{} SOA time points", time.len())
+        }
+    }
+}
+
+fn payload_values_label(payload: &AnalysisResultPayload) -> String {
+    match payload {
+        AnalysisResultPayload::OperatingPoint {
+            mna_node_names,
+            mna_branch_names,
+            ..
+        } => format!(
+            "{} MNA nodes / {} MNA branches",
+            mna_node_names.len(),
+            mna_branch_names.len()
+        ),
+        AnalysisResultPayload::PoleZero { poles, zeros, .. } => {
+            format!("{} poles / {} zeros", poles.len(), zeros.len())
+        }
+        AnalysisResultPayload::Sensitivity { rows, .. } => {
+            format!("{} sensitivities", rows.len())
+        }
+        AnalysisResultPayload::ScalarMeasurements { values } => {
+            format!("{} scalar values", values.len())
+        }
+        AnalysisResultPayload::TransferFunction { .. } => "transfer / impedance scalars".to_owned(),
+        AnalysisResultPayload::Reliability { devices } => {
+            format!("{} reliability devices", devices.len())
+        }
+        AnalysisResultPayload::Soa {
+            evaluations,
+            violations,
+        } => format!(
+            "{} SOA evaluations / {} violations",
+            evaluations.len(),
+            violations.len()
+        ),
+    }
+}
+
+fn expansion_label(analysis: &AnalysisResult) -> String {
+    analysis.provenance().map_or_else(
+        || "legacy result".to_owned(),
+        |provenance| {
+            if provenance.authored_source_instance_id() == provenance.source_instance_id() {
+                "single task".to_owned()
+            } else {
+                "materialized PVT point".to_owned()
+            }
+        },
+    )
+}
+
+const fn missing_result_status(lifecycle: SimulationRunLifecycle) -> &'static str {
+    match lifecycle {
+        SimulationRunLifecycle::Preparing
+        | SimulationRunLifecycle::Running
+        | SimulationRunLifecycle::Cancelling => "pending · not yet retained",
+        SimulationRunLifecycle::Failed
+        | SimulationRunLifecycle::Aborted
+        | SimulationRunLifecycle::Interrupted => "not produced",
+        SimulationRunLifecycle::Completed | SimulationRunLifecycle::LegacyUnknown => "not retained",
+    }
+}
+
+const fn lifecycle_label(lifecycle: SimulationRunLifecycle) -> &'static str {
+    match lifecycle {
+        SimulationRunLifecycle::LegacyUnknown => "legacy status unknown",
+        SimulationRunLifecycle::Preparing => "preparing",
+        SimulationRunLifecycle::Running => "running",
+        SimulationRunLifecycle::Cancelling => "cancelling",
+        SimulationRunLifecycle::Completed => "completed",
+        SimulationRunLifecycle::Failed => "failed",
+        SimulationRunLifecycle::Aborted => "aborted",
+        SimulationRunLifecycle::Interrupted => "interrupted",
+    }
+}
+
+const fn source_domain_label(domain: AnalysisResultSourceDomain) -> &'static str {
+    match domain {
+        AnalysisResultSourceDomain::SimulationPlan => "simulation plan",
+        AnalysisResultSourceDomain::ManualDeck => "manual deck",
+        AnalysisResultSourceDomain::LegacyUnclassified => "legacy unclassified",
+    }
+}
+
+const fn plural(count: usize) -> &'static str {
+    if count == 1 { "" } else { "s" }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{AnalysisResult, SimulationRun, WaveformData};
+
+    #[test]
+    fn legacy_manifest_is_digest_bound_and_fails_closed() {
+        let mut run = SimulationRun::new(7);
+        run.lifecycle = SimulationRunLifecycle::Completed;
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#ffbd2e"),
+            ]),
+        );
+
+        let manifest = ManifestViewModel::from_run(&run);
+
+        assert_eq!(manifest.dataset_id, run.dataset_id.to_string());
+        assert_eq!(
+            manifest.dataset_digest,
+            run.dataset_content_digest().to_string()
+        );
+        assert_eq!(manifest.rows.len(), 1);
+        assert_eq!(manifest.rows[0].domain_axis, "adaptive time");
+        assert!(manifest.rows[0].stored_values.contains("2 samples"));
+        assert_eq!(manifest.rows[0].eligibility, "legacy · no prepared receipt");
+        assert_eq!(manifest.qualification, "not retained · non-sign-off");
+    }
+
+    #[test]
+    fn every_analysis_kind_has_a_truthful_domain_contract() {
+        let kinds = [
+            AnalysisType::DcOp,
+            AnalysisType::DcSweep,
+            AnalysisType::Ac,
+            AnalysisType::Disto,
+            AnalysisType::Transient,
+            AnalysisType::Noise,
+            AnalysisType::PoleZero,
+            AnalysisType::Tf,
+            AnalysisType::Sensitivity,
+            AnalysisType::Pac,
+            AnalysisType::Pnoise,
+            AnalysisType::Pxf,
+            AnalysisType::Pstb,
+            AnalysisType::Stb,
+            AnalysisType::MonteCarlo,
+            AnalysisType::Parametric,
+            AnalysisType::Corner,
+            AnalysisType::Reliability,
+            AnalysisType::Optimization,
+            AnalysisType::Soa,
+            AnalysisType::SParameter,
+            AnalysisType::Envelope,
+            AnalysisType::Fourier,
+            AnalysisType::HarmonicBalance,
+            AnalysisType::Pss,
+            AnalysisType::Qpss,
+            AnalysisType::Hbsp,
+            AnalysisType::Hbnoise,
+            AnalysisType::Psp,
+            AnalysisType::Qpac,
+            AnalysisType::Qpnoise,
+            AnalysisType::Qpxf,
+            AnalysisType::TransientNoise,
+            AnalysisType::DcMismatch,
+        ];
+        for kind in kinds {
+            let meta = domain_meta(kind);
+            assert!(!meta.axis.is_empty(), "{kind:?}");
+            assert!(!meta.precision.is_empty(), "{kind:?}");
+        }
+    }
+}

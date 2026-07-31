@@ -44,16 +44,19 @@ pub(super) const MARKER_ROW_LIMIT: usize = 4;
 ///
 /// A marker on a closed or un-maximized strip has nothing to point at, so
 /// it must not hold the readout strip open.
-pub(super) fn on_screen_strips(state: &AppState) -> Vec<usize> {
+pub(super) fn on_screen_strips(state: &AppState) -> Vec<AnalysisPresentationKey> {
     let Some(run) = state.simulation.active_run() else {
         return Vec::new();
     };
     let results = &state.ui.results;
-    let present = |index: usize| index < run.analyses.len();
+    let present = |key: AnalysisPresentationKey| key.resolve(run).is_some();
     match results.maximized_strip {
-        Some(max_index) if present(max_index) => vec![max_index],
-        _ => (0..run.analyses.len())
-            .filter(|index| !results.hidden_strips.contains(index))
+        Some(max_key) if present(max_key) => vec![max_key],
+        _ => run
+            .analyses
+            .iter()
+            .map(|analysis| AnalysisPresentationKey::new(run.dataset_id, analysis))
+            .filter(|key| !results.hidden_strips.contains(key))
             .collect(),
     }
 }
@@ -66,7 +69,7 @@ pub(super) fn visible_markers(state: &AppState) -> Vec<&ResultMarker> {
         .results
         .markers
         .iter()
-        .filter(|marker| strips.contains(&marker.analysis_index))
+        .filter(|marker| strips.contains(&marker.analysis))
         .collect()
 }
 
@@ -322,13 +325,13 @@ pub(super) fn marker_section(ui: &mut Ui, state: &mut AppState, rect: egui::Rect
             continue;
         };
         let kind = marker.kind;
-        let anchor = marker.anchor;
+        let anchor = marker.anchor.clone();
         let marker_x = marker.x;
-        let analysis_index = marker.analysis_index;
+        let analysis_key = marker.analysis;
         let trace_name = marker.trace_name.clone();
         let model = models
             .iter()
-            .find(|model| model.analysis_index == analysis_index);
+            .find(|model| model.analysis_key == analysis_key);
         let position = model.map_or_else(
             || fmt_si_significant(marker_x, "", significant_digits),
             |model| {
@@ -468,7 +471,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         .ui
         .results
         .cursor_strip
-        .and_then(|idx| models.iter().find(|m| m.analysis_index == idx));
+        .and_then(|index| models.iter().find(|m| m.analysis_index == index));
 
     // Statistics over the cursor window (or the full range).
     let cursors = state.ui.results.cursors;
