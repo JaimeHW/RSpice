@@ -518,6 +518,12 @@ pub enum ReportEdit {
     SetTemplate {
         template: ReportTemplate,
     },
+    SetOutputFormats {
+        output_formats: ReportOutputFormats,
+    },
+    SetPublicationProfile {
+        publication_profile: ReportPublicationProfile,
+    },
     AddPage {
         title: String,
     },
@@ -762,6 +768,10 @@ pub struct ReportDocumentSnapshot {
     revision: ObjectRevision,
     title: String,
     template: ReportTemplate,
+    #[serde(default, skip_serializing_if = "ReportOutputFormats::is_default")]
+    output_formats: ReportOutputFormats,
+    #[serde(default, skip_serializing_if = "ReportPublicationProfile::is_default")]
+    publication_profile: ReportPublicationProfile,
     pages: Vec<ReportPage>,
     receipts: Vec<ReportMutationReceipt>,
     tombstones: Vec<ReportTombstone>,
@@ -787,6 +797,16 @@ impl ReportDocumentSnapshot {
     #[must_use]
     pub const fn template(&self) -> ReportTemplate {
         self.template
+    }
+
+    #[must_use]
+    pub const fn output_formats(&self) -> ReportOutputFormats {
+        self.output_formats
+    }
+
+    #[must_use]
+    pub const fn publication_profile(&self) -> ReportPublicationProfile {
+        self.publication_profile
     }
 
     #[must_use]
@@ -1031,6 +1051,10 @@ pub struct ReportDocument {
     revision: ObjectRevision,
     title: String,
     template: ReportTemplate,
+    #[serde(default, skip_serializing_if = "ReportOutputFormats::is_default")]
+    output_formats: ReportOutputFormats,
+    #[serde(default, skip_serializing_if = "ReportPublicationProfile::is_default")]
+    publication_profile: ReportPublicationProfile,
     pages: Vec<ReportPage>,
     receipts: Vec<ReportMutationReceipt>,
     tombstones: Vec<ReportTombstone>,
@@ -1046,6 +1070,10 @@ struct ReportDocumentWire {
     revision: ObjectRevision,
     title: String,
     template: ReportTemplate,
+    #[serde(default)]
+    output_formats: ReportOutputFormats,
+    #[serde(default)]
+    publication_profile: ReportPublicationProfile,
     #[serde(default)]
     pages: Vec<ReportPage>,
     #[serde(default)]
@@ -1095,8 +1123,8 @@ impl<'de> Deserialize<'de> for ReportDocument {
                         .to_owned(),
                 }));
             }
-            (3 | 4, ReportRevisionHistoryWireField::Value(history)) => history,
-            (version @ (3 | 4), ReportRevisionHistoryWireField::Missing) => {
+            (3..=5, ReportRevisionHistoryWireField::Value(history)) => history,
+            (version @ (3..=5), ReportRevisionHistoryWireField::Missing) => {
                 return Err(serde::de::Error::custom(ReportError::InvalidValue {
                     field: "report-document.revision-history",
                     message: format!(
@@ -1133,6 +1161,8 @@ impl<'de> Deserialize<'de> for ReportDocument {
             revision: wire.revision,
             title: wire.title,
             template: wire.template,
+            output_formats: wire.output_formats,
+            publication_profile: wire.publication_profile,
             pages: wire.pages,
             receipts: wire.receipts,
             tombstones: wire.tombstones,
@@ -1146,7 +1176,7 @@ impl<'de> Deserialize<'de> for ReportDocument {
 }
 
 impl ReportDocument {
-    pub const SCHEMA_VERSION: u16 = 5;
+    pub const SCHEMA_VERSION: u16 = 6;
 
     pub fn new(title: impl Into<String>) -> Result<Self, ReportError> {
         Self::new_with_template(title, ReportTemplate::ReleaseVerification42)
@@ -1162,6 +1192,8 @@ impl ReportDocument {
             revision: ObjectRevision::INITIAL,
             title: title.into(),
             template,
+            output_formats: ReportOutputFormats::default(),
+            publication_profile: ReportPublicationProfile::default(),
             pages: Vec::new(),
             receipts: Vec::new(),
             tombstones: Vec::new(),
@@ -1203,6 +1235,16 @@ impl ReportDocument {
     #[must_use]
     pub const fn template(&self) -> ReportTemplate {
         self.template
+    }
+
+    #[must_use]
+    pub const fn output_formats(&self) -> ReportOutputFormats {
+        self.output_formats
+    }
+
+    #[must_use]
+    pub const fn publication_profile(&self) -> ReportPublicationProfile {
+        self.publication_profile
     }
 
     #[must_use]
@@ -1272,6 +1314,8 @@ impl ReportDocument {
             revision: snapshot.revision,
             title: snapshot.title.clone(),
             template: snapshot.template,
+            output_formats: snapshot.output_formats,
+            publication_profile: snapshot.publication_profile,
             pages: snapshot.pages.clone(),
             receipts: snapshot.receipts.clone(),
             tombstones: snapshot.tombstones.clone(),
@@ -1373,6 +1417,8 @@ impl ReportDocument {
             revision: self.revision,
             title: self.title.clone(),
             template: self.template,
+            output_formats: self.output_formats,
+            publication_profile: self.publication_profile,
             pages: self.pages.clone(),
             receipts: self.receipts.clone(),
             tombstones: self.tombstones.clone(),
@@ -1520,6 +1566,8 @@ impl ReportDocument {
             revision: self.revision,
             title: self.title.clone(),
             template: self.template,
+            output_formats: self.output_formats,
+            publication_profile: self.publication_profile,
             pages: self.pages.clone(),
             receipts: self.receipts.clone(),
             tombstones: self.tombstones.clone(),
@@ -1745,6 +1793,31 @@ impl ReportDocument {
                 {
                     return Err(ReportError::UnsafeLegacyMigration { version: 4 });
                 }
+                self.schema_version = 5;
+                self.migrate()
+            }
+            5 => {
+                // Schema six adds document output formats and publication
+                // policy. Their defaults are omitted from serialization, so
+                // authentic schema-five source and history snapshot bytes
+                // remain unchanged. A non-default value in a schema-five
+                // envelope is a mislabeled schema-six document and must fail
+                // closed rather than acquiring unauthenticated policy.
+                let uses_schema_six_publication_policy =
+                    |output_formats: ReportOutputFormats,
+                     publication_profile: ReportPublicationProfile| {
+                        !output_formats.is_default() || !publication_profile.is_default()
+                    };
+                if uses_schema_six_publication_policy(self.output_formats, self.publication_profile)
+                    || self.revision_history.records.iter().any(|record| {
+                        uses_schema_six_publication_policy(
+                            record.snapshot.output_formats,
+                            record.snapshot.publication_profile,
+                        )
+                    })
+                {
+                    return Err(ReportError::UnsafeLegacyMigration { version: 5 });
+                }
                 self.schema_version = Self::SCHEMA_VERSION;
                 Ok(())
             }
@@ -1757,6 +1830,7 @@ impl ReportDocument {
 struct ReportDocumentContentView<'a> {
     revision: ObjectRevision,
     title: &'a str,
+    output_formats: ReportOutputFormats,
     pages: &'a [ReportPage],
     receipts: &'a [ReportMutationReceipt],
     tombstones: &'a [ReportTombstone],
@@ -1768,6 +1842,7 @@ impl<'a> ReportDocumentContentView<'a> {
         Self {
             revision: document.revision,
             title: &document.title,
+            output_formats: document.output_formats,
             pages: &document.pages,
             receipts: &document.receipts,
             tombstones: &document.tombstones,
@@ -1779,6 +1854,7 @@ impl<'a> ReportDocumentContentView<'a> {
         Self {
             revision: snapshot.revision,
             title: &snapshot.title,
+            output_formats: snapshot.output_formats,
             pages: &snapshot.pages,
             receipts: &snapshot.receipts,
             tombstones: &snapshot.tombstones,
@@ -1788,6 +1864,7 @@ impl<'a> ReportDocumentContentView<'a> {
 
     fn validate(self) -> Result<(), ReportError> {
         validate_label("report-document.title", self.title, 512)?;
+        self.output_formats.validate()?;
         if self.pages.len() > MAX_PAGES {
             return Err(ReportError::CapacityExceeded("report pages"));
         }

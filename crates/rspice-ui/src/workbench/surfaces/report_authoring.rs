@@ -12,9 +12,11 @@ use egui_extras::{Column, TableBuilder};
 use crate::results::report_document::{
     DataTableBlock, DatasheetBlock, DatasheetField, EvidenceBlock, FigureSizing,
     FrozenReportArtifact, PlotFigureBlock, ProseBlock, ProseStyle, ReportBlockId, ReportBlockKind,
-    ReportBlockedGateTextPolicy, ReportDocument, ReportEdit, ReportEntityRef,
-    ReportPageEvidenceBinding, ReportPageId, ReportPageInclusion, ReportPageUpdatePolicy,
-    ReportReferenceMode, ReportReferenceSnapshot, ReportSourceId, ReportTemplate,
+    ReportBlockedGateTextPolicy, ReportDocument, ReportDraftMarking, ReportEdit, ReportEntityRef,
+    ReportOutputFormats, ReportPageEvidenceBinding, ReportPageId, ReportPageInclusion,
+    ReportPageNumbering, ReportPageUpdatePolicy, ReportPublicationPageSize,
+    ReportPublicationProfile, ReportPublicationTemplate, ReportReferenceMode,
+    ReportReferenceSnapshot, ReportSourceId, ReportTablePrecision, ReportTemplate,
     RequirementDisposition, RequirementEntry, RequirementsBlock, ReviewNoteBlock, ReviewNoteStatus,
     SpecificationDisposition, SpecificationEntry, SpecificationsBlock, TableCell, TableColumn,
 };
@@ -39,9 +41,7 @@ const PANEL_GAP: f32 = 0.0;
 const OUTLINE_HEADER_HEIGHT: f32 = 39.0;
 const OUTLINE_ROW_HEIGHT: f32 = 34.0;
 const PREVIEW_MIN_HEIGHT: f32 = 420.0;
-const INSPECTOR_SECTION_HEIGHT: f32 = 29.0;
-const INSPECTOR_ROW_HEIGHT: f32 = 29.0;
-const INSPECTOR_SECTION_PADDING: f32 = 17.0;
+const INSPECTOR_PUBLICATION_CONTENT_HEIGHT: f32 = 820.0;
 const PAPER: Color32 = Color32::from_rgb(255, 255, 255);
 const PAPER_PANEL: Color32 = Color32::from_rgb(246, 247, 247);
 const PAPER_TEXT: Color32 = Color32::from_rgb(32, 36, 40);
@@ -162,6 +162,12 @@ enum PageSettingEdit {
     BlockedGateText(ReportBlockedGateTextPolicy),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DocumentPublicationEdit {
+    OutputFormats(ReportOutputFormats),
+    PublicationProfile(ReportPublicationProfile),
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct PaneSeparators {
     top: bool,
@@ -230,7 +236,7 @@ fn composer_pane_heights(
     layout: ComposerLayout,
     available_height: f32,
     page_count: usize,
-    page_selected: bool,
+    _page_selected: bool,
 ) -> ComposerPaneHeights {
     let viewport_height = if available_height.is_finite() {
         available_height.max(1.0)
@@ -238,9 +244,7 @@ fn composer_pane_heights(
         PREVIEW_MIN_HEIGHT
     };
     let outline_content = OUTLINE_HEADER_HEIGHT + OUTLINE_ROW_HEIGHT * page_count as f32;
-    let inspector_sections = if page_selected { 2.0 } else { 1.0 };
-    let inspector_content = inspector_sections
-        * (INSPECTOR_SECTION_HEIGHT + INSPECTOR_ROW_HEIGHT * 5.0 + INSPECTOR_SECTION_PADDING);
+    let inspector_content = INSPECTOR_PUBLICATION_CONTENT_HEIGHT;
 
     match layout {
         ComposerLayout::ThreeColumn => ComposerPaneHeights {
@@ -520,6 +524,69 @@ fn commit_page_setting(app: &mut RSpiceApp, page_id: ReportPageId, setting: Page
     }
 }
 
+fn commit_document_publication_setting(
+    app: &mut RSpiceApp,
+    document_id: crate::product::ResultDocumentId,
+    setting: DocumentPublicationEdit,
+) {
+    if !report_mutation_allowed(&app.state) {
+        let reason = report_mutation_block_reason(&app.state).to_owned();
+        app.state.workbench.report_authoring.transaction_error = Some(reason.clone());
+        app.state
+            .push_user_message(crate::diagnostics::ConsoleMessage::warning(reason));
+        return;
+    }
+    let result = active_document_mut(&mut app.state).and_then(|document| {
+        if document.id() != document_id {
+            return Err(
+                "The report document changed before its publication policy committed.".to_owned(),
+            );
+        }
+        let (edit, revision_note) = match setting {
+            DocumentPublicationEdit::OutputFormats(output_formats)
+                if document.output_formats() != output_formats =>
+            {
+                (
+                    ReportEdit::SetOutputFormats { output_formats },
+                    "Update report output formats",
+                )
+            }
+            DocumentPublicationEdit::PublicationProfile(publication_profile)
+                if document.publication_profile() != publication_profile =>
+            {
+                (
+                    ReportEdit::SetPublicationProfile {
+                        publication_profile,
+                    },
+                    "Update report publication profile",
+                )
+            }
+            _ => return Ok(false),
+        };
+        document
+            .transact_with_context(
+                document.revision(),
+                vec![edit],
+                timestamp_unix_ms(),
+                "rspice-local-session",
+                revision_note,
+            )
+            .map(|_| true)
+            .map_err(|error| error.to_string())
+    });
+    match result {
+        Ok(changed) => {
+            app.state.workspace.report_documents_dirty |= changed;
+            app.state.workbench.report_authoring.transaction_error = None;
+        }
+        Err(error) => {
+            app.state.workbench.report_authoring.transaction_error = Some(error.clone());
+            app.state
+                .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+        }
+    }
+}
+
 fn set_report_block_enabled(
     app: &mut RSpiceApp,
     document_id: crate::product::ResultDocumentId,
@@ -725,7 +792,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     ui.allocate_ui_with_layout(
                         Vec2::new(INSPECTOR_WIDTH, available.y),
                         egui::Layout::top_down(egui::Align::Min),
-                        |ui| inspector(ui, &document, selected_page, inspector_separators),
+                        |ui| inspector(ui, app, &document, selected_page, inspector_separators),
                     );
                 });
             }
@@ -770,12 +837,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                             Vec2::new(local_width, heights.inspector),
                             egui::Layout::top_down(egui::Align::Min),
                             |ui| {
-                                inspector(
-                                    ui,
-                                    &document,
-                                    selected_page,
-                                    inspector_separators,
-                                )
+                                inspector(ui, app, &document, selected_page, inspector_separators)
                             },
                         );
                     });
@@ -815,12 +877,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                             Vec2::new(local_width, heights.inspector),
                             egui::Layout::top_down(egui::Align::Min),
                             |ui| {
-                                inspector(
-                                    ui,
-                                    &document,
-                                    selected_page,
-                                    inspector_separators,
-                                )
+                                inspector(ui, app, &document, selected_page, inspector_separators)
                             },
                         );
                     });
@@ -1777,45 +1834,434 @@ fn paper_label(ui: &mut Ui, text: &str, font: egui::FontId, color: Color32) {
 
 fn inspector(
     ui: &mut Ui,
+    app: &mut RSpiceApp,
     document: &ReportDocument,
-    selected_page: Option<ReportPageId>,
+    _selected_page: Option<ReportPageId>,
     separators: PaneSeparators,
 ) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width();
     let height = ui.available_height();
+    let writable = report_mutation_allowed(&app.state);
+    let blocked_reason = report_mutation_block_reason(&app.state);
+    let mut pending_edit = None;
+    let mut open_release_owner = false;
+    let mut open_package_assembly = false;
     let pane = egui::Frame::new().fill(t.color.bg_panel).show(ui, |ui| {
         ui.set_min_size(Vec2::new(width.max(1.0), height.max(1.0)));
         ScrollArea::vertical()
             .id_salt("report-authoring.inspector")
             .show(ui, |ui| {
-                code_inspector_section(ui, "Report document", None, |ui| {
+                code_inspector_section(ui, "Output formats", None, |ui| {
                     code_inspector_property_list(ui, |ui| {
-                        property_row(ui, "Title", document.title());
-                        property_row(ui, "Identity", &document.id().to_string());
-                        property_row(ui, "Revision", &document.revision().get().to_string());
-                        property_row(ui, "Template", report_template_label(document.template()));
-                        property_row(ui, "Pages", &document.pages().len().to_string());
+                        let mut output_formats = document.output_formats();
+                        let enabled_count = [
+                            output_formats.pdf_a,
+                            output_formats.html_bundle,
+                            output_formats.canonical_json,
+                            output_formats.selected_csv,
+                        ]
+                        .into_iter()
+                        .filter(|enabled| *enabled)
+                        .count();
+                        let pdf_a_enabled = output_formats.pdf_a;
+                        let html_bundle_enabled = output_formats.html_bundle;
+                        let canonical_json_enabled = output_formats.canonical_json;
+                        let selected_csv_enabled = output_formats.selected_csv;
+                        let mut changed = false;
+                        changed |= inspector_switch_row(
+                            ui,
+                            "PDF/A",
+                            &mut output_formats.pdf_a,
+                            writable && (!pdf_a_enabled || enabled_count > 1),
+                            writable && pdf_a_enabled && enabled_count == 1,
+                            blocked_reason,
+                        );
+                        changed |= inspector_switch_row(
+                            ui,
+                            "HTML bundle",
+                            &mut output_formats.html_bundle,
+                            writable && (!html_bundle_enabled || enabled_count > 1),
+                            writable && html_bundle_enabled && enabled_count == 1,
+                            blocked_reason,
+                        );
+                        changed |= inspector_switch_row(
+                            ui,
+                            "Canonical JSON",
+                            &mut output_formats.canonical_json,
+                            writable && (!canonical_json_enabled || enabled_count > 1),
+                            writable && canonical_json_enabled && enabled_count == 1,
+                            blocked_reason,
+                        );
+                        changed |= inspector_switch_row(
+                            ui,
+                            "Selected CSV",
+                            &mut output_formats.selected_csv,
+                            writable && (!selected_csv_enabled || enabled_count > 1),
+                            writable && selected_csv_enabled && enabled_count == 1,
+                            blocked_reason,
+                        );
+                        if changed {
+                            pending_edit =
+                                Some(DocumentPublicationEdit::OutputFormats(output_formats));
+                        }
                     });
                 });
-                if let Some(page) = selected_page.and_then(|id| document.page(id)) {
-                    code_inspector_section(ui, "Selected page", None, |ui| {
-                        code_inspector_property_list(ui, |ui| {
-                            property_row(ui, "Title", page.title());
-                            property_row(ui, "Identity", &page.id().to_string());
-                            property_row(ui, "Revision", &page.revision().get().to_string());
-                            property_row(
-                                ui,
-                                "Update policy",
-                                page_update_policy_label(page.update_policy()),
-                            );
-                            property_row(ui, "Sections", &page.sections().len().to_string());
-                        });
+                code_inspector_section(ui, "Publication", None, |ui| {
+                    code_inspector_property_list(ui, |ui| {
+                        let mut profile = document.publication_profile();
+                        let mut changed = false;
+                        changed |= inspector_publication_select(
+                            ui,
+                            "report-publication-template",
+                            "Template",
+                            &mut profile.template,
+                            &[
+                                (
+                                    ReportPublicationTemplate::OrganizationVerificationReport,
+                                    "Organization verification report",
+                                ),
+                                (
+                                    ReportPublicationTemplate::CustomerDatasheet,
+                                    "Customer datasheet",
+                                ),
+                                (
+                                    ReportPublicationTemplate::InternalReviewMemo,
+                                    "Internal review memo",
+                                ),
+                            ],
+                            writable,
+                            blocked_reason,
+                        );
+                        changed |= inspector_publication_select(
+                            ui,
+                            "report-publication-page-size",
+                            "Page size",
+                            &mut profile.page_size,
+                            &[
+                                (ReportPublicationPageSize::A4Portrait, "A4 portrait"),
+                                (
+                                    ReportPublicationPageSize::UsLetterPortrait,
+                                    "US Letter portrait",
+                                ),
+                                (ReportPublicationPageSize::A3Landscape, "A3 landscape"),
+                            ],
+                            writable,
+                            blocked_reason,
+                        );
+                        changed |= inspector_publication_select(
+                            ui,
+                            "report-publication-draft-marking",
+                            "Draft marking",
+                            &mut profile.draft_marking,
+                            &[
+                                (
+                                    ReportDraftMarking::WatermarkWhileGatesOpen,
+                                    "Watermark while gates are open",
+                                ),
+                                (ReportDraftMarking::NeverWatermark, "Never watermark"),
+                            ],
+                            writable,
+                            blocked_reason,
+                        );
+                        changed |= inspector_publication_select(
+                            ui,
+                            "report-publication-numbering",
+                            "Numbering",
+                            &mut profile.numbering,
+                            &[
+                                (
+                                    ReportPageNumbering::SectionPageOfTotal,
+                                    "Section · page of total",
+                                ),
+                                (
+                                    ReportPageNumbering::ContinuousPageNumbers,
+                                    "Continuous page numbers",
+                                ),
+                            ],
+                            writable,
+                            blocked_reason,
+                        );
+                        changed |= inspector_publication_select(
+                            ui,
+                            "report-publication-precision",
+                            "Precision in tables",
+                            &mut profile.table_precision,
+                            &[
+                                (
+                                    ReportTablePrecision::SevenSignificantDigits,
+                                    "7 significant digits",
+                                ),
+                                (ReportTablePrecision::FullStoredF64, "Full stored f64"),
+                                (
+                                    ReportTablePrecision::MatchSourceDisplay,
+                                    "Match source display",
+                                ),
+                            ],
+                            writable,
+                            blocked_reason,
+                        );
+                        if changed {
+                            pending_edit =
+                                Some(DocumentPublicationEdit::PublicationProfile(profile));
+                        }
                     });
+                });
+                code_inspector_section(ui, "Release handoff", None, |ui| {
+                    code_inspector_property_list(ui, |ui| {
+                        let (bound_result, exact_binding) =
+                            report_bound_result_label(&app.state, document);
+                        property_row(ui, "Artifact identity", &document.id().to_string());
+                        property_row(ui, "Bound result", &bound_result);
+                        property_row(ui, "Candidate", "Not attached");
+                        property_row(
+                            ui,
+                            "Compatibility",
+                            if exact_binding {
+                                "awaiting candidate review"
+                            } else {
+                                "result binding incomplete"
+                            },
+                        );
+                        property_row(ui, "Package owner", "Release closure");
+                        property_row(ui, "Physical DRC", "No retained DRC evidence");
+                    });
+                    release_handoff_card(
+                        ui,
+                        document,
+                        report_bound_result_label(&app.state, document).1,
+                        &mut open_release_owner,
+                    );
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.add_space(10.0);
+                        if Button::new("Open package assembly").show(ui).clicked() {
+                            open_package_assembly = true;
+                        }
+                    });
+                    ui.add_space(8.0);
+                });
+                if let Some(error) = &app.state.workbench.report_authoring.transaction_error {
+                    ui.add_space(8.0);
+                    ui.colored_label(t.color.err, error);
+                    ui.add_space(8.0);
                 }
             });
     });
     paint_pane_separators(ui, pane.response.rect, separators, t.color.border);
+    if let Some(setting) = pending_edit {
+        commit_document_publication_setting(app, document.id(), setting);
+    }
+    if open_release_owner || open_package_assembly {
+        open_release_cockpit(app);
+    }
+}
+
+fn inspector_switch_row(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut bool,
+    enabled: bool,
+    protected_last_output: bool,
+    blocked_reason: &str,
+) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let before = *value;
+    ui.horizontal(|ui| {
+        ui.set_width(ui.available_width());
+        ui.add_space(10.0);
+        ui.label(
+            egui::RichText::new(label)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(10.0);
+            let response = ui
+                .add_enabled_ui(enabled, |ui| paper_switch(ui, value))
+                .inner;
+            if !enabled {
+                response.on_disabled_hover_text(if protected_last_output {
+                    "At least one report output format must remain enabled."
+                } else {
+                    blocked_reason
+                });
+            }
+        });
+    });
+    *value != before
+}
+
+fn inspector_publication_select<T>(
+    ui: &mut Ui,
+    id: &'static str,
+    label: &str,
+    value: &mut T,
+    options: &[(T, &'static str)],
+    enabled: bool,
+    blocked_reason: &str,
+) -> bool
+where
+    T: Copy + PartialEq,
+{
+    let t = Tokens::get(ui.ctx());
+    let selected = options
+        .iter()
+        .position(|(candidate, _)| candidate == value)
+        .unwrap_or(0);
+    ui.horizontal(|ui| {
+        ui.add_space(10.0);
+        ui.label(
+            egui::RichText::new(label)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_dim),
+        );
+    });
+    let labels = options
+        .iter()
+        .map(|(_, label)| (*label).to_owned())
+        .collect::<Vec<_>>();
+    let mut selected_index = None;
+    ui.horizontal(|ui| {
+        ui.add_space(10.0);
+        let width = (ui.available_width() - 20.0).max(80.0);
+        let output = ui.add_enabled_ui(enabled, |ui| {
+            select(ui, id, label, options[selected].1, &labels, width)
+        });
+        if !enabled {
+            output.response.on_disabled_hover_text(blocked_reason);
+        }
+        selected_index = output.inner;
+    });
+    ui.add_space(5.0);
+    if let Some(index) = selected_index.filter(|index| *index < options.len()) {
+        let next = options[index].0;
+        if *value != next {
+            *value = next;
+            return true;
+        }
+    }
+    false
+}
+
+fn report_bound_result_label(state: &AppState, document: &ReportDocument) -> (String, bool) {
+    let mut binding = None;
+    for page in document.pages() {
+        let ReportPageEvidenceBinding::ExactDataset {
+            binding: page_binding,
+        } = page.evidence_binding()
+        else {
+            return ("Exact immutable result required".to_owned(), false);
+        };
+        match binding {
+            None => binding = Some(page_binding),
+            Some(existing) if existing == page_binding => {}
+            Some(_) => return ("Multiple immutable result bindings".to_owned(), false),
+        }
+    }
+    let Some(binding) = binding else {
+        return ("No report pages are bound".to_owned(), false);
+    };
+    let label = state
+        .simulation
+        .runs
+        .iter()
+        .find(|run| {
+            run.dataset_id == binding.dataset_id
+                && run.dataset_content_digest() == binding.content_digest
+        })
+        .map_or_else(
+            || {
+                let dataset_id = binding.dataset_id.to_string();
+                format!(
+                    "Dataset {}… · immutable",
+                    dataset_id.get(..8).unwrap_or(&dataset_id)
+                )
+            },
+            |run| format!("Run {} · immutable", run.id),
+        );
+    (label, true)
+}
+
+fn release_handoff_card(
+    ui: &mut Ui,
+    document: &ReportDocument,
+    exact_result_binding: bool,
+    open_owner: &mut bool,
+) {
+    let t = Tokens::get(ui.ctx());
+    let shown = egui::Frame::new()
+        .fill(t.color.bg_panel_2)
+        .stroke(Stroke::new(1.0, t.color.border))
+        .inner_margin(egui::Margin::symmetric(10, 8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("OWNED BY RELEASE CLOSURE")
+                        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                        .color(t.color.text_dim),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new(if exact_result_binding {
+                            "ready for candidate review"
+                        } else {
+                            "binding incomplete"
+                        })
+                        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                        .color(if exact_result_binding {
+                            t.color.ok
+                        } else {
+                            t.color.err
+                        }),
+                    );
+                });
+            });
+            ui.add_space(5.0);
+            let id = document.id().to_string();
+            ui.label(
+                egui::RichText::new(format!(
+                    "Attach report {} to a release candidate",
+                    id.get(..8).unwrap_or(&id)
+                ))
+                .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
+                .color(t.color.text),
+            );
+            ui.label(
+                egui::RichText::new(
+                    "Compatibility review only; packaging and promotion remain external.",
+                )
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_dim),
+            );
+            ui.add_space(6.0);
+            let button_width = ui.available_width();
+            if Button::new("Open owner →")
+                .min_width(button_width)
+                .show(ui)
+                .clicked()
+            {
+                *open_owner = true;
+            }
+        });
+    ui.painter().hline(
+        shown.response.rect.x_range(),
+        shown.response.rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+}
+
+fn open_release_cockpit(app: &mut RSpiceApp) {
+    if let Err(error) = app.state.workbench.navigate(
+        SurfaceRoute::surface(SurfaceId::ReleaseCockpit),
+        RouteTransitionSource::User,
+    ) {
+        app.state
+            .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+                "Cannot open release package assembly: {error}"
+            )));
+    }
 }
 
 fn paint_pane_separators(ui: &Ui, rect: Rect, separators: PaneSeparators, color: Color32) {
@@ -3713,14 +4159,14 @@ mod tests {
         );
         let tablet_tall = composer_pane_heights(
             ComposerLayout::TwoColumnInspectorBelow,
-            1_000.0,
+            1_600.0,
             INITIAL_PAGES.len(),
             true,
         );
         assert!(tablet_tall.preview > tablet_short.preview);
         assert!(tablet_tall.inspector > tablet_short.inspector);
         assert!(tablet_short.preview + tablet_short.inspector + 0.01 >= 640.0);
-        assert!(tablet_tall.preview + tablet_tall.inspector + 0.01 >= 1_000.0);
+        assert!(tablet_tall.preview + tablet_tall.inspector + 0.01 >= 1_600.0);
 
         let compact_seven =
             composer_pane_heights(ComposerLayout::Stacked, 720.0, INITIAL_PAGES.len(), true);
@@ -4071,6 +4517,54 @@ mod tests {
         assert_eq!(
             app.state.workbench.report_authoring.selected_report_block,
             None
+        );
+    }
+
+    #[test]
+    fn publication_inspector_edits_are_canonical_document_transactions() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.report_authoring.create_document_title =
+            "Verification report".to_owned();
+        commit_create_document(&mut app);
+        let document_id = active_document(&app.state).expect("active report").id();
+        let initial_revision = active_document(&app.state)
+            .expect("active report")
+            .revision();
+        let output_formats = ReportOutputFormats {
+            pdf_a: true,
+            html_bundle: false,
+            canonical_json: true,
+            selected_csv: true,
+        };
+        commit_document_publication_setting(
+            &mut app,
+            document_id,
+            DocumentPublicationEdit::OutputFormats(output_formats),
+        );
+        let publication_profile = ReportPublicationProfile {
+            template: ReportPublicationTemplate::CustomerDatasheet,
+            page_size: ReportPublicationPageSize::A3Landscape,
+            draft_marking: ReportDraftMarking::NeverWatermark,
+            numbering: ReportPageNumbering::ContinuousPageNumbers,
+            table_precision: ReportTablePrecision::FullStoredF64,
+        };
+        commit_document_publication_setting(
+            &mut app,
+            document_id,
+            DocumentPublicationEdit::PublicationProfile(publication_profile),
+        );
+
+        let document = active_document(&app.state).expect("active report");
+        assert_eq!(document.output_formats(), output_formats);
+        assert_eq!(document.publication_profile(), publication_profile);
+        assert_eq!(document.revision().get(), initial_revision.get() + 2);
+        assert!(app.state.workspace.report_documents_dirty);
+        assert!(
+            app.state
+                .workbench
+                .report_authoring
+                .transaction_error
+                .is_none()
         );
     }
 

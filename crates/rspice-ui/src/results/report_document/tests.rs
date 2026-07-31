@@ -1284,6 +1284,8 @@ fn version_one_initial_snapshots_migrate_without_fabricating_history() {
         revision: ObjectRevision::INITIAL,
         title: "Legacy report".to_owned(),
         template: ReportTemplate::ReleaseVerification42,
+        output_formats: ReportOutputFormats::default(),
+        publication_profile: ReportPublicationProfile::default(),
         pages: vec![page],
         receipts: Vec::new(),
         tombstones: Vec::new(),
@@ -1637,6 +1639,121 @@ fn schema_four_migration_rejects_mislabeled_disabled_blocks() {
         .unwrap();
     let mut mislabeled = serde_json::to_value(document).unwrap();
     mislabeled["schema_version"] = serde_json::json!(4);
+
+    assert!(serde_json::from_value::<ReportDocument>(mislabeled).is_err());
+}
+
+#[test]
+fn publication_policy_is_revisioned_and_reconstructable() {
+    let mut document = ReportDocument::new("Publication policy").unwrap();
+    let initial_revision = document.revision();
+    let output_formats = ReportOutputFormats {
+        pdf_a: true,
+        html_bundle: false,
+        canonical_json: true,
+        selected_csv: true,
+    };
+    let publication_profile = ReportPublicationProfile {
+        template: ReportPublicationTemplate::CustomerDatasheet,
+        page_size: ReportPublicationPageSize::A3Landscape,
+        draft_marking: ReportDraftMarking::NeverWatermark,
+        numbering: ReportPageNumbering::ContinuousPageNumbers,
+        table_precision: ReportTablePrecision::FullStoredF64,
+    };
+
+    document
+        .transact_with_context(
+            document.revision(),
+            vec![
+                ReportEdit::SetOutputFormats { output_formats },
+                ReportEdit::SetPublicationProfile {
+                    publication_profile,
+                },
+            ],
+            81,
+            "publication-editor",
+            "Set exact report publication policy",
+        )
+        .unwrap();
+
+    assert_eq!(document.output_formats(), output_formats);
+    assert_eq!(document.publication_profile(), publication_profile);
+    let prior = document
+        .reconstruct_revision(document.id(), initial_revision)
+        .unwrap();
+    assert_eq!(prior.output_formats(), ReportOutputFormats::default());
+    assert_eq!(
+        prior.publication_profile(),
+        ReportPublicationProfile::default()
+    );
+    let current = document
+        .reconstruct_revision(document.id(), document.revision())
+        .unwrap();
+    assert_eq!(current.output_formats(), output_formats);
+    assert_eq!(current.publication_profile(), publication_profile);
+}
+
+#[test]
+fn report_rejects_disabling_every_output_format_atomically() {
+    let mut document = ReportDocument::new("Publication policy").unwrap();
+    let before = document.clone();
+    let result = document.transact(
+        document.revision(),
+        vec![ReportEdit::SetOutputFormats {
+            output_formats: ReportOutputFormats {
+                pdf_a: false,
+                html_bundle: false,
+                canonical_json: false,
+                selected_csv: false,
+            },
+        }],
+        82,
+    );
+
+    assert!(matches!(
+        result,
+        Err(ReportError::InvalidValue {
+            field: "report-document.output-formats",
+            ..
+        })
+    ));
+    assert_eq!(document, before);
+}
+
+#[test]
+fn schema_five_migration_preserves_authenticated_default_publication_policy() {
+    let document = ReportDocument::new("Schema five report").unwrap();
+    let mut schema_five = serde_json::to_value(&document).unwrap();
+    schema_five["schema_version"] = serde_json::json!(5);
+
+    let migrated: ReportDocument = serde_json::from_value(schema_five).unwrap();
+
+    assert_eq!(migrated, document);
+    assert_eq!(migrated.schema_version(), ReportDocument::SCHEMA_VERSION);
+    assert_eq!(migrated.output_formats(), ReportOutputFormats::default());
+    assert_eq!(
+        migrated.publication_profile(),
+        ReportPublicationProfile::default()
+    );
+}
+
+#[test]
+fn schema_five_migration_rejects_mislabeled_publication_policy() {
+    let mut document = ReportDocument::new("Schema six report").unwrap();
+    document
+        .transact(
+            document.revision(),
+            vec![ReportEdit::SetOutputFormats {
+                output_formats: ReportOutputFormats {
+                    selected_csv: true,
+                    ..ReportOutputFormats::default()
+                },
+            }],
+            83,
+        )
+        .unwrap();
+    let mut mislabeled = serde_json::to_value(document).unwrap();
+    mislabeled["schema_version"] = serde_json::json!(5);
 
     assert!(serde_json::from_value::<ReportDocument>(mislabeled).is_err());
 }

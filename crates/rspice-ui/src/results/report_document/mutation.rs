@@ -31,6 +31,21 @@ impl ReportDocument {
                 }
                 self.template = template;
             }
+            ReportEdit::SetOutputFormats { output_formats } => {
+                output_formats.validate()?;
+                if self.output_formats == output_formats {
+                    return Err(ReportError::NoChanges);
+                }
+                self.output_formats = output_formats;
+            }
+            ReportEdit::SetPublicationProfile {
+                publication_profile,
+            } => {
+                if self.publication_profile == publication_profile {
+                    return Err(ReportError::NoChanges);
+                }
+                self.publication_profile = publication_profile;
+            }
             ReportEdit::AddPage { title } => {
                 validate_label("report-page.title", &title, 512)?;
                 if self.pages.len() >= MAX_PAGES {

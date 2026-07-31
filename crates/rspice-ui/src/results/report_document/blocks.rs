@@ -25,6 +25,105 @@ pub enum ReportTemplate {
     ModelQualification,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReportOutputFormats {
+    pub pdf_a: bool,
+    pub html_bundle: bool,
+    pub canonical_json: bool,
+    pub selected_csv: bool,
+}
+
+impl ReportOutputFormats {
+    #[must_use]
+    pub const fn has_any(self) -> bool {
+        self.pdf_a || self.html_bundle || self.canonical_json || self.selected_csv
+    }
+
+    pub(crate) const fn is_default(&self) -> bool {
+        self.pdf_a && self.html_bundle && self.canonical_json && !self.selected_csv
+    }
+
+    pub(super) fn validate(self) -> Result<(), ReportError> {
+        if self.has_any() {
+            Ok(())
+        } else {
+            Err(ReportError::InvalidValue {
+                field: "report-document.output-formats",
+                message: "at least one report output format must remain enabled".to_owned(),
+            })
+        }
+    }
+}
+
+impl Default for ReportOutputFormats {
+    fn default() -> Self {
+        Self {
+            pdf_a: true,
+            html_bundle: true,
+            canonical_json: true,
+            selected_csv: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReportPublicationTemplate {
+    #[default]
+    OrganizationVerificationReport,
+    CustomerDatasheet,
+    InternalReviewMemo,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReportPublicationPageSize {
+    #[default]
+    A4Portrait,
+    UsLetterPortrait,
+    A3Landscape,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReportDraftMarking {
+    #[default]
+    WatermarkWhileGatesOpen,
+    NeverWatermark,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReportPageNumbering {
+    #[default]
+    SectionPageOfTotal,
+    ContinuousPageNumbers,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReportTablePrecision {
+    #[default]
+    SevenSignificantDigits,
+    FullStoredF64,
+    MatchSourceDisplay,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ReportPublicationProfile {
+    pub template: ReportPublicationTemplate,
+    pub page_size: ReportPublicationPageSize,
+    pub draft_marking: ReportDraftMarking,
+    pub numbering: ReportPageNumbering,
+    pub table_precision: ReportTablePrecision,
+}
+
+impl ReportPublicationProfile {
+    pub(crate) fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum ReportPageUpdatePolicy {
