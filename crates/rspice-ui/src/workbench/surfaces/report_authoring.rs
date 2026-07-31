@@ -64,6 +64,12 @@ enum ComposerLayout {
     Stacked,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PageMoveDirection {
+    Earlier,
+    Later,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct PaneSeparators {
     top: bool,
@@ -243,6 +249,92 @@ pub(crate) fn open_page_properties(app: &mut RSpiceApp) {
     editor.page_update_policy_draft = update_policy;
     editor.transaction_error = None;
     editor.page_properties_open = true;
+}
+
+fn can_move_selected_page(state: &AppState, direction: PageMoveDirection) -> bool {
+    if !report_mutation_allowed(state) {
+        return false;
+    }
+    let Some(document) = active_document(state) else {
+        return false;
+    };
+    let Some(page_id) = selected_page_id(state, document) else {
+        return false;
+    };
+    let Some(index) = document
+        .pages()
+        .iter()
+        .position(|page| page.id() == page_id)
+    else {
+        return false;
+    };
+    match direction {
+        PageMoveDirection::Earlier => index > 0,
+        PageMoveDirection::Later => index + 1 < document.pages().len(),
+    }
+}
+
+fn move_selected_page(app: &mut RSpiceApp, direction: PageMoveDirection) {
+    if !report_mutation_allowed(&app.state) {
+        let reason = report_mutation_block_reason(&app.state).to_owned();
+        app.state.workbench.report_authoring.transaction_error = Some(reason.clone());
+        app.state
+            .push_user_message(crate::diagnostics::ConsoleMessage::warning(reason));
+        return;
+    }
+    let selected_page =
+        active_document(&app.state).and_then(|document| selected_page_id(&app.state, document));
+    let Some(page_id) = selected_page else {
+        return;
+    };
+    let revision_note = match direction {
+        PageMoveDirection::Earlier => "Move report page earlier",
+        PageMoveDirection::Later => "Move report page later",
+    };
+    let result = active_document_mut(&mut app.state).and_then(|document| {
+        let Some(index) = document
+            .pages()
+            .iter()
+            .position(|page| page.id() == page_id)
+        else {
+            return Err("The selected report page no longer exists.".to_owned());
+        };
+        let expected_page_revision = document.pages()[index].revision();
+        let before = match direction {
+            PageMoveDirection::Earlier if index > 0 => Some(document.pages()[index - 1].id()),
+            PageMoveDirection::Later if index + 1 < document.pages().len() => {
+                document.pages().get(index + 2).map(|page| page.id())
+            }
+            _ => return Ok(false),
+        };
+        document
+            .transact_with_context(
+                document.revision(),
+                vec![ReportEdit::MovePage {
+                    page_id,
+                    expected_page_revision,
+                    before,
+                }],
+                timestamp_unix_ms(),
+                "rspice-local-session",
+                revision_note,
+            )
+            .map(|_| true)
+            .map_err(|error| error.to_string())
+    });
+    match result {
+        Ok(changed) => {
+            app.state.workbench.report_authoring.selected_page = Some(page_id);
+            app.state.workbench.report_authoring.preview_block_page = 0;
+            app.state.workbench.report_authoring.transaction_error = None;
+            app.state.workspace.report_documents_dirty |= changed;
+        }
+        Err(error) => {
+            app.state.workbench.report_authoring.transaction_error = Some(error.clone());
+            app.state
+                .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+        }
+    }
 }
 
 fn open_create_document(app: &mut RSpiceApp) {
@@ -507,24 +599,88 @@ fn outline(
             theme::sans(tokens::FS_2, FontWeight::SemiBold),
             t.color.text,
         );
-        let button_rect = Rect::from_center_size(
-            head.right_center() - Vec2::new(19.5, 0.0),
-            Vec2::new(29.0, 29.0),
+        const CONTROL_SIZE: f32 = 29.0;
+        const CONTROL_GAP: f32 = 2.0;
+        const CONTROL_COUNT: f32 = 4.0;
+        let controls_width = CONTROL_SIZE * CONTROL_COUNT + CONTROL_GAP * (CONTROL_COUNT - 1.0);
+        let controls_rect = Rect::from_center_size(
+            head.right_center() - Vec2::new(5.0 + controls_width * 0.5, 0.0),
+            Vec2::new(controls_width, CONTROL_SIZE),
         );
-        let mut properties = ui.new_child(
+        let mut controls = ui.new_child(
             egui::UiBuilder::new()
-                .max_rect(button_rect)
-                .layout(egui::Layout::top_down(egui::Align::Min)),
+                .max_rect(controls_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
-        let properties_enabled = report_mutation_allowed(&app.state);
-        let properties_response = properties
+        controls.spacing_mut().item_spacing.x = CONTROL_GAP;
+        let writable = report_mutation_allowed(&app.state);
+        let add_response = controls
+            .add_enabled_ui(writable, |ui| {
+                icon_button(
+                    ui,
+                    WorkbenchIcon::Add,
+                    "Add report page",
+                    false,
+                    Vec2::splat(CONTROL_SIZE),
+                )
+            })
+            .inner
+            .on_disabled_hover_text(report_mutation_block_reason(&app.state));
+        if add_response.clicked() {
+            open_add_page(app);
+        }
+
+        let move_earlier_enabled = can_move_selected_page(&app.state, PageMoveDirection::Earlier);
+        let move_earlier_response = controls
+            .add_enabled_ui(move_earlier_enabled, |ui| {
+                icon_button(
+                    ui,
+                    WorkbenchIcon::ArrowLeft,
+                    "Move page earlier",
+                    false,
+                    Vec2::splat(CONTROL_SIZE),
+                )
+            })
+            .inner
+            .on_disabled_hover_text(if writable {
+                "The selected page is already first."
+            } else {
+                report_mutation_block_reason(&app.state)
+            });
+        if move_earlier_response.clicked() {
+            move_selected_page(app, PageMoveDirection::Earlier);
+        }
+
+        let move_later_enabled = can_move_selected_page(&app.state, PageMoveDirection::Later);
+        let move_later_response = controls
+            .add_enabled_ui(move_later_enabled, |ui| {
+                icon_button(
+                    ui,
+                    WorkbenchIcon::ArrowRight,
+                    "Move page later",
+                    false,
+                    Vec2::splat(CONTROL_SIZE),
+                )
+            })
+            .inner
+            .on_disabled_hover_text(if writable {
+                "The selected page is already last."
+            } else {
+                report_mutation_block_reason(&app.state)
+            });
+        if move_later_response.clicked() {
+            move_selected_page(app, PageMoveDirection::Later);
+        }
+
+        let properties_enabled = writable && selected_page.is_some();
+        let properties_response = controls
             .add_enabled_ui(properties_enabled, |ui| {
                 icon_button(
                     ui,
                     WorkbenchIcon::Sliders,
                     "Page properties",
                     false,
-                    Vec2::new(29.0, 29.0),
+                    Vec2::splat(CONTROL_SIZE),
                 )
             })
             .inner
@@ -2078,10 +2234,10 @@ fn page_update_policy_label(policy: ReportPageUpdatePolicy) -> &'static str {
     }
 }
 
-fn page_marker(index: usize, title: &str) -> &str {
+fn page_marker(_index: usize, title: &str) -> &str {
     INITIAL_PAGES
-        .get(index)
-        .filter(|(_, expected)| *expected == title)
+        .iter()
+        .find(|(_, expected)| *expected == title)
         .map_or("+", |(marker, _)| *marker)
 }
 
@@ -2242,6 +2398,106 @@ mod tests {
             document_id
         );
         assert_eq!(app.state.workbench.report_authoring.selected_page, page_id);
+    }
+
+    #[test]
+    fn report_page_order_controls_commit_revision_checked_moves() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.report_authoring.create_document_title =
+            "Verification report".to_owned();
+        commit_create_document(&mut app);
+        let page_ids = active_document(&app.state)
+            .expect("active report")
+            .pages()
+            .iter()
+            .map(|page| page.id())
+            .collect::<Vec<_>>();
+        let page_to_move = page_ids[1];
+        app.state.workbench.report_authoring.selected_page = Some(page_to_move);
+        app.state.workspace.report_documents_dirty = false;
+
+        assert!(can_move_selected_page(
+            &app.state,
+            PageMoveDirection::Earlier
+        ));
+        assert!(can_move_selected_page(&app.state, PageMoveDirection::Later));
+        move_selected_page(&mut app, PageMoveDirection::Earlier);
+
+        let document = active_document(&app.state).expect("active report");
+        assert_eq!(document.pages()[0].id(), page_to_move);
+        assert_eq!(document.pages()[1].id(), page_ids[0]);
+        assert_eq!(
+            document
+                .revision_history()
+                .records()
+                .last()
+                .expect("move revision")
+                .revision_note(),
+            "Move report page earlier"
+        );
+        assert!(app.state.workspace.report_documents_dirty);
+        assert_eq!(
+            app.state.workbench.report_authoring.selected_page,
+            Some(page_to_move)
+        );
+
+        app.state.workspace.report_documents_dirty = false;
+        move_selected_page(&mut app, PageMoveDirection::Later);
+        let document = active_document(&app.state).expect("active report");
+        assert_eq!(
+            document
+                .pages()
+                .iter()
+                .map(|page| page.id())
+                .collect::<Vec<_>>(),
+            page_ids
+        );
+        assert_eq!(
+            document
+                .revision_history()
+                .records()
+                .last()
+                .expect("move revision")
+                .revision_note(),
+            "Move report page later"
+        );
+        assert!(app.state.workspace.report_documents_dirty);
+    }
+
+    #[test]
+    fn report_page_order_controls_fail_closed_at_document_boundaries() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.report_authoring.create_document_title =
+            "Verification report".to_owned();
+        commit_create_document(&mut app);
+        let first_page = active_document(&app.state).expect("active report").pages()[0].id();
+        app.state.workbench.report_authoring.selected_page = Some(first_page);
+        app.state.workspace.report_documents_dirty = false;
+        let revision = active_document(&app.state)
+            .expect("active report")
+            .revision();
+
+        assert!(!can_move_selected_page(
+            &app.state,
+            PageMoveDirection::Earlier
+        ));
+        move_selected_page(&mut app, PageMoveDirection::Earlier);
+
+        assert_eq!(
+            active_document(&app.state)
+                .expect("active report")
+                .revision(),
+            revision
+        );
+        assert!(!app.state.workspace.report_documents_dirty);
+    }
+
+    #[test]
+    fn report_page_markers_remain_semantically_stable_after_reordering() {
+        assert_eq!(page_marker(0, "Executive summary"), "1");
+        assert_eq!(page_marker(5, "Executive summary"), "1");
+        assert_eq!(page_marker(0, "Run manifests"), "A");
+        assert_eq!(page_marker(7, "Custom appendix"), "+");
     }
 
     #[test]
