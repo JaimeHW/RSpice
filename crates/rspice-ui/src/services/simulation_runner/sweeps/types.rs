@@ -11,7 +11,6 @@ pub struct ParametricData {
     pub target: String,
     pub sweep_values: Vec<Value>,
     pub voltages: Vec<(String, Vec<Value>)>,
-    pub num_points: usize,
     pub num_failures: usize,
 }
 

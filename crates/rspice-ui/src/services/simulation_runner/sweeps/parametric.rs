@@ -102,7 +102,6 @@ pub fn run_parametric_analysis_with_source_path_and_abort(
 
     Ok(ParametricData {
         target: describe_step_target(step_cmd),
-        num_points: sweep_values.len(),
         sweep_values,
         voltages,
         num_failures,
@@ -143,7 +142,6 @@ fn run_parametric_analysis_with_netlist_and_config(
 
     Ok(ParametricData {
         target: target.to_string(),
-        num_points: sweep_values.len(),
         sweep_values,
         voltages,
         num_failures,
@@ -206,7 +204,6 @@ R2 out 0 1k
 
         assert_eq!(data.target, "DATA SWEEP");
         assert_eq!(data.sweep_values, vec![0.0, 1.0]);
-        assert_eq!(data.num_points, 2);
         assert_eq!(data.num_failures, 0);
 
         let (_, out_values) = data

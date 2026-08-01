@@ -604,7 +604,6 @@ fn insert_scalar_waveform(
             x_values,
             y_values,
             y_unit: y_unit.to_string(),
-            x_unit: x_unit.to_string(),
             is_complex: false,
             y_imag: None,
         },

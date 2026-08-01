@@ -152,7 +152,6 @@ mod transfer_function_tests {
             output_quantity: TransferFunctionQuantity::Voltage,
             input_unit: "V".to_owned(),
             output_unit: "V".to_owned(),
-            gain_unit: "V/V".to_owned(),
             normalization: TfNormalization::None,
             accuracy: TfAccuracy::Balanced,
             gain,

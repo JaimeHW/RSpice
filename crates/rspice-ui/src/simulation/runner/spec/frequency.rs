@@ -189,7 +189,6 @@ fn run_tf(
         output_quantity,
         input_unit: quantity_unit(input_quantity).to_owned(),
         output_unit: quantity_unit(output_quantity).to_owned(),
-        gain_unit: gain_unit(data.gain_metadata.unit).to_owned(),
         normalization,
         accuracy,
         gain: data
@@ -644,7 +643,6 @@ fn insert_scalar_waveform(
             x_values,
             y_values,
             y_unit: y_unit.to_string(),
-            x_unit: x_unit.to_string(),
             is_complex: false,
             y_imag: None,
         },
@@ -712,7 +710,6 @@ R2 out 0 1k
             output_quantity,
             input_unit,
             output_unit,
-            gain_unit,
             normalization,
             accuracy,
             gain,
@@ -730,7 +727,6 @@ R2 out 0 1k
         assert_eq!(output_quantity, TransferFunctionQuantity::Voltage);
         assert_eq!(input_unit, "V");
         assert_eq!(output_unit, "V");
-        assert_eq!(gain_unit, "V/V");
         assert_eq!(normalization, TfNormalization::None);
         assert_eq!(accuracy, TfAccuracy::Balanced);
         assert_finite_scalar_close(gain, 0.5, "gain");

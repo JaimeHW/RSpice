@@ -148,7 +148,6 @@ pub enum SimulationResult {
         output_quantity: TransferFunctionQuantity,
         input_unit: String,
         output_unit: String,
-        gain_unit: String,
         normalization: crate::simulation::multi_run::TfNormalization,
         accuracy: crate::simulation::multi_run::TfAccuracy,
         gain: Option<TransferFunctionScalar>,

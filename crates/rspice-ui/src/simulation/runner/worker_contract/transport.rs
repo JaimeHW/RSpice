@@ -1137,7 +1137,6 @@ pub(crate) struct WorkerWaveformTransport {
     pub x_values: WorkerF64Series,
     pub y_values: WorkerF64Series,
     pub y_unit: String,
-    pub x_unit: String,
     pub is_complex: bool,
     pub y_imag: Option<WorkerF64Series>,
 }
@@ -1149,7 +1148,6 @@ impl WorkerWaveformTransport {
             x_values: WorkerF64Series::from_vec(waveform.x_values, buffers),
             y_values: WorkerF64Series::from_vec(waveform.y_values, buffers),
             y_unit: waveform.y_unit,
-            x_unit: waveform.x_unit,
             is_complex: waveform.is_complex,
             y_imag: waveform
                 .y_imag
@@ -1196,7 +1194,6 @@ impl WorkerWaveformTransport {
             x_values: self.x_values.into_vec(buffers)?,
             y_values: self.y_values.into_vec(buffers)?,
             y_unit: self.y_unit,
-            x_unit: self.x_unit,
             is_complex: self.is_complex,
             y_imag: self
                 .y_imag

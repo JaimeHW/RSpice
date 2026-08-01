@@ -213,7 +213,6 @@ impl SimulationController {
                 output_quantity,
                 input_unit,
                 output_unit,
-                gain_unit: _,
                 normalization,
                 accuracy,
                 gain,

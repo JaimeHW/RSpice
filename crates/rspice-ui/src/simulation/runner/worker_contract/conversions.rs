@@ -521,7 +521,6 @@ pub(crate) struct WorkerWaveform {
     pub x_values: Vec<f64>,
     pub y_values: Vec<f64>,
     pub y_unit: String,
-    pub x_unit: String,
     pub is_complex: bool,
     pub y_imag: Option<Vec<f64>>,
 }
@@ -546,7 +545,6 @@ impl From<WaveformData> for WorkerWaveform {
             x_values: value.x_values,
             y_values: value.y_values,
             y_unit: value.y_unit,
-            x_unit: value.x_unit,
             is_complex: value.is_complex,
             y_imag: value.y_imag,
         }
@@ -560,7 +558,6 @@ impl From<WorkerWaveform> for WaveformData {
             x_values: value.x_values,
             y_values: value.y_values,
             y_unit: value.y_unit,
-            x_unit: value.x_unit,
             is_complex: value.is_complex,
             y_imag: value.y_imag,
         }
@@ -1186,7 +1183,6 @@ pub(super) fn validate_pss_display_contract(
         if display.name != display_name
             || display.x_values.as_slice() != result.time.as_slice()
             || display.y_values.as_slice() != periodic.values.as_slice()
-            || display.x_unit != "s"
             || display.y_unit != "V"
             || display.is_complex
             || display.y_imag.is_some()

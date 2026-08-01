@@ -134,7 +134,6 @@ fn run_corner(
             x_values: x_values.clone(),
             y_values: values,
             y_unit: "V".to_string(),
-            x_unit: x_unit.clone(),
             is_complex: false,
             y_imag: None,
         };

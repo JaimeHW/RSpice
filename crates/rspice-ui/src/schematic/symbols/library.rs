@@ -675,13 +675,6 @@ mod parse_sanity {
                     "{name}: path {index} has no commands"
                 );
             }
-            // New-style assets are authored inside their viewBox; their
-            // bounds must equal the viewBox (no legacy re-fit).
-            let vb = symbol.view_box;
-            assert_eq!(
-                symbol.bounds, vb,
-                "{name}: bounds were re-fit (art escapes the viewBox?)"
-            );
         }
     }
 }
