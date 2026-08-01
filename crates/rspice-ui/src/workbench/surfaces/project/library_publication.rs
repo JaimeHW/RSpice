@@ -1094,12 +1094,17 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use std::rc::Rc;
 
+    /// Every `(path, bytes)` the test double was asked to publish, shared so
+    /// the assertions can read them after the workflow has moved on.
+    #[cfg(not(target_arch = "wasm32"))]
+    type RecordedWrites = Rc<RefCell<Vec<(PathBuf, Vec<u8>)>>>;
+
     #[cfg(not(target_arch = "wasm32"))]
     #[derive(Debug, Clone)]
     struct PublicationIo {
         destination: PathBuf,
         reopenable: bool,
-        writes: Rc<RefCell<Vec<(PathBuf, Vec<u8>)>>>,
+        writes: RecordedWrites,
     }
 
     #[cfg(not(target_arch = "wasm32"))]

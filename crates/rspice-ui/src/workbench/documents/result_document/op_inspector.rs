@@ -92,16 +92,20 @@ fn region_colors(region: &str, t: &Tokens) -> (egui::Color32, egui::Color32) {
 /// The explicitly selected device-OP report, with its analysis label for the
 /// header. Never fall back to another result: doing so displays stale bias
 /// evidence under the selected analysis identity.
+/// The selected device detail, the devices the user picked, and the devices
+/// in violation.
+type SelectedDeviceDetail<'a> = (
+    &'a crate::state::OperatingPointDeviceDetailEvidence,
+    &'a [String],
+    &'a [String],
+);
+
 fn active_report(
     state: &AppState,
 ) -> Option<(
     &rspice_core::circuit::DeviceOpReport,
     &str,
-    Option<(
-        &crate::state::OperatingPointDeviceDetailEvidence,
-        &[String],
-        &[String],
-    )>,
+    Option<SelectedDeviceDetail<'_>>,
 )> {
     let analysis = state.simulation.active_analysis()?;
     let report = analysis.device_op.as_ref()?;

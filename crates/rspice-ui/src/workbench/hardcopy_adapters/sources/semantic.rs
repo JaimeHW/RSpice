@@ -46,6 +46,9 @@ pub struct SemanticPoint {
     pub y_um: i64,
 }
 
+/// One aggregate child with the extent it occupies and where it sits.
+type AggregateChildPlacement<'a> = (&'a SemanticAggregateChild, ContentExtent, SemanticPoint);
+
 impl SemanticPoint {
     #[must_use]
     pub const fn new(x_um: i64, y_um: i64) -> Self {
@@ -403,10 +406,7 @@ impl ResolvedHardcopyDocument {
     pub(crate) fn aggregate_layout_for_setup(
         &self,
         setup: crate::hardcopy::SchematicHardcopySetup,
-    ) -> Result<
-        Option<Vec<(&SemanticAggregateChild, ContentExtent, SemanticPoint)>>,
-        HardcopySourceError,
-    > {
+    ) -> Result<Option<Vec<AggregateChildPlacement<'_>>>, HardcopySourceError> {
         match &self.semantic_document {
             HardcopySemanticDocument::Aggregate(aggregate) => {
                 aggregate_output_layout(aggregate, setup).map(Some)

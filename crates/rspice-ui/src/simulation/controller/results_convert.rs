@@ -13,6 +13,15 @@ use crate::state::{
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Frequencies, output noise, optional input noise, and per-source
+/// contributors, all in the same stable order.
+type OrderedNoiseSeries = (
+    Vec<f64>,
+    Vec<f64>,
+    Option<Vec<f64>>,
+    HashMap<String, Vec<f64>>,
+);
+
 impl SimulationController {
     pub(super) fn convert_to_analysis_result_owned(
         &self,
@@ -632,12 +641,7 @@ impl SimulationController {
         output_noise: Vec<f64>,
         input_noise: Option<Vec<f64>>,
         contributors: HashMap<String, Vec<f64>>,
-    ) -> (
-        Vec<f64>,
-        Vec<f64>,
-        Option<Vec<f64>>,
-        HashMap<String, Vec<f64>>,
-    ) {
+    ) -> OrderedNoiseSeries {
         if frequencies
             .windows(2)
             .all(|pair| pair[0].total_cmp(&pair[1]) != std::cmp::Ordering::Greater)
