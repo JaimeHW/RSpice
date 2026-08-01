@@ -18,8 +18,6 @@ use super::palette::{self, Palette};
 // Exact mockup spacing scale — identical across modes and densities
 // ============================================================================
 
-/// 2 px — optical/microcopy separation.
-pub const SP_1: f32 = 2.0;
 /// 4 px — tight icon-to-text and chip separation.
 pub const SP_2: f32 = 4.0;
 /// 6 px — compact control groups.
@@ -28,12 +26,6 @@ pub const SP_3: f32 = 6.0;
 pub const SP_4: f32 = 8.0;
 /// 12 px — panel inner padding.
 pub const SP_5: f32 = 12.0;
-/// 16 px — section padding.
-pub const SP_6: f32 = 16.0;
-/// 24 px — large structural padding.
-pub const SP_7: f32 = 24.0;
-/// 32 px — major surface separation.
-pub const SP_8: f32 = 32.0;
 
 // ============================================================================
 // Type scale (13 px UI base — dense professional tool)
@@ -87,9 +79,6 @@ impl<'de> Deserialize<'de> for Direction {
 }
 
 impl Direction {
-    /// All directions, in presentation order.
-    pub const ALL: [Direction; 1] = [Direction::Instrument];
-
     /// Control corner radius.
     pub fn radius(self) -> f32 {
         3.0
@@ -286,23 +275,6 @@ impl Tokens {
             color: self.color.shadow_color,
         }
     }
-
-    /// Modal-workflow elevation from the mockup's `--shadow-dialog` token.
-    /// egui supports one shadow layer, so this preserves the exact dominant
-    /// layer rather than substituting the much smaller floating-menu shadow.
-    pub fn dialog_shadow(&self) -> egui::epaint::Shadow {
-        let color = if self.mode == Mode::Light {
-            Color32::from_rgba_premultiplied(11, 12, 13, 66)
-        } else {
-            Color32::from_rgba_premultiplied(0, 0, 0, 117)
-        };
-        egui::epaint::Shadow {
-            offset: [0, 18],
-            blur: 52,
-            spread: 0,
-            color,
-        }
-    }
 }
 
 /// Process-global copy of the active palette, refreshed by
@@ -326,35 +298,29 @@ mod tests {
 
     #[test]
     fn spacing_scale_matches_the_workbench_mockup_exactly() {
-        assert_eq!(
-            [SP_1, SP_2, SP_3, SP_4, SP_5, SP_6, SP_7, SP_8],
-            [2.0, 4.0, 6.0, 8.0, 12.0, 16.0, 24.0, 32.0]
-        );
+        assert_eq!([SP_2, SP_3, SP_4, SP_5], [4.0, 6.0, 8.0, 12.0]);
     }
 
     #[test]
     fn tokens_resolve_every_direction_and_mode() {
-        for direction in Direction::ALL {
-            for mode in Mode::ALL {
-                for density in Density::ALL {
-                    let t = Tokens::new(direction, mode, density);
-                    assert_eq!(t.direction, direction);
-                    assert_eq!(t.radius, direction.radius());
-                    assert!(t.metrics.ctl_h > 0.0);
-                }
+        let direction = Direction::Instrument;
+        for mode in Mode::ALL {
+            for density in Density::ALL {
+                let t = Tokens::new(direction, mode, density);
+                assert_eq!(t.direction, direction);
+                assert_eq!(t.radius, direction.radius());
+                assert!(t.metrics.ctl_h > 0.0);
             }
         }
     }
 
     #[test]
     fn compact_is_denser_than_relaxed() {
-        for direction in Direction::ALL {
-            let compact = Metrics::for_selection(direction, Density::Compact);
-            let relaxed = Metrics::for_selection(direction, Density::Relaxed);
-            assert!(compact.ctl_h < relaxed.ctl_h);
-            assert!(compact.row_h < relaxed.row_h);
-            assert!(compact.bar_pad < relaxed.bar_pad);
-        }
+        let compact = Metrics::for_selection(Direction::Instrument, Density::Compact);
+        let relaxed = Metrics::for_selection(Direction::Instrument, Density::Relaxed);
+        assert!(compact.ctl_h < relaxed.ctl_h);
+        assert!(compact.row_h < relaxed.row_h);
+        assert!(compact.bar_pad < relaxed.bar_pad);
     }
 
     #[test]
@@ -366,8 +332,6 @@ mod tests {
         assert_eq!(compact.radius_lg, 6.0);
         assert_eq!(compact.shadow().offset, [0, 14]);
         assert_eq!(compact.shadow().blur, 42);
-        assert_eq!(compact.dialog_shadow().offset, [0, 18]);
-        assert_eq!(compact.dialog_shadow().blur, 52);
     }
 
     #[test]
