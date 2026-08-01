@@ -40,13 +40,16 @@ use super::sources::{
     SemanticSchematic, SemanticTable,
 };
 use crate::hardcopy::{
-    BackgroundMode, Bleed, ColorMapping, ContentExtent, HardcopyArtifactIdentity,
-    HardcopyDocumentId, HardcopyPlan, HardcopyPlanId, Length, OutputFormat,
-    OutsideSheetContentPolicy, PageRect, PreviewPage, PrintColor, PrintMappingTable,
-    PrintObjectKind, PrintRedundancy, RenderTarget, ResolvedOrientation, ScaleRatio,
-    SchematicHardcopyExtent, SchematicHardcopySetup, Watermark,
+    BackgroundMode, Bleed, ColorMapping, ContentExtent, HardcopyArtifactIdentity, HardcopyPlan,
+    Length, OutputFormat, OutsideSheetContentPolicy, PageRect, PreviewPage, PrintColor,
+    PrintMappingTable, PrintObjectKind, PrintRedundancy, RenderTarget, ResolvedOrientation,
+    ScaleRatio, SchematicHardcopyExtent, SchematicHardcopySetup, Watermark,
 };
-use crate::product::{ContentDigest, ObjectRevision};
+#[cfg(any(test, target_arch = "wasm32"))]
+use crate::hardcopy::{HardcopyDocumentId, HardcopyPlanId};
+use crate::product::ContentDigest;
+#[cfg(any(test, target_arch = "wasm32"))]
+use crate::product::ObjectRevision;
 use crate::results::report_document::{FigureSizing, ReportBlockId, ReportBlockKind, TableCell};
 use crate::schematic::SymbolLibrary;
 use crate::schematic::symbols::PathCommand;

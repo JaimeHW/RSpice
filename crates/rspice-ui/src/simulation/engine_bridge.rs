@@ -19,7 +19,9 @@
 
 use std::path::Path;
 
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
+#[cfg(test)]
+use rspice_core::abort_signal::NoAbort;
 
 use super::config::AnalysisConfig;
 use super::results::SimulationResult;

@@ -18,11 +18,15 @@ use crate::results::plot_export_preset::{
 };
 pub(crate) use drawing_sheet::DrawingSheetPersonalPreferences;
 
-use super::shortcuts::{ShortcutPreferences, ShortcutProfileLibrary, ShortcutProfileLibraryError};
+#[cfg(test)]
+use super::shortcuts::ShortcutProfileLibraryError;
+use super::shortcuts::{ShortcutPreferences, ShortcutProfileLibrary};
+#[cfg(test)]
 use crate::hardcopy::PrintMappingTable;
+#[cfg(test)]
+use crate::hardcopy::mappings::PrintMappingSaveReceipt;
 use crate::hardcopy::mappings::{
     PrintMappingCatalogOwner, PrintMappingPersistenceError, PrintMappingPresetCatalog,
-    PrintMappingSaveReceipt,
 };
 
 /// Mockup-defined workspace composition applied by the workbench owner.

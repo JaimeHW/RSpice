@@ -13,9 +13,11 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(any(test, target_arch = "wasm32"))]
+use super::BrowserHistoryEffect;
 use super::{
-    BrowserHistoryEffect, RouteTransition, RouteTransitionSource, SurfaceArchetype, SurfaceId,
-    SurfaceNavigation, SurfaceRoute, WorkspacePreset,
+    RouteTransition, RouteTransitionSource, SurfaceArchetype, SurfaceId, SurfaceNavigation,
+    SurfaceRoute, WorkspacePreset,
 };
 
 const NAVIGATION_SCHEMA_VERSION: u8 = 1;

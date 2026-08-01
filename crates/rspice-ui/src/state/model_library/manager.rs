@@ -16,15 +16,17 @@ use std::sync::Arc;
 
 use rspice_core::library::SpiceLibraryIndex;
 
+#[cfg(test)]
+use super::ModelFileIdentity;
 #[cfg(not(target_arch = "wasm32"))]
 use super::is_foreign_platform_absolute_path;
 use super::{
-    DeviceModel, FiniteF64, ModelCorrelationState, ModelDefinitionMetadata, ModelFileIdentity,
-    ModelLevel, ModelLibrary, ModelQualificationState, ModelSectionQualification,
-    ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourceEvidenceBinding,
-    ModelSourcePin, ModelType, ParameterDataType, ParameterDefinition, ParameterSource,
-    ParameterValue, ProcessCorner, ProjectModelDefinition, ProjectModelRevisionDefinition,
-    first_unreachable_source, subcircuit_interface_key,
+    DeviceModel, FiniteF64, ModelCorrelationState, ModelDefinitionMetadata, ModelLevel,
+    ModelLibrary, ModelQualificationState, ModelSectionQualification, ModelSourceAuthority,
+    ModelSourceContent, ModelSourceEdge, ModelSourceEvidenceBinding, ModelSourcePin, ModelType,
+    ParameterDataType, ParameterDefinition, ParameterSource, ParameterValue, ProcessCorner,
+    ProjectModelDefinition, ProjectModelRevisionDefinition, first_unreachable_source,
+    subcircuit_interface_key,
 };
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
 use crate::services::simulation_runner::{CornerModelBinding, CornerProcess};

@@ -80,9 +80,9 @@ pub use preferences::{
 pub use routing::availability::{
     SurfaceExecutionAvailability, SurfaceRouteUnavailable, route_availability, surface_availability,
 };
-pub use routing::navigation::{
-    BrowserHistoryEffect, RouteTransition, RouteTransitionSource, SurfaceNavigation,
-};
+#[cfg(any(test, target_arch = "wasm32"))]
+pub use routing::navigation::BrowserHistoryEffect;
+pub use routing::navigation::{RouteTransition, RouteTransitionSource, SurfaceNavigation};
 pub use routing::surface_catalog::{SurfaceArchetype, SurfaceId};
 pub use routing::surface_route::SurfaceRoute;
 pub use shortcuts::{

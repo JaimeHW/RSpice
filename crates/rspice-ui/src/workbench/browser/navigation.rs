@@ -5,6 +5,7 @@
 //! parameter byte-for-byte. Browser APIs are isolated behind `wasm32` so the
 //! protocol receives ordinary native unit-test coverage.
 
+#[cfg(any(test, target_arch = "wasm32"))]
 use std::{borrow::Cow, fmt, str::FromStr};
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -13,6 +14,7 @@ use std::collections::BTreeMap;
 #[cfg(any(test, target_arch = "wasm32"))]
 use serde::{Deserialize, Serialize};
 
+#[cfg(any(test, target_arch = "wasm32"))]
 use crate::workbench::routing::surface_route::{SurfaceRoute, SurfaceRouteParseError};
 
 #[cfg(any(test, target_arch = "wasm32"))]
