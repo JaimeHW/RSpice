@@ -511,6 +511,7 @@ pub(crate) fn resolve_active_studio_pane_source(
 /// Resolve the exact result document currently selected in the ordinary
 /// Results workspace. Specialized viewers read their durable analysis model
 /// directly; table viewers read the selected immutable simulation result.
+#[cfg(test)]
 pub(crate) fn resolve_results_quick_view_source(
     source: ResultsQuickViewHardcopySource<'_>,
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
@@ -612,6 +613,7 @@ pub(super) fn resolve_results_quick_view_parts(
     )
 }
 
+#[cfg(test)]
 fn resolve_results_manifest_source(
     source_key: String,
     project_id: ProjectId,
@@ -665,6 +667,7 @@ fn resolve_results_manifest_source(
     )
 }
 
+#[cfg(test)]
 fn semantic_manifest_summary(manifest: &ManifestViewModel) -> SemanticResultSummary {
     let inventory = SemanticTable {
         title: format!("Frozen analysis inventory · {}", manifest.run_label),
@@ -792,6 +795,7 @@ pub(super) struct ActiveQuickResult<'a> {
     pub(super) analysis: &'a AnalysisResult,
 }
 
+#[cfg(test)]
 pub(super) fn active_quick_result(
     state: &AppState,
 ) -> Result<ActiveQuickResult<'_>, HardcopySourceError> {
@@ -845,6 +849,7 @@ pub(super) fn quick_waveform_plot(
     quick_plot_from_series(viewer, "Results", 0, series)
 }
 
+#[cfg(test)]
 pub(super) fn active_terminal_run(state: &AppState) -> Result<&SimulationRun, HardcopySourceError> {
     let run = state.simulation.active_run().ok_or_else(|| {
         HardcopySourceError::UnretainedResult("no active result dataset is selected".to_owned())

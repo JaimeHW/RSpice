@@ -175,6 +175,7 @@ pub(crate) struct ActiveStudioPaneHardcopySource<'a> {
 /// The document shown by the Results workspace quick-view. The adapter reads
 /// the selected retained dataset and the exact active specialized result
 /// state; it never samples the screen or depends on the viewer's paint cache.
+#[cfg(test)]
 pub(crate) struct ResultsQuickViewHardcopySource<'a> {
     pub source_key: String,
     pub project_id: ProjectId,
