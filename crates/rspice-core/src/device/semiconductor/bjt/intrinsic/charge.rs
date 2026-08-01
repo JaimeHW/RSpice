@@ -96,7 +96,6 @@ impl Bjt {
         }
     }
 
-
     pub(crate) fn legacy_transient_charge_state_with_vbx(
         &self,
         vbe: Value,

@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::numerics::integration::LteEstimator;
 use crate::analysis::harmonic_balance::{
     DC_SHORT_CONDUCTANCE, HbContinuationLimitation, HbReactiveKind, HbReactiveSpectrum,
 };
@@ -11,6 +10,7 @@ use crate::engine::transient::{
     netlist_checkpoint_identity, netlist_fingerprint, simulation_checkpoint_identity,
 };
 use crate::engine::{TransientCheckpoint, TransientResult};
+use crate::numerics::integration::LteEstimator;
 use std::collections::BTreeSet;
 use std::f64::consts::TAU;
 
@@ -458,8 +458,9 @@ impl Engine {
             // three capacitor voltages.
             let _ = reactive_at(oldest)?;
             circuit.capacitors.i_prev[index] = latest_reactive.1;
-            let coefficients =
-                crate::numerics::integration::CompanionCoefficients::for_method(self.config.integration_method);
+            let coefficients = crate::numerics::integration::CompanionCoefficients::for_method(
+                self.config.integration_method,
+            );
             circuit.capacitors.i_eq[index] = coefficients.capacitor_ieq(
                 circuit.capacitors.capacitances[index],
                 history_step,

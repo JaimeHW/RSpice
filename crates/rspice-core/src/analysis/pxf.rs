@@ -153,7 +153,6 @@ impl PxfConfig {
         self
     }
 
-
     /// Generate frequency points based on sweep type
     pub fn frequency_points(&self) -> Vec<Value> {
         self.try_frequency_points().unwrap_or_default()
@@ -393,7 +392,6 @@ impl PxfResult {
     pub fn num_points(&self) -> usize {
         self.points.len()
     }
-
 
     /// Get magnitude curve (frequency, magnitude_db)
     pub fn magnitude_curve(&self) -> Vec<(Value, Value)> {

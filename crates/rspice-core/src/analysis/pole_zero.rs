@@ -137,13 +137,10 @@ impl PoleZeroResult {
         }
     }
 
-
-
     /// Get real poles only
     pub fn real_poles(&self) -> Vec<&Complex> {
         self.poles.iter().filter(|p| p.is_real(1e-10)).collect()
     }
-
 
     /// Get dominant pole (slowest, closest to imaginary axis)
     pub fn dominant_pole(&self) -> Option<&Complex> {
@@ -252,7 +249,6 @@ impl Matrix {
     pub fn dims(&self) -> (usize, usize) {
         (self.rows, self.cols)
     }
-
 }
 
 impl std::ops::Add for &Matrix {
@@ -355,8 +351,6 @@ impl PoleZeroConfig {
             max_pole_freq: 1e15,
         }
     }
-
-
 }
 
 /// Pole-zero analyzer using eigenvalue methods

@@ -205,8 +205,6 @@ impl ThermalNetwork {
         }
     }
 
-
-
     /// Create isothermal (no self-heating) model
     pub fn isothermal(temperature: Value) -> Self {
         Self {
@@ -220,16 +218,11 @@ impl ThermalNetwork {
         }
     }
 
-
-
-
     /// Get junction temperature in Kelvin
     #[inline]
     pub fn junction_temperature_kelvin(&self) -> Value {
         self.t_junction + KELVIN_OFFSET
     }
-
-
 
     /// Accept current state for next transient step
     pub fn accept_step(&mut self) {

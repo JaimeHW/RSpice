@@ -243,7 +243,6 @@ impl SensitivityResult {
         })
     }
 
-
     /// Get total number of sensitivities
     pub fn len(&self) -> usize {
         self.sensitivities.len()
@@ -606,7 +605,6 @@ impl SensitivityAnalyzer {
 //=============================================================================
 // Finite Difference Verification Helper
 //=============================================================================
-
 
 //=============================================================================
 // Tests

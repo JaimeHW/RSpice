@@ -401,11 +401,6 @@ pub struct JitterAnalysis {
 }
 
 impl JitterAnalysis {
-
-
-
-
-
     /// Convert to UI (normalized)
     pub fn tj_ui(&self, ui: Value) -> Value {
         self.tj / ui
@@ -434,9 +429,7 @@ pub struct BathtubCurve {
     pub optimal_phase: Value,
 }
 
-impl BathtubCurve {
-
-}
+impl BathtubCurve {}
 
 //=============================================================================
 // Tests

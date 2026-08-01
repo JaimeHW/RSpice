@@ -846,7 +846,6 @@ impl FfiModelRegistry {
         self.factories.contains_key(&name.to_uppercase())
     }
 
-
     /// Create an instance from a loaded model and apply its registered parameters.
     #[cfg(feature = "ffi")]
     pub fn create_device(

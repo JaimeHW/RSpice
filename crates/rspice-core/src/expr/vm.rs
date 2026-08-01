@@ -3,8 +3,8 @@
 //! Fast execution of compiled expressions without parsing overhead.
 
 use super::ast::{LookupInterpolation, LookupTable};
-use crate::config::ExpressionDialect;
 use crate::Value;
+use crate::config::ExpressionDialect;
 use std::collections::HashMap;
 
 const TWO_PI: Value = std::f64::consts::TAU;

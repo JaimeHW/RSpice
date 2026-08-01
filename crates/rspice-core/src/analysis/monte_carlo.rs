@@ -113,8 +113,6 @@ impl Tolerance {
         }
     }
 
-
-
     /// No tolerance (use nominal value)
     pub fn none() -> Self {
         Self {
@@ -166,7 +164,6 @@ impl MonteCarloConfig {
         self.seed = Some(seed);
         self
     }
-
 }
 
 impl Default for MonteCarloConfig {
@@ -580,7 +577,6 @@ impl MonteCarloRunner {
             num_failures,
         }
     }
-
 }
 
 //=============================================================================

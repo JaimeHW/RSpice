@@ -6,8 +6,8 @@
 //! than producing `NaN`.  Keeping the value and its Newton derivative here
 //! prevents the bytecode and analytic evaluators from drifting apart.
 
-use crate::config::ExpressionDialect;
 use crate::Value;
+use crate::config::ExpressionDialect;
 
 const XYCE_NONFINITE_REPLACEMENT: Value = 1.0e50;
 

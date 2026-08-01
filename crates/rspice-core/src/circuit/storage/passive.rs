@@ -1104,7 +1104,6 @@ impl Capacitors {
         }
     }
 
-
     pub fn len(&self) -> usize {
         self.names.len()
     }

@@ -1033,7 +1033,8 @@ impl XyceTestRunner {
 
         let period = plan.frequency.recip();
         let mut startup_config = self.xyce_engine_config(None);
-        startup_config.integration_method = rspice_core::numerics::integration::IntegrationMethod::BackwardEuler;
+        startup_config.integration_method =
+            rspice_core::numerics::integration::IntegrationMethod::BackwardEuler;
         startup_config.transient_initial_timestep = Some(period / 1.0e6);
         let startup = match Engine::new(startup_config).run_tran(&netlist, period, period / 1000.0)
         {

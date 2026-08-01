@@ -380,8 +380,6 @@ impl HbResult {
         self.spectral_voltages.len()
     }
 
-
-
     /// Get DC operating point for all nodes
     pub fn dc_operating_point(&self) -> Vec<(String, Value)> {
         self.spectral_voltages
@@ -390,8 +388,6 @@ impl HbResult {
             .map(|(sv, name)| (name.clone(), sv.dc()))
             .collect()
     }
-
-
 
     /// Check if solution is valid (converged with reasonable values)
     pub fn is_valid(&self) -> bool {

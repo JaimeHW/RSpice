@@ -53,9 +53,7 @@ impl Default for HierarchyPathConfig {
     }
 }
 
-impl HierarchyPathConfig {
-
-}
+impl HierarchyPathConfig {}
 
 //=============================================================================
 // Hierarchy Path
@@ -115,9 +113,6 @@ impl HierarchyPath {
             separator,
         }
     }
-
-
-
 
     /// Parse a path from a string representation
     ///
@@ -237,7 +232,6 @@ impl HierarchyPath {
         self.separator
     }
 
-
     /// Check if this path is an ancestor of another path
     pub fn is_ancestor_of(&self, other: &Self) -> bool {
         if self.depth() >= other.depth() {
@@ -249,7 +243,6 @@ impl HierarchyPath {
             .zip(other.segments.iter())
             .all(|(a, b)| a == b)
     }
-
 
     /// Check if this path starts with another path (is equal or descendant)
     pub fn starts_with(&self, prefix: &Self) -> bool {
@@ -263,7 +256,6 @@ impl HierarchyPath {
             .zip(self.segments.iter())
             .all(|(a, b)| a == b)
     }
-
 
     //-------------------------------------------------------------------------
     // Name Generation
@@ -293,7 +285,6 @@ impl HierarchyPath {
             // Global prefix
             || node.starts_with('!')
     }
-
 }
 
 impl fmt::Display for HierarchyPath {

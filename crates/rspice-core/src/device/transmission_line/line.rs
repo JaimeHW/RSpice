@@ -316,7 +316,6 @@ impl TransmissionLine {
         }
     }
 
-
     /// Set branch indices for MNA
     pub fn set_branches(&mut self, branch1: NodeId, branch2: NodeId) {
         self.branch1 = Some(branch1);

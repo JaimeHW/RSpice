@@ -6,7 +6,6 @@ use crate::solver::limit_pn_voltage;
 use std::f64::consts::PI;
 
 impl HbSolver {
-
     /// Full nonlinear HB solve with cooperative cancellation.
     pub fn solve_newton_with_abort(
         &mut self,

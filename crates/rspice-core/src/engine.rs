@@ -70,6 +70,10 @@ mod transfer;
 mod transient;
 pub mod waveform;
 
+pub use crate::config::{
+    BypassConfig, ConvergenceConfig, DampingStrategy, JfetLevel2Model, SimulationConfig,
+    SimulationConfigError, SpiceDialect, XyceTraInterpolation,
+};
 pub use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 #[cfg(feature = "veriloga")]
 pub use builder::{
@@ -80,10 +84,6 @@ pub use builder::{
     register_project_veriloga_runtime_for_session, register_project_veriloga_runtimes_for_session,
     register_project_veriloga_runtimes_for_session_with_limits, veriloga_cache_entries,
     veriloga_cache_stats, veriloga_cache_telemetry,
-};
-pub use crate::config::{
-    BypassConfig, ConvergenceConfig, DampingStrategy, JfetLevel2Model, SimulationConfig,
-    SimulationConfigError, SpiceDialect, XyceTraInterpolation,
 };
 pub use config_resolver::{
     ConvergencePreset, SimulationConfigOverrides, resolve_simulation_config,

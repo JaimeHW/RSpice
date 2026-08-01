@@ -138,7 +138,6 @@ impl ShootingNewtonSolver {
         self
     }
 
-
     /// Check if solver has converged
     pub fn has_converged(&self) -> bool {
         self.converged
@@ -249,7 +248,6 @@ impl ShootingNewtonSolver {
 
         matrix.solve(&neg_rhs)
     }
-
 
     /// Extract Floquet multipliers from Monodromy matrix
     ///

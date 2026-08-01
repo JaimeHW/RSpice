@@ -2,8 +2,8 @@
 use crate::config::ExpressionDialect;
 
 use super::{
-    InitialCondition, Netlist, NodeSet, ParseDiagnostic, ParseError,
-    ParseWithAbortError, StartupDiagnostic, StartupDiagnosticCode, StartupDirectiveConflictError,
+    InitialCondition, Netlist, NodeSet, ParseDiagnostic, ParseError, ParseWithAbortError,
+    StartupDiagnostic, StartupDiagnosticCode, StartupDirectiveConflictError,
     StartupDirectiveDisposition, StartupDirectiveKind, StartupDirectiveRecord,
     StartupDirectiveScope, collect_output_node_namespace_from_elements_with_abort,
     ensure_parse_not_aborted, finish_non_aborting_parse, flatten_netlist_with_models_with_abort,

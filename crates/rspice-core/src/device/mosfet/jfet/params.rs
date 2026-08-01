@@ -133,14 +133,8 @@ impl Default for JfetParams {
 }
 
 impl JfetParams {
-
     /// Create with specified parameters
     pub fn new() -> Self {
         Self::default()
     }
-
-
-
-
-
 }

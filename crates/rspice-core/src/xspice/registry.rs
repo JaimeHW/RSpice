@@ -230,9 +230,6 @@ impl CodeModelRegistry {
             self.models.insert(canonical_model_key(model.name()), model);
         }
     }
-
-
-
 }
 
 impl std::fmt::Debug for CodeModelRegistry {

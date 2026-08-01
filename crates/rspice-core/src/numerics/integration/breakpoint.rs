@@ -227,7 +227,6 @@ impl BreakpointManager {
                 .is_some_and(|existing| (*existing - time).abs() < tolerance)
     }
 
-
     /// Get next breakpoint after given time
     pub fn next_after(&self, time: Value) -> Option<Value> {
         let permanent = self
@@ -380,7 +379,6 @@ impl BreakpointManager {
     pub fn should_use_minimal_step(&self) -> bool {
         self.just_passed_breakpoint
     }
-
 
     /// Reset the manager for a new simulation
     pub fn reset(&mut self) {

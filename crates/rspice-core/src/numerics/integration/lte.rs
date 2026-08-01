@@ -55,8 +55,6 @@ impl TransientLteReference {
     }
 }
 
-
-
 /// Local Truncation Error (LTE) estimator for adaptive timestep
 ///
 /// Uses difference between predicted and calculated values to estimate
@@ -719,7 +717,6 @@ impl LteEstimator {
         (lte, accept)
     }
 
-
     /// Get recommended timestep scaling factor based on LTE
     /// Uses method order for proper scaling exponent
     pub fn recommend_scale(&self, lte: Value) -> Value {
@@ -866,7 +863,6 @@ impl LteEstimator {
         let accept = max_lte <= self.reltol;
         (max_lte, accept)
     }
-
 
     /// Restart predictor history while retaining signal-history LTE references.
     pub fn restart_history(&mut self) {

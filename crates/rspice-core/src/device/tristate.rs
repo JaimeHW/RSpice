@@ -192,8 +192,6 @@ impl DrivenSignal {
         }
     }
 
-
-
     /// Create pull-up (weak high)
     pub fn pull_up() -> Self {
         Self {
@@ -210,13 +208,10 @@ impl DrivenSignal {
         }
     }
 
-
-
     /// Check if this is high-impedance
     pub fn is_high_z(&self) -> bool {
         self.strength == DriveStrength::HighZ || self.value == LogicValue::HighZ
     }
-
 }
 
 impl Default for DrivenSignal {
@@ -257,8 +252,6 @@ impl BusResolver {
     pub fn logic_3v3() -> Self {
         Self::new(3.3, 0.0)
     }
-
-
 
     /// Resolve two signals according to strength rules
     pub fn resolve_pair(&self, a: DrivenSignal, b: DrivenSignal) -> DrivenSignal {
@@ -401,7 +394,6 @@ impl TristateBuffer {
         }
     }
 
-
     /// Update buffer state from analog voltages
     pub fn update(&mut self, v_enable: Value, v_in: Value, vth: Value) {
         // Check enable
@@ -418,7 +410,6 @@ impl TristateBuffer {
             self.output = LogicValue::HighZ;
         }
     }
-
 
     /// Get equivalent output resistance
     pub fn output_resistance(&self) -> Value {
@@ -472,7 +463,6 @@ impl PullResistor {
             strength: DriveStrength::from_resistance(resistance),
         }
     }
-
 }
 
 //=============================================================================
@@ -509,9 +499,6 @@ impl Bus {
         }
     }
 
-
-
-
     /// Resolve the bus value from all drivers
     pub fn resolve(&mut self) -> DrivenSignal {
         // Combine drivers and pulls
@@ -522,13 +509,10 @@ impl Bus {
         self.resolved
     }
 
-
     /// Get current resolved value
     pub fn value(&self) -> DrivenSignal {
         self.resolved
     }
-
-
 }
 
 //=============================================================================

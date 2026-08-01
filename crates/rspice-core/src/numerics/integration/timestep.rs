@@ -298,7 +298,6 @@ impl TrapGearController {
         self.at_breakpoint = false;
         self.current_method = IntegrationMethod::Trapezoidal;
     }
-
 }
 
 impl Default for TrapGearController {

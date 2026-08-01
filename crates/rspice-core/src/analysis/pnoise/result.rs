@@ -138,7 +138,6 @@ impl PnoiseResult {
         }
     }
 
-
     /// Get total integrated noise power `dBc` over frequency range
     pub fn integrated_noise_power(&self, f_start: Value, f_stop: Value) -> Option<Value> {
         if self.spectral_points.len() < 2 {
@@ -179,7 +178,6 @@ impl PnoiseResult {
             None
         }
     }
-
 
     /// Number of spectral points
     pub fn num_points(&self) -> usize {
@@ -238,7 +236,6 @@ impl PhaseNoisePoint {
             lower_sideband: Some(lower),
         }
     }
-
 }
 
 /// Individual noise contributor (for noise summary)
@@ -272,8 +269,6 @@ impl NoiseContributor {
     pub fn add_contribution(&mut self, offset_freq: Value, contribution_dbc: Value) {
         self.contributions.push((offset_freq, contribution_dbc));
     }
-
-
 }
 
 // =============================================================================

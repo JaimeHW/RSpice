@@ -335,7 +335,6 @@ impl CircuitData {
         )
     }
 
-
     /// Fallible XSPICE evaluation for transient with explicit timestep.
     pub fn try_evaluate_xspice_with_timestep(
         &mut self,
@@ -1933,7 +1932,6 @@ impl CircuitData {
             .filter_map(|device| device.transient_bound_step())
             .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
     }
-
 
     /// Check if all XSPICE instances have converged
     pub fn xspice_converged(&self, tolerance: Value) -> bool {

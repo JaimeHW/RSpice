@@ -1284,7 +1284,6 @@ impl Diode {
         };
     }
 
-
     /// Junction charge and capacitance at `vd` for transient integration
     /// (dioload.c): depletion charge with the F1/F2/F3 polynomial
     /// continuation above `FC·VJ`, plus diffusion charge `TT·id` riding the

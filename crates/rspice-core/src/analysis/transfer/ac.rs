@@ -452,7 +452,6 @@ impl AcTransferConfig {
         }
     }
 
-
     /// Validate sweep configuration.
     pub fn validate(&self) -> Result<(), String> {
         if self.points_per_decade == 0 {
@@ -561,10 +560,6 @@ impl AcTransferAnalyzer {
         result.compute_characteristics();
         result
     }
-
-
-
-
 }
 
 //=============================================================================

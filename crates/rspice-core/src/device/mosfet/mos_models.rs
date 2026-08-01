@@ -297,8 +297,6 @@ pub fn calculate_gm(params: &MosParams, vgs: Value, vds: Value, vth: Value) -> V
     gm_clm.max(1e-12)
 }
 
-
-
 //=============================================================================
 // Threshold Voltage Calculation
 //=============================================================================

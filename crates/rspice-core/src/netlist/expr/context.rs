@@ -10,8 +10,8 @@
 //! RNG, so a Monte Carlo or corner run reproduces exactly given the same
 //! seed ([`DEFAULT_RANDOM_SEED`] unless overridden).
 
-use crate::config::ExpressionDialect;
 use super::*;
+use crate::config::ExpressionDialect;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};

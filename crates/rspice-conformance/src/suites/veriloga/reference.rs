@@ -42,8 +42,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use rspice_core::Value;
 use rspice_core::NodeId;
+use rspice_core::Value;
 use rspice_core::device::mosfet::bsim4v8::{Bsim4v8, Bsim4v8Device, Bsim4v8Geometry, Bsim4v8Model};
 use rspice_core::device::{MatrixStamper, NonlinearDevice};
 

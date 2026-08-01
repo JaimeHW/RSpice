@@ -1,5 +1,6 @@
 //! Capacitor device model
 
+use crate::config::ExpressionDialect;
 use crate::device::behavioral::{
     compiled_expression_branch_partial, compiled_expression_node_partial,
 };
@@ -8,7 +9,6 @@ use crate::expr::{
     CompiledExpr, Context, Expr, Vm, compile, parse_expression_strict,
     resolve_file_lookup_functions_with_limits,
 };
-use crate::config::ExpressionDialect;
 use crate::{NodeId, Value};
 use std::path::Path;
 
@@ -371,7 +371,6 @@ impl Capacitor {
             ieq: 0.0,
         }
     }
-
 
     /// Get equivalent conductance for trapezoidal integration
     pub fn geq(&self, dt: Value) -> Value {

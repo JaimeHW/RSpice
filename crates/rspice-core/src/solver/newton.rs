@@ -130,7 +130,6 @@ impl NewtonSolver {
         self.converged
     }
 
-
     /// Get current iteration count
     pub fn iterations(&self) -> usize {
         self.iteration

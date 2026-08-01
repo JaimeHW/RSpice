@@ -17,8 +17,8 @@
 
 use pyo3::prelude::*;
 use rspice_core::ResourceLimits;
-use rspice_core::numerics::integration::IntegrationMethod;
 use rspice_core::engine::{BypassConfig, ConvergenceConfig, DampingStrategy, SimulationConfig};
+use rspice_core::numerics::integration::IntegrationMethod;
 
 impl PartialEq for PySimulationConfig {
     fn eq(&self, other: &Self) -> bool {

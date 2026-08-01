@@ -20,8 +20,8 @@
 //! M1 drain gate source body NMOS W=1u L=65n
 //! ```
 
-use crate::Value;
 use crate::NodeId;
+use crate::Value;
 use crate::constants::{K_BOLTZMANN, Q_ELECTRON};
 
 /// Material constants specific to this model.
@@ -636,13 +636,9 @@ impl Bsim4 {
     // Noise Analysis Methods
     //=========================================================================
 
-
-
     //=========================================================================
     // Self-Heating Methods
     //=========================================================================
-
-
 
     /// Get current temperature rise (delta T)
     pub fn delta_temp(&self) -> Value {
@@ -653,8 +649,6 @@ impl Bsim4 {
     pub fn power_dissipation(&self) -> Value {
         self.power_diss
     }
-
-
 }
 
 //=============================================================================

@@ -277,5 +277,3 @@ pub const JUNCTION_BREAKDOWN_FACTOR: Value = 0.9;
 pub fn thermal_voltage(temp_kelvin: Value) -> Value {
     temp_kelvin * K_BOLTZMANN / Q_ELECTRON
 }
-
-

@@ -139,10 +139,7 @@ impl StabilityAnalysis {
             output_stable_inside,
         }
     }
-
-
 }
-
 
 //=============================================================================
 // Gain Calculations

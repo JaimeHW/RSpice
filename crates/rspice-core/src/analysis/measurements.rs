@@ -117,8 +117,6 @@ impl MeasurementResult {
             description: description.into(),
         }
     }
-
-
 }
 
 //=============================================================================
@@ -292,7 +290,6 @@ impl Waveform {
         let sum_sq: Value = self.values.iter().map(|v| v * v).sum();
         (sum_sq / self.values.len() as Value).sqrt()
     }
-
 
     /// Calculate overshoot as percentage of final value
     ///
@@ -726,7 +723,6 @@ impl Waveform {
 
         Ok(harmonic_sum_sq.sqrt() / fund_linear * 100.0)
     }
-
 
     /// Detect fundamental frequency from FFT
     pub fn fundamental_frequency(&self) -> Result<Value, MeasurementError> {

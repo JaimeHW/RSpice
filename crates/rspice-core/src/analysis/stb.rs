@@ -262,7 +262,6 @@ pub struct StabilityMargins {
 }
 
 impl StabilityMargins {
-
     /// Check if the system is stable (positive margins)
     pub fn is_stable(&self) -> bool {
         self.gain_margin_db > 0.0 && self.phase_margin_deg > 0.0
@@ -409,7 +408,6 @@ impl StbResult {
             .map(|p| (p.frequency, p.phase_deg))
             .collect()
     }
-
 
     /// Check if stable
     pub fn is_stable(&self) -> bool {
@@ -655,8 +653,6 @@ impl StbAnalyzer {
             extractor(points.last().unwrap())
         }
     }
-
-
 }
 
 //=============================================================================

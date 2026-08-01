@@ -138,8 +138,6 @@ impl SParameterResult {
         self.data.iter().map(|s| s.frequency).collect()
     }
 
-
-
     /// Get VSWR from S11
     /// VSWR = (1 + |S11|) / (1 - |S11|)
     pub fn vswr(&self) -> Vec<Value> {
@@ -155,9 +153,6 @@ impl SParameterResult {
             })
             .collect()
     }
-
-
-
 }
 
 //=============================================================================

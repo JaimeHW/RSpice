@@ -78,11 +78,6 @@ impl PnoiseConfig {
         self
     }
 
-
-
-
-
-
     /// Set absolute tolerance
     pub fn with_abstol(mut self, tol: Value) -> Self {
         self.abstol = tol;

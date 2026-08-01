@@ -566,7 +566,6 @@ impl CircuitData {
         self.inductors.names.clone()
     }
 
-
     /// Resolve an existing branch ordinal to the owning inductor probe metadata.
     pub fn inductor_probe_for_branch(&self, branch_ordinal: NodeId) -> Option<InductorProbeInfo> {
         let inductor_index = self
@@ -681,7 +680,6 @@ impl CircuitData {
                 device,
             });
     }
-
 
     /// Resolve all pending CCCS/CCVS/ISWITCH control element references.
     /// Call this after all elements have been added to the circuit

@@ -15,7 +15,6 @@
 //! - Proper parameter scoping with precedence resolution
 
 #![allow(clippy::too_many_arguments)]
-use crate::config::ExpressionDialect;
 use super::expr::{
     behavioral_expression_references_runtime_quantity, prepare_behavioral_expression,
     prepare_behavioral_expression_preserving_spelling,
@@ -26,15 +25,16 @@ use super::parser::parse_source_spec_text;
 use super::remove_unused::filter_elements_with_abort as filter_removeunused_elements_with_abort;
 use super::{
     DeviceInitialConditionDirective, DeviceInitialConditionError, DeviceInitialConditionSource,
-    DuplicateSubcircuitPortBindingError, Element, ElementKind,
-    GlobalSubcircuitPortBindingError, InitialCondition, ModelDef, Netlist, NodeSet, ParamContext,
-    ParameterRedefinitionPolicy, ParametricValue, ParseError, ParseWithAbortError, RandomState,
-    SourceSpec, StartupDirectiveDisposition, StartupDirectiveRecord, StartupDirectiveScope,
-    SubcircuitDef, ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort,
+    DuplicateSubcircuitPortBindingError, Element, ElementKind, GlobalSubcircuitPortBindingError,
+    InitialCondition, ModelDef, Netlist, NodeSet, ParamContext, ParameterRedefinitionPolicy,
+    ParametricValue, ParseError, ParseWithAbortError, RandomState, SourceSpec,
+    StartupDirectiveDisposition, StartupDirectiveRecord, StartupDirectiveScope, SubcircuitDef,
+    ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort,
     validate_mutual_inductor_references,
 };
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::config::ExpressionDialect;
 use crate::resource::{ResourceKind, ResourceLimitError};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};

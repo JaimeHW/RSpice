@@ -102,7 +102,6 @@ impl DiodeRecovery {
         self.prev_current = diode_current;
     }
 
-
     /// Reset recovery state
     pub fn reset(&mut self) {
         self.stored_charge = 0.0;

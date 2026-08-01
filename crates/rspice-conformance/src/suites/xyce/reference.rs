@@ -2127,16 +2127,14 @@ impl XyceTestRunner {
 
     pub(super) fn netlist_has_xyce_nonlinear_core(netlist: &Netlist) -> bool {
         let contains_core = |elements: &[rspice_core::netlist::Element]| {
-            elements.iter().any(|element| {
-                match &element.kind {
-                    ElementKind::JilesAthertonInductor { .. } => true,
-                    ElementKind::Coupling {
-                        model: Some(_),
-                        inductors,
-                        ..
-                    } => !inductors.is_empty(),
-                    _ => false,
-                }
+            elements.iter().any(|element| match &element.kind {
+                ElementKind::JilesAthertonInductor { .. } => true,
+                ElementKind::Coupling {
+                    model: Some(_),
+                    inductors,
+                    ..
+                } => !inductors.is_empty(),
+                _ => false,
             })
         };
         contains_core(&netlist.elements)

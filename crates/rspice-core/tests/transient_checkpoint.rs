@@ -4,11 +4,11 @@
 
 use std::sync::Arc;
 
-use rspice_core::numerics::integration::IntegrationMethod;
 #[cfg(feature = "veriloga-builtins")]
 use rspice_core::engine::ConvergenceConfig;
 use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect, TransientCheckpoint};
 use rspice_core::netlist::Netlist;
+use rspice_core::numerics::integration::IntegrationMethod;
 use rspice_core::xspice::{register_data_file, unregister_data_file};
 
 /// Sine-driven RC: smooth, source phase depends on absolute time, so a

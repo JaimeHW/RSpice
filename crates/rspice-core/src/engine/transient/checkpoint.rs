@@ -22,7 +22,6 @@
 //! lean for the wasm build).
 
 use crate::Value;
-use crate::numerics::integration::LteEstimator;
 use crate::circuit::CircuitData;
 use crate::device::veriloga_generated::{
     GENERATED_PERSISTENT_STATE_VERSION, GeneratedVerilogAInstanceCheckpoint,
@@ -31,11 +30,12 @@ use crate::device::veriloga_generated::{
 use crate::engine::SimulationConfig;
 use crate::expr::{Expr, Function, parse_expression_strict};
 use crate::netlist::expr::prepare_behavioral_expression;
-use crate::numerics::integration::TransientLteReference;
 use crate::netlist::{
     Element, ElementKind, Netlist, ParamContext, SourceSpec, SubcircuitDef,
     flatten_netlist_with_models,
 };
+use crate::numerics::integration::LteEstimator;
+use crate::numerics::integration::TransientLteReference;
 use crate::xspice::{CmContextCheckpoint, XspiceInstanceCheckpoint};
 use std::io::Read;
 

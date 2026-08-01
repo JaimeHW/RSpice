@@ -55,7 +55,6 @@ impl EyeMeasurements {
         Self::default()
     }
 
-
     /// Calculate Q-factor from eye height and noise
     pub fn calculate_q(&self, v_high: f64, v_low: f64, sigma_high: f64, sigma_low: f64) -> f64 {
         let swing = v_high - v_low;
@@ -80,13 +79,6 @@ impl EyeMeasurements {
             0.5 * erfc_approx(q / 2.0_f64.sqrt())
         }
     }
-
-
-
-
-
-
-
 }
 
 // =============================================================================
@@ -551,8 +543,6 @@ fn erfc_approx(x: f64) -> f64 {
 
     if x >= 0.0 { tau } else { 2.0 - tau }
 }
-
-
 
 // =============================================================================
 // Tests

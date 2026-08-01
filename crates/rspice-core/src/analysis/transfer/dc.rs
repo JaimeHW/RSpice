@@ -51,7 +51,6 @@ pub struct TransferFunctionConfig {
 }
 
 impl TransferFunctionConfig {
-
     /// Create config for voltage-to-current transfer function
     ///
     /// Example: `.TF I(Rload) Vin`
@@ -65,6 +64,4 @@ impl TransferFunctionConfig {
             output_element: Some(output_element.to_string()),
         }
     }
-
 }
-

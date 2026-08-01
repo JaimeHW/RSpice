@@ -165,8 +165,6 @@ impl Default for JilesAthertonParams {
 }
 
 impl JilesAthertonParams {
-
-
     /// Create parameters for nickel-iron (permalloy-like)
     pub fn permalloy() -> Self {
         Self {
@@ -191,7 +189,6 @@ impl JilesAthertonParams {
             p_zero_tol: 0.1,
         }
     }
-
 
     /// Calculate base inductance (at Ms = 0)
     /// L = μ₀ * N² * A / l
@@ -664,7 +661,6 @@ impl JilesAthertonInductor {
             qv.signum()
         }
     }
-
 
     /// Evaluate one source-ordered MutIndNonLin update using an explicit
     /// `MagVarUpdate` value.  Keeping the carried update as an argument makes
@@ -1972,7 +1968,6 @@ impl JilesAthertonInductor {
             hidden_state,
         );
     }
-
 
     /// Calculate equivalent resistance for trapezoidal integration
     fn req(&self, dt: Value) -> Value {

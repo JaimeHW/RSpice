@@ -30,7 +30,6 @@ impl NonlinearConvergenceCriteria {
         }
     }
 
-
     #[inline]
     pub fn voltage_tolerance(self) -> Value {
         if self.voltage_abs.is_finite() && self.voltage_abs > 0.0 {

@@ -3601,13 +3601,7 @@ mod tests {
     struct DiscardingStamper;
 
     impl crate::device::MatrixStamper for DiscardingStamper {
-        fn stamp(
-            &mut self,
-            _row: crate::NodeId,
-            _col: crate::NodeId,
-            _value: crate::Value,
-        ) {
-        }
+        fn stamp(&mut self, _row: crate::NodeId, _col: crate::NodeId, _value: crate::Value) {}
 
         fn stamp_rhs(&mut self, _index: crate::NodeId, _value: crate::Value) {}
     }

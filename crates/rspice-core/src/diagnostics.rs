@@ -117,9 +117,6 @@ impl Diagnostic {
         }
     }
 
-
-
-
     /// Create an info diagnostic
     pub fn info(category: DiagnosticCategory, message: impl Into<String>) -> Self {
         Self::new(DiagnosticLevel::Info, category, message)
@@ -185,7 +182,6 @@ impl ConvergenceQuality {
         Self::default()
     }
 
-
     /// Record GMIN stepping usage
     pub fn record_gmin_stepping(&mut self) {
         self.gmin_stepping_count += 1;
@@ -206,7 +202,6 @@ impl ConvergenceQuality {
     pub fn record_timestep_reduction(&mut self) {
         self.timestep_reductions += 1;
     }
-
 
     /// Calculate average iterations per solve
     pub fn finalize(&mut self, total_solves: usize) {
@@ -308,7 +303,6 @@ impl SimulationDiagnostics {
             .collect()
     }
 
-
     /// Get all warnings
     pub fn warnings(&self) -> Vec<&Diagnostic> {
         self.by_level(DiagnosticLevel::Warning)
@@ -318,7 +312,6 @@ impl SimulationDiagnostics {
     pub fn errors(&self) -> Vec<&Diagnostic> {
         self.by_level(DiagnosticLevel::Error)
     }
-
 
     /// Check if any errors were generated
     pub fn has_errors(&self) -> bool {

@@ -282,8 +282,6 @@ impl ArcLengthContinuation {
         (x_pred, lambda_pred.clamp(0.0, 1.0))
     }
 
-
-
     /// Update tangent direction from converged corrector
     ///
     /// The tangent is computed from the solution increment normalized

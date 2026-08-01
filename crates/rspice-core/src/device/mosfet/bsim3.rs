@@ -578,7 +578,6 @@ impl Bsim3 {
         self.region
     }
 
-
     /// Calculate gate-source capacitance
     pub fn cgs(&self) -> Value {
         let p = &self.params;

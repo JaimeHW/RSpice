@@ -240,8 +240,9 @@ mod tests {
                 response.request_focus();
                 let handled =
                     handle_placement_transform_keys(&response, state, shelf_drag_over_canvas);
-                let m_still_available =
-                    ui.ctx().input_mut(|input| input.consume_key(Modifiers::NONE, Key::M));
+                let m_still_available = ui
+                    .ctx()
+                    .input_mut(|input| input.consume_key(Modifiers::NONE, Key::M));
                 outcome = (handled, m_still_available);
             });
         });

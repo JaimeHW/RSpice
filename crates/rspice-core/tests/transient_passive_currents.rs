@@ -1,6 +1,6 @@
-use rspice_core::numerics::integration::IntegrationMethod;
 use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
+use rspice_core::numerics::integration::IntegrationMethod;
 
 #[test]
 fn transient_records_linear_resistor_branch_current_waveforms() {

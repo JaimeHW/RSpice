@@ -1205,7 +1205,6 @@ impl GenericSwitch {
         })
     }
 
-
     /// Resolve expression references against the final circuit topology.
     ///
     /// Binding is deliberately performed after flattening and ground-reference
@@ -1267,8 +1266,6 @@ impl GenericSwitch {
     pub fn time_breakpoints(&self) -> &[Value] {
         &self.time_breakpoints
     }
-
-
 
     fn collect_time_breakpoints(expr: &Expr) -> Vec<Value> {
         let mut breakpoints = Vec::new();
@@ -1476,7 +1473,6 @@ impl GenericSwitch {
     pub fn conductance(&self) -> Value {
         self.current_conductance
     }
-
 
     fn refresh_expression_inputs(&mut self, solution: &[Value]) {
         for (idx, binding) in self.node_bindings.iter().enumerate() {
@@ -1824,8 +1820,8 @@ impl GenericSwitch {
 
 #[cfg(test)]
 mod tests {
-    use crate::device::traits::NonlinearDevice;
     use crate::config::ExpressionDialect;
+    use crate::device::traits::NonlinearDevice;
 
     use super::{CurrentSwitch, GenericSwitch, SwitchState, VoltageSwitch};
 

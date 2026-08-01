@@ -1566,7 +1566,6 @@ impl CurrentSources {
         self.pwl_waveforms.push(None);
     }
 
-
     /// Add current source with AC and transient specification.
     pub fn add_with_ac_and_spec(
         &mut self,
@@ -1664,7 +1663,6 @@ impl CurrentSources {
     pub fn clear_transient_context(&mut self) {
         self.transient_context = None;
     }
-
 
     pub fn len(&self) -> usize {
         self.names.len()

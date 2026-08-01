@@ -370,7 +370,6 @@ impl Engine {
         })
     }
 
-
     /// Materialize one indexed member of a checked `.STEP` plan.
     ///
     /// The plan retains its immutable planning base, so DATA coordinates and

@@ -4450,7 +4450,10 @@ mod tests {
 
     #[test]
     fn contextual_report_commands_stay_out_of_the_searchable_registry() {
-        assert!(crate::workbench::commands::vocabulary::COMMAND_REGISTRY.contains(&Command::ReportAuthoring));
+        assert!(
+            crate::workbench::commands::vocabulary::COMMAND_REGISTRY
+                .contains(&Command::ReportAuthoring)
+        );
         // The three mutating commands act on the active document and page, so
         // they stay bound to the surface's own affordances rather than the
         // palette, where they would have no exact subject to resolve against.

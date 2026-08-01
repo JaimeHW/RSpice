@@ -23,9 +23,8 @@ use super::{
     ModelLevel, ModelLibrary, ModelQualificationState, ModelSectionQualification,
     ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourceEvidenceBinding,
     ModelSourcePin, ModelType, ParameterDataType, ParameterDefinition, ParameterSource,
-    subcircuit_interface_key,
     ParameterValue, ProcessCorner, ProjectModelDefinition, ProjectModelRevisionDefinition,
-    first_unreachable_source,
+    first_unreachable_source, subcircuit_interface_key,
 };
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
 use crate::services::simulation_runner::{CornerModelBinding, CornerProcess};
@@ -767,7 +766,6 @@ pub struct PackModelHit {
 }
 
 impl ModelLibraryManager {
-
     /// Convert a parsed card that a `.lib` section owns, recording the section
     /// as execution provenance. Cards at file scope use
     /// [`Self::convert_parsed_model`], which leaves the section unset.
@@ -1455,8 +1453,11 @@ impl ModelLibraryManager {
         if let Some(section_name) = selected_section.as_deref() {
             if let Some(lib_section) = result.get_section(section_name) {
                 for model in &lib_section.models {
-                    let device_model =
-                        Self::convert_parsed_model_in_section(model, &path, Some(&lib_section.name));
+                    let device_model = Self::convert_parsed_model_in_section(
+                        model,
+                        &path,
+                        Some(&lib_section.name),
+                    );
                     library
                         .models
                         .insert(device_model.name.clone(), device_model);

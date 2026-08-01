@@ -268,7 +268,6 @@ impl OpAmpMacromodel {
         Self::new(name, OpAmpParams::op27(), out, inp, inm)
     }
 
-
     /// Calculate ideal output voltage (before limiting)
     pub fn calculate_vout(&self, vp: Value, vm: Value) -> Value {
         let vdiff = vp - vm + self.params.vos;
@@ -277,8 +276,6 @@ impl OpAmpMacromodel {
         // Output limiting
         vout_ideal.clamp(self.params.vout_min, self.params.vout_max)
     }
-
-
 
     /// Get open-loop output conductance
     pub fn output_conductance(&self) -> Value {
@@ -290,7 +287,6 @@ impl OpAmpMacromodel {
         self.dominant_pole / (2.0 * std::f64::consts::PI)
     }
 
-
     /// Get -3dB bandwidth
     pub fn bandwidth_3db(&self) -> Value {
         self.pole_frequency()
@@ -301,12 +297,9 @@ impl OpAmpMacromodel {
 // SPICE Subcircuit Generation
 //=============================================================================
 
-
 //=============================================================================
 // Common OpAmp Library
 //=============================================================================
-
-
 
 //=============================================================================
 // Tests

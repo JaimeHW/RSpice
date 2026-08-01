@@ -11,6 +11,7 @@
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::ac::ac_sweep_frequencies;
 use rspice_core::analysis::{AcResult, AcSensitivityOutput};
+use rspice_core::config::ExpressionDialect;
 use rspice_core::engine::{
     ConvergenceConfig, DcSweepPointResult, SimulationConfig, SimulationError, SpiceDialect,
     StepPlanLimits, TransientResult, XyceTraInterpolation, extract_ac_value, extract_dc_value,
@@ -25,15 +26,13 @@ use rspice_core::netlist::expr::{
 use rspice_core::netlist::{
     AnalysisCommand, DcSecondSweep, DcSweepMode, DeviceInitialConditionError,
     DeviceInitialConditionSource, DuplicateSubcircuitPortBindingError, ElementKind,
-    ElementProvenance, MissingSubcircuitEndsBoundary,
-    MissingSubcircuitEndsError, Netlist, NetlistParseOptions, OutputDirectiveKind,
-    OutputSymbolKind, ParameterRedefinitionPolicy, ParametricValue, ParseError,
-    StartupDiagnosticCode, StartupDiagnosticStage, StartupDirectiveKind, StartupDirectiveScope,
-    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef,
-    XYCE_DEFAULT_ZERO_RESISTANCE_TOL, flatten_netlist, flatten_netlist_with_models,
-    validate_output_symbols,
+    ElementProvenance, MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError, Netlist,
+    NetlistParseOptions, OutputDirectiveKind, OutputSymbolKind, ParameterRedefinitionPolicy,
+    ParametricValue, ParseError, StartupDiagnosticCode, StartupDiagnosticStage,
+    StartupDirectiveKind, StartupDirectiveScope, StatisticalParamMode, StepCommand, StepSweep,
+    StepTarget, SubcircuitDef, XYCE_DEFAULT_ZERO_RESISTANCE_TOL, flatten_netlist,
+    flatten_netlist_with_models, validate_output_symbols,
 };
-use rspice_core::config::ExpressionDialect;
 use rspice_core::numerics::integration::TransientLteReference;
 use rspice_core::{Complex64, Engine, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};

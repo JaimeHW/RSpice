@@ -11,9 +11,7 @@ use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::menu_bar::{FileMenuAction, dispatch_file_menu_action};
 use std::cell::RefCell;
 
-use super::state::{
-    ProjectLauncherFilter, VerificationPage, WorkbenchState, Workspace,
-};
+use super::state::{ProjectLauncherFilter, VerificationPage, WorkbenchState, Workspace};
 
 mod registry;
 pub(crate) mod vocabulary;

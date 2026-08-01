@@ -110,7 +110,6 @@ impl HbSolver {
         branch_idx
     }
 
-
     /// Add voltage source with arbitrary AC harmonic entries.
     pub fn add_voltage_source_branch_harmonics(
         &mut self,
@@ -143,15 +142,12 @@ impl HbSolver {
         self.num_branches
     }
 
-
     /// Add DC source current contribution at a node
     pub fn add_dc_source(&mut self, node: usize, current: Value) {
         if node < self.source_spectra.len() {
             self.source_spectra[node][0] += Complex64::new(current, 0.0);
         }
     }
-
-
 
     /// Set AC source contribution at an arbitrary harmonic for a node.
     ///
@@ -189,8 +185,6 @@ impl HbSolver {
             self.source_spectra[node][harmonic] += Complex64::from_polar(magnitude * scale, phase);
         }
     }
-
-
 
     /// Compute residual for linear circuit (KCL: sum of currents INTO node = 0)
     ///

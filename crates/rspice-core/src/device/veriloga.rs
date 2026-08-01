@@ -157,7 +157,6 @@ impl VerilogADevices {
         self.devices.get_mut(index)
     }
 
-
     /// Iterate over devices
     pub fn iter(&self) -> impl Iterator<Item = &VerilogADevice> {
         self.devices.iter()
@@ -189,7 +188,6 @@ impl VerilogADevices {
         }
     }
 
-
     /// Stamp every device with an explicit named-limiter evaluation policy.
     pub fn try_stamp_all_with_mode<M, R>(
         &mut self,
@@ -219,7 +217,6 @@ impl VerilogADevices {
     pub fn all_converged(&self) -> bool {
         self.devices.iter().all(VerilogADevice::limiter_converged)
     }
-
 
     /// Remap all terminal and internal circuit node IDs after topology changes.
     pub fn remap_circuit_nodes(&mut self, mut remap: impl FnMut(usize) -> usize) {

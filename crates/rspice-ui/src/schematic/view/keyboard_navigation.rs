@@ -5,9 +5,9 @@
 
 use egui::{Event, InputState, Key, Popup, Response};
 
-use crate::workbench::app_state::{AppState, SchematicKeyboardFocus};
 use crate::state::Point;
 use crate::workbench::TogglePreference;
+use crate::workbench::app_state::{AppState, SchematicKeyboardFocus};
 
 use super::SchematicSymbolContext;
 use super::sheet_visibility::object_is_on_active_sheet;
@@ -676,8 +676,9 @@ mod tests {
                 }
                 let symbol_context = SchematicSymbolContext::from_state(state);
                 let handled = handle_keyboard_object_navigation(&response, state, &symbol_context);
-                let key_still_available =
-                    ui.ctx().input_mut(|input| input.consume_key(modifiers, key));
+                let key_still_available = ui
+                    .ctx()
+                    .input_mut(|input| input.consume_key(modifiers, key));
                 outcome = (handled, key_still_available);
             });
         });

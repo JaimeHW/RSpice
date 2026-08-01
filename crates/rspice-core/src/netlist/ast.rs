@@ -59,7 +59,6 @@ impl ParametricValue {
         ParametricValue::Resolved(v)
     }
 
-
     /// Try to get the resolved value
     pub fn as_value(&self) -> Option<Value> {
         match self {
@@ -947,14 +946,10 @@ impl XspicePort {
         XspicePort::Digital(node.into())
     }
 
-
-
     /// Create a digital vector from node names
     pub fn digital_vector(nodes: Vec<String>) -> Self {
         XspicePort::DigitalVector(nodes)
     }
-
-
 
     /// Check if this is an analog port
     pub fn is_analog(&self) -> bool {
@@ -2366,7 +2361,6 @@ impl StartupDirectiveEntry {
     pub fn voltage(&self) -> Value {
         self.voltage
     }
-
 }
 
 /// One physical `.IC` or `.NODESET` card with its ordered assignments.
@@ -2629,7 +2623,6 @@ pub struct XspiceAutoBridgeParamName {
     pub node_type: String,
     pub param_name: String,
 }
-
 
 /// Simulation options from .OPTIONS command
 ///

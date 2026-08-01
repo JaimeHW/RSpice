@@ -176,7 +176,6 @@ impl StepSpec {
         }
     }
 
-
     /// Create a device value step
     pub fn device(device_name: &str, start: Value, stop: Value, step: Value) -> Self {
         Self {
@@ -254,8 +253,6 @@ impl ParametricSweep {
             current_combination: 0,
         }
     }
-
-
 
     /// Get total number of combinations
     pub fn total_combinations(&self) -> usize {

@@ -1750,8 +1750,9 @@ mod tests {
                         DESKTOP_ROW_HEIGHT,
                         false,
                     );
-                    key_still_available =
-                        ui.ctx().input_mut(|input| input.consume_key(Modifiers::NONE, key));
+                    key_still_available = ui
+                        .ctx()
+                        .input_mut(|input| input.consume_key(Modifiers::NONE, key));
                 });
             });
 

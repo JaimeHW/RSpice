@@ -84,8 +84,6 @@ impl HbDiode {
         }
     }
 
-
-
     /// Compute diode current using Shockley equation
     ///
     /// I = Is * (exp(Vd / (n * Vt)) - 1)
@@ -148,7 +146,6 @@ impl HbDiode {
     pub fn evaluate_time_domain(&self, v_waveform: &[Value]) -> Vec<Value> {
         v_waveform.iter().map(|&vd| self.current(vd)).collect()
     }
-
 }
 
 //=============================================================================
@@ -380,7 +377,6 @@ impl HbBjt {
     pub fn gbe(&self, vbe: Value) -> Value {
         self.diode_conductance(vbe, self.nf) / self.bf
     }
-
 
     /// Evaluate BJT currents for all time samples
     ///
@@ -683,8 +679,6 @@ impl HbDeviceCollection {
         self.diodes.push(diode);
     }
 
-
-
     /// Check if collection is empty
     pub fn is_empty(&self) -> bool {
         self.diodes.is_empty() && self.bjts.is_empty() && self.mosfets.is_empty()
@@ -694,7 +688,6 @@ impl HbDeviceCollection {
     pub fn len(&self) -> usize {
         self.diodes.len() + self.bjts.len() + self.mosfets.len()
     }
-
 }
 
 //=============================================================================

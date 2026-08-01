@@ -240,7 +240,6 @@ impl PacResult {
             .unwrap_or(Complex64::new(0.0, 0.0))
     }
 
-
     /// Get conversion gain from input sideband to output sideband
     ///
     /// This is the primary result for mixer analysis.
@@ -281,7 +280,6 @@ impl PacResult {
         self.conversion_matrix.image_rejection_db(freq_idx)
     }
 
-
     /// Get magnitude vs frequency at a specific node and sideband
     pub fn magnitude_vs_frequency(&self, node: usize, sideband: i32) -> Vec<(Value, Value)> {
         self.frequencies
@@ -293,8 +291,6 @@ impl PacResult {
             })
             .collect()
     }
-
-
 
     /// Set the input source name
     pub fn set_input_source(&mut self, name: &str) {

@@ -1226,10 +1226,7 @@ endmodule
         )
         .expect("instance-dependent validation bounds preserve model scope");
 
-    assert_eq!(
-        artifact.mir.parameters[1].scope,
-        ParameterScope::Model
-    );
+    assert_eq!(artifact.mir.parameters[1].scope, ParameterScope::Model);
 }
 
 #[test]

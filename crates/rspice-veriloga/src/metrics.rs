@@ -420,7 +420,9 @@ mod tests {
     fn older_metrics_payloads_default_structural_guard_counts() {
         let mut encoded =
             serde_json::to_value(PipelineMetrics::default()).expect("serialize metrics");
-        let object = encoded.as_object_mut().expect("metrics serialize as an object");
+        let object = encoded
+            .as_object_mut()
+            .expect("metrics serialize as an object");
         object.remove("model_structural_guard_count");
         object.remove("instance_structural_guard_count");
         object.remove("structural_guard_newton_values");

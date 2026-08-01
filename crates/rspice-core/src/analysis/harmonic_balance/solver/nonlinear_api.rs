@@ -12,12 +12,6 @@ impl HbSolver {
         self.add_nonlinear_device(NonlinearDeviceInstance::diode(anode, cathode, is, n));
     }
 
-
-
-
-
-
-
     /// Add a voltage-controlled switch for Newton iteration
     pub fn add_voltage_switch(
         &mut self,

@@ -122,7 +122,6 @@ impl ScopedParam {
         self.source = Some(source.into());
         self
     }
-
 }
 
 //=============================================================================
@@ -169,10 +168,6 @@ impl ParamResolver {
         self.global_params.insert(name.to_uppercase(), value);
     }
 
-
-
-
-
     /// Set subcircuit defaults from a parsed SubcircuitDef
     pub fn add_subcircuit_defaults(&mut self, subckt_name: &str, params: &[(String, Value)]) {
         let entry = self
@@ -192,8 +187,6 @@ impl ParamResolver {
             .or_default()
             .insert(name.to_uppercase(), value);
     }
-
-
 
     //-------------------------------------------------------------------------
     // Parameter Resolution
@@ -245,14 +238,10 @@ impl ParamResolver {
         self.global_params.get(&name_upper).copied()
     }
 
-
-
-
     /// Check if a parameter is defined at any scope
     pub fn is_defined(&self, name: &str, path: &HierarchyPath) -> bool {
         self.resolve(name, path).is_some()
     }
-
 
     //-------------------------------------------------------------------------
     // Utilities

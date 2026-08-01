@@ -126,7 +126,6 @@ impl CachedStamp {
         self.capacitances.push((row, col, value));
     }
 
-
     /// Clear all cached values
     pub fn clear(&mut self) {
         self.conductances.clear();
@@ -184,7 +183,6 @@ pub struct BypassStats {
 }
 
 impl BypassStats {
-
     /// Reset statistics
     pub fn reset(&mut self) {
         self.total_evaluations = 0;
@@ -307,7 +305,6 @@ impl ModelBypassManager {
         self.cached_stamps.get(&device_id)
     }
 
-
     /// Invalidate cache for a specific device
     ///
     /// Use when device parameters change or at start of new analysis.
@@ -316,14 +313,10 @@ impl ModelBypassManager {
         self.cached_stamps.remove(&device_id);
     }
 
-
     /// Get bypass statistics
     pub fn stats(&self) -> &BypassStats {
         &self.stats
     }
-
-
-
 
     /// Get current relative tolerance
     pub fn reltol(&self) -> Value {

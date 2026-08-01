@@ -41,7 +41,6 @@ pub use math::*;
 pub use reduce::*;
 pub use vector::*;
 
-
 /// SIMD lane width for f64 operations.
 ///
 /// We use 4-wide vectors (256-bit) which map to:
@@ -71,5 +70,3 @@ pub const fn align_down(len: usize) -> usize {
 //=============================================================================
 // Inline helper for common patterns
 //=============================================================================
-
-

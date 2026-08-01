@@ -56,7 +56,6 @@ pub fn thermal_voltage(temperature_k: Value) -> Value {
     K_BOLTZMANN * temperature_k / Q_ELECTRON
 }
 
-
 //=============================================================================
 // Temperature Context
 //=============================================================================
@@ -192,9 +191,7 @@ impl Default for JunctionTempScaling {
     }
 }
 
-impl JunctionTempScaling {
-
-}
+impl JunctionTempScaling {}
 
 /// Temperature scaling for MOSFETs
 #[derive(Debug, Clone, Copy)]
@@ -220,9 +217,7 @@ impl Default for MosfetTempScaling {
     }
 }
 
-impl MosfetTempScaling {
-
-}
+impl MosfetTempScaling {}
 
 //=============================================================================
 // Tests
