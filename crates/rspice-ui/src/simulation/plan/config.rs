@@ -677,7 +677,7 @@ impl AnalysisDraft {
     /// because doing so would overwrite persisted raw edits with defaults.
     pub fn prepare_after_restore(&mut self) {
         match self {
-            Self::OperatingPoint(state) => state.initialized = true,
+            Self::OperatingPoint(state) => state.prepare_after_restore(),
             Self::PoleZero(state) => state.initialized = true,
             Self::Sensitivity(state) => state.initialized = true,
             Self::MonteCarlo(state) => state.initialized = true,
