@@ -1020,6 +1020,7 @@ impl ResultsState {
     }
 
     /// Whether any pane of one plot is zoomed away from the automatic view.
+    #[cfg(test)]
     pub fn strip_is_zoomed(&self, viewer: ResultViewer, index: usize) -> bool {
         self.plot_is_zoomed(viewer, PlotPresentationKey::Global(index))
     }

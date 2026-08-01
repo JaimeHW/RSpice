@@ -97,6 +97,7 @@ impl EngineBridge {
     }
 
     /// Run simulation with abort signal for cooperative cancellation.
+    #[cfg(test)]
     pub fn run_with_abort(
         &self,
         config: &AnalysisConfig,

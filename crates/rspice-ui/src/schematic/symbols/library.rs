@@ -492,6 +492,7 @@ impl SymbolLibrary {
     }
 
     /// Return all parsed embedded asset filenames.
+    #[cfg(test)]
     pub fn asset_names(&self) -> Vec<String> {
         let mut names: Vec<_> = self.embedded_assets.keys().cloned().collect();
         names.sort();

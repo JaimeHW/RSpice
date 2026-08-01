@@ -174,6 +174,7 @@ macro_rules! define_surface_catalog {
             }
 
             #[must_use]
+            #[cfg(test)]
             pub const fn release_status(self) -> ReleaseStatus {
                 self.metadata().release_status
             }

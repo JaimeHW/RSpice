@@ -238,6 +238,7 @@ impl PreparedVerilogARuntime {
         self.artifact_digest
     }
 
+    #[cfg(test)]
     pub fn module_name(&self) -> &str {
         &self.module_name
     }

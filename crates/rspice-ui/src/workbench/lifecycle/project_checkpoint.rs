@@ -110,6 +110,7 @@ impl ProjectCheckpointQuarantine {
         &self.reason
     }
 
+    #[cfg(test)]
     pub(crate) fn artifact_count(&self) -> usize {
         #[cfg(not(target_arch = "wasm32"))]
         {

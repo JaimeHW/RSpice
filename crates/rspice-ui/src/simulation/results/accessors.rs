@@ -57,6 +57,7 @@ impl SimulationResult {
     }
 
     /// Check if this is a valid result with data
+    #[cfg(test)]
     pub fn has_data(&self) -> bool {
         match self {
             SimulationResult::DcOp(op) => !op.node_voltages.is_empty(),
@@ -112,6 +113,7 @@ impl SimulationResult {
     }
 
     /// Get display name for the result type
+    #[cfg(test)]
     pub fn type_name(&self) -> &'static str {
         match self {
             SimulationResult::DcOp(_) => "DC Operating Point",

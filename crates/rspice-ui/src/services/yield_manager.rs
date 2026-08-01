@@ -80,6 +80,7 @@ impl YieldSpec {
     }
 
     /// Create a range spec
+    #[cfg(test)]
     pub fn range(target: impl Into<String>, min: f64, max: f64, unit: impl Into<String>) -> Self {
         Self {
             target: target.into(),

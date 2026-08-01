@@ -29,6 +29,7 @@ impl SymbolNetlistBinding {
         !self.device_prefix.is_empty() && !self.template.is_empty()
     }
 
+    #[cfg(test)]
     pub fn validate_template(
         &self,
         pins: &[SymbolPinDefinition],
@@ -39,6 +40,7 @@ impl SymbolNetlistBinding {
 
     /// Render the constrained template without evaluating arbitrary text.
     /// Values are substituted only into the validated placeholders.
+    #[cfg(test)]
     pub fn render(
         &self,
         name: &str,

@@ -1296,6 +1296,7 @@ impl SimulationPlan {
     /// Whether quick repair can synthesize a valid draft for this role from
     /// the dependent's current configuration.
     #[must_use]
+    #[cfg(test)]
     pub fn dependency_prerequisite_is_repairable(
         &self,
         dependent: AnalysisInstanceId,

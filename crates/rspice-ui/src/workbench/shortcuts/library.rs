@@ -280,6 +280,7 @@ impl ShortcutProfileLibrary {
         self.revision.get()
     }
 
+    #[cfg(test)]
     pub fn edit_active<R>(
         &mut self,
         edit: impl FnOnce(&mut ShortcutPreferences) -> R,
@@ -357,6 +358,7 @@ impl ShortcutProfileLibrary {
         Ok(name)
     }
 
+    #[cfg(test)]
     pub fn remove_named_preset(
         &mut self,
         name: &str,

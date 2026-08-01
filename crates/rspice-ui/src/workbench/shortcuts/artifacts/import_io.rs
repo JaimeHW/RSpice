@@ -108,6 +108,7 @@ impl ShortcutArtifactImportError {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn cause_code(&self) -> Option<&'static str> {
         self.cause_code
     }
@@ -151,6 +152,7 @@ impl ReadyShortcutArtifactSource {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub fn source_bytes(&self) -> &[u8] {
         match &self.detected {
             DetectedShortcutArtifact::RSpice(artifact) => artifact.source_bytes(),
@@ -159,6 +161,7 @@ impl ReadyShortcutArtifactSource {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn source_digest(&self) -> [u8; 32] {
         match &self.detected {
             DetectedShortcutArtifact::RSpice(artifact) => artifact.source_digest(),

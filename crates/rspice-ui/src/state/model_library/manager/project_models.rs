@@ -242,6 +242,7 @@ impl ModelLibraryManager {
     /// Replace one complete project-owned model revision using optimistic
     /// source-revision guards. Validation and canonical source parsing finish
     /// before the live manager is mutated.
+    #[cfg(test)]
     pub fn replace_project_model_revision(
         &mut self,
         library_name: &str,
@@ -948,6 +949,7 @@ impl ModelLibraryManager {
         })
     }
 
+    #[cfg(test)]
     fn build_project_model_library(
         library_name: &str,
         previous: Option<&ModelLibrary>,

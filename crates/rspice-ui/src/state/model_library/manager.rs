@@ -2077,6 +2077,7 @@ fn validate_section_qualification_evidence(
     Ok(())
 }
 
+#[cfg(test)]
 fn reconcile_project_model_metadata(
     definition: &ProjectModelDefinition,
     previous: Option<&ModelDefinitionMetadata>,
@@ -2166,6 +2167,7 @@ fn reconcile_project_model_revision_metadata(
     Ok(metadata)
 }
 
+#[cfg(test)]
 fn verify_project_model_round_trip(
     definition: &ProjectModelDefinition,
     parsed: &rspice_core::library::ParsedModel,

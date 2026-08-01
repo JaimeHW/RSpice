@@ -166,6 +166,7 @@ impl OpDeviceDetail {
         Self::ViolationsOnly,
         Self::None,
     ];
+    #[cfg(test)]
     pub const fn display_name(self) -> &'static str {
         match self {
             Self::SelectedAndViolations => "Selected + violations",

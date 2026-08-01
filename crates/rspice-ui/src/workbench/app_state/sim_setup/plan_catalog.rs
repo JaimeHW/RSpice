@@ -140,6 +140,7 @@ impl SimulationPlanLineage {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn clone_contents(self) -> Option<SimulationPlanCloneOptions> {
         self.clone_contents
     }

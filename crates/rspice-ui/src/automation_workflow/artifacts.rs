@@ -67,6 +67,7 @@ impl CheckEvidence {
         self.outcome
     }
 
+    #[cfg(test)]
     pub fn detail(&self) -> &str {
         &self.detail
     }
@@ -172,18 +173,22 @@ impl ComparisonEvidence {
         self.waveform_count
     }
 
+    #[cfg(test)]
     pub const fn evaluated_waveform_count(&self) -> u64 {
         self.evaluated_waveform_count
     }
 
+    #[cfg(test)]
     pub const fn differing_waveform_count(&self) -> u64 {
         self.differing_waveform_count
     }
 
+    #[cfg(test)]
     pub const fn missing_waveform_count(&self) -> u64 {
         self.missing_waveform_count
     }
 
+    #[cfg(test)]
     pub fn detail(&self) -> &str {
         &self.detail
     }

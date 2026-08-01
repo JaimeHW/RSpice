@@ -140,6 +140,7 @@ impl ShortcutImportConflict {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn decision(&self) -> ShortcutImportDecision {
         self.decision
     }
