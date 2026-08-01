@@ -233,5 +233,4 @@ impl SpectrumAnalysis {
             *value = true;
         }
     }
-
 }

@@ -288,7 +288,6 @@ pub(crate) enum WorkerSimulationRequest {
     },
 }
 
-
 fn worker_default_pss_tone_sources() -> Vec<String> {
     vec!["VIN_DIFF".to_owned()]
 }
@@ -1591,7 +1590,6 @@ pub(crate) enum WorkerTransferFunctionQuantity {
     Voltage,
     Current,
 }
-
 
 #[cfg(test)]
 mod tests;

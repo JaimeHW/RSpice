@@ -18,6 +18,7 @@ pub(crate) enum FileMenuAction {
     CloseProject,
     Open,
     Save,
+    OpenNetlist,
     ImportNetlist,
     ExportSvg,
     ExportCsvWaveforms,
@@ -63,7 +64,10 @@ pub(crate) fn dispatch_file_menu_action(
             if require_save_confirmation_if_dirty(state, ConfirmationAction::FileOpen) {
                 return;
             }
-            crate::workbench::workflows::file_actions::action_file_open_with_io(state, file_workflow_io);
+            crate::workbench::workflows::file_actions::action_file_open_with_io(
+                state,
+                file_workflow_io,
+            );
         }
         FileMenuAction::Save => {
             if state.project_lifecycle.project_open {
@@ -75,8 +79,20 @@ pub(crate) fn dispatch_file_menu_action(
                 );
             }
         }
+        FileMenuAction::OpenNetlist => {
+            if require_project_save_confirmation_if_dirty(
+                state,
+                ConfirmationAction::OpenNetlistProject,
+            ) {
+                return;
+            }
+            crate::workbench::workflows::netlist_workflow::open_netlist_project(state);
+        }
         FileMenuAction::ImportNetlist => {
-            if require_save_confirmation_if_dirty(state, ConfirmationAction::ImportNetlist) {
+            if require_netlist_source_save_confirmation_if_dirty(
+                state,
+                ConfirmationAction::ImportNetlist,
+            ) {
                 return;
             }
             crate::workbench::workflows::netlist_workflow::import_netlist(state);
@@ -112,6 +128,18 @@ fn request_exit(state: &mut AppState) {
     }
 }
 
+fn require_netlist_source_save_confirmation_if_dirty(
+    state: &mut AppState,
+    action: ConfirmationAction,
+) -> bool {
+    if !state.workspace.netlist_source_dirty {
+        return false;
+    }
+
+    state.dialogs.confirmation_dialog.show(action);
+    true
+}
+
 fn require_project_save_confirmation_if_dirty(
     state: &mut AppState,
     action: ConfirmationAction,
@@ -122,4 +150,31 @@ fn require_project_save_confirmation_if_dirty(
 
     state.dialogs.confirmation_dialog.show(action);
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn netlist_import_only_prompts_for_source_bytes_it_will_replace() {
+        let mut state = AppState::default();
+        state.schematic.is_dirty = true;
+
+        assert!(!require_netlist_source_save_confirmation_if_dirty(
+            &mut state,
+            ConfirmationAction::ImportNetlist,
+        ));
+        assert!(!state.dialogs.confirmation_dialog.visible);
+
+        state.workspace.set_netlist_source_dirty(true);
+        assert!(require_netlist_source_save_confirmation_if_dirty(
+            &mut state,
+            ConfirmationAction::ImportNetlist,
+        ));
+        assert_eq!(
+            state.dialogs.confirmation_dialog.pending_action,
+            Some(ConfirmationAction::ImportNetlist)
+        );
+    }
 }

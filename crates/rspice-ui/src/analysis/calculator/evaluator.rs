@@ -20,7 +20,6 @@ impl CalcValue {
         debug_assert_eq!(x.len(), y.len());
         Self::Waveform(x, y)
     }
-
 }
 
 /// Interface for retrieving simulation data

@@ -431,6 +431,7 @@ pub(crate) fn compare_source_datasets(
         }
     }
     request.policy.tolerance.validate()?;
+    request.policy.execution.validate()?;
     let baseline_coordinates = coordinate_indices(baseline);
     let candidate_coordinates = coordinate_indices(candidate);
     if baseline_coordinates.len() != candidate_coordinates.len()
@@ -545,7 +546,7 @@ pub(crate) fn compare_source_datasets(
     let receipt = ComparisonReceipt {
         baseline: baseline.binding,
         candidate: candidate.binding,
-        policy: request.policy,
+        policy: request.policy.clone(),
         rows_compared: row_pairs.len(),
         signals: signal_receipts,
         disposition,

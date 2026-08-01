@@ -6,18 +6,19 @@
 mod configuration_set;
 mod connectivity_contract;
 mod design_management;
-pub(crate) mod params_string;
 pub(crate) mod engineering_table;
 pub(crate) mod library_browser;
 mod model_bound_symbol;
 pub(crate) mod model_library;
+pub(crate) mod netlist_document;
+pub(crate) mod params_string;
 pub(crate) mod pdk_config;
+mod physical_layout;
 mod project_sources;
 pub(crate) mod property_types;
 mod schematic;
 mod simulation;
 mod symbol;
-pub(crate) mod netlist_document;
 pub(crate) mod symbol_resolver;
 pub(crate) mod workspace;
 
@@ -35,26 +36,25 @@ pub use connectivity_contract::{
     QualifiedNetReference, TechnologyGlobalNetCatalog,
 };
 pub use design_management::*;
-pub use params_string::{format_params_string, parse_params_string};
 pub use engineering_table::{
     EngineeringDataset, EngineeringFilterGrammar, EngineeringSortRule, EngineeringTableView,
     EngineeringTableViewStore, EngineeringViewScope, EngineeringVirtualizationPolicy,
     FrozenIdentifierPolicy, SavedEngineeringTableView, SortDirection,
 };
 pub use library_browser::{
-    Cell, Library, LibraryCellPlacementCandidate, LibraryManager, View, ViewType,
-    library_cell_placement_candidates,
+    Cell, Library, LibraryCellPlacementCandidate, LibraryManager, ProjectLibraryLockAuthority,
+    View, ViewType, library_cell_placement_candidates,
 };
 pub use model_bound_symbol::{
     GeneratedSymbolViews, MODEL_BOUND_SYMBOL_METADATA_KEY, MODEL_BOUND_SYMBOL_SCHEMA_VERSION,
-    ModelBoundSymbolDefinition, ParameterInheritance, SymbolDefinitionImport,
-    SymbolElectricalType, SymbolFormDiagnostic, SymbolGraphicTemplate, SymbolIdentity,
-    SymbolImplementationView, SymbolModelReference, SymbolNetlistBinding,
-    SymbolParameterConstraints, SymbolParameterDefault, SymbolParameterField, SymbolParameterForm,
-    SymbolParameterSection, SymbolParameterVisibility, SymbolPinDefinition, SymbolPinSide,
-    SymbolSourceContract,
+    ModelBoundSymbolDefinition, ParameterInheritance, SymbolDefinitionImport, SymbolElectricalType,
+    SymbolFormDiagnostic, SymbolGraphicTemplate, SymbolIdentity, SymbolImplementationView,
+    SymbolModelReference, SymbolNetlistBinding, SymbolParameterConstraints, SymbolParameterDefault,
+    SymbolParameterField, SymbolParameterForm, SymbolParameterSection, SymbolParameterVisibility,
+    SymbolPinDefinition, SymbolPinSide, SymbolSourceContract,
 };
 pub use model_library::ModelLibraryManager;
+pub(crate) use netlist_document::parse_include_directives;
 pub use netlist_document::{
     DependencyMetadata, DependencyResolution, DiagnosticSeverity, DocumentOwnership, FindDirection,
     FindError, FindMatch, FindOptions, GeneratedArtifact, GeneratedProvenance,
@@ -62,7 +62,13 @@ pub use netlist_document::{
     OutlineEntry, OutlineEntryKind, ReplaceScope, SourceLocator, ValidationDiagnostic,
     content_digest, find_all_in_source, replace_in_source,
 };
-pub(crate) use netlist_document::parse_include_directives;
+pub use params_string::{format_params_string, parse_params_string};
+pub use physical_layout::{
+    LayoutArray, LayoutDocumentError, LayoutEdit, LayoutGeometry, LayoutInstance,
+    LayoutLayerPurpose, LayoutNet, LayoutNetId, LayoutObjectId, LayoutOrientation, LayoutPoint,
+    LayoutShape, LayoutTechnologyBinding, LayoutTerminal, LayoutText, LayoutTransform,
+    PHYSICAL_LAYOUT_DOCUMENT_SCHEMA_VERSION, PhysicalLayoutDocument,
+};
 pub(crate) use project_sources::{CanonicalCellViewOwnerKey, canonical_cell_view_owner_key};
 pub use project_sources::{
     MAX_PROJECT_CODE_SOURCE_BYTES, MAX_PROJECT_SOURCE_BUNDLE_BYTES,
@@ -81,19 +87,18 @@ pub use simulation::{
     AcBodeMetrics, AcBodeSummary, AnalysisResult, AnalysisResultFamilyMetadata,
     AnalysisResultPayload, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType,
     ComplexResultValue, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult, ExecutionTarget,
-    MonteCarloVariableMetadata, NoiseContributorRow, NoiseSummary,
-    OperatingPointAccuracyEvidence, OperatingPointAnnotationEvidence,
-    OperatingPointDeviceDetailEvidence, OperatingPointHomotopyEvidence,
-    OperatingPointInitialGuessEvidence, OperatingPointNodeInitializationEvidence,
-    OperatingPointProcessEvidence, OperatingPointSaveDeviceEvidence,
-    OperatingPointTemperatureEvidence, OperatingPointValue, PreparedModelSourceIdentity,
-    PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt,
-    ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence, ReliabilityShiftEvidence,
-    ReliabilityStressEvidence, SavedOutputMaterializationStatus, SavedOutputReceipt,
-    SensitivityResultMode, SensitivityResultRow, SharedWaveformValues, SimulationRun,
-    SimulationRunIntent, SimulationRunLifecycle, SimulationRunProvenance, SimulationState,
-    SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
-    SoaViolationSeverityEvidence, TransferFunctionAccuracyEvidence,
+    MonteCarloVariableMetadata, NoiseContributorRow, NoiseSummary, OperatingPointAccuracyEvidence,
+    OperatingPointAnnotationEvidence, OperatingPointDeviceDetailEvidence,
+    OperatingPointHomotopyEvidence, OperatingPointInitialGuessEvidence,
+    OperatingPointNodeInitializationEvidence, OperatingPointProcessEvidence,
+    OperatingPointSaveDeviceEvidence, OperatingPointTemperatureEvidence, OperatingPointValue,
+    PreparedModelSourceIdentity, PreparedRunReceipt, PreparedRunTaskReceipt,
+    PreparedSourceCheckReceipt, ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence,
+    ReliabilityShiftEvidence, ReliabilityStressEvidence, SavedOutputMaterializationStatus,
+    SavedOutputReceipt, SensitivityResultMode, SensitivityResultRow, SharedWaveformValues,
+    SimulationRun, SimulationRunIntent, SimulationRunLifecycle, SimulationRunProvenance,
+    SimulationState, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
+    SoaViolationEvidence, SoaViolationSeverityEvidence, TransferFunctionAccuracyEvidence,
     TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
     TransferFunctionScalarEvidence, WaveformData, ac_bode_summary_for_run,
     ac_bode_summary_for_selection,
@@ -107,16 +112,18 @@ pub use symbol::{
 pub use symbol_resolver::{
     ResolvedCellSymbol, ResolvedSymbolIssueKind, ResolvedSymbolSource, SymbolResolver,
 };
+pub(crate) use workspace::PreparedProjectLibraryMutation;
 pub use workspace::{
     CellViewRef, DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
     DesignVariableRange, DesignVariableScope, DesignVariableSweepEligibility, OpenCellView,
     OwnedNetlistDescriptor, OwnedNetlistEditStrategy, OwnedNetlistSaveRecord,
     PROJECT_DESCRIPTOR_SCHEMA_VERSION, PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION,
-    ProjectDescriptor, ProjectTechnologyBinding, ProjectWorkspace, RegressionComparisonMethod,
-    RegressionComparisonWindow, RegressionTargetKind, RegressionTargetSelector,
-    RegressionToleranceRule, ResolvedHierarchyBinding, SavedOutput, SavedOutputCompatibility,
-    SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
-    SimulationPlanPayload, SimulationPlanPayloadRecord, SpecEntry,
+    ProjectDescriptor, ProjectLibraryMutation, ProjectTechnologyBinding,
+    ProjectTechnologyChangeAuthority, ProjectTechnologyChangeContext, ProjectWorkspace,
+    RegressionComparisonMethod, RegressionComparisonWindow, RegressionTargetKind,
+    RegressionTargetSelector, RegressionToleranceRule, ResolvedHierarchyBinding, SavedOutput,
+    SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision,
+    SavedOutputStreaming, SimulationPlanPayload, SimulationPlanPayloadRecord, SpecEntry,
 };
 
 #[cfg(test)]

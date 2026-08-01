@@ -98,11 +98,15 @@ endmodule
     let mut differentiated = differentiate(&cfg.function, &lanes).expect("differentiates");
     let mut wanted = cfg.residuals.clone();
     for residual in &cfg.residuals {
-        wanted.extend(differentiated.derivative_row(*residual).into_iter().flatten());
+        wanted.extend(
+            differentiated
+                .derivative_row(*residual)
+                .into_iter()
+                .flatten(),
+        );
     }
     let (optimized, wanted) = optimize_cfg(&differentiated.function, &wanted);
-    let (body, names) =
-        emit_body(&optimized, &wanted, &EmitBindings::default()).expect("emits");
+    let (body, names) = emit_body(&optimized, &wanted, &EmitBindings::default()).expect("emits");
 
     assert!(
         !body.contains("Lanes<1>") && !body.contains("Lanes(["),

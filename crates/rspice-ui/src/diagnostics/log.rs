@@ -149,7 +149,6 @@ impl LogEntry {
         let millis = self.timestamp.subsec_millis();
         format!("{:02}:{:02}:{:02}.{:03}", hours, mins, secs, millis)
     }
-
 }
 
 // =============================================================================
@@ -316,7 +315,6 @@ impl LogBuffer {
     pub fn count_by_severity(&self, severity: LogSeverity) -> usize {
         self.severity_counts[severity_index(severity)]
     }
-
 }
 
 // =============================================================================

@@ -258,7 +258,6 @@ impl SoAManager {
     pub fn evaluations(&self) -> impl Iterator<Item = &SoAEvaluation> {
         self.evaluations.values()
     }
-
 }
 
 fn rule_verdict(actual: f64, maximum: f64) -> SoARuleVerdict {

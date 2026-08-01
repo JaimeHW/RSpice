@@ -45,10 +45,7 @@ impl PoleZeroAnalyzer {
             .unwrap_or_default()
     }
 
-    pub(in crate::analysis::pole_zero) fn to_faer_matrix(
-        &self,
-        matrix: &Matrix,
-    ) -> Mat<f64> {
+    pub(in crate::analysis::pole_zero) fn to_faer_matrix(&self, matrix: &Matrix) -> Mat<f64> {
         let mut out = Mat::zeros(matrix.rows, matrix.cols);
         for row in 0..matrix.rows {
             for col in 0..matrix.cols {

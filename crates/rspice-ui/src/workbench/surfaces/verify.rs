@@ -1911,7 +1911,6 @@ fn action_receipt(ui: &mut Ui, app: &RSpiceApp) {
     });
 }
 
-
 #[derive(Debug, Clone, PartialEq)]
 struct RegressionCheck {
     target: crate::state::RegressionTargetSelector,
@@ -1991,7 +1990,6 @@ fn active_dataset_measurement(
         .active_run()
         .and_then(|run| measurement_in_run(run, name))
 }
-
 
 #[cfg(test)]
 mod tests;

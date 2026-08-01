@@ -7,8 +7,9 @@ use crate::state::{Point, StretchTarget};
 use crate::workbench::app_state::AppState;
 
 use super::SchematicSymbolContext;
-use super::coordinates::{screen_to_grid, screen_to_schematic};
+use super::coordinates::screen_to_schematic;
 use super::sheet_visibility::object_is_on_active_sheet;
+use super::snap_resolution::resolve_grid_pointer;
 use super::viewport::Viewport;
 
 const DELTA_OVERFLOW: &str = "The requested stretch exceeds the schematic coordinate range.";
@@ -54,7 +55,7 @@ pub(super) fn handle_armed_stretch_selection(
             .input(|input| input.pointer.press_origin())
             .or_else(|| response.interact_pointer_pos())
     {
-        let anchor = screen_to_grid(viewport, grid_size, position);
+        let anchor = resolve_grid_pointer(state, viewport, position).snapped_position;
         if let Some(target) = stretch_target_at(state, viewport, position) {
             let draft = &mut state.dialogs.stretch_selection;
             draft.target = Some(target);
@@ -75,7 +76,7 @@ pub(super) fn handle_armed_stretch_selection(
             state.dialogs.stretch_selection.target,
         )
     {
-        let destination = screen_to_grid(viewport, grid_size, position);
+        let destination = resolve_grid_pointer(state, viewport, position).snapped_position;
         update_preview_delta(state, target, checked_pointer_delta(anchor, destination));
     }
 
@@ -90,7 +91,7 @@ pub(super) fn handle_armed_stretch_selection(
     if response.clicked_by(egui::PointerButton::Primary)
         && let Some(position) = response.interact_pointer_pos()
     {
-        let point = screen_to_grid(viewport, grid_size, position);
+        let point = resolve_grid_pointer(state, viewport, position).snapped_position;
         if let (Some(anchor), Some(target)) = (
             state.dialogs.stretch_selection.anchor,
             state.dialogs.stretch_selection.target,
@@ -111,7 +112,7 @@ pub(super) fn handle_armed_stretch_selection(
             state.dialogs.stretch_selection.target,
         )
     {
-        let destination = screen_to_grid(viewport, grid_size, position);
+        let destination = resolve_grid_pointer(state, viewport, position).snapped_position;
         update_preview_delta(state, target, checked_pointer_delta(anchor, destination));
     }
 }

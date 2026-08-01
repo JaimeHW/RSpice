@@ -12,7 +12,7 @@ mod readout;
 pub(crate) use expressions::*;
 pub(crate) use readout::*;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use egui::Ui;
@@ -39,8 +39,10 @@ use crate::workbench::{
 
 use super::strip::{LegendChip, StripHeader};
 use super::{
-    DerivedSeries, ExprEditor, ExprSeries, ExprTrace, MarkerKind, ResultMarker, ResultsState,
-    SelectedResultTrace, WaveformSeriesResult, waveform_color, well_hint,
+    AnalysisPresentationKey, DerivedSeries, ExprEditor, ExprSeries, ExprTrace,
+    HorizontalWaveCursor, MarkerKind, ResultMarker, ResultsState, SelectedResultTrace,
+    TracePresentationKey, WavePanePresentationKey, WaveformPresentationKey, WaveformSeriesResult,
+    waveform_color, well_hint,
 };
 
 /// How a trace's Y values are interpreted.
@@ -60,18 +62,25 @@ enum TraceKind {
     Imaginary,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct FamilyTraceVisibilityKey {
+    analysis: AnalysisPresentationKey,
     group_key: u64,
-    waveform_index: usize,
+    source_name_hash: u64,
     trace_kind: u8,
 }
 
 impl FamilyTraceVisibilityKey {
-    const fn new(group_key: u64, waveform_index: usize, trace_kind: TraceKind) -> Self {
+    fn new(
+        analysis: AnalysisPresentationKey,
+        group_key: u64,
+        source_name: &str,
+        trace_kind: TraceKind,
+    ) -> Self {
         Self {
+            analysis,
             group_key,
-            waveform_index,
+            source_name_hash: stable_hash(&source_name),
             trace_kind: trace_kind as u8,
         }
     }
@@ -115,6 +124,7 @@ struct StripTrace {
 /// One strip (== one analysis of the active run).
 pub(super) struct StripModel {
     analysis_index: usize,
+    analysis_key: AnalysisPresentationKey,
     analysis_type: AnalysisType,
     kind_tag: String,
     subtitle: String,
@@ -174,7 +184,7 @@ fn models_fingerprint(
         .map(SourceSampleSelection::fingerprint)
         .hash(&mut h);
     let mut hidden = hidden_family_traces.iter().copied().collect::<Vec<_>>();
-    hidden.sort_unstable();
+    hidden.sort_unstable_by_key(stable_hash);
     hidden.hash(&mut h);
     for color in &t.color.traces {
         color.to_array().hash(&mut h);
@@ -207,6 +217,7 @@ pub(super) fn cached_models(
     complex_display: ComplexNumberDisplay,
     t: &Tokens,
 ) -> Arc<Vec<StripModel>> {
+    results.reconcile_expression_projection(simulation);
     let fp = models_fingerprint(
         simulation,
         results.phase_continuous,
@@ -241,6 +252,13 @@ fn run_mixed_key(base: u64, run_id: u64, overlay: bool) -> u64 {
     } else {
         base
     }
+}
+
+fn stable_hash(value: &impl std::hash::Hash) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
 }
 
 fn unique_analysis<'a>(
@@ -340,6 +358,25 @@ impl StripModel {
     /// Index of the analysis this strip renders.
     pub(super) fn analysis_index(&self) -> usize {
         self.analysis_index
+    }
+
+    pub(super) fn analysis_key(&self) -> AnalysisPresentationKey {
+        self.analysis_key
+    }
+
+    pub(super) fn trace_presentation_key(&self, index: usize) -> Option<TracePresentationKey> {
+        self.traces.get(index).map(trace_presentation_key)
+    }
+
+    pub(super) fn trace_index_for_key(&self, key: &TracePresentationKey) -> Option<usize> {
+        let mut matching = self
+            .traces
+            .iter()
+            .take(self.signal_trace_count)
+            .enumerate()
+            .filter(|(_, trace)| trace_presentation_key(trace) == *key);
+        let (index, _) = matching.next()?;
+        matching.next().is_none().then_some(index)
     }
 
     /// The unit one trace is measured in.
@@ -660,7 +697,7 @@ fn apply_family_trace_style<'a>(
 fn append_projected_traces(
     traces: &mut Vec<StripTrace>,
     derived: &mut DerivedSeries,
-    analysis_index: usize,
+    analysis_key: AnalysisPresentationKey,
     waveform_index: usize,
     run_id: u64,
     selection_key: u64,
@@ -677,7 +714,7 @@ fn append_projected_traces(
 ) {
     for projection in projected_family_series(source_x, source_y, sample_selection) {
         let presentation_key = projection.group.map_or(0, |group| group.stable_key);
-        let derived_key = ((analysis_index as u64) << 32 | waveform_index as u64)
+        let derived_key = stable_hash(&(analysis_key, source_waveform_name, kind as u8))
             ^ selection_key
             ^ presentation_key.rotate_left(23);
         let y = match kind {
@@ -692,9 +729,14 @@ fn append_projected_traces(
             _ => projection.y,
         };
         let family_style = projection.group.map(|group| group.style);
-        let family_visibility_key = projection
-            .group
-            .map(|group| FamilyTraceVisibilityKey::new(group.stable_key, waveform_index, kind));
+        let family_visibility_key = projection.group.map(|group| {
+            FamilyTraceVisibilityKey::new(
+                analysis_key,
+                group.stable_key,
+                source_waveform_name,
+                kind,
+            )
+        });
         let name = projection.group.map_or_else(
             || base_name.to_owned(),
             |group| format!("{base_name} · {}", group.label),
@@ -739,6 +781,7 @@ pub(super) fn build_models(
     let mut models = Vec::new();
 
     for (analysis_index, analysis) in run.analyses.iter().enumerate() {
+        let analysis_key = AnalysisPresentationKey::new(run.dataset_id, analysis);
         if analysis.waveforms.is_empty() {
             continue;
         }
@@ -804,7 +847,7 @@ pub(super) fn build_models(
                         append_projected_traces(
                             &mut traces,
                             derived,
-                            analysis_index,
+                            analysis_key,
                             waveform_index,
                             run.id,
                             selection_key,
@@ -845,7 +888,7 @@ pub(super) fn build_models(
             append_projected_traces(
                 &mut traces,
                 derived,
-                analysis_index,
+                analysis_key,
                 waveform_index,
                 run.id,
                 selection_key,
@@ -1031,6 +1074,7 @@ pub(super) fn build_models(
 
         models.push(StripModel {
             analysis_index,
+            analysis_key,
             analysis_type: analysis.analysis_type,
             kind_tag: analysis.analysis_type.short_label().to_uppercase(),
             subtitle,
@@ -1076,22 +1120,32 @@ fn displayed_phase_series(
 /// measurement caches. Phase traces fold in the wrapped/continuous choice
 /// so a toggle never serves stale envelopes, ranges, or stats.
 fn trace_key(model: &StripModel, trace: &StripTrace) -> u64 {
-    run_mixed_key(anchor_key(model, trace), trace.run_id, trace.overlay)
+    let continuous = trace.kind.is_phase() && model.phase_continuous;
+    run_mixed_key(
+        stable_hash(&(anchor_key(model, trace), continuous)),
+        trace.run_id,
+        trace.overlay,
+    )
 }
 
-/// Run-independent identity of a trace: what a marker anchors to.
+/// Dataset-bound identity of a trace: what a marker anchors to.
 ///
-/// Every solve of the same signal shares this key, which is exactly the
-/// difference from [`trace_key`] — a decimation envelope must not outlive
-/// the run that produced it, while a marker is a statement about the
-/// signal and is meant to survive re-simulation.
-fn anchor_key(model: &StripModel, trace: &StripTrace) -> u64 {
-    let continuous = (trace.kind.is_phase() && model.phase_continuous) as u64;
-    let base = (model.analysis_index as u64) << 44
-        | continuous << 43
-        | (trace.waveform_index as u64) << 3
-        | trace.kind as u64;
-    base ^ trace.presentation_key.rotate_left(11)
+/// The key follows its retained source through analysis/waveform reordering,
+/// but includes the immutable dataset so an annotation can never silently
+/// migrate to a later solve that happens to reuse the same signal name.
+fn trace_presentation_key(trace: &StripTrace) -> TracePresentationKey {
+    TracePresentationKey {
+        source_name: trace.source_waveform_name.clone(),
+        kind: trace.kind as u8,
+        family_group: trace.presentation_key,
+    }
+}
+
+fn anchor_key(model: &StripModel, trace: &StripTrace) -> WaveformPresentationKey {
+    WaveformPresentationKey {
+        analysis: model.analysis_key,
+        trace: trace_presentation_key(trace),
+    }
 }
 
 /// Case-insensitive prefix test for a signal-name accessor (`V(`, `i(`).
@@ -1216,6 +1270,444 @@ fn x_range(model: &StripModel) -> Option<(f64, f64)> {
     }
 }
 
+fn model_is_visible(model: &StripModel, models: &[StripModel], results: &ResultsState) -> bool {
+    match results.maximized_strip {
+        Some(maximized) if models.iter().any(|item| item.analysis_key == maximized) => {
+            model.analysis_key == maximized
+        }
+        _ => !results.hidden_strips.contains(&model.analysis_key),
+    }
+}
+
+fn active_pane<'a>(
+    models: &'a [StripModel],
+    results: &ResultsState,
+) -> Option<(&'a StripModel, usize, UnitPane)> {
+    let active = results.active_wave_pane.as_ref()?;
+    let model = models
+        .iter()
+        .find(|model| model.analysis_key == active.analysis)
+        .filter(|model| model_is_visible(model, models, results))?;
+    model
+        .unit_panes()
+        .into_iter()
+        .enumerate()
+        .find(|(_, pane)| pane.unit == active.unit)
+        .map(|(ordinal, pane)| (model, ordinal, pane))
+}
+
+/// Keep the instrument strip bound to an exact, currently visible waveform
+/// pane. Stable analysis identity and engineering unit are used instead of
+/// transient pane ordinals, so hiding or reordering a strip cannot redirect an
+/// action to unrelated data.
+pub(super) fn reconcile_active_pane(state: &mut AppState, t: &Tokens) {
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        t,
+    );
+    if active_pane(&models, &state.ui.results).is_some() {
+        return;
+    }
+
+    let preferred_analysis = state
+        .ui
+        .results
+        .valid_selected_trace(&state.simulation)
+        .map(SelectedResultTrace::analysis_key)
+        .or_else(|| {
+            state.ui.results.cursor_strip.and_then(|index| {
+                models
+                    .iter()
+                    .find(|model| model.analysis_index == index)
+                    .map(|model| model.analysis_key)
+            })
+        });
+    let next = preferred_analysis
+        .and_then(|analysis| {
+            models.iter().find(|model| {
+                model.analysis_key == analysis
+                    && model_is_visible(model, &models, &state.ui.results)
+            })
+        })
+        .or_else(|| {
+            models
+                .iter()
+                .find(|model| model_is_visible(model, &models, &state.ui.results))
+        })
+        .and_then(|model| {
+            model
+                .unit_panes()
+                .first()
+                .map(|pane| WavePanePresentationKey {
+                    analysis: model.analysis_key,
+                    unit: pane.unit.to_owned(),
+                })
+        });
+    state.ui.results.active_wave_pane = next;
+}
+
+fn matching_spec_limits(
+    state: &AppState,
+    model: &StripModel,
+    pane: &UnitPane,
+    t: &Tokens,
+) -> Vec<plot::LimitLine> {
+    let mut seen = HashSet::new();
+    let mut limits = Vec::new();
+    for trace in pane
+        .traces
+        .iter()
+        .filter_map(|index| model.traces.get(*index))
+        .filter(|trace| trace.visible && !trace.overlay)
+    {
+        for specification in state.workspace.specs.iter().filter(|specification| {
+            specification
+                .measurement
+                .eq_ignore_ascii_case(&trace.source_waveform_name)
+        }) {
+            if let Some(minimum) = specification.min.filter(|value| value.is_finite())
+                && seen.insert((
+                    specification.measurement.to_ascii_lowercase(),
+                    0_u8,
+                    minimum.to_bits(),
+                ))
+            {
+                limits.push(plot::LimitLine {
+                    y: minimum,
+                    color: t.color.warn,
+                    label: format!(
+                        "{} \u{2265} {}",
+                        specification.measurement,
+                        fmt_si_significant(minimum, &specification.unit, 6)
+                    ),
+                });
+            }
+            if let Some(maximum) = specification.max.filter(|value| value.is_finite())
+                && seen.insert((
+                    specification.measurement.to_ascii_lowercase(),
+                    1_u8,
+                    maximum.to_bits(),
+                ))
+            {
+                limits.push(plot::LimitLine {
+                    y: maximum,
+                    color: t.color.warn,
+                    label: format!(
+                        "{} \u{2264} {}",
+                        specification.measurement,
+                        fmt_si_significant(maximum, &specification.unit, 6)
+                    ),
+                });
+            }
+        }
+    }
+    limits
+}
+
+pub(super) fn spec_limits_available(state: &mut AppState, t: &Tokens) -> bool {
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        t,
+    );
+    active_pane(&models, &state.ui.results)
+        .is_some_and(|(model, _, pane)| !matching_spec_limits(state, model, &pane, t).is_empty())
+}
+
+#[derive(Debug)]
+struct FamilyEnvelopeSeries {
+    x: Vec<f64>,
+    minimum: Vec<f64>,
+    maximum: Vec<f64>,
+    color: egui::Color32,
+    minimum_cache_key: u64,
+    maximum_cache_key: u64,
+    right_axis: bool,
+}
+
+fn family_envelope_series(model: &StripModel, pane: &UnitPane) -> Vec<FamilyEnvelopeSeries> {
+    let mut groups = HashMap::<(String, u8, bool), Vec<&StripTrace>>::new();
+    for (trace, right_axis) in pane
+        .traces
+        .iter()
+        .map(|index| (*index, false))
+        .chain(pane.right.iter().map(|index| (*index, true)))
+        .filter_map(|(index, right)| model.traces.get(index).map(|trace| (trace, right)))
+        .filter(|(trace, _)| {
+            trace.visible && !trace.overlay && trace.family_group_ordinal.is_some()
+        })
+    {
+        groups
+            .entry((
+                trace.source_waveform_name.clone(),
+                trace.kind as u8,
+                right_axis,
+            ))
+            .or_default()
+            .push(trace);
+    }
+
+    let mut envelopes = Vec::new();
+    for ((source_name, kind, right_axis), traces) in groups {
+        let family_groups = traces
+            .iter()
+            .map(|trace| trace.presentation_key)
+            .collect::<HashSet<_>>();
+        if family_groups.len() < 2 {
+            continue;
+        }
+
+        let mut points = HashMap::<u64, (f64, f64, f64, usize)>::new();
+        for trace in &traces {
+            for (&x, &y) in trace.x.iter().zip(trace.y.iter()) {
+                if !x.is_finite() || !y.is_finite() {
+                    continue;
+                }
+                points
+                    .entry(x.to_bits())
+                    .and_modify(|(_, minimum, maximum, count)| {
+                        *minimum = minimum.min(y);
+                        *maximum = maximum.max(y);
+                        *count += 1;
+                    })
+                    .or_insert((x, y, y, 1));
+            }
+        }
+        let mut points = points
+            .into_values()
+            .filter(|(_, _, _, count)| *count >= 2)
+            .collect::<Vec<_>>();
+        points.sort_by(|left, right| left.0.total_cmp(&right.0));
+        if points.is_empty() {
+            continue;
+        }
+
+        let presentation_keys = traces
+            .iter()
+            .map(|trace| trace.presentation_key)
+            .collect::<Vec<_>>();
+        let identity = stable_hash(&(
+            model.analysis_key,
+            source_name,
+            kind,
+            right_axis,
+            presentation_keys,
+        ));
+        envelopes.push(FamilyEnvelopeSeries {
+            x: points.iter().map(|point| point.0).collect(),
+            minimum: points.iter().map(|point| point.1).collect(),
+            maximum: points.iter().map(|point| point.2).collect(),
+            color: traces[0].signal_color.gamma_multiply(0.78),
+            minimum_cache_key: identity ^ 0x1357_9BDF_2468_ACE0,
+            maximum_cache_key: identity ^ 0x0246_8ACE_1357_9BDF,
+            right_axis,
+        });
+    }
+    envelopes
+}
+
+pub(super) fn family_envelope_available(state: &mut AppState, t: &Tokens) -> bool {
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        t,
+    );
+    active_pane(&models, &state.ui.results)
+        .is_some_and(|(model, _, pane)| !family_envelope_series(model, &pane).is_empty())
+}
+
+fn cursor_marker_target(
+    state: &AppState,
+    models: &[StripModel],
+) -> Option<(
+    AnalysisPresentationKey,
+    WaveformPresentationKey,
+    String,
+    f64,
+)> {
+    let cursor_x = state
+        .ui
+        .results
+        .cursors
+        .a
+        .filter(|value| value.is_finite())?;
+    let (model, _, pane) = active_pane(models, &state.ui.results)?;
+    let pane_traces = pane
+        .traces
+        .iter()
+        .chain(pane.right.iter())
+        .filter_map(|index| model.traces.get(*index))
+        .filter(|trace| trace.visible && !trace.overlay)
+        .collect::<Vec<_>>();
+    let selected_source = state
+        .ui
+        .results
+        .valid_selected_trace(&state.simulation)
+        .filter(|selected| selected.analysis_key() == model.analysis_key)
+        .map(SelectedResultTrace::source_name);
+    let trace = state
+        .ui
+        .results
+        .cursor_a_anchor
+        .as_ref()
+        .filter(|anchor| anchor.analysis == model.analysis_key)
+        .and_then(|anchor| {
+            pane_traces
+                .iter()
+                .copied()
+                .find(|trace| anchor_key(model, trace) == *anchor)
+        })
+        .or_else(|| {
+            selected_source.and_then(|source| {
+                pane_traces
+                    .iter()
+                    .copied()
+                    .find(|trace| trace.source_waveform_name == source)
+            })
+        })
+        .or_else(|| pane_traces.first().copied())?;
+    let sampled = sample_at_with(
+        &trace.x,
+        &trace.y,
+        cursor_x,
+        cursor_interpolation(
+            state
+                .ui
+                .preferences
+                .result_presentation_policy()
+                .cursor_interpolation(),
+        ),
+    );
+    sampled.is_finite().then(|| {
+        (
+            model.analysis_key,
+            anchor_key(model, trace),
+            trace.name.clone(),
+            cursor_x,
+        )
+    })
+}
+
+pub(super) fn marker_at_cursor_a_available(state: &mut AppState, t: &Tokens) -> bool {
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        t,
+    );
+    cursor_marker_target(state, &models).is_some()
+}
+
+pub(super) fn drop_marker_at_cursor_a(state: &mut AppState, t: &Tokens) {
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        t,
+    );
+    let Some((analysis, anchor, trace_name, x)) = cursor_marker_target(state, &models) else {
+        return;
+    };
+    let marker = state.ui.results.add_marker(analysis, anchor, trace_name, x);
+    state.ui.results.editing_marker = Some(marker);
+}
+
+fn scaled_range(range: (f64, f64), factor: f64, logarithmic: bool) -> Option<(f64, f64)> {
+    if !factor.is_finite() || factor <= 0.0 || !range.0.is_finite() || !range.1.is_finite() {
+        return None;
+    }
+    if logarithmic {
+        if range.0 <= 0.0 || range.1 <= range.0 {
+            return None;
+        }
+        let low = range.0.log10();
+        let high = range.1.log10();
+        let center = (low + high) * 0.5;
+        let half_span = (high - low) * 0.5 * factor;
+        return Some((
+            10.0_f64.powf(center - half_span),
+            10.0_f64.powf(center + half_span),
+        ));
+    }
+    if range.1 <= range.0 {
+        return None;
+    }
+    let center = (range.0 + range.1) * 0.5;
+    let half_span = (range.1 - range.0) * 0.5 * factor;
+    Some((center - half_span, center + half_span))
+}
+
+pub(super) fn zoom_active_pane(state: &mut AppState, t: &Tokens, factor: f64) {
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        t,
+    );
+    let Some((model, ordinal, pane)) = active_pane(&models, &state.ui.results) else {
+        return;
+    };
+    let current = state.ui.results.analysis_plot_view_pane(
+        super::ResultViewer::Waves,
+        model.analysis_key,
+        ordinal,
+    );
+    let x = current
+        .x
+        .or_else(|| x_range(model))
+        .and_then(|range| scaled_range(range, factor, model.x_scale == XScale::Log10));
+    let y = current
+        .y
+        .or_else(|| pane_y_range(&mut state.ui.results.derived, model, &pane.traces))
+        .and_then(|range| scaled_range(range, factor, false));
+    let y_right = current
+        .y_right
+        .or_else(|| pane_y_range(&mut state.ui.results.derived, model, &pane.right))
+        .and_then(|range| scaled_range(range, factor, false));
+    let view = state.ui.results.analysis_plot_view_pane_mut(
+        super::ResultViewer::Waves,
+        model.analysis_key,
+        ordinal,
+    );
+    if let Some(x) = x {
+        view.x = Some(x);
+    }
+    if let Some(y) = y {
+        view.y = Some(y);
+    }
+    if let Some(y_right) = y_right {
+        view.y_right = Some(y_right);
+    }
+}
+
+pub(super) fn fit_active_pane(state: &mut AppState, t: &Tokens) {
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        t,
+    );
+    let Some((model, ordinal, _)) = active_pane(&models, &state.ui.results) else {
+        return;
+    };
+    state.ui.results.reset_analysis_plot_view_pane(
+        super::ResultViewer::Waves,
+        model.analysis_key,
+        ordinal,
+    );
+}
+
 const fn cursor_interpolation(policy: CursorInterpolation) -> SampleInterpolation {
     match policy {
         CursorInterpolation::MonotoneCubicWhereValid => SampleInterpolation::MonotoneCubic,
@@ -1279,13 +1771,13 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
     // Apply hide/maximize strip state.
     let results = &state.ui.results;
     let visible: Vec<&StripModel> = match results.maximized_strip {
-        Some(max_idx) if models.iter().any(|m| m.analysis_index == max_idx) => models
+        Some(max_key) if models.iter().any(|m| m.analysis_key == max_key) => models
             .iter()
-            .filter(|m| m.analysis_index == max_idx)
+            .filter(|m| m.analysis_key == max_key)
             .collect(),
         _ => models
             .iter()
-            .filter(|m| !results.hidden_strips.contains(&m.analysis_index))
+            .filter(|m| !results.hidden_strips.contains(&m.analysis_key))
             .collect(),
     };
     if visible.is_empty() {
@@ -1296,18 +1788,13 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
     // Deferred state mutations (collected while iterating immutably).
     let mut toggle_trace: Option<(usize, usize)> = None;
     let mut toggle_family_trace: Option<FamilyTraceVisibilityKey> = None;
-    let mut toggle_maximize: Option<usize> = None;
-    let mut close_strip: Option<usize> = None;
-    let mut fit_strip: Option<usize> = None;
-    let mut toggle_expr: Option<(usize, usize)> = None;
-    let mut remove_expr: Option<(usize, usize)> = None;
-    let mut open_editor: Option<usize> = None;
+    let mut toggle_maximize: Option<AnalysisPresentationKey> = None;
+    let mut close_strip: Option<AnalysisPresentationKey> = None;
+    let mut fit_strip: Option<AnalysisPresentationKey> = None;
+    let mut toggle_expr: Option<(AnalysisPresentationKey, usize)> = None;
+    let mut remove_expr: Option<(AnalysisPresentationKey, usize)> = None;
+    let mut open_editor: Option<AnalysisPresentationKey> = None;
     let mut select_trace: Option<SelectedResultTrace> = None;
-    let active_dataset_id = state
-        .simulation
-        .active_run()
-        .map(|run| run.dataset_id.clone());
-
     let avail = ui.available_rect_before_wrap();
     let n = visible.len();
     let separators = (n.saturating_sub(1)) as f32;
@@ -1357,8 +1844,8 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
                         let strip_exprs: Vec<ExprTrace> = state
                             .ui
                             .results
-                            .exprs
-                            .get(&model.analysis_index)
+                            .analysis_exprs
+                            .get(&model.analysis_key)
                             .cloned()
                             .unwrap_or_default();
                         let expr_labels: Vec<String> =
@@ -1372,21 +1859,19 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
                             });
                         }
 
-                        let zoomed = state
-                            .ui
-                            .results
-                            .strip_is_zoomed(super::ResultViewer::Waves, model.analysis_index);
+                        let zoomed = state.ui.results.analysis_strip_is_zoomed(
+                            super::ResultViewer::Waves,
+                            model.analysis_key,
+                        );
                         let selected_legend = state
                             .ui
                             .results
                             .valid_selected_trace(&state.simulation)
                             .and_then(|selected| {
-                                (selected.analysis_index == model.analysis_index).then(|| {
+                                (selected.analysis_key() == model.analysis_key).then(|| {
                                     model.traces.iter().take(model.signal_trace_count).position(
                                         |trace| {
-                                            trace.waveform_index == selected.waveform_index
-                                                && trace.source_waveform_name
-                                                    == selected.source_name
+                                            trace.source_waveform_name == selected.source_name()
                                         },
                                     )
                                 })
@@ -1403,19 +1888,15 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
                             .show(ui);
                         if let Some(chip_index) = header.legend_clicked {
                             if chip_index < model.signal_trace_count {
-                                if let (Some(trace), Some(dataset_id)) =
-                                    (model.traces.get(chip_index), active_dataset_id.clone())
-                                {
-                                    select_trace = Some(SelectedResultTrace {
-                                        dataset_id,
-                                        analysis_index: model.analysis_index,
-                                        waveform_index: trace.waveform_index,
-                                        source_name: trace.source_waveform_name.clone(),
-                                    });
+                                if let Some(trace) = model.traces.get(chip_index) {
+                                    select_trace = Some(SelectedResultTrace::from_identity(
+                                        model.analysis_key,
+                                        trace.source_waveform_name.clone(),
+                                    ));
                                 }
                             } else {
                                 toggle_expr = Some((
-                                    model.analysis_index,
+                                    model.analysis_key,
                                     chip_index - model.signal_trace_count,
                                 ));
                             }
@@ -1432,7 +1913,7 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
                                 }
                             } else {
                                 toggle_expr = Some((
-                                    model.analysis_index,
+                                    model.analysis_key,
                                     chip_index - model.signal_trace_count,
                                 ));
                             }
@@ -1441,22 +1922,22 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
                             && chip_index >= model.signal_trace_count
                         {
                             remove_expr =
-                                Some((model.analysis_index, chip_index - model.signal_trace_count));
+                                Some((model.analysis_key, chip_index - model.signal_trace_count));
                         }
                         if header.maximize_clicked {
-                            toggle_maximize = Some(model.analysis_index);
+                            toggle_maximize = Some(model.analysis_key);
                         }
                         if header.close_clicked {
-                            close_strip = Some(model.analysis_index);
+                            close_strip = Some(model.analysis_key);
                         }
                         if header.fit_clicked {
-                            fit_strip = Some(model.analysis_index);
+                            fit_strip = Some(model.analysis_key);
                         }
                         if header.add_expr_clicked {
-                            open_editor = Some(model.analysis_index);
+                            open_editor = Some(model.analysis_key);
                         }
 
-                        expr_editor_row(ui, state, model.analysis_index);
+                        expr_editor_row(ui, state, model.analysis_key, model.analysis_index);
 
                         // Strips scrolled out of view skip the plot body
                         // entirely (range lookups, envelope mapping, shape
@@ -1488,35 +1969,47 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
     }
     if let Some(idx) = close_strip {
         results.hidden_strips.insert(idx);
-        if results.cursor_strip == Some(idx) {
+        if models
+            .iter()
+            .find(|model| model.analysis_key == idx)
+            .is_some_and(|model| results.cursor_strip == Some(model.analysis_index))
+        {
             results.clear_cursors();
         }
     }
-    if let Some(idx) = fit_strip {
-        results.reset_plot_view(super::ResultViewer::Waves, idx);
+    if let Some(key) = fit_strip {
+        results.reset_analysis_plot_view(super::ResultViewer::Waves, key);
     }
     if let Some((analysis, index)) = toggle_expr
         && let Some(expr) = results
-            .exprs
+            .analysis_exprs
             .get_mut(&analysis)
             .and_then(|list| list.get_mut(index))
     {
         expr.visible = !expr.visible;
+        if let Some(model) = models.iter().find(|model| model.analysis_key == analysis) {
+            results.sync_expression_projection(analysis, model.analysis_index);
+        }
     }
     if let Some((analysis, index)) = remove_expr
-        && let Some(list) = results.exprs.get_mut(&analysis)
+        && let Some(list) = results.analysis_exprs.get_mut(&analysis)
     {
         if index < list.len() {
             let removed = list.remove(index);
-            results.expr_cache.remove(&(analysis, removed.text));
+            results
+                .analysis_expr_cache
+                .remove(&(analysis, removed.text));
         }
         if list.is_empty() {
-            results.exprs.remove(&analysis);
+            results.analysis_exprs.remove(&analysis);
+        }
+        if let Some(model) = models.iter().find(|model| model.analysis_key == analysis) {
+            results.sync_expression_projection(analysis, model.analysis_index);
         }
     }
     if let Some(analysis) = open_editor {
         results.expr_editor = Some(ExprEditor {
-            analysis_index: analysis,
+            analysis,
             text: String::new(),
             error: None,
             want_focus: true,
@@ -1667,6 +2160,11 @@ fn show_unit_pane(
     let (x0, x1) = x_domain;
 
     let pane_range = pane_y_range(&mut state.ui.results.derived, model, &pane.traces);
+    let specification_limits = if state.ui.results.show_spec_limits {
+        matching_spec_limits(state, model, pane, &t)
+    } else {
+        Vec::new()
+    };
     let auto_y = {
         let mut lo = f64::INFINITY;
         let mut hi = f64::NEG_INFINITY;
@@ -1679,6 +2177,10 @@ fn show_unit_pane(
                 lo = lo.min(a);
                 hi = hi.max(b);
             }
+        }
+        for limit in &specification_limits {
+            lo = lo.min(limit.y);
+            hi = hi.max(limit.y);
         }
         if !lo.is_finite() || !hi.is_finite() {
             None
@@ -1694,11 +2196,11 @@ fn show_unit_pane(
     };
 
     // User zoom/pan overrides the automatic fit per axis, per pane.
-    let view =
-        state
-            .ui
-            .results
-            .plot_view_pane(super::ResultViewer::Waves, model.analysis_index, ordinal);
+    let view = state.ui.results.analysis_plot_view_pane(
+        super::ResultViewer::Waves,
+        model.analysis_key,
+        ordinal,
+    );
     let (x0, x1) = view.x.unwrap_or((x0, x1));
     let (y0, y1) = view.y.unwrap_or((y0, y1));
 
@@ -1711,9 +2213,28 @@ fn show_unit_pane(
         let (scale, offset, unit) = quantity_policy.frequency_axis_transform();
         x_axis = x_axis.with_display_transform(scale, offset, unit);
     }
+    let family_envelopes = if state.ui.results.show_family_envelope {
+        family_envelope_series(model, pane)
+    } else {
+        Vec::new()
+    };
     let mut spec = PlotSpec::new(x_axis, model.x_scale, Axis::linear(y0, y1, pane.unit))
         .accessible_name("Waveform plot");
     spec.display_decimation = display_decimation(presentation.large_dataset_display());
+    spec.limit_lines = specification_limits;
+    spec.minor_grid = state.ui.results.show_minor_grid;
+    let pane_key = WavePanePresentationKey {
+        analysis: model.analysis_key,
+        unit: pane.unit.to_owned(),
+    };
+    spec.horizontal_cursor = state
+        .ui
+        .results
+        .horizontal_cursor
+        .as_ref()
+        .filter(|cursor| cursor.pane == pane_key)
+        .map(|cursor| cursor.y);
+    spec.horizontal_cursor_interactive = state.ui.results.horizontal_cursor_placement_enabled();
 
     // Right (phase) axis when this pane hosts phase traces.
     let has_phase = !pane.right.is_empty();
@@ -1758,6 +2279,30 @@ fn show_unit_pane(
         spec.ref_lines.push(plot::RefLine { y: 0.0 });
     }
 
+    // Family envelopes are derived only from exact shared X coordinates.
+    // They draw behind source curves and never interpolate missing family
+    // samples into evidence that was not retained.
+    for envelope in &family_envelopes {
+        let mut minimum = Trace::new(&envelope.x, &envelope.minimum, envelope.color)
+            .thin()
+            .dashed()
+            .cache_key(envelope.minimum_cache_key);
+        let mut maximum = Trace::new(&envelope.x, &envelope.maximum, envelope.color)
+            .thin()
+            .dashed()
+            .cache_key(envelope.maximum_cache_key);
+        if envelope.right_axis {
+            minimum = minimum.right();
+            maximum = maximum.right();
+        }
+        if envelope.x.len() == 1 {
+            minimum = minimum.show_single_point();
+            maximum = maximum.show_single_point();
+        }
+        spec.traces.push(minimum);
+        spec.traces.push(maximum);
+    }
+
     // Run owns weight: overlay traces keep the signal hue at reduced alpha
     // and stroke, painted first so the active run draws at full strength
     // on top.
@@ -1798,7 +2343,7 @@ fn show_unit_pane(
 
     // Markers ride their anchored trace: Y is resampled here rather than
     // stored, so zoom, pan, and a re-run all leave the tag on the curve.
-    for marker in state.ui.results.strip_markers(model.analysis_index) {
+    for marker in state.ui.results.strip_markers(model.analysis_key) {
         let color = marker_color(marker.kind, &t);
         let label = marker_label(marker);
         if marker.kind == MarkerKind::Spec {
@@ -1862,6 +2407,16 @@ fn show_unit_pane(
         cursors.as_ref(),
         Some(&readout),
     );
+    if response.response.hovered()
+        || response.response.dragged()
+        || response.clicked_x.is_some()
+        || response.horizontal_cursor_y.is_some()
+    {
+        state.ui.results.active_wave_pane = Some(pane_key.clone());
+    }
+    if let Some(y) = response.horizontal_cursor_y {
+        state.ui.results.horizontal_cursor = Some(HorizontalWaveCursor { pane: pane_key, y });
+    }
 
     // The marker tool takes the click when armed: one click cannot both
     // annotate and move a cursor, and the armed chip says which it will do.
@@ -1894,14 +2449,45 @@ fn show_unit_pane(
             let id = state
                 .ui
                 .results
-                .add_marker(model.analysis_index, anchor, name, clicked_x);
+                .add_marker(model.analysis_key, anchor, name, clicked_x);
             // Focus the new marker's note field: placing one is normally the
             // first half of saying what it means.
             state.ui.results.editing_marker = Some(id);
         }
     } else if let Some(clicked_x) = response.clicked_x
-        && state.ui.results.cursor_tool.is_armed()
+        && state.ui.results.cursor_placement_enabled()
     {
+        let placing_cursor_a = state.ui.results.cursor_a_is_next();
+        let pointer_y = response
+            .response
+            .interact_pointer_pos()
+            .map(|position| position.y);
+        let right_range = spec.y_right.as_ref().map(|(axis, _)| (axis.min, axis.max));
+        let nearest_anchor = placing_cursor_a.then(|| {
+            pane_traces
+                .iter()
+                .filter(|(_, trace)| !trace.overlay)
+                .filter_map(|(index, trace)| {
+                    let value = sample_at_with(&trace.x, &trace.y, clicked_x, interpolation);
+                    let (minimum, maximum) = if pane.right.contains(index) {
+                        right_range?
+                    } else {
+                        (y0, y1)
+                    };
+                    if !value.is_finite() || maximum <= minimum {
+                        return None;
+                    }
+                    let screen_y = response.plot_rect.bottom()
+                        - ((value - minimum) / (maximum - minimum)) as f32
+                            * response.plot_rect.height();
+                    Some((
+                        anchor_key(model, trace),
+                        pointer_y.map_or(0.0, |pointer| (pointer - screen_y).abs()),
+                    ))
+                })
+                .min_by(|(_, left), (_, right)| left.total_cmp(right))
+                .map(|(anchor, _)| anchor)
+        });
         let results = &mut state.ui.results;
         if results.cursor_strip != Some(model.analysis_index)
             && (!results.linked_cursors || !cursor_domain_matches)
@@ -1909,6 +2495,9 @@ fn show_unit_pane(
             results.cursors = CursorPair::default();
         }
         results.cursor_strip = Some(model.analysis_index);
+        if placing_cursor_a {
+            results.cursor_a_anchor = nearest_anchor.flatten();
+        }
         results.cursors.place(clicked_x);
     }
 
@@ -1916,7 +2505,7 @@ fn show_unit_pane(
         state
             .ui
             .results
-            .plot_view_pane_mut(super::ResultViewer::Waves, model.analysis_index, ordinal)
+            .analysis_plot_view_pane_mut(super::ResultViewer::Waves, model.analysis_key, ordinal)
             .apply(&response.view);
     }
 }
@@ -1928,8 +2517,6 @@ fn show_unit_pane(
 // ---------------------------------------------------------------------------
 // readout strip
 // ---------------------------------------------------------------------------
-
-
 
 #[cfg(test)]
 mod tests;

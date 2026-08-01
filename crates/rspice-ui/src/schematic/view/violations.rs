@@ -9,11 +9,11 @@
 use egui::{Painter, Pos2, Shape, Stroke, pos2, vec2};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::app_state::AppState;
 use crate::services::drc::{DrcLocation, DrcSeverity, DrcViolation};
 use crate::state::Point;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::active_palette;
+use crate::workbench::app_state::AppState;
 
 use super::sheet_visibility::object_is_on_active_sheet;
 use super::viewport::Viewport;

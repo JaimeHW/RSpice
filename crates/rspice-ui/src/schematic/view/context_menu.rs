@@ -353,6 +353,14 @@ fn select_pointer_target(
             }
             ContextTarget::Canvas
         }
+        // A probe selects like any other annotation. `ContextTarget` has no
+        // probe case, so the menu opens against the canvas.
+        PointerTarget::Probe(id) => {
+            if !state.schematic.selection.has_probe(id) {
+                state.schematic.selection.select_only_probe(id);
+            }
+            ContextTarget::Canvas
+        }
         PointerTarget::DocumentationShape(id) => {
             if !state.schematic.selection.has_documentation_shape(id) {
                 state

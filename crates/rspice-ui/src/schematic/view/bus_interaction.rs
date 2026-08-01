@@ -4,8 +4,8 @@
 //! pointer is actually on a bus and the ripped signal is in its range, so
 //! the candidate is validated before the affordance appears.
 
-use crate::workbench::app_state::AppState;
 use crate::state::{Bus, BusDeclaration, BusTapOrientation, BusTargetKind, Point, SchematicState};
+use crate::workbench::app_state::AppState;
 
 use super::drawing::nearest_bus_hit;
 use super::sheet_visibility::object_is_on_active_sheet;

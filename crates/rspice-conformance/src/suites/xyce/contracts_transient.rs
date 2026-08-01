@@ -324,9 +324,8 @@ impl XyceTestRunner {
         self.check_measure_cont_tran_deadline(start, "native execution")?;
 
         let scalar = rspice_core::analysis::evaluate_tran_measurements(&netlist, &result);
-        let continuous = rspice_core::analysis::evaluate_tran_continuous_measurements(
-            &netlist, &result,
-        );
+        let continuous =
+            rspice_core::analysis::evaluate_tran_continuous_measurements(&netlist, &result);
         let mt0_path = self.root.join(kind.mt0_relative_path());
         let mismatches = self.compare_analysis_measurement_outputs(
             std::slice::from_ref(&mt0_path),

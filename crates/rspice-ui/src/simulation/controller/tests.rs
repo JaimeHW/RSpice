@@ -67,6 +67,7 @@ fn state_with_current_drc_error() -> AppState {
 
 fn state_with_current_clean_drc() -> AppState {
     let mut state = AppState::default();
+    state.provision_test_project_technology_contract();
     crate::workbench::examples::load_example("Voltage Divider", &mut state.schematic);
     let mut result = DrcResult::new();
     result.completed = true;

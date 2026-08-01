@@ -122,7 +122,6 @@ fn run() -> CommandResult<()> {
     Ok(())
 }
 
-
 fn parse_args(args: impl IntoIterator<Item = String>) -> CommandResult<Option<Options>> {
     let mut args = args.into_iter();
     let Some(command) = args.next() else {

@@ -789,6 +789,37 @@ mod tests {
     }
 
     #[test]
+    fn undo_and_redo_preserve_exact_runtime_wire_and_bus_routing() {
+        let mut state = SchematicState::default();
+        state.wire_drawing.routing_mode = super::super::wire::WireRoutingMode::VerticalFirst;
+        state.bus_drawing.routing_mode = super::super::wire::WireRoutingMode::VerticalFirst;
+        state.init_undo_history();
+
+        assert!(state.with_undo("Add resistor", |schematic| {
+            schematic.add_component(ComponentType::Resistor, Point::new(0, 0));
+        }));
+        assert!(state.undo());
+        assert_eq!(
+            state.wire_drawing.routing_mode,
+            super::super::wire::WireRoutingMode::VerticalFirst
+        );
+        assert_eq!(
+            state.bus_drawing.routing_mode,
+            super::super::wire::WireRoutingMode::VerticalFirst
+        );
+
+        assert!(state.redo());
+        assert_eq!(
+            state.wire_drawing.routing_mode,
+            super::super::wire::WireRoutingMode::VerticalFirst
+        );
+        assert_eq!(
+            state.bus_drawing.routing_mode,
+            super::super::wire::WireRoutingMode::VerticalFirst
+        );
+    }
+
+    #[test]
     fn with_undo_is_skipped_on_read_only_state() {
         let mut state = SchematicState::default();
         state.init_undo_history();

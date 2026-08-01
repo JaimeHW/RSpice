@@ -52,7 +52,6 @@ impl ProcessCorner {
         }
     }
 
-
     /// Speed corners only (SS, TT, FF)
     pub fn speed_corners() -> Vec<ProcessCorner> {
         vec![Self::SS, Self::TT, Self::FF]

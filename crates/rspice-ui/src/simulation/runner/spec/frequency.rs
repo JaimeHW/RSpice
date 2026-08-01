@@ -265,7 +265,6 @@ fn finite_optional(value: Option<f64>, label: &str) -> Result<Option<f64>, Simul
         .transpose()
 }
 
-
 fn run_pac(
     netlist: &str,
     source_path: Option<&Path>,

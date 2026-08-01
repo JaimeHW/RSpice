@@ -6,8 +6,8 @@
 use super::*;
 use crate::analysis::eye_diagram::{EyeData, EyeDataBuilder};
 use crate::analysis::fft::{FftInputOptions, PreparedFftInput};
-use crate::workbench::app_state::{ActiveViewer, AppState};
 use crate::state::{AnalysisType, SharedWaveformValues};
+use crate::workbench::app_state::{ActiveViewer, AppState, SpecializedViewerCacheProvenance};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 
@@ -31,27 +31,21 @@ enum DerivedViewAvailability {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ActiveTransientAnalysisKey {
-    run_id: u64,
-    analysis_index: usize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct LoadedDerivedView {
-    analysis: ActiveTransientAnalysisKey,
+    analysis: SpecializedViewerCacheProvenance,
     availability: DerivedViewAvailability,
 }
 
 #[derive(Debug)]
 struct PendingDerivedViewTask {
-    analysis: ActiveTransientAnalysisKey,
+    analysis: SpecializedViewerCacheProvenance,
     receiver: mpsc::Receiver<DerivedViewTaskResult>,
     cancel_flag: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone)]
 struct DerivedWaveformSource {
-    analysis: ActiveTransientAnalysisKey,
+    analysis: SpecializedViewerCacheProvenance,
     source_name: String,
     time: SharedWaveformValues,
     values: SharedWaveformValues,
@@ -66,7 +60,7 @@ enum DerivedViewResultPayload {
 
 #[derive(Debug)]
 struct DerivedViewTaskResult {
-    analysis: ActiveTransientAnalysisKey,
+    analysis: SpecializedViewerCacheProvenance,
     payload: DerivedViewResultPayload,
 }
 
@@ -92,19 +86,21 @@ impl SimulationController {
         }
     }
 
-    pub(crate) fn mark_transient_view_ready(&mut self, state: &AppState, viewer: ActiveViewer) {
+    pub(crate) fn mark_transient_view_ready(&mut self, state: &mut AppState, viewer: ActiveViewer) {
         let Some(analysis) = self.active_transient_analysis_key(state) else {
             return;
         };
 
         match viewer {
             ActiveViewer::EyeDiagram if state.analysis.eye_diagram_state.trace_count() > 0 => {
+                state.bind_specialized_viewer_cache(viewer, analysis);
                 self.transient_post.eye_loaded = Some(LoadedDerivedView {
                     analysis,
                     availability: DerivedViewAvailability::Ready,
                 });
             }
             ActiveViewer::Fft if state.analysis.fft_state.has_data() => {
+                state.bind_specialized_viewer_cache(viewer, analysis);
                 self.transient_post.fft_loaded = Some(LoadedDerivedView {
                     analysis,
                     availability: DerivedViewAvailability::Ready,
@@ -151,11 +147,7 @@ impl SimulationController {
         self.cancel_task_slot(DerivedViewKind::Fft);
         self.transient_post.eye_loaded = None;
         self.transient_post.fft_loaded = None;
-        state
-            .analysis
-            .eye_diagram_state
-            .load_data(EyeData::default());
-        state.analysis.fft_state.clear();
+        state.clear_transient_specialized_viewer_data();
     }
 
     pub(super) fn prime_transient_fft_source_selection(&mut self, state: &mut AppState) {
@@ -252,7 +244,7 @@ impl SimulationController {
         &mut self,
         state: &mut AppState,
         view: DerivedViewKind,
-        active_analysis: Option<ActiveTransientAnalysisKey>,
+        active_analysis: Option<SpecializedViewerCacheProvenance>,
     ) {
         let task_slot = self.task_slot_mut(view);
         let Some(task) = task_slot.as_mut() else {
@@ -277,6 +269,7 @@ impl SimulationController {
             (DerivedViewKind::EyeDiagram, DerivedViewResultPayload::Eye(result)) => {
                 if let Some(eye_data) = result {
                     state.analysis.eye_diagram_state.load_data(eye_data);
+                    state.bind_specialized_viewer_cache(ActiveViewer::EyeDiagram, message.analysis);
                     self.transient_post.eye_loaded = Some(LoadedDerivedView {
                         analysis: message.analysis,
                         availability: DerivedViewAvailability::Ready,
@@ -295,6 +288,7 @@ impl SimulationController {
             (DerivedViewKind::Fft, DerivedViewResultPayload::Fft(result)) => {
                 if let Some(prepared) = result {
                     state.analysis.fft_state.load_prepared_input(prepared);
+                    state.bind_specialized_viewer_cache(ActiveViewer::Fft, message.analysis);
                     self.transient_post.fft_loaded = Some(LoadedDerivedView {
                         analysis: message.analysis,
                         availability: DerivedViewAvailability::Ready,
@@ -349,7 +343,7 @@ impl SimulationController {
     fn cancel_stale_transient_task(
         &mut self,
         view: DerivedViewKind,
-        active_analysis: Option<ActiveTransientAnalysisKey>,
+        active_analysis: Option<SpecializedViewerCacheProvenance>,
     ) {
         let should_cancel = self
             .task_slot(view)
@@ -383,17 +377,11 @@ impl SimulationController {
     fn active_transient_analysis_key(
         &self,
         state: &AppState,
-    ) -> Option<ActiveTransientAnalysisKey> {
-        let run_idx = state.simulation.active_run_idx?;
-        let analysis_idx = state.simulation.active_analysis_idx?;
-        let run = state.simulation.runs.get(run_idx)?;
-        let analysis = run.analyses.get(analysis_idx)?;
-        Self::analysis_supports_transient_derivation(analysis.analysis_type).then_some(
-            ActiveTransientAnalysisKey {
-                run_id: run.id,
-                analysis_index: analysis_idx,
-            },
-        )
+    ) -> Option<SpecializedViewerCacheProvenance> {
+        let analysis = state.simulation.active_analysis()?;
+        Self::analysis_supports_transient_derivation(analysis.analysis_type)
+            .then(|| state.active_specialized_viewer_cache_provenance())
+            .flatten()
     }
 
     fn current_transient_waveform_source(&self, state: &AppState) -> Option<DerivedWaveformSource> {

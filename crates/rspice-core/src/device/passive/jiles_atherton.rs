@@ -1454,15 +1454,17 @@ impl JilesAthertonInductor {
                         if !Self::xyce_endpoint_matches(trial.magnetization, accepted_m)
                             || !Self::xyce_endpoint_matches(trial.level1_rate, accepted_rate)
                         {
-                            let Some(trial) = self.xyce_core_level1_trial_at_magnetization_and_rate(
-                                happ,
-                                delta_happ,
-                                voltage,
-                                dt,
-                                one_step_order2,
-                                accepted_m,
-                                accepted_rate,
-                            ) else {
+                            let Some(trial) = self
+                                .xyce_core_level1_trial_at_magnetization_and_rate(
+                                    happ,
+                                    delta_happ,
+                                    voltage,
+                                    dt,
+                                    one_step_order2,
+                                    accepted_m,
+                                    accepted_rate,
+                                )
+                            else {
                                 return;
                             };
                             trial
@@ -1654,12 +1656,9 @@ impl JilesAthertonInductor {
             const H_CGS_FACTOR: Value = 4.0 * PI / 1.0e3;
             const B_CGS_FACTOR: Value = 1.0e4;
             let previous_h_cgs = H_CGS_FACTOR * self.state.reported_h;
-            let previous_b_cgs = B_CGS_FACTOR
-                * Self::mu_0()
-                * (previous_h_cgs + old_m);
+            let previous_b_cgs = B_CGS_FACTOR * Self::mu_0() * (previous_h_cgs + old_m);
             let calculated_h_cgs = H_CGS_FACTOR * calculated_h;
-            let calculated_b_cgs =
-                B_CGS_FACTOR * Self::mu_0() * (calculated_h_cgs + self.state.m);
+            let calculated_b_cgs = B_CGS_FACTOR * Self::mu_0() * (calculated_h_cgs + self.state.m);
             let delta_h_cgs = calculated_h_cgs - previous_h_cgs;
             let delta_b_cgs = calculated_b_cgs - previous_b_cgs;
             let d_bd_h = if delta_h_cgs != 0.0 {
@@ -1674,8 +1673,7 @@ impl JilesAthertonInductor {
                 // stored H value at a negative dB/dH turning point.
                 self.state.reported_h
             } else {
-                let d_h_dt = self.xyce_level1_rate
-                    - (self.params.gap / self.params.length) * dmdt;
+                let d_h_dt = self.xyce_level1_rate - (self.params.gap / self.params.length) * dmdt;
                 if (dmdt > 0.0 && d_h_dt < 0.0) || (dmdt < 0.0 && d_h_dt > 0.0) {
                     happ
                 } else {

@@ -12,22 +12,24 @@
 //! Resolving a live document into one of these lives in the parent module;
 //! this half is a value model and validates only itself.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::hardcopy::sources::{
     DISPLAY_NAME_LIMIT, MAX_HARDCOPY_SOURCE_SET_MEMBERS, SOURCE_KEY_LIMIT, validate_label,
 };
 use crate::hardcopy::{
-    ActiveHardcopySource, ContentExtent, HardcopyContentSection, HardcopyDocumentId,
-    HardcopyDocumentKind, HardcopyScope, Length, PrintMappingTable,
+    ActiveHardcopySource, AuthoredSheetMedia, ContentExtent, HardcopyContentSection,
+    HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope, Length, PrintMappingTable,
 };
 use crate::product::{ContentDigest, ObjectRevision};
 use crate::results::report_document::{
     FigureSizing, FrozenReportArtifact, ReportBlockId, ReportPage, ReportReferenceMode,
 };
 use crate::state::{
-    AnalysisResultPayload, Bus, BusTap, Component, DesignNote, DocumentationShape, Junction,
-    NetLabel, SymbolDocument, Wire,
+    AnalysisResultPayload, Bus, BusTap, Component, DesignNote, DocumentationShape,
+    DrawingSheetTitleFieldId, Junction, NetLabel, SchematicSheetFormat, SymbolDocument, Wire,
 };
 use crate::workbench::documents::result_document::ResultViewer;
 
@@ -71,7 +73,7 @@ impl SemanticBounds {
         Ok(Self { minimum, maximum })
     }
 
-    pub(super) fn content_extent(self) -> Result<ContentExtent, HardcopySourceError> {
+    pub(crate) fn content_extent(self) -> Result<ContentExtent, HardcopySourceError> {
         let width = self
             .maximum
             .x_um
@@ -118,6 +120,23 @@ pub struct SemanticComponent {
 pub struct SemanticSchematic {
     /// Canonical active cell/view path used by property-display notes.
     pub view_path: String,
+    /// Authored physical drawing-sheet presentation for a governed sheet.
+    ///
+    /// This is intentionally independent of output media. `None` is retained
+    /// only for legacy unbounded schematic documents and selection hardcopy.
+    #[serde(default)]
+    pub drawing_sheet: Option<SchematicSheetFormat>,
+    /// Resolved automatic title-block values frozen with this hardcopy source.
+    ///
+    /// These values are source metadata, not authored overrides. Freezing
+    /// them here keeps desktop, browser-worker, preview, PDF, and raster
+    /// output identical even if the active workspace changes after queuing.
+    #[serde(default)]
+    pub drawing_sheet_title_values: BTreeMap<DrawingSheetTitleFieldId, String>,
+    /// Frozen authored snap-grid pitch in schematic world units. One world
+    /// unit is exactly [`super::SCHEMATIC_UNIT_UM`] micrometres.
+    #[serde(default = "default_schematic_grid_pitch_units")]
+    pub grid_pitch_units: i32,
     pub components: Vec<SemanticComponent>,
     pub wires: Vec<Wire>,
     pub buses: Vec<Bus>,
@@ -126,6 +145,10 @@ pub struct SemanticSchematic {
     pub net_labels: Vec<NetLabel>,
     pub design_notes: Vec<DesignNote>,
     pub documentation_shapes: Vec<DocumentationShape>,
+}
+
+const fn default_schematic_grid_pitch_units() -> i32 {
+    10
 }
 
 /// One immutable, physically mapped result trace.
@@ -310,6 +333,88 @@ impl ResolvedHardcopyDocument {
         self.content_extent
     }
 
+    /// The physical extent selected by a schematic-output policy.  The
+    /// resolved source remains an immutable snapshot of all content; this
+    /// accessor is the sole place publication narrows that snapshot to an
+    /// authored sheet.
+    pub fn content_extent_for_setup(
+        &self,
+        setup: crate::hardcopy::SchematicHardcopySetup,
+    ) -> Result<ContentExtent, HardcopySourceError> {
+        if setup.extent() == crate::hardcopy::SchematicHardcopyExtent::AuthoredDrawingSheet
+            && setup.outside_content()
+                == crate::hardcopy::OutsideSheetContentPolicy::ClipToAuthoredSheet
+            && let HardcopySemanticDocument::Schematic(schematic) = &self.semantic_document
+            && let Some(format) = &schematic.drawing_sheet
+        {
+            return super::authored_sheet_bounds(format)?.content_extent();
+        }
+        if let HardcopySemanticDocument::Aggregate(aggregate) = &self.semantic_document {
+            let layout = aggregate_output_layout(aggregate, setup)?;
+            let width = layout
+                .iter()
+                .map(|(_, extent, _)| extent.width().micrometres())
+                .max()
+                .unwrap_or(0);
+            let height = layout.last().map_or(Ok(0_i64), |(_, extent, origin)| {
+                origin
+                    .y_um
+                    .checked_add(
+                        i64::try_from(extent.height().micrometres())
+                            .map_err(|_| HardcopySourceError::CoordinateOverflow)?,
+                    )
+                    .ok_or(HardcopySourceError::CoordinateOverflow)
+            })?;
+            return ContentExtent::try_new(
+                Length::from_micrometres(width),
+                Length::from_micrometres(
+                    u64::try_from(height).map_err(|_| HardcopySourceError::CoordinateOverflow)?,
+                ),
+            )
+            .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()));
+        }
+        Ok(self.content_extent)
+    }
+
+    pub(crate) fn authored_sheet_bounds(
+        &self,
+        setup: crate::hardcopy::SchematicHardcopySetup,
+    ) -> Result<Option<SemanticBounds>, HardcopySourceError> {
+        if setup.extent() != crate::hardcopy::SchematicHardcopyExtent::AuthoredDrawingSheet
+            || setup.outside_content()
+                != crate::hardcopy::OutsideSheetContentPolicy::ClipToAuthoredSheet
+        {
+            return Ok(None);
+        }
+        match &self.semantic_document {
+            HardcopySemanticDocument::Schematic(schematic) => schematic
+                .drawing_sheet
+                .as_ref()
+                .map(super::authored_sheet_bounds)
+                .transpose(),
+            // An aggregate owns independently translated sheets. Its
+            // sections need their own projection, so retain the established
+            // aggregate extent rather than claiming one global sheet clip.
+            HardcopySemanticDocument::Aggregate(_) => Ok(None),
+            _ => Ok(None),
+        }
+    }
+
+    pub(crate) fn aggregate_layout_for_setup(
+        &self,
+        setup: crate::hardcopy::SchematicHardcopySetup,
+    ) -> Result<
+        Option<Vec<(&SemanticAggregateChild, ContentExtent, SemanticPoint)>>,
+        HardcopySourceError,
+    > {
+        match &self.semantic_document {
+            HardcopySemanticDocument::Aggregate(aggregate) => {
+                aggregate_output_layout(aggregate, setup).map(Some)
+            }
+            _ => Ok(None),
+        }
+    }
+
     /// Source-derived defaults keyed by stable semantic identity. Callers can
     /// overlay persisted user choices by `(kind, stable_id)` without relying
     /// on table position or display text.
@@ -318,33 +423,149 @@ impl ResolvedHardcopyDocument {
         &self.default_print_mapping
     }
 
+    /// Return whether any resolved schematic content crosses an authored
+    /// drawing-sheet boundary. `None` means this source has no authored
+    /// schematic drawing sheet, including symbol-only and result documents.
+    ///
+    /// Aggregate sources are evaluated child-by-child so an all-sheets print
+    /// fails closed when any one governed sheet needs an outside-content
+    /// decision.
+    pub fn schematic_drawing_sheet_has_outside_content(
+        &self,
+    ) -> Result<Option<bool>, HardcopySourceError> {
+        fn visit(document: &HardcopySemanticDocument) -> Result<(bool, bool), HardcopySourceError> {
+            match document {
+                HardcopySemanticDocument::Schematic(schematic) => {
+                    let Some(format) = schematic.drawing_sheet.as_ref() else {
+                        return Ok((false, false));
+                    };
+                    if super::semantic_is_empty(schematic) {
+                        return Ok((true, false));
+                    }
+                    let content = super::schematic_bounds(schematic)?;
+                    let sheet = super::authored_sheet_bounds(format)?;
+                    let outside = content.minimum.x_um < sheet.minimum.x_um
+                        || content.minimum.y_um < sheet.minimum.y_um
+                        || content.maximum.x_um > sheet.maximum.x_um
+                        || content.maximum.y_um > sheet.maximum.y_um;
+                    Ok((true, outside))
+                }
+                HardcopySemanticDocument::Aggregate(aggregate) => {
+                    let mut found = false;
+                    let mut outside = false;
+                    for child in &aggregate.children {
+                        let (child_found, child_outside) = visit(&child.document)?;
+                        found |= child_found;
+                        outside |= child_outside;
+                    }
+                    Ok((found, outside))
+                }
+                HardcopySemanticDocument::Symbol(_)
+                | HardcopySemanticDocument::Plot(_)
+                | HardcopySemanticDocument::ResultSummary(_)
+                | HardcopySemanticDocument::Report(_) => Ok((false, false)),
+            }
+        }
+
+        let (found, outside) = visit(&self.semantic_document)?;
+        Ok(found.then_some(outside))
+    }
+
     /// Ordered authenticated page groups for aggregate-aware pagination.
     /// Ordinary documents return an empty vector and retain legacy extent
     /// compilation; aggregate callers must pass every returned section to
     /// `HardcopyPlan::compile_with_sections`.
     pub fn hardcopy_sections(&self) -> Result<Vec<HardcopyContentSection>, HardcopySourceError> {
+        self.hardcopy_sections_for_setup(crate::hardcopy::SchematicHardcopySetup::default())
+    }
+
+    pub fn hardcopy_sections_for_setup(
+        &self,
+        setup: crate::hardcopy::SchematicHardcopySetup,
+    ) -> Result<Vec<HardcopyContentSection>, HardcopySourceError> {
         let HardcopySemanticDocument::Aggregate(aggregate) = &self.semantic_document else {
             return Ok(Vec::new());
         };
-        aggregate
-            .children
-            .iter()
-            .map(|child| {
-                let origin_x = u64::try_from(child.placement_origin.x_um)
+        aggregate_output_layout(aggregate, setup)?
+            .into_iter()
+            .map(|(child, extent, origin)| {
+                let origin_x = u64::try_from(origin.x_um)
                     .map_err(|_| HardcopySourceError::CoordinateOverflow)?;
-                let origin_y = u64::try_from(child.placement_origin.y_um)
+                let origin_y = u64::try_from(origin.y_um)
                     .map_err(|_| HardcopySourceError::CoordinateOverflow)?;
                 HardcopyContentSection::try_new(
                     child.ordinal,
                     child.content_digest,
                     Length::from_micrometres(origin_x),
                     Length::from_micrometres(origin_y),
-                    child.local_bounds.content_extent()?,
+                    extent,
                     child.page_break_before,
                 )
                 .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))
             })
             .collect()
+    }
+
+    /// Exact physical media for governed authored-sheet output, in the same
+    /// canonical order as aggregate hardcopy sections. This inventory is
+    /// sealed into [`PaperSize::MatchAuthoredSheets`] by the dialog before a
+    /// plan is compiled, so preview and publication resolve identical mixed
+    /// sheet sizes and orientations.
+    pub fn authored_sheet_output_media(
+        &self,
+    ) -> Result<Vec<AuthoredSheetMedia>, HardcopySourceError> {
+        fn from_format(
+            ordinal: u32,
+            format: &SchematicSheetFormat,
+        ) -> Result<AuthoredSheetMedia, HardcopySourceError> {
+            let (width_um, height_um) = format.oriented_dimensions_um();
+            AuthoredSheetMedia::try_new(
+                ordinal,
+                format.display(),
+                Length::from_micrometres(width_um),
+                Length::from_micrometres(height_um),
+            )
+            .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))
+        }
+
+        match &self.semantic_document {
+            HardcopySemanticDocument::Schematic(schematic) => {
+                let format = schematic.drawing_sheet.as_ref().ok_or_else(|| {
+                    HardcopySourceError::InvalidSheetPartition(
+                        "the selected schematic has no authored drawing sheet".to_owned(),
+                    )
+                })?;
+                Ok(vec![from_format(0, format)?])
+            }
+            HardcopySemanticDocument::Aggregate(aggregate) => aggregate
+                .children
+                .iter()
+                .map(|child| match child.document.as_ref() {
+                    HardcopySemanticDocument::Schematic(schematic) => schematic
+                        .drawing_sheet
+                        .as_ref()
+                        .ok_or_else(|| {
+                            HardcopySourceError::InvalidSheetPartition(format!(
+                                "sheet section {} has no authored drawing sheet",
+                                child.ordinal + 1
+                            ))
+                        })
+                        .and_then(|format| from_format(child.ordinal, format)),
+                    _ => Err(HardcopySourceError::InvalidSheetPartition(format!(
+                        "section {} is not a governed schematic sheet",
+                        child.ordinal + 1
+                    ))),
+                })
+                .collect(),
+            HardcopySemanticDocument::Symbol(_)
+            | HardcopySemanticDocument::Plot(_)
+            | HardcopySemanticDocument::ResultSummary(_)
+            | HardcopySemanticDocument::Report(_) => {
+                Err(HardcopySourceError::InvalidSheetPartition(
+                    "the selected source does not own authored drawing-sheet media".to_owned(),
+                ))
+            }
+        }
     }
 
     /// Bounded serde envelope for browser dedicated-worker transfer.
@@ -370,6 +591,46 @@ impl ResolvedHardcopyDocument {
             .map_err(|error| HardcopySourceError::InvalidWorkerSnapshot(error.to_string()))?;
         snapshot.into_resolved()
     }
+}
+
+/// Deterministic aggregate layout after applying the selected per-sheet
+/// output policy.  Only an authored-sheet clip changes a child footprint;
+/// all other document kinds retain their immutable resolved bounds.
+fn aggregate_output_layout<'a>(
+    aggregate: &'a SemanticAggregate,
+    setup: crate::hardcopy::SchematicHardcopySetup,
+) -> Result<Vec<(&'a SemanticAggregateChild, ContentExtent, SemanticPoint)>, HardcopySourceError> {
+    let mut next_y_um = 0_i64;
+    let mut layout = Vec::with_capacity(aggregate.children.len());
+    for (index, child) in aggregate.children.iter().enumerate() {
+        let extent = match child.document.as_ref() {
+            HardcopySemanticDocument::Schematic(schematic)
+                if setup.extent()
+                    == crate::hardcopy::SchematicHardcopyExtent::AuthoredDrawingSheet
+                    && setup.outside_content()
+                        == crate::hardcopy::OutsideSheetContentPolicy::ClipToAuthoredSheet =>
+            {
+                schematic.drawing_sheet.as_ref().map_or_else(
+                    || child.local_bounds.content_extent(),
+                    |format| super::authored_sheet_bounds(format)?.content_extent(),
+                )?
+            }
+            _ => child.local_bounds.content_extent()?,
+        };
+        layout.push((child, extent, SemanticPoint::new(0, next_y_um)));
+        next_y_um = next_y_um
+            .checked_add(
+                i64::try_from(extent.height().micrometres())
+                    .map_err(|_| HardcopySourceError::CoordinateOverflow)?,
+            )
+            .ok_or(HardcopySourceError::CoordinateOverflow)?;
+        if index + 1 != aggregate.children.len() {
+            next_y_um = next_y_um
+                .checked_add(super::REPORT_PAGE_GAP_UM)
+                .ok_or(HardcopySourceError::CoordinateOverflow)?;
+        }
+    }
+    Ok(layout)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -575,8 +836,14 @@ fn validate_worker_semantics(
                 }
             }
         }
-        HardcopySemanticDocument::Schematic(_)
-        | HardcopySemanticDocument::Symbol(_)
+        HardcopySemanticDocument::Schematic(schematic) => {
+            if schematic.grid_pitch_units <= 0 {
+                return Err(HardcopySourceError::InvalidWorkerSnapshot(
+                    "schematic grid pitch must be positive".to_owned(),
+                ));
+            }
+        }
+        HardcopySemanticDocument::Symbol(_)
         | HardcopySemanticDocument::Plot(_)
         | HardcopySemanticDocument::ResultSummary(_) => {}
     }

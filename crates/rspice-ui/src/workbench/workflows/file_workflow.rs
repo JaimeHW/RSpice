@@ -101,8 +101,14 @@ pub(crate) fn create_new_schematic(state: &mut AppState) {
     state.push_user_message(ConsoleMessage::info("Created new schematic"));
 }
 
-fn replace_active_schematic_document(state: &mut AppState, schematic: SchematicState) {
+fn replace_active_schematic_document(state: &mut AppState, mut schematic: SchematicState) {
+    // Loaded document data owns the grid pitch; the active device session owns
+    // snap targets and radius. Install both authorities before publishing the
+    // new active buffer, then mirror the derived pitch back into the session.
+    schematic.snap_engine = state.ui.schematic_snap.clone();
+    schematic.reconcile_grid_pitch_runtime();
     state.schematic = schematic;
+    state.ui.schematic_snap = state.schematic.snap_engine.clone();
     state.bump_active_schematic_epoch();
     match state.workspace.active_view_type() {
         ViewType::Schematic | ViewType::Testbench => {
@@ -368,14 +374,17 @@ pub(crate) fn save_schematic_to_path_with_io(
                 // legacy, or replaced recovery evidence is retained.
                 #[cfg(not(target_arch = "wasm32"))]
                 {
-                    if let Err(error) = crate::workbench::lifecycle::recovery_checkpoint::cleanup_checkpoint(path) {
+                    if let Err(error) =
+                        crate::workbench::lifecycle::recovery_checkpoint::cleanup_checkpoint(path)
+                    {
                         log::warn!("Saved source but autosave checkpoint cleanup failed: {error}");
                     }
                 }
             }
             state.sync_active_schematic_to_workspace();
             if saved_path_is_reopenable {
-                state.remember_recent_file(crate::workbench::app_state::RecentKind::Schematic, path);
+                state
+                    .remember_recent_file(crate::workbench::app_state::RecentKind::Schematic, path);
                 state.push_user_message(ConsoleMessage::info(format!("Saved: {}", path.display())));
             } else {
                 state.browser_schematic_save_name = file_name_string(path);
@@ -468,6 +477,33 @@ mod tests {
         fn saved_paths_are_reopenable(&self) -> bool {
             self.saved_paths_are_reopenable
         }
+    }
+
+    #[test]
+    fn replacing_the_active_document_reconciles_document_pitch_and_session_snap_preferences() {
+        let mut state = AppState::default();
+        state.ui.schematic_snap.snap_radius = 8;
+        state.ui.schematic_snap.snap_to_grid = false;
+        state.ui.schematic_snap.snap_to_wire_segments = false;
+        state.ui.schematic_snap.grid_size = 999;
+        let mut loaded = SchematicState::default();
+        loaded.document_policy.grid_pitch = crate::state::SchematicGridPitch::Metric;
+        loaded.grid_size = 123;
+        loaded.snap_engine = crate::state::SnapEngine::default();
+
+        replace_active_schematic_document(&mut state, loaded);
+
+        let expected = crate::state::SchematicGridPitch::Metric.canvas_grid_size();
+        assert_eq!(
+            state.schematic.document_policy.grid_pitch,
+            crate::state::SchematicGridPitch::Metric
+        );
+        assert_eq!(state.schematic.grid_size, expected);
+        assert_eq!(state.schematic.snap_engine.grid_size, expected);
+        assert_eq!(state.schematic.snap_engine.snap_radius, 8);
+        assert!(!state.schematic.snap_engine.snap_to_grid);
+        assert!(!state.schematic.snap_engine.snap_to_wire_segments);
+        assert_eq!(state.ui.schematic_snap, state.schematic.snap_engine);
     }
 
     #[test]

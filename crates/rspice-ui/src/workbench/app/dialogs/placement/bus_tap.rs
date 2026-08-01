@@ -82,7 +82,7 @@ impl RSpiceApp {
             return;
         }
 
-        let editable = !self.state.schematic.read_only;
+        let editable = !self.state.schematic_edit_read_only();
         let validation = if editable {
             validate_draft(&self.state.dialogs.bus_tap)
         } else {
@@ -126,7 +126,7 @@ impl RSpiceApp {
                 // frame. Re-parse the post-edit draft so Enter can never
                 // publish the prior frame's valid contract after a field was
                 // changed to an invalid value.
-                if !self.state.schematic.read_only
+                if !self.state.schematic_edit_read_only()
                     && let DraftValidation::Valid(pending) =
                         validate_draft(&self.state.dialogs.bus_tap)
                 {

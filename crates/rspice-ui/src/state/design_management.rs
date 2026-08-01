@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use crate::product::ContentDigest;
 
-use super::{ConfigurationSetId, Point};
+use super::{ConfigurationSetId, Point, SchematicPageOrientation, SchematicPageSize};
 
 pub const DESIGN_MANAGEMENT_SCHEMA_VERSION: u16 = 1;
 pub const SHEET_CATALOG_SCHEMA_VERSION: u16 = 1;
@@ -46,6 +46,9 @@ use validation::*;
 
 mod identity;
 pub use identity::*;
+
+mod drawing_sheet;
+pub use drawing_sheet::*;
 
 mod sheets;
 pub use sheets::*;

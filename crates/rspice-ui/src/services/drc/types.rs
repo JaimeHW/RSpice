@@ -27,7 +27,6 @@ impl DrcSeverity {
             Self::Critical => "Critical",
         }
     }
-
 }
 
 /// Type of DRC violation.
@@ -395,4 +394,3 @@ pub struct DrcSummary {
     pub info: usize,
     pub passed: bool,
 }
-

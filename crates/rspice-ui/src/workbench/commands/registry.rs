@@ -222,6 +222,10 @@ const SAVE_ALL: &[ShortcutBinding] = &[primary(
     chord(Key::S, true, false, true, "Ctrl+Shift+S"),
     ALL,
 )];
+const PAGE_SETUP: &[ShortcutBinding] = &[primary(
+    chord(Key::P, true, true, true, "Ctrl+Shift+Alt+P"),
+    ALL,
+)];
 const CLOSE_DOCUMENT: &[ShortcutBinding] = &[
     primary(chord(Key::W, true, false, false, "Ctrl+W"), DESKTOP),
     alternate(
@@ -239,7 +243,7 @@ const PRINT_HARDCOPY: &[ShortcutBinding] = &[
 ];
 const EXPORT_ACTIVE_VIEW: &[ShortcutBinding] = &[
     primary(chord(Key::P, true, false, true, "Ctrl+Shift+P"), DESKTOP),
-    alternate(chord(Key::P, true, true, true, "Ctrl+Alt+Shift+P"), HOST),
+    alternate(chord(Key::E, true, true, true, "Ctrl+Alt+Shift+E"), HOST),
 ];
 const EXIT: &[ShortcutBinding] = &[primary(
     chord(Key::F4, false, true, false, "Alt+F4"),
@@ -280,6 +284,8 @@ const ZOOM_IN: &[ShortcutBinding] = &[
 ];
 const ZOOM_OUT: &[ShortcutBinding] = &[primary(chord(Key::Minus, false, false, false, "−"), ALL)];
 const ZOOM_FIT: &[ShortcutBinding] = &[primary(chord(Key::F, false, false, false, "F"), ALL)];
+const FIT_SCHEMATIC_CONTENT: &[ShortcutBinding] =
+    &[primary(chord(Key::F, false, false, true, "Shift+F"), ALL)];
 const GRID: &[ShortcutBinding] = &[primary(chord(Key::G, false, false, false, "G"), ALL)];
 const FULL_SCREEN: &[ShortcutBinding] = &[
     primary(chord(Key::F11, false, false, false, "F11"), DESKTOP),
@@ -436,13 +442,15 @@ impl Command {
                 | Self::CloseAllDocuments
                 | Self::CloseProject
                 | Self::NewCell
-                | Self::OpenNetlist
                 | Self::ImportNetlist
                 | Self::ImportVerilogA
+                | Self::ImportResultDataset
                 | Self::ExportSchematicSvg
                 | Self::ExportWaveformsCsv
                 | Self::ExportNetlist(_)
                 | Self::PageSetup
+                | Self::SheetFormatManager
+                | Self::CustomSheetSizes
                 | Self::PrintHardcopy
                 | Self::ExportActiveView
                 | Self::FindInDesign
@@ -459,7 +467,13 @@ impl Command {
                 | Self::PreflightChecks
                 | Self::SimulationOptions
                 | Self::GenerateNetlist
+                | Self::DatasetManifestBrowser
+                | Self::CreateResultDocument
                 | Self::WaveformCalculator
+                | Self::CompareResultDatasets
+                | Self::ReviewNotes
+                | Self::MeasurementLibrary
+                | Self::FamilySlicing
                 | Self::ResultViewer(_)
                 | Self::EditSpecifications
                 | Self::VerificationPage(_)
@@ -510,8 +524,12 @@ impl Command {
                 | Self::OpenNetlist
                 | Self::ImportNetlist
                 | Self::ImportVerilogA
+                | Self::ImportResultDataset
+                | Self::CreateResultDocument
                 | Self::RescanModelLibraries
                 | Self::PageSetup
+                | Self::SheetFormatManager
+                | Self::CustomSheetSizes
                 | Self::PrintHardcopy
                 | Self::ExportActiveView
                 | Self::CheckAndSave
@@ -550,7 +568,6 @@ impl Command {
                 | Self::NextWorkspace
                 | Self::ToggleConsoleMaximized
                 | Self::ClearConsole
-                | Self::ReportAuthoring
                 | Self::SaveReportDocument
                 | Self::AddReportPage
                 | Self::ReportPageProperties
@@ -573,6 +590,7 @@ impl Command {
             | Self::ZoomIn
             | Self::ZoomOut
             | Self::ZoomFit
+            | Self::FitSchematicContent
             | Self::ZoomOneToOne
             | Self::SelectTool => ShortcutContext::EditContext,
             Self::FindInDesign
@@ -600,6 +618,11 @@ impl Command {
             Self::AscendHierarchy
             | Self::DescendHierarchy
             | Self::DescendHierarchyDirect
+            | Self::PageSetup
+            | Self::SheetFormatManager
+            | Self::CustomSheetSizes
+            | Self::GridSnapRouting
+            | Self::DrawingSheetLayers
             | Self::VisibilityOptions
             | Self::RunChecks
             | Self::CheckAndSave
@@ -608,11 +631,19 @@ impl Command {
             | Self::SelectionBulkEdit
             | Self::ConfigurationSets
             | Self::ReviewComments
-            | Self::RevisionHistory => ShortcutContext::DesignWorkspace,
+            | Self::RevisionHistory
+            | Self::DesignSpecialistWorkspaces => ShortcutContext::DesignWorkspace,
             Self::PreflightChecks => ShortcutContext::SimulationWorkspace,
             Self::NextViolation | Self::PreviousViolation => ShortcutContext::ViolationNavigation,
             Self::ClearResults
+            | Self::ImportResultDataset
+            | Self::DatasetManifestBrowser
+            | Self::CreateResultDocument
             | Self::WaveformCalculator
+            | Self::CompareResultDatasets
+            | Self::ReviewNotes
+            | Self::MeasurementLibrary
+            | Self::FamilySlicing
             | Self::ResultViewer(_)
             | Self::AddVisualizationPane
             | Self::VisualizationTraceManager
@@ -659,7 +690,8 @@ impl Command {
             Self::SaveAll => SAVE_ALL,
             Self::CloseActiveDocument => CLOSE_DOCUMENT,
             Self::CloseProject => CLOSE_PROJECT,
-            Self::PageSetup => NONE,
+            Self::PageSetup => PAGE_SETUP,
+            Self::SheetFormatManager | Self::CustomSheetSizes => NONE,
             Self::PrintHardcopy => PRINT_HARDCOPY,
             Self::ExportActiveView => EXPORT_ACTIVE_VIEW,
             Self::Exit => EXIT,
@@ -678,7 +710,10 @@ impl Command {
             Self::ZoomIn => ZOOM_IN,
             Self::ZoomOut => ZOOM_OUT,
             Self::ZoomFit => ZOOM_FIT,
+            Self::FitSchematicContent => FIT_SCHEMATIC_CONTENT,
             Self::CycleGrid => GRID,
+            Self::GridSnapRouting => NONE,
+            Self::DrawingSheetLayers => NONE,
             Self::VisibilityOptions => NONE,
             Self::ToggleFullScreen => FULL_SCREEN,
             Self::EngineeringTableView => ENGINEERING_TABLE_VIEW,
@@ -778,6 +813,9 @@ impl Command {
             return CommandAvailability::Available;
         }
         let reason = match self {
+            Self::OpenWorkspace(workspace) if workspace != Workspace::Project => {
+                "no project is open"
+            }
             Self::Save | Self::SaveAs | Self::SaveAll | Self::CloseProject => "no project is open",
             Self::RevertActiveDocument => "active document has no changes to revert",
             Self::CloseActiveDocument => "no closable document is active",
@@ -790,6 +828,60 @@ impl Command {
             Self::MonitorRecovery => "there are no secondary application windows to recover",
             Self::Undo => "nothing to undo",
             Self::Redo => "nothing to redo",
+            Self::PlaceInstance
+            | Self::PlaceWire
+            | Self::PlaceBus
+            | Self::PlaceBusTap
+            | Self::PlaceJunction
+            | Self::PlaceLabel
+            | Self::PlaceProbe
+            | Self::PlacePin
+            | Self::PlaceText
+            | Self::PlaceShape
+            | Self::Place(_)
+                if !super::active_schematic_editor(app) =>
+            {
+                "open an editable schematic or testbench"
+            }
+            Self::PlaceInstance
+            | Self::PlaceWire
+            | Self::PlaceBus
+            | Self::PlaceBusTap
+            | Self::PlaceJunction
+            | Self::PlaceLabel
+            | Self::PlaceProbe
+            | Self::PlacePin
+            | Self::PlaceText
+            | Self::PlaceShape
+            | Self::Place(_)
+                if app.state.schematic_edit_read_only() =>
+            {
+                "the active schematic is read-only"
+            }
+            Self::MoveSelection
+            | Self::StretchSelection
+            | Self::ArraySelection
+            | Self::ReplaceInstance
+            | Self::CreateHierarchy
+            | Self::RotateSelection
+            | Self::MirrorSelectionHorizontal
+            | Self::MirrorSelectionVertical
+                if !super::active_schematic_editor(app) =>
+            {
+                "open an editable schematic or testbench"
+            }
+            Self::MoveSelection
+            | Self::StretchSelection
+            | Self::ArraySelection
+            | Self::ReplaceInstance
+            | Self::CreateHierarchy
+            | Self::RotateSelection
+            | Self::MirrorSelectionHorizontal
+            | Self::MirrorSelectionVertical
+                if app.state.schematic_edit_read_only() =>
+            {
+                "the active schematic is read-only"
+            }
             Self::Cut
             | Self::Copy
             | Self::Duplicate
@@ -804,18 +896,68 @@ impl Command {
             | Self::MirrorSelectionVertical => "select an editable object",
             Self::ConnectivityManager => "open a schematic or testbench",
             Self::DesignManagement => "open an editable schematic",
+            Self::PageSetup if app.state.schematic_edit_read_only() => {
+                "the active schematic is read-only"
+            }
+            Self::PageSetup => "open an editable schematic or testbench drawing sheet",
+            Self::SheetFormatManager if app.state.schematic_edit_read_only() => {
+                "the active schematic is read-only"
+            }
+            Self::SheetFormatManager
+                if !crate::workbench::app::drawing_sheet_setup_available(app) =>
+            {
+                "open an editable schematic or testbench drawing sheet"
+            }
+            Self::SheetFormatManager if app.state.dialogs.drawing_sheet_support.manager.open => {
+                "Sheet Format Manager is already open"
+            }
+            Self::SheetFormatManager
+                if app
+                    .state
+                    .workspace
+                    .design_management
+                    .sheet_catalog(&app.state.workspace.active_key())
+                    .and_then(|catalog| catalog.active())
+                    .is_none() =>
+            {
+                "create the governed drawing sheet in Page Setup first"
+            }
+            Self::SheetFormatManager => "command is unavailable in this context",
             Self::SelectionBulkEdit => "open a schematic project",
             Self::ConfigurationSets => "open a project",
             Self::ReviewComments => "open a schematic project",
-            Self::RevisionHistory => "open a schematic project",
+            Self::RevisionHistory => "open a project",
             Self::Paste => "clipboard has no compatible content",
             Self::RenameSelection => "select one editable component, net label, or declared bus",
-            Self::ObjectProperties => "select one editable object",
+            Self::ObjectProperties => "select one inspectable object",
+            Self::AscendHierarchy if !super::active_schematic_editor(app) => {
+                "open a schematic or testbench"
+            }
             Self::AscendHierarchy => "already at top hierarchy",
+            Self::DescendHierarchy | Self::DescendHierarchyDirect
+                if !super::active_schematic_editor(app) =>
+            {
+                "open a schematic or testbench"
+            }
             Self::DescendHierarchy | Self::DescendHierarchyDirect => {
                 "select one hierarchical instance"
             }
+            Self::CheckAndSave if !super::active_schematic_editor(app) => {
+                "open an editable schematic or testbench"
+            }
+            Self::CheckAndSave if app.state.schematic_edit_read_only() => {
+                "the active schematic is read-only"
+            }
             Self::RunSimulation => "active plan is not runnable",
+            Self::OpenNetlist | Self::ImportNetlist
+                if app.state.simulation.active_execution.is_some()
+                    || app.state.simulation.is_running =>
+            {
+                "an active simulation execution still owns the project"
+            }
+            Self::ImportNetlist if app.state.workbench.safe_mode.project_read_only() => {
+                "the project is open read-only"
+            }
             Self::StopSimulation
                 if app.state.simulation.is_running
                     && !crate::simulation::execution::execution_target_supports_cancellation() =>
@@ -829,7 +971,45 @@ impl Command {
             {
                 "an active simulation execution still owns result history"
             }
+            Self::ImportResultDataset
+                if app.state.simulation.active_execution.is_some()
+                    || app.state.simulation.is_running =>
+            {
+                "an active simulation execution still owns result history"
+            }
+            Self::ImportResultDataset if app.state.workbench.safe_mode.project_read_only() => {
+                "the project is open read-only"
+            }
             Self::ClearResults | Self::ExportWaveformsCsv => "no result dataset is available",
+            Self::CompareResultDatasets if app.state.workbench.workspace != Workspace::Results => {
+                "open an active result document"
+            }
+            Self::CompareResultDatasets => {
+                "a second compatible immutable result dataset is required"
+            }
+            Self::DatasetManifestBrowser | Self::CreateResultDocument => {
+                "no retained result dataset is available"
+            }
+            Self::ReviewNotes
+            | Self::MeasurementLibrary
+            | Self::FamilySlicing
+            | Self::VisualizationTraceManager
+            | Self::VisualizationCursorManager
+            | Self::VisualizationDocumentProperties
+                if !matches!(
+                    app.state.workbench.current_route().surface_id(),
+                    crate::workbench::SurfaceId::Results
+                        | crate::workbench::SurfaceId::VisualizationStudio
+                ) =>
+            {
+                "open an active result document"
+            }
+            Self::ReviewNotes
+            | Self::MeasurementLibrary
+            | Self::FamilySlicing
+            | Self::VisualizationTraceManager
+            | Self::VisualizationCursorManager
+            | Self::VisualizationDocumentProperties => "no retained result dataset is available",
             Self::ToggleResultsSplit if !app.state.workbench.supports_results_split() => {
                 "open Design, Netlist, or Simulation setup"
             }

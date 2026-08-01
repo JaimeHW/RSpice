@@ -1183,7 +1183,6 @@ impl ModelEditorDraft {
     }
 }
 
-
 /// Runtime-only state for one cooperative qualification pass. A completed
 /// suite is committed to the draft only after its final vector succeeds or
 /// fails with a complete, validated platform record. Partial vectors never
@@ -2420,8 +2419,6 @@ impl ModelEditorState {
         .map_err(|error| error.to_string())
     }
 }
-
-
 
 #[cfg(test)]
 mod tests;

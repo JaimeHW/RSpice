@@ -24,7 +24,7 @@ pub struct NativeJitArgs {
     pub samples: usize,
 
     /// Required bytecode/native median speedup. Set lower for exploratory local runs.
-    #[arg(long, default_value_t = 1.10)]
+    #[arg(long, default_value_t = 3.0)]
     pub min_speedup: f64,
 
     /// Required dense entrypoint bytecode/native median speedup.

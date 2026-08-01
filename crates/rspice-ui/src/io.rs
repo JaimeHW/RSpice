@@ -20,9 +20,7 @@ pub(crate) mod waveform_io;
 
 // Re-exports
 pub use netlist_export::NetlistFormat;
-pub use project_execution::{
-    PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION, ProjectExecutionContext,
-};
+pub use project_execution::{PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION, ProjectExecutionContext};
 #[allow(deprecated)]
 pub use project_io::{
     ProjectFile, ProjectIoError, ProjectSimulationResults, load_project_file,

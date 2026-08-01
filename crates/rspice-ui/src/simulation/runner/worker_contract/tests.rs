@@ -25,9 +25,9 @@ pub(super) fn retained_pss_operating_point() -> rspice_core::engine::PssOperatin
         iterations: 2,
         residual_norm: 1.0e-10,
         time,
-        waveforms: vec![
-            rspice_core::analysis::pss::PeriodicWaveform::from_values(waveform),
-        ],
+        waveforms: vec![rspice_core::analysis::pss::PeriodicWaveform::from_values(
+            waveform,
+        )],
         node_names: vec!["out".to_owned()],
         period_detected: false,
         floquet_multipliers: vec![num_complex::Complex64::new(0.9, 0.0)],

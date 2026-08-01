@@ -16,11 +16,7 @@ impl PoleZeroAnalyzer {
         out
     }
 
-    pub(in crate::analysis::pole_zero) fn matrix_subtract(
-        &self,
-        a: &Matrix,
-        b: &Matrix,
-    ) -> Matrix {
+    pub(in crate::analysis::pole_zero) fn matrix_subtract(&self, a: &Matrix, b: &Matrix) -> Matrix {
         assert_eq!(a.rows, b.rows);
         assert_eq!(a.cols, b.cols);
         let mut out = Matrix::zeros(a.rows, a.cols);
@@ -32,11 +28,7 @@ impl PoleZeroAnalyzer {
         out
     }
 
-    pub(in crate::analysis::pole_zero) fn matrix_multiply(
-        &self,
-        a: &Matrix,
-        b: &Matrix,
-    ) -> Matrix {
+    pub(in crate::analysis::pole_zero) fn matrix_multiply(&self, a: &Matrix, b: &Matrix) -> Matrix {
         assert_eq!(a.cols, b.rows);
         let mut out = Matrix::zeros(a.rows, b.cols);
         for i in 0..a.rows {
@@ -115,10 +107,7 @@ impl PoleZeroAnalyzer {
         Some(out)
     }
 
-    pub(in crate::analysis::pole_zero) fn qr_eigenvalues(
-        &self,
-        matrix: &Matrix,
-    ) -> Vec<Complex> {
+    pub(in crate::analysis::pole_zero) fn qr_eigenvalues(&self, matrix: &Matrix) -> Vec<Complex> {
         let n = matrix.rows;
         if n == 0 {
             return Vec::new();

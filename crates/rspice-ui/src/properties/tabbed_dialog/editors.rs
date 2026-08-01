@@ -297,7 +297,6 @@ fn value_for_property_schema(def: &PropertyDefinition, value_si: f64) -> f64 {
     }
 }
 
-
 /// Enum editor — chips for small sets, dropdown beyond that.
 fn render_enum_editor(
     ui: &mut Ui,

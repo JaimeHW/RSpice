@@ -18,8 +18,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::app_state::AppState;
-use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 use crate::io::{SignalType, WaveformDataset, WaveformFormat, WaveformSignal, WaveformWriter};
 use crate::services::yield_manager::{YieldAnalysisManager, YieldAnalysisProvenance};
 use crate::simulation::config::{
@@ -44,6 +42,8 @@ use crate::state::{
     SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
     SoaViolationSeverityEvidence,
 };
+use crate::workbench::app_state::{ActiveViewer, AppState, SpecializedViewerCacheProvenance};
+use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 
 mod analysis_commands;
 mod analysis_helpers;
@@ -245,6 +245,7 @@ impl SimulationController {
 
         // Apply/cancel background transient post-processing work after any
         // selection changes that happened during the previous frame.
+        state.synchronize_specialized_viewer_cache_authority();
         self.sync_transient_post_views(state);
 
         // Update running state
@@ -571,10 +572,11 @@ impl SimulationController {
         self.current_spec = Some(spec.clone());
         self.current_provenance = Some(provenance);
         self.current_config_digest = Some(next_analysis.config_digest());
-        self.current_effective_source_content_digest =
-            Some(crate::workbench::documents::netlist_document::source_content_digest(
+        self.current_effective_source_content_digest = Some(
+            crate::workbench::documents::netlist_document::source_content_digest(
                 next_analysis.executable_netlist(),
-            ));
+            ),
+        );
         self.current_op_effective_source_content_digest = config.as_ref().and_then(|config| {
             let AnalysisConfig::DcOp(config) = config else {
                 return None;
@@ -1506,9 +1508,7 @@ impl SimulationController {
     pub fn abort(&self) {
         self.runner.abort();
     }
-
 }
-
 
 #[cfg(test)]
 mod tests;

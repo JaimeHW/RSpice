@@ -623,8 +623,9 @@ impl SnapEngine {
 
     /// Collect wire segment snap targets
     ///
-    /// Note: Wire segment midpoints are snapped to the grid to ensure all connection
-    /// points are grid-aligned. This is the commercial-standard approach (Cadence style).
+    /// In grid mode, wire-segment attachments remain grid aligned. In Free
+    /// mode, the geometrically closest integer schematic coordinate is kept so
+    /// disabling grid intersections cannot silently quantize the attachment.
     fn collect_wire_segment_targets(
         &self,
         pos: Point,
@@ -633,9 +634,15 @@ impl SnapEngine {
     ) {
         for wire in wires {
             for (idx, segment) in wire.segments().enumerate() {
-                // Find closest point on segment, then snap to grid for commercial-grade alignment
+                // Find the closest representable point on the segment. Grid
+                // quantization is conditional: `Free` is an exact no-grid
+                // contract, not merely a hidden-grid presentation.
                 let closest_raw = segment.closest_point(pos);
-                let closest = self.snap_to_grid_point(closest_raw);
+                let closest = if self.snap_to_grid {
+                    self.snap_to_grid_point(closest_raw)
+                } else {
+                    closest_raw
+                };
 
                 // Recalculate distance after grid snapping
                 let dx = (closest.x - pos.x) as f64;
@@ -1158,6 +1165,26 @@ mod tests {
         // Projection lands on the start vertex: no segment candidate.
         let result = engine.find_snap_target(Point::new(0, 1), &[], &wires, &[]);
         assert!(result.target.is_none());
+    }
+
+    #[test]
+    fn free_mode_keeps_unquantized_wire_segment_attachment() {
+        let wires = [Wire::segment(3, Point::origin(), Point::new(40, 0))];
+        let mut engine = engine_with(|engine| {
+            engine.grid_size = 10;
+            engine.snap_radius = 5;
+            engine.snap_to_terminals = false;
+            engine.snap_to_junctions = false;
+            engine.snap_to_wire_endpoints = false;
+        });
+
+        let grid = engine.find_snap_target(Point::new(17, 3), &[], &wires, &[]);
+        assert_eq!(grid.snapped_position, Point::new(20, 0));
+
+        engine.snap_to_grid = false;
+        let free = engine.find_snap_target(Point::new(17, 3), &[], &wires, &[]);
+        assert_eq!(free.snapped_position, Point::new(17, 0));
+        assert!(free.show_indicator);
     }
 
     /// Multi-segment wires report the index of the segment that was hit.

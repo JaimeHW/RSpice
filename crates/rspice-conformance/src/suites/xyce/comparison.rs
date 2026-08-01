@@ -2877,11 +2877,10 @@ impl XyceTestRunner {
                 .iter()
                 .map(|point| (point.sweep_value, point.result.clone()))
                 .collect::<Vec<_>>();
-            let equation_traces =
-                rspice_core::analysis::evaluate_dc_equation_measurements(
-                    &batch.netlist,
-                    &equation_sweep,
-                )?;
+            let equation_traces = rspice_core::analysis::evaluate_dc_equation_measurements(
+                &batch.netlist,
+                &equation_sweep,
+            )?;
             let accepted_axis = batch
                 .results
                 .iter()
@@ -3996,9 +3995,7 @@ impl XyceTestRunner {
             .ok_or_else(|| "NOISE simulation produced no points".to_string())?;
         let signals = series.signal_map();
         let equation_traces =
-            rspice_core::analysis::evaluate_noise_equation_measurements(
-                netlist, results,
-            )?;
+            rspice_core::analysis::evaluate_noise_equation_measurements(netlist, results)?;
         let measurement_output_traces =
             Self::noise_measurement_output_traces(netlist, results, &data_columns)?;
         let comp_columns = data_columns
@@ -4403,10 +4400,7 @@ impl XyceTestRunner {
             "AC_CONT",
             &[],
             |trace_netlist| {
-                rspice_core::analysis::evaluate_ac_continuous_measurements(
-                    trace_netlist,
-                    results,
-                )
+                rspice_core::analysis::evaluate_ac_continuous_measurements(trace_netlist, results)
             },
         )?;
         let phase_output_radians = Self::source_requests_ac_phase_output_radians(source);
@@ -4658,17 +4652,12 @@ impl XyceTestRunner {
             .rows
             .iter()
             .map(|row| {
-                row.get(layout.time_column)
-                    .copied()
-                    .unwrap_or(f64::NAN)
-                    / tran_time_scale_factor
+                row.get(layout.time_column).copied().unwrap_or(f64::NAN) / tran_time_scale_factor
             })
             .collect::<Vec<_>>();
         let index_aligned_grid = result.time.len() == reference_times.len()
-            && reference_times
-                .windows(2)
-                .zip(result.time.windows(2))
-                .all(|(reference_window, actual_window)| {
+            && reference_times.windows(2).zip(result.time.windows(2)).all(
+                |(reference_window, actual_window)| {
                     let reference_dt = reference_window[1] - reference_window[0];
                     let actual_dt = actual_window[1] - actual_window[0];
                     if !reference_dt.is_finite()
@@ -4680,7 +4669,8 @@ impl XyceTestRunner {
                     }
                     let ratio = actual_dt / reference_dt;
                     ratio.is_finite() && (0.75..=1.333_333_333_333_333_3).contains(&ratio)
-                });
+                },
+            );
         let stateful_waveforms = data_columns
             .iter()
             .map(|probe| Self::derived_tran_probe_waveform(probe, netlist, result))
@@ -4693,10 +4683,7 @@ impl XyceTestRunner {
             "TRAN_CONT",
             &[],
             |trace_netlist| {
-                rspice_core::analysis::evaluate_tran_continuous_measurements(
-                    trace_netlist,
-                    result,
-                )
+                rspice_core::analysis::evaluate_tran_continuous_measurements(trace_netlist, result)
             },
         )?;
 
@@ -4767,11 +4754,7 @@ impl XyceTestRunner {
                                         )
                                     })?
                             } else {
-                                Self::interpolate_transient_waveform_at(
-                                    &result.time,
-                                    values,
-                                    time,
-                                )?
+                                Self::interpolate_transient_waveform_at(&result.time, values, time)?
                             }
                         }
                         None if index_aligned_grid => Self::evaluate_tran_probe(

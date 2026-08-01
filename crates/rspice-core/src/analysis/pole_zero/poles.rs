@@ -95,9 +95,7 @@ impl PoleZeroAnalyzer {
     /// Cx' + Gx = 0
     /// Split x into dynamic/algebraic variables and eliminate algebraic states.
     /// This yields x_d' = A x_d where A is used for pole extraction.
-    pub(in crate::analysis::pole_zero) fn build_descriptor_state_matrix(
-        &self,
-    ) -> Option<Matrix> {
+    pub(in crate::analysis::pole_zero) fn build_descriptor_state_matrix(&self) -> Option<Matrix> {
         let partition = self.partition_descriptor()?;
         if !self.partition_is_regular(&partition) {
             return None;

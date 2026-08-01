@@ -1,8 +1,6 @@
 use num_complex::Complex64;
 use rspice_core::AtomicAbort;
-use rspice_core::analysis::harmonic_balance::{
-    HbConfig, HbContinuationLimitation, HbReactiveKind,
-};
+use rspice_core::analysis::harmonic_balance::{HbConfig, HbContinuationLimitation, HbReactiveKind};
 use rspice_core::engine::{Engine, SimulationConfig, SimulationError};
 use rspice_core::netlist::Netlist;
 use std::f64::consts::{PI, TAU};

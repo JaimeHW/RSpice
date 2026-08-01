@@ -67,7 +67,6 @@ impl TempConfig {
         Ok(())
     }
 
-
     pub fn num_temps(&self) -> usize {
         if !self.specific_temps.is_empty() {
             return self.specific_temps.len();

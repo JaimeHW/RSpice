@@ -23,6 +23,7 @@ struct PendingPageSetup {
     opened_source: std::sync::Arc<ResolvedHardcopyDocument>,
     setup: crate::hardcopy::HardcopySetup,
     staged_mapping: StagedPrintMappingPersistence,
+    schematic_authority: Option<super::SchematicPageSetupAuthority>,
 }
 
 pub(super) fn register_repaint_context(context: &egui::Context) {
@@ -41,24 +42,37 @@ use crate::hardcopy::{
     OutputFormat, PrinterJobSettings, PrinterMediaSource, ResolvedOrientation,
 };
 use crate::product::ContentDigest;
-#[cfg(target_arch = "wasm32")]
-use crate::workbench::workflows::export_workflow::deterministic_stored_zip;
-use crate::workbench::workflows::export_workflow::{
-    ObservedExportDestination, SaveDialogConfig, export_completion_message,
-};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::hardcopy_adapters::print::discover_native_printers;
 #[cfg(target_arch = "wasm32")]
 use crate::workbench::hardcopy_adapters::print::{
     BrowserPrintReservation, finalize_browser_print, reserve_browser_print_window,
 };
-use crate::workbench::hardcopy_adapters::print::{HardcopyCancellationToken, PrinterCapabilitySnapshot};
+use crate::workbench::hardcopy_adapters::print::{
+    HardcopyCancellationToken, PrinterCapabilitySnapshot,
+};
 #[cfg(test)]
 use crate::workbench::hardcopy_adapters::render::HardcopyRenderer;
 #[cfg(target_arch = "wasm32")]
 use crate::workbench::hardcopy_adapters::render::RenderedHardcopyPublication;
-use crate::workbench::hardcopy_adapters::render::{HardcopyPublicationTimestamp, HardcopySceneMetadata};
+use crate::workbench::hardcopy_adapters::render::{
+    HardcopyPublicationTimestamp, HardcopySceneMetadata,
+};
 use crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
+#[cfg(target_arch = "wasm32")]
+use crate::workbench::workflows::export_workflow::deterministic_stored_zip;
+use crate::workbench::workflows::export_workflow::{
+    ObservedExportDestination, SaveDialogConfig, export_completion_message,
+};
+
+fn retain_hardcopy_receipt(app: &mut RSpiceApp, receipt: HardcopyReceipt) -> Result<(), String> {
+    app.state
+        .workspace
+        .record_hardcopy_receipt(receipt.clone())
+        .map_err(|error| error.to_string())?;
+    app.state.dialogs.hardcopy.last_receipt = Some(receipt);
+    Ok(())
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 thread_local! {
@@ -216,22 +230,25 @@ pub(crate) fn open_hardcopy_workflow(app: &mut RSpiceApp, workflow: HardcopyWork
             return;
         }
     };
-    let prepared = match crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
-        &app.state,
-        &source_key,
-        scope.clone(),
-    ) {
-        Ok(prepared) => prepared,
-        Err(error) => {
-            app.state.push_user_message(ConsoleMessage::warning(format!(
-                "{} is unavailable: {error}.",
-                workflow.title()
-            )));
-            return;
-        }
-    };
+    let prepared =
+        match crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
+            &app.state,
+            &source_key,
+            scope.clone(),
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                app.state.push_user_message(ConsoleMessage::warning(format!(
+                    "{} is unavailable: {error}.",
+                    workflow.title()
+                )));
+                return;
+            }
+        };
     let candidates =
-        crate::workbench::hardcopy_adapters::sources::enumerate_retained_hardcopy_sources(&app.state);
+        crate::workbench::hardcopy_adapters::sources::enumerate_retained_hardcopy_sources(
+            &app.state,
+        );
     app.state.dialogs.hardcopy.begin_open(workflow, candidates);
     let generation = app
         .state
@@ -256,17 +273,18 @@ pub(super) fn select_retained_source(
     source_key: &str,
     scope: crate::hardcopy::HardcopyScope,
 ) {
-    let prepared = match crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
-        &app.state,
-        source_key,
-        scope.clone(),
-    ) {
-        Ok(prepared) => prepared,
-        Err(error) => {
-            app.state.dialogs.hardcopy.error = Some(error.to_string());
-            return;
-        }
-    };
+    let prepared =
+        match crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
+            &app.state,
+            source_key,
+            scope.clone(),
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                app.state.dialogs.hardcopy.error = Some(error.to_string());
+                return;
+            }
+        };
     app.state.dialogs.hardcopy.busy = true;
     app.state.dialogs.hardcopy.error = None;
     let generation = app
@@ -646,13 +664,30 @@ fn apply_open_resolved(
         .setup_for(resolved.authority())
         .map_err(|error| error.to_string())?
         .map(|saved| saved.setup().clone());
+    let schematic_authority = if workflow == HardcopyWorkflow::PageSetup {
+        active_schematic_page_authority(app, &resolved)
+    } else {
+        None
+    };
+    let seeded = if saved.is_none() {
+        schematic_authority
+            .as_ref()
+            .map(|authority| {
+                authored_sheet_format(&app.state, authority)
+                    .and_then(setup_seeded_from_sheet_format)
+            })
+            .transpose()?
+    } else {
+        None
+    };
     let metadata = metadata_for(app, &resolved).map_err(|error| error.to_string())?;
     let source_candidates = app.state.dialogs.hardcopy.source_candidates.clone();
     app.state
         .dialogs
         .hardcopy
-        .open_resolved(workflow, resolved, saved.as_ref())
+        .open_resolved(workflow, resolved, saved.as_ref().or(seeded.as_ref()))
         .map_err(|error| error.to_string())?;
+    app.state.dialogs.hardcopy.schematic_page_authority = schematic_authority;
     app.state.dialogs.hardcopy.metadata = Some(metadata);
     app.state.dialogs.hardcopy.source_candidates = source_candidates;
     #[cfg(not(target_arch = "wasm32"))]
@@ -670,22 +705,227 @@ fn apply_selected_resolved(
     app: &mut RSpiceApp,
     resolved: ResolvedHardcopyDocument,
 ) -> Result<(), String> {
+    let workflow = app.state.dialogs.hardcopy.workflow;
+    let schematic_authority = if workflow == HardcopyWorkflow::PageSetup {
+        active_schematic_page_authority(app, &resolved)
+    } else {
+        None
+    };
+    let saved = app
+        .state
+        .workspace
+        .hardcopy_setups
+        .setup_for(resolved.authority())
+        .map_err(|error| error.to_string())?
+        .map(|saved| saved.setup().clone());
+    let seeded = if saved.is_none() {
+        schematic_authority
+            .as_ref()
+            .map(|authority| {
+                authored_sheet_format(&app.state, authority)
+                    .and_then(setup_seeded_from_sheet_format)
+            })
+            .transpose()?
+    } else {
+        None
+    };
     let metadata = metadata_for(app, &resolved).map_err(|error| error.to_string())?;
-    let mapping = super::merge_print_mapping(
-        resolved.default_print_mapping(),
-        &app.state.dialogs.hardcopy.print_mapping,
+    let source_candidates = app.state.dialogs.hardcopy.source_candidates.clone();
+    app.state
+        .dialogs
+        .hardcopy
+        .open_resolved(workflow, resolved, saved.as_ref().or(seeded.as_ref()))
+        .map_err(|error| error.to_string())?;
+    app.state.dialogs.hardcopy.schematic_page_authority = schematic_authority;
+    app.state.dialogs.hardcopy.metadata = Some(metadata);
+    app.state.dialogs.hardcopy.source_candidates = source_candidates;
+    Ok(())
+}
+
+fn active_schematic_page_authority(
+    app: &RSpiceApp,
+    resolved: &ResolvedHardcopyDocument,
+) -> Option<super::SchematicPageSetupAuthority> {
+    use crate::hardcopy::HardcopyScope;
+    use crate::state::ViewType;
+    use crate::workbench::SurfaceId;
+    use crate::workbench::hardcopy_adapters::sources::HardcopySemanticDocument;
+
+    if app.state.workbench.current_route().surface_id() != SurfaceId::Design
+        || !matches!(
+            app.state.workspace.active_view_type(),
+            ViewType::Schematic | ViewType::Testbench
+        )
+        || !matches!(
+            resolved.semantic_document(),
+            HardcopySemanticDocument::Schematic(_)
+        )
+    {
+        return None;
+    }
+
+    let cell_view_key = app.state.workspace.active_key();
+    let base_source_key = format!(
+        "project:{}:cell-view:{cell_view_key}",
+        app.state.workspace.project.id().as_uuid()
+    );
+    let governed_sheet = app
+        .state
+        .workspace
+        .design_management
+        .sheet_catalog(&cell_view_key)
+        .and_then(|catalog| catalog.active().map(|sheet| (catalog, sheet)));
+    let governed_sheet = if let Some((catalog, sheet)) = governed_sheet {
+        if resolved.authority().scope() != &HardcopyScope::CurrentSheet
+            || resolved.source_key() != format!("{base_source_key}:sheet:{}", sheet.id())
+        {
+            return None;
+        }
+        Some(super::GovernedSheetPageAuthority {
+            cell_view_key,
+            catalog_revision: catalog.revision(),
+            sheet_id: sheet.id(),
+            sheet_revision: sheet.revision(),
+        })
+    } else {
+        if !matches!(
+            resolved.authority().scope(),
+            HardcopyScope::CurrentSheet | HardcopyScope::ActiveDocument
+        ) || resolved.source_key() != base_source_key
+        {
+            return None;
+        }
+        None
+    };
+
+    Some(super::SchematicPageSetupAuthority {
+        edit: crate::workbench::app::SchematicEditAuthority::capture(&app.state),
+        governed_sheet,
+    })
+}
+
+fn validate_schematic_page_authority(
+    state: &crate::workbench::app_state::AppState,
+    authority: &super::SchematicPageSetupAuthority,
+) -> Result<(), String> {
+    authority.edit.validate(state, "Page Setup")?;
+    let Some(governed) = &authority.governed_sheet else {
+        let active_governed_sheet = state
+            .workspace
+            .design_management
+            .sheet_catalog(&state.workspace.active_key())
+            .and_then(|catalog| catalog.active_sheet_id());
+        return if active_governed_sheet.is_none() {
+            Ok(())
+        } else {
+            Err(
+                "The active schematic acquired governed sheet authority. Close and reopen Page Setup."
+                    .to_owned(),
+            )
+        };
+    };
+    if state.workspace.active_key() != governed.cell_view_key {
+        return Err("The active cell/view changed. Close and reopen Page Setup.".to_owned());
+    }
+    let catalog = state
+        .workspace
+        .design_management
+        .sheet_catalog(&governed.cell_view_key)
+        .ok_or_else(|| {
+            "The governed sheet catalog changed. Close and reopen Page Setup.".to_owned()
+        })?;
+    if catalog.revision() != governed.catalog_revision
+        || catalog.active_sheet_id() != Some(governed.sheet_id)
+        || catalog
+            .find(governed.sheet_id)
+            .is_none_or(|sheet| sheet.revision() != governed.sheet_revision)
+    {
+        return Err("The governed active sheet changed. Close and reopen Page Setup.".to_owned());
+    }
+    Ok(())
+}
+
+fn authored_sheet_format(
+    state: &crate::workbench::app_state::AppState,
+    authority: &super::SchematicPageSetupAuthority,
+) -> Result<crate::state::SchematicSheetFormat, String> {
+    validate_schematic_page_authority(state, authority)?;
+    if let Some(governed) = &authority.governed_sheet {
+        return state
+            .workspace
+            .design_management
+            .sheet_catalog(&governed.cell_view_key)
+            .and_then(|catalog| catalog.find(governed.sheet_id))
+            .map(|sheet| sheet.page_format().clone())
+            .ok_or_else(|| "The governed active sheet is unavailable.".to_owned());
+    }
+    let policy = state.schematic.document_policy;
+    if let Some(custom) = policy.custom_page_size {
+        return crate::state::SchematicSheetFormat::try_custom(
+            "Custom",
+            custom.portrait_width_um,
+            custom.portrait_height_um,
+            policy.page_orientation,
+        )
+        .map_err(|error| error.to_string());
+    }
+    Ok(crate::state::SchematicSheetFormat::standard(
+        policy.page_size,
+        policy.page_orientation,
+    ))
+}
+
+fn setup_seeded_from_sheet_format(
+    format: crate::state::SchematicSheetFormat,
+) -> Result<crate::hardcopy::HardcopySetup, String> {
+    use crate::hardcopy::{
+        CustomPaper, HardcopySetup, Length, LengthUnit, Orientation, PaperSize, PhysicalPageSetup,
+        StandardPaper,
+    };
+    use crate::state::{SchematicPageOrientation, SchematicPageSize, SchematicSheetSize};
+
+    let default = HardcopySetup::default();
+    let paper = match format.size {
+        SchematicSheetSize::Standard { size } => PaperSize::Standard(match size {
+            SchematicPageSize::A4 => StandardPaper::A4,
+            SchematicPageSize::A3 => StandardPaper::A3,
+            SchematicPageSize::UsLetter => StandardPaper::Letter,
+            SchematicPageSize::UsLedger => StandardPaper::Tabloid,
+        }),
+        SchematicSheetSize::Custom {
+            name,
+            portrait_width_um,
+            portrait_height_um,
+        } => PaperSize::Custom(
+            CustomPaper::try_new(
+                name,
+                Length::from_micrometres(portrait_width_um),
+                Length::from_micrometres(portrait_height_um),
+                LengthUnit::Millimetres,
+            )
+            .map_err(|error| error.to_string())?,
+        ),
+    };
+    let orientation = match format.orientation {
+        SchematicPageOrientation::Portrait => Orientation::Portrait,
+        SchematicPageOrientation::Landscape => Orientation::Landscape,
+    };
+    let physical_page = PhysicalPageSetup::try_new(
+        paper,
+        default.physical_page().margins(),
+        default.physical_page().bleed(),
+        orientation,
     )
     .map_err(|error| error.to_string())?;
-    let dialog = &mut app.state.dialogs.hardcopy;
-    dialog.source = Some(resolved.authority().clone());
-    dialog.content_extent = Some(resolved.content_extent());
-    dialog.resolved_document = Some(std::sync::Arc::new(resolved));
-    dialog.metadata = Some(metadata);
-    dialog.print_mapping = mapping;
-    dialog.preview_page = 0;
-    dialog.error = None;
-    dialog.refresh_preview();
-    Ok(())
+    HardcopySetup::try_new(
+        physical_page,
+        default.scale(),
+        default.tiling(),
+        default.render().clone(),
+        default.decorations().clone(),
+        default.print_mapping().clone(),
+    )
+    .map_err(|error| error.to_string())
 }
 
 fn active_retained_source_selection(
@@ -695,7 +935,9 @@ fn active_retained_source_selection(
     use crate::workbench::SurfaceId;
 
     let candidates =
-        crate::workbench::hardcopy_adapters::sources::enumerate_retained_hardcopy_sources(&app.state);
+        crate::workbench::hardcopy_adapters::sources::enumerate_retained_hardcopy_sources(
+            &app.state,
+        );
     let selected = match app.state.workbench.current_route().surface_id() {
         SurfaceId::Design => candidates.iter().find(|candidate| {
             candidate.source_key.contains(":cell-view:")
@@ -746,7 +988,8 @@ fn active_retained_source_selection(
 fn metadata_for(
     app: &RSpiceApp,
     resolved: &ResolvedHardcopyDocument,
-) -> Result<HardcopySceneMetadata, crate::workbench::hardcopy_adapters::render::HardcopyRenderError> {
+) -> Result<HardcopySceneMetadata, crate::workbench::hardcopy_adapters::render::HardcopyRenderError>
+{
     let mut metadata =
         HardcopySceneMetadata::try_new(resolved.authority().display_name(), "RSpice")?;
     metadata.set_publication_timestamp(HardcopyPublicationTimestamp::from_unix_seconds(
@@ -931,20 +1174,21 @@ pub(super) fn select_printer_capabilities(
         return;
     };
     let orientation = resolved_orientation(app);
-    let raster_geometry = match crate::workbench::hardcopy_adapters::print::resolve_native_printer_mode(
-        &capabilities,
-        &selected_paper_id,
-        resolution,
-        orientation,
-    ) {
-        Ok(geometry) => geometry,
-        Err(error) => {
-            app.state.dialogs.hardcopy.printer_capabilities = Some(capabilities);
-            app.state.dialogs.hardcopy.clear_printer();
-            app.state.dialogs.hardcopy.error = Some(error.to_string());
-            return;
-        }
-    };
+    let raster_geometry =
+        match crate::workbench::hardcopy_adapters::print::resolve_native_printer_mode(
+            &capabilities,
+            &selected_paper_id,
+            resolution,
+            orientation,
+        ) {
+            Ok(geometry) => geometry,
+            Err(error) => {
+                app.state.dialogs.hardcopy.printer_capabilities = Some(capabilities);
+                app.state.dialogs.hardcopy.clear_printer();
+                app.state.dialogs.hardcopy.error = Some(error.to_string());
+                return;
+            }
+        };
     match PrinterJobSettings::try_new(
         capabilities.content_digest(),
         selected_paper_id,
@@ -1003,7 +1247,15 @@ fn selected_printer_paper_id(
         .dialogs
         .hardcopy
         .paper
-        .build(app.state.dialogs.hardcopy.display_unit)
+        .build(
+            app.state.dialogs.hardcopy.display_unit,
+            app.state
+                .dialogs
+                .hardcopy
+                .resolved_document
+                .as_ref()
+                .and_then(|document| document.authored_sheet_output_media().ok()),
+        )
         .ok()?;
     let (width, height) = paper.portrait_dimensions();
     capabilities
@@ -1193,21 +1445,24 @@ fn current_plan(
         .as_ref()
         .ok_or_else(|| "The hardcopy preview has no sealed publication plan.".to_owned())?;
     let sections = source
-        .hardcopy_sections()
+        .hardcopy_sections_for_setup(setup.schematic())
+        .map_err(|error| error.to_string())?;
+    let output_extent = source
+        .content_extent_for_setup(setup.schematic())
         .map_err(|error| error.to_string())?;
     let candidate = if sections.is_empty() {
         HardcopyPlan::compile_with_id(
             preview_plan.id(),
             source.authority().clone(),
             setup,
-            source.content_extent(),
+            output_extent,
         )
     } else {
         HardcopyPlan::compile_with_id_and_sections(
             preview_plan.id(),
             source.authority().clone(),
             setup,
-            source.content_extent(),
+            output_extent,
             sections,
         )
     }
@@ -1238,12 +1493,13 @@ fn begin_publication_authentication(
     if PENDING_PUBLICATION.with(|slot| slot.borrow().is_some()) {
         return Err("A browser hardcopy publication is already being authenticated.".to_owned());
     }
-    let prepared = crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
-        &app.state,
-        pending.opened_source.source_key(),
-        pending.opened_source.authority().scope().clone(),
-    )
-    .map_err(|error| error.to_string())?;
+    let prepared =
+        crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
+            &app.state,
+            pending.opened_source.source_key(),
+            pending.opened_source.authority().scope().clone(),
+        )
+        .map_err(|error| error.to_string())?;
     let generation = app
         .state
         .dialogs
@@ -1269,12 +1525,13 @@ fn begin_publication_authentication(
     if PENDING_PUBLICATION.with(|slot| slot.borrow().is_some()) {
         return Err("A native hardcopy publication is already being authenticated.".to_owned());
     }
-    let prepared = crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
-        &app.state,
-        pending.opened_source.source_key(),
-        pending.opened_source.authority().scope().clone(),
-    )
-    .map_err(|error| error.to_string())?;
+    let prepared =
+        crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
+            &app.state,
+            pending.opened_source.source_key(),
+            pending.opened_source.authority().scope().clone(),
+        )
+        .map_err(|error| error.to_string())?;
     let generation = app
         .state
         .dialogs
@@ -1388,13 +1645,18 @@ fn save_page_setup(app: &mut RSpiceApp) -> Result<PublicationCompletion, String>
         .hardcopy
         .build_setup()
         .map_err(|error| error.to_string())?;
+    let schematic_authority = app.state.dialogs.hardcopy.schematic_page_authority.clone();
+    if let Some(authority) = &schematic_authority {
+        validate_schematic_page_authority(&app.state, authority)?;
+    }
     let staged_mapping = stage_print_mapping_persistence(app, setup.print_mapping())?;
-    let prepared = crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
-        &app.state,
-        source.source_key(),
-        source.authority().scope().clone(),
-    )
-    .map_err(|error| error.to_string())?;
+    let prepared =
+        crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
+            &app.state,
+            source.source_key(),
+            source.authority().scope().clone(),
+        )
+        .map_err(|error| error.to_string())?;
     let generation = app
         .state
         .dialogs
@@ -1413,6 +1675,7 @@ fn save_page_setup(app: &mut RSpiceApp) -> Result<PublicationCompletion, String>
             opened_source: source,
             setup,
             staged_mapping,
+            schematic_authority,
         });
     });
     Ok(PublicationCompletion::Pending)
@@ -1431,10 +1694,23 @@ fn finish_page_setup_authentication(
                 .to_owned(),
         );
     }
+    commit_authenticated_page_setup(app, source, pending)
+}
+
+fn commit_authenticated_page_setup(
+    app: &mut RSpiceApp,
+    source: ResolvedHardcopyDocument,
+    pending: PendingPageSetup,
+) -> Result<String, String> {
+    if let Some(authority) = pending.schematic_authority.as_ref() {
+        validate_schematic_page_authority(&app.state, authority)?;
+    }
+
     let mut staged_setups = app.state.workspace.hardcopy_setups.clone();
     let outcome = staged_setups
         .save(source.authority(), pending.setup)
         .map_err(|error| error.to_string())?;
+
     commit_print_mapping_persistence(app, pending.staged_mapping)?;
     app.state.workspace.hardcopy_setups = staged_setups;
     if outcome.disposition() != crate::hardcopy::SetupSaveDisposition::Unchanged {
@@ -1715,7 +1991,7 @@ pub(super) fn poll_publication(app: &mut RSpiceApp) {
             outcome.and_then(|outcome| {
                 let receipt =
                     HardcopyReceipt::record(&plan, outcome).map_err(|error| error.to_string())?;
-                app.state.dialogs.hardcopy.last_receipt = Some(receipt);
+                retain_hardcopy_receipt(app, receipt)?;
                 commit_print_mapping_persistence(app, publication.staged_mapping)?;
                 let pages = rendered.page_count();
                 Ok(format!(
@@ -1750,7 +2026,7 @@ pub(super) fn poll_publication(app: &mut RSpiceApp) {
                             },
                         )
                         .map_err(|error| error.to_string())?;
-                        app.state.dialogs.hardcopy.last_receipt = Some(receipt);
+                        retain_hardcopy_receipt(app, receipt)?;
                         commit_print_mapping_persistence(app, publication.staged_mapping)?;
                         Ok(export_completion_message(
                             "hardcopy",
@@ -1783,7 +2059,7 @@ pub(super) fn poll_publication(app: &mut RSpiceApp) {
                                     HardcopyOutcome::ArtifactExported { artifact },
                                 )
                                 .map_err(|error| error.to_string())?;
-                                app.state.dialogs.hardcopy.last_receipt = Some(receipt);
+                                retain_hardcopy_receipt(app, receipt)?;
                                 commit_print_mapping_persistence(app, publication.staged_mapping)?;
                                 Ok(export_completion_message(
                                     "hardcopy",
@@ -1809,6 +2085,15 @@ pub(super) fn poll_publication(app: &mut RSpiceApp) {
     app.state.dialogs.hardcopy.busy = false;
     match completion {
         Ok(message) => {
+            let message = app.state.dialogs.hardcopy.last_receipt.as_ref().map_or(
+                message.clone(),
+                |receipt| {
+                    format!(
+                        "{message} Receipt {} recorded in project history.",
+                        receipt.id()
+                    )
+                },
+            );
             app.state.push_user_message(ConsoleMessage::info(message));
             app.state.dialogs.hardcopy.close();
         }
@@ -2099,7 +2384,7 @@ fn poll_native_finalization(app: &mut RSpiceApp) -> bool {
                 };
                 let receipt =
                     HardcopyReceipt::record(&plan, outcome).map_err(|error| error.to_string())?;
-                app.state.dialogs.hardcopy.last_receipt = Some(receipt);
+                retain_hardcopy_receipt(app, receipt)?;
                 if commit_mapping {
                     commit_print_mapping_persistence(app, publication.staged_mapping)?;
                 }
@@ -2118,7 +2403,7 @@ fn poll_native_finalization(app: &mut RSpiceApp) -> bool {
                 let receipt =
                     HardcopyReceipt::record(&plan, HardcopyOutcome::ArtifactExported { artifact })
                         .map_err(|error| error.to_string())?;
-                app.state.dialogs.hardcopy.last_receipt = Some(receipt);
+                retain_hardcopy_receipt(app, receipt)?;
                 commit_print_mapping_persistence(app, publication.staged_mapping)?;
                 Ok(export_completion_message(
                     "hardcopy",
@@ -2147,6 +2432,15 @@ fn poll_native_finalization(app: &mut RSpiceApp) -> bool {
     app.state.dialogs.hardcopy.busy = false;
     match completion {
         Ok(message) => {
+            let message = app.state.dialogs.hardcopy.last_receipt.as_ref().map_or(
+                message.clone(),
+                |receipt| {
+                    format!(
+                        "{message} Receipt {} recorded in project history.",
+                        receipt.id()
+                    )
+                },
+            );
             app.state.push_user_message(ConsoleMessage::info(message));
             if app.state.dialogs.hardcopy.open {
                 app.state.dialogs.hardcopy.close();
@@ -2174,10 +2468,12 @@ fn record_native_finalization_failure(
         && let Some(outcome) = error.hardcopy_outcome()
     {
         return match HardcopyReceipt::record(plan, outcome) {
-            Ok(receipt) => {
-                app.state.dialogs.hardcopy.last_receipt = Some(receipt);
-                error.to_string()
-            }
+            Ok(receipt) => match retain_hardcopy_receipt(app, receipt) {
+                Ok(()) => error.to_string(),
+                Err(receipt_error) => {
+                    format!("{error}; hardcopy outcome history failed: {receipt_error}")
+                }
+            },
             Err(receipt_error) => {
                 format!("{error}; the typed print outcome could not be recorded: {receipt_error}")
             }
@@ -2320,7 +2616,7 @@ fn record_print_failure(
 ) -> String {
     let message = error.to_string();
     if let Ok(receipt) = HardcopyReceipt::record(plan, error.failure_outcome(pages_completed)) {
-        app.state.dialogs.hardcopy.last_receipt = Some(receipt);
+        let _ = retain_hardcopy_receipt(app, receipt);
     }
     message
 }
@@ -2349,11 +2645,10 @@ fn record_failure(
         retryable,
     };
     if let Ok(receipt) = HardcopyReceipt::record(plan, outcome) {
-        app.state.dialogs.hardcopy.last_receipt = Some(receipt);
+        let _ = retain_hardcopy_receipt(app, receipt);
     }
     message
 }
-
 
 #[cfg(test)]
 mod tests;

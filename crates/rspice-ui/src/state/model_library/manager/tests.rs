@@ -1292,6 +1292,44 @@ fn pack_hits_carry_their_redistribution_status() {
 }
 
 #[test]
+fn execution_catalog_digest_is_invariant_under_model_map_iteration_order() {
+    let mut deck = String::new();
+    for index in 0..16 {
+        deck.push_str(&format!(
+            ".model nch_{index:02} NMOS (LEVEL=1 KP={}e-3)\n",
+            index + 1
+        ));
+    }
+    let mut manager = ModelLibraryManager::new();
+    let library_name = manager
+        .load_library_bytes("catalog-order.lib", deck.into_bytes(), None)
+        .expect("catalogue imports");
+    let baseline = manager.execution_catalog_digest();
+
+    // Re-collecting rebuilds the map behind an independent hasher, which is
+    // what happens whenever the catalogue is reconstructed instead of cloned.
+    // A prepared run rebuilds its snapshot before dispatch and rejects it when
+    // this digest moves, so identical content has to hash identically.
+    let reordered = manager
+        .get_library(&library_name)
+        .expect("library retained")
+        .models
+        .clone()
+        .into_iter()
+        .collect::<std::collections::HashMap<_, _>>();
+    manager
+        .get_library_mut(&library_name)
+        .expect("library retained")
+        .models = reordered;
+
+    assert_eq!(
+        manager.execution_catalog_digest(),
+        baseline,
+        "catalogue identity must depend on content, never on map iteration order"
+    );
+}
+
+#[test]
 fn missing_pack_tree_is_not_an_error() {
     // The browser build has no packs, and a source checkout may not have
     // synced them. Both must degrade to an empty search, not a failure.

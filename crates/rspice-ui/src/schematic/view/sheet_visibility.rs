@@ -6,8 +6,8 @@
 
 use std::borrow::Cow;
 
-use crate::workbench::app_state::AppState;
 use crate::state::{BusTap, Junction, SchematicState, Selection, Wire};
+use crate::workbench::app_state::AppState;
 
 use super::{SchematicSymbolContext, SelectionWindow};
 
@@ -121,6 +121,11 @@ pub(crate) fn selection_filtered_to_active_sheet(
             selection.select_documentation_shape(object.id);
         }
     }
+    for object in &state.schematic.probes {
+        if source.has_probe(object.id) && object_is_on_active_sheet(state, object.id) {
+            selection.select_probe(object.id);
+        }
+    }
     selection
 }
 
@@ -178,6 +183,11 @@ pub(crate) fn select_all_on_active_sheet(state: &mut AppState) {
         for object in &state.schematic.documentation_shapes {
             if object_is_on_active_sheet(state, object.id) {
                 selection.select_documentation_shape(object.id);
+            }
+        }
+        for object in &state.schematic.probes {
+            if object_is_on_active_sheet(state, object.id) {
+                selection.select_probe(object.id);
             }
         }
     }

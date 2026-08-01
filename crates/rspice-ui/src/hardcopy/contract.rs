@@ -341,7 +341,6 @@ impl ActiveHardcopySource {
     }
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum RenderTarget {
@@ -580,6 +579,127 @@ impl DecorationSetup {
     }
 }
 
+/// Schematic-only output extent. This remains independent of the authored
+/// drawing-sheet format: changing it never rewrites the schematic document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SchematicHardcopyExtent {
+    /// Use the authored drawing sheet as the intended output boundary.
+    AuthoredDrawingSheet,
+    /// Include the complete resolved schematic extent, including content
+    /// parked outside the authored drawing sheet.
+    CompleteSchematicContent,
+}
+
+/// Required decision when resolved schematic content crosses the authored
+/// drawing-sheet boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OutsideSheetContentPolicy {
+    /// Refuse publication until the operator chooses clipping or extension.
+    Ask,
+    /// Clip schematic content at the physical authored drawing-sheet edge.
+    ClipToAuthoredSheet,
+    /// Extend the output extent to retain every resolved schematic object.
+    ExtendOutput,
+}
+
+/// Independent print/export inclusion contract for an authored schematic
+/// drawing sheet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SchematicHardcopySetup {
+    extent: SchematicHardcopyExtent,
+    outside_content: OutsideSheetContentPolicy,
+    crop_marks: bool,
+    include_paper: bool,
+    include_border: bool,
+    include_title_block: bool,
+    include_zones: bool,
+    include_grid: bool,
+}
+
+impl SchematicHardcopySetup {
+    #[allow(clippy::too_many_arguments)]
+    #[must_use]
+    pub const fn new(
+        extent: SchematicHardcopyExtent,
+        outside_content: OutsideSheetContentPolicy,
+        crop_marks: bool,
+        include_paper: bool,
+        include_border: bool,
+        include_title_block: bool,
+        include_zones: bool,
+        include_grid: bool,
+    ) -> Self {
+        Self {
+            extent,
+            outside_content,
+            crop_marks,
+            include_paper,
+            include_border,
+            include_title_block,
+            include_zones,
+            include_grid,
+        }
+    }
+
+    #[must_use]
+    pub const fn extent(self) -> SchematicHardcopyExtent {
+        self.extent
+    }
+
+    #[must_use]
+    pub const fn outside_content(self) -> OutsideSheetContentPolicy {
+        self.outside_content
+    }
+
+    #[must_use]
+    pub const fn crop_marks(self) -> bool {
+        self.crop_marks
+    }
+
+    #[must_use]
+    pub const fn includes_paper(self) -> bool {
+        self.include_paper
+    }
+
+    #[must_use]
+    pub const fn includes_border(self) -> bool {
+        self.include_border
+    }
+
+    #[must_use]
+    pub const fn includes_title_block(self) -> bool {
+        self.include_title_block
+    }
+
+    #[must_use]
+    pub const fn includes_zones(self) -> bool {
+        self.include_zones
+    }
+
+    #[must_use]
+    pub const fn includes_grid(self) -> bool {
+        self.include_grid
+    }
+}
+
+impl Default for SchematicHardcopySetup {
+    fn default() -> Self {
+        Self::new(
+            SchematicHardcopyExtent::AuthoredDrawingSheet,
+            OutsideSheetContentPolicy::Ask,
+            true,
+            true,
+            true,
+            true,
+            true,
+            false,
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct HardcopySetup {
     physical_page: PhysicalPageSetup,
@@ -587,6 +707,7 @@ pub struct HardcopySetup {
     tiling: TilingSetup,
     render: RenderSetup,
     decorations: DecorationSetup,
+    schematic: SchematicHardcopySetup,
     print_mapping: PrintMappingTable,
 }
 
@@ -597,6 +718,8 @@ struct HardcopySetupWire {
     tiling: TilingSetup,
     render: RenderSetup,
     decorations: DecorationSetup,
+    #[serde(default)]
+    schematic: SchematicHardcopySetup,
     print_mapping: PrintMappingTable,
 }
 
@@ -606,12 +729,13 @@ impl<'de> Deserialize<'de> for HardcopySetup {
         D: Deserializer<'de>,
     {
         let wire = HardcopySetupWire::deserialize(deserializer)?;
-        Self::try_new(
+        Self::try_new_with_schematic(
             wire.physical_page,
             wire.scale,
             wire.tiling,
             wire.render,
             wire.decorations,
+            wire.schematic,
             wire.print_mapping,
         )
         .map_err(serde::de::Error::custom)
@@ -627,12 +751,33 @@ impl HardcopySetup {
         decorations: DecorationSetup,
         print_mapping: PrintMappingTable,
     ) -> Result<Self, HardcopyError> {
+        Self::try_new_with_schematic(
+            physical_page,
+            scale,
+            tiling,
+            render,
+            decorations,
+            SchematicHardcopySetup::default(),
+            print_mapping,
+        )
+    }
+
+    pub fn try_new_with_schematic(
+        physical_page: PhysicalPageSetup,
+        scale: ScaleMode,
+        tiling: TilingSetup,
+        render: RenderSetup,
+        decorations: DecorationSetup,
+        schematic: SchematicHardcopySetup,
+        print_mapping: PrintMappingTable,
+    ) -> Result<Self, HardcopyError> {
         let value = Self {
             physical_page,
             scale,
             tiling,
             render,
             decorations,
+            schematic,
             print_mapping,
         };
         value.validate()?;
@@ -671,6 +816,11 @@ impl HardcopySetup {
     #[must_use]
     pub const fn decorations(&self) -> &DecorationSetup {
         &self.decorations
+    }
+
+    #[must_use]
+    pub const fn schematic(&self) -> SchematicHardcopySetup {
+        self.schematic
     }
 
     #[must_use]
@@ -834,32 +984,56 @@ pub struct ValidatedPageGeometry {
 
 impl ValidatedPageGeometry {
     fn resolve(setup: &HardcopySetup, content: ContentExtent) -> Result<Self, HardcopyError> {
-        let orientation = match setup.physical_page.orientation {
-            Orientation::Portrait => ResolvedOrientation::Portrait,
-            Orientation::Landscape => ResolvedOrientation::Landscape,
-            Orientation::AutomaticPerPage => {
-                if let RenderTarget::SystemPrinter { job, .. } = setup.render.target() {
-                    let (width_pixels, height_pixels) = job.raster_geometry().physical_size_px();
-                    if width_pixels > height_pixels {
-                        ResolvedOrientation::Landscape
-                    } else if height_pixels > width_pixels {
-                        ResolvedOrientation::Portrait
+        Self::resolve_for_section(setup, content, 0)
+    }
+
+    fn resolve_for_section(
+        setup: &HardcopySetup,
+        content: ContentExtent,
+        section_ordinal: u32,
+    ) -> Result<Self, HardcopyError> {
+        let authored_media = setup.physical_page.paper.authored_media(section_ordinal);
+        let orientation = authored_media.map_or_else(
+            || match setup.physical_page.orientation {
+                Orientation::Portrait => ResolvedOrientation::Portrait,
+                Orientation::Landscape => ResolvedOrientation::Landscape,
+                Orientation::AutomaticPerPage => {
+                    if let RenderTarget::SystemPrinter { job, .. } = setup.render.target() {
+                        let (width_pixels, height_pixels) =
+                            job.raster_geometry().physical_size_px();
+                        if width_pixels > height_pixels {
+                            ResolvedOrientation::Landscape
+                        } else if height_pixels > width_pixels {
+                            ResolvedOrientation::Portrait
+                        } else if content.width > content.height {
+                            ResolvedOrientation::Landscape
+                        } else {
+                            ResolvedOrientation::Portrait
+                        }
                     } else if content.width > content.height {
                         ResolvedOrientation::Landscape
                     } else {
                         ResolvedOrientation::Portrait
                     }
-                } else if content.width > content.height {
+                }
+            },
+            |media| {
+                let (width, height) = media.dimensions();
+                if width > height {
                     ResolvedOrientation::Landscape
                 } else {
                     ResolvedOrientation::Portrait
                 }
+            },
+        );
+        let (physical_width, physical_height) = if let Some(media) = authored_media {
+            media.dimensions()
+        } else {
+            let (portrait_width, portrait_height) = setup.physical_page.paper.portrait_dimensions();
+            match orientation {
+                ResolvedOrientation::Portrait => (portrait_width, portrait_height),
+                ResolvedOrientation::Landscape => (portrait_height, portrait_width),
             }
-        };
-        let (portrait_width, portrait_height) = setup.physical_page.paper.portrait_dimensions();
-        let (physical_width, physical_height) = match orientation {
-            ResolvedOrientation::Portrait => (portrait_width, portrait_height),
-            ResolvedOrientation::Landscape => (portrait_height, portrait_width),
         };
         let margins = setup.physical_page.margins;
         validate_margins(physical_width, physical_height, margins)?;
@@ -1065,7 +1239,15 @@ pub struct PreviewPagination {
 
 impl PreviewPagination {
     fn build(setup: &HardcopySetup, content: ContentExtent) -> Result<Self, HardcopyError> {
-        let geometry = ValidatedPageGeometry::resolve(setup, content)?;
+        Self::build_for_section(setup, content, 0)
+    }
+
+    fn build_for_section(
+        setup: &HardcopySetup,
+        content: ContentExtent,
+        section_ordinal: u32,
+    ) -> Result<Self, HardcopyError> {
+        let geometry = ValidatedPageGeometry::resolve_for_section(setup, content, section_ordinal)?;
         let viewport = geometry.content_rect;
         let scale = match setup.scale {
             ScaleMode::FitPrintableArea => {
@@ -1193,7 +1375,7 @@ impl PreviewPagination {
                     "section geometry exceeds aggregate extent",
                 ));
             }
-            let child = Self::build(setup, section.extent)?;
+            let child = Self::build_for_section(setup, section.extent, section.ordinal)?;
             if first_geometry.is_none() {
                 first_geometry = Some(child.geometry);
                 first_scale = Some(child.scale);
@@ -1321,6 +1503,16 @@ impl HardcopyPlan {
     ) -> Result<Self, HardcopyError> {
         source.scope.validate_for(source.document_kind)?;
         setup.validate()?;
+        if let PaperSize::MatchAuthoredSheets(media) = setup.physical_page.paper() {
+            if source.document_kind != HardcopyDocumentKind::SchematicOrSymbol {
+                return Err(HardcopyError::AuthoredMediaRequiresSchematicSource);
+            }
+            if media.len() != 1 {
+                return Err(HardcopyError::InvalidAuthoredSheetMedia(
+                    "a non-aggregate plan requires exactly one authored medium",
+                ));
+            }
+        }
         let pagination = PreviewPagination::build(&setup, content_extent)?;
         let material = HardcopyPlanMaterial {
             schema_version: HARDCOPY_SCHEMA_VERSION,
@@ -1366,6 +1558,16 @@ impl HardcopyPlan {
     ) -> Result<Self, HardcopyError> {
         source.scope.validate_for(source.document_kind)?;
         setup.validate()?;
+        if let PaperSize::MatchAuthoredSheets(media) = setup.physical_page.paper() {
+            if source.document_kind != HardcopyDocumentKind::SchematicOrSymbol {
+                return Err(HardcopyError::AuthoredMediaRequiresSchematicSource);
+            }
+            if media.len() != sections.len() {
+                return Err(HardcopyError::InvalidAuthoredSheetMedia(
+                    "authored media and content sections must have identical cardinality",
+                ));
+            }
+        }
         let pagination = PreviewPagination::build_sections(&setup, content_extent, &sections)?;
         let material = HardcopyPlanMaterial {
             schema_version: HARDCOPY_SCHEMA_VERSION,
@@ -1628,6 +1830,17 @@ pub struct HardcopyReceipt {
     content_digest: ContentDigest,
 }
 
+#[derive(Deserialize)]
+struct HardcopyReceiptWire {
+    schema_version: u32,
+    id: HardcopyReceiptId,
+    plan_id: HardcopyPlanId,
+    plan_content_digest: ContentDigest,
+    source_content_digest: ContentDigest,
+    outcome: HardcopyOutcome,
+    content_digest: ContentDigest,
+}
+
 #[derive(Serialize)]
 struct HardcopyReceiptMaterial<'a> {
     schema_version: u32,
@@ -1669,6 +1882,30 @@ impl HardcopyReceipt {
         })
     }
 
+    fn validate_integrity(&self) -> Result<(), HardcopyError> {
+        if self.schema_version != HARDCOPY_SCHEMA_VERSION {
+            return Err(HardcopyError::UnsupportedReceiptSchema(self.schema_version));
+        }
+        let material = HardcopyReceiptMaterial {
+            schema_version: self.schema_version,
+            id: self.id,
+            plan_id: self.plan_id,
+            plan_content_digest: self.plan_content_digest,
+            source_content_digest: self.source_content_digest,
+            outcome: &self.outcome,
+        };
+        let expected = canonical_digest(b"rspice-hardcopy-receipt-v1", &material)?;
+        if expected != self.content_digest {
+            return Err(HardcopyError::PersistedReceiptDigestMismatch(self.id));
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub const fn id(&self) -> HardcopyReceiptId {
+        self.id
+    }
+
     #[must_use]
     pub const fn plan_id(&self) -> HardcopyPlanId {
         self.plan_id
@@ -1692,6 +1929,98 @@ impl HardcopyReceipt {
     #[must_use]
     pub const fn content_digest(&self) -> ContentDigest {
         self.content_digest
+    }
+}
+
+impl<'de> Deserialize<'de> for HardcopyReceipt {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = HardcopyReceiptWire::deserialize(deserializer)?;
+        let receipt = Self {
+            schema_version: wire.schema_version,
+            id: wire.id,
+            plan_id: wire.plan_id,
+            plan_content_digest: wire.plan_content_digest,
+            source_content_digest: wire.source_content_digest,
+            outcome: wire.outcome,
+            content_digest: wire.content_digest,
+        };
+        receipt
+            .validate_integrity()
+            .map_err(serde::de::Error::custom)?;
+        Ok(receipt)
+    }
+}
+
+const MAX_RETAINED_HARDCOPY_RECEIPTS: usize = 512;
+
+/// Bounded project-owned history of every observed hardcopy outcome,
+/// including cancellation and failure. Entries are individually sealed and
+/// revalidated when a project is loaded.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct HardcopyReceiptLedger {
+    receipts: Vec<HardcopyReceipt>,
+}
+
+impl HardcopyReceiptLedger {
+    pub fn append(&mut self, receipt: HardcopyReceipt) -> Result<(), HardcopyError> {
+        receipt.validate_integrity()?;
+        if self
+            .receipts
+            .iter()
+            .any(|existing| existing.id == receipt.id)
+        {
+            return Err(HardcopyError::DuplicateReceiptIdentity(receipt.id));
+        }
+        if self.receipts.len() == MAX_RETAINED_HARDCOPY_RECEIPTS {
+            self.receipts.remove(0);
+        }
+        self.receipts.push(receipt);
+        Ok(())
+    }
+
+    pub fn validate(&self) -> Result<(), HardcopyError> {
+        if self.receipts.len() > MAX_RETAINED_HARDCOPY_RECEIPTS {
+            return Err(HardcopyError::TooManyRetainedReceipts(self.receipts.len()));
+        }
+        let mut ids = std::collections::HashSet::with_capacity(self.receipts.len());
+        for receipt in &self.receipts {
+            receipt.validate_integrity()?;
+            if !ids.insert(receipt.id) {
+                return Err(HardcopyError::DuplicateReceiptIdentity(receipt.id));
+            }
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn receipts(&self) -> &[HardcopyReceipt] {
+        &self.receipts
+    }
+
+    #[must_use]
+    pub fn latest(&self) -> Option<&HardcopyReceipt> {
+        self.receipts.last()
+    }
+}
+
+impl<'de> Deserialize<'de> for HardcopyReceiptLedger {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            #[serde(default)]
+            receipts: Vec<HardcopyReceipt>,
+        }
+        let ledger = Self {
+            receipts: Wire::deserialize(deserializer)?.receipts,
+        };
+        ledger.validate().map_err(serde::de::Error::custom)?;
+        Ok(ledger)
     }
 }
 
@@ -1966,6 +2295,10 @@ pub enum HardcopyError {
     EmptyContentExtent,
     #[error("authenticated content sections are invalid: {0}")]
     InvalidContentSections(&'static str),
+    #[error("authored drawing-sheet output media are invalid: {0}")]
+    InvalidAuthoredSheetMedia(&'static str),
+    #[error("matching authored drawing-sheet media requires a governed schematic source")]
+    AuthoredMediaRequiresSchematicSource,
     #[error("{0} leave no printable content area")]
     GeometryUnderflow(&'static str),
     #[error("page decorations leave no printable content area")]
@@ -2010,6 +2343,14 @@ pub enum HardcopyError {
     InvalidCompletedPageCount { completed: u32, total: u32 },
     #[error("unsupported persisted hardcopy setup schema {0}")]
     UnsupportedSetupStoreSchema(u32),
+    #[error("unsupported persisted hardcopy receipt schema {0}")]
+    UnsupportedReceiptSchema(u32),
+    #[error("persisted hardcopy receipt {0} has a mismatched digest")]
+    PersistedReceiptDigestMismatch(HardcopyReceiptId),
+    #[error("hardcopy receipt history contains duplicate identity {0}")]
+    DuplicateReceiptIdentity(HardcopyReceiptId),
+    #[error("hardcopy receipt history contains {0} entries, above the hard limit")]
+    TooManyRetainedReceipts(usize),
     #[error("persisted setup map key {key} does not match entry identity {entry}")]
     PersistedSetupKeyMismatch {
         key: HardcopyDocumentId,
@@ -2184,7 +2525,6 @@ fn saved_setup_digest(
         },
     )
 }
-
 
 #[cfg(test)]
 mod tests;

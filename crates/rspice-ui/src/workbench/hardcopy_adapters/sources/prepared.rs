@@ -30,7 +30,6 @@ impl RetainedHardcopySourceDescriptor {
     pub fn supports_scope(&self, scope: &HardcopyScope) -> bool {
         self.allowed_scopes.contains(scope)
     }
-
 }
 
 /// Owned, `Send`-safe retained-source snapshot prepared on the UI thread
@@ -49,6 +48,9 @@ pub(super) enum PreparedRetainedHardcopyPayload {
         schematic_buffers: std::collections::HashMap<String, SchematicState>,
         sheet_catalog: Option<SheetCatalog>,
         sheet_id: Option<SheetId>,
+        project_default_drawing_sheet: SchematicSheetFormat,
+        project_title_block_field_values:
+            std::collections::BTreeMap<DrawingSheetTitleFieldId, String>,
         all_sheets: bool,
         scope: HardcopyScope,
     },
@@ -74,10 +76,20 @@ pub(super) enum PreparedRetainedHardcopyPayload {
         all_panes: bool,
         scope: HardcopyScope,
     },
+    VisualizationDocument {
+        source_key: String,
+        project_id: ProjectId,
+        document: VisualizationDocument,
+        page_id: PageId,
+        pane_id: PaneId,
+        all_panes: bool,
+        scope: HardcopyScope,
+    },
     Report {
         project_id: ProjectId,
         source_key: String,
         document: ReportDocument,
+        reference_inventory: ReportReferenceInventory,
         scope: HardcopyScope,
     },
     SourceSet {
@@ -411,6 +423,9 @@ pub(super) enum PreparedRetainedHardcopyWorkerPayload {
         schematic_buffers: CanonicalHardcopyOwner,
         sheet_catalog: Option<CanonicalHardcopyOwner>,
         sheet_id: Option<SheetId>,
+        project_default_drawing_sheet: SchematicSheetFormat,
+        project_title_block_field_values:
+            std::collections::BTreeMap<DrawingSheetTitleFieldId, String>,
         all_sheets: bool,
         scope: HardcopyScope,
     },
@@ -436,10 +451,20 @@ pub(super) enum PreparedRetainedHardcopyWorkerPayload {
         all_panes: bool,
         scope: HardcopyScope,
     },
+    VisualizationDocument {
+        source_key: String,
+        project_id: ProjectId,
+        document: CanonicalHardcopyOwner,
+        page_id: PageId,
+        pane_id: PaneId,
+        all_panes: bool,
+        scope: HardcopyScope,
+    },
     Report {
         project_id: ProjectId,
         source_key: String,
         document: CanonicalHardcopyOwner,
+        reference_inventory: ReportReferenceInventory,
         scope: HardcopyScope,
     },
     SourceSet {
@@ -525,6 +550,8 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 schematic_buffers,
                 sheet_catalog,
                 sheet_id,
+                project_default_drawing_sheet,
+                project_title_block_field_values,
                 all_sheets,
                 scope,
             } => {
@@ -560,6 +587,8 @@ impl PreparedRetainedHardcopyWorkerPayload {
                         })
                         .transpose()?,
                     sheet_id,
+                    project_default_drawing_sheet,
+                    project_title_block_field_values,
                     all_sheets,
                     scope,
                 }
@@ -618,15 +647,37 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 all_panes,
                 scope,
             },
+            PreparedRetainedHardcopyPayload::VisualizationDocument {
+                source_key,
+                project_id,
+                document,
+                page_id,
+                pane_id,
+                all_panes,
+                scope,
+            } => Self::VisualizationDocument {
+                source_key,
+                project_id,
+                document: CanonicalHardcopyOwner::capture(
+                    "prepared visualization document",
+                    &document,
+                )?,
+                page_id,
+                pane_id,
+                all_panes,
+                scope,
+            },
             PreparedRetainedHardcopyPayload::Report {
                 project_id,
                 source_key,
                 document,
+                reference_inventory,
                 scope,
             } => Self::Report {
                 project_id,
                 source_key,
                 document: CanonicalHardcopyOwner::capture("prepared report document", &document)?,
+                reference_inventory,
                 scope,
             },
             PreparedRetainedHardcopyPayload::SourceSet {
@@ -649,11 +700,29 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 identity,
                 sheet_catalog,
                 sheet_id,
+                project_default_drawing_sheet,
+                project_title_block_field_values,
                 all_sheets,
                 scope,
                 ..
             } => {
                 validate_project_source_identity(*project_id, identity, "cell-view")?;
+                crate::state::validate_project_drawing_sheet_title_field_values(
+                    project_title_block_field_values,
+                )
+                .map_err(|error| {
+                    HardcopySourceError::InvalidPreparedWorkerSnapshot(error.to_string())
+                })?;
+                project_default_drawing_sheet.validate().map_err(|error| {
+                    HardcopySourceError::InvalidPreparedWorkerSnapshot(error.to_string())
+                })?;
+                if project_default_drawing_sheet.inheritance
+                    != crate::state::DrawingSheetInheritance::ProjectDefault
+                {
+                    return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
+                        "prepared schematic project default has non-default inheritance".to_owned(),
+                    ));
+                }
                 match (*all_sheets, sheet_catalog.is_some(), *sheet_id, scope) {
                     (true, true, None, HardcopyScope::AllSheetsOrPanes)
                     | (false, true, Some(_), HardcopyScope::CurrentSheet)
@@ -740,9 +809,42 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     ));
                 }
             }
+            Self::VisualizationDocument {
+                source_key,
+                project_id,
+                pane_id,
+                all_panes,
+                scope,
+                ..
+            } => {
+                validate_label(
+                    "prepared visualization-document source key",
+                    source_key,
+                    SOURCE_KEY_LIMIT,
+                )?;
+                require_project_source_prefix(*project_id, source_key, "result-document")?;
+                let pane_suffix = format!(":pane:{}", pane_id.get());
+                if !source_key.ends_with(&pane_suffix) {
+                    return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
+                        "result-document pane identity does not match its source key".to_owned(),
+                    ));
+                }
+                if (*all_panes && !matches!(scope, HardcopyScope::AllSheetsOrPanes))
+                    || (!*all_panes
+                        && !matches!(
+                            scope,
+                            HardcopyScope::ActivePlotDocument | HardcopyScope::ActiveDocument
+                        ))
+                {
+                    return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
+                        "result-document aggregate flag and scope are inconsistent".to_owned(),
+                    ));
+                }
+            }
             Self::Report {
                 project_id,
                 source_key,
+                reference_inventory,
                 scope,
                 ..
             } => {
@@ -756,6 +858,9 @@ impl PreparedRetainedHardcopyWorkerPayload {
                         "report worker source has an unsupported scope".to_owned(),
                     ));
                 }
+                reference_inventory.validate().map_err(|error| {
+                    HardcopySourceError::InvalidPreparedWorkerSnapshot(error.to_string())
+                })?;
             }
             Self::SourceSet {
                 source_set,
@@ -795,6 +900,8 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 schematic_buffers,
                 sheet_catalog,
                 sheet_id,
+                project_default_drawing_sheet,
+                project_title_block_field_values,
                 all_sheets,
                 scope,
             } => {
@@ -827,6 +934,8 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     schematic_buffers,
                     sheet_catalog,
                     sheet_id,
+                    project_default_drawing_sheet,
+                    project_title_block_field_values,
                     all_sheets,
                     scope,
                 }
@@ -919,10 +1028,46 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     scope,
                 }
             }
+            Self::VisualizationDocument {
+                source_key,
+                project_id,
+                document,
+                page_id,
+                pane_id,
+                all_panes,
+                scope,
+            } => {
+                let document =
+                    document.restore::<VisualizationDocument>("prepared visualization document")?;
+                let expected_key =
+                    visualization_document_pane_source_key(project_id, document.id(), pane_id);
+                if source_key != expected_key
+                    || !document.pages().iter().any(|page| page.id == page_id)
+                    || !document
+                        .panes()
+                        .iter()
+                        .any(|pane| pane.id == pane_id && pane.page_id == page_id)
+                {
+                    return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
+                        "result-document source identity is not retained by its exact document"
+                            .to_owned(),
+                    ));
+                }
+                PreparedRetainedHardcopyPayload::VisualizationDocument {
+                    source_key,
+                    project_id,
+                    document,
+                    page_id,
+                    pane_id,
+                    all_panes,
+                    scope,
+                }
+            }
             Self::Report {
                 project_id,
                 source_key,
                 document,
+                reference_inventory,
                 scope,
             } => {
                 let document = document.restore::<ReportDocument>("prepared report document")?;
@@ -937,6 +1082,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     project_id,
                     source_key,
                     document,
+                    reference_inventory,
                     scope,
                 }
             }
@@ -1219,6 +1365,22 @@ fn prepared_payload_identity(
                 scope.clone(),
             ))
         }
+        PreparedRetainedHardcopyPayload::VisualizationDocument {
+            source_key,
+            document,
+            scope,
+            ..
+        } => Ok((
+            HardcopySourceIdentity::try_new(
+                source_key,
+                HardcopyDocumentId::try_from_uuid(document.id().as_uuid()).map_err(|error| {
+                    HardcopySourceError::InvalidPreparedWorkerSnapshot(error.to_string())
+                })?,
+                document.revision(),
+                document.title(),
+            )?,
+            scope.clone(),
+        )),
         PreparedRetainedHardcopyPayload::Report {
             source_key,
             document,
@@ -1319,6 +1481,8 @@ impl PreparedRetainedHardcopyResolution {
                 schematic_buffers,
                 sheet_catalog,
                 sheet_id,
+                project_default_drawing_sheet,
+                project_title_block_field_values,
                 all_sheets,
                 scope,
             } => {
@@ -1335,12 +1499,9 @@ impl PreparedRetainedHardcopyResolution {
                         expected_topology_version: schematic.topology_version(),
                         symbol_resolver: Some(&resolver),
                         sheet_catalog: catalog,
+                        project_default_drawing_sheet: &project_default_drawing_sheet,
+                        project_title_block_field_values: &project_title_block_field_values,
                     });
-                }
-                if let (Some(catalog), Some(sheet_id)) = (sheet_catalog.as_ref(), sheet_id)
-                    && !schematic_has_objects_on_sheet(&schematic, catalog, sheet_id)
-                {
-                    return resolve_blank_schematic_sheet(identity, scope);
                 }
                 resolve_schematic_source(SchematicHardcopySource {
                     identity,
@@ -1349,6 +1510,8 @@ impl PreparedRetainedHardcopyResolution {
                     symbol_resolver: Some(&resolver),
                     sheet_catalog: sheet_catalog.as_ref(),
                     sheet_id,
+                    project_default_drawing_sheet: Some(&project_default_drawing_sheet),
+                    project_title_block_field_values: Some(&project_title_block_field_values),
                     scope,
                 })
             }
@@ -1418,15 +1581,27 @@ impl PreparedRetainedHardcopyResolution {
                     })
                 }
             }
+            PreparedRetainedHardcopyPayload::VisualizationDocument {
+                source_key,
+                project_id,
+                document,
+                page_id,
+                pane_id,
+                all_panes,
+                scope,
+            } => resolve_visualization_document_source(
+                source_key, project_id, &document, page_id, pane_id, all_panes, scope,
+            ),
             PreparedRetainedHardcopyPayload::Report {
                 project_id: _,
                 source_key,
                 document,
+                reference_inventory,
                 scope,
             } => resolve_report_source(ReportHardcopySource {
                 source_key,
                 document: &document,
-                reference_inventory: None,
+                reference_inventory: Some(&reference_inventory),
                 scope,
             }),
             PreparedRetainedHardcopyPayload::SourceSet {

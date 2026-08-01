@@ -978,7 +978,7 @@ mod tests {
     }
 
     #[test]
-    fn ngspice_pulse_omitted_period_breakpoints_use_transient_stop_default() {
+    fn ngspice_pulse_omitted_period_breakpoints_repeat_after_waveform_duration() {
         let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-15);
         let spec = crate::netlist::SourceSpec::Pulse {
             v1: 0.0,
@@ -1002,7 +1002,10 @@ mod tests {
 
         assert_delays_close(
             breakpoints.times(),
-            &[10.0e-6, 11.0e-6, 100.011e-3, 100.012e-3],
+            &[
+                10.0e-6, 11.0e-6, 100.011e-3, 100.012e-3, 100.013e-3, 200.013e-3, 200.014e-3,
+                200.015e-3, 300.015e-3, 300.016e-3, 300.017e-3,
+            ],
         );
     }
 

@@ -146,7 +146,6 @@ struct SignalRow {
     color: egui::Color32,
 }
 
-
 impl CalculatorPanel {
     /// Stable id for the expression editor (caret state lives in egui memory).
     fn editor_id(ui: &Ui) -> egui::Id {

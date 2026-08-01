@@ -83,7 +83,7 @@ impl Default for NativeBenchConfig {
             iterations: DEFAULT_ITERATIONS,
             samples: DEFAULT_SAMPLES,
             min_dense_speedup: 2.0,
-            min_speedup: 1.10,
+            min_speedup: 3.0,
             min_full_stamp_speedup: 2.0,
             max_native_setup_ms: None,
             max_native_p95_ns_per_sweep: None,

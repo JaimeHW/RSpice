@@ -849,6 +849,7 @@ pub enum SchematicArrayError {
     EmptySelection,
     PartialSelection,
     UnsupportedSelection,
+    ProbeSelectionUnsupported,
     ReadOnly,
     StaleSelection {
         object_id: u64,
@@ -957,6 +958,9 @@ impl fmt::Display for SchematicArrayError {
             ),
             Self::UnsupportedSelection => formatter.write_str(
                 "The current selection contains an object that cannot participate in an array.",
+            ),
+            Self::ProbeSelectionUnsupported => formatter.write_str(
+                "Probe markers cannot participate in arrays; duplicate or reposition each retained probe explicitly.",
             ),
             Self::ReadOnly => formatter.write_str(
                 "The active schematic is read-only and cannot accept an array transaction.",

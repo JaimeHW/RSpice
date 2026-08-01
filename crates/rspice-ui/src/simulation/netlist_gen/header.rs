@@ -11,9 +11,12 @@ impl<'a> NetlistGenerator<'a> {
 
     /// Generate netlist header
     pub(super) fn generate_header(&mut self) {
+        // No generation timestamp: the executable source is content-addressed
+        // and a prepared run is rebuilt and digest-compared before dispatch, so
+        // a wall-clock line would expire an authorized run whenever the two
+        // builds straddled a second boundary. Run timing is retained on the run
+        // receipt, which is where wall-clock telemetry belongs.
         self.lines.push("* RSpice Netlist".to_string());
-        self.lines
-            .push(format!("* Generated: {}", chrono_lite_timestamp()));
         self.lines
             .push(format!("* Components: {}", self.schematic.components.len()));
         self.lines.push(format!("* Nets: {}", self.nets.len()));

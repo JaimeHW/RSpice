@@ -6,17 +6,52 @@
 //! cannot supply the content is refused rather than printed blank. A blank
 //! sheet is only ever produced where the schematic genuinely has one.
 
+use std::collections::BTreeMap;
+
+use crate::state::DrawingSheetTitleFieldId;
+
 use super::*;
 
 pub(super) fn resolve_blank_schematic_sheet(
     identity: HardcopySourceIdentity,
     scope: HardcopyScope,
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
+    resolve_blank_schematic_sheet_with_format(identity, scope, None)
+}
+
+pub(crate) fn resolve_blank_schematic_sheet_with_format(
+    identity: HardcopySourceIdentity,
+    scope: HardcopyScope,
+    drawing_sheet: Option<&SchematicSheetFormat>,
+) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
+    resolve_blank_schematic_sheet_with_format_and_project_values(
+        identity,
+        scope,
+        drawing_sheet,
+        None,
+    )
+}
+
+pub(super) fn resolve_blank_schematic_sheet_with_format_and_project_values(
+    identity: HardcopySourceIdentity,
+    scope: HardcopyScope,
+    drawing_sheet: Option<&SchematicSheetFormat>,
+    project_title_block_field_values: Option<&BTreeMap<DrawingSheetTitleFieldId, String>>,
+) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
+    if let Some(project_values) = project_title_block_field_values {
+        crate::state::validate_project_drawing_sheet_title_field_values(project_values)
+            .map_err(|error| HardcopySourceError::InvalidSheetPartition(error.to_string()))?;
+    }
     if !matches!(scope, HardcopyScope::CurrentSheet) {
         return Err(HardcopySourceError::UnsupportedScope(scope));
     }
     let semantic = SemanticSchematic {
         view_path: identity.source_key.clone(),
+        drawing_sheet: drawing_sheet.cloned(),
+        drawing_sheet_title_values: drawing_sheet.map_or_else(BTreeMap::new, |format| {
+            drawing_sheet_title_values(&identity, format, None, project_title_block_field_values)
+        }),
+        grid_pitch_units: 10,
         components: Vec::new(),
         wires: Vec::new(),
         buses: Vec::new(),
@@ -27,19 +62,25 @@ pub(super) fn resolve_blank_schematic_sheet(
         documentation_shapes: Vec::new(),
     };
     let digest = canonical_digest(b"rspice-hardcopy-blank-schematic-sheet-v1", &semantic)?;
+    let bounds = drawing_sheet.map_or_else(
+        || {
+            SemanticBounds::try_new(
+                SemanticPoint::new(0, 0),
+                SemanticPoint::new(
+                    BLANK_SCHEMATIC_SHEET_WIDTH_UM,
+                    BLANK_SCHEMATIC_SHEET_HEIGHT_UM,
+                ),
+            )
+        },
+        authored_sheet_bounds,
+    )?;
     finish_resolved(
         identity,
         digest,
         HardcopyDocumentKind::SchematicOrSymbol,
         scope,
         HardcopySemanticDocument::Schematic(semantic),
-        SemanticBounds::try_new(
-            SemanticPoint::new(0, 0),
-            SemanticPoint::new(
-                BLANK_SCHEMATIC_SHEET_WIDTH_UM,
-                BLANK_SCHEMATIC_SHEET_HEIGHT_UM,
-            ),
-        )?,
+        bounds,
     )
 }
 
@@ -49,6 +90,11 @@ pub(super) fn resolve_blank_schematic_sheet(
 pub fn resolve_all_schematic_sheets(
     source: SchematicSheetSetHardcopySource<'_>,
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
+    validate_project_default_drawing_sheet(source.project_default_drawing_sheet)?;
+    crate::state::validate_project_drawing_sheet_title_field_values(
+        source.project_title_block_field_values,
+    )
+    .map_err(|error| HardcopySourceError::InvalidSheetPartition(error.to_string()))?;
     source
         .sheet_catalog
         .validate()
@@ -69,22 +115,21 @@ pub fn resolve_all_schematic_sheets(
     let mut resolved_sheets = Vec::with_capacity(source.sheet_catalog.sheets().len());
     for sheet in source.sheet_catalog.sheets() {
         let sheet_identity = schematic_sheet_identity(&source.identity, sheet)?;
-        if schematic_has_objects_on_sheet(source.schematic, source.sheet_catalog, sheet.id()) {
-            resolved_sheets.push(resolve_schematic_source(SchematicHardcopySource {
-                identity: sheet_identity,
-                schematic: source.schematic,
-                expected_topology_version: source.expected_topology_version,
-                symbol_resolver: source.symbol_resolver,
-                sheet_catalog: Some(source.sheet_catalog),
-                sheet_id: Some(sheet.id()),
-                scope: HardcopyScope::CurrentSheet,
-            })?);
-        } else {
-            resolved_sheets.push(resolve_blank_schematic_sheet(
-                sheet_identity,
-                HardcopyScope::CurrentSheet,
-            )?);
-        }
+        // Resolve empty sheets through the same governed path as populated
+        // sheets. Besides eliminating a duplicate resolver, this preserves
+        // catalog-aware automatic title values such as "3 / 3" and the
+        // effective inherited project format on a deliberately blank page.
+        resolved_sheets.push(resolve_schematic_source(SchematicHardcopySource {
+            identity: sheet_identity,
+            schematic: source.schematic,
+            expected_topology_version: source.expected_topology_version,
+            symbol_resolver: source.symbol_resolver,
+            sheet_catalog: Some(source.sheet_catalog),
+            sheet_id: Some(sheet.id()),
+            project_default_drawing_sheet: Some(source.project_default_drawing_sheet),
+            project_title_block_field_values: Some(source.project_title_block_field_values),
+            scope: HardcopyScope::CurrentSheet,
+        })?);
     }
 
     let members = resolved_sheets
@@ -130,6 +175,13 @@ pub fn resolve_all_schematic_sheets(
 pub fn resolve_schematic_source(
     source: SchematicHardcopySource<'_>,
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
+    if let Some(project_default) = source.project_default_drawing_sheet {
+        validate_project_default_drawing_sheet(project_default)?;
+    }
+    if let Some(project_values) = source.project_title_block_field_values {
+        crate::state::validate_project_drawing_sheet_title_field_values(project_values)
+            .map_err(|error| HardcopySourceError::InvalidSheetPartition(error.to_string()))?;
+    }
     if source.schematic.topology_version() != source.expected_topology_version {
         return Err(HardcopySourceError::StaleSchematic {
             expected: source.expected_topology_version,
@@ -145,6 +197,9 @@ pub fn resolve_schematic_source(
     let selection_only = matches!(&source.scope, HardcopyScope::Selection);
     if selection_only && source.schematic.selection.is_empty() {
         return Err(HardcopySourceError::EmptySelection);
+    }
+    if selection_only && !source.schematic.selection.probes.is_empty() {
+        return Err(HardcopySourceError::ProbeSelectionUnsupported);
     }
     let governed_sheet = match (source.sheet_catalog, source.sheet_id) {
         (Some(catalog), Some(sheet_id)) if matches!(source.scope, HardcopyScope::CurrentSheet) => {
@@ -178,11 +233,39 @@ pub fn resolve_schematic_source(
         })
     };
 
+    let drawing_sheet = governed_sheet
+        .and_then(|(catalog, sheet_id)| catalog.find(sheet_id))
+        .map(|sheet| {
+            source.project_default_drawing_sheet.map_or_else(
+                || sheet.page_format().clone(),
+                |project_default| {
+                    effective_governed_sheet_format(sheet.page_format(), project_default)
+                },
+            )
+        })
+        .or_else(|| {
+            matches!(
+                source.scope,
+                HardcopyScope::CurrentSheet | HardcopyScope::ActiveDocument
+            )
+            .then(|| source.project_default_drawing_sheet.cloned())
+            .flatten()
+        });
     let mut semantic = SemanticSchematic {
         view_path: governed_sheet.map_or_else(
             || source.identity.source_key.clone(),
             |(_, sheet_id)| format!("{}:sheet:{sheet_id}", source.identity.source_key),
         ),
+        drawing_sheet_title_values: drawing_sheet.as_ref().map_or_else(BTreeMap::new, |format| {
+            drawing_sheet_title_values(
+                &source.identity,
+                format,
+                governed_sheet,
+                source.project_title_block_field_values,
+            )
+        }),
+        drawing_sheet,
+        grid_pitch_units: source.schematic.grid_size.max(1),
         components: Vec::new(),
         wires: Vec::new(),
         buses: Vec::new(),
@@ -331,11 +414,28 @@ pub fn resolve_schematic_source(
             })
             .cloned(),
     );
-    if semantic_is_empty(&semantic) {
+    let content_empty = semantic_is_empty(&semantic);
+    if content_empty && (selection_only || semantic.drawing_sheet.is_none()) {
         return Err(HardcopySourceError::EmptyContent);
     }
 
-    let bounds = schematic_bounds(&semantic)?;
+    let bounds = if content_empty {
+        authored_sheet_bounds(
+            semantic
+                .drawing_sheet
+                .as_ref()
+                .expect("empty authored sheet was validated above"),
+        )?
+    } else {
+        let content_bounds = schematic_bounds(&semantic)?;
+        semantic
+            .drawing_sheet
+            .as_ref()
+            .map_or(Ok(content_bounds), |format| {
+                authored_sheet_bounds(format)
+                    .map(|sheet_bounds| union_bounds(content_bounds, sheet_bounds))
+            })?
+    };
     let digest = canonical_digest(b"rspice-hardcopy-schematic-v1", &semantic)?;
     finish_resolved(
         source.identity,
@@ -345,6 +445,100 @@ pub fn resolve_schematic_source(
         HardcopySemanticDocument::Schematic(semantic),
         bounds,
     )
+}
+
+fn effective_governed_sheet_format(
+    sheet_format: &SchematicSheetFormat,
+    project_default: &SchematicSheetFormat,
+) -> SchematicSheetFormat {
+    match sheet_format.inheritance {
+        crate::state::DrawingSheetInheritance::ProjectDefault => {
+            project_default.with_target_sheet_title_fields(sheet_format)
+        }
+        crate::state::DrawingSheetInheritance::Explicit
+        | crate::state::DrawingSheetInheritance::UserDefault => sheet_format.clone(),
+    }
+}
+
+fn validate_project_default_drawing_sheet(
+    format: &SchematicSheetFormat,
+) -> Result<(), HardcopySourceError> {
+    format
+        .validate()
+        .map_err(|error| HardcopySourceError::InvalidSheetPartition(error.to_string()))?;
+    if format.inheritance != crate::state::DrawingSheetInheritance::ProjectDefault {
+        return Err(HardcopySourceError::InvalidSheetPartition(
+            "project drawing-sheet default has non-default inheritance".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn drawing_sheet_title_values(
+    identity: &HardcopySourceIdentity,
+    format: &SchematicSheetFormat,
+    governed: Option<(&SheetCatalog, SheetId)>,
+    project_title_block_field_values: Option<&BTreeMap<DrawingSheetTitleFieldId, String>>,
+) -> BTreeMap<DrawingSheetTitleFieldId, String> {
+    let mut values = BTreeMap::new();
+    let source_view = identity
+        .source_key
+        .split(":sheet:")
+        .next()
+        .unwrap_or(identity.source_key.as_str());
+    let project = source_view
+        .split(['/', '\\', ':'])
+        .find(|part| !part.trim().is_empty())
+        .unwrap_or("Project");
+    let (sheet_title, page) = governed.map_or_else(
+        || (identity.display_name.clone(), "1 / 1".to_owned()),
+        |(catalog, sheet_id)| {
+            let index = catalog
+                .sheets()
+                .iter()
+                .position(|sheet| sheet.id() == sheet_id)
+                .unwrap_or(0);
+            let title = catalog.find(sheet_id).map_or_else(
+                || identity.display_name.clone(),
+                |sheet| sheet.name().to_owned(),
+            );
+            (title, format!("{} / {}", index + 1, catalog.sheets().len()))
+        },
+    );
+    values.insert(DrawingSheetTitleFieldId::Project, project.to_owned());
+    values.insert(DrawingSheetTitleFieldId::CellView, source_view.to_owned());
+    values.insert(DrawingSheetTitleFieldId::SheetTitle, sheet_title);
+    values.insert(DrawingSheetTitleFieldId::Page, page);
+    values.insert(
+        DrawingSheetTitleFieldId::Revision,
+        identity.revision.get().to_string(),
+    );
+    values.insert(
+        DrawingSheetTitleFieldId::Format,
+        format.authored_size.label().to_owned(),
+    );
+    values.insert(
+        DrawingSheetTitleFieldId::Scale,
+        match format.title_block.scale {
+            crate::state::DrawingSheetScale::NotToScale => "NTS".to_owned(),
+            crate::state::DrawingSheetScale::Ratio {
+                drawing_units,
+                reality_units,
+            } => format!("{drawing_units}:{reality_units}"),
+        },
+    );
+    values.insert(
+        DrawingSheetTitleFieldId::Date,
+        crate::state::automatic_drawing_sheet_date_utc(),
+    );
+    if let Some(project_values) = project_title_block_field_values {
+        for id in DrawingSheetTitleFieldId::PROJECT_OWNED {
+            if let Some(value) = project_values.get(&id) {
+                values.insert(id, value.clone());
+            }
+        }
+    }
+    values
 }
 
 pub fn resolve_symbol_source(
@@ -643,8 +837,7 @@ pub fn resolve_report_source(
         return Err(HardcopySourceError::EmptyContent);
     }
     let mut authenticated_references = Vec::new();
-    let mut figures = Vec::new();
-    let mut linked_figures = Vec::new();
+    let mut figure_blocks = Vec::new();
     let mut contains_linked_reference = false;
     for block in record
         .snapshot()
@@ -657,24 +850,7 @@ pub fn resolve_report_source(
             continue;
         };
         if let ReportBlockKind::PlotFigure(figure) = block.kind() {
-            match reference {
-                ReportReferenceMode::Frozen { artifact, .. } => {
-                    let (width_pixels, height_pixels) =
-                        validate_frozen_report_png(block.id(), artifact)?;
-                    figures.push(SemanticReportFigure {
-                        block_id: block.id(),
-                        artifact_digest: artifact.content_digest(),
-                        media_type: artifact.media_type().to_owned(),
-                        payload: artifact.payload().to_vec(),
-                        width_pixels,
-                        height_pixels,
-                        caption: figure.caption.clone(),
-                        alternative_text: figure.alternative_text.clone(),
-                        sizing: figure.sizing,
-                    });
-                }
-                ReportReferenceMode::Linked { .. } => linked_figures.push(block.id()),
-            }
+            figure_blocks.push((block.id(), figure.clone()));
         }
         contains_linked_reference |= matches!(reference, ReportReferenceMode::Linked { .. });
         authenticated_references.push(SemanticReportReference {
@@ -713,13 +889,53 @@ pub fn resolve_report_source(
             });
         }
     }
-    if let Some(block_id) = linked_figures.first().copied() {
-        return Err(HardcopySourceError::UnsupportedAuthenticatedReportBlock {
+    let mut figures = Vec::with_capacity(figure_blocks.len());
+    for (block_id, figure) in figure_blocks {
+        let artifact = match &figure.reference {
+            ReportReferenceMode::Frozen { artifact, .. } => artifact,
+            ReportReferenceMode::Linked { .. } => {
+                let matches = inventory
+                    .figure_artifacts
+                    .iter()
+                    .filter(|artifact| artifact.block_id() == block_id)
+                    .collect::<Vec<_>>();
+                let [resolved] = matches.as_slice() else {
+                    return Err(HardcopySourceError::UnsupportedAuthenticatedReportBlock {
+                        block_id,
+                        kind: "linked plot figure",
+                        reason: if matches.is_empty() {
+                            "the exact linked figure payload is absent from the retained source inventory"
+                                .to_owned()
+                        } else {
+                            "the retained source inventory contains ambiguous linked figure payloads"
+                                .to_owned()
+                        },
+                    });
+                };
+                if resolved.source() != figure.reference.snapshot()
+                    || figure.source_locator.as_ref() != Some(resolved.source_locator())
+                {
+                    return Err(HardcopySourceError::UnsupportedAuthenticatedReportBlock {
+                        block_id,
+                        kind: "linked plot figure",
+                        reason: "the resolved figure payload does not match the block source snapshot and page/pane locator"
+                            .to_owned(),
+                    });
+                }
+                resolved.artifact()
+            }
+        };
+        let (width_pixels, height_pixels) = validate_frozen_report_png(block_id, artifact)?;
+        figures.push(SemanticReportFigure {
             block_id,
-            kind: "linked plot figure",
-            reason:
-                "the source inventory authenticates identity but supplies no exact semantic or raster figure payload"
-                    .to_owned(),
+            artifact_digest: artifact.content_digest(),
+            media_type: artifact.media_type().to_owned(),
+            payload: artifact.payload().to_vec(),
+            width_pixels,
+            height_pixels,
+            caption: figure.caption,
+            alternative_text: figure.alternative_text,
+            sizing: figure.sizing,
         });
     }
     let page_count = i64::try_from(record.snapshot().pages().len())

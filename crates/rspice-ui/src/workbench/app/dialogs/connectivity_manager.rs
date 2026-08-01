@@ -276,8 +276,6 @@ pub(crate) fn open_connectivity_manager(state: &mut AppState) {
     state.sync_active_schematic_to_workspace();
     let contract = state.workspace.connectivity.clone();
     let report = build_report(state, &contract.policy);
-    state.dialogs.drc_results = Some(report.drc.clone());
-    state.dialogs.drc_checked_version = state.schematic.topology_version();
     state.dialogs.connectivity_manager = ConnectivityManagerDialogState {
         open: true,
         authority: Some(SchematicEditAuthority::capture(state)),
@@ -1155,8 +1153,6 @@ impl RSpiceApp {
                 let policy = self.state.dialogs.connectivity_manager.policy.clone();
                 let report = build_report(&self.state, &policy);
                 let authority = SchematicEditAuthority::capture(&self.state);
-                self.state.dialogs.drc_results = Some(report.drc.clone());
-                self.state.dialogs.drc_checked_version = self.state.schematic.topology_version();
                 let dialog = &mut self.state.dialogs.connectivity_manager;
                 dialog.report = report;
                 dialog.authority = Some(authority);
@@ -1329,6 +1325,10 @@ impl RSpiceApp {
         let policy = self.state.workspace.connectivity.policy.clone();
         let report = build_report(&self.state, &policy);
         let authority = SchematicEditAuthority::capture(&self.state);
+        self.state.publish_active_design_check_result(
+            report.drc.clone(),
+            crate::workbench::app_state::DesignCheckOrigin::ConnectivityCommit,
+        )?;
         self.state.dialogs.drc_results = Some(report.drc.clone());
         self.state.dialogs.drc_checked_version = self.state.schematic.topology_version();
         let dialog = &mut self.state.dialogs.connectivity_manager;

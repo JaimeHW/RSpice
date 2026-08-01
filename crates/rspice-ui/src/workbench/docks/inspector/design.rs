@@ -8,21 +8,29 @@
 
 mod component;
 
-use component::*;
-
 pub(crate) use component::apply_bound_model_choice;
+
+use component::*;
 
 use std::collections::{HashMap, HashSet};
 
-use egui::{Color32, Ui};
+use egui::{Color32, RichText, Ui};
 
+use crate::schematic::view::{
+    SchematicSymbolContext,
+    drawing_sheet::{
+        ActiveDrawingSheet, DrawingSheetOverflowSummary, drawing_sheet_overflow_summary,
+    },
+};
 use crate::services::drc::{DrcLocation, DrcSeverity, DrcViolation};
 use crate::simulation::netlist_gen::{
     DesignNet, HierarchySource, NetClass, design_nets_with_hierarchy,
 };
 use crate::state::{
-    AnalysisResultPayload, CellViewRef, Component, ComponentType, DisplayMode, NetGraph,
-    NetNamingPolicy, PropertyDefinition, PropertyType, PropertyValue, SoaRuleVerdictEvidence,
+    AnalysisResultPayload, CellViewRef, Component, ComponentType, DisplayMode,
+    DrawingSheetBorderTemplate, DrawingSheetInheritance, DrawingSheetTitleBlockAnchor,
+    DrawingSheetTitleBlockTemplate, NetGraph, NetNamingPolicy, PropertyDefinition, PropertyType,
+    PropertyValue, SoaRuleVerdictEvidence,
 };
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
@@ -67,6 +75,8 @@ pub(super) enum DesignSubject {
     Note(u64),
     /// Exactly one non-electrical documentation shape.
     Shape(u64),
+    /// Exactly one retained schematic probe marker.
+    Probe(u64),
     /// A conductor selection that resolves to exactly one named net.
     Net(String),
     /// Several objects, or conductors spanning several nets.
@@ -107,6 +117,7 @@ fn conductors_only(state: &AppState) -> bool {
         && selection.bus_taps.is_empty()
         && selection.design_notes.is_empty()
         && selection.documentation_shapes.is_empty()
+        && selection.probes.is_empty()
 }
 
 pub(super) fn subject(state: &AppState, nets: &[DesignNet]) -> DesignSubject {
@@ -138,6 +149,9 @@ pub(super) fn subject(state: &AppState, nets: &[DesignNet]) -> DesignSubject {
     }
     if let Some(id) = selection.single_documentation_shape() {
         return DesignSubject::Shape(id);
+    }
+    if let Some(id) = selection.single_probe() {
+        return DesignSubject::Probe(id);
     }
     if conductors_only(state)
         && let Some(name) = selected_net_name(state, nets)
@@ -180,7 +194,8 @@ fn navigator_selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<S
         && selection.bus_taps.is_empty()
         && selection.net_labels.is_empty()
         && selection.design_notes.is_empty()
-        && selection.documentation_shapes.is_empty();
+        && selection.documentation_shapes.is_empty()
+        && selection.probes.is_empty();
     let exact_wires = selection.wires.iter().copied().collect::<HashSet<_>>()
         == wire_ids.iter().copied().collect();
     let exact_components = if wire_ids.is_empty() {
@@ -261,6 +276,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         DesignSubject::Net(name) => net_panel(ui, app, &name, &sheet.nets),
         DesignSubject::Note(id) => note_panel(ui, app, id),
         DesignSubject::Shape(id) => shape_panel(ui, app, id),
+        DesignSubject::Probe(id) => probe_panel(ui, app, id),
         DesignSubject::Multi => multi_panel(ui, app),
         DesignSubject::Sheet => sheet_panel(ui, app, &sheet.nets),
     }
@@ -447,7 +463,7 @@ fn hero(ui: &mut Ui, app: &mut RSpiceApp, spec: Hero) {
                 "Open selected component properties",
             )
         });
-        if response.double_clicked() && !app.state.active_view_read_only() {
+        if response.double_clicked() && !app.state.schematic_edit_read_only() {
             crate::workbench::app::open_property_editor(&mut app.state, component_id);
         }
         theme::paint_focus_ring(ui, &response, rect);
@@ -748,7 +764,7 @@ fn write_param(params: &str, key: &str, value: &str) -> String {
 
 /// Open an edit session on `field`, seeded with `current`.
 fn begin_edit(app: &mut RSpiceApp, component: &Component, field: InlineEditField, current: String) {
-    if app.state.active_view_read_only() || app.state.schematic.read_only {
+    if app.state.schematic_edit_read_only() {
         return;
     }
     let before = crate::state::SchematicSnapshot::capture(&app.state.schematic);
@@ -883,23 +899,37 @@ fn proposed_tuning_variable_name(
     unreachable!("the finite variable set cannot exhaust every numeric suffix")
 }
 
-/// Bind the selected Value row to the non-destructive parameter sandbox.
-///
-/// This function writes only runtime proposal state. The schematic and active
-/// plan remain byte-for-byte authoritative until the existing review dialog
-/// commits the complete transaction.
-fn stage_component_tuning(app: &mut RSpiceApp, component_id: u64) -> Result<(), String> {
-    if app.state.active_view_read_only() || app.state.schematic.read_only {
+enum ComponentTuningPreparation {
+    ExistingBinding {
+        variable_id: crate::product::DesignVariableId,
+    },
+    StageBinding {
+        variable: crate::state::DesignVariable,
+        creates_variable: bool,
+    },
+}
+
+struct PreparedComponentTuning {
+    plan_id: crate::product::SimulationPlanId,
+    plan_revision: crate::product::ObjectRevision,
+    variables: Vec<crate::state::DesignVariable>,
+    source_view: CellViewRef,
+    source_topology_version: u64,
+    active_plan_run: Option<crate::product::RunId>,
+    preparation: ComponentTuningPreparation,
+}
+
+/// Resolve the exact Tune transaction without mutating the sandbox or either
+/// authoritative document. The inspector button and the click handler both
+/// use this preflight so a control cannot advertise a workflow that staging
+/// will later reject.
+fn prepare_component_tuning(
+    app: &RSpiceApp,
+    component: &Component,
+) -> Result<PreparedComponentTuning, String> {
+    if app.state.schematic_edit_read_only() {
         return Err("the active schematic is read-only".to_owned());
     }
-    let component = app
-        .state
-        .schematic
-        .components
-        .iter()
-        .find(|component| component.id == component_id)
-        .cloned()
-        .ok_or_else(|| "the selected instance no longer exists".to_owned())?;
     let quantity = tunable_value_quantity(component.kind).ok_or_else(|| {
         format!(
             "{} values do not have a truthful typed design-variable mapping",
@@ -931,38 +961,26 @@ fn stage_component_tuning(app: &mut RSpiceApp, component_id: u64) -> Result<(), 
         })
         .map(|run| run.run_id);
 
-    let session = &mut app.state.workbench.verification;
-    if session.tuning_plan_id != Some(plan_id)
-        || session.tuning_plan_revision != Some(plan_revision)
-    {
-        session.tuning_plan_id = Some(plan_id);
-        session.tuning_plan_revision = Some(plan_revision);
-        session.tuning_variables = variables
-            .iter()
-            .map(|variable| crate::workbench::state::TuningVariableDraft {
-                variable_id: variable.id,
-                baseline_expression: variable.expression.clone(),
-                candidate_expression: variable.expression.clone(),
-                validation_error: None,
-                proposed: false,
-            })
-            .collect();
-        session.tuning_instance_binding = None;
-        session.tuning_selected_variable = None;
-        session.tuning_focus_variable = None;
-        session.tuning_baseline_run = active_plan_run;
-        session.tuning_review_open = false;
-    }
-
-    if let Some(pending) = session.tuning_instance_binding.as_ref() {
-        if pending.component_id == component_id
+    let session = &app.state.workbench.verification;
+    let current_session = session.tuning_plan_id == Some(plan_id)
+        && session.tuning_plan_revision == Some(plan_revision);
+    if current_session && let Some(pending) = session.tuning_instance_binding.as_ref() {
+        if pending.component_id == component.id
             && pending.source_view == source_view
             && pending.source_topology_version == source_topology_version
             && pending.source_value == component.value
         {
-            session.tuning_selected_variable = Some(pending.variable.id);
-            session.tuning_focus_variable = Some(pending.variable.id);
-            return Ok(());
+            return Ok(PreparedComponentTuning {
+                plan_id,
+                plan_revision,
+                variables,
+                source_view,
+                source_topology_version,
+                active_plan_run,
+                preparation: ComponentTuningPreparation::ExistingBinding {
+                    variable_id: pending.variable.id,
+                },
+            });
         }
         if pending.creates_variable || pending.requires_schematic_edit() {
             return Err(format!(
@@ -995,7 +1013,7 @@ fn stage_component_tuning(app: &mut RSpiceApp, component_id: u64) -> Result<(), 
         }
         (variable, false)
     } else {
-        let name = proposed_tuning_variable_name(&component, &variables);
+        let name = proposed_tuning_variable_name(component, &variables);
         let typed_expression = typed_tuning_expression(&component.value, quantity);
         let variable = crate::state::DesignVariable::new(
             &name,
@@ -1022,25 +1040,103 @@ fn stage_component_tuning(app: &mut RSpiceApp, component_id: u64) -> Result<(), 
                 quantity.label()
             )
         })?;
+        (variable, true)
+    };
+
+    Ok(PreparedComponentTuning {
+        plan_id,
+        plan_revision,
+        variables,
+        source_view,
+        source_topology_version,
+        active_plan_run,
+        preparation: ComponentTuningPreparation::StageBinding {
+            variable,
+            creates_variable,
+        },
+    })
+}
+
+fn component_tuning_action_block_reason(app: &RSpiceApp, component: &Component) -> Option<String> {
+    match Command::VerificationPage(VerificationPage::Tuning).availability(app) {
+        CommandAvailability::Available => prepare_component_tuning(app, component).err(),
+        CommandAvailability::Disabled(reason) => Some(reason.to_owned()),
+        CommandAvailability::Hidden => {
+            Some("parameter tuning is unavailable in this context".to_owned())
+        }
+    }
+}
+
+/// Bind the selected Value row to the non-destructive parameter sandbox.
+///
+/// This function writes only runtime proposal state. The schematic and active
+/// plan remain byte-for-byte authoritative until the existing review dialog
+/// commits the complete transaction.
+fn stage_component_tuning(app: &mut RSpiceApp, component_id: u64) -> Result<(), String> {
+    let component = app
+        .state
+        .schematic
+        .components
+        .iter()
+        .find(|component| component.id == component_id)
+        .cloned()
+        .ok_or_else(|| "the selected instance no longer exists".to_owned())?;
+    let prepared = prepare_component_tuning(app, &component)?;
+
+    let session = &mut app.state.workbench.verification;
+    if session.tuning_plan_id != Some(prepared.plan_id)
+        || session.tuning_plan_revision != Some(prepared.plan_revision)
+    {
+        session.tuning_plan_id = Some(prepared.plan_id);
+        session.tuning_plan_revision = Some(prepared.plan_revision);
+        session.tuning_variables = prepared
+            .variables
+            .iter()
+            .map(|variable| crate::workbench::state::TuningVariableDraft {
+                variable_id: variable.id,
+                baseline_expression: variable.expression.clone(),
+                candidate_expression: variable.expression.clone(),
+                validation_error: None,
+                proposed: false,
+            })
+            .collect();
+        session.tuning_instance_binding = None;
+        session.tuning_selected_variable = None;
+        session.tuning_focus_variable = None;
+        session.tuning_baseline_run = prepared.active_plan_run;
+        session.tuning_review_open = false;
+    }
+
+    let (variable, creates_variable) = match prepared.preparation {
+        ComponentTuningPreparation::ExistingBinding { variable_id } => {
+            session.tuning_selected_variable = Some(variable_id);
+            session.tuning_focus_variable = Some(variable_id);
+            return Ok(());
+        }
+        ComponentTuningPreparation::StageBinding {
+            variable,
+            creates_variable,
+        } => (variable, creates_variable),
+    };
+    if creates_variable {
         session.tuning_variables.retain(|draft| !draft.proposed);
         session
             .tuning_variables
             .push(crate::workbench::state::TuningVariableDraft {
                 variable_id: variable.id,
-                baseline_expression: typed_expression.clone(),
-                candidate_expression: typed_expression,
+                baseline_expression: variable.expression.clone(),
+                candidate_expression: variable.expression.clone(),
                 validation_error: None,
                 proposed: true,
             });
-        (variable, true)
-    };
+    }
 
     let binding_expression = format!("{{{}}}", variable.name);
     session.tuning_instance_binding = Some(crate::workbench::state::TuningInstanceBindingDraft {
         component_id,
         component_name: component.name.clone(),
-        source_view,
-        source_topology_version,
+        source_view: prepared.source_view,
+        source_topology_version: prepared.source_topology_version,
         source_value: component.value.clone(),
         binding_expression,
         variable: variable.clone(),
@@ -1090,7 +1186,7 @@ fn edit_row_with_hint(
     label: &str,
     hint: &str,
 ) -> Option<String> {
-    let editable = !app.state.active_view_read_only() && !app.state.schematic.read_only;
+    let editable = !app.state.schematic_edit_read_only();
     if !editable {
         let value = field_value(component, &field);
         property_row(ui, label, if value.is_empty() { hint } else { &value });
@@ -1112,7 +1208,14 @@ fn edit_row_with_hint(
 
     let tuning = Command::VerificationPage(VerificationPage::Tuning);
     let (response, tuning_response) = if matches!(field, InlineEditField::Value) {
-        let available = tuning.availability(app).is_available();
+        let tuning_block_reason = rejection.as_ref().map_or_else(
+            || component_tuning_action_block_reason(app, component),
+            |reason| {
+                Some(format!(
+                    "resolve the Value validation error before tuning: {reason}"
+                ))
+            },
+        );
         let (edit, action) = property_row_input_action(
             ui,
             label,
@@ -1120,7 +1223,8 @@ fn edit_row_with_hint(
             rejection.is_some(),
             WorkbenchIcon::Sliders,
             &format!("Scrub-tune {} in the parameter sandbox", component.name),
-            available,
+            tuning_block_reason.is_none(),
+            tuning_block_reason.as_deref(),
         );
         (edit, Some(action))
     } else {
@@ -1672,7 +1776,7 @@ fn select_net(app: &mut RSpiceApp, net: &DesignNet) {
 
 fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
     let reference = app.state.workspace.active_view.clone();
-    let read_only = app.state.active_view_read_only() || app.state.schematic.read_only;
+    let read_only = app.state.schematic_edit_read_only();
     let current = checks_current(&app.state);
     let dirty = active_view_dirty(&app.state);
     let depth = app.state.workspace.hierarchy_stack.len().saturating_sub(1);
@@ -1742,11 +1846,6 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
     property_row(ui, "View", &reference.view);
     property_row(
         ui,
-        "Sheet size",
-        &app.state.schematic.document_policy.page_size_display(),
-    );
-    property_row(
-        ui,
         "Grid / snap",
         &format!(
             "{} · snap {}",
@@ -1778,6 +1877,8 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
         "Working revision",
         &app.state.workspace.project.revision().get().to_string(),
     );
+
+    drawing_sheet_inspector(ui, app);
 
     section_header(ui, "Contents", None);
     property_row(
@@ -1864,6 +1965,309 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
     muted_inspector_copy(
         ui,
         "Click an instance or conductor to inspect it. Drag for a marquee; Shift-click adds to the selection.",
+    );
+}
+
+fn drawing_sheet_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
+    let sheet = ActiveDrawingSheet::resolve(&app.state);
+    let symbol_context = SchematicSymbolContext::from_state(&app.state);
+    let overflow = drawing_sheet_overflow_summary(&app.state, &symbol_context, &sheet);
+    let source = drawing_sheet_source_label(sheet.format.inheritance);
+    let physical = sheet.geometry.physical;
+    let unit = sheet.format.display_unit;
+
+    section_header(ui, "Drawing sheet", Some(source));
+    property_row(ui, "Format", &sheet.format_label());
+    property_row(
+        ui,
+        "Dimensions",
+        &unit.format_size_um(physical.paper.width_um, physical.paper.height_um),
+    );
+    property_row(
+        ui,
+        "Printable area",
+        &unit.format_size_um(physical.printable.width_um, physical.printable.height_um),
+    );
+    property_row(ui, "Margins", &drawing_sheet_margins_label(&sheet.format));
+    property_row(ui, "Border", &drawing_sheet_border_label(&sheet));
+    property_row(ui, "Title block", &drawing_sheet_title_block_label(&sheet));
+    if sheet.format.title_block_substituted() {
+        drawing_sheet_title_block_substitution(ui, &sheet);
+    }
+    property_row(
+        ui,
+        "Page",
+        &format!("{} · {}", sheet.page_label, sheet.sheet_name),
+    );
+
+    let advisory_count = overflow.finding_count();
+    property_row_status(
+        ui,
+        "Content",
+        &if overflow.is_clear() {
+            "inside the sheet".to_owned()
+        } else {
+            format!("{advisory_count} outside")
+        },
+        tone_for(ui, overflow.is_clear()),
+        mark_for(overflow.is_clear()),
+    );
+
+    if !overflow.is_clear() {
+        drawing_sheet_overflow_advisory(ui, app, &overflow);
+    }
+
+    if app.state.schematic_edit_read_only() {
+        drawing_sheet_lock_note(
+            ui,
+            "The active schematic is read-only. The sheet format is shown in full and prints exactly as stated.",
+        );
+    } else {
+        action_stack(ui, |ui| {
+            let width = ui.available_width();
+            ui.allocate_ui_with_layout(
+                egui::vec2(width, 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.spacing_mut().item_spacing.y = ACTION_ROW_GAP;
+
+                    let availability = Command::PageSetup.availability(app);
+                    let response = Button::new("Page setup…")
+                        .icon(Icon::File)
+                        .min_width(width)
+                        .enabled(availability.is_available())
+                        .show(ui);
+                    if let CommandAvailability::Disabled(reason) = availability {
+                        response.on_disabled_hover_text(reason);
+                    } else if response.clicked() {
+                        Command::PageSetup.execute(app);
+                    }
+
+                    let availability = Command::SheetFormatManager.availability(app);
+                    let response = Button::new("All sheet formats…")
+                        .icon(Icon::Copy)
+                        .min_width(width)
+                        .enabled(availability.is_available())
+                        .show(ui);
+                    if let CommandAvailability::Disabled(reason) = availability {
+                        response.on_disabled_hover_text(reason);
+                    } else if response.clicked() {
+                        Command::SheetFormatManager.execute(app);
+                    }
+                },
+            );
+        });
+    }
+}
+
+fn drawing_sheet_title_block_substitution(ui: &mut Ui, sheet: &ActiveDrawingSheet) {
+    let t = Tokens::get(ui.ctx());
+    let requested = drawing_sheet_title_template_name(sheet.format.title_block.template);
+    let effective =
+        drawing_sheet_title_template_name(sheet.geometry.physical.effective_title_block_template);
+    let shown = egui::Frame::new()
+        .fill(Color32::from_rgba_unmultiplied(
+            t.color.warn.r(),
+            t.color.warn.g(),
+            t.color.warn.b(),
+            18,
+        ))
+        .stroke(egui::Stroke::new(
+            1.0,
+            Color32::from_rgba_unmultiplied(
+                t.color.warn.r(),
+                t.color.warn.g(),
+                t.color.warn.b(),
+                102,
+            ),
+        ))
+        .corner_radius(t.radius)
+        .inner_margin(egui::Margin::symmetric(9, 8))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new("Title block substituted")
+                    .font(theme::sans(tokens::FS_1, FontWeight::Medium))
+                    .color(t.color.warn),
+            );
+            ui.add(
+                egui::Label::new(
+                    RichText::new(format!(
+                        "{requested} does not fit the current drawing area, so {effective} is rendered. The requested template remains saved; enlarge the sheet or drawing area in Page Setup to restore it."
+                    ))
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_dim),
+                )
+                .wrap(),
+            );
+        });
+    ui.painter().vline(
+        shown.response.rect.left() + 1.0,
+        shown.response.rect.y_range(),
+        egui::Stroke::new(2.0, t.color.warn),
+    );
+}
+
+const fn drawing_sheet_title_template_name(
+    template: DrawingSheetTitleBlockTemplate,
+) -> &'static str {
+    match template {
+        DrawingSheetTitleBlockTemplate::Compact => "RSpice compact",
+        DrawingSheetTitleBlockTemplate::Standard => "RSpice standard",
+        DrawingSheetTitleBlockTemplate::Wide => "RSpice wide",
+        DrawingSheetTitleBlockTemplate::OrganizationManaged => "Organization block",
+        DrawingSheetTitleBlockTemplate::None => "No title block",
+    }
+}
+
+const fn drawing_sheet_source_label(inheritance: DrawingSheetInheritance) -> &'static str {
+    match inheritance {
+        DrawingSheetInheritance::Explicit => "sheet override",
+        DrawingSheetInheritance::ProjectDefault => "inherited · project default",
+        DrawingSheetInheritance::UserDefault => "inherited · personal",
+    }
+}
+
+fn drawing_sheet_margins_label(format: &crate::state::SchematicSheetFormat) -> String {
+    let margins = format.margins;
+    let unit = format.display_unit;
+    if margins.top_um == margins.right_um
+        && margins.top_um == margins.bottom_um
+        && margins.top_um == margins.left_um
+    {
+        format!(
+            "{} {} all edges",
+            unit.format_um(margins.top_um),
+            unit.suffix()
+        )
+    } else {
+        format!(
+            "{} · {} · {} · {} {}",
+            unit.format_um(margins.top_um),
+            unit.format_um(margins.right_um),
+            unit.format_um(margins.bottom_um),
+            unit.format_um(margins.left_um),
+            unit.suffix()
+        )
+    }
+}
+
+fn drawing_sheet_border_label(sheet: &ActiveDrawingSheet) -> String {
+    let template = match sheet.format.border {
+        DrawingSheetBorderTemplate::Standard => "standard border with zones",
+        DrawingSheetBorderTemplate::Plain => "plain border",
+        DrawingSheetBorderTemplate::None => "no border",
+        DrawingSheetBorderTemplate::OrganizationManaged => "organization border",
+    };
+    sheet.geometry.physical.zones.map_or_else(
+        || template.to_owned(),
+        |zones| format!("{template} · {} × {} zones", zones.columns, zones.rows),
+    )
+}
+
+fn drawing_sheet_title_block_label(sheet: &ActiveDrawingSheet) -> String {
+    let template = match sheet.format.title_block.template {
+        DrawingSheetTitleBlockTemplate::Compact => "RSpice compact",
+        DrawingSheetTitleBlockTemplate::Standard => "RSpice standard",
+        DrawingSheetTitleBlockTemplate::Wide => "RSpice wide",
+        DrawingSheetTitleBlockTemplate::OrganizationManaged => "Organization block",
+        DrawingSheetTitleBlockTemplate::None => {
+            return "none · identity printed in the page header".to_owned();
+        }
+    };
+    let anchor = match sheet.format.title_block.anchor {
+        DrawingSheetTitleBlockAnchor::BottomRight => "bottom right",
+        DrawingSheetTitleBlockAnchor::BottomLeft => "bottom left",
+        DrawingSheetTitleBlockAnchor::BottomStrip => "bottom strip",
+        DrawingSheetTitleBlockAnchor::TopRight => "top right",
+    };
+    format!("{template} · {anchor}")
+}
+
+fn drawing_sheet_overflow_advisory(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    summary: &DrawingSheetOverflowSummary,
+) {
+    let t = Tokens::get(ui.ctx());
+    let count = summary.finding_count();
+    let mut details = Vec::with_capacity(2);
+    if summary.outside_border > 0 {
+        let mut outside = format!("{} outside the border", summary.outside_border);
+        if summary.off_paper > 0 {
+            outside.push_str(&format!(" · {} beyond the paper edge", summary.off_paper));
+        }
+        details.push(outside);
+    }
+    if summary.title_block_collisions > 0 {
+        details.push(format!(
+            "{} overlapping the title block",
+            summary.title_block_collisions
+        ));
+    }
+    let fill =
+        Color32::from_rgba_unmultiplied(t.color.warn.r(), t.color.warn.g(), t.color.warn.b(), 18);
+    let border =
+        Color32::from_rgba_unmultiplied(t.color.warn.r(), t.color.warn.g(), t.color.warn.b(), 102);
+    ui.add_space(2.0);
+    let shown = egui::Frame::new()
+        .fill(fill)
+        .stroke(egui::Stroke::new(1.0, border))
+        .corner_radius(t.radius)
+        .inner_margin(egui::Margin::symmetric(9, 8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width().max(1.0));
+            ui.spacing_mut().item_spacing.y = 7.0;
+            ui.label(
+                egui::RichText::new(format!(
+                    "△ {count} object{} outside the drawing area",
+                    if count == 1 { "" } else { "s" }
+                ))
+                .font(theme::sans(tokens::FS_1, FontWeight::Medium))
+                .color(t.color.warn),
+            );
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(format!(
+                        "{}. This is advisory: the sheet saves, netlists, checks and simulates unchanged. Print and export ask what to do with it.",
+                        details.join(" · ")
+                    ))
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_dim),
+                )
+                .wrap(),
+            );
+            ui.horizontal(|ui| {
+                if Button::new("Show first")
+                    .icon(Icon::ZoomFit)
+                    .show(ui)
+                    .clicked()
+                {
+                    crate::schematic::view::drawing_sheet::show_first_drawing_sheet_overflow(
+                        &mut app.state,
+                    );
+                }
+                if Button::new("Review all…").show(ui).clicked() {
+                    crate::workbench::app::open_drawing_sheet_overflow_review(&mut app.state);
+                }
+            });
+        });
+    ui.painter().vline(
+        shown.response.rect.left() + 1.0,
+        shown.response.rect.y_range(),
+        egui::Stroke::new(2.0, t.color.warn),
+    );
+}
+
+fn drawing_sheet_lock_note(ui: &mut Ui, message: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.add_space(6.0);
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(message)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_faint),
+        )
+        .wrap(),
     );
 }
 
@@ -2087,6 +2491,83 @@ fn shape_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
         "Control points",
         &shape.geometry.points().len().to_string(),
     );
+}
+
+fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
+    let Some(probe) = app
+        .state
+        .schematic
+        .probes
+        .iter()
+        .find(|probe| probe.id == id)
+        .cloned()
+    else {
+        return;
+    };
+    let bound = probe.source_expression.as_deref();
+    hero(
+        ui,
+        app,
+        Hero {
+            preview: HeroPreview::Icon(WorkbenchIcon::Label),
+            eyebrow: format!("PROBE-{id}"),
+            title: probe.reference.clone(),
+            subtitle: bound.map_or_else(
+                || "unbound saved-output marker".to_owned(),
+                |expression| format!("bound to {expression}"),
+            ),
+            statuses: vec![(
+                if bound.is_some() { "bound" } else { "unbound" }.to_owned(),
+                if bound.is_some() {
+                    Tokens::get(ui.ctx()).color.ok
+                } else {
+                    Tokens::get(ui.ctx()).color.warn
+                },
+            )],
+            open_properties: None,
+        },
+    );
+    section_header(ui, "Probe marker", Some("authored output intent"));
+    property_row(ui, "Stable ID", &format!("PROBE-{id}"));
+    property_row(ui, "Reference", &probe.reference);
+    property_row(ui, "Source", bound.unwrap_or("not bound"));
+    property_row(
+        ui,
+        "Anchor",
+        &format!("{}, {}", probe.position.x, probe.position.y),
+    );
+    property_row(ui, "Electrical connectivity", "none");
+
+    action_stack(ui, |ui| {
+        if let Some(expression) = bound {
+            let writable = !app.state.schematic_edit_read_only();
+            let response = Button::new("Show in results")
+                .icon(Icon::Results)
+                .enabled(writable)
+                .show(ui);
+            let clicked = response.clicked();
+            if !writable {
+                response.on_hover_text(
+                    "The active schematic is read-only; a missing saved-output contract cannot be created.",
+                );
+            }
+            if clicked {
+                let changed = crate::schematic::view::ensure_probe_visible_with_feedback(
+                    ui,
+                    &mut app.state,
+                    expression,
+                    expression,
+                );
+                if changed {
+                    app.invalidate_simulation_preflight();
+                }
+            }
+        }
+        if Button::new("Center marker").ghost().show(ui).clicked() {
+            app.state.schematic.center_request = Some(probe.position);
+        }
+        command_action(ui, app, Command::Delete, Icon::Trash, "Delete probe", true);
+    });
 }
 
 #[cfg(test)]

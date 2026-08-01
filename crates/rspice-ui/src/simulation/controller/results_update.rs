@@ -359,6 +359,7 @@ impl SimulationController {
         variables: &[crate::simulation::results::MonteCarloVariableResult],
     ) {
         state.analysis.histogram_state.clear();
+        state.clear_specialized_viewer_cache_authority(ActiveViewer::Histogram);
 
         for variable in variables {
             if variable.histogram.is_empty()
@@ -393,6 +394,12 @@ impl SimulationController {
             } else {
                 state.analysis.histogram_state.add_histogram(histogram);
             }
+        }
+
+        if !state.analysis.histogram_state.is_empty()
+            && let Some(provenance) = self.in_flight_specialized_viewer_provenance(state)
+        {
+            state.bind_specialized_viewer_cache(ActiveViewer::Histogram, provenance);
         }
     }
 }

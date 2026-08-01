@@ -20,13 +20,15 @@ use crate::hardcopy::{
     HardcopyPlan, OutputFormat, RenderTarget,
 };
 use crate::product::ContentDigest;
-use crate::workbench::workflows::export_workflow::{
-    ExportWorkflowIo, NativeExportWorkflowIo, ObservedExportDestination, deterministic_stored_zip,
-};
 use crate::workbench::hardcopy_adapters::print::{
     HardcopyCancellationToken, HardcopyPrintError, discover_native_printers, spool_native_hardcopy,
 };
-use crate::workbench::hardcopy_adapters::render::{RenderedHardcopyPublication, RenderedPrinterPages};
+use crate::workbench::hardcopy_adapters::render::{
+    RenderedHardcopyPublication, RenderedPrinterPages,
+};
+use crate::workbench::workflows::export_workflow::{
+    ExportWorkflowIo, NativeExportWorkflowIo, ObservedExportDestination, deterministic_stored_zip,
+};
 
 const NATIVE_FINALIZATION_THREAD_NAME: &str = "rspice-hardcopy-finalize";
 const CANCELLED_MESSAGE: &str = "Native hardcopy finalization was cancelled.";

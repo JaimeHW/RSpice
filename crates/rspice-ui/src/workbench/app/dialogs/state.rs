@@ -18,6 +18,71 @@ pub(crate) enum ViewOperation {
     ResetActiveView,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LibraryDeletionTarget {
+    Cell {
+        library: String,
+        cell: String,
+    },
+    View {
+        library: String,
+        cell: String,
+        view: String,
+    },
+}
+
+impl LibraryDeletionTarget {
+    pub(crate) fn library(&self) -> &str {
+        match self {
+            Self::Cell { library, .. } | Self::View { library, .. } => library,
+        }
+    }
+
+    pub(crate) fn cell(&self) -> &str {
+        match self {
+            Self::Cell { cell, .. } | Self::View { cell, .. } => cell,
+        }
+    }
+
+    pub(crate) fn view(&self) -> Option<&str> {
+        match self {
+            Self::Cell { .. } => None,
+            Self::View { view, .. } => Some(view),
+        }
+    }
+
+    pub(crate) fn display_path(&self) -> String {
+        match self {
+            Self::Cell { library, cell } => format!("{library}/{cell}"),
+            Self::View {
+                library,
+                cell,
+                view,
+            } => format!("{library}/{cell}/{view}"),
+        }
+    }
+
+    pub(crate) const fn kind_label(&self) -> &'static str {
+        match self {
+            Self::Cell { .. } => "Cell",
+            Self::View { .. } => "View",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct LibraryDeletionReviewState {
+    pub(crate) target: Option<LibraryDeletionTarget>,
+    pub(crate) expected_library_revision: u64,
+    pub(crate) error: Option<String>,
+}
+
+impl LibraryDeletionReviewState {
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum FullScreenScope {
     #[default]
@@ -337,6 +402,10 @@ pub struct CommandPaletteState {
 pub(crate) struct TechnologyAttachmentDialogState {
     pub(crate) open: bool,
     pub(crate) selected_library: Option<String>,
+    pub(crate) selected_signed_package: Option<String>,
+    pub(crate) actor_id: String,
+    pub(crate) authority_id: String,
+    pub(crate) reason: String,
     pub(crate) validation_error: Option<String>,
     #[cfg(target_arch = "wasm32")]
     pub(crate) checkpoint_pending: bool,
@@ -345,8 +414,10 @@ pub(crate) struct TechnologyAttachmentDialogState {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ProjectCheckpointRecoveryState {
     pub(crate) project_id: Option<String>,
-    pub(crate) checkpoints: Vec<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary>,
-    pub(crate) quarantined: Vec<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointQuarantine>,
+    pub(crate) checkpoints:
+        Vec<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary>,
+    pub(crate) quarantined:
+        Vec<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointQuarantine>,
     pub(crate) error: Option<String>,
     pub(crate) initialized: bool,
     #[cfg(target_arch = "wasm32")]
@@ -361,10 +432,18 @@ impl ProjectCheckpointRecoveryState {
 }
 
 impl TechnologyAttachmentDialogState {
-    pub(crate) fn open(&mut self, selected_library: Option<String>) {
+    pub(crate) fn open(
+        &mut self,
+        selected_library: Option<String>,
+        selected_signed_package: Option<String>,
+    ) {
         *self = Self {
             open: true,
             selected_library,
+            selected_signed_package,
+            actor_id: String::new(),
+            authority_id: String::new(),
+            reason: String::new(),
             validation_error: None,
             #[cfg(target_arch = "wasm32")]
             checkpoint_pending: false,
@@ -511,6 +590,107 @@ impl NetLabelPlacementDialogState {
 /// The draft is device-local presentation state. Apply publishes all seven
 /// controls atomically; Cancel discards them without touching schematic
 /// history, topology, project serialization, or retained result data.
+/// Governed snap-spacing choices shown by the upgraded schematic toolbar
+/// transaction. `Free` disables snapping without replacing the document's
+/// retained pitch.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum GridSnapSpacingChoice {
+    #[default]
+    Free,
+    Mil25,
+    Mil50,
+    Metric,
+}
+
+impl GridSnapSpacingChoice {
+    pub(crate) const ALL: [Self; 4] = [Self::Free, Self::Mil25, Self::Mil50, Self::Metric];
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Free => "Free",
+            Self::Mil25 => "25 mil",
+            Self::Mil50 => "50 mil",
+            Self::Metric => "Metric \u{00b7} 0.5 mm",
+        }
+    }
+
+    pub(crate) const fn pitch(self) -> Option<crate::state::SchematicGridPitch> {
+        match self {
+            Self::Free => None,
+            Self::Mil25 => Some(crate::state::SchematicGridPitch::Mil25),
+            Self::Mil50 => Some(crate::state::SchematicGridPitch::Mil50),
+            Self::Metric => Some(crate::state::SchematicGridPitch::Metric),
+        }
+    }
+
+    pub(crate) const fn from_pitch(pitch: crate::state::SchematicGridPitch) -> Self {
+        match pitch {
+            crate::state::SchematicGridPitch::Mil25 => Self::Mil25,
+            crate::state::SchematicGridPitch::Mil50 => Self::Mil50,
+            crate::state::SchematicGridPitch::Metric => Self::Metric,
+        }
+    }
+}
+
+/// Complete isolated candidate published by Grid, snap and wire routing.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct GridSnapRoutingDraft {
+    pub(crate) grid_style: crate::state::GridStyle,
+    pub(crate) snap_spacing: GridSnapSpacingChoice,
+    pub(crate) snap_engine: crate::state::SnapEngine,
+    pub(crate) wire_routing: crate::state::WireRoutingMode,
+}
+
+impl Default for GridSnapRoutingDraft {
+    fn default() -> Self {
+        Self {
+            grid_style: crate::state::GridStyle::Dots,
+            snap_spacing: GridSnapSpacingChoice::Mil50,
+            snap_engine: crate::state::SnapEngine::default(),
+            wire_routing: crate::state::WireRoutingMode::HorizontalFirst,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GridSnapRoutingFocusTarget {
+    SnapSpacing,
+    SnapTargets,
+}
+
+/// Application-modal transactional owner for the schematic canvas settings
+/// popover. The original and draft are kept separately so Cancel is exact.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct GridSnapRoutingDialogState {
+    pub(crate) open: bool,
+    pub(crate) draft: GridSnapRoutingDraft,
+    pub(crate) original: GridSnapRoutingDraft,
+    pub(crate) authority: Option<SchematicEditAuthority>,
+    pub(crate) validation_error: Option<String>,
+    pub(crate) focus_target: Option<GridSnapRoutingFocusTarget>,
+}
+
+impl GridSnapRoutingDialogState {
+    pub(crate) fn open(&mut self, draft: GridSnapRoutingDraft, authority: SchematicEditAuthority) {
+        *self = Self {
+            open: true,
+            original: draft.clone(),
+            draft,
+            authority: Some(authority),
+            validation_error: None,
+            focus_target: None,
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(crate) fn dirty(&self) -> bool {
+        self.open && self.draft != self.original
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SchematicVisibilityDialogState {
     pub(crate) open: bool,
@@ -524,6 +704,31 @@ impl SchematicVisibilityDialogState {
             open: true,
             draft: policy,
             original: policy,
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(crate) fn dirty(&self) -> bool {
+        self.open && self.draft != self.original
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DrawingSheetLayersDialogState {
+    pub(crate) open: bool,
+    pub(crate) draft: crate::state::DrawingSheetLayerVisibility,
+    pub(crate) original: crate::state::DrawingSheetLayerVisibility,
+}
+
+impl DrawingSheetLayersDialogState {
+    pub(crate) fn open(&mut self, layers: crate::state::DrawingSheetLayerVisibility) {
+        *self = Self {
+            open: true,
+            draft: layers,
+            original: layers,
         };
     }
 
@@ -1152,7 +1357,8 @@ pub(crate) struct CheckAndSaveDialogState {
     pub(crate) dirty: bool,
     pub(crate) discard_confirm: bool,
     #[cfg(target_arch = "wasm32")]
-    pub(crate) pending_transaction: Option<crate::workbench::lifecycle::project_lifecycle::TransactionId>,
+    pub(crate) pending_transaction:
+        Option<crate::workbench::lifecycle::project_lifecycle::TransactionId>,
     #[cfg(target_arch = "wasm32")]
     pub(crate) pending_revision_id: Option<crate::state::ValidatedSchematicRevisionId>,
     #[cfg(target_arch = "wasm32")]
@@ -1899,6 +2105,8 @@ pub struct DialogState {
     pub new_cell_create_testbench: bool,
     /// New Cell validation error message
     pub new_cell_error: Option<String>,
+    /// Exact library catalog revision captured when New Cell opened.
+    pub(crate) new_cell_library_revision: u64,
     /// New View creation dialog
     pub new_view_dialog: bool,
     /// New View target library
@@ -1911,6 +2119,8 @@ pub struct DialogState {
     pub new_view_type: crate::state::ViewType,
     /// New View validation error message
     pub new_view_error: Option<String>,
+    /// Exact library catalog revision captured when New View opened.
+    pub(crate) new_view_library_revision: u64,
     /// Copy Cell dialog
     pub copy_cell_dialog: bool,
     /// Copy Cell source library
@@ -1923,6 +2133,8 @@ pub struct DialogState {
     pub copy_cell_name: String,
     /// Copy Cell validation error message
     pub copy_cell_error: Option<String>,
+    /// Exact library catalog revision captured when Copy Cell opened.
+    pub(crate) copy_cell_library_revision: u64,
     /// Rename Cell dialog
     pub rename_cell_dialog: bool,
     /// Rename Cell target library
@@ -1933,6 +2145,10 @@ pub struct DialogState {
     pub rename_cell_name: String,
     /// Rename Cell validation error message
     pub rename_cell_error: Option<String>,
+    /// Exact library catalog revision captured when Rename Cell opened.
+    pub(crate) rename_cell_library_revision: u64,
+    /// Exact, revision-bound destructive review for deleting one cell or view.
+    pub(crate) library_deletion_review: LibraryDeletionReviewState,
     /// A saved-file open found a bound, eligible autosave checkpoint; the
     /// restore dialog resolves it before either exact byte snapshot is loaded.
     #[cfg(not(target_arch = "wasm32"))]
@@ -1963,6 +2179,19 @@ pub struct DialogState {
     /// controls and preview state are runtime-only; committed setups live in
     /// `ProjectWorkspace::hardcopy_setups`.
     pub(crate) hardcopy: crate::workbench::app::HardcopyDialogState,
+
+    /// Permanent authored drawing-sheet transaction for schematic and
+    /// testbench documents. It never contains printer or export-media state.
+    pub(crate) drawing_sheet_setup: crate::workbench::app::DrawingSheetSetupState,
+
+    /// Project and personal defaults for future authored drawing sheets.
+    pub(crate) drawing_sheet_defaults: crate::workbench::app::DrawingSheetDefaultsDialogState,
+
+    /// Custom drawing-sheet size library, editor, and portable JSON transfer.
+    pub(crate) drawing_sheet_presets: crate::workbench::app::DrawingSheetPresetDialogsState,
+
+    /// Document-wide authored-sheet reconciliation and title-field editing.
+    pub(crate) drawing_sheet_support: crate::workbench::app::DrawingSheetSupportState,
 
     /// Read-only resolved policy review owned by Preferences.
     pub(crate) managed_preference_policy_open: bool,
@@ -1995,6 +2224,18 @@ pub struct DialogState {
 
     /// Device-local hierarchy and annotation visibility transaction.
     pub(crate) schematic_visibility: SchematicVisibilityDialogState,
+
+    /// Device-local construction-layer visibility around the permanent paper
+    /// edge. These choices never modify project-owned drawing-sheet setup.
+    pub(crate) drawing_sheet_layers: DrawingSheetLayersDialogState,
+
+    /// Live advisory review of printable objects outside the authored drawing
+    /// area or overlapping the title block.
+    pub(crate) drawing_sheet_overflow_open: bool,
+
+    /// Transactional grid display, exact snapping, and conductor-routing
+    /// configuration.
+    pub(crate) grid_snap_routing: GridSnapRoutingDialogState,
 
     /// Explicit menu-owned hierarchy edit-context transaction.
     pub(crate) descend_hierarchy: DescendHierarchyDialogState,
@@ -2108,9 +2349,13 @@ impl DialogState {
             || self.new_view_dialog
             || self.copy_cell_dialog
             || self.rename_cell_dialog
-            || self.waveform_calculator_dialog
+            || self.library_deletion_review.target.is_some()
             || self.preferences_open
             || self.hardcopy.open
+            || self.drawing_sheet_setup.open
+            || self.drawing_sheet_defaults.open
+            || self.drawing_sheet_presets.any_open()
+            || self.drawing_sheet_support.any_open()
             || self.managed_preference_policy_open
             || self.workspace_layout_manager.open
             || self.shortcut_portability.application_modal_open()
@@ -2120,6 +2365,9 @@ impl DialogState {
             || self.bus_tap.open
             || self.net_label_placement.open
             || self.schematic_visibility.open
+            || self.drawing_sheet_layers.open
+            || self.drawing_sheet_overflow_open
+            || self.grid_snap_routing.open
             || self.engineering_table.open
             || self.pin_port.open
             || self.design_note.open
@@ -2178,9 +2426,11 @@ mod tests {
         assert_blocks_shortcuts(|dialogs| dialogs.create_model_bound_symbol.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.symbol_import.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.symbol_parameter_form.open = true);
-        assert_blocks_shortcuts(|dialogs| dialogs.waveform_calculator_dialog = true);
         assert_blocks_shortcuts(|dialogs| dialogs.engineering_table.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.preferences_open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.drawing_sheet_setup.open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.drawing_sheet_support.manager.open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.drawing_sheet_support.title_fields.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.managed_preference_policy_open = true);
         assert_blocks_shortcuts(|dialogs| {
             dialogs
@@ -2195,6 +2445,9 @@ mod tests {
         assert_blocks_shortcuts(|dialogs| dialogs.bus_tap.open());
         assert_blocks_shortcuts(|dialogs| dialogs.net_label_placement.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.schematic_visibility.open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.drawing_sheet_layers.open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.drawing_sheet_overflow_open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.grid_snap_routing.open = true);
         assert_blocks_shortcuts(|dialogs| {
             dialogs.pin_port.open(
                 "BIAS_EN".to_owned(),
@@ -2321,8 +2574,24 @@ mod tests {
         assert_blocks_shortcuts(|dialogs| {
             dialogs.interaction.schematic_delete_confirmation_open = true;
         });
+        assert_blocks_shortcuts(|dialogs| {
+            dialogs.library_deletion_review.target = Some(LibraryDeletionTarget::Cell {
+                library: "work".to_owned(),
+                cell: "filter".to_owned(),
+            });
+        });
         assert_blocks_shortcuts(|dialogs| dialogs.confirmation_dialog.visible = true);
         assert_blocks_shortcuts(|dialogs| dialogs.project_review_dialog.show_close_project());
+    }
+
+    #[test]
+    fn modeless_waveform_calculator_does_not_block_workspace_shortcuts() {
+        let mut dialogs = DialogState::default();
+        dialogs.waveform_calculator_dialog = true;
+        assert!(
+            !dialogs.application_modal_open(),
+            "the modeless calculator must leave plot and workspace shortcuts active"
+        );
     }
 
     #[test]

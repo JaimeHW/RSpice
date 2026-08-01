@@ -15,8 +15,8 @@ pub mod klu {
 }
 
 pub use arc_length::{ArcLengthConfig, ArcLengthContinuation, ArcLengthResult, ArcLengthState};
-pub use damping::{DampingController, DampingStatistics, DampingStrategy};
 pub use convergence::{PseudoTransient, SourceStepper};
+pub use damping::{DampingController, DampingStatistics, DampingStrategy};
 pub use newton::*;
 
 use crate::Value;

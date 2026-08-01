@@ -776,7 +776,6 @@ async fn run_browser_open(picker: js_sys::Promise) -> BrowserOpenResult {
     }
 }
 
-
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn observe_native_destination(
     path: &Path,

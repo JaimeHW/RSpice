@@ -6,6 +6,7 @@
 //! pagination and emits an authenticated artifact. PDF/A output is returned
 //! only after Krilla's PDF/A-2b validator accepts the complete document.
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::io::Cursor;
 
@@ -33,22 +34,27 @@ use tiff::encoder::{Compression, DeflateLevel, Rational, TiffEncoder, colortype}
 use tiff::tags::ResolutionUnit;
 
 use super::sources::{
-    HardcopySemanticDocument, ResolvedHardcopyDocument, SCHEMATIC_UNIT_UM, SemanticAggregate,
-    SemanticBounds, SemanticPlot, SemanticPoint, SemanticReport, SemanticReportFigure,
-    SemanticResultSummary, SemanticSchematic, SemanticTable,
+    HardcopySemanticDocument, ResolvedHardcopyDocument, SCHEMATIC_SHEET_ORIGIN_X_UNITS,
+    SCHEMATIC_SHEET_ORIGIN_Y_UNITS, SCHEMATIC_UNIT_UM, SemanticAggregate, SemanticBounds,
+    SemanticPlot, SemanticPoint, SemanticReport, SemanticReportFigure, SemanticResultSummary,
+    SemanticSchematic, SemanticTable,
 };
 use crate::hardcopy::{
     BackgroundMode, Bleed, ColorMapping, ContentExtent, HardcopyArtifactIdentity,
-    HardcopyDocumentId, HardcopyPlan, HardcopyPlanId, Length, OutputFormat, PageRect, PreviewPage,
-    PrintColor, PrintMappingTable, PrintObjectKind, PrintRedundancy, RenderTarget,
-    ResolvedOrientation, ScaleRatio, Watermark,
+    HardcopyDocumentId, HardcopyPlan, HardcopyPlanId, Length, OutputFormat,
+    OutsideSheetContentPolicy, PageRect, PreviewPage, PrintColor, PrintMappingTable,
+    PrintObjectKind, PrintRedundancy, RenderTarget, ResolvedOrientation, ScaleRatio,
+    SchematicHardcopyExtent, SchematicHardcopySetup, Watermark,
 };
 use crate::product::{ContentDigest, ObjectRevision};
 use crate::results::report_document::{FigureSizing, ReportBlockId, ReportBlockKind, TableCell};
 use crate::schematic::SymbolLibrary;
 use crate::schematic::symbols::PathCommand;
 use crate::state::{
-    Component, DocumentationShapeGeometry, Point as SchematicPoint, SymbolDocument, SymbolShape,
+    Component, DocumentationShapeGeometry, DrawingSheetBorderTemplate, DrawingSheetRect,
+    DrawingSheetTitleBlockRotation, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId,
+    DrawingSheetZoneEdges, DrawingSheetZoneGrid, DrawingSheetZoneLabels, Point as SchematicPoint,
+    SchematicSheetFormat, SymbolDocument, SymbolShape,
 };
 
 const MICROMETRES_PER_INCH: u64 = 25_400;
@@ -192,7 +198,6 @@ impl HardcopyPublicationTimestamp {
             .utc_offset_hour(0)
             .utc_offset_minute(0)
     }
-
 }
 
 const fn days_in_month(year: u16, month: u8) -> Option<u8> {
@@ -296,7 +301,6 @@ impl HardcopySceneMetadata {
     pub fn title(&self) -> &str {
         &self.title
     }
-
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -435,6 +439,15 @@ pub enum TextAnchor {
     End,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SceneTextRotation {
+    #[default]
+    Upright,
+    Clockwise90,
+    CounterClockwise90,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum SceneFill {
@@ -492,6 +505,20 @@ pub enum ScenePrimitive {
         size: Length,
         color: SemanticColor,
         anchor: TextAnchor,
+        #[serde(default)]
+        rotation: SceneTextRotation,
+    },
+    /// Preserve complete source primitives while presenting only one exact
+    /// authenticated authored-sheet window. The renderer remaps
+    /// `source_origin` to `destination_origin`; the physical page clip then
+    /// clips circles, raster images, searchable text, and every future
+    /// primitive without lossy geometry-specific rejection.
+    ClippedGroup {
+        source_origin: ScenePoint,
+        destination_origin: ScenePoint,
+        clip_extent: ContentExtent,
+        source_extent: ContentExtent,
+        primitives: Vec<ScenePrimitive>,
     },
 }
 
@@ -742,10 +769,38 @@ impl FontCoverage {
 pub fn scene_from_resolved(
     source: &ResolvedHardcopyDocument,
     mapping: &PrintMappingTable,
+    schematic_output: SchematicHardcopySetup,
     metadata: HardcopySceneMetadata,
 ) -> Result<HardcopyScene, HardcopyRenderError> {
-    let mut compiler =
-        SemanticSceneCompiler::new(source.bounds(), source.content_extent(), mapping);
+    let drawing_sheet_has_outside_content = source
+        .schematic_drawing_sheet_has_outside_content()
+        .map_err(|error| HardcopyRenderError::SourceConversion(error.to_string()))?;
+    if drawing_sheet_has_outside_content == Some(true)
+        && schematic_output.extent() == SchematicHardcopyExtent::AuthoredDrawingSheet
+        && schematic_output.outside_content() == OutsideSheetContentPolicy::Ask
+    {
+        return Err(HardcopyRenderError::SchematicOutsideContentDecisionRequired);
+    }
+    if let Some(layout) = source
+        .aggregate_layout_for_setup(schematic_output)
+        .map_err(|error| HardcopyRenderError::SourceConversion(error.to_string()))?
+        && schematic_output.extent() == SchematicHardcopyExtent::AuthoredDrawingSheet
+        && schematic_output.outside_content() == OutsideSheetContentPolicy::ClipToAuthoredSheet
+    {
+        return scene_from_clipped_aggregate(source, mapping, schematic_output, metadata, layout);
+    }
+    let clipped_sheet_bounds = source
+        .authored_sheet_bounds(schematic_output)
+        .map_err(|error| HardcopyRenderError::SourceConversion(error.to_string()))?;
+    let output_extent = source
+        .content_extent_for_setup(schematic_output)
+        .map_err(|error| HardcopyRenderError::SourceConversion(error.to_string()))?;
+    let mut compiler = SemanticSceneCompiler::new(
+        source.bounds(),
+        source.content_extent(),
+        mapping,
+        schematic_output,
+    );
     match source.semantic_document() {
         HardcopySemanticDocument::Schematic(schematic) => compiler.schematic(schematic)?,
         HardcopySemanticDocument::Symbol(symbol) => compiler.symbol_document(symbol, None)?,
@@ -754,15 +809,602 @@ pub fn scene_from_resolved(
         HardcopySemanticDocument::Report(report) => compiler.report(report)?,
         HardcopySemanticDocument::Aggregate(aggregate) => compiler.aggregate(aggregate)?,
     }
+    let primitives = if let Some(sheet_bounds) = clipped_sheet_bounds {
+        clip_primitives_to_authored_sheet(&compiler.primitives, source.bounds(), sheet_bounds)?
+    } else {
+        compiler.primitives
+    };
     let scene = HardcopyScene {
-        extent: source.content_extent(),
+        extent: output_extent,
         metadata,
-        primitives: compiler.primitives,
+        primitives,
         legend: compiler.legend,
         aggregate_sections: compiler.aggregate_sections,
     };
     scene.validate()?;
     Ok(scene)
+}
+
+fn scene_from_clipped_aggregate(
+    source: &ResolvedHardcopyDocument,
+    mapping: &PrintMappingTable,
+    schematic_output: SchematicHardcopySetup,
+    metadata: HardcopySceneMetadata,
+    layout: Vec<(
+        &crate::workbench::hardcopy_adapters::sources::SemanticAggregateChild,
+        ContentExtent,
+        SemanticPoint,
+    )>,
+) -> Result<HardcopyScene, HardcopyRenderError> {
+    let extent = source
+        .content_extent_for_setup(schematic_output)
+        .map_err(|error| HardcopyRenderError::SourceConversion(error.to_string()))?;
+    let mut primitives = Vec::new();
+    let mut legend = Vec::new();
+    let mut aggregate_sections = Vec::with_capacity(layout.len());
+    for (child, child_extent, origin) in layout {
+        let original_extent = child
+            .local_bounds
+            .content_extent()
+            .map_err(|error| HardcopyRenderError::SourceConversion(error.to_string()))?;
+        let mut compiler = SemanticSceneCompiler::new(
+            child.local_bounds,
+            original_extent,
+            mapping,
+            schematic_output,
+        );
+        compiler.mapping_ordinal = Some(child.ordinal);
+        match child.document.as_ref() {
+            HardcopySemanticDocument::Schematic(schematic) => compiler.schematic(schematic)?,
+            HardcopySemanticDocument::Symbol(symbol) => compiler.symbol_document(symbol, None)?,
+            HardcopySemanticDocument::Plot(plot) => compiler.plot(plot)?,
+            HardcopySemanticDocument::ResultSummary(summary) => compiler.result_summary(summary)?,
+            HardcopySemanticDocument::Report(report) => compiler.report(report)?,
+            HardcopySemanticDocument::Aggregate(_) => {
+                return Err(conversion_error("nested aggregate hardcopy source"));
+            }
+        }
+        let child_primitives = match child.document.as_ref() {
+            HardcopySemanticDocument::Schematic(schematic) => schematic
+                .drawing_sheet
+                .as_ref()
+                .map(|format| {
+                    let sheet =
+                        crate::workbench::hardcopy_adapters::sources::authored_sheet_bounds(format)
+                            .map_err(|error| {
+                                HardcopyRenderError::SourceConversion(error.to_string())
+                            })?;
+                    clip_primitives_to_authored_sheet(
+                        &compiler.primitives,
+                        child.local_bounds,
+                        sheet,
+                    )
+                })
+                .transpose()?
+                .unwrap_or(compiler.primitives),
+            _ => compiler.primitives,
+        };
+        let origin = ScenePoint::new(
+            Length::from_micrometres(
+                u64::try_from(origin.x_um)
+                    .map_err(|_| conversion_error("aggregate X origin is negative"))?,
+            ),
+            Length::from_micrometres(
+                u64::try_from(origin.y_um)
+                    .map_err(|_| conversion_error("aggregate Y origin is negative"))?,
+            ),
+        );
+        let primitive_start = primitives.len();
+        primitives.extend(translate_primitives(child_primitives, origin)?);
+        let primitive_end = primitives.len();
+        aggregate_sections.push(AggregateSection {
+            ordinal: child.ordinal,
+            source_key: child.source_key.clone(),
+            display_name: child.display_name.clone(),
+            content_digest: child.content_digest,
+            origin,
+            extent: child_extent,
+            page_break_before: child.page_break_before,
+            primitive_start,
+            primitive_end,
+        });
+        for entry in compiler.legend {
+            if !legend.iter().any(|existing| existing == &entry) {
+                legend.push(entry);
+            }
+        }
+    }
+    let scene = HardcopyScene {
+        extent,
+        metadata,
+        primitives,
+        legend,
+        aggregate_sections,
+    };
+    scene.validate()?;
+    Ok(scene)
+}
+
+fn translate_primitives(
+    primitives: Vec<ScenePrimitive>,
+    origin: ScenePoint,
+) -> Result<Vec<ScenePrimitive>, HardcopyRenderError> {
+    let point = |point: ScenePoint| -> Result<ScenePoint, HardcopyRenderError> {
+        Ok(ScenePoint::new(
+            Length::from_micrometres(
+                point
+                    .x
+                    .micrometres()
+                    .checked_add(origin.x.micrometres())
+                    .ok_or_else(|| conversion_error("aggregate X translation overflow"))?,
+            ),
+            Length::from_micrometres(
+                point
+                    .y
+                    .micrometres()
+                    .checked_add(origin.y.micrometres())
+                    .ok_or_else(|| conversion_error("aggregate Y translation overflow"))?,
+            ),
+        ))
+    };
+    primitives
+        .into_iter()
+        .map(|primitive| {
+            Ok(match primitive {
+                ScenePrimitive::Line { from, to, stroke } => ScenePrimitive::Line {
+                    from: point(from)?,
+                    to: point(to)?,
+                    stroke,
+                },
+                ScenePrimitive::Polyline {
+                    points,
+                    closed,
+                    stroke,
+                    fill,
+                } => ScenePrimitive::Polyline {
+                    points: points.into_iter().map(point).collect::<Result<_, _>>()?,
+                    closed,
+                    stroke,
+                    fill,
+                },
+                ScenePrimitive::Rect { rect, stroke, fill } => ScenePrimitive::Rect {
+                    rect: SceneRect::try_new(
+                        Length::from_micrometres(
+                            rect.x
+                                .micrometres()
+                                .checked_add(origin.x.micrometres())
+                                .ok_or_else(|| {
+                                    conversion_error("aggregate rectangle X overflow")
+                                })?,
+                        ),
+                        Length::from_micrometres(
+                            rect.y
+                                .micrometres()
+                                .checked_add(origin.y.micrometres())
+                                .ok_or_else(|| {
+                                    conversion_error("aggregate rectangle Y overflow")
+                                })?,
+                        ),
+                        rect.width,
+                        rect.height,
+                    )?,
+                    stroke,
+                    fill,
+                },
+                ScenePrimitive::Circle {
+                    center,
+                    radius,
+                    stroke,
+                    fill,
+                } => ScenePrimitive::Circle {
+                    center: point(center)?,
+                    radius,
+                    stroke,
+                    fill,
+                },
+                ScenePrimitive::RasterImage {
+                    rect,
+                    png,
+                    content_digest,
+                    alternative_text,
+                } => ScenePrimitive::RasterImage {
+                    rect: SceneRect::try_new(
+                        Length::from_micrometres(
+                            rect.x
+                                .micrometres()
+                                .checked_add(origin.x.micrometres())
+                                .ok_or_else(|| conversion_error("aggregate image X overflow"))?,
+                        ),
+                        Length::from_micrometres(
+                            rect.y
+                                .micrometres()
+                                .checked_add(origin.y.micrometres())
+                                .ok_or_else(|| conversion_error("aggregate image Y overflow"))?,
+                        ),
+                        rect.width,
+                        rect.height,
+                    )?,
+                    png,
+                    content_digest,
+                    alternative_text,
+                },
+                ScenePrimitive::Text {
+                    origin: text_origin,
+                    text,
+                    font,
+                    size,
+                    color,
+                    anchor,
+                    rotation,
+                } => ScenePrimitive::Text {
+                    origin: point(text_origin)?,
+                    text,
+                    font,
+                    size,
+                    color,
+                    anchor,
+                    rotation,
+                },
+                ScenePrimitive::ClippedGroup {
+                    source_origin,
+                    destination_origin,
+                    clip_extent,
+                    source_extent,
+                    primitives,
+                } => ScenePrimitive::ClippedGroup {
+                    source_origin,
+                    destination_origin: point(destination_origin)?,
+                    clip_extent,
+                    source_extent,
+                    primitives,
+                },
+            })
+        })
+        .collect()
+}
+
+/// Project a union-bounded schematic scene onto the authored sheet.  This is
+/// deliberately done before pagination: all backends receive sheet-local
+/// coordinates and therefore share the same exact physical clipping edge.
+fn clip_primitives_to_authored_sheet(
+    primitives: &[ScenePrimitive],
+    source_bounds: SemanticBounds,
+    sheet_bounds: SemanticBounds,
+) -> Result<Vec<ScenePrimitive>, HardcopyRenderError> {
+    let x = u64::try_from(sheet_bounds.minimum.x_um - source_bounds.minimum.x_um)
+        .map_err(|_| conversion_error("authored sheet precedes source bounds"))?;
+    let y = u64::try_from(sheet_bounds.minimum.y_um - source_bounds.minimum.y_um)
+        .map_err(|_| conversion_error("authored sheet precedes source bounds"))?;
+    let width = u64::try_from(sheet_bounds.maximum.x_um - sheet_bounds.minimum.x_um)
+        .map_err(|_| conversion_error("invalid authored sheet width"))?;
+    let height = u64::try_from(sheet_bounds.maximum.y_um - sheet_bounds.minimum.y_um)
+        .map_err(|_| conversion_error("invalid authored sheet height"))?;
+    let source_extent = source_bounds
+        .content_extent()
+        .map_err(|error| HardcopyRenderError::SourceConversion(error.to_string()))?;
+    let clip_extent = ContentExtent::try_new(
+        Length::from_micrometres(width),
+        Length::from_micrometres(height),
+    )
+    .map_err(|error| HardcopyRenderError::SourceConversion(error.to_string()))?;
+    Ok(vec![ScenePrimitive::ClippedGroup {
+        source_origin: ScenePoint::new(Length::from_micrometres(x), Length::from_micrometres(y)),
+        destination_origin: ScenePoint::new(Length::ZERO, Length::ZERO),
+        clip_extent,
+        source_extent,
+        primitives: primitives.to_vec(),
+    }])
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+struct ClipRect {
+    x: u64,
+    y: u64,
+    width: u64,
+    height: u64,
+}
+
+#[cfg(test)]
+impl ClipRect {
+    fn right(self) -> u64 {
+        self.x.saturating_add(self.width)
+    }
+    fn bottom(self) -> u64 {
+        self.y.saturating_add(self.height)
+    }
+    fn contains(self, point: ScenePoint) -> bool {
+        let x = point.x.micrometres();
+        let y = point.y.micrometres();
+        x >= self.x && x <= self.right() && y >= self.y && y <= self.bottom()
+    }
+    fn local(self, point: ScenePoint) -> ScenePoint {
+        ScenePoint::new(
+            Length::from_micrometres(point.x.micrometres() - self.x),
+            Length::from_micrometres(point.y.micrometres() - self.y),
+        )
+    }
+}
+
+#[cfg(test)]
+fn clip_scene_primitive(
+    primitive: &ScenePrimitive,
+    clip: ClipRect,
+) -> Result<Vec<ScenePrimitive>, HardcopyRenderError> {
+    match primitive {
+        ScenePrimitive::Line { from, to, stroke } => Ok(clip_line(*from, *to, clip)
+            .map(|(from, to)| {
+                vec![ScenePrimitive::Line {
+                    from: clip.local(from),
+                    to: clip.local(to),
+                    stroke: *stroke,
+                }]
+            })
+            .unwrap_or_default()),
+        ScenePrimitive::Polyline {
+            points,
+            closed,
+            stroke,
+            fill,
+        } if !closed && fill.is_none() => Ok(points
+            .windows(2)
+            .filter_map(|edge| clip_line(edge[0], edge[1], clip))
+            .map(|(from, to)| ScenePrimitive::Line {
+                from: clip.local(from),
+                to: clip.local(to),
+                stroke: *stroke,
+            })
+            .collect()),
+        ScenePrimitive::Polyline {
+            points,
+            closed,
+            stroke,
+            fill,
+        } => {
+            let points = clip_polygon(points, clip)
+                .into_iter()
+                .map(|point| clip.local(point))
+                .collect::<Vec<_>>();
+            if points.len() < if *closed { 3 } else { 2 } {
+                Ok(Vec::new())
+            } else {
+                Ok(vec![ScenePrimitive::Polyline {
+                    points,
+                    closed: *closed,
+                    stroke: *stroke,
+                    fill: *fill,
+                }])
+            }
+        }
+        ScenePrimitive::Rect { rect, stroke, fill } => {
+            let left = rect.x.micrometres().max(clip.x);
+            let top = rect.y.micrometres().max(clip.y);
+            let right = rect
+                .x
+                .micrometres()
+                .saturating_add(rect.width.micrometres())
+                .min(clip.right());
+            let bottom = rect
+                .y
+                .micrometres()
+                .saturating_add(rect.height.micrometres())
+                .min(clip.bottom());
+            if right <= left || bottom <= top {
+                return Ok(Vec::new());
+            }
+            Ok(vec![ScenePrimitive::Rect {
+                rect: SceneRect::try_new(
+                    Length::from_micrometres(left - clip.x),
+                    Length::from_micrometres(top - clip.y),
+                    Length::from_micrometres(right - left),
+                    Length::from_micrometres(bottom - top),
+                )?,
+                stroke: *stroke,
+                fill: *fill,
+            }])
+        }
+        ScenePrimitive::Circle {
+            center,
+            radius,
+            stroke,
+            fill,
+        } => {
+            let radius_um = radius.micrometres();
+            if center.x.micrometres().saturating_sub(radius_um) >= clip.x
+                && center.y.micrometres().saturating_sub(radius_um) >= clip.y
+                && center.x.micrometres().saturating_add(radius_um) <= clip.right()
+                && center.y.micrometres().saturating_add(radius_um) <= clip.bottom()
+            {
+                Ok(vec![ScenePrimitive::Circle {
+                    center: clip.local(*center),
+                    radius: *radius,
+                    stroke: *stroke,
+                    fill: *fill,
+                }])
+            } else {
+                Ok(Vec::new())
+            }
+        }
+        ScenePrimitive::RasterImage {
+            rect,
+            png,
+            content_digest,
+            alternative_text,
+        } => {
+            let right = rect
+                .x
+                .micrometres()
+                .saturating_add(rect.width.micrometres());
+            let bottom = rect
+                .y
+                .micrometres()
+                .saturating_add(rect.height.micrometres());
+            if rect.x.micrometres() >= clip.x
+                && rect.y.micrometres() >= clip.y
+                && right <= clip.right()
+                && bottom <= clip.bottom()
+            {
+                Ok(vec![ScenePrimitive::RasterImage {
+                    rect: SceneRect::try_new(
+                        Length::from_micrometres(rect.x.micrometres() - clip.x),
+                        Length::from_micrometres(rect.y.micrometres() - clip.y),
+                        rect.width,
+                        rect.height,
+                    )?,
+                    png: png.clone(),
+                    content_digest: *content_digest,
+                    alternative_text: alternative_text.clone(),
+                }])
+            } else {
+                Ok(Vec::new())
+            }
+        }
+        ScenePrimitive::Text {
+            origin,
+            text,
+            font,
+            size,
+            color,
+            anchor,
+            rotation,
+        } => {
+            if clip.contains(*origin) {
+                Ok(vec![ScenePrimitive::Text {
+                    origin: clip.local(*origin),
+                    text: text.clone(),
+                    font: *font,
+                    size: *size,
+                    color: *color,
+                    anchor: *anchor,
+                    rotation: *rotation,
+                }])
+            } else {
+                Ok(Vec::new())
+            }
+        }
+        ScenePrimitive::ClippedGroup { .. } => Err(HardcopyRenderError::InvalidClippedScene),
+    }
+}
+
+#[cfg(test)]
+fn clip_line(from: ScenePoint, to: ScenePoint, clip: ClipRect) -> Option<(ScenePoint, ScenePoint)> {
+    let (mut x0, mut y0) = (from.x.micrometres() as f64, from.y.micrometres() as f64);
+    let (mut x1, mut y1) = (to.x.micrometres() as f64, to.y.micrometres() as f64);
+    let dx = x1 - x0;
+    let dy = y1 - y0;
+    let mut t0 = 0.0_f64;
+    let mut t1 = 1.0_f64;
+    for (p, q) in [
+        (-dx, x0 - clip.x as f64),
+        (dx, clip.right() as f64 - x0),
+        (-dy, y0 - clip.y as f64),
+        (dy, clip.bottom() as f64 - y0),
+    ] {
+        if p == 0.0 {
+            if q < 0.0 {
+                return None;
+            }
+        } else {
+            let r = q / p;
+            if p < 0.0 {
+                if r > t1 {
+                    return None;
+                }
+                t0 = t0.max(r);
+            } else {
+                if r < t0 {
+                    return None;
+                }
+                t1 = t1.min(r);
+            }
+        }
+    }
+    x1 = x0 + t1 * dx;
+    y1 = y0 + t1 * dy;
+    x0 += t0 * dx;
+    y0 += t0 * dy;
+    Some((
+        ScenePoint::new(
+            Length::from_micrometres(x0.round() as u64),
+            Length::from_micrometres(y0.round() as u64),
+        ),
+        ScenePoint::new(
+            Length::from_micrometres(x1.round() as u64),
+            Length::from_micrometres(y1.round() as u64),
+        ),
+    ))
+}
+
+#[cfg(test)]
+fn clip_polygon(points: &[ScenePoint], clip: ClipRect) -> Vec<ScenePoint> {
+    let mut output = points.to_vec();
+    for (axis, bound, keep_greater) in [
+        (0, clip.x, true),
+        (0, clip.right(), false),
+        (1, clip.y, true),
+        (1, clip.bottom(), false),
+    ] {
+        let input = std::mem::take(&mut output);
+        if input.is_empty() {
+            break;
+        }
+        let inside = |point: ScenePoint| {
+            let value = if axis == 0 {
+                point.x.micrometres()
+            } else {
+                point.y.micrometres()
+            };
+            if keep_greater {
+                value >= bound
+            } else {
+                value <= bound
+            }
+        };
+        let mut previous = *input.last().expect("nonempty polygon");
+        let mut previous_inside = inside(previous);
+        for current in input {
+            let current_inside = inside(current);
+            if current_inside != previous_inside {
+                if let Some((a, b)) = if axis == 0 {
+                    clip_line(
+                        previous,
+                        current,
+                        ClipRect {
+                            x: bound,
+                            y: 0,
+                            width: 0,
+                            height: u64::MAX,
+                        },
+                    )
+                } else {
+                    clip_line(
+                        previous,
+                        current,
+                        ClipRect {
+                            x: 0,
+                            y: bound,
+                            width: u64::MAX,
+                            height: 0,
+                        },
+                    )
+                } {
+                    output.push(if axis == 0 {
+                        if a.x.micrometres() == bound { a } else { b }
+                    } else if a.y.micrometres() == bound {
+                        a
+                    } else {
+                        b
+                    });
+                }
+            }
+            if current_inside {
+                output.push(current);
+            }
+            previous = current;
+            previous_inside = current_inside;
+        }
+    }
+    output
 }
 
 /// Resolve the authored print color to device-independent sRGB. `GrayPercent`
@@ -905,16 +1547,24 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::hardcopy::sources::HardcopySourceIdentity;
+    use crate::hardcopy::sources::{
+        HardcopySourceIdentity, HardcopySourceSet, HardcopySourceSetMember,
+    };
     use crate::hardcopy::{
         ActiveHardcopySource, DecorationSetup, DuplexMode, FontPolicy, HardcopyContentSection,
-        HardcopyDocumentKind, HardcopyScope, HardcopySetup, Orientation, PageMargins, PaperSize,
-        PhysicalPageSetup, PrintMappingEntry, PrintMappingSaveScope, PrintMappingTable,
-        PrintObjectIdentity, PrinterJobSettings, PrinterMediaSource, RenderSetup, ScaleMode,
-        StandardPaper, TilingMode, TilingSetup,
+        HardcopyDocumentKind, HardcopyScope, HardcopySetup, Orientation, OutsideSheetContentPolicy,
+        PageMargins, PaperSize, PhysicalPageSetup, PrintMappingEntry, PrintMappingSaveScope,
+        PrintMappingTable, PrintObjectIdentity, PrinterJobSettings, PrinterMediaSource,
+        RenderSetup, ScaleMode, SchematicHardcopyExtent, SchematicHardcopySetup, StandardPaper,
+        TilingMode, TilingSetup,
+    };
+    use crate::state::{
+        DrawingSheetTitleBlockRotation, DrawingSheetTitleFieldId, DrawingSheetZoneEdges,
+        DrawingSheetZoneLabels, SchematicSheetFormat,
     };
     use crate::workbench::hardcopy_adapters::sources::{
-        SymbolHardcopySource, resolve_symbol_source,
+        SymbolHardcopySource, resolve_blank_schematic_sheet_with_format,
+        resolve_hardcopy_source_set_with, resolve_symbol_source,
     };
 
     fn digest(byte: u8) -> ContentDigest {
@@ -1139,6 +1789,7 @@ mod tests {
             size: Length::from_micrometres(4_000),
             color: SemanticColor::Foreground,
             anchor: TextAnchor::Start,
+            rotation: SceneTextRotation::Upright,
         };
         let scene = HardcopyScene {
             extent: aggregate_extent,
@@ -1233,6 +1884,7 @@ mod tests {
                     size: Length::from_micrometres(4_000),
                     color: SemanticColor::Foreground,
                     anchor: TextAnchor::Start,
+                    rotation: SceneTextRotation::Upright,
                 },
             ],
             vec![LegendEntry::try_new("V(out)", trace).unwrap()],
@@ -1299,6 +1951,52 @@ mod tests {
             selection: None,
             scope: HardcopyScope::ActiveDocument,
         })
+        .unwrap()
+    }
+
+    fn resolved_blank_schematic(format: &SchematicSheetFormat) -> ResolvedHardcopyDocument {
+        resolved_blank_schematic_with_identity(
+            format,
+            "test-schematic",
+            0x5343_4845_4d41,
+            "Test schematic",
+        )
+    }
+
+    fn resolved_blank_schematic_with_identity(
+        format: &SchematicSheetFormat,
+        source_key: &str,
+        document_id: u128,
+        display_name: &str,
+    ) -> ResolvedHardcopyDocument {
+        resolve_blank_schematic_sheet_with_format(
+            HardcopySourceIdentity::try_new(
+                source_key,
+                HardcopyDocumentId::try_from_uuid(Uuid::from_u128(document_id)).unwrap(),
+                ObjectRevision::INITIAL,
+                display_name,
+            )
+            .unwrap(),
+            HardcopyScope::CurrentSheet,
+            Some(format),
+        )
+        .unwrap()
+    }
+
+    fn setup_with_schematic_output(
+        format: OutputFormat,
+        schematic: SchematicHardcopySetup,
+    ) -> HardcopySetup {
+        let base = setup(format, false);
+        HardcopySetup::try_new_with_schematic(
+            base.physical_page().clone(),
+            base.scale(),
+            base.tiling(),
+            base.render().clone(),
+            base.decorations().clone(),
+            schematic,
+            base.print_mapping().clone(),
+        )
         .unwrap()
     }
 
@@ -1442,9 +2140,11 @@ mod tests {
         .unwrap();
         let content = extent(100_000, 100_000);
         let empty = PrintMappingTable::default();
-        let mut first_identity = SemanticSceneCompiler::new(bounds, content, &empty);
+        let mut first_identity =
+            SemanticSceneCompiler::new(bounds, content, &empty, SchematicHardcopySetup::default());
         first_identity.mapping_ordinal = Some(0);
-        let mut second_identity = SemanticSceneCompiler::new(bounds, content, &empty);
+        let mut second_identity =
+            SemanticSceneCompiler::new(bounds, content, &empty, SchematicHardcopySetup::default());
         second_identity.mapping_ordinal = Some(1);
         let first_id = first_identity.mapping_stable_id("trace:shared");
         let second_id = second_identity.mapping_stable_id("trace:shared");
@@ -1495,9 +2195,19 @@ mod tests {
         )
         .unwrap();
         let fallback = StrokeStyle::default();
-        let mut first = SemanticSceneCompiler::new(bounds, content, &mapping);
+        let mut first = SemanticSceneCompiler::new(
+            bounds,
+            content,
+            &mapping,
+            SchematicHardcopySetup::default(),
+        );
         first.mapping_ordinal = Some(0);
-        let mut second = SemanticSceneCompiler::new(bounds, content, &mapping);
+        let mut second = SemanticSceneCompiler::new(
+            bounds,
+            content,
+            &mapping,
+            SchematicHardcopySetup::default(),
+        );
         second.mapping_ordinal = Some(1);
         assert_eq!(
             first
@@ -1731,8 +2441,13 @@ mod tests {
     fn resolved_source_compiles_to_semantic_scene_and_deterministic_preview() {
         let source = resolved_symbol();
         let plan = plan_for_resolved(&source, OutputFormat::SvgVector);
-        let scene = scene_from_resolved(&source, plan.setup().print_mapping(), resolved_metadata())
-            .unwrap();
+        let scene = scene_from_resolved(
+            &source,
+            plan.setup().print_mapping(),
+            plan.setup().schematic(),
+            resolved_metadata(),
+        )
+        .unwrap();
         assert!(!scene.primitives().is_empty());
         let first = HardcopyRenderer::render_preview_page_resolved(
             &plan,
@@ -1755,6 +2470,480 @@ mod tests {
         assert_eq!(first.page_number(), 1);
         assert_eq!(first.dpi(), 72);
         assert_eq!(first.rgba().len(), 792 * 612 * 4);
+    }
+
+    #[test]
+    fn schematic_inclusion_contract_gates_real_scene_primitives() {
+        let source = resolved_blank_schematic(&SchematicSheetFormat::default());
+        let excluded = SchematicHardcopySetup::new(
+            SchematicHardcopyExtent::AuthoredDrawingSheet,
+            OutsideSheetContentPolicy::Ask,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+        );
+        let excluded_scene = scene_from_resolved(
+            &source,
+            source.default_print_mapping(),
+            excluded,
+            resolved_metadata(),
+        )
+        .unwrap();
+        assert!(excluded_scene.primitives().is_empty());
+
+        let grid_only = SchematicHardcopySetup::new(
+            SchematicHardcopyExtent::AuthoredDrawingSheet,
+            OutsideSheetContentPolicy::Ask,
+            false,
+            false,
+            false,
+            false,
+            false,
+            true,
+        );
+        let grid_scene = scene_from_resolved(
+            &source,
+            source.default_print_mapping(),
+            grid_only,
+            resolved_metadata(),
+        )
+        .unwrap();
+        assert!(!grid_scene.primitives().is_empty());
+        assert!(
+            grid_scene
+                .primitives()
+                .iter()
+                .all(|primitive| matches!(primitive, ScenePrimitive::Line { .. }))
+        );
+    }
+
+    #[test]
+    fn schematic_clipping_policy_compiles_an_authored_sheet() {
+        let source = resolved_blank_schematic(&SchematicSheetFormat::default());
+        let clipping = SchematicHardcopySetup::new(
+            SchematicHardcopyExtent::AuthoredDrawingSheet,
+            OutsideSheetContentPolicy::ClipToAuthoredSheet,
+            true,
+            true,
+            true,
+            true,
+            true,
+            false,
+        );
+
+        let scene = scene_from_resolved(
+            &source,
+            source.default_print_mapping(),
+            clipping,
+            resolved_metadata(),
+        )
+        .unwrap();
+
+        assert_eq!(scene.extent, source.content_extent());
+    }
+
+    #[test]
+    fn authored_sheet_clip_projects_crossing_geometry_to_the_exact_sheet_edge() {
+        let clip = ClipRect {
+            x: 50,
+            y: 50,
+            width: 100,
+            height: 100,
+        };
+        let stroke = StrokeStyle::default();
+        let primitives = clip_scene_primitive(
+            &ScenePrimitive::Line {
+                from: ScenePoint::new(Length::from_micrometres(0), Length::from_micrometres(100)),
+                to: ScenePoint::new(Length::from_micrometres(200), Length::from_micrometres(100)),
+                stroke,
+            },
+            clip,
+        )
+        .unwrap();
+        assert!(matches!(
+            primitives.as_slice(),
+            [ScenePrimitive::Line { from, to, .. }]
+                if from.x.micrometres() == 0
+                    && from.y.micrometres() == 50
+                    && to.x.micrometres() == 100
+                    && to.y.micrometres() == 50
+        ));
+    }
+
+    #[test]
+    fn authored_sheet_clip_preserves_partially_intersecting_non_linear_primitives() {
+        let source_bounds =
+            SemanticBounds::try_new(SemanticPoint::new(0, 0), SemanticPoint::new(200, 200))
+                .unwrap();
+        let sheet_bounds =
+            SemanticBounds::try_new(SemanticPoint::new(50, 50), SemanticPoint::new(150, 150))
+                .unwrap();
+        let crossing = vec![
+            ScenePrimitive::Circle {
+                center: ScenePoint::new(Length::from_micrometres(40), Length::from_micrometres(90)),
+                radius: Length::from_micrometres(20),
+                stroke: Some(StrokeStyle::default()),
+                fill: None,
+            },
+            ScenePrimitive::RasterImage {
+                rect: SceneRect::try_new(
+                    Length::from_micrometres(40),
+                    Length::from_micrometres(60),
+                    Length::from_micrometres(30),
+                    Length::from_micrometres(30),
+                )
+                .unwrap(),
+                png: vec![1, 2, 3],
+                content_digest: ContentDigest::from_bytes([7; 32]),
+                alternative_text: "crossing image".to_owned(),
+            },
+            ScenePrimitive::Text {
+                origin: ScenePoint::new(Length::from_micrometres(40), Length::from_micrometres(80)),
+                text: "crossing text".to_owned(),
+                font: SceneFont::Sans,
+                size: Length::from_micrometres(20),
+                color: SemanticColor::Foreground,
+                anchor: TextAnchor::Start,
+                rotation: SceneTextRotation::Upright,
+            },
+        ];
+        let clipped =
+            clip_primitives_to_authored_sheet(&crossing, source_bounds, sheet_bounds).unwrap();
+        let [
+            ScenePrimitive::ClippedGroup {
+                source_origin,
+                destination_origin,
+                clip_extent,
+                source_extent,
+                primitives,
+            },
+        ] = clipped.as_slice()
+        else {
+            panic!("authored clipping must retain one exact renderer-owned clip group");
+        };
+        assert_eq!(source_origin.x.micrometres(), 50);
+        assert_eq!(source_origin.y.micrometres(), 50);
+        assert_eq!(
+            *destination_origin,
+            ScenePoint::new(Length::ZERO, Length::ZERO)
+        );
+        assert_eq!(clip_extent.width().micrometres(), 100);
+        assert_eq!(clip_extent.height().micrometres(), 100);
+        assert_eq!(source_extent.width().micrometres(), 200);
+        assert_eq!(source_extent.height().micrometres(), 200);
+        assert_eq!(primitives, &crossing);
+    }
+
+    #[test]
+    fn coordinate_zone_mode_keeps_rules_but_suppresses_every_edge_label() {
+        let mut format = SchematicSheetFormat::default();
+        format.zones.labels = DrawingSheetZoneLabels::Coordinates;
+        let geometry = format.geometry().unwrap();
+        let source = resolved_blank_schematic(&format);
+        let schematic = SchematicHardcopySetup::new(
+            SchematicHardcopyExtent::AuthoredDrawingSheet,
+            OutsideSheetContentPolicy::Ask,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+        );
+        let scene = scene_from_resolved(
+            &source,
+            source.default_print_mapping(),
+            schematic,
+            resolved_metadata(),
+        )
+        .unwrap();
+        assert!(
+            scene
+                .primitives()
+                .iter()
+                .all(|primitive| !matches!(primitive, ScenePrimitive::Text { .. }))
+        );
+        assert!(
+            scene
+                .primitives()
+                .iter()
+                .all(|primitive| matches!(primitive, ScenePrimitive::Line { .. })),
+            "zones-only output must own its ruled band without borrowing paper, border, or title primitives"
+        );
+        assert!(
+            scene
+                .primitives()
+                .iter()
+                .any(|primitive| matches!(primitive, ScenePrimitive::Line { .. }))
+        );
+        assert!(
+            scene.primitives().iter().any(|primitive| {
+                let ScenePrimitive::Line { from, to, .. } = primitive else {
+                    return false;
+                };
+                from.x.micrometres().abs_diff(to.x.micrometres()) == geometry.border_band_um
+                    || from.y.micrometres().abs_diff(to.y.micrometres()) == geometry.border_band_um
+            }),
+            "the zones-only layer must span the complete authored band even without the border layer"
+        );
+    }
+
+    #[test]
+    fn hardcopy_zone_labels_follow_the_selected_output_edges() {
+        let bottom_right = SchematicSheetFormat::default()
+            .try_update(|draft| {
+                draft.zones.edges = DrawingSheetZoneEdges::BottomAndRight;
+            })
+            .unwrap();
+        let geometry = bottom_right.geometry().unwrap();
+        let source = resolved_blank_schematic(&bottom_right);
+        let schematic = SchematicHardcopySetup::new(
+            SchematicHardcopyExtent::AuthoredDrawingSheet,
+            OutsideSheetContentPolicy::Ask,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+        );
+        let scene = scene_from_resolved(
+            &source,
+            source.default_print_mapping(),
+            schematic,
+            resolved_metadata(),
+        )
+        .unwrap();
+        let labels = scene
+            .primitives()
+            .iter()
+            .filter_map(|primitive| {
+                let ScenePrimitive::Text { origin, .. } = primitive else {
+                    return None;
+                };
+                Some(origin)
+            })
+            .collect::<Vec<_>>();
+        let zones = geometry.zones.unwrap();
+        assert_eq!(labels.len(), usize::from(zones.columns + zones.rows));
+        let drawing_right =
+            u64::try_from(geometry.drawing_area.x_um + geometry.drawing_area.width_um as i64)
+                .unwrap();
+        let drawing_bottom =
+            u64::try_from(geometry.drawing_area.y_um + geometry.drawing_area.height_um as i64)
+                .unwrap();
+        assert_eq!(
+            labels
+                .iter()
+                .filter(|origin| origin.y.micrometres() > drawing_bottom)
+                .count(),
+            usize::from(zones.columns),
+            "one column label must be emitted on the selected bottom edge"
+        );
+        assert_eq!(
+            labels
+                .iter()
+                .filter(|origin| origin.x.micrometres() > drawing_right)
+                .count(),
+            usize::from(zones.rows),
+            "one row label must be emitted on the selected right edge"
+        );
+
+        let all_edges = bottom_right
+            .try_update(|draft| draft.zones.edges = DrawingSheetZoneEdges::All)
+            .unwrap();
+        let source = resolved_blank_schematic(&all_edges);
+        let scene = scene_from_resolved(
+            &source,
+            source.default_print_mapping(),
+            schematic,
+            resolved_metadata(),
+        )
+        .unwrap();
+        assert_eq!(
+            scene
+                .primitives()
+                .iter()
+                .filter(|primitive| matches!(primitive, ScenePrimitive::Text { .. }))
+                .count(),
+            usize::from((zones.columns + zones.rows) * 2),
+            "all-edge output must publish the label set on both opposing edges"
+        );
+    }
+
+    #[test]
+    fn structured_scale_authority_projects_even_when_legacy_field_storage_is_empty() {
+        let format = SchematicSheetFormat::default()
+            .try_update(|draft| {
+                draft
+                    .title_block
+                    .fields
+                    .get_mut(&DrawingSheetTitleFieldId::Scale)
+                    .unwrap()
+                    .value
+                    .clear();
+            })
+            .unwrap();
+        let source = resolved_blank_schematic(&format);
+        let schematic = SchematicHardcopySetup::new(
+            SchematicHardcopyExtent::AuthoredDrawingSheet,
+            OutsideSheetContentPolicy::Ask,
+            false,
+            false,
+            false,
+            true,
+            false,
+            false,
+        );
+        let scene = scene_from_resolved(
+            &source,
+            source.default_print_mapping(),
+            schematic,
+            resolved_metadata(),
+        )
+        .unwrap();
+        let text = scene
+            .primitives()
+            .iter()
+            .filter_map(|primitive| {
+                let ScenePrimitive::Text { text, .. } = primitive else {
+                    return None;
+                };
+                Some(text.as_str())
+            })
+            .collect::<Vec<_>>();
+        assert!(text.contains(&"\u{2022} Scale: 1:1"));
+        assert!(
+            !text.iter().any(|line| line.starts_with("SCALE: NTS")),
+            "the structured ratio must not be replaced by an unrelated NTS value"
+        );
+    }
+
+    #[test]
+    fn hardcopy_zone_alphabet_matches_engineering_drawing_overflow_rules() {
+        assert_eq!(compiler::zone_alpha_label(0), "A");
+        assert_eq!(compiler::zone_alpha_label(8), "J");
+        assert_eq!(compiler::zone_alpha_label(21), "Y");
+        assert_eq!(compiler::zone_alpha_label(22), "23");
+    }
+
+    #[test]
+    fn clipped_sheet_set_reflows_each_child_and_compiles_with_matching_sections() {
+        let first = resolved_blank_schematic(&SchematicSheetFormat::default());
+        let mut second_format = SchematicSheetFormat::default();
+        second_format.orientation = crate::state::SchematicPageOrientation::Landscape;
+        let second = resolved_blank_schematic_with_identity(
+            &second_format,
+            "test-schematic-second-sheet",
+            0x5343_4845_4d42,
+            "Test schematic · second sheet",
+        );
+        let members = [&first, &second]
+            .into_iter()
+            .map(|document| {
+                HardcopySourceSetMember::try_new(
+                    document.source_key(),
+                    document.authority().display_name(),
+                    document.authority().document_id(),
+                    document.authority().revision(),
+                    document.authority().content_digest(),
+                    HardcopyScope::CurrentSheet,
+                )
+                .unwrap()
+            })
+            .collect();
+        let set = HardcopySourceSet::try_new(
+            HardcopyDocumentId::try_from_uuid(Uuid::from_u128(0x5151)).unwrap(),
+            ObjectRevision::INITIAL,
+            "Test sheet set",
+            HardcopyDocumentKind::SchematicOrSymbol,
+            HardcopyScope::AllSheetsOrPanes,
+            members,
+        )
+        .unwrap();
+        let mut retained = vec![first, second].into_iter();
+        let source =
+            resolve_hardcopy_source_set_with(&set, |_| Ok(retained.next().unwrap())).unwrap();
+        let clipping = SchematicHardcopySetup::new(
+            SchematicHardcopyExtent::AuthoredDrawingSheet,
+            OutsideSheetContentPolicy::ClipToAuthoredSheet,
+            false,
+            true,
+            true,
+            true,
+            true,
+            false,
+        );
+        let extent = source.content_extent_for_setup(clipping).unwrap();
+        let sections = source.hardcopy_sections_for_setup(clipping).unwrap();
+        assert_eq!(sections.len(), 2);
+        let setup = setup_with_schematic_output(OutputFormat::SvgVector, clipping);
+        let plan = HardcopyPlan::compile_with_sections(
+            source.authority().clone(),
+            setup,
+            extent,
+            sections,
+        )
+        .unwrap();
+        let scene = scene_from_resolved(
+            &source,
+            plan.setup().print_mapping(),
+            clipping,
+            resolved_metadata(),
+        )
+        .unwrap();
+        assert_eq!(scene.extent, plan.content_extent());
+        HardcopyRenderer::render(&plan, &scene).unwrap();
+    }
+
+    #[test]
+    fn rotated_title_block_rotates_grid_text_and_published_svg() {
+        let mut format = SchematicSheetFormat::default();
+        format.title_block.rotation = DrawingSheetTitleBlockRotation::Clockwise90;
+        let source = resolved_blank_schematic(&format);
+        let schematic = SchematicHardcopySetup::new(
+            SchematicHardcopyExtent::AuthoredDrawingSheet,
+            OutsideSheetContentPolicy::Ask,
+            false,
+            false,
+            false,
+            true,
+            false,
+            false,
+        );
+        let setup = setup_with_schematic_output(OutputFormat::SvgVector, schematic);
+        let plan =
+            HardcopyPlan::compile(source.authority().clone(), setup, source.content_extent())
+                .unwrap();
+        let scene = scene_from_resolved(
+            &source,
+            plan.setup().print_mapping(),
+            plan.setup().schematic(),
+            resolved_metadata(),
+        )
+        .unwrap();
+        let rotated_text = scene
+            .primitives()
+            .iter()
+            .filter_map(|primitive| match primitive {
+                ScenePrimitive::Text { rotation, .. } => Some(*rotation),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!rotated_text.is_empty());
+        assert!(
+            rotated_text
+                .iter()
+                .all(|rotation| *rotation == SceneTextRotation::Clockwise90)
+        );
+
+        let publication =
+            HardcopyRenderer::render_resolved(&plan, &source, resolved_metadata()).unwrap();
+        let svg = String::from_utf8_lossy(publication.single_part().unwrap().bytes());
+        assert!(svg.contains("transform=\"rotate(90 "));
     }
 
     #[test]

@@ -26,15 +26,19 @@
 //! materially different parameter fits, so a lookup returns every match and
 //! leaves the choice to the caller rather than silently picking one.
 
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
-use std::io;
+use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
 /// Environment variable that pins the model root explicitly.
 pub const MODELS_DIR_ENV: &str = "RSPICE_MODELS_DIR";
 
 const PACKS_INDEX: &str = "PACKS.tsv";
 const CATALOG_INDEX: &str = "CATALOG.tsv";
+const MAX_DEFINITION_PREVIEW_FILE_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_DEFINITION_PREVIEW_LINES: usize = 240;
 
 /// How a pack's licence bears on redistribution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -175,10 +179,26 @@ pub struct CatalogEntry {
 impl CatalogEntry {
     /// Absolute path to the file holding this definition.
     pub fn source_path(&self, index: &SpiceLibraryIndex) -> Option<PathBuf> {
-        index
-            .pack(&self.pack)
-            .map(|pack| index.root().join(&pack.path).join(&self.path))
+        index.catalog_source_path(self)
     }
+}
+
+/// Bounded, line-attributed source preview for one indexed definition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogDefinitionPreview {
+    pub source_path: PathBuf,
+    pub start_line: usize,
+    pub source: String,
+    pub truncated: bool,
+}
+
+/// Exact ordered terminal contract for one addressable `.subckt`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogSubcircuitInterface {
+    pub name: String,
+    pub ports: Vec<String>,
+    pub source_path: PathBuf,
+    pub start_line: usize,
 }
 
 /// The shipped model tree: its packs and its part catalog.
@@ -186,6 +206,21 @@ impl CatalogEntry {
 pub struct SpiceLibraryIndex {
     root: PathBuf,
     packs: Vec<SpicePack>,
+    addressable_catalog: Arc<OnceLock<Result<Arc<AddressableCatalog>, String>>>,
+    #[cfg(target_arch = "wasm32")]
+    embedded_catalog: Option<&'static str>,
+}
+
+#[derive(Debug)]
+struct AddressableCatalog {
+    entries: Vec<IndexedCatalogEntry>,
+    device_counts: BTreeMap<String, usize>,
+}
+
+#[derive(Debug)]
+struct IndexedCatalogEntry {
+    entry: CatalogEntry,
+    search_text: String,
 }
 
 impl SpiceLibraryIndex {
@@ -202,20 +237,30 @@ impl SpiceLibraryIndex {
     /// A missing tree is not an error: the built-in library is compiled in, so
     /// RSpice runs without the packs. Only an unreadable index is an error.
     pub fn discover() -> io::Result<Option<Self>> {
-        // The browser build has no filesystem to discover a tree on, and
-        // `current_exe` is unsupported there. Answer "no tree" up front rather
-        // than probing paths that cannot exist.
-        if cfg!(target_arch = "wasm32") {
-            return Ok(None);
+        #[cfg(target_arch = "wasm32")]
+        {
+            const PACKS: &str = include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../models/spice/PACKS.tsv"
+            ));
+            const CATALOG: &str = include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../models/spice/CATALOG.tsv"
+            ));
+            Ok(Some(Self::from_embedded_indexes(PACKS, CATALOG)))
         }
-        for candidate in Self::candidate_roots() {
-            if candidate.join(PACKS_INDEX).is_file() {
-                return Ok(Some(Self::open(candidate)?));
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            for candidate in Self::candidate_roots() {
+                if candidate.join(PACKS_INDEX).is_file() {
+                    return Ok(Some(Self::open(candidate)?));
+                }
             }
+            Ok(None)
         }
-        Ok(None)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn candidate_roots() -> Vec<PathBuf> {
         let mut roots = Vec::new();
 
@@ -241,7 +286,23 @@ impl SpiceLibraryIndex {
     pub fn open(root: impl Into<PathBuf>) -> io::Result<Self> {
         let root = root.into();
         let packs = parse_packs(&fs::read_to_string(root.join(PACKS_INDEX))?);
-        Ok(Self { root, packs })
+        Ok(Self {
+            root,
+            packs,
+            addressable_catalog: Arc::new(OnceLock::new()),
+            #[cfg(target_arch = "wasm32")]
+            embedded_catalog: None,
+        })
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn from_embedded_indexes(packs: &'static str, catalog: &'static str) -> Self {
+        Self {
+            root: PathBuf::from("/rspice-browser/model-catalog"),
+            packs: parse_packs(packs),
+            addressable_catalog: Arc::new(OnceLock::new()),
+            embedded_catalog: Some(catalog),
+        }
     }
 
     /// Root directory of the model tree.
@@ -252,6 +313,22 @@ impl SpiceLibraryIndex {
     /// Every discovered pack, ordered as the index lists them.
     pub fn packs(&self) -> &[SpicePack] {
         &self.packs
+    }
+
+    /// Whether indexed definition source files are locally available.
+    ///
+    /// The browser embeds the redistributable metadata index for discovery,
+    /// but never pretends that the roughly 200 MB source corpus is present.
+    /// A user must import an authenticated source bundle before execution.
+    pub fn source_files_available(&self) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.embedded_catalog.is_none()
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            true
+        }
     }
 
     /// Look up a pack by identifier.
@@ -285,6 +362,11 @@ impl SpiceLibraryIndex {
             .sum()
     }
 
+    /// Top-level `.model` cards addressable from a device instance.
+    pub fn model_count(&self) -> usize {
+        self.packs.iter().map(|pack| pack.models_top).sum()
+    }
+
     /// Every addressable definition matching `name`, compared case-insensitively.
     ///
     /// A part number routinely appears in several packs with different
@@ -292,9 +374,13 @@ impl SpiceLibraryIndex {
     /// Subcircuit-private cards are excluded; use
     /// [`Self::find_definition_any_scope`] when tracing one to its source.
     pub fn find_part(&self, name: &str) -> io::Result<Vec<CatalogEntry>> {
-        self.filter_catalog(|entry| {
-            entry.scope.is_addressable() && entry.name.eq_ignore_ascii_case(name)
-        })
+        Ok(self
+            .addressable_catalog()?
+            .entries
+            .iter()
+            .filter(|entry| entry.entry.name.eq_ignore_ascii_case(name))
+            .map(|entry| entry.entry.clone())
+            .collect())
     }
 
     /// Every definition matching `name` at any nesting depth.
@@ -310,28 +396,311 @@ impl SpiceLibraryIndex {
     /// Narrower than [`Self::find_part`]: a pack can be usable while individual
     /// files inside it are not.
     pub fn find_shippable_part(&self, name: &str) -> io::Result<Vec<CatalogEntry>> {
-        self.filter_catalog(|entry| {
-            entry.scope.is_addressable()
-                && !entry.restricted
-                && entry.name.eq_ignore_ascii_case(name)
-        })
+        Ok(self
+            .addressable_catalog()?
+            .entries
+            .iter()
+            .filter(|entry| !entry.entry.restricted && entry.entry.name.eq_ignore_ascii_case(name))
+            .map(|entry| entry.entry.clone())
+            .collect())
     }
 
     /// Every addressable definition whose name contains `needle`,
     /// compared case-insensitively.
     pub fn search_parts(&self, needle: &str, limit: usize) -> io::Result<Vec<CatalogEntry>> {
-        let needle = needle.to_ascii_uppercase();
-        let mut found = Vec::new();
-        self.for_each_catalog_entry(|entry| {
-            if found.len() >= limit {
-                return false;
+        let needle = needle.to_ascii_lowercase();
+        Ok(self
+            .addressable_catalog()?
+            .entries
+            .iter()
+            .filter(|entry| entry.entry.name.to_ascii_lowercase().contains(&needle))
+            .take(limit)
+            .map(|entry| entry.entry.clone())
+            .collect())
+    }
+
+    /// Every addressable top-level `.model` whose name contains `needle`.
+    ///
+    /// This is the contract for a model-card browser. Subcircuits are omitted
+    /// because activating them requires a symbol/interface workflow rather
+    /// than a model-card selection.
+    pub fn search_model_cards(&self, needle: &str, limit: usize) -> io::Result<Vec<CatalogEntry>> {
+        let needle = needle.to_ascii_lowercase();
+        Ok(self
+            .addressable_catalog()?
+            .entries
+            .iter()
+            .filter(|entry| {
+                entry.entry.kind.eq_ignore_ascii_case("model")
+                    && entry.entry.name.to_ascii_lowercase().contains(&needle)
+            })
+            .take(limit)
+            .map(|entry| entry.entry.clone())
+            .collect())
+    }
+
+    /// Query the complete addressable part catalog with bounded paging.
+    ///
+    /// The catalog is streamed once. `needle` matches name, device class,
+    /// definition kind, pack identity, and relative source path. `devices`
+    /// contains exact canonical device-class tokens; an empty slice selects
+    /// every class. The returned count is the complete number of matches, not
+    /// merely the bounded page length.
+    pub fn query_parts(
+        &self,
+        needle: &str,
+        pack: Option<&str>,
+        devices: &[&str],
+        offset: usize,
+        limit: usize,
+    ) -> io::Result<(usize, Vec<CatalogEntry>)> {
+        self.query_parts_cancellable(needle, pack, devices, offset, limit, || false)
+    }
+
+    /// Query the complete addressable catalog while allowing a superseded UI
+    /// request to stop the scan.
+    ///
+    /// Cancellation is checked between catalog rows. It returns
+    /// [`io::ErrorKind::Interrupted`] and never reports a partial match count as
+    /// complete.
+    pub fn query_parts_cancellable(
+        &self,
+        needle: &str,
+        pack: Option<&str>,
+        devices: &[&str],
+        offset: usize,
+        limit: usize,
+        mut is_cancelled: impl FnMut() -> bool,
+    ) -> io::Result<(usize, Vec<CatalogEntry>)> {
+        let needle = needle.trim().to_ascii_lowercase();
+        let pack = pack.map(str::trim).filter(|pack| !pack.is_empty());
+        let catalog = self.addressable_catalog()?;
+        let mut total = 0usize;
+        let mut page = Vec::with_capacity(limit.min(1_024));
+        for indexed in &catalog.entries {
+            if is_cancelled() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "catalog query was superseded",
+                ));
             }
-            if entry.scope.is_addressable() && entry.name.to_ascii_uppercase().contains(&needle) {
-                found.push(entry);
+            let entry = &indexed.entry;
+            if pack.is_some_and(|pack| !entry.pack.eq_ignore_ascii_case(pack))
+                || (!devices.is_empty()
+                    && !devices
+                        .iter()
+                        .any(|device| entry.device.eq_ignore_ascii_case(device)))
+            {
+                continue;
             }
-            true
+            if !needle.is_empty() && !indexed.search_text.contains(&needle) {
+                continue;
+            }
+            if total >= offset && page.len() < limit {
+                page.push(entry.clone());
+            }
+            total = total.saturating_add(1);
+        }
+        Ok((total, page))
+    }
+
+    /// Exact addressable part counts by canonical device class.
+    pub fn part_device_counts(&self) -> io::Result<BTreeMap<String, usize>> {
+        Ok(self.addressable_catalog()?.device_counts.clone())
+    }
+
+    /// Read a bounded, line-attributed preview from the indexed source file.
+    ///
+    /// Paths are accepted only when both the pack path and catalog member are
+    /// safe relative paths. The indexed line must still declare the requested
+    /// name and kind; a stale or tampered index fails rather than showing a
+    /// nearby plausible card.
+    pub fn definition_preview(&self, entry: &CatalogEntry) -> io::Result<CatalogDefinitionPreview> {
+        let source_path = self.catalog_source_path(entry).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "catalog entry has an unsafe or unknown source path",
+            )
         })?;
-        Ok(found)
+        let metadata = fs::metadata(&source_path)?;
+        if metadata.len() > MAX_DEFINITION_PREVIEW_FILE_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "definition source exceeds the {}-byte preview limit",
+                    MAX_DEFINITION_PREVIEW_FILE_BYTES
+                ),
+            ));
+        }
+        let source = fs::read_to_string(&source_path)?;
+        let lines = source.lines().collect::<Vec<_>>();
+        let start = entry.line.checked_sub(1).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "catalog definition line must be one-based",
+            )
+        })?;
+        let indexed = lines.get(start).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "catalog definition line lies beyond the source file",
+            )
+        })?;
+        if !definition_line_matches(indexed, entry) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "catalog entry {}:{} no longer declares {} '{}'",
+                    source_path.display(),
+                    entry.line,
+                    entry.kind,
+                    entry.name
+                ),
+            ));
+        }
+
+        let mut selected = Vec::new();
+        let mut truncated = false;
+        if entry.kind.eq_ignore_ascii_case("subckt") {
+            for line in lines.iter().skip(start) {
+                if selected.len() >= MAX_DEFINITION_PREVIEW_LINES {
+                    truncated = true;
+                    break;
+                }
+                selected.push(*line);
+                if selected.len() > 1
+                    && line
+                        .split_ascii_whitespace()
+                        .next()
+                        .is_some_and(|token| token.eq_ignore_ascii_case(".ends"))
+                {
+                    break;
+                }
+            }
+        } else {
+            selected.push(indexed);
+            for line in lines.iter().skip(start + 1) {
+                let trimmed = line.trim_start();
+                if !trimmed.starts_with('+') && !trimmed.starts_with('*') {
+                    break;
+                }
+                if selected.len() >= MAX_DEFINITION_PREVIEW_LINES {
+                    truncated = true;
+                    break;
+                }
+                selected.push(*line);
+            }
+        }
+        let source = selected
+            .iter()
+            .enumerate()
+            .map(|(offset, line)| format!("{:>7}  {line}", entry.line + offset))
+            .collect::<Vec<_>>()
+            .join("\n");
+        Ok(CatalogDefinitionPreview {
+            source_path,
+            start_line: entry.line,
+            source,
+            truncated,
+        })
+    }
+
+    /// Revalidate and extract the exact ordered terminal list from an indexed
+    /// top-level `.subckt` declaration.
+    pub fn subcircuit_interface(
+        &self,
+        entry: &CatalogEntry,
+    ) -> io::Result<CatalogSubcircuitInterface> {
+        if !entry.kind.eq_ignore_ascii_case("subckt") || !entry.scope.is_addressable() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "catalog entry is not an addressable subcircuit",
+            ));
+        }
+        let source_path = self.catalog_source_path(entry).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "catalog entry has an unsafe or unknown source path",
+            )
+        })?;
+        let metadata = fs::metadata(&source_path)?;
+        if metadata.len() > MAX_DEFINITION_PREVIEW_FILE_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "subcircuit source exceeds the bounded interface-inspection limit",
+            ));
+        }
+        let source = fs::read_to_string(&source_path)?;
+        let lines = source.lines().collect::<Vec<_>>();
+        let start = entry.line.checked_sub(1).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "catalog definition line must be one-based",
+            )
+        })?;
+        let indexed = lines.get(start).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "catalog definition line lies beyond the source file",
+            )
+        })?;
+        if !definition_line_matches(indexed, entry) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "indexed subcircuit declaration changed",
+            ));
+        }
+
+        let mut declaration = indexed.trim().to_owned();
+        for line in lines.iter().skip(start + 1) {
+            let Some(continuation) = line.trim_start().strip_prefix('+') else {
+                break;
+            };
+            declaration.push(' ');
+            declaration.push_str(continuation.trim());
+        }
+        let mut tokens = declaration.split_ascii_whitespace();
+        let directive = tokens.next().unwrap_or_default();
+        let name = tokens.next().unwrap_or_default();
+        if !directive.eq_ignore_ascii_case(".subckt") || !name.eq_ignore_ascii_case(&entry.name) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "indexed subcircuit declaration does not match its catalog identity",
+            ));
+        }
+        let mut ports = Vec::new();
+        let mut folded = HashSet::new();
+        for token in tokens {
+            if token.eq_ignore_ascii_case("params:")
+                || token.eq_ignore_ascii_case("param:")
+                || token.contains('=')
+            {
+                break;
+            }
+            let canonical = token.to_ascii_lowercase();
+            if token.is_empty() || !folded.insert(canonical) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "subcircuit '{}' has an invalid repeated terminal",
+                        entry.name
+                    ),
+                ));
+            }
+            ports.push(token.to_owned());
+        }
+        if ports.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("subcircuit '{}' declares no terminals", entry.name),
+            ));
+        }
+        Ok(CatalogSubcircuitInterface {
+            name: entry.name.clone(),
+            ports,
+            source_path,
+            start_line: entry.line,
+        })
     }
 
     /// A bounded, deterministic first page of addressable definitions.
@@ -355,23 +724,31 @@ impl SpiceLibraryIndex {
 
     /// Every addressable definition of a given canonical device class.
     pub fn parts_by_device(&self, device: &str, limit: usize) -> io::Result<Vec<CatalogEntry>> {
-        let mut found = Vec::new();
-        self.for_each_catalog_entry(|entry| {
-            if found.len() >= limit {
-                return false;
-            }
-            if entry.scope.is_addressable() && entry.device == device {
-                found.push(entry);
-            }
-            true
-        })?;
-        Ok(found)
+        Ok(self
+            .addressable_catalog()?
+            .entries
+            .iter()
+            .filter(|entry| entry.entry.device == device)
+            .take(limit)
+            .map(|entry| entry.entry.clone())
+            .collect())
     }
 
     /// The whole catalog, nested definitions included. Around 199,000 entries;
     /// prefer the search methods.
     pub fn load_catalog(&self) -> io::Result<Vec<CatalogEntry>> {
         self.filter_catalog(|_| true)
+    }
+
+    fn catalog_source_path(&self, entry: &CatalogEntry) -> Option<PathBuf> {
+        if !self.source_files_available() {
+            return None;
+        }
+        let pack = self.pack(&entry.pack)?;
+        if !safe_relative_path(&pack.path) || !safe_relative_path(&entry.path) {
+            return None;
+        }
+        Some(self.root.join(&pack.path).join(&entry.path))
     }
 
     fn filter_catalog(
@@ -388,6 +765,44 @@ impl SpiceLibraryIndex {
         Ok(found)
     }
 
+    fn addressable_catalog(&self) -> io::Result<&AddressableCatalog> {
+        let result = self.addressable_catalog.get_or_init(|| {
+            self.build_addressable_catalog()
+                .map(Arc::new)
+                .map_err(|error| error.to_string())
+        });
+        match result {
+            Ok(catalog) => Ok(catalog),
+            Err(error) => Err(io::Error::new(io::ErrorKind::InvalidData, error.clone())),
+        }
+    }
+
+    fn build_addressable_catalog(&self) -> io::Result<AddressableCatalog> {
+        let mut entries = Vec::with_capacity(self.part_count());
+        let mut device_counts = BTreeMap::new();
+        self.for_each_catalog_entry(|entry| {
+            if !entry.scope.is_addressable() {
+                return true;
+            }
+            *device_counts.entry(entry.device.clone()).or_default() += 1;
+            let search_text = format!(
+                "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
+                entry.name,
+                entry.device,
+                entry.kind,
+                entry.pack,
+                entry.path.to_string_lossy()
+            )
+            .to_ascii_lowercase();
+            entries.push(IndexedCatalogEntry { entry, search_text });
+            true
+        })?;
+        Ok(AddressableCatalog {
+            entries,
+            device_counts,
+        })
+    }
+
     /// Stream the catalog, stopping early when `visit` returns `false`.
     ///
     /// The catalog is around 16 MB. Streaming keeps a part lookup from paying
@@ -396,13 +811,29 @@ impl SpiceLibraryIndex {
         &self,
         mut visit: impl FnMut(CatalogEntry) -> bool,
     ) -> io::Result<()> {
+        #[cfg(target_arch = "wasm32")]
+        if let Some(catalog) = self.embedded_catalog {
+            for line in catalog.lines() {
+                if line.starts_with('#') || line.is_empty() {
+                    continue;
+                }
+                let Some(entry) = parse_catalog_row(line) else {
+                    continue;
+                };
+                if !visit(entry) {
+                    break;
+                }
+            }
+            return Ok(());
+        }
         let path = self.root.join(CATALOG_INDEX);
-        let text = fs::read_to_string(path)?;
-        for line in text.lines() {
+        let reader = BufReader::new(fs::File::open(path)?);
+        for line in reader.lines() {
+            let line = line?;
             if line.starts_with('#') || line.is_empty() {
                 continue;
             }
-            let Some(entry) = parse_catalog_row(line) else {
+            let Some(entry) = parse_catalog_row(&line) else {
                 continue;
             };
             if !visit(entry) {
@@ -411,6 +842,30 @@ impl SpiceLibraryIndex {
         }
         Ok(())
     }
+}
+
+fn safe_relative_path(path: &Path) -> bool {
+    !path.as_os_str().is_empty()
+        && path.components().all(|component| {
+            matches!(
+                component,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        })
+}
+
+fn definition_line_matches(line: &str, entry: &CatalogEntry) -> bool {
+    let mut tokens = line.split_ascii_whitespace();
+    let Some(directive) = tokens.next() else {
+        return false;
+    };
+    let Some(name) = tokens.next() else {
+        return false;
+    };
+    directive
+        .strip_prefix('.')
+        .is_some_and(|directive| directive.eq_ignore_ascii_case(&entry.kind))
+        && name.eq_ignore_ascii_case(&entry.name)
 }
 
 /// Build a path from an index field.
@@ -583,6 +1038,22 @@ mod tests {
     }
 
     #[test]
+    fn model_card_catalog_excludes_subcircuits_and_nested_helpers() {
+        let index = SpiceLibraryIndex::open(repo_models_root()).expect("index opens");
+        assert!(
+            index.model_count() > 15_000,
+            "expected the shipped top-level model set"
+        );
+        let matches = index
+            .search_model_cards("1N4148", 50)
+            .expect("model-card catalog readable");
+        assert!(!matches.is_empty());
+        assert!(matches.iter().all(|entry| {
+            entry.scope == DefinitionScope::TopLevel && entry.kind.eq_ignore_ascii_case("model")
+        }));
+    }
+
+    #[test]
     fn part_lookup_returns_every_pack_that_defines_it() {
         let index = SpiceLibraryIndex::open(repo_models_root()).expect("index opens");
         let matches = index.find_part("1N4148").expect("catalog readable");
@@ -655,6 +1126,124 @@ mod tests {
             .expect("catalog readable");
         assert!(!jfets.is_empty(), "expected N-JFETs in the catalog");
         assert!(jfets.iter().all(|entry| entry.device == "jfet-n"));
+    }
+
+    #[test]
+    fn bounded_catalog_query_reports_complete_match_count() {
+        let index = SpiceLibraryIndex::open(repo_models_root()).expect("index opens");
+        let (total, page) = index
+            .query_parts("1n4148", None, &[], 0, 2)
+            .expect("catalog query succeeds");
+        assert!(total > page.len());
+        assert_eq!(page.len(), 2);
+        assert!(page.iter().all(|entry| {
+            entry.scope.is_addressable()
+                && (entry.name.to_ascii_lowercase().contains("1n4148")
+                    || entry.device.to_ascii_lowercase().contains("1n4148")
+                    || entry.pack.to_ascii_lowercase().contains("1n4148")
+                    || entry
+                        .path
+                        .to_string_lossy()
+                        .to_ascii_lowercase()
+                        .contains("1n4148"))
+        }));
+    }
+
+    #[test]
+    fn catalog_pages_are_stable_disjoint_windows_of_one_index() {
+        let index = SpiceLibraryIndex::open(repo_models_root()).expect("index opens");
+        let (first_total, first) = index.query_parts("", None, &[], 0, 25).expect("first page");
+        let (second_total, second) = index
+            .query_parts("", None, &[], 25, 25)
+            .expect("second page");
+        assert_eq!(first_total, second_total);
+        assert_eq!(first.len(), 25);
+        assert_eq!(second.len(), 25);
+        let identity = |entry: &CatalogEntry| {
+            (
+                entry.pack.clone(),
+                entry.path.clone(),
+                entry.line,
+                entry.name.clone(),
+            )
+        };
+        let first = first
+            .iter()
+            .map(identity)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(
+            second
+                .iter()
+                .map(identity)
+                .all(|entry| !first.contains(&entry)),
+            "adjacent pages must never repeat an exact catalog identity"
+        );
+    }
+
+    #[test]
+    fn cancelled_catalog_query_never_reports_a_partial_total() {
+        let index = SpiceLibraryIndex::open(repo_models_root()).expect("index opens");
+        let error = index
+            .query_parts_cancellable("", None, &[], 0, 25, || true)
+            .expect_err("superseded query must stop");
+        assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+    }
+
+    #[test]
+    fn device_facets_sum_to_the_addressable_part_total() {
+        let index = SpiceLibraryIndex::open(repo_models_root()).expect("index opens");
+        let counts = index.part_device_counts().expect("catalog counts");
+        assert_eq!(counts.values().sum::<usize>(), index.part_count());
+        assert!(counts.get("diode").copied().unwrap_or_default() > 1_000);
+    }
+
+    #[test]
+    fn definition_preview_revalidates_the_indexed_line_and_bounds_source() {
+        let index = SpiceLibraryIndex::open(repo_models_root()).expect("index opens");
+        let entry = index
+            .find_part("1N4148")
+            .expect("catalog readable")
+            .into_iter()
+            .next()
+            .expect("fixture definition exists");
+        let preview = index
+            .definition_preview(&entry)
+            .expect("indexed source preview");
+        assert_eq!(preview.start_line, entry.line);
+        assert!(preview.source_path.is_file());
+        assert!(preview.source.to_ascii_lowercase().contains("1n4148"));
+        assert!(preview.source.lines().count() <= MAX_DEFINITION_PREVIEW_LINES);
+
+        let mut unsafe_entry = entry;
+        unsafe_entry.path = PathBuf::from("../outside.lib");
+        assert!(unsafe_entry.source_path(&index).is_none());
+        assert!(index.definition_preview(&unsafe_entry).is_err());
+    }
+
+    #[test]
+    fn subcircuit_interface_preserves_exact_terminal_order() {
+        let index = SpiceLibraryIndex::open(repo_models_root()).expect("index opens");
+        let entry = index
+            .find_part("7400")
+            .expect("catalog readable")
+            .into_iter()
+            .find(|entry| entry.pack == "ngspice-74xx-logic" && entry.kind == "subckt")
+            .expect("addressable 7400 subcircuit exists");
+        let interface = index
+            .subcircuit_interface(&entry)
+            .expect("interface revalidates");
+        assert_eq!(interface.name, "7400");
+        assert!(!interface.ports.is_empty());
+        assert_eq!(interface.start_line, entry.line);
+        assert!(interface.source_path.is_file());
+
+        let model = index
+            .find_part("1N4148")
+            .expect("catalog readable")
+            .into_iter()
+            .find(|entry| entry.kind == "model")
+            .expect("model entry exists");
+        assert!(index.subcircuit_interface(&model).is_err());
     }
 
     #[test]

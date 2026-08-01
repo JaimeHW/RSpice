@@ -34,9 +34,9 @@
 
 use crate::canonical_ir::CanonicalIrArtifact;
 use crate::codegen::{CompiledModel, Instruction, StampIndex};
-#[cfg(feature = "native")]
-use crate::vm::terminal_pair_current_endpoints;
 use crate::vm::{CURRENT_PAIR_GROUND, Vm, VmContext, VmError};
+#[cfg(feature = "native")]
+use crate::vm::{terminal_pair_current_endpoints, terminal_pair_current_len};
 use smol_str::SmolStr;
 
 #[cfg(feature = "native")]
@@ -1927,6 +1927,11 @@ impl VerilogADevice {
         &mut self,
         mode: crate::vm::VerilogAEvaluationMode,
     ) -> Result<Vec<f64>, VmError> {
+        #[cfg(feature = "native")]
+        if self.native_model.evaluation_kernel_is_eligible() {
+            return self.try_evaluate_native_kernel(mode);
+        }
+
         self.begin_evaluation(mode);
         self.context.clear_currents();
         self.context.clear_timer_event_bound();
@@ -1979,6 +1984,80 @@ impl VerilogADevice {
         Self::run_post_assignment_pass(&mut vm, &self.model, native)?;
 
         Ok(currents)
+    }
+
+    #[cfg(feature = "native")]
+    fn try_evaluate_native_kernel(
+        &mut self,
+        mode: crate::vm::VerilogAEvaluationMode,
+    ) -> Result<Vec<f64>, VmError> {
+        self.begin_evaluation(mode);
+        self.context.clear_timer_event_bound();
+
+        let model = &self.model;
+        let native = self.native_model.as_ref();
+        let stamp_count = model.stamp_programs.len();
+        if self.native_program_active.len() != stamp_count {
+            return Err(VmError::NativeJit(format!(
+                "native fused-evaluation buffer does not match compiled model shape ({}/{stamp_count} active flags); no interpreter fallback",
+                self.native_program_active.len()
+            )));
+        }
+
+        {
+            let context = &mut self.context;
+            context.prepare_indexed_currents(stamp_count);
+            if context.variables.len() < model.num_variables {
+                context.variables.resize(model.num_variables, 0.0);
+            }
+            Self::validate_native_storage(context, native)?;
+            Self::validate_native_terminal_pair_table(context, native.num_terminals)?;
+            Self::validate_native_branch_unknowns(
+                context,
+                native.evaluation_kernel_branch_unknowns(),
+            )?;
+
+            let ctx = Self::eval_context_from(context);
+            let io = NativeStampKernelIo {
+                program_active: self.native_program_active.as_ptr(),
+                jacobians: std::ptr::null_mut(),
+            };
+            let vars = context.variables.as_mut_ptr();
+            ctx.clear_runtime_error();
+            if !native.run_evaluation_kernel(&ctx, vars, &io) {
+                return Err(VmError::NativeJit(
+                    "native JIT image is missing its fused evaluation entry; no interpreter fallback"
+                        .into(),
+                ));
+            }
+            if let Some(error) = ctx.take_native_runtime_error() {
+                return Err(match error.kind {
+                    crate::native::NativeRuntimeErrorKind::NativeJit => {
+                        VmError::NativeJit(error.message)
+                    }
+                    crate::native::NativeRuntimeErrorKind::InvalidNumericResult => {
+                        VmError::InvalidNumericResult(error.message)
+                    }
+                });
+            }
+        }
+
+        for program_idx in 0..stamp_count {
+            if self.native_program_active[program_idx] != 0 {
+                Self::finite_native_stamp_value(
+                    self.context.currents[program_idx],
+                    program_idx,
+                    None,
+                    "contribution during device evaluation",
+                )?;
+            }
+        }
+        {
+            let mut vm = Vm::new(&mut self.context);
+            Self::run_post_assignment_pass(&mut vm, model, native)?;
+        }
+
+        Ok(self.context.currents.clone())
     }
 
     /// Whether no named limiter changed its proposal during the latest
@@ -2291,6 +2370,33 @@ impl VerilogADevice {
             }
         }
 
+        Ok(())
+    }
+
+    #[cfg(feature = "native")]
+    fn validate_native_terminal_pair_table(
+        context: &VmContext,
+        compiled_terminal_count: usize,
+    ) -> Result<(), VmError> {
+        let terminal_count = context.terminal_count();
+        if terminal_count != compiled_terminal_count {
+            return Err(Self::mismatched_native_terminal_context(
+                compiled_terminal_count,
+                terminal_count,
+            ));
+        }
+        let expected = terminal_pair_current_len(compiled_terminal_count).ok_or_else(|| {
+            VmError::NativeJit(
+                "native terminal-pair current table dimensions overflow; no interpreter fallback"
+                    .into(),
+            )
+        })?;
+        let available = context.terminal_pair_currents_len();
+        if available != expected {
+            return Err(Self::missing_native_terminal_pair_current_slot(
+                available.min(expected.saturating_sub(1)),
+            ));
+        }
         Ok(())
     }
 
@@ -2957,11 +3063,7 @@ impl VerilogADevice {
                 context.variables.resize(model.num_variables, 0.0);
             }
             Self::validate_native_storage(context, native)?;
-            Self::validate_native_current_pair_storage(
-                context,
-                native.num_terminals,
-                native.assignment_current_pairs(),
-            )?;
+            Self::validate_native_terminal_pair_table(context, native.num_terminals)?;
             Self::validate_native_prior_currents(context, native.assignment_prior_currents())?;
             Self::validate_native_branch_unknowns(context, native.assignment_branch_unknowns())?;
 

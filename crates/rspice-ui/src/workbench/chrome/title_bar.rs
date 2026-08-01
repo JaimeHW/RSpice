@@ -1197,7 +1197,10 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::OpenWorkspace(Workspace::Simulate) => WorkbenchIcon::Simulate,
         Command::OpenWorkspace(Workspace::Results)
         | Command::ResultViewer(_)
-        | Command::WaveformCalculator => WorkbenchIcon::Results,
+        | Command::WaveformCalculator
+        | Command::CompareResultDatasets
+        | Command::MeasurementLibrary
+        | Command::FamilySlicing => WorkbenchIcon::Results,
         Command::OpenWorkspace(Workspace::Verify)
         | Command::VerificationPage(_)
         | Command::EditSpecifications => WorkbenchIcon::Verify,
@@ -1209,8 +1212,11 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::OpenWorkspace(Workspace::Netlist) => WorkbenchIcon::Netlist,
         Command::AutomationConsole => WorkbenchIcon::Terminal,
         Command::NewProject => WorkbenchIcon::File,
-        Command::NewCell => WorkbenchIcon::Add,
-        Command::OpenProject | Command::OpenDocument => WorkbenchIcon::Folder,
+        Command::NewCell | Command::CreateResultDocument => WorkbenchIcon::Add,
+        Command::OpenProject
+        | Command::OpenDocument
+        | Command::ImportResultDataset
+        | Command::DatasetManifestBrowser => WorkbenchIcon::Folder,
         Command::OpenNetlist => WorkbenchIcon::Netlist,
         Command::RecentProjects => WorkbenchIcon::History,
         Command::Save | Command::SaveAs | Command::SaveAll | Command::ModelSaveRevision => {
@@ -1228,6 +1234,8 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         | Command::PrintHardcopy
         | Command::ExportActiveView => WorkbenchIcon::Export,
         Command::PageSetup => WorkbenchIcon::File,
+        Command::SheetFormatManager => WorkbenchIcon::Grid,
+        Command::CustomSheetSizes => WorkbenchIcon::Models,
         Command::Undo => WorkbenchIcon::Undo,
         Command::Redo => WorkbenchIcon::Redo,
         Command::Cut | Command::Copy | Command::Paste | Command::Duplicate => WorkbenchIcon::Copy,
@@ -1240,7 +1248,10 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::ZoomIn => WorkbenchIcon::ZoomIn,
         Command::ZoomOut => WorkbenchIcon::ZoomOut,
         Command::ZoomFit => WorkbenchIcon::ZoomFit,
+        Command::FitSchematicContent => WorkbenchIcon::ZoomFit,
         Command::CycleGrid => WorkbenchIcon::Grid,
+        Command::GridSnapRouting => WorkbenchIcon::Sliders,
+        Command::DrawingSheetLayers => WorkbenchIcon::Layers,
         Command::VisibilityOptions => WorkbenchIcon::Layers,
         Command::ToggleNavigator => WorkbenchIcon::Navigator,
         Command::ToggleInspector => WorkbenchIcon::Inspector,
@@ -1264,7 +1275,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::CreateHierarchy | Command::DesignManagement => WorkbenchIcon::Folder,
         Command::ConnectivityManager => WorkbenchIcon::Bus,
         Command::SelectionBulkEdit => WorkbenchIcon::Sliders,
-        Command::ReviewComments => WorkbenchIcon::Info,
+        Command::ReviewComments | Command::ReviewNotes => WorkbenchIcon::Info,
         Command::RevisionHistory => WorkbenchIcon::History,
         Command::AscendHierarchy => WorkbenchIcon::ArrowLeft,
         Command::DescendHierarchy | Command::DescendHierarchyDirect => WorkbenchIcon::Folder,
@@ -1283,7 +1294,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::SystemDiagnostics | Command::SupportBundle => WorkbenchIcon::Terminal,
         Command::LegalPrivacy => WorkbenchIcon::Check,
         Command::InteroperabilityMatrix | Command::ModelCompareRelease => WorkbenchIcon::Compare,
-        Command::SpecialistToolBrowser => WorkbenchIcon::Grid,
+        Command::DesignSpecialistWorkspaces | Command::SpecialistToolBrowser => WorkbenchIcon::Grid,
         Command::VisualizationStudio => WorkbenchIcon::Results,
         Command::AddVisualizationPane => WorkbenchIcon::Add,
         Command::VisualizationTraceManager => WorkbenchIcon::Sliders,
@@ -1362,7 +1373,9 @@ fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item(ui, app, Command::CloseActiveDocument);
     command_item(ui, app, Command::CloseProject);
     menu_separator(ui);
-    command_item(ui, app, Command::PageSetup);
+    for command in DRAWING_SHEET_FILE_COMMANDS {
+        command_item(ui, app, command);
+    }
     command_item(ui, app, Command::PrintHardcopy);
     command_item(ui, app, Command::ExportActiveView);
     let platform = crate::workbench::app_state::runtime_command_platform(ui.ctx());
@@ -1371,6 +1384,12 @@ fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         command_item(ui, app, Command::Exit);
     }
 }
+
+const DRAWING_SHEET_FILE_COMMANDS: [Command; 3] = [
+    Command::PageSetup,
+    Command::SheetFormatManager,
+    Command::CustomSheetSizes,
+];
 
 fn menu_popup_max_height(ui: &Ui) -> f32 {
     menu_popup_height_for_viewport(ui.ctx().content_rect().height())
@@ -1419,8 +1438,12 @@ fn view_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         Command::ZoomIn,
         Command::ZoomOut,
         Command::ZoomFit,
+        Command::FitSchematicContent,
         Command::ZoomOneToOne,
         Command::CycleGrid,
+        Command::GridSnapRouting,
+        Command::DrawingSheetLayers,
+        Command::VisibilityOptions,
     ] {
         command_item(ui, app, command);
     }
@@ -1468,7 +1491,7 @@ fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item_as(
         ui,
         app,
-        Command::SpecialistToolBrowser,
+        Command::DesignSpecialistWorkspaces,
         "Specialist workspaces\u{2026}",
         None,
     );
@@ -1496,46 +1519,25 @@ fn simulate_menu(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn results_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    command_item_as(
+    command_item(
         ui,
         app,
         Command::ResultViewer(crate::workbench::ResultViewer::Waves),
-        "Open results workspace",
-        None,
     );
+    command_item(ui, app, Command::DatasetManifestBrowser);
+    command_item(ui, app, Command::CreateResultDocument);
+    command_item(ui, app, Command::CompareResultDatasets);
     menu_separator(ui);
-    for (viewer, label) in [
-        (crate::workbench::ResultViewer::Bode, "Bode / stability"),
-        (crate::workbench::ResultViewer::Fft, "FFT / spectrum"),
-        (crate::workbench::ResultViewer::Eye, "Eye diagram"),
-        (crate::workbench::ResultViewer::Hist, "Distribution"),
-        (crate::workbench::ResultViewer::Op, "Operating point"),
-        (
-            crate::workbench::ResultViewer::NoiseContrib,
-            "Noise contributors",
-        ),
-        (
-            crate::workbench::ResultViewer::Contribution,
-            "Sensitivity contributions",
-        ),
-        (
-            crate::workbench::ResultViewer::TransferFunction,
-            "Transfer function",
-        ),
-        (
-            crate::workbench::ResultViewer::Specs,
-            "Measurements & specifications",
-        ),
-        (crate::workbench::ResultViewer::Nyquist, "Nyquist"),
-        (crate::workbench::ResultViewer::Smith, "Smith chart"),
-        (crate::workbench::ResultViewer::PoleZero, "Pole-zero"),
-    ] {
-        command_item_as(ui, app, Command::ResultViewer(viewer), label, None);
-    }
+    command_item(ui, app, Command::VisualizationTraceManager);
+    command_item(ui, app, Command::VisualizationCursorManager);
+    command_item(ui, app, Command::ReviewNotes);
+    command_item(ui, app, Command::WaveformCalculator);
+    command_item(ui, app, Command::MeasurementLibrary);
+    command_item(ui, app, Command::FamilySlicing);
+    command_item(ui, app, Command::VisualizationDocumentProperties);
     menu_separator(ui);
-    command_item_as(ui, app, Command::WaveformCalculator, "Calculator…", None);
+    command_item(ui, app, Command::ImportResultDataset);
     command_item(ui, app, Command::ExportWaveformsCsv);
-    command_item(ui, app, Command::ClearResults);
 }
 
 fn verify_menu(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -1749,17 +1751,41 @@ fn paint_title_context(
     );
     ui.ctx().accesskit_node_builder(status.id, |node| {
         node.set_role(egui::accesskit::Role::Status);
-        node.set_label(format!(
-            "Active project: {}; {}; {}",
-            app.state.workspace.project.display_name(),
-            cell,
-            if dirty {
-                "unsaved changes"
-            } else {
-                "all changes saved"
-            }
-        ));
+        if app.state.project_lifecycle.project_open {
+            node.set_label(format!(
+                "Active project: {}; {}; {}",
+                app.state.workspace.project.display_name(),
+                cell,
+                if dirty {
+                    "unsaved changes"
+                } else {
+                    "all changes saved"
+                }
+            ));
+        } else {
+            node.set_label("No project open");
+        }
     });
+}
+
+fn title_context_text(app: &RSpiceApp, compact: bool) -> String {
+    if !app.state.project_lifecycle.project_open {
+        return if compact {
+            "No project open"
+        } else {
+            "RSpice Workbench"
+        }
+        .to_owned();
+    }
+    if compact {
+        active_title_cell(app)
+    } else {
+        // On desktop the active cell/view already appears in both the
+        // document tab and the local canvas breadcrumb. Keep the centered
+        // title scoped to project identity so the shell does not repeat the
+        // same context three times.
+        app.state.workspace.project.display_name().to_owned()
+    }
 }
 
 fn ellipsize_to_width(
@@ -1805,6 +1831,9 @@ fn ellipsize_to_width(
 }
 
 fn active_title_cell(app: &RSpiceApp) -> String {
+    if !app.state.project_lifecycle.project_open {
+        return "No project open".to_owned();
+    }
     match app.state.workbench.workspace {
         Workspace::Project => "Project overview".to_owned(),
         Workspace::Design => format!(

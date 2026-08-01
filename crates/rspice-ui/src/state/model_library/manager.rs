@@ -23,6 +23,7 @@ use super::{
     ModelLevel, ModelLibrary, ModelQualificationState, ModelSectionQualification,
     ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourceEvidenceBinding,
     ModelSourcePin, ModelType, ParameterDataType, ParameterDefinition, ParameterSource,
+    subcircuit_interface_key,
     ParameterValue, ProcessCorner, ProjectModelDefinition, ProjectModelRevisionDefinition,
     first_unreachable_source,
 };
@@ -50,13 +51,40 @@ pub struct SealedModelExecutionSources {
     sources: Vec<(PathBuf, String)>,
     edges: Vec<rspice_core::netlist::SealedSourceEdge>,
     libraries: Vec<SealedExecutionLibrary>,
+    pdk_process_bindings: Vec<crate::state::pdk_config::SealedPdkModelProcessBinding>,
+    pdk_veriloga_artifacts: Vec<crate::state::pdk_config::SealedPdkVerilogAArtifact>,
+    pdk_veriloga_bindings: Vec<crate::state::pdk_config::SealedPdkVerilogABinding>,
+    pdk_identity: Option<(
+        crate::state::pdk_config::PdkTechnologyBinding,
+        ContentDigest,
+    )>,
 }
 
 #[derive(Debug, Clone)]
 struct SealedExecutionLibrary {
     name: String,
     root_path: PathBuf,
-    sections: Vec<String>,
+    corners: Vec<ProcessCorner>,
+}
+
+/// One corner section materialized out of the sealed bundle, with the identity
+/// needed to label it and the domains it covers.
+struct MaterializedCornerSection {
+    source_label: String,
+    path: PathBuf,
+    section: String,
+    domains: Vec<super::CornerSectionDomain>,
+    materialized_model_cards: String,
+}
+
+const fn pdk_model_process(process: CornerProcess) -> crate::state::pdk_config::PdkModelProcess {
+    match process {
+        CornerProcess::TT => crate::state::pdk_config::PdkModelProcess::Tt,
+        CornerProcess::SS => crate::state::pdk_config::PdkModelProcess::Ss,
+        CornerProcess::FF => crate::state::pdk_config::PdkModelProcess::Ff,
+        CornerProcess::SF => crate::state::pdk_config::PdkModelProcess::Sf,
+        CornerProcess::FS => crate::state::pdk_config::PdkModelProcess::Fs,
+    }
 }
 
 impl SealedModelExecutionSources {
@@ -67,6 +95,118 @@ impl SealedModelExecutionSources {
     /// names one retained source exactly. This deliberately does not guess by
     /// basename or consult a host search path: unresolved and ambiguous deck
     /// references fail closed in browser execution.
+    pub(crate) fn with_pdk_model_sources(
+        mut self,
+        pdk: crate::state::pdk_config::SealedPdkModelSources,
+    ) -> Result<Self, String> {
+        if self.pdk_identity.is_some() {
+            return Err("A sealed model snapshot already contains a signed PDK binding".to_owned());
+        }
+
+        let mut sources_by_key = self
+            .sources
+            .iter()
+            .map(|(path, source)| (portable_path_key(path), (path.clone(), source.clone())))
+            .collect::<BTreeMap<_, _>>();
+        for (path, source) in pdk.sources {
+            let key = portable_path_key(&path);
+            match sources_by_key.entry(key) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert((path, source));
+                }
+                std::collections::btree_map::Entry::Occupied(entry) if entry.get().1 != source => {
+                    return Err(format!(
+                        "Signed PDK source '{}' conflicts with an authenticated model-library source",
+                        path.display()
+                    ));
+                }
+                std::collections::btree_map::Entry::Occupied(_) => {}
+            }
+        }
+
+        let mut edges_by_key = self
+            .edges
+            .iter()
+            .map(|edge| {
+                (
+                    (portable_path_key(&edge.owner), edge.requested_path.clone()),
+                    edge.clone(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        for edge in pdk.edges {
+            let key = (portable_path_key(&edge.owner), edge.requested_path.clone());
+            match edges_by_key.entry(key) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(edge);
+                }
+                std::collections::btree_map::Entry::Occupied(entry)
+                    if portable_path_key(&entry.get().target)
+                        != portable_path_key(&edge.target) =>
+                {
+                    return Err(format!(
+                        "Signed PDK and model libraries disagree on dependency '{}' in '{}'",
+                        edge.requested_path,
+                        edge.owner.display()
+                    ));
+                }
+                std::collections::btree_map::Entry::Occupied(_) => {}
+            }
+        }
+
+        self.sources = sources_by_key.into_values().collect();
+        self.sources.sort_by(|left, right| left.0.cmp(&right.0));
+        self.edges = edges_by_key.into_values().collect();
+        self.edges.sort_by(|left, right| {
+            left.owner
+                .cmp(&right.owner)
+                .then_with(|| left.requested_path.cmp(&right.requested_path))
+                .then_with(|| left.target.cmp(&right.target))
+        });
+        self.bundle = rspice_core::netlist::SealedSourceBundle::try_new_with_edges(
+            self.sources.clone(),
+            self.edges.clone(),
+        )
+        .map_err(|error| format!("Failed to merge signed PDK model sources: {error}"))?;
+        self.pdk_process_bindings = pdk.process_bindings;
+        self.pdk_veriloga_artifacts = pdk.veriloga_artifacts;
+        self.pdk_veriloga_bindings = pdk.veriloga_bindings;
+        self.pdk_identity = Some((pdk.binding, pdk.archive_digest));
+        Ok(self)
+    }
+
+    /// Exact signed package identity participating in this model snapshot.
+    #[must_use]
+    pub(crate) fn pdk_model_identity(&self) -> Option<(String, ContentDigest)> {
+        self.pdk_identity.as_ref().map(|(binding, archive_digest)| {
+            (
+                format!(
+                    "signed-pdk:{}@{}:manifest:{}",
+                    binding.package_id, binding.revision, binding.manifest_digest
+                ),
+                *archive_digest,
+            )
+        })
+    }
+
+    #[must_use]
+    pub(crate) fn pdk_veriloga_authority(
+        &self,
+    ) -> Option<(
+        &crate::state::pdk_config::PdkTechnologyBinding,
+        ContentDigest,
+        &[crate::state::pdk_config::SealedPdkVerilogAArtifact],
+        &[crate::state::pdk_config::SealedPdkVerilogABinding],
+    )> {
+        let (binding, archive_digest) = self.pdk_identity.as_ref()?;
+        Some((
+            binding,
+            *archive_digest,
+            &self.pdk_veriloga_artifacts,
+            &self.pdk_veriloga_bindings,
+        ))
+    }
+
     pub(crate) fn bundle_for_root(
         &self,
         root_path: &Path,
@@ -235,7 +375,7 @@ impl SealedModelExecutionSources {
         &self,
         processes: &[CornerProcess],
     ) -> Result<Vec<CornerModelBinding>, String> {
-        if self.libraries.is_empty() {
+        if self.libraries.is_empty() && self.pdk_process_bindings.is_empty() {
             if let Some(process) = processes
                 .iter()
                 .find(|process| **process != CornerProcess::TT)
@@ -252,48 +392,194 @@ impl SealedModelExecutionSources {
         for process in processes {
             for library in &self.libraries {
                 let keyword = process.as_keyword();
-                let section = library
-                    .sections
+                let corner = library
+                    .corners
                     .iter()
-                    .find(|section| section.eq_ignore_ascii_case(keyword))
+                    .find(|corner| corner.name.eq_ignore_ascii_case(keyword))
                     .cloned();
-                if section.is_none()
-                    && (*process != CornerProcess::TT || !library.sections.is_empty())
+                if corner.is_none()
+                    && (*process != CornerProcess::TT || !library.corners.is_empty())
                 {
                     return Err(format!(
                         "Model library '{}' does not define the {} process section",
                         library.name, keyword
                     ));
                 }
+                match corner.as_ref() {
+                    Some(corner) => {
+                        for section in self.materialize_library_corner(library, corner)? {
+                            let binding = CornerModelBinding {
+                                process: *process,
+                                source_label: section.source_label,
+                                section: Some(section.section),
+                                materialized_model_cards: section.materialized_model_cards,
+                            };
+                            binding.validate()?;
+                            bindings.push(binding);
+                        }
+                    }
+                    None => {
+                        let mut processor = rspice_core::netlist::IncludeProcessor::new_sealed(
+                            &library.root_path,
+                            self.bundle.clone(),
+                        );
+                        let materialized_model_cards = processor
+                            .process_sealed_root(&library.root_path, None)
+                            .map_err(|error| {
+                                format!(
+                                    "Failed to materialize sealed model library '{}' from '{}': {error}",
+                                    library.name,
+                                    library.root_path.display()
+                                )
+                            })?;
+                        let binding = CornerModelBinding {
+                            process: *process,
+                            source_label: library.root_path.display().to_string(),
+                            section: None,
+                            materialized_model_cards,
+                        };
+                        binding.validate()?;
+                        bindings.push(binding);
+                    }
+                }
+            }
 
-                let mut processor = rspice_core::netlist::IncludeProcessor::new_sealed(
-                    &library.root_path,
-                    self.bundle.clone(),
-                );
-                let materialized_model_cards = processor
-                    .process_sealed_root(&library.root_path, section.as_deref())
-                    .map_err(|error| {
-                        format!(
-                            "Failed to materialize sealed model library '{}' from '{}': {error}",
-                            library.name,
-                            library.root_path.display()
-                        )
-                    })?;
-                let source_label = match section.as_deref() {
-                    Some(section) => format!("{} [{}]", library.root_path.display(), section),
-                    None => library.root_path.display().to_string(),
-                };
-                let binding = CornerModelBinding {
-                    process: *process,
-                    source_label,
-                    section,
-                    materialized_model_cards,
-                };
-                binding.validate()?;
-                bindings.push(binding);
+            if !self.pdk_process_bindings.is_empty() {
+                let pdk_process = pdk_model_process(*process);
+                let selected = self
+                    .pdk_process_bindings
+                    .iter()
+                    .filter(|binding| binding.process == pdk_process)
+                    .collect::<Vec<_>>();
+                if selected.is_empty() {
+                    let package = self
+                        .pdk_identity
+                        .as_ref()
+                        .map(|(binding, _)| format!("{} {}", binding.package_id, binding.revision))
+                        .unwrap_or_else(|| "signed PDK".to_owned());
+                    return Err(format!(
+                        "{package} does not supply an explicit {} model-source contract",
+                        process.as_keyword()
+                    ));
+                }
+                for source in selected {
+                    let mut processor = rspice_core::netlist::IncludeProcessor::new_sealed(
+                        &source.root_path,
+                        self.bundle.clone(),
+                    );
+                    let materialized_model_cards = processor
+                        .process_sealed_root(&source.root_path, source.section.as_deref())
+                        .map_err(|error| {
+                            format!(
+                                "Failed to materialize signed PDK {} source '{}' from '{}': {error}",
+                                process.as_keyword(),
+                                source.source_id,
+                                source.artifact_path
+                            )
+                        })?;
+                    let package = self
+                        .pdk_identity
+                        .as_ref()
+                        .map(|(binding, digest)| {
+                            format!(
+                                "{} {} / {} / {} / artifact {} / archive {}",
+                                binding.package_id,
+                                binding.revision,
+                                source.domain.label(),
+                                source.source_id,
+                                source.artifact_digest,
+                                digest
+                            )
+                        })
+                        .unwrap_or_else(|| source.source_id.clone());
+                    let binding = CornerModelBinding {
+                        process: *process,
+                        source_label: package,
+                        section: source.section.clone(),
+                        materialized_model_cards,
+                    };
+                    binding.validate()?;
+                    bindings.push(binding);
+                }
             }
         }
         Ok(bindings)
+    }
+
+    fn materialize_library_corner(
+        &self,
+        library: &SealedExecutionLibrary,
+        corner: &ProcessCorner,
+    ) -> Result<Vec<MaterializedCornerSection>, String> {
+        if let Err(errors) = corner.validate_contract() {
+            return Err(format!(
+                "Model library '{}' corner '{}' has an invalid section contract: {}",
+                library.name,
+                corner.name,
+                errors.join("; ")
+            ));
+        }
+        let source_path = corner
+            .file_path
+            .as_deref()
+            .unwrap_or(library.root_path.as_path());
+        let bindings = corner.effective_section_bindings();
+        if bindings.is_empty() {
+            return Err(format!(
+                "Model library '{}' corner '{}' has no executable section binding",
+                library.name, corner.name
+            ));
+        }
+
+        let mut domains_by_section =
+            BTreeMap::<(PathBuf, String), Vec<super::CornerSectionDomain>>::new();
+        for binding in bindings {
+            domains_by_section
+                .entry((source_path.to_path_buf(), binding.section))
+                .or_default()
+                .push(binding.domain);
+        }
+
+        let mut sections = Vec::with_capacity(domains_by_section.len());
+        for ((path, section), mut domains) in domains_by_section {
+            domains.sort();
+            domains.dedup();
+            let mut processor =
+                rspice_core::netlist::IncludeProcessor::new_sealed(&path, self.bundle.clone());
+            let materialized_model_cards = processor
+                .process_sealed_root(&path, Some(&section))
+                .map_err(|error| {
+                    format!(
+                        "Failed to materialize {} section '{}' for model library '{}' corner '{}' from '{}': {error}",
+                        domains
+                            .iter()
+                            .map(|domain| domain.label())
+                            .collect::<Vec<_>>()
+                            .join(" + "),
+                        section,
+                        library.name,
+                        corner.name,
+                        path.display()
+                    )
+                })?;
+            sections.push(MaterializedCornerSection {
+                source_label: format!(
+                    "{} [{}] ({})",
+                    path.display(),
+                    section,
+                    domains
+                        .iter()
+                        .map(|domain| domain.label())
+                        .collect::<Vec<_>>()
+                        .join(" + ")
+                ),
+                path,
+                section,
+                domains,
+                materialized_model_cards,
+            });
+        }
+        Ok(sections)
     }
 }
 
@@ -481,6 +767,97 @@ pub struct PackModelHit {
 }
 
 impl ModelLibraryManager {
+
+    /// Convert a parsed card that a `.lib` section owns, recording the section
+    /// as execution provenance. Cards at file scope use
+    /// [`Self::convert_parsed_model`], which leaves the section unset.
+    pub(crate) fn convert_parsed_model_in_section(
+        model: &rspice_core::library::ParsedModel,
+        file_path: &Path,
+        section: Option<&str>,
+    ) -> DeviceModel {
+        let mut converted = Self::convert_parsed_model(model, file_path);
+        converted.section = section.map(str::to_owned);
+        converted
+    }
+
+    /// Project one parsed subcircuit onto its callable interface. A subcircuit
+    /// carries its own source file when it was reached through an include, so
+    /// that path wins over the root being scanned.
+    fn insert_parsed_subcircuits(
+        library: &mut ModelLibrary,
+        parsed: &[rspice_core::library::ParsedSubcircuit],
+        file_path: &Path,
+        section: Option<&str>,
+    ) -> Result<(), String> {
+        for subcircuit in parsed {
+            let interface = Self::convert_parsed_subcircuit(subcircuit, file_path, section);
+            let key = subcircuit_interface_key(interface.section.as_deref(), &interface.name);
+            if let Some(existing) = library
+                .subcircuits
+                .keys()
+                .find(|existing| existing.eq_ignore_ascii_case(&key))
+            {
+                return Err(format!(
+                    "Subcircuit '{}' is defined more than once in the same library section (first identity '{}')",
+                    interface.name, existing
+                ));
+            }
+            library.subcircuits.insert(key, interface);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn convert_parsed_subcircuit(
+        subcircuit: &rspice_core::library::ParsedSubcircuit,
+        file_path: &Path,
+        section: Option<&str>,
+    ) -> super::ModelSubcircuitInterface {
+        super::ModelSubcircuitInterface {
+            name: subcircuit.name.clone(),
+            ports: subcircuit.pins.clone(),
+            parameter_defaults: subcircuit
+                .parameter_defaults
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect(),
+            description: subcircuit.description.clone(),
+            file_path: Some(
+                subcircuit
+                    .source_file
+                    .as_deref()
+                    .unwrap_or(file_path)
+                    .to_path_buf(),
+            ),
+            source_line: subcircuit.source_line,
+            section: section.map(str::to_owned),
+        }
+    }
+
+    /// Stable identity of the persisted model catalogue relevant to source
+    /// preparation. Browser filters, selection, shipped-pack indexes, and
+    /// audit ledgers are deliberately excluded.
+    pub(crate) fn execution_catalog_digest(&self) -> ContentDigest {
+        let mut libraries = self.libraries.values().collect::<Vec<_>>();
+        libraries.sort_by(|left, right| left.name.cmp(&right.name));
+        let mut hasher = Sha256::new();
+        hasher.update(b"rspice.model-execution-catalog/v4\0");
+        for library in libraries {
+            // A library owns several `HashMap` fields, so serializing it
+            // directly emits their entries in per-instance iteration order and
+            // yields a different digest for identical content. Route through
+            // `serde_json::Value`, whose objects are key-sorted maps, so the
+            // catalogue identity depends only on the content itself. A prepared
+            // run compares this digest before dispatch; an order-dependent one
+            // expires authorized runs at random.
+            let bytes = serde_json::to_value(library)
+                .and_then(|canonical| serde_json::to_vec(&canonical))
+                .unwrap_or_else(|error| format!("serialization-error:{error}").into_bytes());
+            hasher.update((bytes.len() as u64).to_le_bytes());
+            hasher.update(bytes);
+        }
+        ContentDigest::from_bytes(hasher.finalize().into())
+    }
     /// Create a new manager
     pub fn new() -> Self {
         Self::default()
@@ -1036,13 +1413,12 @@ impl ModelLibraryManager {
         library.selected_corner = None;
 
         for section_name in result.section_names() {
-            let corner = ProcessCorner {
-                name: section_name.to_string(),
-                description: format!("Process corner from {}", lib_name),
-                file_path: Some(path.clone()),
-                is_default: false,
-                ..ProcessCorner::default()
-            };
+            // Build the corner through its section contract rather than by
+            // field assignment: a corner with no section binding materializes
+            // to nothing, so a bare name would seal an empty corner.
+            let mut corner =
+                ProcessCorner::from_composite_section(section_name, path.clone(), false);
+            corner.description = format!("Process corner from {lib_name}");
             library.corners.insert(corner.name.clone(), corner);
         }
 
@@ -1063,11 +1439,24 @@ impl ModelLibraryManager {
                 .models
                 .insert(device_model.name.clone(), device_model);
         }
+        // Every section's interfaces are retained, not just the selected one:
+        // a subcircuit is addressable by section-qualified identity, and a
+        // library that declares only `.subckt` definitions is still a library.
+        Self::insert_parsed_subcircuits(&mut library, &result.top_level_subcircuits, &path, None)?;
+        for lib_section in &result.sections {
+            Self::insert_parsed_subcircuits(
+                &mut library,
+                &lib_section.subcircuits,
+                &path,
+                Some(&lib_section.name),
+            )?;
+        }
 
         if let Some(section_name) = selected_section.as_deref() {
             if let Some(lib_section) = result.get_section(section_name) {
                 for model in &lib_section.models {
-                    let device_model = Self::convert_parsed_model(model, &path);
+                    let device_model =
+                        Self::convert_parsed_model_in_section(model, &path, Some(&lib_section.name));
                     library
                         .models
                         .insert(device_model.name.clone(), device_model);
@@ -1136,9 +1525,14 @@ impl ModelLibraryManager {
 
         let mut library = ModelLibrary::new(&lib_name);
         library.root_path = Some(root.clone());
-        library.source_authority = ModelSourceAuthority::ProjectOwned {
+        // Imported bytes the project retained, not a definition the project
+        // authored. The distinction is load-bearing: a project-owned library
+        // carries a revision and typed definition metadata, and
+        // `project_model_definition_identities` fails closed when a
+        // project-owned model has none. An import has neither, so recording it
+        // as project-owned makes that check demand metadata that cannot exist.
+        library.source_authority = ModelSourceAuthority::RetainedImport {
             source_id: crate::product::ModelSourceId::new(),
-            revision: crate::product::ObjectRevision::INITIAL,
             digest,
         };
         library.source_closure = vec![ModelSourcePin {
@@ -1150,14 +1544,16 @@ impl ModelLibraryManager {
             bytes,
         }];
         library.corners.clear();
+        // `ModelLibrary::new` seeds the standard corners and selects "tt".
+        // Clearing the catalogue without clearing the selection leaves a
+        // library pointing at a corner it no longer defines, which fails
+        // projection later with "selected corner does not exist". A section
+        // below re-selects when the source actually declares one.
+        library.selected_corner = None;
         for section_name in result.section_names() {
-            let corner = ProcessCorner {
-                name: section_name.to_owned(),
-                description: format!("Process corner from {lib_name}"),
-                file_path: Some(root.clone()),
-                is_default: false,
-                ..ProcessCorner::default()
-            };
+            let mut corner =
+                ProcessCorner::from_composite_section(section_name, root.clone(), false);
+            corner.description = format!("Process corner from {lib_name}");
             library.corners.insert(corner.name.clone(), corner);
         }
         let section_names = result.section_names();
@@ -1174,6 +1570,15 @@ impl ModelLibraryManager {
                 .models
                 .insert(device_model.name.clone(), device_model);
         }
+        Self::insert_parsed_subcircuits(&mut library, &result.top_level_subcircuits, &root, None)?;
+        for lib_section in &result.sections {
+            Self::insert_parsed_subcircuits(
+                &mut library,
+                &lib_section.subcircuits,
+                &root,
+                Some(&lib_section.name),
+            )?;
+        }
         if let Some(section_name) = selected_section.as_deref() {
             let lib_section = result.get_section(section_name).ok_or_else(|| {
                 format!(
@@ -1182,7 +1587,8 @@ impl ModelLibraryManager {
                 )
             })?;
             for model in &lib_section.models {
-                let device_model = Self::convert_parsed_model(model, &root);
+                let device_model =
+                    Self::convert_parsed_model_in_section(model, &root, Some(&lib_section.name));
                 library
                     .models
                     .insert(device_model.name.clone(), device_model);
@@ -1192,8 +1598,12 @@ impl ModelLibraryManager {
                 corner.is_default = true;
             }
         }
-        if library.models.is_empty() {
-            return Err("Uploaded model library contains no supported device models".to_owned());
+        // A macromodel library legitimately declares only `.subckt`
+        // definitions, so an empty model map alone is not an empty library.
+        if library.models.is_empty() && library.subcircuits.is_empty() {
+            return Err(format!(
+                "Model library '{lib_name}' contains no supported device models or addressable subcircuits"
+            ));
         }
         if self.libraries.contains_key(&lib_name) {
             return Err(format!(
@@ -1338,6 +1748,9 @@ impl ModelLibraryManager {
             for model in models {
                 let device_model = DeviceModel {
                     name: model.name.clone(),
+                    // Built-in cards are compiled in at file scope; no `.lib`
+                    // section owns them.
+                    section: None,
                     model_type: Self::convert_core_model_type(model.model_type),
                     spice_type: Some(Self::core_model_type_token(model.model_type).to_owned()),
                     level: ModelLevel::Unknown,
@@ -1371,6 +1784,9 @@ impl ModelLibraryManager {
 
         DeviceModel {
             name: model.name.clone(),
+            // This conversion has no section context; a card parsed inside a
+            // `.lib` is attributed by the caller that knows the section.
+            section: None,
             model_type,
             spice_type: Some(model.spice_type.clone()),
             level: Self::convert_model_level(model.level, &model.spice_type),

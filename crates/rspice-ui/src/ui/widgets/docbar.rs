@@ -56,4 +56,3 @@ fn docbar_with_geometry<R>(
         ui.interact(rect, ui.id().with("docbar"), egui::Sense::hover()),
     )
 }
-

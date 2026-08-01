@@ -13,13 +13,15 @@ use crate::hardcopy::{
     MAX_PREVIEW_PAGES, OutputFormat,
 };
 use crate::product::ContentDigest;
-use crate::workbench::workflows::export_workflow::deterministic_stored_zip;
 use crate::workbench::hardcopy_adapters::render::{
     HardcopyRenderer, HardcopySceneMetadata, MAX_ARTIFACT_BYTES, MAX_PREVIEW_WORKER_MANIFEST_BYTES,
     MAX_PREVIEW_WORKER_RGBA_BYTES, MAX_PUBLICATION_BYTES, MAX_PUBLICATION_WORKER_MANIFEST_BYTES,
     RenderedHardcopyPublication,
 };
-use crate::workbench::hardcopy_adapters::sources::{MAX_WORKER_SNAPSHOT_BYTES, ResolvedHardcopyDocument};
+use crate::workbench::hardcopy_adapters::sources::{
+    MAX_WORKER_SNAPSHOT_BYTES, ResolvedHardcopyDocument,
+};
+use crate::workbench::workflows::export_workflow::deterministic_stored_zip;
 
 const HARDCOPY_WORKER_PROTOCOL_VERSION: u32 = 1;
 const MAX_REQUEST_METADATA_BYTES: usize = MAX_WORKER_SNAPSHOT_BYTES;
@@ -590,21 +592,19 @@ fn reconstruct_plan(
     source: &ResolvedHardcopyDocument,
 ) -> Result<HardcopyPlan, String> {
     let sections = source
-        .hardcopy_sections()
+        .hardcopy_sections_for_setup(setup.schematic())
+        .map_err(|error| error.to_string())?;
+    let output_extent = source
+        .content_extent_for_setup(setup.schematic())
         .map_err(|error| error.to_string())?;
     let plan = if sections.is_empty() {
-        HardcopyPlan::compile_with_id(
-            plan_id,
-            source.authority().clone(),
-            setup,
-            source.content_extent(),
-        )
+        HardcopyPlan::compile_with_id(plan_id, source.authority().clone(), setup, output_extent)
     } else {
         HardcopyPlan::compile_with_id_and_sections(
             plan_id,
             source.authority().clone(),
             setup,
-            source.content_extent(),
+            output_extent,
             sections,
         )
     }
@@ -1167,11 +1167,16 @@ pub(crate) use browser::{
 mod tests {
     use super::*;
     use crate::hardcopy::{
-        BackgroundMode, ColorMapping, FontPolicy, RenderSetup, RenderTarget, ScaleMode,
+        BackgroundMode, Bleed, ColorMapping, DecorationSetup, FontPolicy,
+        OutsideSheetContentPolicy, PageMargins, PhysicalPageSetup, RenderSetup, RenderTarget,
+        ScaleMode, SchematicHardcopyExtent, SchematicHardcopySetup, TilingMode, TilingSetup,
+        Watermark,
     };
     use crate::state::{Point, Wire};
     use crate::workbench::AppState;
-    use crate::workbench::hardcopy_adapters::render::{HardcopyPreviewPage, RenderedHardcopyPublication};
+    use crate::workbench::hardcopy_adapters::render::{
+        HardcopyPreviewPage, RenderedHardcopyPublication,
+    };
     use crate::workbench::hardcopy_adapters::sources::{
         PreparedRetainedHardcopyResolution, prepare_retained_hardcopy_resolution,
         resolve_retained_hardcopy_source,
@@ -1221,12 +1226,41 @@ mod tests {
 
     fn two_page_setup() -> HardcopySetup {
         let defaults = HardcopySetup::default();
-        HardcopySetup::try_new(
-            defaults.physical_page().clone(),
+        let physical_page = PhysicalPageSetup::try_new(
+            defaults.physical_page().paper().clone(),
+            PageMargins::uniform(crate::hardcopy::Length::ZERO),
+            Bleed::None,
+            defaults.physical_page().orientation(),
+        )
+        .expect("zero-margin worker fixture page is valid");
+        let tiling = TilingSetup::try_new(
+            TilingMode::Manual {
+                columns: 2,
+                rows: 1,
+            },
+            defaults.tiling().overlap(),
+            false,
+        )
+        .expect("two-page tiling is valid");
+        let decorations = DecorationSetup::try_new(false, false, false, Watermark::None)
+            .expect("undecorated worker fixture is valid");
+        let schematic = SchematicHardcopySetup::new(
+            SchematicHardcopyExtent::CompleteSchematicContent,
+            OutsideSheetContentPolicy::ExtendOutput,
+            true,
+            true,
+            true,
+            true,
+            true,
+            false,
+        );
+        HardcopySetup::try_new_with_schematic(
+            physical_page,
             ScaleMode::EngineeringOneToOne,
-            defaults.tiling(),
+            tiling,
             defaults.render().clone(),
-            defaults.decorations().clone(),
+            decorations,
+            schematic,
             defaults.print_mapping().clone(),
         )
         .expect("two-page setup is valid")
@@ -1234,7 +1268,7 @@ mod tests {
 
     fn two_page_svg_setup() -> HardcopySetup {
         let defaults = two_page_setup();
-        HardcopySetup::try_new(
+        HardcopySetup::try_new_with_schematic(
             defaults.physical_page().clone(),
             defaults.scale(),
             defaults.tiling(),
@@ -1248,6 +1282,7 @@ mod tests {
             )
             .expect("SVG render setup is valid"),
             defaults.decorations().clone(),
+            defaults.schematic(),
             defaults.print_mapping().clone(),
         )
         .expect("two-page SVG setup is valid")

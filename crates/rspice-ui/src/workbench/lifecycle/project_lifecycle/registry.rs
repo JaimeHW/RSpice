@@ -163,6 +163,7 @@ fn document_digests(
         digest(&(
             &project.simulation_results,
             &project.workspace.report_documents,
+            &project.workspace.visualization_documents,
         ))?,
     );
     documents.insert(
@@ -199,6 +200,11 @@ fn document_digests(
             references.insert(reference);
         }
     }
+    for key in project.workspace.physical_layout_documents().keys() {
+        if let Some(reference) = reference_from_key(key) {
+            references.insert(reference);
+        }
+    }
     for (library_key, library) in project.libraries.libraries_by_key() {
         for (cell_key, cell) in &library.cells {
             for view_key in cell.views.keys() {
@@ -212,6 +218,7 @@ fn document_digests(
             .schematic_buffers
             .get(&reference.key())
             .map(SchematicDocumentContent::from);
+        let physical_layout = project.workspace.physical_layout_document(&reference);
         let view = project
             .libraries
             .get_library(&reference.library)
@@ -223,7 +230,7 @@ fn document_digests(
         );
         documents.insert(
             ProjectDocumentId::CellView(reference),
-            digest(&(schematic, view, project_source))?,
+            digest(&(schematic, physical_layout, view, project_source))?,
         );
     }
 
@@ -291,6 +298,7 @@ fn project_configuration_value(project: &ProjectFile) -> Result<serde_json::Valu
         &project.libraries,
         &project.workspace.configuration_sets,
         &project.workspace.design_management,
+        project.workspace.pdk_callback_receipts(),
     ))
     .map_err(|error| error.to_string())?;
     // Paths are persistence bindings and browser/tree expansion is
@@ -336,6 +344,10 @@ fn scrub_library_presentation(value: &mut serde_json::Value) {
         "selected_view",
         "filter_text",
         "show_read_only",
+        // The revision is a concurrency/audit coordinate, not independent
+        // engineering configuration. The catalog structure below is the
+        // content authority, while each view document owns its view payload.
+        "revision",
     ] {
         manager.remove(key);
     }

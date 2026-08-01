@@ -19,14 +19,30 @@ use crate::state::{CellViewRef, ModelBoundSymbolDefinition, ViewType};
 use crate::workbench::app_state::AppState;
 
 pub(crate) fn open_symbol_import_dialog(state: &mut AppState) {
+    open_symbol_import_dialog_for(state, None);
+}
+
+/// Open the importer with an explicit project-owned symbol as the preferred
+/// electrical binding source. Callers that present their own shared
+/// Library/Cell/View selection use this entry point so an unrelated active
+/// Design document cannot silently retarget the transaction.
+pub(crate) fn open_symbol_import_dialog_for(
+    state: &mut AppState,
+    preferred_binding_source: Option<&CellViewRef>,
+) {
     let Some(target_library) = writable_library_name(state) else {
         state.push_user_message(ConsoleMessage::warning(
             "Import symbol requires an open project with a writable design library.",
         ));
         return;
     };
-    let binding_source = selected_symbol_reference(state)
+    let binding_source = preferred_binding_source
+        .cloned()
         .filter(|reference| reference_has_typed_definition(state, reference))
+        .or_else(|| {
+            selected_symbol_reference(state)
+                .filter(|reference| reference_has_typed_definition(state, reference))
+        })
         .or_else(|| first_model_bound_symbol_reference(state));
     state.dialogs.symbol_import = SymbolImportDialogState {
         open: true,
@@ -44,6 +60,15 @@ pub(crate) fn open_symbol_parameter_form_dialog(state: &mut AppState) {
         ));
         return;
     };
+    open_symbol_parameter_form_dialog_for(state, target);
+}
+
+/// Open the form transaction for one exact symbol reference.
+///
+/// This explicit form is required by the Library/Cellview specialist route:
+/// its project-library selection is authoritative even when another symbol
+/// remains open in the Design workspace.
+pub(crate) fn open_symbol_parameter_form_dialog_for(state: &mut AppState, target: CellViewRef) {
     let writable = state
         .library_manager
         .get_library(&target.library)
@@ -68,6 +93,12 @@ pub(crate) fn open_symbol_parameter_form_dialog(state: &mut AppState) {
         ));
         return;
     };
+    if view.view_type != ViewType::Symbol {
+        state.push_user_message(ConsoleMessage::warning(
+            "The selected cellview is not a symbol and has no component-form contract.",
+        ));
+        return;
+    }
     let definition = match crate::state::ModelBoundSymbolDefinition::load_from_view(view) {
         Ok(Some(definition)) => definition,
         Ok(None) => {

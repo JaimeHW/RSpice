@@ -10,8 +10,8 @@ use std::fmt;
 
 use serde_json::Value;
 
-use crate::workbench::shortcuts::artifacts::{canonical_json_bytes, hex_digest, sha256};
 use crate::workbench::shortcuts::ShortcutProfileLibrary;
+use crate::workbench::shortcuts::artifacts::{canonical_json_bytes, hex_digest, sha256};
 
 pub const SHORTCUT_LIBRARY_STORE_FORMAT: &str = "rspice.shortcut-profile-library";
 pub const SHORTCUT_LIBRARY_STORE_SCHEMA_VERSION: u16 = 1;
@@ -81,7 +81,6 @@ impl ShortcutLibraryPersistenceToken {
     pub const fn generation(self) -> u64 {
         self.generation
     }
-
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1600,12 +1599,9 @@ mod tests {
         let ShortcutProfileLibraryRestore::Compatible(restored) = decode_store_bytes(&bytes) else {
             panic!("protected acknowledgement store did not restore");
         };
-        assert!(
-            restored
-                .library()
-                .active()
-                .protected_override_acknowledged(crate::workbench::commands::vocabulary::Command::Save)
-        );
+        assert!(restored.library().active().protected_override_acknowledged(
+            crate::workbench::commands::vocabulary::Command::Save
+        ));
     }
 
     #[test]

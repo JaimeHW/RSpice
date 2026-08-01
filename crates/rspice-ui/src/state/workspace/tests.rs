@@ -1709,7 +1709,45 @@ fn technology_binding_fixture() -> ProjectTechnologyBinding {
         source_edges: Vec::new(),
         model_count: 14,
         process_sections: vec!["ff".to_owned(), "ss".to_owned(), "tt".to_owned()],
+        signed_package: None,
     }
+}
+
+#[test]
+fn signed_technology_pin_is_strictly_validated_and_round_trips_with_the_project_binding() {
+    let binding = technology_binding_fixture();
+    let mut value = serde_json::to_value(&binding).expect("binding serializes");
+    value["signed_package"] = serde_json::json!({
+        "schema_version": PROJECT_SIGNED_TECHNOLOGY_PIN_SCHEMA_VERSION,
+        "package_id": "demo180",
+        "revision": "2.3.1",
+        "manifest_digest": crate::product::ContentDigest::from_bytes([0x11; 32]),
+        "archive_digest": crate::product::ContentDigest::from_bytes([0x22; 32]),
+        "technology_name": "Demo 180 nm",
+        "publisher_id": "rspice-foundry-demo",
+        "signing_key_id": "ceremony-01",
+        "process_node_nm": 180,
+        "stack_name": "1P2M",
+        "execution_targets": ["desktop", "web-assembly", "mobile"]
+    });
+    let restored: ProjectTechnologyBinding =
+        serde_json::from_value(value.clone()).expect("strict signed pin deserializes");
+    restored.validate().expect("signed binding validates");
+    assert_eq!(
+        serde_json::from_str::<ProjectTechnologyBinding>(
+            &serde_json::to_string(&restored).expect("binding serializes")
+        )
+        .expect("binding round trips"),
+        restored
+    );
+
+    value["signed_package"]["execution_targets"] = serde_json::json!(["desktop", "desktop"]);
+    let duplicate_targets: ProjectTechnologyBinding =
+        serde_json::from_value(value).expect("shape deserializes");
+    assert!(matches!(
+        duplicate_targets.validate(),
+        Err(TechnologyBindingError::InvalidSignedPackage(_))
+    ));
 }
 
 #[test]
@@ -1746,6 +1784,105 @@ fn technology_attachment_is_atomic_revisioned_and_idempotent() {
     assert_eq!(project.revision(), before.revision());
     assert_eq!(project.technology, before.technology);
     assert_eq!(project.technology_binding(), before.technology_binding());
+}
+
+#[test]
+fn technology_change_receipts_are_checkpoint_bound_atomic_and_tamper_evident() {
+    let mut project = ProjectDescriptor::default();
+    let initial_revision = project.revision();
+    let authority = ProjectTechnologyChangeAuthority::new(
+        "engineer.james",
+        "project-technology-admin",
+        "Attach the qualified tapeout technology",
+    )
+    .expect("authority validates");
+    let context = ProjectTechnologyChangeContext::new(
+        authority,
+        Uuid::new_v4(),
+        initial_revision,
+        1_785_430_000_000,
+        crate::product::ContentDigest::from_bytes([0x71; 32]),
+        4_096,
+    )
+    .expect("checkpoint context validates");
+    let binding = technology_binding_fixture();
+    let (attached_revision, first_receipt) = project
+        .attach_technology_audited(binding.clone(), context)
+        .expect("audited attachment commits");
+    assert_eq!(first_receipt.sequence(), 1);
+    assert_eq!(
+        first_receipt.action(),
+        ProjectTechnologyChangeAction::Attach
+    );
+    assert_eq!(attached_revision.get(), initial_revision.get() + 1);
+    assert_eq!(project.technology_change_audit().len(), 1);
+    project.validate().expect("audited project validates");
+
+    let mut bypass = binding.clone();
+    bypass.package_version = Some("2026.08".to_owned());
+    assert_eq!(
+        project.attach_technology(bypass.clone()),
+        Err(ProjectDescriptorError::TechnologyAuditRequired)
+    );
+    assert_eq!(project.technology_binding(), Some(&binding));
+
+    project
+        .rename("Audited technology project")
+        .expect("unrelated project revision advances");
+    let replacement_from = project.revision();
+    let replacement_context = ProjectTechnologyChangeContext::new(
+        ProjectTechnologyChangeAuthority::new(
+            "engineer.james",
+            "project-technology-admin",
+            "Adopt qualified model update",
+        )
+        .expect("replacement authority validates"),
+        Uuid::new_v4(),
+        replacement_from,
+        1_785_430_100_000,
+        crate::product::ContentDigest::from_bytes([0x72; 32]),
+        8_192,
+    )
+    .expect("replacement checkpoint context validates");
+    let (_, replacement_receipt) = project
+        .attach_technology_audited(bypass.clone(), replacement_context)
+        .expect("audited replacement commits");
+    assert_eq!(replacement_receipt.sequence(), 2);
+    assert_eq!(
+        replacement_receipt.action(),
+        ProjectTechnologyChangeAction::Replace
+    );
+    assert_eq!(
+        replacement_receipt.from_project_revision(),
+        replacement_from
+    );
+    assert_eq!(project.technology_binding(), Some(&bypass));
+    project.validate().expect("replacement chain validates");
+
+    let encoded = serde_json::to_vec(&project).expect("descriptor serializes");
+    let restored: ProjectDescriptor =
+        serde_json::from_slice(&encoded).expect("descriptor round trips");
+    restored.validate().expect("restored audit validates");
+    assert_eq!(
+        serde_json::to_value(&restored).expect("restored descriptor serializes"),
+        serde_json::to_value(&project).expect("source descriptor serializes")
+    );
+
+    let mut tampered = serde_json::to_value(&project).expect("descriptor serializes to value");
+    tampered["technology_change_audit"][0]["reason"] =
+        serde_json::Value::String("tampered reason".to_owned());
+    let tampered: ProjectDescriptor =
+        serde_json::from_value(tampered).expect("tampered shape deserializes");
+    assert!(matches!(
+        tampered.validate(),
+        Err(ProjectDescriptorError::TechnologyAuditCorrupted(_))
+    ));
+
+    let copied = project.fork_copy_at(PathBuf::from(r"C:\projects\fork.rspice"));
+    assert!(copied.technology_change_audit().is_empty());
+    copied
+        .validate()
+        .expect("independent copy starts fresh history");
 }
 
 #[test]
@@ -2231,4 +2368,114 @@ fn project_source_validation_rejects_mismatched_slots_and_stale_evidence() {
     let mut legacy = serde_json::json!({ "verilog_a": root });
     legacy["verilog_a"]["language"] = serde_json::Value::String("rspice-automation".to_owned());
     assert!(serde_json::from_value::<ProjectSourceRegistry>(legacy).is_err());
+}
+
+#[test]
+fn project_library_mutation_receipts_are_exact_hash_chained_and_tamper_evident() {
+    let mut project = ProjectDescriptor::default();
+    let first = project
+        .prepare_library_mutation(
+            ProjectLibraryMutation::CreateCell {
+                library: "work".to_owned(),
+                cell: "amp".to_owned(),
+            },
+            7,
+        )
+        .expect("prepare cell creation");
+    assert_eq!(first.minimum_library_revision(), 8);
+    let first = project
+        .publish_library_mutation(first, 8)
+        .expect("publish cell creation");
+
+    let second = project
+        .prepare_library_mutation(
+            ProjectLibraryMutation::CreateView {
+                library: "work".to_owned(),
+                cell: "amp".to_owned(),
+                view: "symbol".to_owned(),
+            },
+            8,
+        )
+        .expect("prepare view creation");
+    let second = project
+        .publish_library_mutation(second, 10)
+        .expect("publish view creation");
+
+    assert_eq!(project.revision().get(), 3);
+    assert_eq!(project.library_mutation_audit().len(), 2);
+    assert_eq!(first.sequence(), 1);
+    assert_eq!(second.sequence(), 2);
+    assert_eq!(first.from_project_revision().get(), 1);
+    assert_eq!(first.to_project_revision().get(), 2);
+    assert_eq!(second.from_project_revision().get(), 2);
+    assert_eq!(second.to_project_revision().get(), 3);
+    assert_eq!(first.from_library_revision(), 7);
+    assert_eq!(first.to_library_revision(), 8);
+    assert_eq!(second.from_library_revision(), 8);
+    assert_eq!(second.to_library_revision(), 10);
+    assert_eq!(
+        second.previous_receipt_digest(),
+        Some(first.receipt_digest())
+    );
+    project.validate().expect("valid receipt chain");
+
+    let json = serde_json::to_string(&project).expect("serialize project descriptor");
+    let restored: ProjectDescriptor =
+        serde_json::from_str(&json).expect("restore project descriptor");
+    restored
+        .validate()
+        .expect("restored receipt chain is valid");
+
+    let mut tampered: serde_json::Value =
+        serde_json::from_str(&json).expect("parse project descriptor");
+    tampered["library_mutation_audit"][0]["mutation"]["cell"] =
+        serde_json::Value::String("tampered".to_owned());
+    let tampered: ProjectDescriptor =
+        serde_json::from_value(tampered).expect("receipt schema remains structurally valid");
+    assert!(matches!(
+        tampered.validate(),
+        Err(ProjectDescriptorError::LibraryAuditCorrupted(_))
+    ));
+}
+
+#[test]
+fn library_mutation_preflight_rejects_noops_and_revision_exhaustion_atomically() {
+    let project = ProjectDescriptor::default();
+    let revision = project.revision();
+
+    assert!(matches!(
+        project.prepare_library_mutation(
+            ProjectLibraryMutation::RenameCell {
+                library: "work".to_owned(),
+                from_cell: "amp".to_owned(),
+                to_cell: "AMP".to_owned(),
+            },
+            4,
+        ),
+        Err(ProjectDescriptorError::LibraryAuditCorrupted(_))
+    ));
+    assert!(matches!(
+        project.prepare_library_mutation(
+            ProjectLibraryMutation::DeleteCell {
+                library: "work".to_owned(),
+                cell: "amp".to_owned(),
+            },
+            u64::MAX,
+        ),
+        Err(ProjectDescriptorError::LibraryRevisionExhausted)
+    ));
+    assert_eq!(project.revision(), revision);
+    assert!(project.library_mutation_audit().is_empty());
+}
+
+#[test]
+fn library_manager_revision_survives_serialization_for_audit_continuity() {
+    let mut libraries = LibraryManager::new();
+    libraries.add_library(Library::new("work"));
+    let revision = libraries.revision();
+    assert!(revision > 0);
+
+    let json = serde_json::to_string(&libraries).expect("serialize library manager");
+    let restored: LibraryManager = serde_json::from_str(&json).expect("restore library manager");
+    assert_eq!(restored.revision(), revision);
 }

@@ -88,7 +88,11 @@ endmodule
             .any(|value| matches!(value.kind, CfgValueKind::Ddt { .. })),
         "the charge is read by nothing that was asked for, so its ddt must not survive"
     );
-    let merges: usize = optimized.blocks.iter().map(|block| block.params.len()).sum();
+    let merges: usize = optimized
+        .blocks
+        .iter()
+        .map(|block| block.params.len())
+        .sum();
     assert_eq!(
         merges, 0,
         "no value asked for is defined on only one arm, so no merge is needed"

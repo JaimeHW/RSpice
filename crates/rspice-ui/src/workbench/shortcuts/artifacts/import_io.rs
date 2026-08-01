@@ -109,7 +109,6 @@ impl ShortcutArtifactImportError {
     pub const fn cause_code(&self) -> Option<&'static str> {
         self.cause_code
     }
-
 }
 
 impl fmt::Display for ShortcutArtifactImportError {

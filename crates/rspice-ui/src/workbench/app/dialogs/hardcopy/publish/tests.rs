@@ -3,7 +3,336 @@
 //! The cases pin that the dialog never misrepresents a print target, and that
 //! the mapping stage stays transactional until publication actually commits.
 
+use super::super::{GovernedSheetPageAuthority, SchematicPageSetupAuthority};
 use super::*;
+
+#[test]
+fn authored_sheet_formats_seed_output_media_without_reverse_coercion() {
+    use crate::hardcopy::{
+        HardcopySetup, Orientation, PaperSize, PhysicalPageSetup, StandardPaper,
+    };
+    use crate::state::{SchematicPageOrientation, SchematicPageSize, SchematicSheetFormat};
+
+    for size in [
+        SchematicPageSize::A4,
+        SchematicPageSize::A3,
+        SchematicPageSize::UsLetter,
+        SchematicPageSize::UsLedger,
+    ] {
+        for orientation in [
+            SchematicPageOrientation::Portrait,
+            SchematicPageOrientation::Landscape,
+        ] {
+            let expected = SchematicSheetFormat::standard(size, orientation);
+            let setup = setup_seeded_from_sheet_format(expected).unwrap();
+            assert_eq!(
+                setup.physical_page().orientation(),
+                match orientation {
+                    SchematicPageOrientation::Portrait => Orientation::Portrait,
+                    SchematicPageOrientation::Landscape => Orientation::Landscape,
+                }
+            );
+        }
+    }
+
+    let custom = SchematicSheetFormat::try_custom(
+        "Review board",
+        304_800,
+        457_200,
+        SchematicPageOrientation::Landscape,
+    )
+    .unwrap();
+    let setup = setup_seeded_from_sheet_format(custom).unwrap();
+    let PaperSize::Custom(paper) = setup.physical_page().paper() else {
+        panic!("a custom authored sheet seeds custom output media");
+    };
+    assert_eq!(
+        paper.dimensions(),
+        (
+            crate::hardcopy::Length::from_micrometres(304_800),
+            crate::hardcopy::Length::from_micrometres(457_200),
+        )
+    );
+
+    let default = HardcopySetup::default();
+    let automatic = HardcopySetup::try_new(
+        PhysicalPageSetup::try_new(
+            PaperSize::Standard(StandardPaper::A4),
+            default.physical_page().margins(),
+            default.physical_page().bleed(),
+            Orientation::AutomaticPerPage,
+        )
+        .unwrap(),
+        default.scale(),
+        default.tiling(),
+        default.render().clone(),
+        default.decorations().clone(),
+        default.print_mapping().clone(),
+    )
+    .unwrap();
+    assert_eq!(
+        automatic.physical_page().orientation(),
+        Orientation::AutomaticPerPage,
+        "automatic orientation remains an output-media choice and is never converted into authored-sheet state"
+    );
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn governed_output_page_setup_preserves_authored_sheet_and_saves_hardcopy() {
+    use crate::state::{Point, SchematicPageOrientation, SchematicSheetFormat, Wire};
+    use crate::workbench::state::WorkspaceDocumentId;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .schematic
+        .wires
+        .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
+    let reference = app.state.workspace.active_view.clone();
+    app.state
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::CellView(reference));
+    let key = app.state.workspace.active_key();
+    let sheet_id = app
+        .state
+        .workspace
+        .design_management
+        .bootstrap_for_cell_view(&key, "Input", [71])
+        .unwrap();
+    let catalog = app
+        .state
+        .workspace
+        .design_management
+        .sheet_catalog(&key)
+        .unwrap();
+    let authored_before = catalog.find(sheet_id).unwrap().page_format().clone();
+    let authority = SchematicPageSetupAuthority {
+        edit: crate::workbench::app::SchematicEditAuthority::capture(&app.state),
+        governed_sheet: Some(GovernedSheetPageAuthority {
+            cell_view_key: key.clone(),
+            catalog_revision: catalog.revision(),
+            sheet_id,
+            sheet_revision: catalog.find(sheet_id).unwrap().revision(),
+        }),
+    };
+    let resolved =
+        crate::workbench::hardcopy_adapters::sources::resolve_active_app_hardcopy_source(
+            &app.state,
+        )
+        .expect("active governed sheet resolves");
+    let format = SchematicSheetFormat::try_custom(
+        "Review board",
+        304_800,
+        457_200,
+        SchematicPageOrientation::Landscape,
+    )
+    .unwrap();
+    let setup = setup_seeded_from_sheet_format(format.clone()).unwrap();
+    let pending = PendingPageSetup {
+        opened_source: std::sync::Arc::new(resolved.clone()),
+        setup: setup.clone(),
+        staged_mapping: StagedPrintMappingPersistence::Document,
+        schematic_authority: Some(authority),
+    };
+
+    commit_authenticated_page_setup(&mut app, resolved.clone(), pending).unwrap();
+
+    assert_eq!(
+        app.state
+            .workspace
+            .design_management
+            .sheet_catalog(&key)
+            .unwrap()
+            .find(sheet_id)
+            .unwrap()
+            .page_format(),
+        &authored_before
+    );
+    assert!(
+        !app.state.can_undo_project_design(),
+        "output-media setup must not create an authored-sheet transaction"
+    );
+    assert_eq!(
+        app.state
+            .workspace
+            .hardcopy_setups
+            .setup_for(resolved.authority())
+            .unwrap()
+            .unwrap()
+            .setup(),
+        &setup
+    );
+    assert!(app.state.workspace.hardcopy_setups_dirty);
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn legacy_output_page_setup_does_not_rewrite_document_policy() {
+    use crate::state::{Point, SchematicPageOrientation, SchematicSheetFormat, Wire};
+    use crate::workbench::state::WorkspaceDocumentId;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .schematic
+        .wires
+        .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
+    let reference = app.state.workspace.active_view.clone();
+    app.state
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::CellView(reference));
+    let resolved =
+        crate::workbench::hardcopy_adapters::sources::resolve_active_app_hardcopy_source(
+            &app.state,
+        )
+        .expect("legacy schematic resolves");
+    let policy_before = app.state.schematic.document_policy.clone();
+    let format = SchematicSheetFormat::try_custom(
+        "Custom",
+        300_123,
+        450_987,
+        SchematicPageOrientation::Portrait,
+    )
+    .unwrap();
+    let pending = PendingPageSetup {
+        opened_source: std::sync::Arc::new(resolved.clone()),
+        setup: setup_seeded_from_sheet_format(format).unwrap(),
+        staged_mapping: StagedPrintMappingPersistence::Document,
+        schematic_authority: Some(SchematicPageSetupAuthority {
+            edit: crate::workbench::app::SchematicEditAuthority::capture(&app.state),
+            governed_sheet: None,
+        }),
+    };
+
+    commit_authenticated_page_setup(&mut app, resolved, pending).unwrap();
+
+    assert_eq!(
+        app.state.schematic.document_policy, policy_before,
+        "hardcopy output media must not mutate the authored schematic policy"
+    );
+    assert_eq!(app.state.schematic.undo_history.undo_description(), None);
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn page_setup_rejects_late_read_only_authority_without_partial_commit() {
+    use crate::state::{
+        Point, SchematicPageOrientation, SchematicPageSize, SchematicSheetFormat, Wire,
+    };
+    use crate::workbench::state::{LocalSafeModeOptions, WorkspaceDocumentId};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .schematic
+        .wires
+        .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
+    let reference = app.state.workspace.active_view.clone();
+    app.state
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::CellView(reference));
+    let resolved =
+        crate::workbench::hardcopy_adapters::sources::resolve_active_app_hardcopy_source(
+            &app.state,
+        )
+        .expect("legacy schematic resolves");
+    let authority = SchematicPageSetupAuthority {
+        edit: crate::workbench::app::SchematicEditAuthority::capture(&app.state),
+        governed_sheet: None,
+    };
+    app.state.workbench.safe_mode.activate(
+        LocalSafeModeOptions {
+            open_project_read_only: true,
+            ..LocalSafeModeOptions::default()
+        },
+        String::new(),
+    );
+    let pending = PendingPageSetup {
+        opened_source: std::sync::Arc::new(resolved.clone()),
+        setup: setup_seeded_from_sheet_format(SchematicSheetFormat::standard(
+            SchematicPageSize::A3,
+            SchematicPageOrientation::Portrait,
+        ))
+        .unwrap(),
+        staged_mapping: StagedPrintMappingPersistence::Document,
+        schematic_authority: Some(authority),
+    };
+
+    assert!(
+        commit_authenticated_page_setup(&mut app, resolved.clone(), pending)
+            .expect_err("late read-only activation revokes Page Setup")
+            .contains("read-only")
+    );
+    assert!(
+        app.state
+            .workspace
+            .hardcopy_setups
+            .setup_for(resolved.authority())
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        app.state.schematic.document_policy.page_size,
+        SchematicPageSize::A4
+    );
+}
+
+#[test]
+fn governed_page_authority_rejects_catalog_or_active_sheet_drift() {
+    use crate::state::{SchematicPageOrientation, SchematicPageSize, SchematicSheetFormat};
+
+    let mut app = RSpiceApp::test_instance();
+    let key = app.state.workspace.active_key();
+    let sheet_id = app
+        .state
+        .workspace
+        .design_management
+        .bootstrap_for_cell_view(&key, "Input", [])
+        .unwrap();
+    let catalog = app
+        .state
+        .workspace
+        .design_management
+        .sheet_catalog(&key)
+        .unwrap();
+    let authority = SchematicPageSetupAuthority {
+        edit: crate::workbench::app::SchematicEditAuthority::capture(&app.state),
+        governed_sheet: Some(GovernedSheetPageAuthority {
+            cell_view_key: key.clone(),
+            catalog_revision: catalog.revision(),
+            sheet_id,
+            sheet_revision: catalog.find(sheet_id).unwrap().revision(),
+        }),
+    };
+    let catalog = app
+        .state
+        .workspace
+        .design_management
+        .sheet_catalog_mut(&key)
+        .unwrap();
+    let sheet_revision = catalog.find(sheet_id).unwrap().revision();
+    let changed_format =
+        SchematicSheetFormat::standard(SchematicPageSize::A3, SchematicPageOrientation::Portrait)
+            .try_update(|draft| {
+                draft
+                    .title_block
+                    .fields
+                    .get_mut(&crate::state::DrawingSheetTitleFieldId::SheetTitle)
+                    .expect("canonical title field")
+                    .value = "Input".to_owned();
+            })
+            .unwrap();
+    catalog
+        .update_sheet_page_format(sheet_id, sheet_revision, changed_format)
+        .unwrap();
+
+    assert!(
+        validate_schematic_page_authority(&app.state, &authority)
+            .expect_err("catalog drift revokes authority")
+            .contains("governed active sheet changed")
+    );
+}
 
 #[test]
 #[cfg(not(target_arch = "wasm32"))]

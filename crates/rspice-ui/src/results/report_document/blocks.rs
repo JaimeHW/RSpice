@@ -25,6 +25,105 @@ pub enum ReportTemplate {
     ModelQualification,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReportOutputFormats {
+    pub pdf_a: bool,
+    pub html_bundle: bool,
+    pub canonical_json: bool,
+    pub selected_csv: bool,
+}
+
+impl ReportOutputFormats {
+    #[must_use]
+    pub const fn has_any(self) -> bool {
+        self.pdf_a || self.html_bundle || self.canonical_json || self.selected_csv
+    }
+
+    pub(crate) const fn is_default(&self) -> bool {
+        self.pdf_a && self.html_bundle && self.canonical_json && !self.selected_csv
+    }
+
+    pub(super) fn validate(self) -> Result<(), ReportError> {
+        if self.has_any() {
+            Ok(())
+        } else {
+            Err(ReportError::InvalidValue {
+                field: "report-document.output-formats",
+                message: "at least one report output format must remain enabled".to_owned(),
+            })
+        }
+    }
+}
+
+impl Default for ReportOutputFormats {
+    fn default() -> Self {
+        Self {
+            pdf_a: true,
+            html_bundle: true,
+            canonical_json: true,
+            selected_csv: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReportPublicationTemplate {
+    #[default]
+    OrganizationVerificationReport,
+    CustomerDatasheet,
+    InternalReviewMemo,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReportPublicationPageSize {
+    #[default]
+    A4Portrait,
+    UsLetterPortrait,
+    A3Landscape,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReportDraftMarking {
+    #[default]
+    WatermarkWhileGatesOpen,
+    NeverWatermark,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReportPageNumbering {
+    #[default]
+    SectionPageOfTotal,
+    ContinuousPageNumbers,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReportTablePrecision {
+    #[default]
+    SevenSignificantDigits,
+    FullStoredF64,
+    MatchSourceDisplay,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ReportPublicationProfile {
+    pub template: ReportPublicationTemplate,
+    pub page_size: ReportPublicationPageSize,
+    pub draft_marking: ReportDraftMarking,
+    pub numbering: ReportPageNumbering,
+    pub table_precision: ReportTablePrecision,
+}
+
+impl ReportPublicationProfile {
+    pub(crate) fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum ReportPageUpdatePolicy {
@@ -33,11 +132,73 @@ pub enum ReportPageUpdatePolicy {
     FreezeSelectedRevision,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReportPageInclusion {
+    #[default]
+    Included,
+    ExcludedFromDraft,
+    AppendixOnly,
+}
+
+impl ReportPageInclusion {
+    pub(crate) const fn is_default(&self) -> bool {
+        matches!(self, Self::Included)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case", tag = "mode")]
+pub enum ReportPageEvidenceBinding {
+    #[default]
+    Unbound,
+    ExactDataset {
+        binding: DatasetBinding,
+    },
+    LatestAcceptedRun,
+}
+
+impl ReportPageEvidenceBinding {
+    pub(crate) const fn is_default(&self) -> bool {
+        matches!(self, Self::Unbound)
+    }
+
+    #[must_use]
+    pub const fn exact_dataset(self) -> Option<DatasetBinding> {
+        match self {
+            Self::ExactDataset { binding } => Some(binding),
+            Self::Unbound | Self::LatestAcceptedRun => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReportBlockedGateTextPolicy {
+    #[default]
+    VerbatimFromSource,
+    SummarizeWithLink,
+}
+
+impl ReportBlockedGateTextPolicy {
+    pub(crate) const fn is_default(&self) -> bool {
+        matches!(self, Self::VerbatimFromSource)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReportFigureSourceLocator {
+    pub page_id: u64,
+    pub pane_id: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlotFigureBlock {
     pub caption: String,
     pub alternative_text: String,
     pub sizing: FigureSizing,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_locator: Option<ReportFigureSourceLocator>,
     pub reference: ReportReferenceMode,
 }
 
@@ -264,6 +425,26 @@ impl ReportBlockKind {
                     return Err(ReportError::InvalidReferenceKind {
                         block: "plot-figure",
                         expected: "visualization-document",
+                    });
+                }
+                if matches!(block.reference, ReportReferenceMode::Linked { .. })
+                    && block.source_locator.is_none()
+                {
+                    return Err(ReportError::InvalidValue {
+                        field: "plot-figure.source-locator",
+                        message:
+                            "linked visualization figures require an exact page and pane locator"
+                                .to_owned(),
+                    });
+                }
+                if block
+                    .source_locator
+                    .as_ref()
+                    .is_some_and(|locator| locator.page_id == 0 || locator.pane_id == 0)
+                {
+                    return Err(ReportError::InvalidValue {
+                        field: "plot-figure.source-locator",
+                        message: "page and pane stable IDs must both be non-zero".to_owned(),
                     });
                 }
             }

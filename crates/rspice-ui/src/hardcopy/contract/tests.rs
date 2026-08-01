@@ -1026,3 +1026,170 @@ fn cancellation_and_failure_are_explicit_validated_outcomes() {
         Err(HardcopyError::InvalidText { .. })
     ));
 }
+
+#[test]
+fn receipt_ledger_round_trips_and_rejects_tampered_entries() {
+    let plan = HardcopyPlan::compile(
+        source(),
+        HardcopySetup::default(),
+        ContentExtent::try_new(
+            Length::from_micrometres(100_000),
+            Length::from_micrometres(100_000),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let receipt = HardcopyReceipt::record(
+        &plan,
+        HardcopyOutcome::Cancelled {
+            phase: CancellationPhase::Preparing,
+            pages_completed: 0,
+            reason: Some("operator cancelled preview".to_owned()),
+        },
+    )
+    .unwrap();
+    let receipt_id = receipt.id();
+    let mut ledger = HardcopyReceiptLedger::default();
+    ledger.append(receipt).unwrap();
+    let bytes = serde_json::to_vec(&ledger).unwrap();
+    let restored: HardcopyReceiptLedger = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(restored.latest().map(HardcopyReceipt::id), Some(receipt_id));
+
+    let mut tampered: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    tampered["receipts"][0]["content_digest"] =
+        serde_json::to_value(ContentDigest::from_bytes([0xFE; 32])).unwrap();
+    assert!(
+        serde_json::from_value::<HardcopyReceiptLedger>(tampered).is_err(),
+        "persisted outcome history must revalidate every sealed receipt"
+    );
+}
+
+#[test]
+fn authored_media_resolves_exact_mixed_sheet_size_and_orientation_per_section() {
+    let mut setup = one_to_one_setup(TilingMode::Automatic, Length::ZERO);
+    setup.physical_page.paper = PaperSize::MatchAuthoredSheets(vec![
+        AuthoredSheetMedia::try_new(
+            0,
+            "ISO A4 portrait",
+            Length::from_micrometres(210_000),
+            Length::from_micrometres(297_000),
+        )
+        .unwrap(),
+        AuthoredSheetMedia::try_new(
+            1,
+            "ISO A3 landscape",
+            Length::from_micrometres(420_000),
+            Length::from_micrometres(297_000),
+        )
+        .unwrap(),
+    ]);
+    setup.physical_page.margins = PageMargins::uniform(Length::ZERO);
+    setup.physical_page.orientation = Orientation::Portrait;
+    let portrait_extent = ContentExtent::try_new(
+        Length::from_micrometres(210_000),
+        Length::from_micrometres(297_000),
+    )
+    .unwrap();
+    let landscape_extent = ContentExtent::try_new(
+        Length::from_micrometres(420_000),
+        Length::from_micrometres(297_000),
+    )
+    .unwrap();
+    let sections = vec![
+        HardcopyContentSection::try_new(
+            0,
+            digest(0x12),
+            Length::ZERO,
+            Length::ZERO,
+            portrait_extent,
+            false,
+        )
+        .unwrap(),
+        HardcopyContentSection::try_new(
+            1,
+            digest(0x13),
+            Length::ZERO,
+            Length::from_micrometres(302_000),
+            landscape_extent,
+            true,
+        )
+        .unwrap(),
+    ];
+    let plan = HardcopyPlan::compile_with_sections(
+        source(),
+        setup,
+        ContentExtent::try_new(
+            Length::from_micrometres(420_000),
+            Length::from_micrometres(599_000),
+        )
+        .unwrap(),
+        sections,
+    )
+    .unwrap();
+    let pages = plan.pagination().pages();
+    assert_eq!(pages.len(), 2);
+    assert_eq!(
+        pages[0].geometry().physical_size(),
+        (
+            Length::from_micrometres(210_000),
+            Length::from_micrometres(297_000)
+        )
+    );
+    assert_eq!(
+        pages[1].geometry().physical_size(),
+        (
+            Length::from_micrometres(420_000),
+            Length::from_micrometres(297_000)
+        )
+    );
+    assert_eq!(
+        pages[0].geometry().orientation(),
+        ResolvedOrientation::Portrait
+    );
+    assert_eq!(
+        pages[1].geometry().orientation(),
+        ResolvedOrientation::Landscape
+    );
+}
+
+#[test]
+fn schematic_output_inclusion_contract_round_trips_and_legacy_setups_default() {
+    let base = HardcopySetup::default();
+    let schematic = SchematicHardcopySetup::new(
+        SchematicHardcopyExtent::CompleteSchematicContent,
+        OutsideSheetContentPolicy::ExtendOutput,
+        false,
+        true,
+        false,
+        true,
+        false,
+        true,
+    );
+    let setup = HardcopySetup::try_new_with_schematic(
+        base.physical_page().clone(),
+        base.scale(),
+        base.tiling(),
+        base.render().clone(),
+        base.decorations().clone(),
+        schematic,
+        base.print_mapping().clone(),
+    )
+    .unwrap();
+
+    let mut encoded = serde_json::to_value(&setup).unwrap();
+    assert_eq!(
+        encoded["schematic"]["outside_content"],
+        serde_json::json!("extend-output")
+    );
+    assert_eq!(
+        serde_json::from_value::<HardcopySetup>(encoded.clone()).unwrap(),
+        setup
+    );
+
+    encoded.as_object_mut().unwrap().remove("schematic");
+    let restored_legacy = serde_json::from_value::<HardcopySetup>(encoded).unwrap();
+    assert_eq!(
+        restored_legacy.schematic(),
+        SchematicHardcopySetup::default()
+    );
+}

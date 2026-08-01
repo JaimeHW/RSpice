@@ -11,8 +11,7 @@ mod regression;
 
 pub use artifacts::{
     ArtifactRenderError, CheckEvidence, CheckOutcome, ComparisonEvidence, CompletedEvidence,
-    EvidenceError, RenderedArtifact,
-    render_requested_artifacts,
+    EvidenceError, RenderedArtifact, render_requested_artifacts,
 };
 pub use parser::{
     ArtifactKind, AutomationPlan, DiagnosticCode, DiagnosticSet, compile_workflow, parse_workflow,

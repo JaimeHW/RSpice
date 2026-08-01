@@ -3272,7 +3272,9 @@ pub(super) fn parse_meas_delay_spec(
     section_name: &str,
     stop_at_targ: bool,
 ) -> Result<crate::netlist::measure::TrigSpec, ParseError> {
-    use crate::netlist::measure::{EdgeType, EventOccurrence, TrigSpec, TriggerEvent, WhenCondition};
+    use crate::netlist::measure::{
+        EdgeType, EventOccurrence, TrigSpec, TriggerEvent, WhenCondition,
+    };
 
     let event = if matches!(&stream.peek().kind, TokenKind::Ident(value) if value.eq_ignore_ascii_case("AT"))
         && matches!(stream.peek_n(1).kind, TokenKind::Equals)
@@ -4750,7 +4752,9 @@ mod tests {
         .expect("statement-wide qualifiers parse around derived qualifiers");
         let statement = &netlist.measurements[0];
         assert_eq!(statement.default_value, Some(3.0));
-        let crate::netlist::measure::MeasureType::Avg { signal, from, to } = &statement.measure_type else {
+        let crate::netlist::measure::MeasureType::Avg { signal, from, to } =
+            &statement.measure_type
+        else {
             panic!("expected AVG measurement");
         };
         assert_eq!(signal, "V(DEFAULT_VAL)");

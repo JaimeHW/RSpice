@@ -42,5 +42,4 @@ impl FftPoint {
             20.0 * self.magnitude.log10()
         }
     }
-
 }

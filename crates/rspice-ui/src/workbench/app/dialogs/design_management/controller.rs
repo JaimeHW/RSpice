@@ -66,6 +66,11 @@ impl RSpiceApp {
         if dirty && !discard {
             dialog = dialog.retain_on_cancel_focus(DialogInitialFocus::Ghost);
         }
+        let drawing_sheet_personal = self
+            .state
+            .ui
+            .preferences
+            .drawing_sheet_personal_preferences();
         if discard {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
@@ -102,6 +107,7 @@ impl RSpiceApp {
                     &self.state.workspace,
                     &self.state.library_manager,
                     &self.state.schematic,
+                    &drawing_sheet_personal,
                     write_allowed,
                 ))
             };

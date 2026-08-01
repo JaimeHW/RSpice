@@ -136,7 +136,7 @@ impl RSpiceApp {
             return;
         }
 
-        if self.state.schematic.read_only && command_edits_schematic(command) {
+        if self.state.schematic_edit_read_only() && command_edits_schematic(command) {
             self.state.deny_read_only_edit();
             return;
         }
@@ -345,20 +345,13 @@ impl RSpiceApp {
             ShortcutCommand::NextWorkspace => {
                 self.state.workbench.cycle_workspace(false);
             }
-            ShortcutCommand::ZoomIn => {
-                self.state.schematic.zoom = (self.state.schematic.zoom * 1.25).min(8.0);
-            }
-            ShortcutCommand::ZoomOut => {
-                self.state.schematic.zoom = (self.state.schematic.zoom / 1.25).max(0.25);
-            }
+            ShortcutCommand::ZoomIn | ShortcutCommand::ZoomOut => command.execute(self),
             ShortcutCommand::ToggleLinkedCursors => {
                 self.state.ui.results.toggle_linked_cursors();
             }
-            ShortcutCommand::ZoomFit => {
-                self.state.schematic.zoom = 1.0;
-                self.state.schematic.pan = (0.0, 0.0);
-                self.state.schematic.needs_fit = false;
-            }
+            ShortcutCommand::ZoomFit
+            | ShortcutCommand::FitSchematicContent
+            | ShortcutCommand::DrawingSheetLayers => command.execute(self),
             ShortcutCommand::ZoomOneToOne => {
                 self.state.schematic.zoom = 1.0;
             }
@@ -526,12 +519,8 @@ impl RSpiceApp {
                 self.state.ui.symbol.marquee_current = None;
                 true
             }
-            ShortcutCommand::ZoomIn => {
-                self.state.ui.symbol.zoom = (self.state.ui.symbol.zoom * 1.25).min(16.0);
-                true
-            }
-            ShortcutCommand::ZoomOut => {
-                self.state.ui.symbol.zoom = (self.state.ui.symbol.zoom / 1.25).max(0.1);
+            ShortcutCommand::ZoomIn | ShortcutCommand::ZoomOut => {
+                command.execute(self);
                 true
             }
             ShortcutCommand::ZoomFit => {
@@ -987,6 +976,7 @@ impl RSpiceApp {
             .unwrap_or("schematic edit")
             .to_owned();
         if self.state.schematic.undo() {
+            self.state.ui.schematic_snap = self.state.schematic.snap_engine.clone();
             self.state.sync_active_schematic_to_workspace();
             self.state
                 .push_user_message(ConsoleMessage::info(format!("Undo: {description}")));
@@ -1020,6 +1010,7 @@ impl RSpiceApp {
             .unwrap_or("schematic edit")
             .to_owned();
         if self.state.schematic.redo() {
+            self.state.ui.schematic_snap = self.state.schematic.snap_engine.clone();
             self.state.sync_active_schematic_to_workspace();
             self.state
                 .push_user_message(ConsoleMessage::info(format!("Redo: {description}")));
@@ -1053,6 +1044,14 @@ impl RSpiceApp {
     }
 
     pub(in crate::workbench) fn action_edit_copy(&mut self) {
+        if self.state.workbench.workspace == crate::workbench::state::Workspace::Results {
+            if let Some(text) =
+                crate::workbench::documents::result_document::copy_cursor_text(&mut self.state)
+            {
+                self.state.ui.clipboard_text_request = Some(text);
+            }
+            return;
+        }
         crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(&mut self.state);
         self.state.copy_active_schematic_selection();
     }
@@ -1083,36 +1082,46 @@ impl RSpiceApp {
 /// Copy and Select All are reads; tools that only inspect (select, probe)
 /// and navigation stay live.
 fn command_edits_schematic(command: ShortcutCommand) -> bool {
-    matches!(
-        command,
-        ShortcutCommand::Undo
-            | ShortcutCommand::Redo
-            | ShortcutCommand::Paste
-            | ShortcutCommand::Cut
-            | ShortcutCommand::Delete
-            | ShortcutCommand::PlaceWire
-            | ShortcutCommand::PlaceBus
-            | ShortcutCommand::PlaceBusTap
-            | ShortcutCommand::PlacePin
-            | ShortcutCommand::PlaceText
-            | ShortcutCommand::PlaceShape
-            | ShortcutCommand::MoveSelection
-            | ShortcutCommand::StretchSelection
-            | ShortcutCommand::ArraySelection
-            | ShortcutCommand::ReplaceInstance
-            | ShortcutCommand::PlaceJunction
-            | ShortcutCommand::PlaceLabel
-            | ShortcutCommand::Place(_)
-            | ShortcutCommand::RotateSelection
-            | ShortcutCommand::MirrorSelectionHorizontal
-            | ShortcutCommand::MirrorSelectionVertical
-            | ShortcutCommand::ObjectProperties
-    )
+    crate::workbench::commands::command_edits_schematic(command)
 }
 
 #[cfg(test)]
 mod shortcut_ownership_tests {
     use super::*;
+
+    fn assert_grid_pitch_contract(app: &RSpiceApp, pitch: crate::state::SchematicGridPitch) {
+        let expected = pitch.canvas_grid_size();
+        assert_eq!(app.state.schematic.document_policy.grid_pitch, pitch);
+        assert_eq!(app.state.schematic.grid_size, expected);
+        assert_eq!(app.state.schematic.snap_engine.grid_size, expected);
+        assert_eq!(app.state.ui.schematic_snap.grid_size, expected);
+    }
+
+    #[test]
+    fn document_undo_and_redo_reconcile_all_grid_pitch_authorities() {
+        use crate::state::SchematicGridPitch;
+
+        let mut app = RSpiceApp::test_instance();
+        assert_grid_pitch_contract(&app, SchematicGridPitch::Mil50);
+
+        assert!(
+            app.state
+                .schematic
+                .with_undo("change schematic grid pitch", |schematic| {
+                    schematic.document_policy.grid_pitch = SchematicGridPitch::Mil25;
+                    schematic.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
+                    schematic.snap_engine.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
+                })
+        );
+        app.state.ui.schematic_snap = app.state.schematic.snap_engine.clone();
+        assert_grid_pitch_contract(&app, SchematicGridPitch::Mil25);
+
+        app.action_edit_undo();
+        assert_grid_pitch_contract(&app, SchematicGridPitch::Mil50);
+
+        app.action_edit_redo();
+        assert_grid_pitch_contract(&app, SchematicGridPitch::Mil25);
+    }
 
     #[test]
     fn open_popup_blocks_application_shortcut_dispatch() {
@@ -1142,6 +1151,39 @@ mod shortcut_ownership_tests {
         assert!(app.state.ui.results.linked_cursors);
         app.execute_shortcut_command(ShortcutCommand::ToggleLinkedCursors);
         assert!(!app.state.ui.results.linked_cursors);
+    }
+
+    #[test]
+    fn copy_shortcut_in_results_copies_cursor_readout_not_schematic_selection() {
+        let mut app = RSpiceApp::test_instance();
+        let analysis =
+            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
+                .with_waveforms(vec![crate::state::WaveformData::new(
+                    "V(out)",
+                    vec![0.0, 1.0],
+                    vec![0.0, 2.0],
+                    "#ffbd2e",
+                )]);
+        let mut run = crate::state::SimulationRun::new(1);
+        run.add_analysis(analysis);
+        app.state.simulation.runs = vec![run];
+        assert!(app.state.simulation.select_run(0));
+        app.state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Results);
+        app.state.ui.results.cursors.a = Some(0.5);
+        app.state.ui.results.cursor_strip = Some(0);
+
+        app.execute_shortcut_command(ShortcutCommand::Copy);
+
+        let copied = app
+            .state
+            .ui
+            .clipboard_text_request
+            .as_deref()
+            .expect("cursor readout copied");
+        assert!(copied.starts_with('A'));
+        assert!(copied.contains("V(out)"));
     }
 
     #[test]
@@ -1196,8 +1238,16 @@ mod shortcut_ownership_tests {
             ));
         }
         result.completed = true;
-        app.state.dialogs.drc_results = Some(result);
-        app.state.dialogs.drc_checked_version = app.state.schematic.topology_version();
+        // Availability resolves against the design-check receipt, so publish
+        // through the canonical owner and let it refresh the legacy canvas
+        // projection the violation cursor still reads.
+        app.state
+            .publish_active_design_check_result(
+                result,
+                crate::workbench::app_state::DesignCheckOrigin::Manual,
+            )
+            .expect("publish the active design-check receipt");
+        app.state.refresh_active_design_check_projection();
         app.state
             .workbench
             .activate(crate::workbench::state::Workspace::Verify);

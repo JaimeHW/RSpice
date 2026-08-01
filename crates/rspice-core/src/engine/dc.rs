@@ -708,9 +708,9 @@ impl Engine {
                 swept.params.set("TEMPER", outer_value);
                 swept.params.set(
                     "VT",
-                    crate::constants::thermal_voltage(
-                        crate::constants::celsius_to_kelvin(outer_value),
-                    ),
+                    crate::constants::thermal_voltage(crate::constants::celsius_to_kelvin(
+                        outer_value,
+                    )),
                 );
                 swept
             } else if outer_is_parameter {
@@ -849,9 +849,9 @@ impl Engine {
                 swept.params.set("TEMPER", sweep_value);
                 swept.params.set(
                     "VT",
-                    crate::constants::thermal_voltage(
-                        crate::constants::celsius_to_kelvin(sweep_value),
-                    ),
+                    crate::constants::thermal_voltage(crate::constants::celsius_to_kelvin(
+                        sweep_value,
+                    )),
                 );
                 let (result, device_op_report) =
                     self.run_dc_op_with_report_and_abort(&swept, abort)?;
@@ -1737,9 +1737,7 @@ D1 1 0 DXX
             "expected ideal source to force V(1)=1.2, got {voltage}"
         );
 
-        let vt = crate::constants::thermal_voltage(
-            crate::constants::celsius_to_kelvin(25.0),
-        );
+        let vt = crate::constants::thermal_voltage(crate::constants::celsius_to_kelvin(25.0));
         let expected = -1.0e-18 * ((1.2 / vt).exp() - 1.0);
         let current = result
             .branch_current_named("VD")

@@ -212,8 +212,8 @@ pub fn run_sparameter_analysis_with_source_path_and_abort(
                 y_matrix[row][col] = y[row][col][freq_idx];
             }
         }
-        let s_matrix = s_param::s_from_y_with_abort(&y_matrix, &z0_by_port, abort)
-            .map_err(network_error)?;
+        let s_matrix =
+            s_param::s_from_y_with_abort(&y_matrix, &z0_by_port, abort).map_err(network_error)?;
         for row in 0..num_ports {
             for col in 0..num_ports {
                 s[row][col][freq_idx] = s_matrix[row][col];

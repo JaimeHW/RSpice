@@ -819,7 +819,11 @@ fn validate_worker_authority(
     if plan.source() != source.authority() {
         return Err(HardcopyRenderError::SourceAuthorityMismatch);
     }
-    if plan.content_extent() != source.content_extent() {
+    if plan.content_extent()
+        != source
+            .content_extent_for_setup(plan.setup().schematic())
+            .map_err(|error| HardcopyRenderError::SourceConversion(error.to_string()))?
+    {
         return Err(HardcopyRenderError::ExtentMismatch);
     }
     Ok(())
@@ -983,6 +987,8 @@ pub enum HardcopyRenderError {
     PrimitiveOutsideExtent,
     #[error("polyline requires at least two points, or three points when closed")]
     InvalidPolyline,
+    #[error("authored-sheet clipped scene groups must be nonempty, canonical, and non-nested")]
+    InvalidClippedScene,
     #[error("stroke width {0:?} is outside the supported physical range")]
     InvalidStrokeWidth(Length),
     #[error("cross-hatch line width and spacing must be ordered physical values within 25 mm")]
@@ -1002,6 +1008,10 @@ pub enum HardcopyRenderError {
     SourceAuthorityMismatch,
     #[error("could not convert the resolved semantic hardcopy source: {0}")]
     SourceConversion(String),
+    #[error(
+        "schematic content crosses the authored drawing sheet; choose Clip to authored drawing sheet or Extend output to include content"
+    )]
+    SchematicOutsideContentDecisionRequired,
     #[error(
         "report {0} lacks authenticated renderable content; publication is blocked instead of flattening evidence"
     )]
@@ -1091,10 +1101,19 @@ impl HardcopyRenderer {
         if plan.source() != source.authority() {
             return Err(HardcopyRenderError::SourceAuthorityMismatch);
         }
-        if plan.content_extent() != source.content_extent() {
+        if plan.content_extent()
+            != source
+                .content_extent_for_setup(plan.setup().schematic())
+                .map_err(|error| HardcopyRenderError::SourceConversion(error.to_string()))?
+        {
             return Err(HardcopyRenderError::ExtentMismatch);
         }
-        let scene = scene_from_resolved(source, plan.setup().print_mapping(), metadata)?;
+        let scene = scene_from_resolved(
+            source,
+            plan.setup().print_mapping(),
+            plan.setup().schematic(),
+            metadata,
+        )?;
         Self::render_scene(plan, &scene)
     }
 
@@ -1135,7 +1154,11 @@ impl HardcopyRenderer {
         if plan.source() != source.authority() {
             return Err(HardcopyRenderError::SourceAuthorityMismatch);
         }
-        if plan.content_extent() != source.content_extent() {
+        if plan.content_extent()
+            != source
+                .content_extent_for_setup(plan.setup().schematic())
+                .map_err(|error| HardcopyRenderError::SourceConversion(error.to_string()))?
+        {
             return Err(HardcopyRenderError::ExtentMismatch);
         }
         if !(36..=1_200).contains(&dpi) {
@@ -1159,7 +1182,12 @@ impl HardcopyRenderer {
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let scene = scene_from_resolved(source, plan.setup().print_mapping(), metadata)?;
+        let scene = scene_from_resolved(
+            source,
+            plan.setup().print_mapping(),
+            plan.setup().schematic(),
+            metadata,
+        )?;
         scene.validate()?;
         validate_plan_font_coverage(plan)?;
         validate_aggregate_pagination(plan, &scene)?;
@@ -1223,10 +1251,19 @@ impl HardcopyRenderer {
         if plan.source() != source.authority() {
             return Err(HardcopyRenderError::SourceAuthorityMismatch);
         }
-        if plan.content_extent() != source.content_extent() {
+        if plan.content_extent()
+            != source
+                .content_extent_for_setup(plan.setup().schematic())
+                .map_err(|error| HardcopyRenderError::SourceConversion(error.to_string()))?
+        {
             return Err(HardcopyRenderError::ExtentMismatch);
         }
-        let scene = scene_from_resolved(source, plan.setup().print_mapping(), metadata)?;
+        let scene = scene_from_resolved(
+            source,
+            plan.setup().print_mapping(),
+            plan.setup().schematic(),
+            metadata,
+        )?;
         Self::render_printer_scene(plan, &scene, device_dpi)
     }
 
@@ -1974,6 +2011,54 @@ pub(super) fn validate_primitive(
                     })?;
             Ok(())
         }
+        ScenePrimitive::ClippedGroup {
+            source_origin,
+            destination_origin,
+            clip_extent,
+            source_extent,
+            primitives,
+        } => {
+            if primitives.is_empty() || primitives.len() > MAX_SCENE_PRIMITIVES {
+                return Err(HardcopyRenderError::ResourceLimit {
+                    scope: "clipped scene primitives",
+                    maximum: MAX_SCENE_PRIMITIVES as u64,
+                });
+            }
+            let source_right = source_origin
+                .x
+                .micrometres()
+                .checked_add(clip_extent.width().micrometres())
+                .ok_or(HardcopyRenderError::PrimitiveOutsideExtent)?;
+            let source_bottom = source_origin
+                .y
+                .micrometres()
+                .checked_add(clip_extent.height().micrometres())
+                .ok_or(HardcopyRenderError::PrimitiveOutsideExtent)?;
+            let destination_right = destination_origin
+                .x
+                .micrometres()
+                .checked_add(clip_extent.width().micrometres())
+                .ok_or(HardcopyRenderError::PrimitiveOutsideExtent)?;
+            let destination_bottom = destination_origin
+                .y
+                .micrometres()
+                .checked_add(clip_extent.height().micrometres())
+                .ok_or(HardcopyRenderError::PrimitiveOutsideExtent)?;
+            if source_right > source_extent.width().micrometres()
+                || source_bottom > source_extent.height().micrometres()
+                || destination_right > extent.width().micrometres()
+                || destination_bottom > extent.height().micrometres()
+            {
+                return Err(HardcopyRenderError::PrimitiveOutsideExtent);
+            }
+            for primitive in primitives {
+                if matches!(primitive, ScenePrimitive::ClippedGroup { .. }) {
+                    return Err(HardcopyRenderError::InvalidClippedScene);
+                }
+                validate_primitive(primitive, *source_extent, text_bytes, coverage)?;
+            }
+            Ok(())
+        }
     }
 }
 
@@ -2004,10 +2089,16 @@ pub(super) fn primitive_vertex_count(primitive: &ScenePrimitive) -> usize {
         ScenePrimitive::Circle { .. } => 4,
         ScenePrimitive::RasterImage { .. } => 4,
         ScenePrimitive::Text { .. } => 1,
+        ScenePrimitive::ClippedGroup { primitives, .. } => {
+            primitives.iter().map(primitive_vertex_count).sum()
+        }
     }
 }
 
 pub(super) fn primitive_hatch_line_count(primitive: &ScenePrimitive) -> u64 {
+    if let ScenePrimitive::ClippedGroup { primitives, .. } = primitive {
+        return primitives.iter().map(primitive_hatch_line_count).sum();
+    }
     let Some(SceneFill::CrossHatch { spacing, .. }) = primitive_fill(primitive) else {
         return 0;
     };
@@ -2029,6 +2120,7 @@ pub(super) fn primitive_hatch_line_count(primitive: &ScenePrimitive) -> u64 {
         ScenePrimitive::Line { .. }
         | ScenePrimitive::RasterImage { .. }
         | ScenePrimitive::Text { .. } => 0,
+        ScenePrimitive::ClippedGroup { .. } => unreachable!("handled before fill resolution"),
     };
     span.div_ceil(spacing.micrometres()).saturating_mul(2)
 }
@@ -2042,10 +2134,14 @@ pub(super) fn validate_stroke(stroke: StrokeStyle) -> Result<(), HardcopyRenderE
 }
 
 pub(super) fn scene_contains_text(scene: &HardcopyScene) -> bool {
-    scene
-        .primitives
-        .iter()
-        .any(|primitive| matches!(primitive, ScenePrimitive::Text { .. }))
+    fn contains_text(primitive: &ScenePrimitive) -> bool {
+        match primitive {
+            ScenePrimitive::Text { .. } => true,
+            ScenePrimitive::ClippedGroup { primitives, .. } => primitives.iter().any(contains_text),
+            _ => false,
+        }
+    }
+    scene.primitives.iter().any(contains_text)
         || !scene.legend.is_empty()
         || !scene.metadata.header_lines.is_empty()
         || !scene.metadata.provenance_lines.is_empty()
@@ -2061,41 +2157,76 @@ fn validate_render_budget(
     let mut text_bytes = 0_u64;
     let mut image_bytes = 0_u64;
     let mut image_pixels = 0_u64;
-    for primitive in &scene.primitives {
-        vertices = vertices
+    fn accumulate(
+        primitive: &ScenePrimitive,
+        vertices: &mut u64,
+        hatch_lines: &mut u64,
+        text_bytes: &mut u64,
+        image_bytes: &mut u64,
+        image_pixels: &mut u64,
+    ) -> Result<(), HardcopyRenderError> {
+        if let ScenePrimitive::ClippedGroup { primitives, .. } = primitive {
+            for primitive in primitives {
+                accumulate(
+                    primitive,
+                    vertices,
+                    hatch_lines,
+                    text_bytes,
+                    image_bytes,
+                    image_pixels,
+                )?;
+            }
+            return Ok(());
+        }
+        *vertices = vertices
             .checked_add(primitive_vertex_count(primitive) as u64)
             .ok_or(HardcopyRenderError::ResourceLimit {
                 scope: "render work units",
                 maximum: MAX_RENDER_WORK_UNITS,
             })?;
-        hatch_lines = hatch_lines
+        *hatch_lines = hatch_lines
             .checked_add(primitive_hatch_line_count(primitive))
             .ok_or(HardcopyRenderError::ResourceLimit {
                 scope: "render work units",
                 maximum: MAX_RENDER_WORK_UNITS,
             })?;
-        if let ScenePrimitive::Text { text, .. } = primitive {
-            text_bytes = text_bytes.checked_add(text.len() as u64).ok_or(
-                HardcopyRenderError::ResourceLimit {
-                    scope: "render work units",
-                    maximum: MAX_RENDER_WORK_UNITS,
-                },
-            )?;
-        } else if let ScenePrimitive::RasterImage { png, .. } = primitive {
-            image_bytes = image_bytes.checked_add(png.len() as u64).ok_or(
-                HardcopyRenderError::ResourceLimit {
-                    scope: "render work units",
-                    maximum: MAX_RENDER_WORK_UNITS,
-                },
-            )?;
-            let (width, height) = png_dimensions(png)?;
-            image_pixels = image_pixels
-                .checked_add(u64::from(width).saturating_mul(u64::from(height)))
-                .ok_or(HardcopyRenderError::ResourceLimit {
-                    scope: "render work units",
-                    maximum: MAX_RENDER_WORK_UNITS,
-                })?;
+        match primitive {
+            ScenePrimitive::Text { text, .. } => {
+                *text_bytes = text_bytes.checked_add(text.len() as u64).ok_or(
+                    HardcopyRenderError::ResourceLimit {
+                        scope: "render work units",
+                        maximum: MAX_RENDER_WORK_UNITS,
+                    },
+                )?;
+            }
+            ScenePrimitive::RasterImage { png, .. } => {
+                *image_bytes = image_bytes.checked_add(png.len() as u64).ok_or(
+                    HardcopyRenderError::ResourceLimit {
+                        scope: "render work units",
+                        maximum: MAX_RENDER_WORK_UNITS,
+                    },
+                )?;
+                let (width, height) = png_dimensions(png)?;
+                *image_pixels = image_pixels
+                    .checked_add(u64::from(width).saturating_mul(u64::from(height)))
+                    .ok_or(HardcopyRenderError::ResourceLimit {
+                        scope: "render work units",
+                        maximum: MAX_RENDER_WORK_UNITS,
+                    })?;
+            }
+            _ => {}
         }
+        Ok(())
+    }
+    for primitive in &scene.primitives {
+        accumulate(
+            primitive,
+            &mut vertices,
+            &mut hatch_lines,
+            &mut text_bytes,
+            &mut image_bytes,
+            &mut image_pixels,
+        )?;
     }
     for entry in &scene.legend {
         text_bytes = text_bytes.checked_add(entry.label.len() as u64).ok_or(
@@ -2256,6 +2387,8 @@ struct PageTransform {
     content_rect: PageRect,
     window: PageRect,
     scale: ScaleRatio,
+    source_origin: ScenePoint,
+    destination_origin: ScenePoint,
 }
 
 fn validate_aggregate_pagination(
@@ -2322,23 +2455,44 @@ fn page_primitives<'a>(
 impl PageTransform {
     fn point(self, point: ScenePoint) -> (f64, f64) {
         (
-            self.axis(
+            self.axis_for(
                 self.content_rect.x.micrometres(),
                 point.x.micrometres(),
                 self.window.x.micrometres(),
+                self.source_origin.x.micrometres(),
+                self.destination_origin.x.micrometres(),
             ),
-            self.axis(
+            self.axis_for(
                 self.content_rect.y.micrometres(),
                 point.y.micrometres(),
                 self.window.y.micrometres(),
+                self.source_origin.y.micrometres(),
+                self.destination_origin.y.micrometres(),
             ),
         )
     }
 
-    fn axis(self, page_origin: u64, source: u64, window_origin: u64) -> f64 {
+    fn axis_for(
+        self,
+        page_origin: u64,
+        source: u64,
+        window_origin: u64,
+        source_origin: u64,
+        destination_origin: u64,
+    ) -> f64 {
         page_origin as f64
-            + source as f64 * self.scale.numerator() as f64 / self.scale.denominator() as f64
+            + (source as f64 - source_origin as f64 + destination_origin as f64)
+                * self.scale.numerator() as f64
+                / self.scale.denominator() as f64
             - window_origin as f64
+    }
+
+    fn remap(self, source_origin: ScenePoint, destination_origin: ScenePoint) -> Self {
+        Self {
+            source_origin,
+            destination_origin,
+            ..self
+        }
     }
 
     fn length(self, value: Length) -> f64 {
@@ -2364,6 +2518,8 @@ fn page_transform(page: &PreviewPage) -> PageTransform {
         content_rect: page.geometry().content_rect(),
         window: page.scaled_content_window(),
         scale: page.scale(),
+        source_origin: ScenePoint::new(Length::ZERO, Length::ZERO),
+        destination_origin: ScenePoint::new(Length::ZERO, Length::ZERO),
     }
 }
 
@@ -2486,5 +2642,3 @@ fn background_color(plan: &HardcopyPlan) -> Option<Rgb8> {
 fn svg_color(color: Rgb8) -> String {
     format!("#{:02x}{:02x}{:02x}", color.red, color.green, color.blue)
 }
-
-

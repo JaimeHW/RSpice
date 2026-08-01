@@ -1,5 +1,7 @@
 //! Hierarchical design document surface.
 
+mod layout_editor;
+
 use egui::{Align2, Context, Id, Order, Rect, Sense, Stroke, Ui, Vec2};
 
 use crate::state::ViewType;
@@ -33,12 +35,12 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             );
         }
         ViewType::Symbol => crate::schematic::symbol_editor::show(ui, &mut app.state),
+        ViewType::Layout => layout_editor::show(ui, app),
         ViewType::Spice | ViewType::Verilog | ViewType::VerilogA => source_document(ui, app),
         view_type => unsupported_document(ui, app, view_type),
     }
     breadcrumb(ui.ctx(), app, content_rect);
     if canvas_document {
-        canvas_check_note(ui.ctx(), app, content_rect);
         if app.state.workbench.current_route().surface_id() == super::super::SurfaceId::Design {
             crate::schematic::view::show_mobile_canvas_controls(ui.ctx(), app, content_rect);
         }
@@ -356,136 +358,8 @@ fn hierarchy_breadcrumb_segments(state: &AppState) -> Vec<String> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CheckNoteTone {
-    Ok,
-    Warning,
-    Error,
-}
-
-const CANVAS_CHECK_NOTE_MIN_WIDTH: f32 = 620.0;
-
-fn canvas_check_note_visible(viewport_width: f32) -> bool {
-    viewport_width > CANVAS_CHECK_NOTE_MIN_WIDTH
-}
-
-fn canvas_check_note(ctx: &Context, app: &RSpiceApp, content_rect: Rect) {
-    // The upgraded mockup keeps the current/stale engineering status visible
-    // on tablets and phone landscape, suppressing it only in the narrow
-    // portrait composition where it would collide with the breadcrumb.
-    if !canvas_check_note_visible(ctx.content_rect().width()) {
-        return;
-    }
-    let (message, tone) = check_note_content(&app.state);
-    let t = Tokens::get(ctx);
-    let color = match tone {
-        CheckNoteTone::Ok => t.color.ok,
-        CheckNoteTone::Warning => t.color.warn,
-        CheckNoteTone::Error => t.color.err,
-    };
-
-    egui::Area::new(Id::new("workbench.design.canvas-check-note"))
-        .order(Order::Middle)
-        .pivot(Align2::RIGHT_TOP)
-        .fixed_pos(content_rect.right_top() + egui::vec2(-11.0, 10.0))
-        .constrain_to(content_rect)
-        .interactable(false)
-        .show(ctx, |ui| {
-            egui::Frame::new()
-                .fill(with_alpha(t.color.bg_panel, 245))
-                .stroke(Stroke::new(1.0, color.gamma_multiply(0.55)))
-                .corner_radius(t.radius)
-                .inner_margin(egui::Margin::symmetric(8, 0))
-                .shadow(t.shadow())
-                .show(ui, |ui| {
-                    ui.set_max_width((content_rect.width() * 0.5 - 32.0).max(80.0));
-                    ui.set_min_height(27.0);
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 7.0;
-                        let (icon_rect, _) =
-                            ui.allocate_exact_size(egui::Vec2::splat(13.0), egui::Sense::hover());
-                        match tone {
-                            CheckNoteTone::Ok => WorkbenchIcon::Success,
-                            CheckNoteTone::Warning | CheckNoteTone::Error => WorkbenchIcon::Warning,
-                        }
-                        .paint(ui.painter(), icon_rect, color);
-                        ui.label(
-                            egui::RichText::new(message)
-                                .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                                .color(color),
-                        );
-                    });
-                });
-        });
-}
-
 fn with_alpha(color: egui::Color32, alpha: u8) -> egui::Color32 {
     egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
-}
-
-fn check_note_content(state: &AppState) -> (String, CheckNoteTone) {
-    let Some(result) = state.dialogs.drc_results.as_ref() else {
-        return (
-            "Schematic checks stale · run schematic checks".to_owned(),
-            CheckNoteTone::Warning,
-        );
-    };
-    if state.dialogs.drc_checked_version != state.schematic.topology_version() {
-        return (
-            "Schematic checks stale · run schematic checks".to_owned(),
-            CheckNoteTone::Warning,
-        );
-    }
-
-    let summary = result.summary();
-    let blocking = summary.critical + summary.errors;
-    if blocking > 0 {
-        return (
-            format!("{blocking} blocking schematic findings"),
-            CheckNoteTone::Error,
-        );
-    }
-    if summary.warnings > 0 {
-        return (
-            format!("{} schematic advisories", summary.warnings),
-            CheckNoteTone::Warning,
-        );
-    }
-    if let Some(run) = historical_annotation_run(state) {
-        return (
-            format!("Checks current · Run {run} annotations historical"),
-            CheckNoteTone::Warning,
-        );
-    }
-    (
-        "Checks and annotations current".to_owned(),
-        CheckNoteTone::Ok,
-    )
-}
-
-/// The run whose retained operating point no longer annotates this drawing.
-///
-/// Canvas annotations fail closed: the cross-probe point map is rejected as
-/// soon as it stops matching the open cell and topology, so the drawing is
-/// silently unannotated. Checks can be re-run without re-simulating, which
-/// would otherwise leave an all-clear note over a schematic that carries no
-/// operating point at all.
-fn historical_annotation_run(state: &AppState) -> Option<u64> {
-    if state.ui.schematic_visibility.annotations
-        == crate::state::SchematicAnnotationVisibility::Hidden
-    {
-        return None;
-    }
-    let run = state.simulation.active_run()?;
-    let solved = state
-        .simulation
-        .active_analysis()
-        .is_some_and(|analysis| analysis.dc_op.is_some());
-    let annotates_this_drawing = state.simulation.cross_probe.is_current_for(
-        &state.workspace.active_view,
-        state.schematic.topology_version(),
-    );
-    (solved && !annotates_this_drawing).then_some(run.id)
 }
 
 fn read_only_banner(ui: &mut Ui, app: &RSpiceApp) {
@@ -554,53 +428,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn canvas_check_note_never_calls_unrun_checks_current() {
-        let mut state = AppState::default();
-        assert_eq!(check_note_content(&state).1, CheckNoteTone::Warning);
-
-        state.dialogs.drc_results = Some(crate::services::drc::DrcResult::new());
-        state.dialogs.drc_checked_version = state.schematic.topology_version();
-        assert_eq!(check_note_content(&state).1, CheckNoteTone::Ok);
-
-        state.dialogs.drc_checked_version = state.schematic.topology_version().wrapping_sub(1);
-        assert_eq!(check_note_content(&state).1, CheckNoteTone::Warning);
-    }
-
-    #[test]
-    fn canvas_check_note_matches_the_upgraded_mockup_breakpoint() {
-        assert_eq!(CANVAS_CHECK_NOTE_MIN_WIDTH, 620.0);
-        assert!(!canvas_check_note_visible(619.0));
-        assert!(!canvas_check_note_visible(620.0));
-        assert!(canvas_check_note_visible(620.01));
-    }
-
-    #[test]
     fn canvas_breadcrumb_uses_the_mockup_body_type_size() {
         assert_eq!(CANVAS_BREADCRUMB_FONT_SIZE, 12.0);
-    }
-
-    #[test]
-    fn a_solved_run_that_no_longer_annotates_the_drawing_is_never_an_all_clear() {
-        let mut state = AppState::default();
-        state.dialogs.drc_results = Some(crate::services::drc::DrcResult::new());
-        state.dialogs.drc_checked_version = state.schematic.topology_version();
-        assert_eq!(check_note_content(&state).1, CheckNoteTone::Ok);
-
-        // A run that solved an operating point, whose cross-probe map was
-        // never built for this drawing, must read as historical.
-        let mut run = crate::state::SimulationRun::new(41);
-        run.add_analysis(
-            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::DcOp, "OP")
-                .with_dc_op(crate::state::DcOpResult::default()),
-        );
-        state.simulation.runs.insert(0, run);
-        state.simulation.active_run_idx = Some(0);
-        state.simulation.active_analysis_idx = Some(0);
-
-        let (message, tone) = check_note_content(&state);
-        assert_eq!(tone, CheckNoteTone::Warning);
-        assert!(message.contains("Run 41"), "message was {message}");
-        assert!(message.contains("historical"), "message was {message}");
     }
 
     #[test]
@@ -631,12 +460,14 @@ mod tests {
     #[test]
     fn imported_deck_with_only_the_pristine_bootstrap_buffer_is_netlist_first() {
         let mut app = RSpiceApp::test_instance();
-        assert!(crate::workbench::workflows::netlist_workflow::apply_imported_netlist(
-            &mut app.state,
-            "V1 out 0 1\n.op\n.end\n".to_owned(),
-            None,
-            "front_end.sp",
-        ));
+        assert!(
+            crate::workbench::workflows::netlist_workflow::apply_imported_netlist(
+                &mut app.state,
+                "V1 out 0 1\n.op\n.end\n".to_owned(),
+                None,
+                "front_end.sp",
+            )
+        );
 
         assert!(is_netlist_first_without_schematic(&app.state));
 

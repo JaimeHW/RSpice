@@ -124,6 +124,10 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
             executor: "rspice-ui persistent Visualization Studio result-document executor",
             evidence_boundary: "Versioned pane composition, native waveform/Bode/spectrum/Smith/table/histogram/eye/pole-zero viewers, exact source-row inspection, cursor/marker/annotation entities, retained-run overlays, display LOD policy, and CSV/Touchstone/PNG export are executable. Catalog viewers without a compatible native renderer or qualified external producer remain explicitly unavailable and never receive fabricated fallback data.",
         },
+        SurfaceId::ReportAuthoring => SurfaceExecutionAvailability::Available {
+            executor: "rspice-ui project-owned report and datasheet document composer",
+            evidence_boundary: "Versioned project-owned report documents, template-seeded outlines, page creation/reordering/paper settings, typed prose and result blocks, live result references that re-resolve against current project evidence, frozen references that capture deterministic authenticated raster artifacts, publication settings, and hardcopy export are executable. Unresolved, stale, or unbound evidence references are disclosed and fail closed rather than rendering fabricated content. The composer discloses release-handoff readiness and routes to Release Closure; it never freezes, approves, promotes, or signs off a release candidate, and it exposes no external publication or distribution service.",
+        },
         SurfaceId::ModelEditor => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui governed project-owned device-model definition editor",
             evidence_boundary: "A selected coherent project-owned single-card model can be opened, edited through typed parameter, section, statistical, temperature, and executable qualification contracts, parser-validated, compared with retained releases, and committed as guarded source or evidence-only revisions. Qualification runs execute on the current real Desktop or WebAssembly runtime and assemble parity evidence only from an exact retained pair. Promotion remains fail-closed behind complete source-bound evidence, declarations, compatibility, and independent approvals. Built-in and external sources remain read-only.",
@@ -131,6 +135,14 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
         SurfaceId::ModelCorrelation => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui project-owned measurement-correlation workspace",
             evidence_boundary: "Immutable CSV datasets, exact source and simulation provenance, unit-aware alignment and metrics, retained residuals, append-only outlier dispositions, independent review evidence, and qualification handoff are executable against project history. Correlation evidence never promotes a model or converts a failed qualification vector into a pass.",
+        },
+        SurfaceId::PdkTechnologyAdmin => SurfaceExecutionAvailability::Available {
+            executor: "rspice-ui signed PDK technology-package administrator",
+            evidence_boundary: "Exact Ed25519 manifest signatures, artifact digests and sizes, layer-purpose and stream-map completeness, connectivity, callback capabilities, platform contracts, typed recognition and extraction contract completeness, deterministic comparison of currently trusted signed revisions, immutable package-bound personal-device display profiles, immutable installed revisions, current publisher trust, exact active bindings, durable configuration, local administrator-recorded trust-key provisioning and irreversible revocation, and hash-chained trust/install/activation/rollback receipts are executable. Typed SPICE model artifacts are decoded, dependency-closed, process-section-selected, and merged into the simulator's content-addressed sealed model resolver only when an exact project pin resolves to that currently trusted archive; administrative activation alone cannot change a project's executable model authority. Schema-3 signed callback modules are ABI-validated at installation and execute for an exact project pin through a deterministic, fuel-metered, memory-bounded interpreter with no WASI or network surface; canonical active-plan inputs and exact package, artifact, output, target, fuel, operator, plan, project-revision, and receipt-chain identity are retained as verifiable project evidence. No qualified product engine consumes callback-derived metadata, and rule decks are not executed. Display profiles are governed administration data and are not consumed by a production layout renderer; project and organization display-profile repositories are unavailable. The local trust file is not an operating-system or organization trust service, packages cannot mutate pinned projects implicitly, and package validation does not execute or qualify layout recognition, parasitic extraction, PCells, migration, or sign-off.",
+        },
+        SurfaceId::LibraryCellviewManager => SurfaceExecutionAvailability::Available {
+            executor: "rspice-ui project-owned library, cellview, symbol, and component-form authoring workspace",
+            evidence_boundary: "The canonical three-column project library browser, guarded cell/view mutations, exact shared selection, authored symbol preview, typed terminal and parameter-form inspection, symbol editor handoff, model-bound symbol creation/import, form editing, edit-lock inspection, audit history, and versioned project-library publication evidence are executable. Legacy or invalid symbol metadata is disclosed and fails closed; the workspace does not claim PCell, layout, extraction, characterization, protected-IP, remote collaboration, or sign-off authority.",
         },
         SurfaceId::NotificationCenter => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui retained notification and activity center",
@@ -186,8 +198,11 @@ mod tests {
                 SurfaceId::Models,
                 SurfaceId::Netlist,
                 SurfaceId::VisualizationStudio,
+                SurfaceId::ReportAuthoring,
                 SurfaceId::ModelEditor,
                 SurfaceId::ModelCorrelation,
+                SurfaceId::PdkTechnologyAdmin,
+                SurfaceId::LibraryCellviewManager,
                 SurfaceId::ProjectLauncher,
                 SurfaceId::Preferences,
                 SurfaceId::DesignManagement,
@@ -221,6 +236,68 @@ mod tests {
         assert!(route_availability(SurfaceRoute::surface(SurfaceId::ModelEditor)).can_open());
         require_available(SurfaceRoute::surface(SurfaceId::ModelEditor))
             .expect("model editor route executor is registered");
+    }
+
+    #[test]
+    fn pdk_administration_has_an_explicit_signed_package_executor_boundary() {
+        let availability = surface_availability(SurfaceId::PdkTechnologyAdmin);
+        assert!(availability.can_open());
+        assert!(matches!(
+            availability,
+            SurfaceExecutionAvailability::Available {
+                executor: "rspice-ui signed PDK technology-package administrator",
+                ..
+            }
+        ));
+        require_available(SurfaceRoute::surface(SurfaceId::PdkTechnologyAdmin))
+            .expect("PDK technology administrator route executor is registered");
+    }
+
+    #[test]
+    fn library_cellview_manager_has_an_explicit_shared_project_domain_boundary() {
+        let availability = surface_availability(SurfaceId::LibraryCellviewManager);
+        assert!(matches!(
+            availability,
+            SurfaceExecutionAvailability::Available {
+                executor: "rspice-ui project-owned library, cellview, symbol, and component-form authoring workspace",
+                ..
+            }
+        ));
+        require_available(SurfaceRoute::surface(SurfaceId::LibraryCellviewManager))
+            .expect("Library Cellview Manager route executor is registered");
+    }
+
+    #[test]
+    fn models_and_pdk_surface_execution_matrix_is_explicit_and_fail_closed() {
+        for surface in [
+            SurfaceId::ModelEditor,
+            SurfaceId::ModelCorrelation,
+            SurfaceId::PdkTechnologyAdmin,
+            SurfaceId::LibraryCellviewManager,
+        ] {
+            assert!(
+                surface_availability(surface).can_open(),
+                "{surface} lost its registered Rust executor"
+            );
+        }
+        for surface in [
+            SurfaceId::PcellDesigner,
+            SurfaceId::ModelExtraction,
+            SurfaceId::LibraryCharacterization,
+            SurfaceId::ProtectedIpCenter,
+        ] {
+            let availability = surface_availability(surface);
+            assert!(
+                !availability.can_open(),
+                "{surface} must not become available merely because its mockup exists"
+            );
+            assert!(
+                availability
+                    .reason()
+                    .is_some_and(|reason| reason.contains("no complete Rust route executor")),
+                "{surface} does not expose the expected implementation boundary"
+            );
+        }
     }
 
     #[test]

@@ -174,6 +174,8 @@ impl<'de> serde::Deserialize<'de> for AppState {
         // so restore the exact device-local settings after loading the active
         // document buffer and keep wire and bus gestures coherent.
         state.schematic.snap_engine = state.ui.schematic_snap.clone();
+        state.schematic.reconcile_grid_pitch_runtime();
+        state.ui.schematic_snap.grid_size = state.schematic.grid_size;
         state.schematic.wire_drawing.routing_mode = state.ui.schematic_routing_mode;
         state.schematic.bus_drawing.routing_mode = state.ui.schematic_routing_mode;
         state.workbench.reconcile_restored_navigation();

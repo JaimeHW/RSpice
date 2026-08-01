@@ -34,7 +34,7 @@ impl NumericTolerance {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ComparisonPolicy {
     pub row_alignment: RowAlignmentPolicy,
     pub tolerance: NumericTolerance,
@@ -46,7 +46,7 @@ pub struct ComparisonPolicy {
 /// Fully declared numerical behavior for the currently implemented exact
 /// comparison engine. New algorithms must add explicit variants rather than
 /// silently changing alignment or interpolation semantics.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ComparisonExecutionContract {
     #[serde(default)]
     pub alignment: ComparisonAlignmentMethod,
@@ -60,11 +60,105 @@ pub struct ComparisonExecutionContract {
     pub precision: ComparisonPrecisionPolicy,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+impl ComparisonExecutionContract {
+    pub fn validate(&self) -> Result<(), VisualizationError> {
+        match &self.alignment {
+            ComparisonAlignmentMethod::ExactCoordinateRows
+            | ComparisonAlignmentMethod::AbsoluteXAxis => {}
+            ComparisonAlignmentMethod::FirstThresholdCrossing {
+                signal_key,
+                threshold,
+                baseline_crossing,
+                candidate_crossing,
+            } => {
+                validate_key("comparison.execution.alignment.signal-key", signal_key)?;
+                if !threshold.is_finite()
+                    || !baseline_crossing.is_finite()
+                    || !candidate_crossing.is_finite()
+                {
+                    return Err(VisualizationError::InvalidValue {
+                        field: "comparison.execution.alignment",
+                        message: "threshold-crossing parameters must be finite".to_owned(),
+                    });
+                }
+            }
+            ComparisonAlignmentMethod::CrossCorrelation {
+                signal_key,
+                maximum_lag_samples,
+                selected_lag_samples,
+                sample_interval,
+                coefficient,
+                baseline_shift,
+            } => {
+                validate_key("comparison.execution.alignment.signal-key", signal_key)?;
+                if *maximum_lag_samples == 0
+                    || selected_lag_samples.unsigned_abs() > u64::from(*maximum_lag_samples)
+                    || !sample_interval.is_finite()
+                    || *sample_interval <= 0.0
+                    || !coefficient.is_finite()
+                    || !(-1.0..=1.0).contains(coefficient)
+                    || !baseline_shift.is_finite()
+                {
+                    return Err(VisualizationError::InvalidValue {
+                        field: "comparison.execution.alignment",
+                        message:
+                            "cross-correlation parameters are outside their exact numeric contract"
+                                .to_owned(),
+                    });
+                }
+            }
+        }
+        let exact_policy = matches!(
+            self.alignment,
+            ComparisonAlignmentMethod::ExactCoordinateRows
+                | ComparisonAlignmentMethod::AbsoluteXAxis
+        );
+        let exact_resampling = matches!(
+            self.resampling,
+            ComparisonResamplingPolicy::NoneRetainSourceGrid
+                | ComparisonResamplingPolicy::ExactCoordinateIntersection
+        );
+        if exact_policy
+            != matches!(
+                self.interpolation,
+                ComparisonInterpolationPolicy::NoneExactOnly
+            )
+            || exact_policy != exact_resampling
+        {
+            return Err(VisualizationError::InvalidValue {
+                field: "comparison.execution",
+                message:
+                    "alignment, interpolation, and resampling policies form an inconsistent contract"
+                        .to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ComparisonAlignmentMethod {
+    /// Compatibility spelling for receipts written by the original exact-row engine.
     #[default]
     ExactCoordinateRows,
+    AbsoluteXAxis,
+    FirstThresholdCrossing {
+        #[serde(deserialize_with = "deserialize_key_string")]
+        signal_key: String,
+        threshold: f64,
+        baseline_crossing: f64,
+        candidate_crossing: f64,
+    },
+    CrossCorrelation {
+        #[serde(deserialize_with = "deserialize_key_string")]
+        signal_key: String,
+        maximum_lag_samples: u32,
+        selected_lag_samples: i64,
+        sample_interval: f64,
+        coefficient: f64,
+        baseline_shift: f64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,6 +166,7 @@ pub enum ComparisonAlignmentMethod {
 pub enum ComparisonInterpolationPolicy {
     #[default]
     NoneExactOnly,
+    MonotoneLinear,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,6 +174,9 @@ pub enum ComparisonInterpolationPolicy {
 pub enum ComparisonResamplingPolicy {
     #[default]
     NoneRetainSourceGrid,
+    ExactCoordinateIntersection,
+    BaselineOntoCandidateGrid,
+    UniformOverlapGrid,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,6 +239,7 @@ impl NestedResourceCount for ComparisonReceipt {
 impl ComparisonReceipt {
     pub(crate) fn validate_structure(&self) -> Result<(), VisualizationError> {
         self.policy.tolerance.validate()?;
+        self.policy.execution.validate()?;
         if self.baseline.dataset_id == self.candidate.dataset_id {
             return Err(VisualizationError::InvalidValue {
                 field: "comparison-receipt.datasets",

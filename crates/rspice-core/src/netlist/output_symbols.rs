@@ -987,7 +987,10 @@ fn is_symbol_char(ch: char) -> bool {
 fn collect_measure_sources<'a>(statement: &'a MeasureStatement, output: &mut Vec<&'a str>) {
     use crate::netlist::measure::{MeasureOperand, MeasureType, TriggerEvent};
 
-    fn condition<'a>(condition: &'a crate::netlist::measure::WhenCondition, output: &mut Vec<&'a str>) {
+    fn condition<'a>(
+        condition: &'a crate::netlist::measure::WhenCondition,
+        output: &mut Vec<&'a str>,
+    ) {
         output.push(condition.left.as_str());
         if let MeasureOperand::Waveform(source) = &condition.right {
             output.push(source.as_str());

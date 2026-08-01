@@ -1053,7 +1053,8 @@ mod tests {
     fn cleanup_fails_closed_while_another_owner_holds_the_lease() {
         let root = unique_temp_dir("cleanup-race");
         let source = root.join("design.rsch");
-        let checkpoint = crate::workbench::workflows::file_workflow::autosave_checkpoint_path(&source);
+        let checkpoint =
+            crate::workbench::workflows::file_workflow::autosave_checkpoint_path(&source);
         std::fs::write(&source, "saved source").expect("write source");
         std::fs::write(&checkpoint, "recovery bytes").expect("write checkpoint");
         let lease = open_and_lock_lease(&checkpoint, true).expect("hold competing lease");
@@ -1076,7 +1077,8 @@ mod tests {
         let root = unique_temp_dir("legacy");
         let source = root.join("design.rsch");
         crate::io::save_schematic(&SchematicState::default(), &source).expect("save source");
-        let checkpoint = crate::workbench::workflows::file_workflow::autosave_checkpoint_path(&source);
+        let checkpoint =
+            crate::workbench::workflows::file_workflow::autosave_checkpoint_path(&source);
         let bytes = serialize_checkpoint(&source, &SchematicState::default())
             .expect("serialize legacy checkpoint");
         atomic_write(&checkpoint, &bytes).expect("write legacy checkpoint");

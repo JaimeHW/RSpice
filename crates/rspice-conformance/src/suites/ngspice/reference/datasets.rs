@@ -661,16 +661,12 @@ impl TestRunner {
         false
     }
 
-    pub(in crate::suites::ngspice) fn reference_expr_contains_voltage_probe(
-        expr: &str,
-    ) -> bool {
+    pub(in crate::suites::ngspice) fn reference_expr_contains_voltage_probe(expr: &str) -> bool {
         let normalized = Self::normalize_variable_name(expr);
         Self::reference_expr_contains_probe(&normalized, Self::is_voltage_probe_name)
     }
 
-    pub(in crate::suites::ngspice) fn reference_expr_contains_current_probe(
-        expr: &str,
-    ) -> bool {
+    pub(in crate::suites::ngspice) fn reference_expr_contains_current_probe(expr: &str) -> bool {
         let normalized = Self::normalize_variable_name(expr);
         Self::reference_expr_contains_probe(&normalized, Self::is_current_probe_name)
     }

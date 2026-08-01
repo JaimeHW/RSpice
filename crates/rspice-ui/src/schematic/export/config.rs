@@ -34,7 +34,6 @@ impl SvgColor {
             alpha,
         }
     }
-
 }
 
 impl fmt::Display for SvgColor {

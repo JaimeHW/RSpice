@@ -1730,7 +1730,6 @@ fn hash_exact_section(file: &mut File, len: u64) -> io::Result<[u8; 32]> {
     Ok(hasher.finalize().into())
 }
 
-
 #[cfg(not(unix))]
 fn sync_parent_directory(_parent: &Path) -> io::Result<()> {
     // Windows has no portable directory-fsync primitive. Staged file data is
@@ -1740,7 +1739,6 @@ fn sync_parent_directory(_parent: &Path) -> io::Result<()> {
     // use this same native boundary.
     Ok(())
 }
-
 
 mod recovery_journal;
 

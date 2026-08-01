@@ -152,10 +152,8 @@ impl<'a> NetlistGenerator<'a> {
 
         let primary_nodes = self.format_nodes(&node_names[0..2], 2);
         let secondary_nodes = self.format_nodes(&node_names[2..4], 2);
-        let primary_suffix =
-            crate::state::format_params_string(&primary_params);
-        let secondary_suffix =
-            crate::state::format_params_string(&secondary_params);
+        let primary_suffix = crate::state::format_params_string(&primary_params);
+        let secondary_suffix = crate::state::format_params_string(&secondary_params);
         let primary_line = if primary_suffix.is_empty() {
             format!("{} {} {}", primary_name, primary_nodes, primary_inductance)
         } else {

@@ -117,7 +117,10 @@ fn cell_instance_identity_sheet() -> PropertySheet {
 /// Single authority for the schematic Object properties command. Availability
 /// requires a live target that the matching editor can actually open.
 pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
-    if state.schematic.read_only || state.active_view_read_only() {
+    if let Some(id) = state.schematic.selection.single_probe() {
+        return state.schematic.probes.iter().any(|probe| probe.id == id);
+    }
+    if state.schematic_edit_read_only() {
         return false;
     }
     if let Some(id) = state.schematic.selection.single_component() {
@@ -253,6 +256,14 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
     {
         return false;
     }
+    if let Some(id) = state.schematic.selection.single_probe() {
+        if state.schematic.probes.iter().all(|probe| probe.id != id) {
+            return false;
+        }
+        state.workbench.inspector_visible = true;
+        state.workbench.drawer = Some(crate::workbench::state::Drawer::Inspector);
+        return true;
+    }
     if state.deny_read_only_edit() || !selected_object_properties_available(state) {
         return false;
     }
@@ -354,7 +365,7 @@ mod tests {
         Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, DesignNote,
         DesignNoteKind, GeneratedSymbolViews, Library, LibraryCellInstance,
         ModelBoundSymbolDefinition, NetLabel, ParameterInheritance, Point, PortDirection,
-        PropertyType, SymbolElectricalType, SymbolGraphicTemplate, SymbolIdentity,
+        PropertyType, SchematicProbe, SymbolElectricalType, SymbolGraphicTemplate, SymbolIdentity,
         SymbolModelReference, SymbolNetlistBinding, SymbolParameterConstraints,
         SymbolParameterDefault, SymbolParameterField, SymbolParameterForm, SymbolParameterSection,
         SymbolParameterVisibility, SymbolPinDefinition, SymbolPinSide, SymbolSourceContract, Wire,
@@ -612,6 +623,27 @@ mod tests {
 
         assert!(!open_selected_object_properties(&mut state));
         assert!(!state.dialogs.object_properties.open);
+    }
+
+    #[test]
+    fn selected_probe_routes_to_the_inspector_even_in_read_only_mode() {
+        let mut state = AppState::default();
+        state.schematic.probes.push(
+            SchematicProbe::new(74, Point::new(10, 20), "V(out)", Some("V(out)".to_owned()))
+                .unwrap(),
+        );
+        state.schematic.selection.select_only_probe(74);
+        state.schematic.read_only = true;
+
+        assert!(selected_object_properties_available(&state));
+        assert!(open_selected_object_properties(&mut state));
+        assert!(state.workbench.inspector_visible);
+        assert_eq!(
+            state.workbench.drawer,
+            Some(crate::workbench::state::Drawer::Inspector)
+        );
+        assert!(!state.dialogs.object_properties.open);
+        assert!(!state.tabbed_property_dialog.open);
     }
 
     #[test]

@@ -25,13 +25,12 @@ use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::numerics::integration::{
     BreakpointManager, LteEstimator, TimestepController, TrapGearController,
 };
-use crate::numerics::integration::CompanionCoefficients;
-use crate::numerics::integration::IntegrationMethod;
 use crate::analysis::{
-    PeriodDetector, PeriodicWaveform, PssConfig, PssResult,
-    ShootingNewtonSolver, ShootingState,
+    PeriodDetector, PeriodicWaveform, PssConfig, PssResult, ShootingNewtonSolver, ShootingState,
 };
 use crate::circuit::CircuitData;
+use crate::numerics::integration::CompanionCoefficients;
+use crate::numerics::integration::IntegrationMethod;
 use crate::solver::StaticMatrix;
 use crate::{Netlist, Value};
 
@@ -873,7 +872,9 @@ impl Engine {
         self.run_tran_resume_with_abort(netlist, &state.checkpoint, tstop, max_step, abort)
     }
 
-    fn ensure_pss_continuation_state_supported(circuit: &CircuitData) -> Result<(), SimulationError> {
+    fn ensure_pss_continuation_state_supported(
+        circuit: &CircuitData,
+    ) -> Result<(), SimulationError> {
         let mut blockers = Vec::new();
         // Keep this list aligned with transient/residual.rs and
         // transient/state_commit.rs. Shooting PSS currently advances only the
@@ -1366,7 +1367,11 @@ impl Engine {
     /// function of the shooting state. Leaving stale history in place would
     /// leak the previous trajectory into the next one and corrupt both the
     /// shooting residual and the finite-difference Jacobian columns.
-    pub(in crate::engine) fn pss_set_reactive_state(&self, circuit: &mut CircuitData, state: &[Value]) {
+    pub(in crate::engine) fn pss_set_reactive_state(
+        &self,
+        circuit: &mut CircuitData,
+        state: &[Value],
+    ) {
         let n_caps = circuit.capacitors.len();
 
         // Set capacitor voltages
@@ -1538,8 +1543,9 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let dt_freeze = period * 1e-9;
-        let coeff =
-            CompanionCoefficients::for_method(crate::numerics::integration::IntegrationMethod::BackwardEuler);
+        let coeff = CompanionCoefficients::for_method(
+            crate::numerics::integration::IntegrationMethod::BackwardEuler,
+        );
         let start = vec![0.0; circuit.matrix_size()];
 
         match self.pss_newton_solve(circuit, matrix, &coeff, dt_freeze, dt_freeze, &start, abort)? {

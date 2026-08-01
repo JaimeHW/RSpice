@@ -12,8 +12,8 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 use crate::workbench::shortcuts::MAX_SHORTCUT_SEQUENCE_STROKES;
+use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 use crate::workbench::{ShortcutPreferences, ShortcutProfileAudit};
 
 pub const SHORTCUT_PROFILE_FORMAT: &str = "rspice.shortcuts/1";
@@ -527,7 +527,9 @@ mod tests {
     use std::cell::RefCell;
 
     use super::*;
-    use crate::workbench::workflows::export_workflow::{ObservedExportDestination, SaveDialogConfig};
+    use crate::workbench::workflows::export_workflow::{
+        ObservedExportDestination, SaveDialogConfig,
+    };
 
     const VALID_SOURCE: &str = r#"{
         "format": "rspice.shortcuts/1",
@@ -577,7 +579,8 @@ mod tests {
     #[test]
     fn legacy_export_strips_device_local_protected_acknowledgements() {
         let mut profile = ShortcutPreferences::default();
-        profile.acknowledge_protected_override(crate::workbench::commands::vocabulary::Command::Save);
+        profile
+            .acknowledge_protected_override(crate::workbench::commands::vocabulary::Command::Save);
 
         let encoded = serialize_shortcut_profile(&profile).unwrap();
         let document: Value = serde_json::from_str(&encoded).unwrap();
@@ -603,11 +606,9 @@ mod tests {
         )
         .unwrap();
 
-        assert!(
-            !staged
-                .candidate()
-                .protected_override_acknowledged(crate::workbench::commands::vocabulary::Command::Save)
-        );
+        assert!(!staged.candidate().protected_override_acknowledged(
+            crate::workbench::commands::vocabulary::Command::Save
+        ));
         let reencoded = serialize_shortcut_profile(staged.candidate()).unwrap();
         assert!(!reencoded.contains("protected-override-acknowledgements"));
     }

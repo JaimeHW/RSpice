@@ -164,11 +164,9 @@ impl XyceTestRunner {
             .run_tran_with_abort(&netlist, tran.stop, max_step, &abort)
             .map_err(|error| format!("MEASURE_CONT STEP transient execution failed: {error}"))?;
         Self::validate_transient_result_time_grid(&transient)?;
-        let scalar =
-            rspice_core::analysis::evaluate_tran_measurements(&netlist, &transient);
-        let continuous = rspice_core::analysis::evaluate_tran_continuous_measurements(
-            &netlist, &transient,
-        );
+        let scalar = rspice_core::analysis::evaluate_tran_measurements(&netlist, &transient);
+        let continuous =
+            rspice_core::analysis::evaluate_tran_continuous_measurements(&netlist, &transient);
         for result in &continuous {
             result.validate_invariants().map_err(|error| {
                 format!(

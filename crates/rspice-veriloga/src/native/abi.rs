@@ -14,6 +14,18 @@
 
 use std::cell::UnsafeCell;
 
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NativeRuntimeErrorKind {
+    NativeJit,
+    InvalidNumericResult,
+}
+
+pub(crate) struct NativeRuntimeError {
+    pub(crate) kind: NativeRuntimeErrorKind,
+    pub(crate) message: String,
+}
+
 /// Per-dispatch failure state owned by one [`EvalContext`].
 ///
 /// JIT code reads only `failed`; Rust helpers own the diagnostic payload.
@@ -22,6 +34,7 @@ use std::cell::UnsafeCell;
 #[repr(C)]
 pub struct NativeRuntimeStatus {
     failed: UnsafeCell<u8>,
+    kind: UnsafeCell<NativeRuntimeErrorKind>,
     message: UnsafeCell<Option<String>>,
 }
 
@@ -29,30 +42,37 @@ impl Default for NativeRuntimeStatus {
     fn default() -> Self {
         Self {
             failed: UnsafeCell::new(0),
+            kind: UnsafeCell::new(NativeRuntimeErrorKind::NativeJit),
             message: UnsafeCell::new(None),
         }
     }
 }
 
 impl NativeRuntimeStatus {
-    fn record(&self, message: impl Into<String>) {
+    fn record(&self, kind: NativeRuntimeErrorKind, message: impl Into<String>) {
         // Safety: EvalContext's contract requires exclusive dispatch access.
         // Helpers execute synchronously on that dispatching thread.
         unsafe {
             let slot = &mut *self.message.get();
             if slot.is_none() {
+                *self.kind.get() = kind;
                 *slot = Some(message.into());
                 *self.failed.get() = 1;
             }
         }
     }
 
-    pub(crate) fn take(&self) -> Option<String> {
+    pub(crate) fn take(&self) -> Option<NativeRuntimeError> {
         // Safety: the dispatch contract grants exclusive access while the
         // status is cleared or drained.
         unsafe {
             *self.failed.get() = 0;
-            (&mut *self.message.get()).take()
+            (&mut *self.message.get())
+                .take()
+                .map(|message| NativeRuntimeError {
+                    kind: *self.kind.get(),
+                    message,
+                })
         }
     }
 
@@ -195,11 +215,21 @@ impl EvalContext {
     }
 
     pub(crate) fn take_runtime_error(&self) -> Option<String> {
+        self.take_native_runtime_error().map(|error| error.message)
+    }
+
+    pub(crate) fn take_native_runtime_error(&self) -> Option<NativeRuntimeError> {
         self.runtime_status.take()
     }
 
     pub(crate) fn record_runtime_error(&self, message: impl Into<String>) {
-        self.runtime_status.record(message);
+        self.runtime_status
+            .record(NativeRuntimeErrorKind::NativeJit, message);
+    }
+
+    pub(crate) fn record_invalid_numeric_result(&self, message: impl Into<String>) {
+        self.runtime_status
+            .record(NativeRuntimeErrorKind::InvalidNumericResult, message);
     }
 }
 
@@ -220,6 +250,19 @@ pub extern "C" fn rspice_native_loop_limit_error(ctx: *const EvalContext) {
         ctx,
         "native runtime loop iteration limit exceeded; no interpreter fallback",
     );
+}
+
+#[unsafe(export_name = "rspice_native_non_finite_contribution_error")]
+pub extern "C" fn rspice_native_non_finite_contribution_error(
+    ctx: *const EvalContext,
+    contribution: usize,
+) {
+    // SAFETY: A non-null pointer comes from the active native entry point.
+    if let Some(ctx) = unsafe { ctx.as_ref() } {
+        ctx.record_invalid_numeric_result(format!(
+            "contribution {contribution} evaluated to a non-finite value (NaN or infinity)"
+        ));
+    }
 }
 
 #[unsafe(export_name = "rspice_native_integer_shift_count_error")]

@@ -13,6 +13,71 @@ fn canonical_workspace_order_is_stable() {
 }
 
 #[test]
+fn project_page_catalog_is_the_complete_five_tab_contract() {
+    assert_eq!(
+        ProjectPage::ALL,
+        [
+            ProjectPage::Overview,
+            ProjectPage::Library,
+            ProjectPage::Configuration,
+            ProjectPage::Dependencies,
+            ProjectPage::Recovery,
+        ]
+    );
+    assert_eq!(ProjectPage::default(), ProjectPage::Overview);
+    assert_eq!(
+        ProjectPage::ALL.map(ProjectPage::label),
+        [
+            "Overview",
+            "Library",
+            "Configuration",
+            "Dependencies",
+            "Recovery",
+        ]
+    );
+    assert_eq!(
+        ProjectPage::ALL.into_iter().collect::<HashSet<_>>().len(),
+        ProjectPage::ALL.len(),
+        "the project tab catalog must not contain duplicate routes"
+    );
+}
+
+#[test]
+fn legacy_project_pages_restore_to_their_supported_successors() {
+    for (serialized, expected) in [
+        (r#""Dashboard""#, ProjectPage::Overview),
+        (r#""Activity""#, ProjectPage::Overview),
+        (r#""Technology""#, ProjectPage::Dependencies),
+    ] {
+        assert_eq!(
+            serde_json::from_str::<ProjectPage>(serialized)
+                .expect("legacy project page remains decodable"),
+            expected
+        );
+    }
+
+    for page in ProjectPage::ALL {
+        let encoded = serde_json::to_string(&page).expect("project page serializes");
+        let restored: ProjectPage =
+            serde_json::from_str(&encoded).expect("canonical project page restores");
+        assert_eq!(restored, page);
+    }
+}
+
+#[test]
+fn workbench_without_a_project_page_defaults_to_overview() {
+    let mut encoded = serde_json::to_value(WorkbenchState::default()).unwrap();
+    encoded
+        .as_object_mut()
+        .expect("workbench is an object")
+        .remove("project_page");
+
+    let restored: WorkbenchState = serde_json::from_value(encoded).unwrap();
+
+    assert_eq!(restored.project_page, ProjectPage::Overview);
+}
+
+#[test]
 fn visualization_studio_presentation_round_trips_with_the_workbench() {
     let mut state = WorkbenchState::default();
     state.visualization_studio.section =
@@ -151,6 +216,48 @@ fn visualization_studio_is_a_persistent_surface_not_an_application_modal() {
     );
     assert_eq!(state.workspace, Workspace::Results);
     assert!(!state.application_modal_open());
+}
+
+#[test]
+fn library_cellview_route_and_page_restore_with_models_workspace_ownership() {
+    let mut state = WorkbenchState::default();
+    state.library_cellview_page = LibraryCellviewPage::SymbolForm;
+    state
+        .navigate(
+            SurfaceRoute::surface(SurfaceId::LibraryCellviewManager),
+            RouteTransitionSource::User,
+        )
+        .expect("Library Cellview Manager has a registered executor");
+
+    assert_eq!(state.workspace, Workspace::Models);
+    assert_eq!(
+        state.current_route().surface_id(),
+        SurfaceId::LibraryCellviewManager
+    );
+    assert!(!state.application_modal_open());
+
+    let encoded = serde_json::to_string(&state).expect("workbench session serializes");
+    let mut restored: WorkbenchState =
+        serde_json::from_str(&encoded).expect("workbench session restores");
+    restored.workspace = Workspace::Project;
+    restored.reconcile_restored_navigation();
+
+    assert_eq!(restored.workspace, Workspace::Models);
+    assert_eq!(
+        restored.current_route().surface_id(),
+        SurfaceId::LibraryCellviewManager
+    );
+    assert_eq!(
+        restored.library_cellview_page,
+        LibraryCellviewPage::SymbolForm
+    );
+}
+
+#[test]
+fn legacy_session_without_library_cellview_page_defaults_to_libraries() {
+    let state: WorkbenchState =
+        serde_json::from_str(r#"{"workspace":"Models"}"#).expect("legacy workbench restores");
+    assert_eq!(state.library_cellview_page, LibraryCellviewPage::Libraries);
 }
 
 #[test]

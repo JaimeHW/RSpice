@@ -26,7 +26,152 @@ pub(super) struct PendingPreparedRun {
     permit: ExecutionPermit,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct PreparedModelBinInspection {
+    pub(crate) source_digest: crate::product::ContentDigest,
+    pub(crate) receipt: rspice_core::engine::ModelBinInspection,
+}
+
 impl SimulationController {
+    /// Build the analysis-independent executable design deck used by
+    /// inspection surfaces.
+    ///
+    /// This is not a preview database. It materializes the configured
+    /// hierarchy, plan-owned design variables, reference-process model
+    /// sources, simulation options, and include closure through the same
+    /// binding helpers used by prepared execution. Consumers can therefore
+    /// ask the engine to inspect the exact current design without inventing a
+    /// second model-resolution path.
+    pub(crate) fn prepare_design_netlist_for_inspection(
+        state: &AppState,
+    ) -> Result<String, PreparationError> {
+        let projection = state
+            .workspace
+            .configuration_execution_projection(
+                &state.library_manager,
+                &state.workspace.active_view,
+                &state.schematic,
+            )
+            .map_err(|error| {
+                PreparationError::new(PreparationStage::DesignChecks, error.to_string())
+            })?;
+        let root_reference = projection.root().clone();
+        let root_schematic = projection.root_schematic().ok_or_else(|| {
+            PreparationError::new(
+                PreparationStage::DesignChecks,
+                "The configured simulation root is not materialized",
+            )
+        })?;
+        let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
+            &state.library_manager,
+            &projection,
+        );
+        let plan = state
+            .sim_setup
+            .stable_analysis_plan()
+            .map_err(|error| PreparationError::new(PreparationStage::AnalysisPlan, error))?;
+        let payload = state.workspace.active_plan_data(plan.id()).ok_or_else(|| {
+            PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                format!(
+                    "Simulation plan {} has no plan-owned variables, outputs, and specifications payload",
+                    plan.id()
+                ),
+            )
+        })?;
+        let analysis_instances = plan
+            .instances()
+            .iter()
+            .filter(|instance| instance.enabled())
+            .map(crate::simulation::plan::AnalysisInstance::id)
+            .collect::<Vec<_>>();
+        let generated =
+            crate::simulation::netlist_gen::generate_netlist_hierarchical_with_variables(
+                root_schematic,
+                &[],
+                &hierarchy,
+                &payload.design_variables,
+                crate::simulation::netlist_gen::DesignVariableNetlistContext {
+                    active_cell: &root_reference,
+                    analysis_instances: &analysis_instances,
+                },
+            );
+        if !generated.errors.is_empty() {
+            return Err(PreparationError::new(
+                PreparationStage::Netlist,
+                generated.errors.join("; "),
+            ));
+        }
+
+        let has_project_technology = state.workspace.project.technology_binding().is_some()
+            && !state.workspace.project.technology_change_audit().is_empty();
+        let sealed_models = if has_project_technology {
+            state.seal_project_execution_model_sources()
+        } else {
+            state.model_library_manager.seal_execution_sources()
+        }
+        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
+        let model_cards = if has_project_technology {
+            sealed_models
+                .reference_process_model_cards(state.sim_setup.reference_pvt.process)
+                .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?
+        } else {
+            Vec::new()
+        };
+        let generated_source = state
+            .workspace
+            .bind_generated_netlist_provenance(generated.netlist);
+        let mut source =
+            Self::apply_reference_model_bindings_to_netlist(&generated_source, &model_cards);
+        let pdk_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?;
+        for runtime in pdk_veriloga_runtimes.iter() {
+            crate::simulation::veriloga::append_project_veriloga_directive(
+                &mut source,
+                runtime.source_key(),
+                runtime.netlist_alias(),
+            );
+        }
+        let source = Self::apply_simulation_options_to_netlist(&source, &state.sim_setup.options);
+        let (source, _) = expand_generated_dependencies_with_sealed_sources(
+            &source,
+            root_schematic.current_file.as_deref(),
+            Some(&sealed_models),
+        )?;
+        Ok(source)
+    }
+
+    /// Produce the engine-owned geometry-bin receipt for the exact current
+    /// design projection.
+    pub(crate) fn inspect_current_model_bins(
+        state: &AppState,
+    ) -> Result<PreparedModelBinInspection, PreparationError> {
+        let source = Self::prepare_design_netlist_for_inspection(state)?;
+        let source_digest =
+            content_digest("rspice.generated-executable-source/v1", source.as_bytes());
+        let netlist = rspice_core::Netlist::parse(&source).map_err(|error| {
+            PreparationError::new(
+                PreparationStage::Netlist,
+                format!("Prepared inspection netlist is invalid: {error}"),
+            )
+        })?;
+        let mut config = rspice_core::SimulationConfig::default();
+        config.temperature = rspice_core::constants::celsius_to_kelvin(
+            state.sim_setup.reference_pvt.temperature_celsius,
+        );
+        let receipt = rspice_core::Engine::new(config)
+            .inspect_model_bins(&netlist)
+            .map_err(|error| {
+                PreparationError::new(
+                    PreparationStage::ModelBindings,
+                    format!("Prepared model-bin resolution is invalid: {error}"),
+                )
+            })?;
+        Ok(PreparedModelBinInspection {
+            source_digest,
+            receipt,
+        })
+    }
+
     /// Validate the exact visible manual-deck document through the same
     /// dependency expansion, source checks, task construction, model binding,
     /// and execution-target contract used immediately before dispatch.
@@ -282,13 +427,8 @@ impl SimulationController {
                 ),
             )
         })?;
-        state
-            .model_library_manager
-            .validate_attached_technology(state.workspace.project.technology_binding())
-            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         let sealed_models = state
-            .model_library_manager
-            .seal_execution_sources()
+            .seal_project_execution_model_sources()
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         let tasks = self
             .build_queue_from_plan(state, &plan, &sealed_models)
@@ -315,6 +455,10 @@ impl SimulationController {
             .collect::<Vec<_>>();
         let project_veriloga_runtimes =
             prepared_configuration_veriloga_runtimes(state, &execution_projection)?;
+        let pdk_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?;
+        let project_veriloga_runtimes = project_veriloga_runtimes
+            .try_extend(pdk_veriloga_runtimes.iter().cloned())
+            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         let generated =
             crate::simulation::netlist_gen::generate_netlist_hierarchical_with_variables(
                 root_schematic,
@@ -341,6 +485,13 @@ impl SimulationController {
             .bind_generated_netlist_provenance(generated.netlist);
         let mut netlist =
             Self::apply_reference_model_bindings_to_netlist(&generated_source, &model_cards);
+        for runtime in pdk_veriloga_runtimes.iter() {
+            crate::simulation::veriloga::append_project_veriloga_directive(
+                &mut netlist,
+                runtime.source_key(),
+                runtime.netlist_alias(),
+            );
+        }
         netlist = Self::apply_simulation_options_to_netlist(&netlist, &state.sim_setup.options);
         let (expanded_netlist, sealed_source_dependencies) =
             expand_generated_dependencies_with_sealed_sources(
@@ -372,6 +523,7 @@ impl SimulationController {
                 )
             })
             .collect::<Vec<_>>();
+        append_signed_pdk_model_identity(&sealed_models, &mut model_identities);
         append_corner_model_identities(
             tasks.iter().map(PreparedTask::queued_analysis),
             &mut model_identities,
@@ -454,12 +606,38 @@ impl SimulationController {
         }
 
         let owned_materialized = if owned_active {
-            crate::workbench::workflows::netlist_workflow::compose_owned_netlist_execution_source(state, source)
-                .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?
+            crate::workbench::workflows::netlist_workflow::compose_owned_netlist_execution_source(
+                state, source,
+            )
+            .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?
         } else {
             source.to_owned()
         };
+        let has_project_technology = state.workspace.project.technology_binding().is_some()
+            && !state.workspace.project.technology_change_audit().is_empty();
+        let sealed_models = if has_project_technology {
+            state.seal_project_execution_model_sources()
+        } else {
+            state.model_library_manager.seal_execution_sources()
+        }
+        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
+        let model_cards = if has_project_technology {
+            sealed_models
+                .reference_process_model_cards(state.sim_setup.reference_pvt.process)
+                .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?
+        } else {
+            Vec::new()
+        };
         let composed = manual_deck::compose_manual_deck_source(&owned_materialized);
+        let mut composed = Self::apply_reference_model_bindings_to_netlist(&composed, &model_cards);
+        let pdk_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?;
+        for runtime in pdk_veriloga_runtimes.iter() {
+            crate::simulation::veriloga::append_project_veriloga_directive(
+                &mut composed,
+                runtime.source_key(),
+                runtime.netlist_alias(),
+            );
+        }
         let origin = if owned_active {
             state.workspace.netlist_source_path.as_deref()
         } else {
@@ -472,9 +650,11 @@ impl SimulationController {
             ));
         }
         let (expanded, canonical_origin, sealed_source_dependencies) =
-            expand_manual_dependencies(&composed, origin, &state.model_library_manager)?;
+            expand_manual_dependencies(&composed, origin, &sealed_models)?;
         let project_model_sources = prepared_project_model_sources(state, &expanded)?;
-        let project_veriloga_runtimes = project_veriloga_runtimes_referenced_by(state, &expanded)?;
+        let project_veriloga_runtimes = project_veriloga_runtimes_referenced_by(state, &expanded)?
+            .try_extend(pdk_veriloga_runtimes.iter().cloned())
+            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         reject_deferred_external_sources_with_project_runtimes(
             &expanded,
             &project_veriloga_runtimes,
@@ -506,7 +686,17 @@ impl SimulationController {
             dependency_closure_digest,
             &analysis_config_digests,
         );
-        let mut model_identities = Vec::new();
+        let mut model_identities = model_cards
+            .iter()
+            .enumerate()
+            .map(|(index, cards)| {
+                ModelSourceIdentity::new(
+                    format!("reference-model-source-{index}"),
+                    content_digest("rspice.materialized-model-cards/v1", cards.as_bytes()),
+                )
+            })
+            .collect::<Vec<_>>();
+        append_signed_pdk_model_identity(&sealed_models, &mut model_identities);
         append_corner_model_identities(
             tasks.iter().map(PreparedTask::queued_analysis),
             &mut model_identities,
@@ -630,6 +820,35 @@ impl SimulationController {
         }
         Ok(ordered)
     }
+}
+
+/// Stable cache identity for analysis-independent design inspection.
+///
+/// Presentation-only selection state is intentionally excluded. Every source
+/// input capable of changing hierarchy, variables, PVT expression context,
+/// model cards, or option materialization participates.
+pub(crate) fn design_inspection_input_digest(state: &AppState) -> crate::product::ContentDigest {
+    let plan_identity = state.sim_setup.analysis_plan.as_ref().map_or_else(
+        || "none".to_owned(),
+        |plan| format!("{}:{}", plan.id(), plan.revision().get()),
+    );
+    let model_library_identity = state.model_library_manager.execution_catalog_digest();
+    let material = format!(
+        "{}\0{}\0{}\0{}\0{}\0{:?}\0{}\0{}\0{}",
+        state.design_execution_epoch,
+        state.workspace.project.revision().get(),
+        state.workspace.simulation_root_reference().key(),
+        state.workspace.active_view.key(),
+        plan_identity,
+        state.sim_setup.reference_pvt.process,
+        state.sim_setup.reference_pvt.temperature_celsius,
+        state.sim_setup.options.to_spice_options(),
+        model_library_identity,
+    );
+    content_digest(
+        "rspice.analysis-independent-design-inspection/v1",
+        material.as_bytes(),
+    )
 }
 
 fn validate_prepared_periodic_sources(
@@ -805,10 +1024,8 @@ fn prepared_project_veriloga_runtimes(
             receipt.module_name.clone(),
         )
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
-        return crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![
-            runtime,
-        ])
-        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error));
+        return crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime])
+            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error));
     }
     if !document.validation_is_current() {
         return Err(PreparationError::new(
@@ -848,6 +1065,30 @@ fn prepared_project_veriloga_runtimes(
         )
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
     crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime])
+        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
+}
+
+fn prepared_signed_pdk_veriloga_runtimes(
+    sealed_models: &crate::state::model_library::SealedModelExecutionSources,
+) -> Result<crate::simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
+    let Some((package, archive_digest, artifacts, bindings)) =
+        sealed_models.pdk_veriloga_authority()
+    else {
+        return Ok(Default::default());
+    };
+    let runtimes = bindings
+        .iter()
+        .map(|binding| {
+            crate::simulation::veriloga::compile_signed_pdk_source_runtime(
+                package,
+                archive_digest,
+                artifacts,
+                binding,
+            )
+            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(runtimes)
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
 }
 
@@ -987,7 +1228,7 @@ fn attach_saved_output_contracts(
 fn expand_manual_dependencies(
     source: &str,
     origin: Option<&Path>,
-    model_libraries: &crate::state::ModelLibraryManager,
+    sealed_sources: &crate::state::model_library::SealedModelExecutionSources,
 ) -> Result<
     (
         String,
@@ -1003,10 +1244,7 @@ fn expand_manual_dependencies(
 
     #[cfg(target_arch = "wasm32")]
     {
-        let sealed = model_libraries
-            .seal_execution_sources()
-            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
-        let (expanded, dependencies) = sealed
+        let (expanded, dependencies) = sealed_sources
             .expand_root_dependencies(
                 &absolute_origin,
                 source,
@@ -1022,7 +1260,7 @@ fn expand_manual_dependencies(
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let _ = model_libraries;
+        let _ = sealed_sources;
         let mut processor = IncludeProcessor::new(&absolute_origin);
         let expanded = processor
             .expand_content(source, &absolute_origin)
@@ -1456,6 +1694,15 @@ fn append_corner_model_identities<'a>(
     }
 }
 
+fn append_signed_pdk_model_identity(
+    sealed_sources: &crate::state::model_library::SealedModelExecutionSources,
+    identities: &mut Vec<ModelSourceIdentity>,
+) {
+    if let Some((label, archive_digest)) = sealed_sources.pdk_model_identity() {
+        identities.push(ModelSourceIdentity::new(label, archive_digest));
+    }
+}
+
 fn prepared_project_model_sources(
     state: &AppState,
     executable_netlist: &str,
@@ -1665,7 +1912,6 @@ fn element_model_name(element: &rspice_core::netlist::Element) -> Option<&str> {
         _ => None,
     }
 }
-
 
 #[cfg(test)]
 mod tests;

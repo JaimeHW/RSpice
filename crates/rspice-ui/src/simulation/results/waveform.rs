@@ -80,5 +80,4 @@ impl WaveformData {
             y_imag: Some(imag),
         }
     }
-
 }

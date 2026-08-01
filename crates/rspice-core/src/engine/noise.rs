@@ -43,10 +43,7 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine) fn noise_node_voltage(
-        voltages: &[Value],
-        node: usize,
-    ) -> Value {
+    pub(in crate::engine) fn noise_node_voltage(voltages: &[Value], node: usize) -> Value {
         if node == 0 {
             0.0
         } else {
@@ -2359,10 +2356,7 @@ R2 out 0 1k
             crate::analysis::NoiseSource::thermal("R1".to_string(), 1, 0, resistance),
         ];
         let modern_shot = sources[0].spectral_density(1.0, temperature);
-        assert_eq!(
-            modern_shot,
-            2.0 * crate::constants::Q_ELECTRON * current
-        );
+        assert_eq!(modern_shot, 2.0 * crate::constants::Q_ELECTRON * current);
 
         Engine::configure_noise_physical_constants(
             &mut sources,
@@ -2793,8 +2787,7 @@ r1 a 0 rmod
 
     /// onoise_spectrum table of [`RB_NOISE_DECK`] from the official
     /// ngspice-46 binary, in its default root-spectral-density units.
-    const RB_NOISE_ORACLE: &str =
-        include_str!("../../tests/testdata/vbic_noise_rb_ngspice46.dat");
+    const RB_NOISE_ORACLE: &str = include_str!("../../tests/testdata/vbic_noise_rb_ngspice46.dat");
 
     /// A low-impedance-driven CE stage with large RBX/RBI: the parasitic
     /// base-resistance thermal sources dominate the output noise, so this
@@ -3290,8 +3283,7 @@ R2 OUT 0 10k DTEMP=150
 
     /// onoise table of [`GP_RB_NOISE_DECK`] from the official ngspice-46
     /// binary.
-    const GP_RB_NOISE_ORACLE: &str =
-        include_str!("../../tests/testdata/gp_rb_noise_ngspice46.dat");
+    const GP_RB_NOISE_ORACLE: &str = include_str!("../../tests/testdata/gp_rb_noise_ngspice46.dat");
 
     /// The quantifying deck for the GP noise gap: RB=500 driven from a
     /// low-impedance source, where the base-resistance thermal noise
@@ -3464,8 +3456,7 @@ Q1 C B 0 QN
         }
     }
 
-    const BSIM4_MODELS45: &str =
-        include_str!("../device/mosfet/bsim4v8/testdata/models45.lib");
+    const BSIM4_MODELS45: &str = include_str!("../device/mosfet/bsim4v8/testdata/models45.lib");
     const BSIM4_FNOI1_TNOI0_ORACLE: &str =
         include_str!("../../tests/testdata/bsim4_fnoi1_tnoi0_noise_ngspice46.dat");
     const BSIM4_FNOI0_TNOI0_ORACLE: &str =
@@ -3478,8 +3469,7 @@ Q1 C B 0 QN
         include_str!("../../tests/testdata/bsim4_rdsmod1_tnoi1_noise_ngspice46.dat");
     const BSIM4_RBODYMOD1_ORACLE: &str =
         include_str!("../../tests/testdata/bsim4_rbodymod1_noise_ngspice46.dat");
-    const BSIM3_MODELS018: &str =
-        include_str!("../device/mosfet/bsim3v3/testdata/models018.lib");
+    const BSIM3_MODELS018: &str = include_str!("../device/mosfet/bsim3v3/testdata/models018.lib");
     const BSIM3_NOIMOD1_ORACLE: &str =
         include_str!("../../tests/testdata/bsim3_noimod1_noise_ngspice46.dat");
     const BSIM3_NOIMOD2_ORACLE: &str =
@@ -4011,8 +4001,7 @@ J1 D G 0 JN M=2
 
     /// onoise tables of [`RES_FLICKER_DECK`] and its quiet-R2 variant from
     /// the official ngspice-46 binary.
-    const RES_FLICKER_ORACLE: &str =
-        include_str!("../../tests/testdata/res_flicker_ngspice46.dat");
+    const RES_FLICKER_ORACLE: &str = include_str!("../../tests/testdata/res_flicker_ngspice46.dat");
     const RES_QUIET_ORACLE: &str = include_str!("../../tests/testdata/res_quiet_ngspice46.dat");
 
     /// A current-carrying semiconductor resistor with model-card flicker:

@@ -364,36 +364,33 @@ fn lane_liveness_with_control(
                 check_cancelled(control)?;
             }
             match &value.kind {
-                CfgValueKind::BlockParameter => match incoming.get(&value.id) {
-                    Some(arguments) => {
+                CfgValueKind::BlockParameter => {
+                    if let Some(arguments) = incoming.get(&value.id) {
                         for argument in arguments {
                             changed |= live.union_from(value.id, *argument);
                         }
                     }
-                    None => {}
-                },
+                }
                 // Only `proposed`, not the limiter body: the rule chains through
                 // the value that was offered, so a lane only the body can reach
                 // would be a structural zero taking up a slot.
                 CfgValueKind::Limit { proposed, .. } => {
                     changed |= live.union_from(value.id, *proposed);
                 }
-                kind if differentiable(kind) => {
-                    match kind {
-                        CfgValueKind::Unary { input, .. } | CfgValueKind::Ddt { input, .. } => {
-                            changed |= live.union_from(value.id, *input);
-                        }
-                        CfgValueKind::Binary { left, right, .. } => {
-                            changed |= live.union_from(value.id, *left);
-                            changed |= live.union_from(value.id, *right);
-                        }
-                        CfgValueKind::Idt { input, ic, .. } => {
-                            changed |= live.union_from(value.id, *input);
-                            changed |= live.union_from(value.id, *ic);
-                        }
-                        _ => unreachable!("every differentiable value kind is covered"),
+                kind if differentiable(kind) => match kind {
+                    CfgValueKind::Unary { input, .. } | CfgValueKind::Ddt { input, .. } => {
+                        changed |= live.union_from(value.id, *input);
                     }
-                }
+                    CfgValueKind::Binary { left, right, .. } => {
+                        changed |= live.union_from(value.id, *left);
+                        changed |= live.union_from(value.id, *right);
+                    }
+                    CfgValueKind::Idt { input, ic, .. } => {
+                        changed |= live.union_from(value.id, *input);
+                        changed |= live.union_from(value.id, *ic);
+                    }
+                    _ => unreachable!("every differentiable value kind is covered"),
+                },
                 _ => {}
             }
         }
@@ -450,7 +447,9 @@ fn is_predicate(op: CfgBinaryOp) -> bool {
 
 /// Which lane, if any, the caller reserved for the limiter correction.
 fn correction_lane(lanes: &[AdSeed]) -> Option<usize> {
-    lanes.iter().position(|seed| *seed == AdSeed::LimiterCorrection)
+    lanes
+        .iter()
+        .position(|seed| *seed == AdSeed::LimiterCorrection)
 }
 
 fn seed_lanes(function: &CfgFunction, lanes: &[AdSeed]) -> Vec<(ValueId, usize)> {
@@ -790,10 +789,8 @@ impl<'a> AdBuilder<'a> {
                 let Some(shape) = self.target[usize::from(*param)] else {
                     continue;
                 };
-                let derivative = self.new_value(
-                    CfgValueType::Lanes(shape),
-                    CfgValueKind::BlockParameter,
-                );
+                let derivative =
+                    self.new_value(CfgValueType::Lanes(shape), CfgValueKind::BlockParameter);
                 self.blocks[usize::from(block.id)].params.push(derivative);
                 self.derivatives[usize::from(*param)] = Some(derivative);
                 added.push((position, shape));
@@ -1085,15 +1082,13 @@ impl<'a> AdBuilder<'a> {
             CfgBinaryOp::Div => {
                 let numerator = match (d_left, d_right) {
                     (Some(d_left), Some(d_right)) => {
-                        let quotient =
-                            self.push_binary(CfgBinaryOp::Div, left, right);
+                        let quotient = self.push_binary(CfgBinaryOp::Div, left, right);
                         let scaled = self.scale(d_right, quotient);
                         self.lane_binary(CfgBinaryOp::Sub, d_left, scaled, target)
                     }
                     (Some(d_left), None) => d_left,
                     (None, Some(d_right)) => {
-                        let quotient =
-                            self.push_binary(CfgBinaryOp::Div, left, right);
+                        let quotient = self.push_binary(CfgBinaryOp::Div, left, right);
                         let scaled = self.scale(d_right, quotient);
                         self.negate(scaled)
                     }
@@ -1119,12 +1114,9 @@ impl<'a> AdBuilder<'a> {
                     self.scale(d_right, scaled)
                 });
                 match (from_base, from_exponent) {
-                    (Some(from_base), Some(from_exponent)) => Some(self.lane_binary(
-                        CfgBinaryOp::Add,
-                        from_base,
-                        from_exponent,
-                        target,
-                    )),
+                    (Some(from_base), Some(from_exponent)) => {
+                        Some(self.lane_binary(CfgBinaryOp::Add, from_base, from_exponent, target))
+                    }
                     (Some(only), None) | (None, Some(only)) => Some(only),
                     (None, None) => None,
                 }
@@ -1137,8 +1129,7 @@ impl<'a> AdBuilder<'a> {
                 } else {
                     CfgBinaryOp::Ge
                 };
-                let takes_left =
-                    self.push_typed(CfgValueType::Boolean, comparison, left, right);
+                let takes_left = self.push_typed(CfgValueType::Boolean, comparison, left, right);
                 match (d_left, d_right) {
                     (Some(d_left), Some(d_right)) => {
                         let difference =
@@ -1150,8 +1141,7 @@ impl<'a> AdBuilder<'a> {
                     // db + c*(0 - db) is db*(1 - c).
                     (None, Some(d_right)) => {
                         let one = self.one;
-                        let takes_right =
-                            self.push_binary(CfgBinaryOp::Sub, one, takes_left);
+                        let takes_right = self.push_binary(CfgBinaryOp::Sub, one, takes_left);
                         Some(self.scale(d_right, takes_right))
                     }
                     (None, None) => None,
@@ -1190,8 +1180,7 @@ impl<'a> AdBuilder<'a> {
             // branch: 2*(x >= 0) - 1.
             CfgUnaryOp::Abs => {
                 let zero = self.constant(0.0);
-                let positive =
-                    self.push_typed(CfgValueType::Boolean, CfgBinaryOp::Ge, input, zero);
+                let positive = self.push_typed(CfgValueType::Boolean, CfgBinaryOp::Ge, input, zero);
                 let two = self.constant(2.0);
                 let doubled = self.push_binary(CfgBinaryOp::Mul, two, positive);
                 let one = self.one;

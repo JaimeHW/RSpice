@@ -1,22 +1,24 @@
 //! New View — small modal on the dialog primitive: the target
 //! library/cell context, a view name, and the view type as chips.
 
-use super::shared::{DialogActionOutcome, validate_lcv_name};
+use super::shared::{DialogActionOutcome, LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};
 use super::{Context, RSpiceApp, VERILOGA_LIBRARY_NAME};
 use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, chip, input_row, kv_row};
+use crate::workbench::AppState;
 
 /// Cell-view kinds backed by a complete, editable production surface.
 ///
 /// Other persisted `ViewType` variants remain valid for project interchange,
 /// but must not be offered by the creation workflow until their editor and
 /// storage contract are implemented end to end.
-const CREATABLE_VIEW_TYPES: [crate::state::ViewType; 4] = [
+const CREATABLE_VIEW_TYPES: [crate::state::ViewType; 5] = [
     crate::state::ViewType::Schematic,
     crate::state::ViewType::Testbench,
     crate::state::ViewType::Symbol,
+    crate::state::ViewType::Layout,
     crate::state::ViewType::VerilogA,
 ];
 
@@ -26,8 +28,49 @@ const fn is_creatable_view_type(view_type: crate::state::ViewType) -> bool {
         crate::state::ViewType::Schematic
             | crate::state::ViewType::Testbench
             | crate::state::ViewType::Symbol
+            | crate::state::ViewType::Layout
             | crate::state::ViewType::VerilogA
     )
+}
+
+impl AppState {
+    /// Open New View against an exact, currently writable cell identity.
+    ///
+    /// The target is resolved before any dialog state changes. This keeps a
+    /// stale row click from opening an apparently valid transaction against a
+    /// different or read-only object.
+    pub(crate) fn open_new_view_dialog(&mut self, library: &str, cell: &str) -> Result<(), String> {
+        let target = self
+            .library_manager
+            .get_library(library)
+            .ok_or_else(|| format!("Library '{library}' no longer exists."))?;
+        if target.read_only {
+            return Err(format!(
+                "Library '{library}' is read-only; a new view cannot be created."
+            ));
+        }
+        let cell_target = target
+            .get_cell(cell)
+            .ok_or_else(|| format!("Cell '{library}/{cell}' no longer exists."))?;
+        let view_type = CREATABLE_VIEW_TYPES
+            .into_iter()
+            .find(|view_type| {
+                !cell_target
+                    .views
+                    .values()
+                    .any(|view| view.view_type == *view_type)
+            })
+            .unwrap_or(crate::state::ViewType::Schematic);
+
+        self.dialogs.new_view_library = library.to_owned();
+        self.dialogs.new_view_cell = cell.to_owned();
+        self.dialogs.new_view_name = view_type.display_name().to_owned();
+        self.dialogs.new_view_type = view_type;
+        self.dialogs.new_view_error = None;
+        self.dialogs.new_view_library_revision = self.library_manager.revision();
+        self.dialogs.new_view_dialog = true;
+        Ok(())
+    }
 }
 
 impl RSpiceApp {
@@ -40,11 +83,17 @@ impl RSpiceApp {
         let mut should_create = false;
         let mut persist_global_veriloga = false;
 
+        let catalog_current =
+            self.state.library_manager.revision() == self.state.dialogs.new_view_library_revision;
+        if !catalog_current {
+            self.state.dialogs.new_view_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
+        }
         let dialogs = &mut self.state.dialogs;
         let can_create = !dialogs.new_view_name.trim().is_empty()
             && !dialogs.new_view_library.is_empty()
             && !dialogs.new_view_cell.is_empty()
-            && is_creatable_view_type(dialogs.new_view_type);
+            && is_creatable_view_type(dialogs.new_view_type)
+            && catalog_current;
 
         let choice = Dialog::new("Library", "New view", "Create")
             .description("Create a named view of the selected type in this library cell.")
@@ -131,6 +180,10 @@ impl RSpiceApp {
         let library = self.state.dialogs.new_view_library.clone();
         let cell = self.state.dialogs.new_view_cell.clone();
 
+        if self.state.library_manager.revision() != self.state.dialogs.new_view_library_revision {
+            self.state.dialogs.new_view_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
+            return outcome;
+        }
         if let Some(error) = validate_lcv_name(&view_name, "View name") {
             self.state.dialogs.new_view_error = Some(error);
             return outcome;
@@ -182,12 +235,28 @@ impl RSpiceApp {
             return outcome;
         }
 
+        if view_type == crate::state::ViewType::Layout {
+            return self.create_layout_cell_view(&library, &cell, &view_name);
+        }
         if view_type == crate::state::ViewType::VerilogA {
             return self.create_veriloga_cell_view(&library, &cell, &view_name);
         }
 
         use crate::state::View;
 
+        let project_mutation = match self.state.preflight_project_library_mutation(
+            crate::state::ProjectLibraryMutation::CreateView {
+                library: library.clone(),
+                cell: cell.clone(),
+                view: view_name.clone(),
+            },
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.state.dialogs.new_view_error = Some(error);
+                return outcome;
+            }
+        };
         let seeded_schematic = self.state.new_schematic_document();
         if let Some(lib) = self.state.library_manager.get_library_mut(&library) {
             if let Some(cell_ref) = lib.get_cell_mut(&cell) {
@@ -202,6 +271,8 @@ impl RSpiceApp {
                         .schematic_buffers
                         .insert(reference.key(), seeded_schematic);
                 }
+                self.state
+                    .publish_project_library_mutation(project_mutation);
                 self.state.push_user_message(ConsoleMessage::info(format!(
                     "Created view '{}' in cell '{}'",
                     view_name, cell
@@ -232,6 +303,105 @@ impl RSpiceApp {
             self.state.dialogs.new_view_error = Some(format!("Library '{}' not found", library));
         }
 
+        outcome
+    }
+
+    fn create_layout_cell_view(
+        &mut self,
+        library: &str,
+        cell: &str,
+        view_name: &str,
+    ) -> DialogActionOutcome {
+        let mut outcome = DialogActionOutcome::default();
+        let reference = crate::state::CellViewRef::new(library, cell, view_name);
+        let technology = match self.state.exact_project_layout_technology_binding() {
+            Ok(technology) => technology,
+            Err(error) => {
+                self.state.dialogs.new_view_error = Some(format!(
+                    "A Layout view requires the project's exact validated signed PDK: {error}"
+                ));
+                return outcome;
+            }
+        };
+        let document =
+            match crate::state::PhysicalLayoutDocument::try_new(reference.clone(), technology) {
+                Ok(document) => document,
+                Err(error) => {
+                    self.state.dialogs.new_view_error =
+                        Some(format!("The physical-layout document is invalid: {error}"));
+                    return outcome;
+                }
+            };
+        let candidate_layouts = match self
+            .state
+            .workspace
+            .prepare_insert_physical_layout_document(document)
+        {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                self.state.dialogs.new_view_error = Some(format!(
+                    "The physical-layout document could not be retained: {error}"
+                ));
+                return outcome;
+            }
+        };
+        let mut candidate_libraries = self.state.library_manager.clone();
+        let Some(candidate_library) = candidate_libraries.get_library_mut(library) else {
+            self.state.dialogs.new_view_error = Some(format!("Library '{library}' not found"));
+            return outcome;
+        };
+        if candidate_library.read_only {
+            self.state.dialogs.new_view_error = Some(format!(
+                "Library '{library}' became read only before the Layout view could be created"
+            ));
+            return outcome;
+        }
+        let Some(candidate_cell) = candidate_library.get_cell_mut(cell) else {
+            self.state.dialogs.new_view_error =
+                Some(format!("Cell '{cell}' not found in library '{library}'"));
+            return outcome;
+        };
+        let requested_identity =
+            crate::state::canonical_cell_view_owner_key(library, cell, view_name);
+        if candidate_cell.views.values().any(|view| {
+            crate::state::canonical_cell_view_owner_key(library, cell, &view.name)
+                == requested_identity
+        }) {
+            self.state.dialogs.new_view_error = Some(format!(
+                "View '{view_name}' conflicts with an existing canonical view identity in cell '{cell}'"
+            ));
+            return outcome;
+        }
+        candidate_cell.add_view(crate::state::View::new(
+            view_name,
+            crate::state::ViewType::Layout,
+        ));
+        let project_mutation = match self.state.preflight_project_library_mutation(
+            crate::state::ProjectLibraryMutation::CreateView {
+                library: library.to_owned(),
+                cell: cell.to_owned(),
+                view: view_name.to_owned(),
+            },
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.state.dialogs.new_view_error = Some(error);
+                return outcome;
+            }
+        };
+
+        self.state.library_manager = candidate_libraries;
+        self.state
+            .workspace
+            .commit_prepared_physical_layout_catalog(candidate_layouts);
+        self.state
+            .publish_project_library_mutation(project_mutation);
+        self.state.dialogs.new_view_error = None;
+        self.state.open_workspace_view(reference);
+        self.state.push_user_message(ConsoleMessage::info(format!(
+            "Created Layout view '{view_name}' for cell '{cell}' under the exact signed project PDK."
+        )));
+        outcome.close = true;
         outcome
     }
 
@@ -276,23 +446,24 @@ impl RSpiceApp {
                 return outcome;
             }
         };
-        let receipt = match crate::workbench::documents::code_workspace::compile_project_bundle_receipt(
-            self.state.workspace.project.id(),
-            &bundle,
-            Some(&module_name),
-        ) {
-            Ok(receipt) => receipt,
-            Err(diagnostics) => {
-                let detail = diagnostics
-                    .first()
-                    .map(|diagnostic| format!("{}: {}", diagnostic.message, diagnostic.detail))
-                    .unwrap_or_else(|| "the compiler returned no diagnostic".to_owned());
-                self.state.dialogs.new_view_error = Some(format!(
-                    "The generated Verilog-A starter did not pass semantic compilation: {detail}"
-                ));
-                return outcome;
-            }
-        };
+        let receipt =
+            match crate::workbench::documents::code_workspace::compile_project_bundle_receipt(
+                self.state.workspace.project.id(),
+                &bundle,
+                Some(&module_name),
+            ) {
+                Ok(receipt) => receipt,
+                Err(diagnostics) => {
+                    let detail = diagnostics
+                        .first()
+                        .map(|diagnostic| format!("{}: {}", diagnostic.message, diagnostic.detail))
+                        .unwrap_or_else(|| "the compiler returned no diagnostic".to_owned());
+                    self.state.dialogs.new_view_error = Some(format!(
+                        "The generated Verilog-A starter did not pass semantic compilation: {detail}"
+                    ));
+                    return outcome;
+                }
+            };
         if let Err(error) = bundle.mark_validated() {
             self.state.dialogs.new_view_error = Some(format!(
                 "The compiled Verilog-A source could not retain its validation identity: {error}"
@@ -356,9 +527,24 @@ impl RSpiceApp {
         }
         candidate_cell.add_view(view);
 
+        let project_mutation = match self.state.preflight_project_library_mutation(
+            crate::state::ProjectLibraryMutation::CreateView {
+                library: library.to_owned(),
+                cell: cell.to_owned(),
+                view: view_name.to_owned(),
+            },
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.state.dialogs.new_view_error = Some(error);
+                return outcome;
+            }
+        };
         self.state.workspace.project_sources = candidate_sources;
         self.state.workspace.project_sources_dirty = true;
         self.state.library_manager = candidate_libraries;
+        self.state
+            .publish_project_library_mutation(project_mutation);
         self.state.dialogs.new_view_error = None;
         self.state.open_workspace_view(reference);
         self.state
@@ -554,10 +740,57 @@ fn starter_veriloga_source(module_name: &str, ports: &[crate::state::PortSpec]) 
 mod tests {
     use super::*;
     use crate::state::{
-        Cell, Library, PortDirection, ProjectSourceBundle, ProjectSourceLanguage,
+        Cell, CellViewRef, Library, PortDirection, ProjectSourceBundle, ProjectSourceLanguage,
         ProjectSourceOwner, PropertyCommitPolicy, SymbolDocument, SymbolPin, View, ViewType,
     };
     use crate::workbench::ChoicePreference;
+
+    #[test]
+    fn new_view_entry_point_resolves_exact_writable_cell_before_opening() {
+        let mut state = AppState::default();
+        let mut library = Library::new("entry_point_test");
+        let mut cell = Cell::new("filter");
+        cell.add_view(View::new("symbol", ViewType::Symbol));
+        library.add_cell(cell);
+        state.library_manager.add_library(library);
+
+        state
+            .open_new_view_dialog("entry_point_test", "filter")
+            .expect("writable exact target should open");
+
+        assert!(state.dialogs.new_view_dialog);
+        assert_eq!(state.dialogs.new_view_library, "entry_point_test");
+        assert_eq!(state.dialogs.new_view_cell, "filter");
+        assert_eq!(state.dialogs.new_view_type, ViewType::Schematic);
+        assert_eq!(state.dialogs.new_view_name, "schematic");
+        assert!(state.dialogs.new_view_error.is_none());
+        assert_eq!(
+            state.dialogs.new_view_library_revision,
+            state.library_manager.revision()
+        );
+    }
+
+    #[test]
+    fn new_view_entry_point_rejects_read_only_or_stale_target_without_mutation() {
+        let mut state = AppState::default();
+        let mut library = Library::new("entry_point_read_only");
+        library.read_only = true;
+        library.add_cell(Cell::new("filter"));
+        state.library_manager.add_library(library);
+        state.dialogs.new_view_library = "sentinel".to_owned();
+
+        let read_only_error = state
+            .open_new_view_dialog("entry_point_read_only", "filter")
+            .expect_err("read-only target must fail closed");
+        let stale_error = state
+            .open_new_view_dialog("missing", "filter")
+            .expect_err("stale target must fail closed");
+
+        assert!(read_only_error.contains("read-only"));
+        assert!(stale_error.contains("no longer exists"));
+        assert!(!state.dialogs.new_view_dialog);
+        assert_eq!(state.dialogs.new_view_library, "sentinel");
+    }
 
     #[test]
     fn creating_schematic_view_freezes_current_defaults_into_its_buffer() {
@@ -574,10 +807,29 @@ mod tests {
         app.state.dialogs.new_view_cell = "filter".to_owned();
         app.state.dialogs.new_view_name = "schematic".to_owned();
         app.state.dialogs.new_view_type = crate::state::ViewType::Schematic;
+        app.state.dialogs.new_view_library_revision = app.state.library_manager.revision();
+        let project_revision_before = app.state.workspace.project.revision().get();
 
         let outcome = app.handle_new_view_create_action();
 
         assert!(outcome.close);
+        assert_eq!(
+            app.state.workspace.project.revision().get(),
+            project_revision_before + 1
+        );
+        assert!(matches!(
+            app.state
+                .workspace
+                .project
+                .library_mutation_audit()
+                .last()
+                .map(|receipt| receipt.mutation()),
+            Some(crate::state::ProjectLibraryMutation::CreateView {
+                library,
+                cell,
+                view,
+            }) if library == "view_policy_test" && cell == "filter" && view == "schematic"
+        ));
         let key = crate::state::CellViewRef::new("view_policy_test", "filter", "schematic").key();
         let document = app
             .state
@@ -599,6 +851,7 @@ mod tests {
                 crate::state::ViewType::Schematic,
                 crate::state::ViewType::Testbench,
                 crate::state::ViewType::Symbol,
+                crate::state::ViewType::Layout,
                 crate::state::ViewType::VerilogA,
             ]
         );
@@ -619,8 +872,9 @@ mod tests {
         app.state.library_manager.add_library(library);
         app.state.dialogs.new_view_library = "view_policy_test".to_owned();
         app.state.dialogs.new_view_cell = "filter".to_owned();
-        app.state.dialogs.new_view_name = "layout".to_owned();
-        app.state.dialogs.new_view_type = crate::state::ViewType::Layout;
+        app.state.dialogs.new_view_name = "doc".to_owned();
+        app.state.dialogs.new_view_type = crate::state::ViewType::Document;
+        app.state.dialogs.new_view_library_revision = app.state.library_manager.revision();
 
         let outcome = app.handle_new_view_create_action();
 
@@ -630,7 +884,7 @@ mod tests {
                 .library_manager
                 .get_library("view_policy_test")
                 .and_then(|library| library.get_cell("filter"))
-                .is_some_and(|cell| cell.get_view("layout").is_none())
+                .is_some_and(|cell| cell.get_view("doc").is_none())
         );
         assert!(
             app.state
@@ -638,6 +892,96 @@ mod tests {
                 .new_view_error
                 .as_deref()
                 .is_some_and(|error| error.contains("production editor"))
+        );
+    }
+
+    #[test]
+    fn creating_layout_view_atomically_retains_exact_signed_pdk_document_and_opens_it() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.provision_test_project_technology_contract();
+        let mut library = Library::new("layout_designs");
+        library.add_cell(Cell::new("precision_amp"));
+        app.state.library_manager.add_library(library);
+        app.state.dialogs.new_view_library = "layout_designs".to_owned();
+        app.state.dialogs.new_view_cell = "precision_amp".to_owned();
+        app.state.dialogs.new_view_name = "layout".to_owned();
+        app.state.dialogs.new_view_type = ViewType::Layout;
+        app.state.dialogs.new_view_library_revision = app.state.library_manager.revision();
+        let project_revision_before = app.state.workspace.project.revision().get();
+
+        let outcome = app.handle_new_view_create_action();
+
+        assert!(outcome.close, "{:?}", app.state.dialogs.new_view_error);
+        assert_eq!(
+            app.state.workspace.project.revision().get(),
+            project_revision_before + 1
+        );
+        let reference = CellViewRef::new("layout_designs", "precision_amp", "layout");
+        let view = app
+            .state
+            .library_manager
+            .get_library("layout_designs")
+            .and_then(|library| library.get_cell("precision_amp"))
+            .and_then(|cell| cell.get_view("layout"))
+            .expect("Layout view commits");
+        assert_eq!(view.view_type, ViewType::Layout);
+        let document = app
+            .state
+            .workspace
+            .physical_layout_document(&reference)
+            .expect("authoritative physical-layout document commits atomically");
+        assert_eq!(document.owner(), &reference);
+        assert_eq!(document.technology().package_id(), "demo180");
+        assert_eq!(document.technology().stack_id(), "1P2M");
+        assert_eq!(app.state.workspace.active_view, reference);
+        assert_eq!(
+            app.state.workbench.workspace,
+            crate::workbench::state::Workspace::Design
+        );
+        crate::workbench::lifecycle::project_lifecycle::snapshot(&app.state)
+            .expect("created Layout view and document validate as one project transaction");
+    }
+
+    #[test]
+    fn creating_layout_view_without_exact_signed_project_pdk_is_transactional() {
+        let mut app = RSpiceApp::test_instance();
+        let mut library = Library::new("layout_designs");
+        library.add_cell(Cell::new("precision_amp"));
+        app.state.library_manager.add_library(library);
+        app.state.dialogs.new_view_library = "layout_designs".to_owned();
+        app.state.dialogs.new_view_cell = "precision_amp".to_owned();
+        app.state.dialogs.new_view_name = "layout".to_owned();
+        app.state.dialogs.new_view_type = ViewType::Layout;
+        app.state.dialogs.new_view_library_revision = app.state.library_manager.revision();
+        let project_revision_before = app.state.workspace.project.revision();
+
+        let outcome = app.handle_new_view_create_action();
+
+        assert!(!outcome.close);
+        assert_eq!(
+            app.state.workspace.project.revision(),
+            project_revision_before
+        );
+        let reference = CellViewRef::new("layout_designs", "precision_amp", "layout");
+        assert!(
+            app.state
+                .library_manager
+                .get_library("layout_designs")
+                .and_then(|library| library.get_cell("precision_amp"))
+                .is_some_and(|cell| cell.get_view("layout").is_none())
+        );
+        assert!(
+            app.state
+                .workspace
+                .physical_layout_document(&reference)
+                .is_none()
+        );
+        assert!(
+            app.state
+                .dialogs
+                .new_view_error
+                .as_deref()
+                .is_some_and(|error| error.contains("exact validated signed PDK"))
         );
     }
 
@@ -653,6 +997,7 @@ mod tests {
         app.state.dialogs.new_view_cell = "filter".to_owned();
         app.state.dialogs.new_view_name = "MOD\u{c8}LE".to_owned();
         app.state.dialogs.new_view_type = ViewType::Schematic;
+        app.state.dialogs.new_view_library_revision = app.state.library_manager.revision();
         let buffers_before = app.state.workspace.schematic_buffers.len();
 
         let outcome = app.handle_new_view_create_action();
@@ -699,10 +1044,16 @@ mod tests {
         app.state.dialogs.new_view_cell = "precision_amp".to_owned();
         app.state.dialogs.new_view_name = "veriloga".to_owned();
         app.state.dialogs.new_view_type = ViewType::VerilogA;
+        app.state.dialogs.new_view_library_revision = app.state.library_manager.revision();
+        let project_revision_before = app.state.workspace.project.revision().get();
 
         let outcome = app.handle_new_view_create_action();
 
         assert!(outcome.close, "{:?}", app.state.dialogs.new_view_error);
+        assert_eq!(
+            app.state.workspace.project.revision().get(),
+            project_revision_before + 1
+        );
         let reference =
             crate::state::CellViewRef::new("behavioral_models", "precision_amp", "veriloga");
         let owner = ProjectSourceOwner::cell_view(reference.clone());
@@ -746,7 +1097,8 @@ mod tests {
             app.state.ui.code_workspace.page,
             crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA
         );
-        let selected = crate::workbench::documents::code_workspace::selected_veriloga_source(&app).unwrap();
+        let selected =
+            crate::workbench::documents::code_workspace::selected_veriloga_source(&app).unwrap();
         assert_eq!(selected.bundle().id(), bundle.id());
         assert_eq!(selected.selected_module(), Some("rspice_precision_amp_va"));
         assert!(selected.bundle().validation_is_current());
@@ -781,6 +1133,7 @@ mod tests {
         app.state.dialogs.new_view_cell = "gain_stage".to_owned();
         app.state.dialogs.new_view_name = "veriloga".to_owned();
         app.state.dialogs.new_view_type = ViewType::VerilogA;
+        app.state.dialogs.new_view_library_revision = app.state.library_manager.revision();
 
         let outcome = app.handle_new_view_create_action();
 
@@ -797,5 +1150,41 @@ mod tests {
                 .is_some_and(|cell| cell.get_view("veriloga").is_none())
         );
         assert!(app.state.dialogs.new_view_error.is_some());
+    }
+
+    #[test]
+    fn new_view_rejects_catalog_change_after_dialog_open_without_mutation() {
+        let mut app = RSpiceApp::test_instance();
+        let mut library = Library::new("stale_test");
+        library.add_cell(Cell::new("filter"));
+        app.state.library_manager.add_library(library);
+        app.state.dialogs.new_view_library = "stale_test".to_owned();
+        app.state.dialogs.new_view_cell = "filter".to_owned();
+        app.state.dialogs.new_view_name = "schematic".to_owned();
+        app.state.dialogs.new_view_type = ViewType::Schematic;
+        app.state.dialogs.new_view_library_revision = app.state.library_manager.revision();
+        app.state
+            .library_manager
+            .add_library(Library::new("intervening_change"));
+        let project_revision_before = app.state.workspace.project.revision();
+
+        let outcome = app.handle_new_view_create_action();
+
+        assert!(!outcome.close);
+        assert!(
+            app.state
+                .library_manager
+                .get_library("stale_test")
+                .and_then(|library| library.get_cell("filter"))
+                .is_some_and(|cell| cell.get_view("schematic").is_none())
+        );
+        assert_eq!(
+            app.state.workspace.project.revision(),
+            project_revision_before
+        );
+        assert_eq!(
+            app.state.dialogs.new_view_error.as_deref(),
+            Some(LIBRARY_CATALOG_STALE_MESSAGE)
+        );
     }
 }

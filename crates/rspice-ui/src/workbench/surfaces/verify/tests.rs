@@ -238,6 +238,7 @@ fn tuning_session_discovers_real_variables_and_revert_is_non_destructive() {
 #[test]
 fn tuning_commit_is_one_plan_revision_and_queues_the_required_run() {
     let mut app = RSpiceApp::test_instance();
+    app.state.provision_test_project_technology_contract();
     app.state.workspace.project_sources = Default::default();
     crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
     let variable_id = add_tuning_variable(&mut app);
@@ -321,6 +322,7 @@ fn reverting_a_literal_value_proposal_discards_variable_and_binding_only() {
 #[test]
 fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
     let mut app = RSpiceApp::test_instance();
+    app.state.provision_test_project_technology_contract();
     app.state.workspace.project_sources = Default::default();
     crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
     let component_id = app
@@ -398,8 +400,87 @@ fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
 }
 
 #[test]
+fn tuning_commit_rechecks_live_schematic_authority_after_staging() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workspace.project_sources = Default::default();
+    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
+    let component_id = app
+        .state
+        .schematic
+        .components
+        .iter()
+        .find(|component| component.kind == crate::state::ComponentType::Resistor)
+        .map(|component| component.id)
+        .expect("voltage divider resistor");
+    let component_index = app
+        .state
+        .schematic
+        .components
+        .iter()
+        .position(|component| component.id == component_id)
+        .unwrap();
+    app.state.schematic.components[component_index].name = "RLOCKED".to_owned();
+    app.state.schematic.components[component_index].value = "10k".to_owned();
+    app.state.schematic.bump_topology_version();
+    stage_literal_tuning_binding(&mut app, component_id, "RLOCKED_VALUE");
+
+    let workspace_before = serde_json::to_vec(&app.state.workspace).unwrap();
+    let plan_revision_before = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .unwrap()
+        .revision();
+    let topology_before = app.state.schematic.topology_version();
+    let value_before = app.state.schematic.components[component_index]
+        .value
+        .clone();
+    let can_undo_before = app.state.schematic.can_undo();
+
+    app.state.workbench.safe_mode.activate(
+        crate::workbench::state::LocalSafeModeOptions {
+            open_project_read_only: true,
+            ..Default::default()
+        },
+        String::new(),
+    );
+    assert!(app.state.schematic_edit_read_only());
+
+    let reason = tuning_commit_block_reason(&app);
+    assert_eq!(
+        reason,
+        "The staged instance Value binding cannot be committed because the active schematic is read-only."
+    );
+    let error = tuning::commit_tuning_and_run(&mut app)
+        .expect_err("authority revoked after staging must prevent every authoritative write");
+
+    assert_eq!(error, reason);
+    assert_eq!(
+        serde_json::to_vec(&app.state.workspace).unwrap(),
+        workspace_before
+    );
+    assert_eq!(
+        app.state
+            .sim_setup
+            .stable_analysis_plan()
+            .unwrap()
+            .revision(),
+        plan_revision_before
+    );
+    assert_eq!(app.state.schematic.topology_version(), topology_before);
+    assert_eq!(
+        app.state.schematic.components[component_index].value,
+        value_before
+    );
+    assert_eq!(app.state.schematic.can_undo(), can_undo_before);
+    assert!(tuning_is_dirty(&app));
+    assert!(!app.state.simulation.trigger_simulation);
+}
+
+#[test]
 fn failed_literal_value_run_preparation_rolls_back_plan_and_schematic() {
     let mut app = RSpiceApp::test_instance();
+    app.state.provision_test_project_technology_contract();
     let component_id = app.state.schematic.add_component(
         crate::state::ComponentType::Resistor,
         crate::state::Point::origin(),

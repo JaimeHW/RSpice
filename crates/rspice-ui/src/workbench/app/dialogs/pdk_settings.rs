@@ -13,9 +13,6 @@ use std::path::PathBuf;
 
 use egui::{Context, Rect, Sense, Stroke, Ui, vec2};
 
-use crate::workbench::app_state::session::pdk_settings::{
-    PdkSettingsDialogResult, PdkSettingsDialogState,
-};
 use crate::state::pdk_config::{DiscoveredFile, LibraryPathEntry};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight, mix};
@@ -23,6 +20,9 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogSize, IconButton, PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W,
     PaneSide, chip, pane_footer, pane_header, pane_section_label, two_pane,
+};
+use crate::workbench::app_state::session::pdk_settings::{
+    PdkSettingsDialogResult, PdkSettingsDialogState,
 };
 
 /// Height of the two-pane region.
@@ -149,8 +149,8 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> bool {
         header_caption(ui, "Sources");
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            // Native folder pickers don't exist in the browser build; the
-            // inline "+ Add" input remains the entry point there.
+            // Native folder pickers don't exist in the browser build. Browser
+            // imports accept one complete sibling-file dependency bundle.
             #[cfg(not(target_arch = "wasm32"))]
             if chip(ui, "Browse…", false).clicked()
                 && let Some(path) = rfd::FileDialog::new().pick_folder()
@@ -158,7 +158,7 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> bool {
                 state.add_library_path(path.to_string_lossy().to_string());
             }
             #[cfg(target_arch = "wasm32")]
-            if chip(ui, "Import file…", false).clicked() {
+            if chip(ui, "Import bundle…", false).clicked() {
                 import_browser_file = true;
             }
             if chip(ui, "+ Add", false).clicked() {
@@ -274,14 +274,19 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> bool {
             }
             SourceAction::FinishEdit(idx) => {
                 let buffer = state.edit_path_buffer.trim().to_owned();
+                let mut changed = false;
                 if !buffer.is_empty() {
                     let paths = state.config.library_paths_mut();
-                    if idx < paths.len() {
+                    if idx < paths.len() && paths[idx].path != buffer {
                         paths[idx].path = buffer;
+                        changed = true;
                     }
                 }
                 state.editing_path_index = None;
                 state.edit_path_buffer.clear();
+                if changed {
+                    state.rescan();
+                }
             }
             SourceAction::Remove(idx) => state.remove_library_path(idx),
             SourceAction::Add(path) => {

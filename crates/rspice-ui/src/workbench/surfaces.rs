@@ -2,11 +2,13 @@
 
 mod automation;
 mod design;
+mod library_cellview_manager;
 mod model_correlation;
 mod model_correlation_controller;
 mod model_editor;
 mod models;
 mod netlist;
+mod pdk_technology_admin;
 mod project;
 pub(crate) mod report_authoring;
 mod results;
@@ -46,6 +48,15 @@ fn show_primary(ui: &mut Ui, app: &mut RSpiceApp) {
         model_correlation::show(ui, app);
         return;
     }
+    if app.state.workbench.current_route().surface_id() == super::SurfaceId::PdkTechnologyAdmin {
+        pdk_technology_admin::show(ui, app);
+        return;
+    }
+    if app.state.workbench.current_route().surface_id() == super::SurfaceId::LibraryCellviewManager
+    {
+        library_cellview_manager::show(ui, app);
+        return;
+    }
     match app.state.workbench.workspace {
         Workspace::Project => project::show(ui, app),
         Workspace::Design => design::show(ui, app),
@@ -59,8 +70,12 @@ fn show_primary(ui: &mut Ui, app: &mut RSpiceApp) {
                 crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist => {
                     netlist::show_prepared(ui, app)
                 }
-                crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA => veriloga::show(ui, app),
-                crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation => automation::show(ui, app),
+                crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA => {
+                    veriloga::show(ui, app)
+                }
+                crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation => {
+                    automation::show(ui, app)
+                }
             }
         }
     }

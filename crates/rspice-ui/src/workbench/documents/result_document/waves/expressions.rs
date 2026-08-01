@@ -109,13 +109,18 @@ pub(super) fn expr_editor_layout(
 /// The inline expression editor row under a strip header (when open for
 /// this strip): mono input, Enter/Add commits, Esc closes, and a bounded
 /// validation message that moves below the controls on compact surfaces.
-pub(super) fn expr_editor_row(ui: &mut Ui, state: &mut AppState, analysis_index: usize) {
+pub(super) fn expr_editor_row(
+    ui: &mut Ui,
+    state: &mut AppState,
+    analysis_key: AnalysisPresentationKey,
+    analysis_index: usize,
+) {
     let Some(editor) = state
         .ui
         .results
         .expr_editor
         .as_mut()
-        .filter(|editor| editor.analysis_index == analysis_index)
+        .filter(|editor| editor.analysis == analysis_key)
     else {
         return;
     };
@@ -297,8 +302,8 @@ pub(super) fn expr_editor_row(ui: &mut Ui, state: &mut AppState, analysis_index:
             );
             match series {
                 Ok(series) => {
-                    state.ui.results.expr_cache.insert(
-                        (analysis_index, text.clone()),
+                    state.ui.results.analysis_expr_cache.insert(
+                        (analysis_key, text.clone()),
                         ExprSeries {
                             version: expression_version(
                                 state.simulation.data_version,
@@ -310,13 +315,17 @@ pub(super) fn expr_editor_row(ui: &mut Ui, state: &mut AppState, analysis_index:
                     state
                         .ui
                         .results
-                        .exprs
-                        .entry(analysis_index)
+                        .analysis_exprs
+                        .entry(analysis_key)
                         .or_default()
                         .push(ExprTrace {
                             text,
                             visible: true,
                         });
+                    state
+                        .ui
+                        .results
+                        .sync_expression_projection(analysis_key, analysis_index);
                     state.ui.results.expr_editor = None;
                 }
                 Err(error) => {
@@ -355,36 +364,35 @@ pub(super) fn evaluate_expression(
     };
     match calculator::evaluator::evaluate(&expr, &ctx) {
         Ok(calculator::CalcValue::Waveform(x, y)) if !x.is_empty() => {
-            let (x, y) =
-                match selection {
-                    None => (x, y),
-                    Some(selection)
-                        if x.len() == y.len()
-                            && selection
-                                .source_indices
-                                .last()
-                                .is_none_or(|index| *index < x.len()) =>
-                    {
-                        (
-                            selection
-                                .source_indices
-                                .iter()
-                                .map(|index| x[*index])
-                                .collect(),
-                            selection
-                                .source_indices
-                                .iter()
-                                .map(|index| y[*index])
-                                .collect(),
-                        )
-                    }
-                    Some(_) => {
-                        return Err(
-                            "expression sample count does not match the retained family manifest"
-                                .to_owned(),
-                        );
-                    }
-                };
+            let (x, y) = match selection {
+                None => (x, y),
+                Some(selection)
+                    if x.len() == y.len()
+                        && selection
+                            .source_indices
+                            .last()
+                            .is_none_or(|index| *index < x.len()) =>
+                {
+                    (
+                        selection
+                            .source_indices
+                            .iter()
+                            .map(|index| x[*index])
+                            .collect(),
+                        selection
+                            .source_indices
+                            .iter()
+                            .map(|index| y[*index])
+                            .collect(),
+                    )
+                }
+                Some(_) => {
+                    return Err(
+                        "expression sample count does not match the retained family manifest"
+                            .to_owned(),
+                    );
+                }
+            };
             Ok((x.into(), y.into()))
         }
         Ok(calculator::CalcValue::Waveform(..)) => Err("expression produced no samples".to_owned()),
@@ -446,8 +454,8 @@ pub(super) fn resolve_strip_exprs(
     let exprs: Vec<(usize, ExprTrace)> = state
         .ui
         .results
-        .exprs
-        .get(&model.analysis_index)
+        .analysis_exprs
+        .get(&model.analysis_key)
         .map(|list| list.iter().cloned().enumerate().collect())
         .unwrap_or_default();
     if exprs.is_empty() {
@@ -458,11 +466,11 @@ pub(super) fn resolve_strip_exprs(
     let version = expression_version(state.simulation.data_version, sample_selection.as_ref());
     let mut resolved = Vec::new();
     for (slot, expr) in exprs {
-        let key = (model.analysis_index, expr.text.clone());
+        let key = (model.analysis_key, expr.text.clone());
         let fresh = state
             .ui
             .results
-            .expr_cache
+            .analysis_expr_cache
             .get(&key)
             .is_some_and(|s| s.version == version);
         if !fresh {
@@ -478,21 +486,27 @@ pub(super) fn resolve_strip_exprs(
                     expr.text, error
                 )));
             }
-            state.ui.results.expr_cache.insert(
-                key.clone(),
-                ExprSeries { version, series },
-            );
+            state
+                .ui
+                .results
+                .analysis_expr_cache
+                .insert(key.clone(), ExprSeries { version, series });
         }
         if !expr.visible {
             continue;
         }
-        let cached = state.ui.results.expr_cache.get(&key).and_then(|cached| {
-            cached
-                .series
-                .as_ref()
-                .ok()
-                .map(|(x, y)| (Arc::clone(x), Arc::clone(y)))
-        });
+        let cached = state
+            .ui
+            .results
+            .analysis_expr_cache
+            .get(&key)
+            .and_then(|cached| {
+                cached
+                    .series
+                    .as_ref()
+                    .ok()
+                    .map(|(x, y)| (Arc::clone(x), Arc::clone(y)))
+            });
         let Some((x, y)) = cached else {
             continue;
         };
@@ -505,7 +519,7 @@ pub(super) fn resolve_strip_exprs(
             continue;
         };
         let base_color = expr_color(tokens, model.traces.len() + slot);
-        let base_cache_key = expr_cache_key(model.analysis_index, &expr.text);
+        let base_cache_key = expr_cache_key(model.analysis_key, &expr.text);
         let base_label = elide(&expr.text, 24);
         for projection in projections {
             let family_style = projection.group.map(|group| group.style);
@@ -531,10 +545,10 @@ pub(super) fn resolve_strip_exprs(
 
 /// Stable decimation-cache identity for an expression trace. The high bit
 /// keeps it out of the waveform trace_key space.
-pub(super) fn expr_cache_key(analysis_index: usize, text: &str) -> u64 {
+pub(super) fn expr_cache_key(analysis: AnalysisPresentationKey, text: &str) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    (analysis_index, text).hash(&mut hasher);
+    (analysis, text).hash(&mut hasher);
     hasher.finish() | (1 << 63)
 }
 

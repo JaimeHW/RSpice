@@ -88,6 +88,42 @@ impl SchematicState {
         );
     }
 
+    /// Frame an exact world-space rectangle with a stable screen-space inset.
+    ///
+    /// Drawing-sheet paper uses physical dimensions which are not necessarily
+    /// integral schematic units (for example, US Letter is 215.9 mm wide).
+    /// Keeping this path in `f64` avoids coercing those edges while preserving
+    /// the editor's shared 25%-800% zoom contract.
+    pub(crate) fn zoom_to_fit_world_rect(
+        &mut self,
+        bounds: (f64, f64, f64, f64),
+        viewport_width: f64,
+        viewport_height: f64,
+        screen_inset: f64,
+    ) {
+        let (min_x, min_y, max_x, max_y) = bounds;
+        let width = (max_x - min_x).max(f64::EPSILON);
+        let height = (max_y - min_y).max(f64::EPSILON);
+        let inset_x = screen_inset
+            .max(0.0)
+            .min((viewport_width - 1.0).max(0.0) * 0.5);
+        let inset_y = screen_inset
+            .max(0.0)
+            .min((viewport_height - 1.0).max(0.0) * 0.5);
+        let usable_width = (viewport_width - inset_x * 2.0).max(1.0);
+        let usable_height = (viewport_height - inset_y * 2.0).max(1.0);
+        self.zoom = (usable_width / width)
+            .min(usable_height / height)
+            .clamp(0.25, 8.0);
+
+        let center_x = (min_x + max_x) * 0.5;
+        let center_y = (min_y + max_y) * 0.5;
+        self.pan = (
+            viewport_width * 0.5 - center_x * self.zoom,
+            viewport_height * 0.5 - center_y * self.zoom,
+        );
+    }
+
     /// Pan so `target` (schematic pixel coordinates) sits at the viewport
     /// center, keeping the current zoom. Same screen mapping as
     /// `zoom_to_fit`: screen = bounds.min + pan + schematic * zoom.
@@ -107,6 +143,7 @@ impl SchematicState {
             && self.junctions.is_empty()
             && self.design_notes.is_empty()
             && self.documentation_shapes.is_empty()
+            && self.probes.is_empty()
         {
             return None;
         }
@@ -166,6 +203,37 @@ impl SchematicState {
             max_y = max_y.max(max.y);
         }
 
+        for probe in &self.probes {
+            let (min, max) = probe.world_bounds();
+            min_x = min_x.min(min.x);
+            min_y = min_y.min(min.y);
+            max_x = max_x.max(max.x);
+            max_y = max_y.max(max.y);
+        }
+
         Some((min_x, min_y, max_x, max_y))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SchematicState;
+
+    #[test]
+    fn physical_world_rect_fit_preserves_fractional_edges_and_screen_inset() {
+        let mut state = SchematicState::default();
+        state.zoom_to_fit_world_rect((-140.0, -40.0, 723.6, 1077.6), 1200.0, 800.0, 24.0);
+
+        let left = state.pan.0 + -140.0 * state.zoom;
+        let top = state.pan.1 + -40.0 * state.zoom;
+        let right = state.pan.0 + 723.6 * state.zoom;
+        let bottom = state.pan.1 + 1077.6 * state.zoom;
+
+        assert!(left >= 24.0 - 1.0e-9);
+        assert!(top >= 24.0 - 1.0e-9);
+        assert!(right <= 1200.0 - 24.0 + 1.0e-9);
+        assert!(bottom <= 800.0 - 24.0 + 1.0e-9);
+        assert!(((left + right) * 0.5 - 600.0).abs() < 1.0e-9);
+        assert!(((top + bottom) * 0.5 - 400.0).abs() < 1.0e-9);
     }
 }

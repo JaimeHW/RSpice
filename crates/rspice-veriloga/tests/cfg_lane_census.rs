@@ -29,7 +29,11 @@ const MODELS: &[(&str, &str, &str)] = &[
     ),
     ("EPFL_HEMT_10a", "epfl_hemt_3.0.0/vacode", "epfl_hemt.va"),
     ("vbic_4T_et_cf", "vbic_1.3/vacode", "vbic_4T_et_cf.va"),
-    ("bsimbulk", "cmc/BSIM-BULK107.2.1_02112025/code", "bsimbulk.va"),
+    (
+        "bsimbulk",
+        "cmc/BSIM-BULK107.2.1_02112025/code",
+        "bsimbulk.va",
+    ),
     (
         "bsimcmg_va",
         "cmc/BSIM-CMG_112.1.0_04282026/code",
@@ -86,7 +90,8 @@ fn census(root: &Path, path: &Path, module: &str) {
     let lanes: Vec<AdSeed> = (0..artifact.mir.nodes.len())
         .map(|index| AdSeed::NodePotential(index.into()))
         .chain(
-            (0..artifact.mir.branch_unknowns.len()).map(|index| AdSeed::BranchUnknownFlow(index.into())),
+            (0..artifact.mir.branch_unknowns.len())
+                .map(|index| AdSeed::BranchUnknownFlow(index.into())),
         )
         .collect();
     let live = lane_liveness(&cfg.function, &lanes);

@@ -455,10 +455,7 @@ impl Engine {
         lines
     }
 
-    pub(in crate::engine) fn contains_identifier(
-        haystack_upper: &str,
-        needle_upper: &str,
-    ) -> bool {
+    pub(in crate::engine) fn contains_identifier(haystack_upper: &str, needle_upper: &str) -> bool {
         if needle_upper.is_empty() {
             return false;
         }
@@ -482,10 +479,7 @@ impl Engine {
         b.is_ascii_alphanumeric() || b == b'_'
     }
 
-    pub(in crate::engine) fn param_assignment_present(
-        line: &str,
-        param_upper: &str,
-    ) -> bool {
+    pub(in crate::engine) fn param_assignment_present(line: &str, param_upper: &str) -> bool {
         let trimmed = line.trim();
         let upper = trimmed.to_ascii_uppercase();
         if !Self::is_parameter_assignment_command(&upper) {
@@ -534,10 +528,7 @@ impl Engine {
             || upper_trimmed_line.starts_with(".GLOBAL_PARAM")
     }
 
-    pub(in crate::engine) fn source_references_param(
-        source: &str,
-        param_name: &str,
-    ) -> bool {
+    pub(in crate::engine) fn source_references_param(source: &str, param_name: &str) -> bool {
         let param_upper = param_name.to_ascii_uppercase();
 
         Self::logical_lines_after_title(source).iter().any(|line| {

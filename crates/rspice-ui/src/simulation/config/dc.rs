@@ -95,5 +95,4 @@ impl DcSweepConfig {
             Err(errors)
         }
     }
-
 }

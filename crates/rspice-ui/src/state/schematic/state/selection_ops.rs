@@ -98,6 +98,18 @@ impl SchematicState {
             }
         }
 
+        for probe in &self.probes {
+            if probe.position.x >= min_x
+                && probe.position.x <= max_x
+                && probe.position.y >= min_y
+                && probe.position.y <= max_y
+                && !self.selection.has_probe(probe.id)
+            {
+                self.selection.select_probe(probe.id);
+                count += 1;
+            }
+        }
+
         // Select buses whose routed polyline intersects the rectangle, even
         // when both segment endpoints are outside it.
         for bus in &self.buses {
@@ -185,6 +197,16 @@ impl SchematicState {
             }
         }
 
+        for probe in &self.probes {
+            if probe.position.x >= min_x
+                && probe.position.x <= max_x
+                && probe.position.y >= min_y
+                && probe.position.y <= max_y
+            {
+                self.selection.select_probe(probe.id);
+            }
+        }
+
         for bus in &self.buses {
             if polyline_intersects_rect(&bus.points, min_x, min_y, max_x, max_y) {
                 self.selection.select_bus(bus.id);
@@ -242,7 +264,11 @@ impl SchematicState {
             || self
                 .documentation_shapes
                 .iter()
-                .any(|shape| selection.has_documentation_shape(shape.id));
+                .any(|shape| selection.has_documentation_shape(shape.id))
+            || self
+                .probes
+                .iter()
+                .any(|probe| selection.has_probe(probe.id));
         if !has_live_object {
             return false;
         }
@@ -300,6 +326,9 @@ impl SchematicState {
             schematic
                 .documentation_shapes
                 .retain(|shape| !selection.has_documentation_shape(shape.id));
+            schematic
+                .probes
+                .retain(|probe| !selection.has_probe(probe.id));
             schematic.selection.clear();
             schematic.is_dirty = true;
             if removes_electrical_object {
@@ -322,6 +351,7 @@ impl SchematicState {
             .iter()
             .map(|item| item.id)
             .collect();
+        self.selection.probes = self.probes.iter().map(|item| item.id).collect();
         for position in self.junctions.iter().map(|item| item.pos) {
             self.selection.select_junction(position);
         }
@@ -387,7 +417,7 @@ fn segments_intersect(a: Point, b: Point, c: Point, d: Point) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::DocumentationShapeGeometry;
+    use crate::state::{DocumentationShapeGeometry, SchematicProbe};
 
     #[test]
     fn junction_deletion_is_one_undoable_transaction() {
@@ -625,5 +655,35 @@ mod tests {
         assert_eq!(schematic.junctions, vec![Junction::new(7, marker)]);
         assert_eq!(schematic.topology_version(), topology);
         assert!(!schematic.can_undo(), "deletion must create one undo step");
+    }
+
+    #[test]
+    fn probe_select_all_delete_and_undo_are_non_electrical() {
+        let probe =
+            SchematicProbe::new(45, Point::new(10, 20), "V(out)", Some("V(out)".to_owned()))
+                .unwrap();
+        let marker = Point::new(90, 90);
+        let mut schematic = SchematicState::default();
+        schematic.probes.push(probe.clone());
+        schematic.junctions.push(Junction::new(7, marker));
+
+        schematic.select_all_objects();
+        assert!(schematic.selection.has_probe(probe.id));
+        assert_eq!(schematic.selection.count(), 2);
+
+        schematic.selection.select_only_probe(probe.id);
+        schematic.init_undo_history();
+        let topology = schematic.topology_version();
+        assert!(schematic.delete_selection());
+        assert!(schematic.probes.is_empty());
+        assert_eq!(schematic.junctions, vec![Junction::new(7, marker)]);
+        assert_eq!(schematic.topology_version(), topology);
+        assert_eq!(schematic.undo_description(), Some("delete selection"));
+
+        assert!(schematic.undo());
+        assert_eq!(schematic.probes, vec![probe]);
+        assert_eq!(schematic.junctions, vec![Junction::new(7, marker)]);
+        assert_eq!(schematic.topology_version(), topology);
+        assert!(!schematic.can_undo());
     }
 }

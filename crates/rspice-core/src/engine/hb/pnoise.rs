@@ -13,9 +13,7 @@
 use super::*;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::HbSolverState;
-use crate::analysis::harmonic_balance::{
-    HbConfig, PeriodicAcExcitation, PeriodicNoiseSource,
-};
+use crate::analysis::harmonic_balance::{HbConfig, PeriodicAcExcitation, PeriodicNoiseSource};
 
 /// Result of periodic noise analysis.
 #[derive(Debug, Clone)]

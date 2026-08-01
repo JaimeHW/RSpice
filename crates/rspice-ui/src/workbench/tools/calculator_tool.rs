@@ -14,10 +14,11 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::workbench::RSpiceApp;
 
-/// Default size of the floating tool.
-const TOOL_WIDTH: f32 = 420.0;
+/// Default geometry of the mockup's modeless lower-right calculator.
+const TOOL_WIDTH: f32 = 372.0;
+const TOOL_DEFAULT_HEIGHT: f32 = 390.0;
 const TOOL_MIN_HEIGHT: f32 = 240.0;
-/// Inset from the workspace's top-right corner on first open.
+/// Inset from the workspace edges on first open.
 const TOOL_MARGIN: f32 = 24.0;
 
 /// Show the calculator when it is open. Modeless: the workspace behind it
@@ -31,7 +32,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
     let screen = ctx.content_rect();
     let default_pos = egui::pos2(
         (screen.right() - TOOL_WIDTH - TOOL_MARGIN).max(screen.left() + TOOL_MARGIN),
-        screen.top() + TOOL_MARGIN * 3.0,
+        (screen.bottom() - TOOL_DEFAULT_HEIGHT - TOOL_MARGIN).max(screen.top() + TOOL_MARGIN),
     );
 
     let mut open = true;
@@ -40,6 +41,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
         .open(&mut open)
         .default_pos(default_pos)
         .default_width(TOOL_WIDTH)
+        .default_height(TOOL_DEFAULT_HEIGHT)
         .min_width(TOOL_WIDTH * 0.7)
         .min_height(TOOL_MIN_HEIGHT)
         .resizable(true)

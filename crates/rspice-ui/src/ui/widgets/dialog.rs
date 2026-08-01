@@ -49,6 +49,9 @@ pub enum DialogSize {
     /// Wide numerical/setup workflows: 980 pt wide, content-height capped at
     /// 760 pt, and edge-to-edge at the mockup's 820 pt breakpoint.
     WideWorkflow,
+    /// Drawing-sheet supporting workflows: 1160 pt wide, content-height
+    /// capped at 760 pt, and edge-to-edge at the shared 820 pt breakpoint.
+    DrawingSheetWorkflow,
     /// Account, organization, and licensing manager: the mockup's 920 pt
     /// desktop surface, content-height capped at 820 pt so the final license
     /// action clears the fixed footer, and edge-to-edge at the shared 820 pt
@@ -60,6 +63,9 @@ pub enum DialogSize {
     /// Execution queue, target, and retained-run manager: 1120 × 680 pt with
     /// the mockup's 12 pt desktop perimeter and 4 pt phone perimeter.
     JobsManager,
+    /// Permanent authored drawing-sheet studio: 1280 x 760 pt with a fixed
+    /// section navigator, editable sheet form, and live effect preview.
+    SchematicPageSetup,
     /// Schematic instance editor: the mockup's fixed 880 x 680 pt two-pane
     /// surface with 24/32 pt desktop viewport gutters.
     ComponentEditor,
@@ -230,6 +236,38 @@ impl DialogSize {
                 radius: 4.0,
                 top_anchored: false,
             },
+            Self::DrawingSheetWorkflow => DialogSurfaceSpec {
+                width: 1_160.0,
+                max_height: 760.0,
+                horizontal_inset: 12.0,
+                vertical_inset: 24.0,
+                narrow_max_width: 820.0,
+                narrow_inset: 0.0,
+                narrow_vertical_inset: 0.0,
+                cap_narrow_height: false,
+                edge_to_edge_narrow: true,
+                fill_narrow_viewport: true,
+                fill_height: false,
+                app_background: true,
+                radius: 4.0,
+                top_anchored: false,
+            },
+            Self::SchematicPageSetup => DialogSurfaceSpec {
+                width: 1_280.0,
+                max_height: 760.0,
+                horizontal_inset: 12.0,
+                vertical_inset: 12.0,
+                narrow_max_width: 820.0,
+                narrow_inset: 0.0,
+                narrow_vertical_inset: 0.0,
+                cap_narrow_height: false,
+                edge_to_edge_narrow: true,
+                fill_narrow_viewport: true,
+                fill_height: true,
+                app_background: true,
+                radius: 4.0,
+                top_anchored: false,
+            },
             Self::ComponentEditor => DialogSurfaceSpec {
                 width: 880.0,
                 max_height: 680.0,
@@ -336,6 +374,10 @@ impl DialogLayout {
             },
             narrow,
         }
+    }
+
+    fn fills_surface_height(self, fixed_height: Option<f32>) -> bool {
+        self.fill_height || fixed_height.is_some()
     }
 }
 
@@ -712,6 +754,11 @@ impl<'a> Dialog<'a> {
                 .or(self.initial_height)
         });
         let layout = DialogLayout::resolve(self.size, screen, measured_height);
+        // `fixed_height` is a workflow-stability contract, not merely an
+        // initial measurement hint. Its surface and body viewport must retain
+        // the resolved height while body content scrolls beneath the fixed
+        // footer, including when the requested height is clamped to the screen.
+        let fill_surface_height = layout.fills_surface_height(self.fixed_height);
         let large_targets = (layout.narrow && self.size != DialogSize::ComponentEditor)
             || (self.size == DialogSize::AnalysisCatalog && screen.width() <= 820.0)
             || ctx.input(|input| input.has_touch_screen());
@@ -776,7 +823,7 @@ impl<'a> Dialog<'a> {
                 surface.disable();
             }
             surface.set_width(width);
-            if layout.fill_height {
+            if fill_surface_height {
                 surface.set_min_height(max_height);
             }
 
@@ -795,7 +842,7 @@ impl<'a> Dialog<'a> {
                 .shadow(t.shadow())
                 .show(&mut surface, |ui| {
                     ui.set_width(width);
-                    if layout.fill_height {
+                    if fill_surface_height {
                         ui.set_min_height(max_height);
                     }
                     // Header, body, transaction state, and footer are one
@@ -827,11 +874,7 @@ impl<'a> Dialog<'a> {
                     };
                     let body_max_height =
                         (max_height - header_height - footer_height - transaction_height).max(1.0);
-                    let initial_scroll_offset = self
-                        .body_scroll_offset
-                        .as_deref()
-                        .copied()
-                        .unwrap_or_default();
+                    let requested_scroll_offset = self.body_scroll_offset.as_deref().copied();
                     let flush_body = self.flush_body;
                     if self.manual_body_scroll {
                         let body_output = ui.allocate_ui_with_layout(
@@ -861,14 +904,23 @@ impl<'a> Dialog<'a> {
                     } else {
                         let body_scroll = egui::ScrollArea::vertical()
                             .id_salt(id.with("body"))
-                            .vertical_scroll_offset(initial_scroll_offset)
                             .max_height(body_max_height)
-                            .min_scrolled_height(if layout.fill_height {
+                            .min_scrolled_height(if fill_surface_height {
                                 body_max_height
                             } else {
                                 64.0
                             })
-                            .auto_shrink([false, !layout.fill_height]);
+                            .auto_shrink([false, !fill_surface_height]);
+                        // Without an externally managed offset, leave egui's
+                        // retained ScrollArea state untouched. Supplying a
+                        // default zero here would snap the body to the top on
+                        // every frame and make wheel/scrollbar input inert.
+                        let body_scroll =
+                            if let Some(requested_scroll_offset) = requested_scroll_offset {
+                                body_scroll.vertical_scroll_offset(requested_scroll_offset)
+                            } else {
+                                body_scroll
+                            };
                         let body_output = body_scroll.show(ui, |ui| {
                             Frame::NONE
                                 .fill(if layout.app_background {
@@ -1027,16 +1079,31 @@ impl<'a> Dialog<'a> {
                             egui::Layout::top_down(egui::Align::Min),
                             |ui| {
                                 ui.set_width(text_width);
-                                ui.spacing_mut().item_spacing.y = 3.0;
-                                ui.add(egui::Label::new(eyebrow).wrap());
-                                ui.add(
+                                ui.spacing_mut().item_spacing.y =
+                                    if self.size == DialogSize::SchematicPageSetup {
+                                        // The Page Setup mockup names the
+                                        // operation first and uses one 9 px
+                                        // lead between it and the sheet
+                                        // identity subtitle.
+                                        9.0
+                                    } else {
+                                        3.0
+                                    };
+                                let title = || {
                                     egui::Label::new(
                                         egui::RichText::new(self.title)
                                             .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
                                             .color(c.text),
                                     )
-                                    .wrap(),
-                                );
+                                    .wrap()
+                                };
+                                if self.size == DialogSize::SchematicPageSetup {
+                                    ui.add(title());
+                                    ui.add(egui::Label::new(eyebrow).wrap());
+                                } else {
+                                    ui.add(egui::Label::new(eyebrow).wrap());
+                                    ui.add(title());
+                                }
                             },
                         );
                         let close_response =
@@ -1736,6 +1803,7 @@ mod tests {
         let layout = DialogLayout::resolve(DialogSize::WideWorkflow, screen, fixed.fixed_height);
         assert_eq!(layout.surface_rect.size(), vec2(980.0, 612.0));
         assert_eq!(layout.surface_rect.center(), screen.center());
+        assert!(layout.fills_surface_height(fixed.fixed_height));
 
         let clamped = Dialog::new("Test", TEST_TITLE, "Accept").fixed_height(0.0);
         assert_eq!(clamped.fixed_height, Some(1.0));
@@ -1807,6 +1875,16 @@ mod tests {
         assert_eq!(workflow.surface_rect.center(), screen.center());
         assert_eq!(workflow.radius, 4.0);
         assert!(!workflow.fill_height);
+    }
+
+    #[test]
+    fn drawing_sheet_workflow_uses_the_approved_supporting_surface_width() {
+        let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_440.0, 900.0));
+        let layout = DialogLayout::resolve(DialogSize::DrawingSheetWorkflow, screen, Some(650.0));
+
+        assert_eq!(layout.surface_rect.size(), vec2(1_160.0, 650.0));
+        assert_eq!(layout.surface_rect.center(), screen.center());
+        assert_eq!(layout.radius, 4.0);
     }
 
     #[test]

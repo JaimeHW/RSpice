@@ -58,10 +58,13 @@ pub enum Command {
     OpenNetlist,
     ImportNetlist,
     ImportVerilogA,
+    ImportResultDataset,
     ExportSchematicSvg,
     ExportWaveformsCsv,
     ExportNetlist(crate::io::NetlistFormat),
     PageSetup,
+    SheetFormatManager,
+    CustomSheetSizes,
     PrintHardcopy,
     ExportActiveView,
     Exit,
@@ -80,8 +83,11 @@ pub enum Command {
     ZoomIn,
     ZoomOut,
     ZoomFit,
+    FitSchematicContent,
     ZoomOneToOne,
     CycleGrid,
+    GridSnapRouting,
+    DrawingSheetLayers,
     VisibilityOptions,
     ToggleFullScreen,
     ResetActiveView,
@@ -132,6 +138,7 @@ pub enum Command {
     ConfigurationSets,
     ReviewComments,
     RevisionHistory,
+    DesignSpecialistWorkspaces,
     SymbolPinTool,
     SymbolPolylineTool,
     SymbolRectangleTool,
@@ -176,7 +183,13 @@ pub enum Command {
     CompareGeneratedRevisions,
     ClearResults,
     ToggleLinkedCursors,
+    DatasetManifestBrowser,
+    CreateResultDocument,
     WaveformCalculator,
+    CompareResultDatasets,
+    ReviewNotes,
+    MeasurementLibrary,
+    FamilySlicing,
     ResultViewer(crate::workbench::ResultViewer),
     EditSpecifications,
     VerificationPage(VerificationPage),
@@ -244,6 +257,21 @@ impl Command {
         if id == "model-metadata-audit" {
             return Some(Self::ModelsPage(ModelsPage::Qualification));
         }
+        if id == "fit-canvas" {
+            return Some(Self::ZoomFit);
+        }
+        if id == "export-waveforms" {
+            return Some(Self::ExportWaveformsCsv);
+        }
+        if id == "visualization-trace-manager" {
+            return Some(Self::VisualizationTraceManager);
+        }
+        if id == "visualization-cursor-manager" {
+            return Some(Self::VisualizationCursorManager);
+        }
+        if id == "visualization-document-properties" {
+            return Some(Self::VisualizationDocumentProperties);
+        }
         COMMAND_REGISTRY
             .iter()
             .copied()
@@ -290,10 +318,13 @@ impl Command {
             Self::OpenNetlist => spec("open-netlist", "Open netlist…", "File"),
             Self::ImportNetlist => spec("import-netlist", "Import SPICE deck…", "File"),
             Self::ImportVerilogA => spec("import-veriloga", "Import Verilog-A…", "File"),
+            Self::ImportResultDataset => {
+                spec("import-dataset", "Import result dataset…", "Results")
+            }
             Self::ExportSchematicSvg => {
                 spec("export-schematic-svg", "Export schematic SVG…", "File")
             }
-            Self::ExportWaveformsCsv => spec("export-waveforms", "Export result data…", "File"),
+            Self::ExportWaveformsCsv => spec("export-results", "Export dataset…", "Results"),
             Self::ExportNetlist(crate::io::NetlistFormat::Spectre) => {
                 spec("export-netlist-spectre", "Export Spectre netlist…", "File")
             }
@@ -307,6 +338,12 @@ impl Command {
                 spec("export-netlist-xyce", "Export Xyce netlist…", "File")
             }
             Self::PageSetup => spec("page-setup", "Page setup…", "File"),
+            Self::SheetFormatManager => spec(
+                "sheet-format-manager",
+                "Sheet formats across this document…",
+                "File",
+            ),
+            Self::CustomSheetSizes => spec("sheet-preset-library", "Custom sheet sizes…", "File"),
             Self::PrintHardcopy => spec("print-hardcopy", "Print / hardcopy…", "File"),
             Self::ExportActiveView => spec("export-active-view", "Export active view…", "File"),
             Self::Exit => spec("exit-rspice", "Exit RSpice…", "File"),
@@ -324,9 +361,22 @@ impl Command {
             Self::Preferences => spec("preferences", "Preferences…", "Edit"),
             Self::ZoomIn => spec("zoom-in", "Zoom in", "View"),
             Self::ZoomOut => spec("zoom-out", "Zoom out", "View"),
-            Self::ZoomFit => spec("fit-canvas", "Zoom active canvas to fit", "View"),
+            Self::ZoomFit => spec("canvas-fit-sheet", "Fit drawing sheet", "View"),
+            Self::FitSchematicContent => {
+                spec("canvas-fit-content", "Fit schematic content", "View")
+            }
             Self::ZoomOneToOne => spec("zoom-one-to-one", "Zoom 100%", "View"),
-            Self::CycleGrid => spec("toggle-grid", "Canvas grid and snap", "View"),
+            Self::CycleGrid => spec("cycle-grid", "Cycle grid display", "View"),
+            Self::GridSnapRouting => spec(
+                "grid-snap-routing",
+                "Grid, snap and wire routing\u{2026}",
+                "View",
+            ),
+            Self::DrawingSheetLayers => spec(
+                "sheet-layer-visibility",
+                "Drawing-sheet layers\u{2026}",
+                "View",
+            ),
             Self::VisibilityOptions => spec(
                 "visibility-options",
                 "Hierarchy and annotation visibility\u{2026}",
@@ -439,6 +489,11 @@ impl Command {
             }
             Self::ReviewComments => spec("review-comments", "Review comments\u{2026}", "Design"),
             Self::RevisionHistory => spec("revision-history", "Revision history\u{2026}", "Design"),
+            Self::DesignSpecialistWorkspaces => spec(
+                "specialist-tools-design",
+                "Specialist workspaces\u{2026}",
+                "Design",
+            ),
             Self::SymbolPinTool => spec("symbol-pin-tool", "Place symbol pin", "Design"),
             Self::SymbolPolylineTool => spec("symbol-line-tool", "Draw symbol line", "Design"),
             Self::SymbolRectangleTool => {
@@ -549,7 +604,28 @@ impl Command {
             Self::ToggleLinkedCursors => {
                 spec("toggle-linked-cursors", "Linked A/B cursors", "Results")
             }
+            Self::DatasetManifestBrowser => spec(
+                "dataset-browser",
+                "Dataset and manifest browser…",
+                "Results",
+            ),
+            Self::CreateResultDocument => spec(
+                "create-result-document",
+                "Create result document…",
+                "Results",
+            ),
             Self::WaveformCalculator => spec("calculator", "Calculator…", "Results"),
+            Self::CompareResultDatasets => {
+                spec("compare-datasets", "Add result comparison…", "Results")
+            }
+            Self::ReviewNotes => spec("annotation-manager", "Review notes…", "Results"),
+            Self::MeasurementLibrary => {
+                spec("measurement-library", "Measurement library…", "Results")
+            }
+            Self::FamilySlicing => spec("family-slicing", "Family slicing and pivot…", "Results"),
+            Self::ResultViewer(crate::workbench::ResultViewer::Manifest) => {
+                spec("result-manifest", "Open dataset manifest", "Results")
+            }
             Self::ResultViewer(crate::workbench::ResultViewer::Waves) => {
                 spec("waveforms", "Open results workspace", "Results")
             }
@@ -624,17 +700,17 @@ impl Command {
             Self::VerificationPage(VerificationPage::Drc) => {
                 spec("open-drc", "Physical DRC unavailable", "Verify")
             }
-            Self::ProjectPage(ProjectPage::Dashboard) => {
+            Self::ProjectPage(ProjectPage::Overview) => {
                 spec("project-overview", "Open project overview", "Project")
+            }
+            Self::ProjectPage(ProjectPage::Library) => {
+                spec("project-library", "Open project library", "Project")
             }
             Self::ProjectPage(ProjectPage::Configuration) => spec(
                 "project-testbench-configuration",
                 "Open testbench configuration",
                 "Project",
             ),
-            Self::ProjectPage(ProjectPage::Technology) => {
-                spec("project-technology", "Open technology and PDK", "Project")
-            }
             Self::ProjectPage(ProjectPage::Dependencies) => spec(
                 "project-dependencies",
                 "Open dependency manifest",
@@ -701,7 +777,11 @@ impl Command {
                 "Open Visualization Studio",
                 "Navigate",
             ),
-            Self::ReportAuthoring => spec("report-authoring", "Open report authoring", "Navigate"),
+            Self::ReportAuthoring => spec(
+                "report-page-editor",
+                "Report page and datasheet editor\u{2026}",
+                "Results",
+            ),
             Self::SaveReportDocument => {
                 spec("report-save-document", "Save report document", "Results")
             }
@@ -715,16 +795,14 @@ impl Command {
                 "Results",
             ),
             Self::VisualizationTraceManager => {
-                spec("visualization-trace-manager", "Trace manager", "Results")
+                spec("trace-manager", "Trace and family manager…", "Results")
             }
             Self::VisualizationCursorManager => {
-                spec("visualization-cursor-manager", "Cursor manager", "Results")
+                spec("cursor-manager", "Cursor groups and links…", "Results")
             }
-            Self::VisualizationDocumentProperties => spec(
-                "visualization-document-properties",
-                "Document properties",
-                "Results",
-            ),
+            Self::VisualizationDocumentProperties => {
+                spec("plot-properties", "Plot document properties…", "Results")
+            }
             Self::ExportVisualizationDocument => spec(
                 "visualization-export-document",
                 "Export document",
@@ -792,12 +870,15 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::OpenNetlist,
     Command::ImportNetlist,
     Command::ImportVerilogA,
+    Command::ImportResultDataset,
     Command::ExportSchematicSvg,
     Command::ExportNetlist(crate::io::NetlistFormat::Spectre),
     Command::ExportNetlist(crate::io::NetlistFormat::Spice),
     Command::ExportNetlist(crate::io::NetlistFormat::Hspice),
     Command::ExportNetlist(crate::io::NetlistFormat::Xyce),
     Command::PageSetup,
+    Command::SheetFormatManager,
+    Command::CustomSheetSizes,
     Command::PrintHardcopy,
     Command::ExportActiveView,
     Command::Exit,
@@ -820,9 +901,9 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::OpenWorkspace(Workspace::Verify),
     Command::OpenWorkspace(Workspace::Models),
     Command::OpenWorkspace(Workspace::Netlist),
-    Command::ProjectPage(ProjectPage::Dashboard),
+    Command::ProjectPage(ProjectPage::Overview),
+    Command::ProjectPage(ProjectPage::Library),
     Command::ProjectPage(ProjectPage::Configuration),
-    Command::ProjectPage(ProjectPage::Technology),
     Command::ProjectPage(ProjectPage::Dependencies),
     Command::ProjectPage(ProjectPage::Recovery),
     Command::ResultViewer(crate::workbench::ResultViewer::Waves),
@@ -838,8 +919,11 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ZoomIn,
     Command::ZoomOut,
     Command::ZoomFit,
+    Command::FitSchematicContent,
     Command::ZoomOneToOne,
     Command::CycleGrid,
+    Command::GridSnapRouting,
+    Command::DrawingSheetLayers,
     Command::VisibilityOptions,
     Command::ToggleFullScreen,
     Command::ResetActiveView,
@@ -888,6 +972,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ConfigurationSets,
     Command::ReviewComments,
     Command::RevisionHistory,
+    Command::DesignSpecialistWorkspaces,
     Command::SymbolPinTool,
     Command::SymbolPolylineTool,
     Command::SymbolRectangleTool,
@@ -936,7 +1021,13 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ExportWaveformsCsv,
     Command::ClearResults,
     Command::ToggleLinkedCursors,
+    Command::DatasetManifestBrowser,
+    Command::CreateResultDocument,
     Command::WaveformCalculator,
+    Command::CompareResultDatasets,
+    Command::ReviewNotes,
+    Command::MeasurementLibrary,
+    Command::FamilySlicing,
     Command::ResultViewer(crate::workbench::ResultViewer::Bode),
     Command::ResultViewer(crate::workbench::ResultViewer::Fft),
     Command::ResultViewer(crate::workbench::ResultViewer::Eye),
@@ -970,6 +1061,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::License,
     Command::SpecialistToolBrowser,
     Command::VisualizationStudio,
+    Command::ReportAuthoring,
     Command::AddVisualizationPane,
     Command::VisualizationTraceManager,
     Command::VisualizationCursorManager,

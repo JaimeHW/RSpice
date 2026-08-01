@@ -7,6 +7,19 @@
 use super::*;
 
 impl SimulationController {
+    pub(super) fn in_flight_specialized_viewer_provenance(
+        &self,
+        state: &AppState,
+    ) -> Option<SpecializedViewerCacheProvenance> {
+        let run_sequence = self.current_run_id?;
+        let run = state.simulation.run_by_sequence(run_sequence)?;
+        let source_instance_id = self.current_provenance.as_ref()?.source_instance_id();
+        Some(SpecializedViewerCacheProvenance::for_prepared_analysis(
+            run.dataset_id,
+            source_instance_id,
+        ))
+    }
+
     pub(super) fn populate_transient_post_views(
         &self,
         state: &mut AppState,
@@ -26,6 +39,7 @@ impl SimulationController {
             .set_selected_source(Some(waveform_key.clone()));
         let input_options = state.analysis.fft_state.input_options_for_waveform(time);
 
+        let provenance = self.in_flight_specialized_viewer_provenance(state);
         if let Some(bit_period) = Self::estimate_ui_period(time, &waveform.y_values) {
             let eye_data = crate::analysis::eye_diagram::EyeDataBuilder::new()
                 .bit_period(bit_period)
@@ -34,6 +48,9 @@ impl SimulationController {
                 .build(time, &waveform.y_values);
             if eye_data.trace_count() > 0 {
                 state.analysis.eye_diagram_state.load_data(eye_data);
+                if let Some(provenance) = provenance {
+                    state.bind_specialized_viewer_cache(ActiveViewer::EyeDiagram, provenance);
+                }
             }
         }
 
@@ -44,6 +61,9 @@ impl SimulationController {
             input_options,
         ) {
             state.analysis.fft_state.load_prepared_input(prepared);
+            if let Some(provenance) = provenance {
+                state.bind_specialized_viewer_cache(ActiveViewer::Fft, provenance);
+            }
         }
     }
 
@@ -54,6 +74,9 @@ impl SimulationController {
         waveforms: &std::collections::HashMap<String, crate::simulation::WaveformData>,
     ) {
         let mut bode_data = crate::analysis::bode::BodeData::new();
+        state.clear_specialized_viewer_cache_authority(ActiveViewer::BodePlot);
+        state.clear_specialized_viewer_cache_authority(ActiveViewer::Nyquist);
+        state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
         state.analysis.nyquist_state.clear();
         state.analysis.smith_chart_state.clear_traces();
 
@@ -96,13 +119,26 @@ impl SimulationController {
             }
         }
 
-        if bode_data.response_count() > 0 {
+        let has_bode = bode_data.response_count() > 0;
+        if has_bode {
             state.analysis.bode_plot_state.load_data(bode_data);
         } else {
             state
                 .analysis
                 .bode_plot_state
                 .load_data(crate::analysis::bode::BodeData::new());
+        }
+
+        if let Some(provenance) = self.in_flight_specialized_viewer_provenance(state) {
+            if has_bode {
+                state.bind_specialized_viewer_cache(ActiveViewer::BodePlot, provenance);
+            }
+            if loaded_nyquist {
+                state.bind_specialized_viewer_cache(ActiveViewer::Nyquist, provenance);
+            }
+            if !state.analysis.smith_chart_state.traces.is_empty() {
+                state.bind_specialized_viewer_cache(ActiveViewer::SmithChart, provenance);
+            }
         }
     }
 
@@ -289,8 +325,7 @@ impl SimulationController {
         }
 
         let threshold = (v_min + v_max) * 0.5;
-        let edges =
-            crate::analysis::eye_diagram::find_edges(&time[..n], &signal[..n], threshold);
+        let edges = crate::analysis::eye_diagram::find_edges(&time[..n], &signal[..n], threshold);
         if edges.len() < 3 {
             return None;
         }

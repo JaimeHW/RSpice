@@ -3,12 +3,24 @@
 //! Viewport movement: wheel and pinch zoom about the pointer, drag panning,
 //! and the fit/zoom-to-selection commands.
 
-use egui::{Pos2, Rect, Response, Ui, Vec2};
+use egui::{Event, MouseWheelUnit, Pos2, Rect, Response, TouchPhase, Ui, Vec2};
 
 use crate::workbench::app_state::AppState;
 
 const SCHEMATIC_ZOOM_MIN: f64 = 0.25;
 const SCHEMATIC_ZOOM_MAX: f64 = 8.0;
+/// Convert normalized raw wheel/trackpad points into a continuous zoom.
+///
+/// Egui deliberately replays discrete wheel notches through its smoothed
+/// scrolling stream. That feels good in a document, but it makes a CAD camera
+/// continue zooming after the physical input and compounds one notch across
+/// several frames. The schematic consumes raw events instead: pixel-precise
+/// trackpads remain proportional, discrete units are normalized once, and a
+/// pathological driver spike is bounded before the exponential curve.
+const WHEEL_ZOOM_EXPONENT_PER_POINT: f64 = 0.00065;
+const WHEEL_ZOOM_MAX_DELTA_PER_EVENT: f32 = 240.0;
+const WHEEL_ZOOM_LINE_POINTS: f32 = 40.0;
+const WHEEL_ZOOM_PAGE_POINTS: f32 = 240.0;
 
 pub(super) fn primary_pan_modifier_down(ui: &Ui) -> bool {
     ui.input(|input| input.modifiers.alt || input.key_down(egui::Key::Space))
@@ -66,7 +78,7 @@ pub(super) fn handle_viewport_navigation(
 
     // Cursor-centered zoom, matching professional CAD tools.
     if response.hovered() {
-        let (scroll, shift) = ui.input(|i| (i.smooth_scroll_delta, i.modifiers.shift));
+        let (scroll, shift) = raw_wheel_navigation_delta(ui);
         if shift {
             let horizontal = if scroll.y != 0.0 { scroll.y } else { scroll.x };
             if horizontal != 0.0 {
@@ -75,16 +87,53 @@ pub(super) fn handle_viewport_navigation(
         } else if scroll.y != 0.0
             && let Some(cursor_pos) = response.hover_pos()
         {
-            let zoom_factor = if scroll.y > 0.0 { 1.1 } else { 1.0 / 1.1 };
             apply_zoom_about(
                 &mut state.schematic.zoom,
                 &mut state.schematic.pan,
                 available,
                 cursor_pos,
-                zoom_factor,
+                wheel_zoom_factor(scroll.y),
             );
         }
     }
+}
+
+fn raw_wheel_navigation_delta(ui: &Ui) -> (Vec2, bool) {
+    ui.input(|input| {
+        let mut normalized = Vec2::ZERO;
+        let mut shift = input.modifiers.shift;
+        for event in &input.raw.events {
+            let Event::MouseWheel {
+                unit,
+                delta,
+                phase: TouchPhase::Move,
+                modifiers,
+            } = event
+            else {
+                continue;
+            };
+            shift |= modifiers.shift;
+            normalized.x += canonical_wheel_points(*unit, delta.x);
+            normalized.y += canonical_wheel_points(*unit, delta.y);
+        }
+        (normalized, shift)
+    })
+}
+
+fn canonical_wheel_points(unit: MouseWheelUnit, delta: f32) -> f32 {
+    let points = match unit {
+        MouseWheelUnit::Point => delta,
+        MouseWheelUnit::Line => delta * WHEEL_ZOOM_LINE_POINTS,
+        MouseWheelUnit::Page => delta.signum() * WHEEL_ZOOM_PAGE_POINTS,
+    };
+    points.clamp(
+        -WHEEL_ZOOM_MAX_DELTA_PER_EVENT,
+        WHEEL_ZOOM_MAX_DELTA_PER_EVENT,
+    )
+}
+
+fn wheel_zoom_factor(scroll_delta_y: f32) -> f64 {
+    (f64::from(scroll_delta_y) * WHEEL_ZOOM_EXPONENT_PER_POINT).exp()
 }
 
 fn apply_horizontal_scroll_pan(pan: &mut (f64, f64), delta: f32) {
@@ -158,6 +207,42 @@ mod tests {
         let mut pan = (4.0, -8.0);
         apply_horizontal_scroll_pan(&mut pan, 12.5);
         assert_eq!(pan, (16.5, -8.0));
+    }
+
+    #[test]
+    fn wheel_zoom_is_continuous_bounded_and_reversible() {
+        assert_eq!(wheel_zoom_factor(0.0), 1.0);
+
+        let notch_in = wheel_zoom_factor(120.0);
+        let notch_out = wheel_zoom_factor(-120.0);
+        assert!(
+            (1.08..1.082).contains(&notch_in),
+            "one wheel notch should be a controlled step, got {notch_in}"
+        );
+        assert!((notch_in * notch_out - 1.0).abs() < 1e-12);
+
+        let small_delta = wheel_zoom_factor(1.0);
+        assert!(
+            (1.0..1.001).contains(&small_delta),
+            "precision scrolling should remain proportional, got {small_delta}"
+        );
+    }
+
+    #[test]
+    fn raw_wheel_units_are_normalized_once_and_driver_spikes_are_bounded() {
+        assert_eq!(canonical_wheel_points(MouseWheelUnit::Point, 1.0), 1.0);
+        assert_eq!(
+            canonical_wheel_points(MouseWheelUnit::Point, 10_000.0),
+            WHEEL_ZOOM_MAX_DELTA_PER_EVENT
+        );
+        assert_eq!(
+            canonical_wheel_points(MouseWheelUnit::Line, 1.0),
+            WHEEL_ZOOM_LINE_POINTS
+        );
+        assert_eq!(
+            canonical_wheel_points(MouseWheelUnit::Page, -3.0),
+            -WHEEL_ZOOM_PAGE_POINTS
+        );
     }
 
     #[test]

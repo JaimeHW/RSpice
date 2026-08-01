@@ -7,7 +7,7 @@ use crate::state::{Point, SchematicArrayKind, SchematicArrayPlacement};
 use crate::workbench::app_state::AppState;
 
 use super::SchematicSymbolContext;
-use super::coordinates::screen_to_grid;
+use super::snap_resolution::resolve_grid_pointer;
 use super::viewport::Viewport;
 
 const DELTA_OVERFLOW: &str =
@@ -51,7 +51,7 @@ pub(super) fn handle_armed_array_selection(
             .input(|input| input.pointer.press_origin())
             .or_else(|| response.interact_pointer_pos())
     {
-        let point = screen_to_grid(viewport, grid_size, position);
+        let point = resolve_grid_pointer(state, viewport, position).snapped_position;
         let draft = &mut state.dialogs.array_selection;
         draft.anchor = Some(point);
         draft.preview_delta = Point::origin();
@@ -68,7 +68,7 @@ pub(super) fn handle_armed_array_selection(
                 .or_else(|| response.interact_pointer_pos()),
         )
     {
-        let destination = screen_to_grid(viewport, grid_size, position);
+        let destination = resolve_grid_pointer(state, viewport, position).snapped_position;
         if state.dialogs.array_selection.kind == SchematicArrayKind::RadialDocumentation {
             state.dialogs.array_selection.anchor = Some(destination);
             update_preview_delta(state, Ok(Point::origin()));
@@ -88,7 +88,7 @@ pub(super) fn handle_armed_array_selection(
     if response.clicked_by(egui::PointerButton::Primary)
         && let Some(position) = response.interact_pointer_pos()
     {
-        let point = screen_to_grid(viewport, grid_size, position);
+        let point = resolve_grid_pointer(state, viewport, position).snapped_position;
         if state.dialogs.array_selection.kind == SchematicArrayKind::RadialDocumentation {
             let draft = &mut state.dialogs.array_selection;
             draft.anchor = Some(point);
@@ -107,7 +107,7 @@ pub(super) fn handle_armed_array_selection(
     } else if !state.dialogs.array_selection.pointer_drag
         && let Some(position) = response.hover_pos()
     {
-        let point = screen_to_grid(viewport, grid_size, position);
+        let point = resolve_grid_pointer(state, viewport, position).snapped_position;
         if state.dialogs.array_selection.kind == SchematicArrayKind::RadialDocumentation {
             state.dialogs.array_selection.anchor = Some(point);
             update_preview_delta(state, Ok(Point::origin()));

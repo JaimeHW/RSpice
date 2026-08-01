@@ -7,13 +7,13 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::workbench::RSpiceApp;
 
-use crate::workbench::documents::code_workspace::{
-    CodeEditorLanguage, CodeEditorSeverity, CodeWorkspacePage, TargetQualification,
-    show_code_editor,
-};
 use super::super::design_system::{
     StatusMark, code_inspector_property_list, code_inspector_section, code_workspace_heading,
     property_row, property_row_status, property_row_toned, workspace_title_row,
+};
+use crate::workbench::documents::code_workspace::{
+    CodeEditorLanguage, CodeEditorSeverity, CodeWorkspacePage, TargetQualification,
+    show_code_editor,
 };
 
 const INTERNAL_INSPECTOR_MIN_WIDTH: f32 = 270.0;
@@ -49,7 +49,8 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 return;
             }
         };
-        let active_path = crate::workbench::documents::code_workspace::active_veriloga_file_path(app, &selected);
+        let active_path =
+            crate::workbench::documents::code_workspace::active_veriloga_file_path(app, &selected);
         let mut source = selected
             .bundle()
             .file_content(&active_path)
@@ -183,7 +184,8 @@ fn generated_netlist_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
         button = button.min_width(width).max_width(width);
     }
     if button.show(ui).clicked() {
-        let _ = crate::workbench::documents::netlist_document::open_generated_primary(&mut app.state);
+        let _ =
+            crate::workbench::documents::netlist_document::open_generated_primary(&mut app.state);
         app.state.ui.code_workspace.page = CodeWorkspacePage::Netlist;
     }
 }
@@ -527,7 +529,10 @@ fn muted_row(ui: &mut Ui, text: &str) {
         });
 }
 
-fn diagnostic_row(ui: &mut Ui, diagnostic: &crate::workbench::documents::code_workspace::CodeEditorDiagnostic) {
+fn diagnostic_row(
+    ui: &mut Ui,
+    diagnostic: &crate::workbench::documents::code_workspace::CodeEditorDiagnostic,
+) {
     let t = Tokens::get(ui.ctx());
     let tone = match diagnostic.severity {
         CodeEditorSeverity::Info => t.color.info,

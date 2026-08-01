@@ -8,32 +8,6 @@
 
 use super::*;
 
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    let layout = ProjectContractLayout::resolve(ui.available_width());
-    header_with_actions(
-        ui,
-        "TECHNOLOGY ATTACHMENT",
-        TECHNOLOGY_SURFACE_TITLE,
-        "Project-owned authenticated binding for parsed models, process sections, dependency edges, and exact source bytes.",
-        |ui, app| {
-            if Button::new("Project").show(ui).clicked() {
-                Command::ProjectPage(ProjectPage::Dashboard).execute(app);
-            }
-            if Button::new(TECHNOLOGY_SURFACE_ACTION)
-                .accent()
-                .show(ui)
-                .clicked()
-            {
-                open_technology_attachment_dialog(app);
-            }
-        },
-        app,
-    );
-    technology_metric_strip(ui, app, layout);
-    technology_resource_table(ui, app);
-    technology_migration_strip(ui, app, layout);
-}
-
 pub(super) fn technology_metric_strip(ui: &mut Ui, app: &RSpiceApp, layout: ProjectContractLayout) {
     let t = Tokens::get(ui.ctx());
     let binding = app.state.workspace.project.technology_binding();
@@ -41,12 +15,20 @@ pub(super) fn technology_metric_strip(ui: &mut Ui, app: &RSpiceApp, layout: Proj
     let replacement_count = catalog
         .candidates
         .iter()
-        .filter(|candidate| Some(&candidate.binding) != binding)
+        .filter(|candidate| {
+            binding
+                .is_none_or(|binding| candidate.binding.model_library() != binding.model_library())
+        })
         .count();
     let validation = binding.map(|binding| {
         app.state
             .model_library_manager
             .validate_attached_technology(Some(binding))
+            .and_then(|()| {
+                binding
+                    .validate_signed_package(&app.state.pdk_config.technology_registry)
+                    .map_err(|error| error.to_string())
+            })
     });
     let (attachment_value, attachment_detail, attachment_color) = match validation {
         Some(Ok(())) => (
@@ -166,6 +148,11 @@ pub(super) fn technology_resource_rows(app: &RSpiceApp) -> Vec<TechnologyResourc
             .state
             .model_library_manager
             .validate_attached_technology(Some(binding))
+            .and_then(|()| {
+                binding
+                    .validate_signed_package(&app.state.pdk_config.technology_registry)
+                    .map_err(|error| error.to_string())
+            })
             .is_ok();
         rows.push(TechnologyResourceRow {
             resource: "Project technology binding".to_owned(),
@@ -227,6 +214,70 @@ pub(super) fn technology_resource_rows(app: &RSpiceApp) -> Vec<TechnologyResourc
             }
             .to_owned(),
             healthy: binding_healthy,
+        });
+        if let Some(pin) = binding.signed_package() {
+            let package_healthy = binding
+                .validate_signed_package(&app.state.pdk_config.technology_registry)
+                .is_ok();
+            rows.push(TechnologyResourceRow {
+                resource: "Signed PDK package".to_owned(),
+                identity: format!(
+                    "{} · manifest {} · archive {}",
+                    pin.display_label(),
+                    short_identity(&pin.manifest_digest().to_string()),
+                    short_identity(&pin.archive_digest().to_string())
+                ),
+                scope: format!(
+                    "{} · {} nm · {}",
+                    pin.technology_name(),
+                    pin.process_node_nm(),
+                    pin.stack_name()
+                ),
+                platform: "declared package targets".to_owned(),
+                status: if package_healthy {
+                    "signature verified"
+                } else {
+                    "untrusted or unavailable"
+                }
+                .to_owned(),
+                healthy: package_healthy,
+            });
+        } else {
+            rows.push(TechnologyResourceRow {
+                resource: "Signed PDK package".to_owned(),
+                identity: "Not pinned".to_owned(),
+                scope: "technology definition".to_owned(),
+                platform: "desktop · web · mobile".to_owned(),
+                status: "required".to_owned(),
+                healthy: false,
+            });
+        }
+        let technology_audit = app.state.workspace.project.technology_change_audit();
+        let audit_healthy =
+            !technology_audit.is_empty() && app.state.workspace.project.validate().is_ok();
+        rows.push(TechnologyResourceRow {
+            resource: "Technology change history".to_owned(),
+            identity: technology_audit.last().map_or_else(
+                || "Legacy binding · no authority receipt".to_owned(),
+                |receipt| {
+                    format!(
+                        "{} receipt{} · latest #{} · checkpoint {}",
+                        technology_audit.len(),
+                        plural(technology_audit.len()),
+                        receipt.sequence(),
+                        receipt.checkpoint_id()
+                    )
+                },
+            ),
+            scope: "project governance".to_owned(),
+            platform: "project artifact".to_owned(),
+            status: if audit_healthy {
+                "hash chain verified"
+            } else {
+                "audited reattachment required"
+            }
+            .to_owned(),
+            healthy: audit_healthy,
         });
     } else {
         rows.push(TechnologyResourceRow {
@@ -331,88 +382,6 @@ pub(super) fn technology_resource_table(ui: &mut Ui, app: &RSpiceApp) {
         });
 }
 
-pub(super) fn technology_migration_strip(
-    ui: &mut Ui,
-    app: &mut RSpiceApp,
-    layout: ProjectContractLayout,
-) {
-    let t = Tokens::get(ui.ctx());
-    let attached = app.state.workspace.project.technology_binding().is_some();
-    let copy = if attached {
-        "A replacement is accepted only after its authenticated source contract is validated and a whole-project recovery checkpoint is written and read-back verified. The current binding remains authoritative until commit."
-    } else {
-        "Attachment validates an authenticated source contract and writes and read-back verifies a whole-project recovery checkpoint before the project binding changes."
-    };
-    let shown = egui::Frame::new()
-        .fill(t.color.bg_panel)
-        .inner_margin(Margin::symmetric(10, 7))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            if layout.status_columns == 1 {
-                ui.vertical(|ui| {
-                    migration_safety_copy(ui, copy);
-                    ui.add_space(7.0);
-                    if Button::new(if attached {
-                        "Review replacement…"
-                    } else {
-                        TECHNOLOGY_SURFACE_ACTION
-                    })
-                    .show(ui)
-                    .clicked()
-                    {
-                        open_technology_attachment_dialog(app);
-                    }
-                });
-            } else {
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if Button::new(if attached {
-                        "Review replacement…"
-                    } else {
-                        TECHNOLOGY_SURFACE_ACTION
-                    })
-                    .show(ui)
-                    .clicked()
-                    {
-                        open_technology_attachment_dialog(app);
-                    }
-                    let width = ui.available_width().max(1.0);
-                    ui.allocate_ui_with_layout(
-                        vec2(width, 0.0),
-                        Layout::top_down(Align::Min),
-                        |ui| {
-                            migration_safety_copy(ui, copy);
-                        },
-                    );
-                });
-            }
-        });
-    ui.painter().hline(
-        shown.response.rect.x_range(),
-        shown.response.rect.top(),
-        Stroke::new(1.0, t.color.border_strong),
-    );
-}
-
-pub(super) fn migration_safety_copy(ui: &mut Ui, copy: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 12.0;
-        ui.label(
-            egui::RichText::new("Migration safety")
-                .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                .color(t.color.text),
-        );
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(copy)
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-            )
-            .wrap(),
-        );
-    });
-}
-
 #[derive(Debug, Clone)]
 pub(super) struct TechnologyCandidate {
     pub(super) binding: ProjectTechnologyBinding,
@@ -498,16 +467,51 @@ pub(super) fn technology_candidates(app: &RSpiceApp) -> TechnologyCandidateCatal
     catalog
 }
 
+fn signed_package_key(package: &crate::state::pdk_config::ValidatedPdkTechnologyPackage) -> String {
+    let manifest = package.manifest();
+    format!(
+        "{}@{}#{}",
+        manifest.package_id,
+        manifest.revision,
+        package.manifest_digest()
+    )
+}
+
+fn signed_package_label(
+    package: &crate::state::pdk_config::ValidatedPdkTechnologyPackage,
+) -> String {
+    let manifest = package.manifest();
+    let targets = manifest
+        .compatibility
+        .targets
+        .iter()
+        .map(|target| match target {
+            crate::state::pdk_config::PdkExecutionTarget::Desktop => "desktop",
+            crate::state::pdk_config::PdkExecutionTarget::WebAssembly => "browser",
+            crate::state::pdk_config::PdkExecutionTarget::Mobile => "mobile",
+        })
+        .collect::<Vec<_>>()
+        .join(" · ");
+    format!(
+        "{} · {} · {} nm · {} · {}",
+        manifest.technology_name,
+        manifest.revision,
+        manifest.process_node_nm,
+        manifest.stack_name,
+        targets
+    )
+}
+
 pub(super) fn open_technology_attachment_dialog(app: &mut RSpiceApp) {
     let catalog = technology_candidates(app);
     let candidates = &catalog.candidates;
-    let current = app
+    let current_library = app
         .state
         .workspace
         .project
         .technology_binding()
         .map(|binding| binding.model_library().to_owned());
-    let selected = current
+    let selected_library = current_library
         .filter(|name| {
             candidates
                 .iter()
@@ -518,7 +522,42 @@ pub(super) fn open_technology_attachment_dialog(app: &mut RSpiceApp) {
                 .first()
                 .map(|candidate| candidate.binding.model_library().to_owned())
         });
-    app.state.dialogs.technology_attachment.open(selected);
+    let packages = app
+        .state
+        .pdk_config
+        .technology_registry
+        .validated_packages();
+    let current_pin = app
+        .state
+        .workspace
+        .project
+        .technology_binding()
+        .and_then(ProjectTechnologyBinding::signed_package);
+    let selected_signed_package = current_pin
+        .and_then(|pin| {
+            packages
+                .iter()
+                .find(|package| {
+                    let manifest = package.manifest();
+                    manifest.package_id.eq_ignore_ascii_case(pin.package_id())
+                        && manifest.revision == pin.revision()
+                        && package.manifest_digest() == pin.manifest_digest()
+                        && package.archive_digest() == pin.archive_digest()
+                })
+                .map(signed_package_key)
+        })
+        .or_else(|| {
+            app.state
+                .pdk_config
+                .technology_registry
+                .active_package()
+                .map(signed_package_key)
+        })
+        .or_else(|| packages.first().map(signed_package_key));
+    app.state
+        .dialogs
+        .technology_attachment
+        .open(selected_library, selected_signed_package);
 }
 
 pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceApp) {
@@ -528,6 +567,12 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
 
     let catalog = technology_candidates(app);
     let candidates = &catalog.candidates;
+    let packages = app
+        .state
+        .pdk_config
+        .technology_registry
+        .validated_packages()
+        .to_vec();
     let selected_is_current = app
         .state
         .dialogs
@@ -543,6 +588,34 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         app.state.dialogs.technology_attachment.selected_library = candidates
             .first()
             .map(|candidate| candidate.binding.model_library().to_owned());
+    }
+    let selected_package_is_current = app
+        .state
+        .dialogs
+        .technology_attachment
+        .selected_signed_package
+        .as_deref()
+        .is_some_and(|selected| {
+            packages
+                .iter()
+                .any(|package| signed_package_key(package) == selected)
+        });
+    if !selected_package_is_current {
+        app.state
+            .dialogs
+            .technology_attachment
+            .selected_signed_package = app
+            .state
+            .pdk_config
+            .technology_registry
+            .active_package()
+            .filter(|active| {
+                packages
+                    .iter()
+                    .any(|package| signed_package_key(package) == signed_package_key(active))
+            })
+            .or_else(|| packages.first())
+            .map(signed_package_key);
     }
 
     let selected_name = app
@@ -564,6 +637,48 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         .and_then(|index| options.get(index))
         .map(String::as_str)
         .unwrap_or("No attachable authenticated model library");
+    let selected_package_key = app
+        .state
+        .dialogs
+        .technology_attachment
+        .selected_signed_package
+        .clone();
+    let selected_package_index = selected_package_key.as_deref().and_then(|key| {
+        packages
+            .iter()
+            .position(|package| signed_package_key(package) == key)
+    });
+    let package_options = packages
+        .iter()
+        .map(signed_package_label)
+        .collect::<Vec<_>>();
+    let selected_package_label = selected_package_index
+        .and_then(|index| package_options.get(index))
+        .map(String::as_str)
+        .unwrap_or("No trusted signed PDK package");
+    let package_runtime_error = selected_package_index
+        .and_then(|index| packages.get(index))
+        .and_then(|package| package.runtime_compatibility().err());
+    let selected_binding = selected_index
+        .and_then(|index| candidates.get(index))
+        .zip(selected_package_index.and_then(|index| packages.get(index)))
+        .map(|(candidate, package)| {
+            candidate
+                .binding
+                .clone()
+                .with_signed_package(package)
+                .and_then(|binding| {
+                    binding.validate_signed_package(&app.state.pdk_config.technology_registry)?;
+                    Ok(binding)
+                })
+        })
+        .transpose();
+    let selected_binding_error = selected_binding
+        .as_ref()
+        .err()
+        .map(ToString::to_string)
+        .or(package_runtime_error.clone());
+    let selected_binding = selected_binding.ok().flatten();
     let validation_error = app
         .state
         .dialogs
@@ -571,15 +686,15 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         .validation_error
         .clone();
     let checkpoint_pending = technology_checkpoint_pending(&app.state.dialogs);
-    let selected_is_attached = selected_index
-        .and_then(|index| candidates.get(index))
-        .is_some_and(|candidate| {
-            let label = candidate.binding.display_label();
-            app.state.workspace.project.technology_binding() == Some(&candidate.binding)
-                && app.state.workspace.project.technology.as_deref() == Some(label.as_str())
-        });
+    let authority_ready =
+        technology_authority_fields_ready(&app.state.dialogs.technology_attachment);
+    let selected_is_attached = selected_binding.as_ref().is_some_and(|binding| {
+        let label = binding.display_label();
+        app.state.workspace.project.technology_binding() == Some(binding)
+            && app.state.workspace.project.technology.as_deref() == Some(label.as_str())
+    });
     let primary = technology_primary_state(
-        selected_index.is_some(),
+        selected_binding.is_some() && authority_ready,
         checkpoint_pending,
         selected_is_attached,
     );
@@ -590,7 +705,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         primary.label,
     )
     .description(
-        "Choose an authenticated model library. Commit verifies its retained source identity, writes and read-back verifies a whole-project checkpoint, then records one exact project-owned binding revision.",
+        "Choose an authenticated model library and one trusted signed PDK revision. Commit verifies both exact identities, writes and read-back verifies a whole-project checkpoint, then records one immutable project-owned binding revision.",
     )
     .size(DialogSize::Transaction)
     .ghost("Cancel")
@@ -612,6 +727,56 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         }
 
         ui.add_space(10.0);
+        technology_dialog_label(ui, "SIGNED PDK PACKAGE");
+        if let Some(index) = select(
+            ui,
+            "project-signed-technology-package",
+            "Trusted signed PDK package",
+            selected_package_label,
+            &package_options,
+            ui.available_width(),
+        ) {
+            app.state
+                .dialogs
+                .technology_attachment
+                .selected_signed_package = Some(signed_package_key(&packages[index]));
+            app.state.dialogs.technology_attachment.validation_error = None;
+        }
+
+        ui.add_space(10.0);
+        technology_dialog_label(ui, "CHANGE AUTHORITY");
+        ui.add_enabled(
+            !checkpoint_pending,
+            egui::TextEdit::singleline(
+                &mut app.state.dialogs.technology_attachment.actor_id,
+            )
+            .hint_text("Actor ID")
+            .char_limit(240)
+            .desired_width(f32::INFINITY),
+        );
+        ui.add_enabled(
+            !checkpoint_pending,
+            egui::TextEdit::singleline(
+                &mut app.state.dialogs.technology_attachment.authority_id,
+            )
+            .hint_text("Authority ID")
+            .char_limit(240)
+            .desired_width(f32::INFINITY),
+        );
+        ui.add_enabled(
+            !checkpoint_pending,
+            egui::TextEdit::multiline(&mut app.state.dialogs.technology_attachment.reason)
+                .hint_text("Change reason")
+                .char_limit(1_024)
+                .desired_rows(2)
+                .desired_width(f32::INFINITY),
+        );
+        muted(
+            ui,
+            "Actor, authority, reason, exact before/after contract digests, and checkpoint evidence are retained in the project’s immutable hash-linked technology history.",
+        );
+
+        ui.add_space(10.0);
         technology_dialog_label(ui, "TECHNOLOGY MAPPING");
         if let Some(candidate) = selected_index.and_then(|index| candidates.get(index)) {
             property_card(ui, "Resolved authenticated model contract", |ui| {
@@ -623,7 +788,15 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
                 property_row(
                     ui,
                     "Layers",
-                    "Not supplied by this model-library binding",
+                    &selected_package_index
+                        .and_then(|index| packages.get(index))
+                        .map(|package| {
+                            format!(
+                                "{} signed technology layers",
+                                package.manifest().layers.len()
+                            )
+                        })
+                        .unwrap_or_else(|| "No signed layer catalog selected".to_owned()),
                 );
                 property_row(
                     ui,
@@ -638,6 +811,30 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
                         candidate.binding.source_closure().len()
                     ),
                 );
+                if let Some(package) =
+                    selected_package_index.and_then(|index| packages.get(index))
+                {
+                    property_row(
+                        ui,
+                        "Package identity",
+                        &format!(
+                            "{} {} · manifest {} · archive {}",
+                            package.manifest().package_id,
+                            package.manifest().revision,
+                            short_identity(&package.manifest_digest().to_string()),
+                            short_identity(&package.archive_digest().to_string())
+                        ),
+                    );
+                    property_row(
+                        ui,
+                        "Publisher signature",
+                        &format!(
+                            "{} · key {}",
+                            package.manifest().publisher_id,
+                            package.manifest().signing_key_id
+                        ),
+                    );
+                }
             });
         } else {
             technology_unavailable_message(ui);
@@ -653,7 +850,14 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
 
         ui.add_space(10.0);
         technology_dialog_label(ui, "BINDING GATES");
-        technology_binding_gates(ui, selected_index.is_some(), checkpoint_pending);
+        technology_binding_gates(
+            ui,
+            selected_index.is_some(),
+            selected_package_index.is_some(),
+            selected_binding.is_some(),
+            authority_ready,
+            checkpoint_pending,
+        );
         if !catalog.diagnostics.is_empty() {
             ui.add_space(10.0);
             technology_dialog_label(ui, "LIBRARY VALIDATION");
@@ -674,6 +878,13 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
                 "Writing and read-back verifying the full-project recovery checkpoint…",
             );
         }
+        if let Some(error) = selected_binding_error.as_deref() {
+            ui.add_space(8.0);
+            technology_error(
+                ui,
+                &format!("Selected signed PDK cannot be attached: {error}"),
+            );
+        }
         if let Some(error) = validation_error.as_deref() {
             ui.add_space(8.0);
             technology_error(ui, error);
@@ -682,10 +893,18 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
 
     match choice {
         DialogChoice::Primary => {
-            let result = selected_index
-                .and_then(|index| candidates.get(index))
-                .ok_or_else(|| "Select an attachable authenticated model library".to_owned())
-                .and_then(|candidate| attach_technology_candidate(ctx, app, candidate));
+            let result = selected_binding
+                .clone()
+                .ok_or_else(|| {
+                    "Select an attachable authenticated model library and trusted signed PDK package"
+                        .to_owned()
+                })
+                .and_then(|binding| {
+                    technology_change_authority(&app.state.dialogs.technology_attachment)
+                        .and_then(|authority| {
+                            attach_technology_binding(ctx, app, binding, authority)
+                        })
+                });
             match result {
                 Ok(receipt) => {
                     if technology_checkpoint_pending(&app.state.dialogs) {
@@ -714,16 +933,17 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
     }
 }
 
-pub(super) fn attach_technology_candidate(
+pub(super) fn attach_technology_binding(
     ctx: &Context,
     app: &mut RSpiceApp,
-    candidate: &TechnologyCandidate,
+    binding: ProjectTechnologyBinding,
+    authority: crate::state::ProjectTechnologyChangeAuthority,
 ) -> Result<String, String> {
     #[cfg(not(target_arch = "wasm32"))]
     let _ = ctx;
-    verify_pinned_model_sources(&candidate.binding, &app.state.model_library_manager)?;
-    let label = candidate.binding.display_label();
-    if app.state.workspace.project.technology_binding() == Some(&candidate.binding)
+    verify_pinned_technology_contract(&binding, app)?;
+    let label = binding.display_label();
+    if app.state.workspace.project.technology_binding() == Some(&binding)
         && app.state.workspace.project.technology.as_deref() == Some(label.as_str())
     {
         return Ok(format!(
@@ -739,12 +959,12 @@ pub(super) fn attach_technology_candidate(
             &app.state,
             crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::TechnologyAttachment,
         )?;
-        commit_technology_after_checkpoint(app, candidate.binding.clone(), &checkpoint)
+        commit_technology_after_checkpoint(app, binding, authority, &checkpoint)
     }
 
     #[cfg(target_arch = "wasm32")]
     {
-        start_browser_technology_checkpoint(ctx, app, candidate.binding.clone())?;
+        start_browser_technology_checkpoint(ctx, app, binding, authority)?;
         Ok("Writing and verifying the full-project recovery checkpoint…".to_owned())
     }
 }
@@ -752,8 +972,10 @@ pub(super) fn attach_technology_candidate(
 pub(super) fn commit_technology_after_checkpoint(
     app: &mut RSpiceApp,
     binding: ProjectTechnologyBinding,
+    authority: crate::state::ProjectTechnologyChangeAuthority,
     checkpoint: &crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
 ) -> Result<String, String> {
+    verify_pinned_technology_contract(&binding, app)?;
     let previous_revision = app.state.workspace.project.revision();
     if checkpoint.project_revision() != previous_revision.get()
         || checkpoint.project_name() != app.state.workspace.project.name()
@@ -766,19 +988,31 @@ pub(super) fn commit_technology_after_checkpoint(
                 .to_owned(),
         );
     }
-    let revision = app
+    let checkpoint_revision = crate::product::ObjectRevision::new(checkpoint.project_revision())
+        .map_err(|error| format!("Recovery checkpoint revision is invalid: {error}"))?;
+    let change_context = crate::state::ProjectTechnologyChangeContext::new(
+        authority,
+        checkpoint.checkpoint_id(),
+        checkpoint_revision,
+        checkpoint.created_unix_ms(),
+        checkpoint.snapshot_digest(),
+        checkpoint.snapshot_byte_len(),
+    )
+    .map_err(|error| format!("Technology change authority is invalid: {error}"))?;
+    let (revision, audit_receipt) = app
         .state
         .workspace
-        .attach_technology(binding.clone())
+        .attach_technology_audited(binding.clone(), change_context)
         .map_err(|error| format!("Technology attachment was not committed: {error}"))?;
     if revision == previous_revision {
         return Err("Technology attachment unexpectedly produced no project revision".to_owned());
     }
     app.state.dialogs.project_checkpoint_recovery.invalidate();
     Ok(format!(
-        "{} committed at project revision {} with {} exact source file{}; recovery checkpoint {} retains revision {}.",
+        "{} committed at project revision {} as technology receipt #{} with {} exact source file{}; recovery checkpoint {} retains revision {}.",
         binding.display_label(),
         revision.get(),
+        audit_receipt.sequence(),
         binding.source_closure().len(),
         plural(binding.source_closure().len()),
         checkpoint.checkpoint_id(),
@@ -803,6 +1037,7 @@ pub(super) fn start_browser_technology_checkpoint(
     ctx: &Context,
     app: &mut RSpiceApp,
     binding: ProjectTechnologyBinding,
+    authority: crate::state::ProjectTechnologyChangeAuthority,
 ) -> Result<(), String> {
     if app.state.dialogs.technology_attachment.checkpoint_pending {
         return Err("A project recovery checkpoint is already being written".to_owned());
@@ -823,6 +1058,7 @@ pub(super) fn start_browser_technology_checkpoint(
                         project_id: queued_project_id,
                         expected_revision,
                         binding: queued_binding,
+                        authority,
                         result,
                     });
             });
@@ -850,8 +1086,13 @@ pub(super) fn poll_browser_technology_checkpoint(ctx: &Context, app: &mut RSpice
             continue;
         }
         let result = completion.result.and_then(|checkpoint| {
-            verify_pinned_model_sources(&completion.binding, &app.state.model_library_manager)?;
-            commit_technology_after_checkpoint(app, completion.binding, &checkpoint)
+            verify_pinned_technology_contract(&completion.binding, app)?;
+            commit_technology_after_checkpoint(
+                app,
+                completion.binding,
+                completion.authority,
+                &checkpoint,
+            )
         });
         app.state.dialogs.technology_attachment.checkpoint_pending = false;
         match result {
@@ -952,6 +1193,16 @@ pub(super) fn verify_pinned_model_sources(
     Ok(())
 }
 
+pub(super) fn verify_pinned_technology_contract(
+    binding: &ProjectTechnologyBinding,
+    app: &RSpiceApp,
+) -> Result<(), String> {
+    verify_pinned_model_sources(binding, &app.state.model_library_manager)?;
+    binding
+        .validate_signed_package(&app.state.pdk_config.technology_registry)
+        .map_err(|error| format!("Signed PDK contract is unavailable: {error}"))
+}
+
 pub(super) fn technology_warning(ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
@@ -965,7 +1216,7 @@ pub(super) fn technology_warning(ui: &mut Ui) {
             ui.set_width(ui.available_width());
             ui.add(egui::Label::new(
                 egui::RichText::new(
-                    "Attachment changes the project's authenticated model-source and process-section execution contract. Before mutation, RSpice durably writes and read-back verifies a whole-project recovery checkpoint; editable design data is never migrated implicitly.",
+                    "Attachment changes the project's authenticated model-source, signed PDK, layer, and process-section execution contract. Before mutation, RSpice durably writes and read-back verifies a whole-project recovery checkpoint; editable design data is never migrated implicitly.",
                 )
                 .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                 .color(t.color.text),
@@ -993,19 +1244,39 @@ pub(super) fn technology_unavailable_message(ui: &mut Ui) {
     });
 }
 
-pub(super) fn technology_binding_gates(ui: &mut Ui, has_candidate: bool, checkpoint_pending: bool) {
+pub(super) fn technology_binding_gates(
+    ui: &mut Ui,
+    has_model_candidate: bool,
+    has_signed_package: bool,
+    contract_ready: bool,
+    authority_ready: bool,
+    checkpoint_pending: bool,
+) {
     let t = Tokens::get(ui.ctx());
     status_dot(
         ui,
-        if has_candidate {
+        if has_model_candidate {
             t.color.ok
         } else {
             t.color.warn
         },
-        if has_candidate {
+        if has_model_candidate {
             "Source authentication · retained bytes, SHA-256 pins, and dependency edges verified"
         } else {
             "Source authentication · attachable parsed models and authenticated bytes required"
+        },
+    );
+    status_dot(
+        ui,
+        if authority_ready {
+            t.color.ok
+        } else {
+            t.color.warn
+        },
+        if authority_ready {
+            "Change authority · actor, authority, and reason ready for immutable receipt"
+        } else {
+            "Change authority · actor, authority, and reason are required"
         },
     );
     status_dot(
@@ -1023,17 +1294,25 @@ pub(super) fn technology_binding_gates(ui: &mut Ui, has_candidate: bool, checkpo
     );
     status_dot(
         ui,
-        if has_candidate {
+        if contract_ready {
             t.color.ok
         } else {
             t.color.warn
         },
-        technology_runtime_gate_copy(has_candidate),
+        technology_runtime_gate_copy(contract_ready),
     );
     status_dot(
         ui,
-        t.color.text_faint,
-        "Package signature · not represented by this model-library binding",
+        if has_signed_package {
+            t.color.ok
+        } else {
+            t.color.warn
+        },
+        if has_signed_package {
+            "Package signature · publisher key, exact manifest bytes, archive, and artifacts verified"
+        } else {
+            "Package signature · a currently trusted signed PDK revision is required"
+        },
     );
     status_dot(
         ui,
@@ -1045,6 +1324,25 @@ pub(super) fn technology_binding_gates(ui: &mut Ui, has_candidate: bool, checkpo
         t.color.text_faint,
         "License entitlement · not represented; no entitlement claim",
     );
+}
+
+fn technology_authority_fields_ready(
+    dialog: &crate::workbench::app::TechnologyAttachmentDialogState,
+) -> bool {
+    !dialog.actor_id.trim().is_empty()
+        && !dialog.authority_id.trim().is_empty()
+        && !dialog.reason.trim().is_empty()
+}
+
+fn technology_change_authority(
+    dialog: &crate::workbench::app::TechnologyAttachmentDialogState,
+) -> Result<crate::state::ProjectTechnologyChangeAuthority, String> {
+    crate::state::ProjectTechnologyChangeAuthority::new(
+        dialog.actor_id.trim(),
+        dialog.authority_id.trim(),
+        dialog.reason.trim(),
+    )
+    .map_err(|error| format!("Technology change authority is invalid: {error}"))
 }
 
 pub(super) const fn technology_runtime_gate_copy(has_candidate: bool) -> &'static str {

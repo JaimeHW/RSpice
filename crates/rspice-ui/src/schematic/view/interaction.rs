@@ -18,16 +18,22 @@ use crate::workbench::app_state::{AppState, DragType};
 use super::SchematicSymbolContext;
 use super::array_interaction::handle_armed_array_selection;
 use super::bus_interaction::{BusTapCandidateError, resolve_bus_tap_candidate_on_active_sheet};
-use super::coordinates::{screen_to_grid, screen_to_schematic, screen_to_wire_grid};
+use super::coordinates::screen_to_schematic;
 use super::design_notes::design_note_at;
 use super::documentation_shapes::documentation_shape_at;
-use super::drawing::{bus_tap_at, nearest_bus_hit, nearest_terminal};
+use super::drawing::{
+    WireScreenHit, bus_tap_at, nearest_bus_hit, nearest_terminal, nearest_wire_screen_hit,
+    probe_at_screen,
+};
 use super::navigation::primary_pan_gesture_active;
 use super::net_labels::net_label_at;
 use super::scene::visible_design_notes;
 use super::sheet_visibility::{
     active_junction_at, active_wire_at, active_wire_point_is_draggable, objects_on_active_sheet,
     retain_selection_on_active_sheet, select_in_rect_on_active_sheet, with_active_wire_topology,
+};
+use super::snap_resolution::{
+    resolve_grid_pointer, resolve_target_pointer, target_acquisition_radius,
 };
 use super::stretch_interaction::handle_armed_stretch_selection;
 use super::viewport::Viewport;
@@ -85,13 +91,14 @@ pub(super) fn handle_tool_interactions(
         && ui.input(|input| input.pointer.delta() != egui::Vec2::ZERO)
         && let Some(pos) = response.hover_pos()
     {
+        let position = resolve_grid_pointer(state, viewport, pos).snapped_position;
         let drawing = &mut state.schematic.documentation_shape_drawing;
-        drawing.keyboard_cursor = Some(screen_to_grid(viewport, grid_size, pos));
+        drawing.keyboard_cursor = Some(position);
         drawing.keyboard_active = false;
     }
 
     if matches!(current_tool, Tool::Select) {
-        handle_select_dragging(ui, response, state, viewport, grid_size, symbol_context);
+        handle_select_dragging(ui, response, state, viewport, symbol_context);
     } else if current_tool == Tool::MoveSelection {
         handle_armed_move_selection(ui, response, state, viewport, grid_size, symbol_context);
     } else if current_tool == Tool::StretchSelection {
@@ -101,8 +108,8 @@ pub(super) fn handle_tool_interactions(
     }
 
     if shape_double_click && let Some(pos) = response.interact_pointer_pos() {
-        let grid_pos = screen_to_grid(viewport, grid_size, pos);
-        handle_documentation_shape_click(ui, state, grid_pos, true);
+        let position = resolve_grid_pointer(state, viewport, pos).snapped_position;
+        handle_documentation_shape_click(ui, state, position, true);
     }
 
     if response.clicked_by(egui::PointerButton::Primary)
@@ -120,28 +127,32 @@ pub(super) fn handle_tool_interactions(
             | Tool::DesignNote
             | Tool::DocumentationShape
             | Tool::Label
-                if state.schematic.read_only =>
+            | Tool::Probe
+                if state.schematic_edit_read_only() =>
             {
                 state.deny_read_only_edit();
             }
             Tool::Place(component_type) => {
-                let grid_pos = screen_to_grid(viewport, grid_size, pos);
-                place_component(state, component_type, grid_pos);
+                let position = resolve_grid_pointer(state, viewport, pos).snapped_position;
+                place_component(state, component_type, position);
             }
             Tool::Wire => {
-                let wire_pos = resolved_snap_position(
-                    state,
-                    symbol_context,
-                    screen_to_wire_grid(viewport, grid_size, pos),
-                );
-                if state.schematic.wire_drawing.active {
-                    state.schematic.extend_wire(wire_pos);
-                } else {
-                    state.schematic.start_wire(wire_pos);
+                let conductor_hit = nearest_active_wire_screen_hit(state, viewport, pos);
+                let fallback =
+                    resolve_target_pointer(state, symbol_context, viewport, pos).snapped_position;
+                match resolved_wire_attachment(conductor_hit, fallback) {
+                    Some(wire_pos) if state.schematic.wire_drawing.active => {
+                        state.schematic.extend_wire(wire_pos);
+                        if conductor_hit.is_some() {
+                            let _ = state.schematic.finish_wire();
+                        }
+                    }
+                    Some(wire_pos) => state.schematic.start_wire(wire_pos),
+                    None => report_unrepresentable_conductor_attachment(ui, state),
                 }
             }
             Tool::Bus => {
-                let bus_pos = screen_to_wire_grid(viewport, grid_size, pos);
+                let bus_pos = resolve_grid_pointer(state, viewport, pos).snapped_position;
                 if state.schematic.bus_drawing.active {
                     state.schematic.extend_bus(bus_pos);
                 } else {
@@ -153,25 +164,25 @@ pub(super) fn handle_tool_interactions(
             }
             Tool::BusTap => {
                 let requested = screen_to_schematic(viewport, pos);
-                let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
+                let hit_radius = target_acquisition_radius(viewport);
                 handle_bus_tap_click(ui, state, requested, hit_radius);
             }
             Tool::Junction => {
-                let grid_pos = screen_to_wire_grid(viewport, grid_size, pos);
-                handle_junction_click(ui, state, grid_pos);
+                let position = resolve_grid_pointer(state, viewport, pos).snapped_position;
+                handle_junction_click(ui, state, position);
             }
             Tool::DesignNote => {
-                let grid_pos = screen_to_grid(viewport, grid_size, pos);
-                place_pending_design_note(state, grid_pos);
+                let position = resolve_grid_pointer(state, viewport, pos).snapped_position;
+                place_pending_design_note(state, position);
             }
             Tool::DocumentationShape => {
-                let grid_pos = screen_to_grid(viewport, grid_size, pos);
-                handle_documentation_shape_click(ui, state, grid_pos, false);
+                let position = resolve_grid_pointer(state, viewport, pos).snapped_position;
+                handle_documentation_shape_click(ui, state, position, false);
             }
             Tool::Select => {
-                let grid_pos = screen_to_grid(viewport, grid_size, pos);
+                let grid_pos = resolve_grid_pointer(state, viewport, pos).snapped_position;
                 let hit_pos = screen_to_schematic(viewport, pos);
-                let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
+                let hit_radius = target_acquisition_radius(viewport);
                 handle_select_click(
                     ui,
                     state,
@@ -184,15 +195,13 @@ pub(super) fn handle_tool_interactions(
             }
             Tool::MoveSelection | Tool::StretchSelection | Tool::ArraySelection => {}
             Tool::Probe => {
-                let grid_pos = screen_to_grid(viewport, grid_size, pos);
-                handle_probe_click(ui, state, grid_pos, symbol_context);
+                let position =
+                    resolve_target_pointer(state, symbol_context, viewport, pos).snapped_position;
+                handle_probe_click(ui, state, position, symbol_context);
             }
             Tool::Label => {
-                let anchor = resolved_snap_position(
-                    state,
-                    symbol_context,
-                    screen_to_wire_grid(viewport, grid_size, pos),
-                );
+                let anchor =
+                    resolve_target_pointer(state, symbol_context, viewport, pos).snapped_position;
                 crate::workbench::app::open_net_label_placement(state, anchor);
             }
         }
@@ -202,9 +211,9 @@ pub(super) fn handle_tool_interactions(
         && response.double_clicked_by(egui::PointerButton::Primary)
         && let Some(pos) = response.interact_pointer_pos()
     {
-        let grid_pos = screen_to_grid(viewport, grid_size, pos);
+        let grid_pos = resolve_grid_pointer(state, viewport, pos).snapped_position;
         let hit_pos = screen_to_schematic(viewport, pos);
-        let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
+        let hit_radius = target_acquisition_radius(viewport);
         let hit = PointerHit::new(grid_pos, hit_pos);
         let target = pointer_target(
             state,
@@ -360,7 +369,7 @@ fn handle_armed_move_selection(
             .input(|input| input.pointer.press_origin())
             .or_else(|| response.interact_pointer_pos())
     {
-        let anchor = screen_to_grid(viewport, grid_size, position);
+        let anchor = resolve_grid_pointer(state, viewport, position).snapped_position;
         if pointer_is_in_frozen_move_selection(
             state,
             ui.ctx(),
@@ -386,7 +395,7 @@ fn handle_armed_move_selection(
                 .or_else(|| response.interact_pointer_pos()),
         )
     {
-        let destination = screen_to_grid(viewport, grid_size, position);
+        let destination = resolve_grid_pointer(state, viewport, position).snapped_position;
         state.dialogs.move_selection.preview_delta = Point::new(
             destination.x.saturating_sub(anchor.x),
             destination.y.saturating_sub(anchor.y),
@@ -404,7 +413,7 @@ fn handle_armed_move_selection(
     if response.clicked_by(egui::PointerButton::Primary)
         && let Some(position) = response.interact_pointer_pos()
     {
-        let point = screen_to_grid(viewport, grid_size, position);
+        let point = resolve_grid_pointer(state, viewport, position).snapped_position;
         if let Some(anchor) = state.dialogs.move_selection.anchor {
             state.dialogs.move_selection.preview_delta = Point::new(
                 point.x.saturating_sub(anchor.x),
@@ -428,7 +437,7 @@ fn handle_armed_move_selection(
         && let (Some(anchor), Some(position)) =
             (state.dialogs.move_selection.anchor, response.hover_pos())
     {
-        let destination = screen_to_grid(viewport, grid_size, position);
+        let destination = resolve_grid_pointer(state, viewport, position).snapped_position;
         state.dialogs.move_selection.preview_delta = Point::new(
             destination.x.saturating_sub(anchor.x),
             destination.y.saturating_sub(anchor.y),
@@ -501,6 +510,7 @@ fn pointer_is_in_frozen_move_selection(
         PointerTarget::NetLabel(id) => selection.has_net_label(id),
         PointerTarget::DesignNote(id) => selection.has_design_note(id),
         PointerTarget::DocumentationShape(id) => selection.has_documentation_shape(id),
+        PointerTarget::Probe(id) => selection.has_probe(id),
         PointerTarget::Junction(_) => false,
     }
 }
@@ -664,25 +674,30 @@ fn report_bus_error(ui: &Ui, state: &mut AppState, title: &str, message: String)
     state.push_user_message(ConsoleMessage::warning(message));
 }
 
-fn resolved_snap_position(
+fn nearest_active_wire_screen_hit(
     state: &AppState,
-    symbol_context: &SchematicSymbolContext,
-    grid_pos: Point,
-) -> Point {
-    let components = objects_on_active_sheet(state, &state.schematic.components, |item| item.id);
+    viewport: &Viewport,
+    pointer: egui::Pos2,
+) -> Option<WireScreenHit> {
     let wires = objects_on_active_sheet(state, &state.schematic.wires, |item| item.id);
-    let junctions = objects_on_active_sheet(state, &state.schematic.junctions, |item| item.id);
+    nearest_wire_screen_hit(viewport, wires.as_ref(), pointer, 6.0)
+}
+
+/// A visual conductor acquisition owns the click. If no exact integer
+/// attachment can be represented, fail closed instead of silently falling
+/// back to a nearby grid point and creating a disconnected route.
+fn resolved_wire_attachment(hit: Option<WireScreenHit>, fallback: Point) -> Option<Point> {
+    hit.map_or(Some(fallback), |hit| hit.attachment)
+}
+
+fn report_unrepresentable_conductor_attachment(ui: &Ui, state: &mut AppState) {
+    let message = "The conductor was acquired visually, but no exact schematic attachment point could be represented; the wire was not started."
+        .to_owned();
     state
-        .schematic
-        .snap_engine
-        .find_snap_target_resolved(
-            grid_pos,
-            components.as_ref(),
-            wires.as_ref(),
-            junctions.as_ref(),
-            |component| symbol_context.resolved_symbol(component),
-        )
-        .snapped_position
+        .ui
+        .toasts
+        .warn_with_title(ui.ctx(), "Wire attachment unavailable", message.clone());
+    state.push_user_message(ConsoleMessage::warning(message));
 }
 
 fn handle_select_dragging(
@@ -690,7 +705,6 @@ fn handle_select_dragging(
     response: &Response,
     state: &mut AppState,
     viewport: &Viewport,
-    grid_size: i32,
     symbol_context: &SchematicSymbolContext,
 ) {
     if !select_drag_is_authorized(state.schematic.tool, state.dialogs.move_selection.armed) {
@@ -701,9 +715,10 @@ fn handle_select_dragging(
     if filter.wires
         && let Some(pos) = response.hover_pos()
     {
-        let wire_grid_pos = screen_to_wire_grid(viewport, grid_size, pos);
-        if active_wire_point_is_draggable(state, wire_grid_pos) {
-            state.dialogs.interaction.hover_wire_vertex = Some((wire_grid_pos.x, wire_grid_pos.y));
+        let wire_position =
+            resolve_target_pointer(state, symbol_context, viewport, pos).snapped_position;
+        if active_wire_point_is_draggable(state, wire_position) {
+            state.dialogs.interaction.hover_wire_vertex = Some((wire_position.x, wire_position.y));
         } else {
             state.dialogs.interaction.hover_wire_vertex = None;
         }
@@ -714,10 +729,11 @@ fn handle_select_dragging(
     if response.drag_started_by(egui::PointerButton::Primary)
         && let Some(pos) = response.interact_pointer_pos()
     {
-        let grid_pos = screen_to_grid(viewport, grid_size, pos);
-        let wire_grid_pos = screen_to_wire_grid(viewport, grid_size, pos);
+        let grid_pos = resolve_grid_pointer(state, viewport, pos).snapped_position;
+        let wire_position =
+            resolve_target_pointer(state, symbol_context, viewport, pos).snapped_position;
         let hit_pos = screen_to_schematic(viewport, pos);
-        let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
+        let hit_radius = target_acquisition_radius(viewport);
         let target = pointer_target(
             state,
             PointerHit::new(grid_pos, hit_pos),
@@ -730,7 +746,7 @@ fn handle_select_dragging(
 
         if !select_drag_can_start(primary_pan_gesture_active(ui, response)) {
             return;
-        } else if state.schematic.read_only {
+        } else if state.schematic_edit_read_only() {
             // No moves on read-only views — every drag is a marquee.
             state.schematic.selection_rect.start_at(grid_pos);
         } else {
@@ -757,6 +773,12 @@ fn handle_select_dragging(
                     }
                     start_selection_drag(state, grid_pos);
                 }
+                Some(PointerTarget::Probe(id)) => {
+                    if !state.schematic.selection.has_probe(id) {
+                        state.schematic.selection.select_only_probe(id);
+                    }
+                    start_selection_drag(state, grid_pos);
+                }
                 Some(PointerTarget::NetLabel(id)) => {
                     if !state.schematic.selection.has_net_label(id) {
                         state.schematic.selection.select_only_net_label(id);
@@ -770,9 +792,9 @@ fn handle_select_dragging(
                     start_selection_drag(state, grid_pos);
                 }
                 Some(PointerTarget::Junction(_))
-                    if filter.wires && active_wire_point_is_draggable(state, wire_grid_pos) =>
+                    if filter.wires && active_wire_point_is_draggable(state, wire_position) =>
                 {
-                    start_wire_vertex_drag(state, wire_grid_pos);
+                    start_wire_vertex_drag(state, wire_position);
                 }
                 Some(PointerTarget::Bus(id)) => {
                     if !state.schematic.selection.has_bus(id) {
@@ -781,9 +803,9 @@ fn handle_select_dragging(
                     start_selection_drag(state, grid_pos);
                 }
                 Some(PointerTarget::Wire(_))
-                    if filter.wires && active_wire_point_is_draggable(state, wire_grid_pos) =>
+                    if filter.wires && active_wire_point_is_draggable(state, wire_position) =>
                 {
-                    start_wire_vertex_drag(state, wire_grid_pos);
+                    start_wire_vertex_drag(state, wire_position);
                 }
                 _ => state.schematic.selection_rect.start_at(grid_pos),
             }
@@ -793,21 +815,19 @@ fn handle_select_dragging(
     if response.dragged_by(egui::PointerButton::Primary)
         && let Some(pos) = response.hover_pos()
     {
-        let grid_pos = screen_to_grid(viewport, grid_size, pos);
-        let wire_grid_pos = screen_to_wire_grid(viewport, grid_size, pos);
+        let grid_pos = resolve_grid_pointer(state, viewport, pos).snapped_position;
 
         if let Some((old_x, old_y)) = state.dialogs.interaction.vertex_drag_pos {
             let old_pos = Point::new(old_x, old_y);
             if with_active_wire_topology(state, |schematic| {
-                schematic.move_all_vertices_at(old_pos, wire_grid_pos)
+                schematic.move_all_vertices_at(old_pos, grid_pos)
             }) {
-                state.dialogs.interaction.vertex_drag_pos =
-                    Some((wire_grid_pos.x, wire_grid_pos.y));
+                state.dialogs.interaction.vertex_drag_pos = Some((grid_pos.x, grid_pos.y));
                 state
                     .dialogs
                     .interaction
                     .drag
-                    .update((wire_grid_pos.x, wire_grid_pos.y));
+                    .update((grid_pos.x, grid_pos.y));
             }
         } else if let Some((last_x, last_y)) = state.dialogs.last_drag_pos {
             let delta = Point::new(
@@ -839,7 +859,9 @@ fn handle_select_dragging(
                 schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions)
             });
             // One undo entry for the whole gesture (no-ops deduplicate).
-            state.schematic.end_operation();
+            if state.schematic.end_operation() {
+                state.sync_active_schematic_to_workspace();
+            }
             state.dialogs.interaction.vertex_drag_pos = None;
             state.dialogs.interaction.drag.cancel();
         } else if state.dialogs.last_drag_pos.is_some() {
@@ -851,7 +873,9 @@ fn handle_select_dragging(
             with_active_wire_topology(state, |schematic| {
                 schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions)
             });
-            state.schematic.end_operation();
+            if state.schematic.end_operation() {
+                state.sync_active_schematic_to_workspace();
+            }
             state.dialogs.drag_start = None;
             state.dialogs.last_drag_pos = None;
         } else {
@@ -952,7 +976,7 @@ fn place_pending_port(state: &mut AppState, grid_pos: Point) {
                 && authority.active_schematic_epoch == state.active_schematic_epoch
                 && authority.view_path == state.workspace.active_view.display_path()
         });
-    if state.schematic.read_only || state.active_view_read_only() || !authority_matches {
+    if state.schematic_edit_read_only() || !authority_matches {
         state.push_user_message(ConsoleMessage::warning(
             "Interface port was not placed: the active schematic authority changed; reopen Place pin or port."
                 .to_owned(),
@@ -996,7 +1020,7 @@ fn place_pending_design_note(state: &mut AppState, grid_pos: Point) {
                 && authority.active_schematic_epoch == state.active_schematic_epoch
                 && authority.view_path == state.workspace.active_view.display_path()
         });
-    if state.schematic.read_only || state.active_view_read_only() || !authority_matches {
+    if state.schematic_edit_read_only() || !authority_matches {
         state.push_user_message(ConsoleMessage::warning(
             "Design note was not placed: the active schematic authority changed; reopen Place text or note."
                 .to_owned(),
@@ -1046,7 +1070,7 @@ fn handle_documentation_shape_click(
                 && authority.active_schematic_epoch == state.active_schematic_epoch
                 && authority.view_path == state.workspace.active_view.display_path()
         });
-    if state.schematic.read_only || state.active_view_read_only() || !authority_matches {
+    if state.schematic_edit_read_only() || !authority_matches {
         state.push_user_message(ConsoleMessage::warning(
             "Documentation shape was not placed: the active schematic authority changed; reopen Draw documentation shape."
                 .to_owned(),
@@ -1090,7 +1114,7 @@ fn handle_documentation_shape_keyboard(
     if directional {
         let fallback = response
             .hover_pos()
-            .map(|position| screen_to_grid(viewport, grid_size, position))
+            .map(|position| resolve_grid_pointer(state, viewport, position).snapped_position)
             .or_else(|| {
                 state
                     .schematic
@@ -1100,9 +1124,14 @@ fn handle_documentation_shape_keyboard(
                     .copied()
             })
             .unwrap_or_else(Point::origin);
+        let step =
+            if state.schematic.snap_engine.enabled && state.schematic.snap_engine.snap_to_grid {
+                grid_size.max(1)
+            } else {
+                1
+            };
         let drawing = &mut state.schematic.documentation_shape_drawing;
         let mut cursor = drawing.keyboard_cursor.unwrap_or(fallback);
-        let step = grid_size.max(1);
         if left {
             cursor.x = cursor.x.saturating_sub(step);
         }
@@ -1129,7 +1158,7 @@ fn handle_documentation_shape_keyboard(
         .or_else(|| {
             response
                 .hover_pos()
-                .map(|position| screen_to_grid(viewport, grid_size, position))
+                .map(|position| resolve_grid_pointer(state, viewport, position).snapped_position)
         })
     else {
         return;
@@ -1316,6 +1345,7 @@ pub(super) enum PointerTarget {
     Component(u64),
     DesignNote(u64),
     DocumentationShape(u64),
+    Probe(u64),
     NetLabel(u64),
     BusTap(u64),
     Junction(Point),
@@ -1374,6 +1404,12 @@ fn pointer_target_with_filter(
     let buses = objects_on_active_sheet(state, &state.schematic.buses, |item| item.id);
     let shapes =
         objects_on_active_sheet(state, &state.schematic.documentation_shapes, |item| item.id);
+    let probes = objects_on_active_sheet(state, &state.schematic.probes, |item| item.id);
+    if filter.annotations
+        && let Some(id) = probe_at_screen(viewport, probes.as_ref(), pointer_pos)
+    {
+        return Some(PointerTarget::Probe(id));
+    }
     if filter.annotations
         && let Some(id) = design_note_at(ctx, viewport, notes.as_ref(), state, pointer_pos)
     {
@@ -1462,6 +1498,14 @@ fn handle_select_click(
                     .select_only_documentation_shape(id);
             }
         }
+        Some(PointerTarget::Probe(id)) => {
+            state.schematic.net_highlight.clear();
+            if additive {
+                state.schematic.selection.toggle_probe(id);
+            } else {
+                state.schematic.selection.select_only_probe(id);
+            }
+        }
         Some(PointerTarget::NetLabel(id)) => {
             state.schematic.net_highlight.clear();
             if additive {
@@ -1533,6 +1577,7 @@ fn handle_select_click(
 enum ProbeSignalOutcome {
     WaveformShown,
     WaveformHidden,
+    WaveformAlreadyVisible,
     GroundReference,
     SavedOutputCreated { plan_name: String },
     SavedOutputAlreadyPresent { plan_name: String },
@@ -1696,6 +1741,21 @@ fn request_probe_signal(
     ProbeSignalOutcome::SavedOutputCreated { plan_name }
 }
 
+fn request_probe_signal_visible(
+    state: &mut AppState,
+    waveform_name: &str,
+    expression: &str,
+) -> ProbeSignalOutcome {
+    if is_ground_voltage_expression(expression) {
+        return ProbeSignalOutcome::GroundReference;
+    }
+    match state.simulation.ensure_waveform_visible(waveform_name) {
+        Some(true) => ProbeSignalOutcome::WaveformShown,
+        Some(false) => ProbeSignalOutcome::WaveformAlreadyVisible,
+        None => request_probe_signal(state, waveform_name, expression),
+    }
+}
+
 /// Resolve a probed signal and report the exact committed outcome.
 ///
 /// The canvas probe tool and the inspector's plot action commit the same
@@ -1709,6 +1769,20 @@ pub(crate) fn toggle_probe_with_feedback(
     display: &str,
 ) -> bool {
     let outcome = request_probe_signal(state, name, display);
+    let configuration_changed = matches!(&outcome, ProbeSignalOutcome::SavedOutputCreated { .. });
+    report_probe_outcome(ui, state, display, outcome);
+    configuration_changed
+}
+
+/// Inspector/navigation action: reveal a probe without ever toggling a
+/// currently visible trace off.
+pub(crate) fn ensure_probe_visible_with_feedback(
+    ui: &Ui,
+    state: &mut AppState,
+    name: &str,
+    display: &str,
+) -> bool {
+    let outcome = request_probe_signal_visible(state, name, display);
     let configuration_changed = matches!(&outcome, ProbeSignalOutcome::SavedOutputCreated { .. });
     report_probe_outcome(ui, state, display, outcome);
     configuration_changed
@@ -1730,6 +1804,15 @@ fn report_probe_outcome(ui: &Ui, state: &mut AppState, display: &str, outcome: P
                 .ui
                 .toasts
                 .success(ui.ctx(), "Trace hidden", format!("{message}."));
+            state.push_user_message(ConsoleMessage::info(message));
+        }
+        ProbeSignalOutcome::WaveformAlreadyVisible => {
+            let message = format!("{display} is already visible in the plot");
+            state.ui.toasts.info_with_title(
+                ui.ctx(),
+                "Trace already visible",
+                format!("{message}."),
+            );
             state.push_user_message(ConsoleMessage::info(message));
         }
         ProbeSignalOutcome::GroundReference => {
@@ -1788,7 +1871,7 @@ fn probe_edit_identity_is_current(state: &AppState) -> Result<(), String> {
     if state.workspace.active_schematic().is_none() {
         return Err("the active schematic has no project-owned document buffer".to_owned());
     }
-    if state.schematic.read_only || state.active_view_read_only() {
+    if state.schematic_edit_read_only() {
         return Err("the active schematic is read-only".to_owned());
     }
     Ok(())
@@ -1804,6 +1887,22 @@ fn retain_probe_flag(
     let source_expression = source_expression.map(str::trim).map(str::to_owned);
     let validation_reference = source_expression.as_deref().unwrap_or("P1");
     SchematicProbe::new(1, position, validation_reference, source_expression.clone())?;
+    let source_key = source_expression.as_deref().map(raw_output_expression_key);
+    if let Some(existing) = state.schematic.probes.iter().find(|probe| {
+        probe.position == position
+            && probe
+                .source_expression
+                .as_deref()
+                .map(raw_output_expression_key)
+                == source_key
+    }) {
+        let id = existing.id;
+        state.schematic.selection.select_only_probe(id);
+        state.dialogs.interaction.schematic_keyboard_focus = Some(
+            crate::workbench::app_state::SchematicKeyboardFocus::Probe(id),
+        );
+        return Ok(id);
+    }
     let changed = state
         .schematic
         .with_undo("place schematic probe", |schematic| {
@@ -1815,6 +1914,7 @@ fn retain_probe_flag(
                 SchematicProbe::new(id, position, reference, source_expression.clone())
             {
                 schematic.probes.push(probe);
+                schematic.selection.select_only_probe(id);
                 schematic.is_dirty = true;
                 probe_id = id;
             }
@@ -1822,6 +1922,10 @@ fn retain_probe_flag(
     if !changed || probe_id == 0 {
         return Err("the probe marker did not change the active schematic".to_owned());
     }
+    state.dialogs.interaction.schematic_keyboard_focus = Some(
+        crate::workbench::app_state::SchematicKeyboardFocus::Probe(probe_id),
+    );
+    state.sync_active_schematic_to_workspace();
     Ok(probe_id)
 }
 
@@ -1914,7 +2018,7 @@ fn handle_probe_click(
     symbol_context: &SchematicSymbolContext,
 ) {
     if let Err(reason) = probe_edit_identity_is_current(state) {
-        if state.schematic.read_only || state.active_view_read_only() {
+        if state.schematic_edit_read_only() {
             state.deny_read_only_edit();
         } else {
             state
@@ -2082,6 +2186,9 @@ fn open_object_properties(
                 .selection
                 .select_only_documentation_shape(id);
         }
+        Some(PointerTarget::Probe(id)) => {
+            state.schematic.selection.select_only_probe(id);
+        }
         Some(PointerTarget::NetLabel(id)) => {
             state.schematic.selection.select_only_net_label(id);
         }
@@ -2095,7 +2202,6 @@ fn open_object_properties(
     }
     crate::workbench::app::open_selected_object_properties(state);
 }
-
 
 #[cfg(test)]
 mod tests;

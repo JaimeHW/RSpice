@@ -13,7 +13,10 @@ use uuid::Uuid;
 
 use super::schema::DecodedShortcutArtifact;
 use super::{canonical_json_bytes, sha256};
-use crate::workbench::commands::{ShortcutContext, vocabulary::{Command, COMMAND_REGISTRY, CommandPlatform}};
+use crate::workbench::commands::{
+    ShortcutContext,
+    vocabulary::{COMMAND_REGISTRY, Command, CommandPlatform},
+};
 use crate::workbench::shortcuts::{
     CommandShortcutOverride, ProfileShortcutBinding, ShortcutBindingSlot, ShortcutPreferences,
     ShortcutProfileAudit, ShortcutProfileIssueCode, ShortcutProfileIssueSeverity,
@@ -1461,7 +1464,6 @@ pub fn rollback_shortcut_import(
     *library = restored;
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests;

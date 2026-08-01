@@ -424,7 +424,7 @@ pub(crate) fn validate_raw_probe(expression: &str) -> Result<(), String> {
     if !expression.ends_with(')') {
         return Err("raw output has an unterminated probe".to_owned());
     }
-    let function = &expression[..open];
+    let function = expression[..open].trim();
     let arguments = &expression[open + 1..expression.len() - 1];
     let arguments = arguments.split(',').map(str::trim).collect::<Vec<_>>();
     if function.eq_ignore_ascii_case("V") && matches!(arguments.len(), 1 | 2)
@@ -524,4 +524,3 @@ pub(super) fn validate_bounded_text(
     }
     Ok(())
 }
-

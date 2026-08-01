@@ -6,14 +6,14 @@
 //! affordance into a release or qualification mutation.
 
 mod promotion;
+mod qualification;
 mod schema_editors;
 mod workflows;
-mod qualification;
 
 use promotion::*;
+use qualification::*;
 use schema_editors::*;
 use workflows::*;
-use qualification::*;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -34,9 +34,13 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
 use crate::workbench::RSpiceApp;
 
-use crate::workbench::commands::{CommandAvailability, ModelEditorWorkflow, active_model_editor_workflow, close_model_editor_workflow, prepare_model_editor_workflow, request_model_editor_workflow, set_model_editor_workflow_error};
-use crate::workbench::commands::vocabulary::Command;
 use super::super::design_system::{self, WorkbenchIcon};
+use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::{
+    CommandAvailability, ModelEditorWorkflow, active_model_editor_workflow,
+    close_model_editor_workflow, prepare_model_editor_workflow, request_model_editor_workflow,
+    set_model_editor_workflow_error,
+};
 use crate::workbench::documents::model_editor::{
     ModelComparisonDisposition, ModelEditorSection, ModelParameterKind,
     QualificationAuthoringAnalysis, QualificationAuthoringProbe, QualificationAuthoringSample,
@@ -2039,8 +2043,6 @@ fn apply_action(app: &mut RSpiceApp, action: SurfaceAction) {
     }
 }
 
-
-
 fn release_comparison_dialog(
     ctx: &egui::Context,
     app: &mut RSpiceApp,
@@ -2422,7 +2424,6 @@ fn short_identity(value: &str) -> String {
         .collect::<String>();
     format!("{start}…{end}")
 }
-
 
 #[cfg(test)]
 mod tests;

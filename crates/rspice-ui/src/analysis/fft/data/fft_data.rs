@@ -219,5 +219,4 @@ impl FftData {
             .filter(|(_, point)| point.magnitude.is_finite())
             .max_by(|(_, a), (_, b)| a.magnitude.total_cmp(&b.magnitude))
     }
-
 }

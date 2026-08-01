@@ -35,7 +35,6 @@ impl LibraryPathEntry {
             file_count: 0,
         }
     }
-
 }
 
 impl Default for LibraryPathEntry {

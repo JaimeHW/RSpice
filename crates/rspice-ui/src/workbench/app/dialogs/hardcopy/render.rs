@@ -16,8 +16,9 @@ use egui::{
 };
 
 use crate::hardcopy::{
-    BackgroundMode, ColorMapping, Length, LengthUnit, Orientation, OutputFormat, PaperSize,
-    PrintColor, PrintMappingEntry, PrintMappingTable, PrintRedundancy, ScaleMode, StandardPaper,
+    AuthoredSheetMedia, BackgroundMode, ColorMapping, Length, LengthUnit, Orientation,
+    OutputFormat, OutsideSheetContentPolicy, PaperSize, PrintColor, PrintMappingEntry,
+    PrintMappingTable, PrintRedundancy, ScaleMode, SchematicHardcopyExtent, StandardPaper,
     TilingMode, Watermark,
 };
 use crate::ui::icons::Icon;
@@ -130,6 +131,7 @@ struct ContentInputs {
     manual_rows: String,
     overlap: String,
     registration_marks: bool,
+    schematic: crate::hardcopy::SchematicHardcopySetup,
     printer_id: String,
     printer_job: Option<crate::hardcopy::PrinterJobSettings>,
 }
@@ -910,7 +912,6 @@ fn context_strip(ui: &mut Ui, draft: &HardcopyDialogState) {
     );
 }
 
-
 fn preview_surface(ui: &mut Ui, draft: &mut HardcopyDialogState) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width();
@@ -1374,6 +1375,16 @@ fn content_inputs(draft: &HardcopyDialogState) -> ContentInputs {
         manual_rows: draft.manual_rows.clone(),
         overlap: draft.overlap.clone(),
         registration_marks: draft.registration_marks,
+        schematic: crate::hardcopy::SchematicHardcopySetup::new(
+            draft.schematic_extent,
+            draft.outside_sheet_content,
+            draft.crop_marks,
+            draft.include_sheet_paper,
+            draft.include_sheet_border,
+            draft.include_sheet_title_block,
+            draft.include_sheet_zones,
+            draft.include_schematic_grid,
+        ),
         printer_id: draft.printer_id.clone(),
         printer_job: draft.printer_job.clone(),
     }
@@ -1599,11 +1610,11 @@ fn workflow_status(ui: &mut Ui, valid: bool, title: &str, detail: &str) {
     status_grid(ui, |ui| status_grid_content(ui, valid, title, detail));
 }
 
-fn standard_paper_label(paper: StandardPaper) -> &'static str {
+pub(super) fn standard_paper_label(paper: StandardPaper) -> &'static str {
     match paper {
-        StandardPaper::Letter => "Letter · 8.5 × 11 in",
+        StandardPaper::Letter => "US Letter · 8.5 × 11 in",
         StandardPaper::Legal => "Legal · 8.5 × 14 in",
-        StandardPaper::Tabloid => "Tabloid · 11 × 17 in",
+        StandardPaper::Tabloid => "US Ledger · 11 × 17 in",
         StandardPaper::A4 => "A4 · 210 × 297 mm",
         StandardPaper::A3 => "A3 · 297 × 420 mm",
         StandardPaper::A2 => "A2 · 420 × 594 mm",
@@ -1652,7 +1663,9 @@ fn detailed_scope_label(scope: &crate::hardcopy::HardcopyScope) -> &str {
 
 fn source_choice_for_active_extent(
     candidates: &[crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor],
-    candidate: Option<&crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor>,
+    candidate: Option<
+        &crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor,
+    >,
 ) -> Option<(String, crate::hardcopy::HardcopyScope)> {
     let active_kind = candidate.map(|candidate| candidate.document_kind);
     candidate
@@ -1683,7 +1696,9 @@ fn source_choice_for_active_extent(
 
 fn source_choice_for_scope(
     candidates: &[crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor],
-    candidate: Option<&crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor>,
+    candidate: Option<
+        &crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor,
+    >,
     scope: crate::hardcopy::HardcopyScope,
 ) -> Option<(String, crate::hardcopy::HardcopyScope)> {
     let active_kind = candidate.map(|candidate| candidate.document_kind);
@@ -1699,7 +1714,9 @@ fn source_choice_for_scope(
 
 fn named_source_choices(
     candidates: &[crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor],
-    candidate: Option<&crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor>,
+    candidate: Option<
+        &crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor,
+    >,
 ) -> Vec<(String, crate::hardcopy::HardcopyScope, String)> {
     let active_kind = candidate.map(|candidate| candidate.document_kind);
     candidates
@@ -1721,14 +1738,23 @@ fn named_source_choices(
 fn paper_label(paper: &PaperDraft) -> String {
     match paper {
         PaperDraft::Standard(paper) => standard_paper_label(*paper).to_owned(),
+        PaperDraft::MatchAuthoredSheets => "Match each authored sheet".to_owned(),
         PaperDraft::Custom { name, .. } => format!("Custom · {name}"),
     }
 }
 
 fn custom_from_current(draft: &HardcopyDialogState) -> PaperDraft {
-    let (width, height) = match draft.paper.build(draft.display_unit) {
+    let authored_media = draft
+        .resolved_document
+        .as_ref()
+        .and_then(|document| document.authored_sheet_output_media().ok());
+    let (width, height) = match draft.paper.build(draft.display_unit, authored_media) {
         Ok(PaperSize::Standard(paper)) => paper.portrait_dimensions(),
         Ok(PaperSize::Custom(custom)) => custom.dimensions(),
+        Ok(PaperSize::MatchAuthoredSheets(media)) => media.first().map_or_else(
+            || StandardPaper::Letter.portrait_dimensions(),
+            AuthoredSheetMedia::portrait_dimensions,
+        ),
         Err(_) => StandardPaper::Letter.portrait_dimensions(),
     };
     PaperDraft::Custom {
@@ -2056,7 +2082,11 @@ fn reconcile_native_printer_job(draft: &mut HardcopyDialogState) -> bool {
     ) else {
         return false;
     };
-    let Ok(paper) = draft.paper.build(draft.display_unit) else {
+    let authored_media = draft
+        .resolved_document
+        .as_ref()
+        .and_then(|document| document.authored_sheet_output_media().ok());
+    let Ok(paper) = draft.paper.build(draft.display_unit, authored_media) else {
         draft.printer_job = None;
         return false;
     };

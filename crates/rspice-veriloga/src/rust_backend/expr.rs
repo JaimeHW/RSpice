@@ -937,9 +937,7 @@ impl ExprEmitter<'_> {
         // Noise lowering carries no `ddt` state table, so there is no slot to
         // bind. The refusal, and its wording, are what the empty table
         // produced before the table itself was removed.
-        Err(self.internal(format!(
-            "ddt expression {id} has no generated state slot"
-        )))
+        Err(self.internal(format!("ddt expression {id} has no generated state slot")))
     }
 
     fn ddt_operand(&self, args: &[ExprId]) -> Result<ExprId, RustBackendError> {
@@ -967,9 +965,7 @@ impl ExprEmitter<'_> {
         let _ = base;
         // As for `ddt`: noise lowering has no `idt` state table to bind a slot
         // in, and this is the refusal the empty table produced.
-        Err(self.internal(format!(
-            "idt expression {id} has no generated state slot"
-        )))
+        Err(self.internal(format!("idt expression {id} has no generated state slot")))
     }
 
     fn idt_operands(&self, args: &[ExprId]) -> Result<(ExprId, Option<ExprId>), RustBackendError> {
@@ -1453,7 +1449,6 @@ mod tests {
             "{let pb=x;pb*pb}"
         );
     }
-
 }
 
 fn unary_value(op: &str, operand: &str) -> Result<String, RustBackendError> {

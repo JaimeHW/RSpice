@@ -173,10 +173,7 @@ pub(crate) fn open_design_review_comments(state: &mut AppState) {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench) fn render_design_review_comments_dialog(
-        &mut self,
-        ctx: &Context,
-    ) {
+    pub(in crate::workbench) fn render_design_review_comments_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.design_review_comments.open {
             return;
         }

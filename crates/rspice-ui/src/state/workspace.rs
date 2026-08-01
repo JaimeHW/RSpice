@@ -9,21 +9,23 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 mod design_intent;
-mod plan_data;
-mod project_descriptor;
 mod hierarchy;
 mod materialize;
 mod open_documents;
+mod plan_data;
+mod project_descriptor;
+mod project_library_publication;
 mod saved_output;
 
-pub(crate) use saved_output::validate_raw_probe;
 pub use design_intent::*;
-pub use project_descriptor::*;
 pub use hierarchy::*;
+pub use project_descriptor::*;
+pub use project_library_publication::*;
+pub(crate) use saved_output::validate_raw_probe;
 // The glob is crate-private: `materialize` is `pub(super)` throughout except
 // the one binding lookup two workbench surfaces reach by path.
-use materialize::*;
 pub(crate) use materialize::project_veriloga_binding_for_view;
+use materialize::*;
 
 pub use saved_output::{
     SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
@@ -63,6 +65,9 @@ pub const PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION: u16 = 1;
 /// designs while placing a deterministic bound on corrupt or hostile project
 /// data before it reaches netlisting.
 const MAX_HIERARCHY_RESOLUTION_DEPTH: usize = 128;
+/// Defensive bound on project-owned result documents. Documents themselves
+/// carry independent limits for panes, traces, retained samples, and history.
+pub const MAX_PROJECT_VISUALIZATION_DOCUMENTS: usize = 1_024;
 /// Maximum number of expanded instances accepted by the configuration
 /// resolver. The table remains grouped by master, but the receipt count is an
 /// exact expanded-instance count up to this defensive product limit.
@@ -207,7 +212,6 @@ impl CellViewRef {
         self.key()
     }
 }
-
 
 /// One immutable, exact-path executable binding consumed by hierarchical
 /// netlist generation.  The placed schematic binding is deliberately not
@@ -372,7 +376,6 @@ pub enum ConfigurationExecutionPlanError {
     DesignManagement(String),
 }
 
-
 /// One open view tab in the workspace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenCellView {
@@ -419,10 +422,28 @@ pub enum SimulationConfigurationError {
     InvalidPlotExportPresetOwnership { message: String },
     #[error("project hardcopy source-set catalog is invalid: {message}")]
     InvalidHardcopySourceSetCatalog { message: String },
+    #[error("project hardcopy receipt ledger is invalid: {message}")]
+    InvalidHardcopyReceiptLedger { message: String },
+    #[error("project signed-PDK callback receipt ledger is invalid: {message}")]
+    InvalidPdkCallbackReceiptLedger { message: String },
+    #[error("project physical-layout document catalog is invalid: {message}")]
+    InvalidPhysicalLayoutCatalog { message: String },
     #[error("report_documents[{index}] is invalid: {message}")]
     InvalidReportDocument { index: usize, message: String },
     #[error("report document identity {document_id} is duplicated")]
     DuplicateReportDocumentIdentity { document_id: ResultDocumentId },
+    #[error("visualization_documents[{index}] is invalid: {message}")]
+    InvalidVisualizationDocument { index: usize, message: String },
+    #[error("visualization document identity {document_id} is duplicated")]
+    DuplicateVisualizationDocumentIdentity { document_id: ResultDocumentId },
+    #[error(
+        "visualization document title {title:?} is duplicated by entries {first_index} and {index}"
+    )]
+    DuplicateVisualizationDocumentTitle {
+        title: String,
+        first_index: usize,
+        index: usize,
+    },
     #[error("simulation_plan_payloads contains duplicate owner {plan_id}")]
     DuplicatePlanPayload { plan_id: SimulationPlanId },
     #[error("simulation_plan_payloads[{plan_id}].design_variables[{index}] is invalid: {message}")]
@@ -535,6 +556,20 @@ pub enum SimulationConfigurationError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum VisualizationDocumentPersistenceError {
+    #[error("the project already contains the visualization document identity {document_id}")]
+    DuplicateIdentity { document_id: ResultDocumentId },
+    #[error("the project already contains a result document named {title:?}")]
+    DuplicateTitle { title: String },
+    #[error(
+        "the project already contains the supported limit of {MAX_PROJECT_VISUALIZATION_DOCUMENTS} result documents"
+    )]
+    CatalogFull,
+    #[error("the visualization document is invalid: {message}")]
+    Invalid { message: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ProjectConfigurationMutationError {
     #[error("configuration-set catalog is invalid: {0}")]
     InvalidCatalog(#[from] crate::state::ConfigurationSetError),
@@ -562,6 +597,10 @@ pub enum HardcopySourceSetPersistenceError {
     CatalogFull,
     #[error("hardcopy source-set name '{name}' is already owned by another retained set")]
     DuplicateName { name: String },
+}
+
+pub(crate) struct PreparedPhysicalLayoutCatalog {
+    documents: BTreeMap<String, crate::state::PhysicalLayoutDocument>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -818,6 +857,18 @@ pub struct ProjectWorkspace {
     /// into one record after execution-context migration.
     #[serde(default)]
     pub simulation_plan_payloads: Vec<SimulationPlanPayloadRecord>,
+    /// Authoritative physical geometry for layout cell views, keyed by the
+    /// exact `library/cell/view` owner. Documents use integral PDK database
+    /// units and expected-revision transactions; no schematic or display
+    /// geometry is projected into this store.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    physical_layout_documents: BTreeMap<String, crate::state::PhysicalLayoutDocument>,
+    /// Project-owned, append-only evidence for exact signed-PDK callback
+    /// executions. Each entry retains canonical inputs, derived metadata,
+    /// package/runtime provenance, active-plan identity, and project revision
+    /// authority; callback output is never accepted as ambient mutable state.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pdk_callback_receipts: Vec<crate::state::pdk_config::ProjectPdkCallbackReceipt>,
     /// Project-owned, versioned publication profiles for result plots.
     /// Personal profiles are owned by serialized user preferences; an
     /// organization profile requires a connected organization authority.
@@ -828,6 +879,12 @@ pub struct ProjectWorkspace {
     /// and transient preview state are intentionally not persisted here.
     #[serde(default)]
     pub hardcopy_setups: crate::hardcopy::HardcopySetupStore,
+    /// Bounded, digest-sealed outcome history for print and export
+    /// publications. Failures and cancellations are retained alongside
+    /// successful artifacts so project evidence never implies more than the
+    /// platform actually accepted.
+    #[serde(default)]
+    pub hardcopy_receipts: crate::hardcopy::HardcopyReceiptLedger,
     /// Reusable print-mapping sets owned by this project. Personal portable
     /// presets are persisted by `UserPreferences`; document mappings remain
     /// embedded in `hardcopy_setups` for reproducible publication.
@@ -848,6 +905,12 @@ pub struct ProjectWorkspace {
     /// here unless a publication writer has produced and verified them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub report_documents: Vec<crate::results::report_document::ReportDocument>,
+    /// Project-owned, dataset-bound result documents. Immutable solver
+    /// datasets remain owned by result history; each visualization document
+    /// pins exact dataset digests and owns only its versioned presentation
+    /// graph.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub visualization_documents: Vec<crate::results::visualization_document::VisualizationDocument>,
     /// Manually edited netlist source. When set, simulations run this
     /// deck instead of regenerating from the schematic (text-first mode);
     /// `None` means the netlist view shows the generated artifact.
@@ -893,9 +956,15 @@ pub struct ProjectWorkspace {
     /// canonical save/revert authority.
     #[serde(default, skip)]
     pub report_documents_dirty: bool,
+    /// Runtime dirty projection for project-owned result documents.
+    #[serde(default, skip)]
+    pub visualization_documents_dirty: bool,
     /// Runtime dirty projection for committed per-document page setups.
     #[serde(default, skip)]
     pub hardcopy_setups_dirty: bool,
+    /// Runtime dirty projection for the durable hardcopy outcome ledger.
+    #[serde(default, skip)]
+    pub hardcopy_receipts_dirty: bool,
     /// Runtime dirty projection for reusable project-owned print mappings.
     #[serde(default, skip)]
     pub project_print_mappings_dirty: bool,
@@ -922,15 +991,19 @@ impl Default for ProjectWorkspace {
             schematic_buffers,
             specs: Vec::new(),
             simulation_plan_payloads: Vec::new(),
+            physical_layout_documents: BTreeMap::new(),
+            pdk_callback_receipts: Vec::new(),
             plot_export_presets:
                 crate::results::plot_export_preset::PlotExportPresetCatalog::default(),
             hardcopy_setups: crate::hardcopy::HardcopySetupStore::default(),
+            hardcopy_receipts: crate::hardcopy::HardcopyReceiptLedger::default(),
             project_print_mappings: crate::hardcopy::PrintMappingPresetCatalog::new(
                 crate::hardcopy::PrintMappingCatalogOwner::Project,
             ),
             engineering_table_views: crate::state::EngineeringTableViewStore::default(),
             hardcopy_source_sets: Vec::new(),
             report_documents: Vec::new(),
+            visualization_documents: Vec::new(),
             netlist_source: None,
             netlist_document: None,
             netlist_descriptor: None,
@@ -940,7 +1013,9 @@ impl Default for ProjectWorkspace {
             project_sources_dirty: false,
             project_metadata_dirty: false,
             report_documents_dirty: false,
+            visualization_documents_dirty: false,
             hardcopy_setups_dirty: false,
+            hardcopy_receipts_dirty: false,
             project_print_mappings_dirty: false,
             hardcopy_source_sets_dirty: false,
         }
@@ -1011,7 +1086,366 @@ fn validate_connectivity_contract_references(
     Ok(())
 }
 
+fn validate_physical_layout_document_catalog(
+    documents: &BTreeMap<String, crate::state::PhysicalLayoutDocument>,
+) -> Result<(), crate::state::LayoutDocumentError> {
+    for (key, document) in documents {
+        document.validate()?;
+        if document.owner().key() != *key {
+            return Err(crate::state::LayoutDocumentError::Invalid {
+                path: format!("physical_layout_documents[{key}].owner"),
+                message: format!(
+                    "document owner '{}' does not match its exact catalog key",
+                    document.owner().key()
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
 impl ProjectWorkspace {
+    pub fn physical_layout_documents(
+        &self,
+    ) -> &BTreeMap<String, crate::state::PhysicalLayoutDocument> {
+        &self.physical_layout_documents
+    }
+
+    pub fn physical_layout_document(
+        &self,
+        owner: &CellViewRef,
+    ) -> Option<&crate::state::PhysicalLayoutDocument> {
+        self.physical_layout_documents.get(&owner.key())
+    }
+
+    pub fn commit_physical_layout_document(
+        &mut self,
+        document: crate::state::PhysicalLayoutDocument,
+    ) -> Result<Option<crate::state::PhysicalLayoutDocument>, crate::state::LayoutDocumentError>
+    {
+        document.validate()?;
+        let key = document.owner().key();
+        let mut candidate = self.physical_layout_documents.clone();
+        let previous = candidate.insert(key, document);
+        validate_physical_layout_document_catalog(&candidate)?;
+        self.physical_layout_documents = candidate;
+        Ok(previous)
+    }
+
+    pub(crate) fn prepare_insert_physical_layout_document(
+        &self,
+        document: crate::state::PhysicalLayoutDocument,
+    ) -> Result<PreparedPhysicalLayoutCatalog, crate::state::LayoutDocumentError> {
+        document.validate()?;
+        let key = document.owner().key();
+        let mut candidate = self.physical_layout_documents.clone();
+        if candidate.insert(key.clone(), document).is_some() {
+            return Err(crate::state::LayoutDocumentError::DuplicateObject {
+                kind: "physical-layout document",
+                id: key,
+            });
+        }
+        validate_physical_layout_document_catalog(&candidate)?;
+        Ok(PreparedPhysicalLayoutCatalog {
+            documents: candidate,
+        })
+    }
+
+    pub(crate) fn synchronize_physical_layout_document_from(
+        &mut self,
+        owner: &CellViewRef,
+        source: &Self,
+    ) -> Result<bool, crate::state::LayoutDocumentError> {
+        let key = owner.key();
+        let incoming = source.physical_layout_documents.get(&key).cloned();
+        if self.physical_layout_documents.get(&key) == incoming.as_ref() {
+            return Ok(false);
+        }
+        let mut candidate = self.physical_layout_documents.clone();
+        match incoming {
+            Some(document) => {
+                candidate.insert(key, document);
+            }
+            None => {
+                candidate.remove(&key);
+            }
+        }
+        validate_physical_layout_document_catalog(&candidate)?;
+        self.physical_layout_documents = candidate;
+        Ok(true)
+    }
+
+    pub(crate) fn remove_physical_layout_document(&mut self, owner: &CellViewRef) -> bool {
+        self.physical_layout_documents
+            .remove(&owner.key())
+            .is_some()
+    }
+
+    pub(crate) fn prepare_copy_physical_layout_cell_documents(
+        &self,
+        source_library: &str,
+        source_cell: &str,
+        target_library: &str,
+        target_cell: &str,
+    ) -> Result<PreparedPhysicalLayoutCatalog, crate::state::LayoutDocumentError> {
+        let copies = self
+            .physical_layout_documents
+            .values()
+            .filter(|document| {
+                document.owner().library == source_library && document.owner().cell == source_cell
+            })
+            .map(|document| {
+                document.copy_for_cell(source_library, source_cell, target_library, target_cell)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut candidate = self.physical_layout_documents.clone();
+        for document in &copies {
+            let key = document.owner().key();
+            if candidate.contains_key(&key) {
+                return Err(crate::state::LayoutDocumentError::DuplicateObject {
+                    kind: "physical-layout document",
+                    id: key,
+                });
+            }
+            candidate.insert(key, document.clone());
+        }
+        validate_physical_layout_document_catalog(&candidate)?;
+        Ok(PreparedPhysicalLayoutCatalog {
+            documents: candidate,
+        })
+    }
+
+    pub(crate) fn prepare_rename_physical_layout_cell_documents(
+        &self,
+        library: &str,
+        source_cell: &str,
+        target_cell: &str,
+    ) -> Result<PreparedPhysicalLayoutCatalog, crate::state::LayoutDocumentError> {
+        let mut candidate = BTreeMap::new();
+        for document in self.physical_layout_documents.values() {
+            let document = document.rename_cell_references(library, source_cell, target_cell)?;
+            let key = document.owner().key();
+            if candidate.insert(key.clone(), document).is_some() {
+                return Err(crate::state::LayoutDocumentError::DuplicateObject {
+                    kind: "physical-layout document",
+                    id: key,
+                });
+            }
+        }
+        validate_physical_layout_document_catalog(&candidate)?;
+        Ok(PreparedPhysicalLayoutCatalog {
+            documents: candidate,
+        })
+    }
+
+    pub(crate) fn commit_prepared_physical_layout_catalog(
+        &mut self,
+        prepared: PreparedPhysicalLayoutCatalog,
+    ) {
+        self.physical_layout_documents = prepared.documents;
+    }
+
+    pub fn validate_physical_layout_documents(&self) -> Result<(), String> {
+        validate_physical_layout_document_catalog(&self.physical_layout_documents)
+            .map_err(|error| error.to_string())
+    }
+
+    #[must_use]
+    pub fn pdk_callback_receipts(&self) -> &[crate::state::pdk_config::ProjectPdkCallbackReceipt] {
+        &self.pdk_callback_receipts
+    }
+
+    /// Replace the project-owned callback ledger while applying an already
+    /// validated lifecycle snapshot. The candidate is validated against this
+    /// workspace's project identity and revision before any live state changes.
+    pub(crate) fn replace_pdk_callback_receipts_for_lifecycle(
+        &mut self,
+        receipts: Vec<crate::state::pdk_config::ProjectPdkCallbackReceipt>,
+    ) -> Result<(), String> {
+        let mut candidate = self.clone();
+        candidate.pdk_callback_receipts = receipts;
+        candidate.validate_pdk_callback_receipts()?;
+        self.pdk_callback_receipts = candidate.pdk_callback_receipts;
+        Ok(())
+    }
+
+    pub fn validate_pdk_callback_receipts(&self) -> Result<(), String> {
+        use crate::state::pdk_config::MAX_PROJECT_PDK_CALLBACK_RECEIPTS;
+
+        if self.pdk_callback_receipts.len() > MAX_PROJECT_PDK_CALLBACK_RECEIPTS {
+            return Err(format!(
+                "receipt count exceeds {MAX_PROJECT_PDK_CALLBACK_RECEIPTS}"
+            ));
+        }
+        let mut previous_digest = None;
+        let mut previous_to_revision = None;
+        for (index, receipt) in self.pdk_callback_receipts.iter().enumerate() {
+            receipt
+                .validate()
+                .map_err(|error| format!("receipt[{index}] is invalid: {error}"))?;
+            let expected_sequence = u64::try_from(index)
+                .ok()
+                .and_then(|value| value.checked_add(1))
+                .ok_or_else(|| "receipt sequence overflow".to_owned())?;
+            if receipt.sequence != expected_sequence {
+                return Err(format!(
+                    "receipt[{index}] has sequence {}, expected {expected_sequence}",
+                    receipt.sequence
+                ));
+            }
+            if receipt.project_id != self.project.id() {
+                return Err(format!(
+                    "receipt[{index}] belongs to project {}, not {}",
+                    receipt.project_id,
+                    self.project.id()
+                ));
+            }
+            if receipt.previous_receipt_digest != previous_digest {
+                return Err(format!(
+                    "receipt[{index}] does not continue the callback receipt hash chain"
+                ));
+            }
+            if previous_to_revision.is_some_and(|previous: ObjectRevision| {
+                receipt.from_project_revision.get() < previous.get()
+            }) {
+                return Err(format!(
+                    "receipt[{index}] predates the previous callback project revision"
+                ));
+            }
+            if receipt.to_project_revision.get() > self.project.revision().get() {
+                return Err(format!(
+                    "receipt[{index}] claims future project revision {}",
+                    receipt.to_project_revision.get()
+                ));
+            }
+            previous_digest = Some(receipt.receipt_digest);
+            previous_to_revision = Some(receipt.to_project_revision);
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn commit_pdk_callback_execution(
+        &mut self,
+        plan_id: SimulationPlanId,
+        plan_revision: ObjectRevision,
+        authority: &crate::state::pdk_config::PdkAdministrativeAuthority,
+        reason: &str,
+        input: crate::state::pdk_config::PdkCallbackExecutionInput,
+        execution: crate::state::pdk_config::PdkCallbackExecutionReceipt,
+    ) -> Result<
+        crate::state::pdk_config::ProjectPdkCallbackReceipt,
+        crate::state::pdk_config::PdkCallbackError,
+    > {
+        use crate::state::pdk_config::{
+            MAX_PROJECT_PDK_CALLBACK_RECEIPTS, PdkCallbackError, ProjectPdkCallbackReceipt,
+        };
+
+        self.validate_pdk_callback_receipts()
+            .map_err(PdkCallbackError::ProjectTransaction)?;
+        if self.pdk_callback_receipts.len() >= MAX_PROJECT_PDK_CALLBACK_RECEIPTS {
+            return Err(PdkCallbackError::ProjectTransaction(format!(
+                "callback receipt ledger is limited to {MAX_PROJECT_PDK_CALLBACK_RECEIPTS} entries"
+            )));
+        }
+        let from_project_revision = self.project.revision();
+        let to_project_revision = self
+            .project
+            .next_revision()
+            .map_err(|error| PdkCallbackError::ProjectTransaction(error.to_string()))?;
+        let sequence = u64::try_from(self.pdk_callback_receipts.len())
+            .ok()
+            .and_then(|value| value.checked_add(1))
+            .ok_or_else(|| {
+                PdkCallbackError::ProjectTransaction(
+                    "callback receipt sequence is exhausted".to_owned(),
+                )
+            })?;
+        let receipt = ProjectPdkCallbackReceipt::issue(
+            sequence,
+            self.project.id(),
+            from_project_revision,
+            to_project_revision,
+            plan_id,
+            plan_revision,
+            authority.actor_id.trim().to_owned(),
+            authority.authority_id.trim().to_owned(),
+            reason.trim().to_owned(),
+            input,
+            execution,
+            self.pdk_callback_receipts
+                .last()
+                .map(|receipt| receipt.receipt_digest),
+        )?;
+
+        let mut candidate = self.clone();
+        let committed_revision = candidate
+            .project
+            .advance_revision()
+            .map_err(|error| PdkCallbackError::ProjectTransaction(error.to_string()))?;
+        if committed_revision != to_project_revision {
+            return Err(PdkCallbackError::ProjectTransaction(
+                "preflighted project revision changed before callback receipt commit".to_owned(),
+            ));
+        }
+        candidate.pdk_callback_receipts.push(receipt.clone());
+        candidate
+            .validate_pdk_callback_receipts()
+            .map_err(PdkCallbackError::ProjectTransaction)?;
+        *self = candidate;
+        Ok(receipt)
+    }
+
+    /// Commit a new visualization document into the project authority.
+    ///
+    /// Validation and every duplicate check run before the vector changes, so
+    /// a failed dialog commit cannot leave a partial document or dirty bit.
+    pub fn insert_visualization_document(
+        &mut self,
+        document: crate::results::visualization_document::VisualizationDocument,
+    ) -> Result<ResultDocumentId, VisualizationDocumentPersistenceError> {
+        if self.visualization_documents.len() >= MAX_PROJECT_VISUALIZATION_DOCUMENTS {
+            return Err(VisualizationDocumentPersistenceError::CatalogFull);
+        }
+        document.content_digest().map_err(|error| {
+            VisualizationDocumentPersistenceError::Invalid {
+                message: error.to_string(),
+            }
+        })?;
+        if self
+            .visualization_documents
+            .iter()
+            .any(|candidate| candidate.id() == document.id())
+        {
+            return Err(VisualizationDocumentPersistenceError::DuplicateIdentity {
+                document_id: document.id(),
+            });
+        }
+        if self
+            .visualization_documents
+            .iter()
+            .any(|candidate| candidate.title().eq_ignore_ascii_case(document.title()))
+        {
+            return Err(VisualizationDocumentPersistenceError::DuplicateTitle {
+                title: document.title().to_owned(),
+            });
+        }
+        let document_id = document.id();
+        self.visualization_documents.push(document);
+        self.visualization_documents_dirty = true;
+        Ok(document_id)
+    }
+
+    #[must_use]
+    pub fn visualization_document(
+        &self,
+        document_id: ResultDocumentId,
+    ) -> Option<&crate::results::visualization_document::VisualizationDocument> {
+        self.visualization_documents
+            .iter()
+            .find(|document| document.id() == document_id)
+    }
+
     /// Validate the persisted simulation configuration without requiring any
     /// runtime editor state. Cross-document targets are validated by project
     /// I/O once the library tree and simulation plan are available.
@@ -1044,6 +1478,18 @@ impl ProjectWorkspace {
                 message: error.to_string(),
             }
         })?;
+        self.hardcopy_receipts.validate().map_err(|error| {
+            SimulationConfigurationError::InvalidHardcopyReceiptLedger {
+                message: error.to_string(),
+            }
+        })?;
+        self.validate_pdk_callback_receipts().map_err(|message| {
+            SimulationConfigurationError::InvalidPdkCallbackReceiptLedger { message }
+        })?;
+        self.validate_physical_layout_documents()
+            .map_err(
+                |message| SimulationConfigurationError::InvalidPhysicalLayoutCatalog { message },
+            )?;
         let mut report_document_ids = std::collections::HashSet::new();
         for (index, document) in self.report_documents.iter().enumerate() {
             document.validate().map_err(|error| {
@@ -1060,15 +1506,40 @@ impl ProjectWorkspace {
                 );
             }
         }
+        let mut visualization_document_ids = std::collections::HashSet::new();
+        let mut visualization_document_titles = std::collections::HashMap::<String, usize>::new();
+        for (index, document) in self.visualization_documents.iter().enumerate() {
+            document.content_digest().map_err(|error| {
+                SimulationConfigurationError::InvalidVisualizationDocument {
+                    index,
+                    message: error.to_string(),
+                }
+            })?;
+            if !visualization_document_ids.insert(document.id()) {
+                return Err(
+                    SimulationConfigurationError::DuplicateVisualizationDocumentIdentity {
+                        document_id: document.id(),
+                    },
+                );
+            }
+            let folded_title = document.title().to_lowercase();
+            if let Some(first_index) = visualization_document_titles.insert(folded_title, index) {
+                return Err(
+                    SimulationConfigurationError::DuplicateVisualizationDocumentTitle {
+                        title: document.title().to_owned(),
+                        first_index,
+                        index,
+                    },
+                );
+            }
+        }
         self.project_sources.validate().map_err(|error| {
             SimulationConfigurationError::InvalidProjectSourceRegistry {
                 message: error.to_string(),
             }
         })?;
         if let Some(document) = &self.netlist_document {
-            if document.ownership()
-                == crate::state::DocumentOwnership::Generated
-            {
+            if document.ownership() == crate::state::DocumentOwnership::Generated {
                 return Err(
                     SimulationConfigurationError::InvalidNetlistDocumentProjection {
                         message: "project-owned netlist document cannot have generated ownership"
@@ -1232,9 +1703,7 @@ impl ProjectWorkspace {
         }
         Ok(())
     }
-
 }
-
 
 #[cfg(test)]
 mod tests;

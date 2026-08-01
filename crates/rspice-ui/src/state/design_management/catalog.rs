@@ -10,6 +10,7 @@ pub struct DesignManagementCatalog {
     sheet_catalogs: BTreeMap<String, SheetCatalog>,
     variants: AssemblyVariantCatalog,
     annotation: AnnotationState,
+    drawing_sheet_settings: DrawingSheetProjectSettings,
     hierarchy_settings: HierarchyManagementSettings,
     hierarchy_audits: Vec<HierarchyAuditReceipt>,
 }
@@ -26,6 +27,8 @@ struct DesignManagementCatalogWire {
     #[serde(default)]
     annotation: AnnotationState,
     #[serde(default)]
+    drawing_sheet_settings: DrawingSheetProjectSettings,
+    #[serde(default)]
     hierarchy_settings: HierarchyManagementSettings,
     #[serde(default)]
     hierarchy_audits: Vec<HierarchyAuditReceipt>,
@@ -37,15 +40,17 @@ impl<'de> Deserialize<'de> for DesignManagementCatalog {
         D: Deserializer<'de>,
     {
         let wire = DesignManagementCatalogWire::deserialize(deserializer)?;
-        let value = Self {
+        let mut value = Self {
             schema_version: wire.schema_version,
             revision: wire.revision,
             sheet_catalogs: wire.sheet_catalogs,
             variants: wire.variants,
             annotation: wire.annotation,
+            drawing_sheet_settings: wire.drawing_sheet_settings,
             hierarchy_settings: wire.hierarchy_settings,
             hierarchy_audits: wire.hierarchy_audits,
         };
+        value.normalize_drawing_sheet_preset_references();
         value.validate().map_err(serde::de::Error::custom)?;
         Ok(value)
     }
@@ -59,6 +64,7 @@ impl Default for DesignManagementCatalog {
             sheet_catalogs: BTreeMap::new(),
             variants: AssemblyVariantCatalog::default(),
             annotation: AnnotationState::default(),
+            drawing_sheet_settings: DrawingSheetProjectSettings::default(),
             hierarchy_settings: HierarchyManagementSettings::default(),
             hierarchy_audits: Vec::new(),
         }
@@ -66,6 +72,45 @@ impl Default for DesignManagementCatalog {
 }
 
 impl DesignManagementCatalog {
+    fn normalize_drawing_sheet_preset_references(&mut self) {
+        let available = self
+            .drawing_sheet_settings
+            .presets
+            .iter()
+            .map(|preset| {
+                (
+                    case_fold(&preset.id),
+                    (
+                        preset.name.clone(),
+                        matches!(
+                            &preset.format.authored_size,
+                            AuthoredDrawingSheetSize::Custom {
+                                snapshot: CustomDrawingSheetSnapshot {
+                                    source_preset_unavailable: true,
+                                    ..
+                                }
+                            }
+                        ),
+                    ),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        normalize_format_preset_reference(
+            &mut self.drawing_sheet_settings.default_format,
+            &available,
+        );
+        if let Some(format) = &mut self.drawing_sheet_settings.last_explicit_format {
+            normalize_format_preset_reference(format, &available);
+        }
+        for sheet in self
+            .sheet_catalogs
+            .values_mut()
+            .flat_map(|catalog| &mut catalog.sheets)
+        {
+            normalize_format_preset_reference(&mut sheet.page_format, &available);
+        }
+    }
+
     #[must_use]
     pub const fn revision(&self) -> u64 {
         self.revision
@@ -77,6 +122,7 @@ impl DesignManagementCatalog {
             && self.variants.variants.is_empty()
             && self.annotation.journal.is_empty()
             && self.annotation.object_authorities.is_empty()
+            && self.drawing_sheet_settings == DrawingSheetProjectSettings::default()
             && self.hierarchy_audits.is_empty()
     }
 
@@ -96,6 +142,283 @@ impl DesignManagementCatalog {
         canonical_cell_view_key(cell_view_key)
             .ok()
             .and_then(|key| self.sheet_catalogs.get_mut(&key))
+    }
+
+    #[must_use]
+    pub const fn drawing_sheet_settings(&self) -> &DrawingSheetProjectSettings {
+        &self.drawing_sheet_settings
+    }
+
+    /// Atomically replace all project drawing-sheet defaults and presets.
+    pub fn update_drawing_sheet_settings(
+        &mut self,
+        expected_revision: u64,
+        mut settings: DrawingSheetProjectSettings,
+    ) -> Result<u64, DesignManagementError> {
+        self.validate()?;
+        require_revision(
+            expected_revision,
+            self.revision,
+            "design management catalog",
+            "catalog".to_owned(),
+        )?;
+        settings.normalize_preset_references();
+        settings.validate()?;
+        if self.drawing_sheet_settings == settings {
+            return Err(DesignManagementError::NoChanges(
+                "drawing sheet project settings",
+            ));
+        }
+        let default_changed = self.drawing_sheet_settings.default_format != settings.default_format;
+        let mut candidate = self.clone();
+        candidate.drawing_sheet_settings = settings;
+        candidate.normalize_drawing_sheet_preset_references();
+        if default_changed {
+            let project_default = candidate.drawing_sheet_settings.default_format.clone();
+            for catalog in candidate.sheet_catalogs.values_mut() {
+                catalog.refresh_inherited_page_formats(&project_default)?;
+            }
+        }
+        candidate.revision = next_revision(
+            self.revision,
+            "design management catalog",
+            "catalog".to_owned(),
+        )?;
+        candidate.validate()?;
+        let revision = candidate.revision;
+        *self = candidate;
+        Ok(revision)
+    }
+
+    /// Publish the project default used by sheets that inherit project setup.
+    pub fn update_drawing_sheet_default(
+        &mut self,
+        expected_revision: u64,
+        mut format: SchematicSheetFormat,
+    ) -> Result<u64, DesignManagementError> {
+        format.inheritance = DrawingSheetInheritance::ProjectDefault;
+        let mut settings = self.drawing_sheet_settings.clone();
+        settings.default_format = format;
+        self.update_drawing_sheet_settings(expected_revision, settings)
+    }
+
+    /// Append immutable project evidence for one committed multi-sheet format
+    /// transaction. The receipt revision is the revision this append creates.
+    pub fn record_drawing_sheet_transaction(
+        &mut self,
+        expected_revision: u64,
+        receipt: DrawingSheetTransactionReceipt,
+    ) -> Result<u64, DesignManagementError> {
+        self.validate()?;
+        require_revision(
+            expected_revision,
+            self.revision,
+            "design management catalog",
+            "catalog".to_owned(),
+        )?;
+        let committed_revision = next_revision(
+            self.revision,
+            "design management catalog",
+            "catalog".to_owned(),
+        )?;
+        if receipt.catalog_revision != committed_revision {
+            return Err(DesignManagementError::RevisionConflict {
+                domain: "drawing sheet transaction receipt",
+                identity: receipt.owner_cell_view_key.clone(),
+                expected: committed_revision,
+                actual: receipt.catalog_revision,
+            });
+        }
+        receipt.validate()?;
+        let sheet_catalog = self
+            .sheet_catalog(&receipt.owner_cell_view_key)
+            .ok_or_else(|| DesignManagementError::MissingReference {
+                domain: "drawing sheet transaction owner",
+                identity: receipt.owner_cell_view_key.clone(),
+            })?;
+        for sheet_id in &receipt.selected_sheet_ids {
+            if sheet_catalog.find(*sheet_id).is_none() {
+                return Err(DesignManagementError::MissingReference {
+                    domain: "drawing sheet transaction selected sheet",
+                    identity: sheet_id.to_string(),
+                });
+            }
+        }
+        let mut settings = self.drawing_sheet_settings.clone();
+        settings.transaction_receipts.push(receipt);
+        self.update_drawing_sheet_settings(expected_revision, settings)
+    }
+
+    /// Insert or replace a project preset by case-insensitive stable id.
+    pub fn publish_drawing_sheet_preset(
+        &mut self,
+        expected_revision: u64,
+        preset: DrawingSheetPreset,
+    ) -> Result<u64, DesignManagementError> {
+        let mut preset = preset.normalized_for_storage()?;
+        let mut settings = self.drawing_sheet_settings.clone();
+        let preset_key = case_fold(&preset.id);
+        if let Some(index) = settings
+            .presets
+            .iter()
+            .position(|current| case_fold(&current.id) == preset_key)
+        {
+            preset.id.clone_from(&settings.presets[index].id);
+            preset = preset.normalized_for_storage()?;
+            settings.presets[index] = preset;
+        } else {
+            settings.presets.push(preset);
+        }
+        settings.normalize_preset_references();
+        settings.validate()?;
+        self.update_drawing_sheet_settings(expected_revision, settings)
+    }
+
+    /// Rename one project preset and every project-owned reference to it.
+    ///
+    /// Preset references are stable identities, but the embedded display name
+    /// is intentionally repeated in authored snapshots so a sheet remains
+    /// intelligible if its preset library is unavailable. Renaming therefore
+    /// updates those labels atomically without changing any physical geometry.
+    pub fn rename_drawing_sheet_preset(
+        &mut self,
+        expected_revision: u64,
+        preset_id: &str,
+        name: String,
+    ) -> Result<u64, DesignManagementError> {
+        self.validate()?;
+        require_revision(
+            expected_revision,
+            self.revision,
+            "design management catalog",
+            "catalog".to_owned(),
+        )?;
+        validate_name("drawing sheet preset id", preset_id)?;
+        validate_name("drawing sheet preset name", &name)?;
+        validate_drawing_sheet_preset_label(&name)?;
+
+        let mut candidate = self.clone();
+        let preset_key = case_fold(preset_id);
+        let preset_index = candidate
+            .drawing_sheet_settings
+            .presets
+            .iter()
+            .position(|preset| case_fold(&preset.id) == preset_key)
+            .ok_or_else(|| DesignManagementError::MissingReference {
+                domain: "drawing sheet preset",
+                identity: preset_id.to_owned(),
+            })?;
+        if candidate
+            .drawing_sheet_settings
+            .presets
+            .iter()
+            .enumerate()
+            .any(|(index, preset)| {
+                index != preset_index && case_fold(&preset.name) == case_fold(&name)
+            })
+        {
+            return Err(DesignManagementError::DuplicateListEntry {
+                field: "drawing sheet preset name",
+                value: name,
+            });
+        }
+        if candidate.drawing_sheet_settings.presets[preset_index].name == name {
+            return Err(DesignManagementError::NoChanges(
+                "drawing sheet preset name",
+            ));
+        }
+
+        let stable_id = candidate.drawing_sheet_settings.presets[preset_index]
+            .id
+            .clone();
+        candidate.drawing_sheet_settings.presets[preset_index]
+            .name
+            .clone_from(&name);
+        rename_drawing_sheet_preset_reference(
+            &mut candidate.drawing_sheet_settings.presets[preset_index].format,
+            &stable_id,
+            &name,
+        )?;
+        rename_drawing_sheet_preset_reference(
+            &mut candidate.drawing_sheet_settings.default_format,
+            &stable_id,
+            &name,
+        )?;
+        if let Some(format) = &mut candidate.drawing_sheet_settings.last_explicit_format {
+            rename_drawing_sheet_preset_reference(format, &stable_id, &name)?;
+        }
+
+        for catalog in candidate.sheet_catalogs.values_mut() {
+            let mut catalog_changed = false;
+            for sheet in &mut catalog.sheets {
+                if !rename_drawing_sheet_preset_reference(
+                    &mut sheet.page_format,
+                    &stable_id,
+                    &name,
+                )? {
+                    continue;
+                }
+                sheet.revision = next_revision(sheet.revision, "sheet", sheet.id.to_string())?;
+                catalog_changed = true;
+            }
+            if catalog_changed {
+                catalog.revision =
+                    next_revision(catalog.revision, "sheet catalog", "catalog".to_owned())?;
+            }
+        }
+
+        candidate.revision = next_revision(
+            candidate.revision,
+            "design management catalog",
+            "catalog".to_owned(),
+        )?;
+        candidate.validate()?;
+        let revision = candidate.revision;
+        *self = candidate;
+        Ok(revision)
+    }
+
+    /// Remove one project preset by case-insensitive stable id.
+    pub fn remove_drawing_sheet_preset(
+        &mut self,
+        expected_revision: u64,
+        preset_id: &str,
+    ) -> Result<u64, DesignManagementError> {
+        validate_name("drawing sheet preset id", preset_id)?;
+        let sheet_references = self
+            .sheet_catalogs
+            .values()
+            .flat_map(SheetCatalog::sheets)
+            .filter(|sheet| drawing_sheet_format_references_preset(sheet.page_format(), preset_id))
+            .count();
+        let settings_references = usize::from(drawing_sheet_format_references_preset(
+            &self.drawing_sheet_settings.default_format,
+            preset_id,
+        )) + usize::from(
+            self.drawing_sheet_settings
+                .last_explicit_format
+                .as_ref()
+                .is_some_and(|format| drawing_sheet_format_references_preset(format, preset_id)),
+        );
+        let used_by = sheet_references + settings_references;
+        if used_by > 0 {
+            return Err(DesignManagementError::DrawingSheetPresetInUse {
+                identity: preset_id.to_owned(),
+                count: used_by,
+            });
+        }
+        let mut settings = self.drawing_sheet_settings.clone();
+        let preset_key = case_fold(preset_id);
+        let index = settings
+            .presets
+            .iter()
+            .position(|preset| case_fold(&preset.id) == preset_key)
+            .ok_or_else(|| DesignManagementError::MissingReference {
+                domain: "drawing sheet preset",
+                identity: preset_id.to_owned(),
+            })?;
+        settings.presets.remove(index);
+        self.update_drawing_sheet_settings(expected_revision, settings)
     }
 
     pub fn ensure_sheet_catalog(
@@ -121,7 +444,7 @@ impl DesignManagementCatalog {
         }
         let ids = unique_object_ids(object_ids)?;
         let mut catalog = SheetCatalog::default();
-        let id = catalog.create_sheet(
+        let id = catalog.create_sheet_with_page_format(
             SheetDefinition {
                 name: sheet_name.into(),
                 template: SheetTemplate::AnalogSchematic,
@@ -129,6 +452,7 @@ impl DesignManagementCatalog {
                 explicit_page_number: Some(1),
             },
             None,
+            self.drawing_sheet_settings.default_format.clone(),
         )?;
         if !ids.is_empty() {
             catalog.assign_objects(catalog.revision(), id, ids)?;
@@ -219,6 +543,7 @@ impl DesignManagementCatalog {
                             &sheet.definition,
                         )?,
                         definition: sheet.definition.clone(),
+                        page_format: sheet.page_format.clone(),
                     })
                 })
                 .collect::<Result<Vec<_>, DesignManagementError>>()?;
@@ -620,7 +945,13 @@ impl DesignManagementCatalog {
             "catalog".to_owned(),
         )?;
         candidate.validate()?;
-        if semantic_material(self)? == semantic_material(&candidate)? {
+        // The electrical semantic digest deliberately excludes drawing-sheet
+        // presentation. A reviewed project transaction, however, must still
+        // publish presentation-only changes such as defaults, presets, and
+        // title-block policy. Compare the complete stored aggregate while
+        // normalizing only the catalog's transaction revision.
+        candidate.revision = self.revision;
+        if *self == candidate {
             return Err(DesignManagementError::NoChanges(
                 "design management catalog",
             ));
@@ -630,6 +961,26 @@ impl DesignManagementCatalog {
             "design management catalog",
             "catalog".to_owned(),
         )?;
+        // A reviewed candidate may have used several private revision steps
+        // while staging one atomic project publication. A transaction receipt
+        // created during that staging must name the single revision actually
+        // committed here, not a private candidate revision that will never
+        // exist in the live catalog. Historical receipts remain immutable.
+        let committed_revision = candidate.revision;
+        let staged_receipts = candidate
+            .drawing_sheet_settings
+            .transaction_receipts
+            .iter_mut()
+            .filter(|receipt| receipt.catalog_revision > self.revision)
+            .collect::<Vec<_>>();
+        if staged_receipts.len() > 1 {
+            return Err(DesignManagementError::NumericRange(
+                "reviewed drawing sheet transaction receipt count",
+            ));
+        }
+        for receipt in staged_receipts {
+            receipt.catalog_revision = committed_revision;
+        }
         candidate.validate()?;
         let revision = candidate.revision;
         *self = candidate;
@@ -674,6 +1025,44 @@ impl DesignManagementCatalog {
         }
         self.variants.validate()?;
         self.annotation.validate()?;
+        self.drawing_sheet_settings.validate()?;
+        let available_presets = self
+            .drawing_sheet_settings
+            .presets
+            .iter()
+            .map(|preset| {
+                (
+                    case_fold(&preset.id),
+                    (
+                        preset.name.clone(),
+                        matches!(
+                            &preset.format.authored_size,
+                            AuthoredDrawingSheetSize::Custom {
+                                snapshot: CustomDrawingSheetSnapshot {
+                                    source_preset_unavailable: true,
+                                    ..
+                                }
+                            }
+                        ),
+                    ),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        for catalog in self.sheet_catalogs.values() {
+            for sheet in &catalog.sheets {
+                validate_format_preset_reference(sheet.page_format(), &available_presets)?;
+            }
+        }
+        for receipt in &self.drawing_sheet_settings.transaction_receipts {
+            if receipt.catalog_revision > self.revision {
+                return Err(DesignManagementError::RevisionConflict {
+                    domain: "drawing sheet transaction receipt",
+                    identity: receipt.owner_cell_view_key.clone(),
+                    expected: self.revision,
+                    actual: receipt.catalog_revision,
+                });
+            }
+        }
         for range in &self.annotation.policy.definition.reserved_ranges {
             if let AnnotationRangeScope::Sheet { sheet_id } = range.scope
                 && !project_sheet_ids.contains(&sheet_id)
@@ -752,6 +1141,37 @@ impl DesignManagementCatalog {
         }
         Ok(())
     }
+}
+
+fn drawing_sheet_format_references_preset(format: &SchematicSheetFormat, preset_id: &str) -> bool {
+    matches!(
+        &format.authored_size,
+        AuthoredDrawingSheetSize::Custom { snapshot }
+            if snapshot
+                .preset_id
+                .as_deref()
+                .is_some_and(|id| id.eq_ignore_ascii_case(preset_id))
+    )
+}
+
+fn rename_drawing_sheet_preset_reference(
+    format: &mut SchematicSheetFormat,
+    preset_id: &str,
+    name: &str,
+) -> Result<bool, DesignManagementError> {
+    if !drawing_sheet_format_references_preset(format, preset_id) {
+        return Ok(false);
+    }
+    let renamed = format.try_update(|draft| {
+        if let AuthoredDrawingSheetSize::Custom { snapshot } = &mut draft.authored_size {
+            snapshot.name = name.to_owned();
+        }
+    })?;
+    if *format == renamed {
+        return Ok(false);
+    }
+    *format = renamed;
+    Ok(true)
 }
 
 #[derive(PartialEq, Eq, Serialize)]

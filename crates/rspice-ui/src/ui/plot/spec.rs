@@ -298,7 +298,6 @@ impl Marker {
             ..Self::point(x, 0.0, color, label)
         }
     }
-
 }
 
 /// A horizontal dashed reference line (0 dB, thresholds).
@@ -306,6 +305,14 @@ impl Marker {
 pub struct RefLine {
     /// Y position on the left axis.
     pub y: f64,
+}
+
+/// A labeled horizontal project limit on the left Y axis.
+#[derive(Debug, Clone)]
+pub struct LimitLine {
+    pub y: f64,
+    pub color: Color32,
+    pub label: String,
 }
 
 /// A shaded vertical band (±σ ranges).
@@ -364,6 +371,14 @@ pub struct PlotSpec<'a> {
     pub markers: Vec<Marker>,
     /// Horizontal reference lines.
     pub ref_lines: Vec<RefLine>,
+    /// Exact labeled limits from an owning project contract.
+    pub limit_lines: Vec<LimitLine>,
+    /// Draw unlabeled subdivisions between major ticks.
+    pub minor_grid: bool,
+    /// Horizontal measurement cursor on the left Y axis.
+    pub horizontal_cursor: Option<f64>,
+    /// Whether primary click/drag updates `horizontal_cursor`.
+    pub horizontal_cursor_interactive: bool,
     /// Shaded vertical bands, drawn under everything.
     pub bands: Vec<Band>,
     /// Custom content drawn after the grid, under the traces.
@@ -385,6 +400,10 @@ impl<'a> PlotSpec<'a> {
             display_decimation: DisplayDecimation::default(),
             markers: Vec::new(),
             ref_lines: Vec::new(),
+            limit_lines: Vec::new(),
+            minor_grid: false,
+            horizontal_cursor: None,
+            horizontal_cursor_interactive: false,
             bands: Vec::new(),
             underlay: None,
             left_margin: 56.0,

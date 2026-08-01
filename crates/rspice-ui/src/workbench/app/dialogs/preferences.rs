@@ -19,11 +19,11 @@ use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
 use self::preferences_shell::PreferenceCategory;
 use self::shortcut_portability_dialogs::{ShortcutExportEnvironment, ShortcutPortabilityAction};
+use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::session::shortcut_library::{
     ShortcutLibraryPublication, ShortcutLibraryPublicationContinuation,
 };
-use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::AppState;
 
 const CATEGORY_STATE_ID: &str = "rspice.preferences.active-category";
 pub(in crate::workbench) const ENGINEERING_PROFILE_HELP: &str = "Sets the discipline context reported by capability discovery and the availability matrix. Deep links and project documents remain available.";

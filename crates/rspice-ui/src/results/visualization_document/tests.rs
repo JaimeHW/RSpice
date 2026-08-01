@@ -49,6 +49,146 @@ fn document() -> (VisualizationDocument, DatasetBinding) {
 }
 
 #[test]
+fn result_document_tracking_is_revisioned_and_requires_exact_plan_authority() {
+    let (mut document, _) = document();
+    assert_eq!(
+        document.tracking(),
+        ResultDocumentTracking::pinned(),
+        "new immutable documents begin pinned until a prepared plan identity is supplied"
+    );
+
+    let plan_id = SimulationPlanId::new();
+    let analysis_id = AnalysisInstanceId::new();
+    let latest =
+        ResultDocumentTracking::for_plan(ResultDocumentTrackingMode::Latest, plan_id, analysis_id);
+    let previous_revision = document.revision();
+    document
+        .transact(previous_revision, vec![DocumentEdit::SetTracking(latest)])
+        .unwrap();
+    assert_eq!(document.tracking(), latest);
+    assert_ne!(document.revision(), previous_revision);
+
+    let malformed = ResultDocumentTracking {
+        mode: ResultDocumentTrackingMode::Latest,
+        simulation_plan_id: Some(plan_id),
+        authored_analysis_id: None,
+    };
+    let revision = document.revision();
+    let error = document
+        .transact(revision, vec![DocumentEdit::SetTracking(malformed)])
+        .expect_err("partial tracking authority must fail closed");
+    assert!(error.to_string().contains("present together"));
+    assert_eq!(document.revision(), revision);
+    assert_eq!(document.tracking(), latest);
+}
+
+#[test]
+fn schema_three_migrates_to_pinned_tracking_without_inventing_plan_identity() {
+    let (document, _) = document();
+    let mut value = serde_json::to_value(document).unwrap();
+    value["schema_version"] = serde_json::json!(3);
+    value
+        .as_object_mut()
+        .expect("document JSON is an object")
+        .remove("tracking");
+
+    let restored: VisualizationDocument = serde_json::from_value(value).unwrap();
+    assert_eq!(restored.tracking(), ResultDocumentTracking::pinned());
+    assert_eq!(
+        serde_json::to_value(restored).unwrap()["schema_version"],
+        serde_json::json!(VisualizationDocument::SCHEMA_VERSION)
+    );
+}
+
+#[test]
+fn latest_retarget_is_atomic_and_keeps_the_prior_immutable_snapshot() {
+    let (mut document, previous) = document();
+    let plan_id = SimulationPlanId::new();
+    let authored_analysis = AnalysisInstanceId::new();
+    let previous_execution = AnalysisInstanceId::new();
+    let next_execution = AnalysisInstanceId::new();
+    let pane_id = document.panes()[0].id;
+    document
+        .transact(
+            document.revision(),
+            vec![
+                DocumentEdit::SetTracking(ResultDocumentTracking::for_plan(
+                    ResultDocumentTrackingMode::Latest,
+                    plan_id,
+                    authored_analysis,
+                )),
+                DocumentEdit::SetPaneSource {
+                    pane_id,
+                    viewer_id: "viewer-waveform".to_owned(),
+                    binding: Some(PaneDataBinding {
+                        analysis_id: previous_execution,
+                        dataset: previous,
+                    }),
+                },
+            ],
+        )
+        .unwrap();
+
+    let next = binding(2);
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::RetargetTrackedDataset {
+                previous,
+                next: dataset(next, 10.0),
+                analysis_id: next_execution,
+            }],
+        )
+        .unwrap();
+    assert_eq!(document.datasets().len(), 2);
+    assert!(
+        document
+            .datasets()
+            .iter()
+            .any(|source| source.binding() == previous)
+    );
+    assert!(
+        document
+            .datasets()
+            .iter()
+            .any(|source| source.binding() == next)
+    );
+    assert_eq!(
+        document.panes()[0].binding,
+        Some(PaneDataBinding {
+            analysis_id: next_execution,
+            dataset: next,
+        })
+    );
+
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::SetTracking(ResultDocumentTracking::for_plan(
+                ResultDocumentTrackingMode::Pinned,
+                plan_id,
+                authored_analysis,
+            ))],
+        )
+        .unwrap();
+    let revision = document.revision();
+    let third = binding(3);
+    let error = document
+        .transact(
+            revision,
+            vec![DocumentEdit::RetargetTrackedDataset {
+                previous: next,
+                next: dataset(third, 20.0),
+                analysis_id: AnalysisInstanceId::new(),
+            }],
+        )
+        .expect_err("pinned documents cannot advance");
+    assert!(error.to_string().contains("latest-bound"));
+    assert_eq!(document.revision(), revision);
+    assert_eq!(document.datasets().len(), 2);
+}
+
+#[test]
 fn content_digest_authenticates_the_exact_document_revision() {
     let (mut document, _) = document();
     let first = document.content_digest().unwrap();
@@ -864,7 +1004,7 @@ fn comparison_rejects_mismatched_bindings_and_inconsistent_receipts() {
         baseline: binding(33),
         candidate,
         signal_keys: vec!["v(out)".to_owned()],
-        policy,
+        policy: policy.clone(),
     };
     assert!(matches!(
         compare_source_datasets(&baseline_data, &candidate_data, &request),
@@ -877,7 +1017,7 @@ fn comparison_rejects_mismatched_bindings_and_inconsistent_receipts() {
     let malformed = ComparisonReceipt {
         baseline,
         candidate,
-        policy,
+        policy: policy.clone(),
         rows_compared: 3,
         signals: vec![SignalComparison {
             signal_key: "v(out)".to_owned(),
@@ -907,7 +1047,7 @@ fn comparison_rejects_oversized_or_overlong_signal_keys_before_result_work() {
         baseline,
         candidate,
         signal_keys: vec!["s".repeat(MAX_VISUALIZATION_KEY_BYTES + 1)],
-        policy,
+        policy: policy.clone(),
     };
     assert!(matches!(
         compare_source_datasets(&baseline_data, &candidate_data, &overlong),

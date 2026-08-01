@@ -179,7 +179,8 @@ fn repeated_static_hot_guards_are_specialized_with_a_source_size_cap() {
     if let Err(report) = compile("repeated structure", state, stamp, noise) {
         panic!("repeated structure: generated specialization does not compile:\n{report}");
     }
-    if let Err(report) = run_structural_variants("repeated structure runtime", state, stamp, noise) {
+    if let Err(report) = run_structural_variants("repeated structure runtime", state, stamp, noise)
+    {
         panic!("repeated structure: generated specialization changed behavior:\n{report}");
     }
 }
@@ -641,9 +642,7 @@ impl PipelineControl for CancelInsideStructuralSpecialization {
         }
         // The first poll is the StampEmission boundary. Let it enter, then
         // cancel at the first poll in the variant's CFG optimization.
-        self.polls_after_scheduling
-            .fetch_add(1, Ordering::Relaxed)
-            >= 1
+        self.polls_after_scheduling.fetch_add(1, Ordering::Relaxed) >= 1
     }
 
     fn phase_completed(
@@ -720,12 +719,7 @@ fn compile(name: &str, state: &str, stamp: &str, noise: &str) -> Result<(), Stri
     Err(String::from_utf8_lossy(&output.stderr).into_owned())
 }
 
-fn run_shared_model_cache(
-    name: &str,
-    state: &str,
-    stamp: &str,
-    noise: &str,
-) -> Result<(), String> {
+fn run_shared_model_cache(name: &str, state: &str, stamp: &str, noise: &str) -> Result<(), String> {
     let root = scratch().join(name.replace(' ', "_"));
     std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
     let main = root.join("main.rs");

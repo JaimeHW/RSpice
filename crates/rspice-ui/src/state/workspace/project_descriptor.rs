@@ -1,17 +1,188 @@
 //! The project's own identity: its descriptor and its technology binding.
 //!
-//! A binding names the technology a project is authored against and nothing
-//! more — physical layer decks, signed organization packages, and remote
-//! entitlement receipts need provider records this local binding deliberately
-//! does not stand in for. Keeping that boundary explicit is what stops a
-//! locally-declared technology from being read as a licensed one.
+//! A binding pins the model-source closure and, when a signed PDK is attached,
+//! the exact trusted package revision and content digests. Remote entitlement
+//! receipts remain a provider concern and are never inferred from local state.
 
 use super::*;
 
-/// Exact project-owned attachment to a locally parsed and content-pinned model
-/// technology. Physical layer decks, signed organization packages, and remote
-/// entitlement receipts require provider records that are intentionally not
-/// represented by this local binding.
+pub const PROJECT_SIGNED_TECHNOLOGY_PIN_SCHEMA_VERSION: u16 = 1;
+pub const PROJECT_TECHNOLOGY_CHANGE_RECEIPT_SCHEMA_VERSION: u16 = 1;
+pub const MAX_PROJECT_TECHNOLOGY_CHANGE_RECEIPTS: usize = 4_096;
+pub const PROJECT_LIBRARY_MUTATION_RECEIPT_SCHEMA_VERSION: u16 = 1;
+pub const MAX_PROJECT_LIBRARY_MUTATION_RECEIPTS: usize = 16_384;
+
+/// Persisted, content-addressed project pin to one signed PDK package.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectSignedTechnologyPin {
+    schema_version: u16,
+    package_id: String,
+    revision: String,
+    manifest_digest: crate::product::ContentDigest,
+    archive_digest: crate::product::ContentDigest,
+    technology_name: String,
+    publisher_id: String,
+    signing_key_id: String,
+    process_node_nm: u32,
+    stack_name: String,
+    execution_targets: Vec<crate::state::pdk_config::PdkExecutionTarget>,
+}
+
+impl ProjectSignedTechnologyPin {
+    pub(crate) fn from_validated_package(
+        package: &crate::state::pdk_config::ValidatedPdkTechnologyPackage,
+    ) -> Result<Self, TechnologyBindingError> {
+        let manifest = package.manifest();
+        let mut execution_targets = manifest.compatibility.targets.clone();
+        execution_targets.sort();
+        let pin = Self {
+            schema_version: PROJECT_SIGNED_TECHNOLOGY_PIN_SCHEMA_VERSION,
+            package_id: manifest.package_id.clone(),
+            revision: manifest.revision.clone(),
+            manifest_digest: package.manifest_digest(),
+            archive_digest: package.archive_digest(),
+            technology_name: manifest.technology_name.clone(),
+            publisher_id: manifest.publisher_id.clone(),
+            signing_key_id: manifest.signing_key_id.clone(),
+            process_node_nm: manifest.process_node_nm,
+            stack_name: manifest.stack_name.clone(),
+            execution_targets,
+        };
+        pin.validate()?;
+        Ok(pin)
+    }
+
+    pub fn validate(&self) -> Result<(), TechnologyBindingError> {
+        if self.schema_version != PROJECT_SIGNED_TECHNOLOGY_PIN_SCHEMA_VERSION {
+            return Err(TechnologyBindingError::UnsupportedSignedPackageSchema {
+                found: self.schema_version,
+                supported: PROJECT_SIGNED_TECHNOLOGY_PIN_SCHEMA_VERSION,
+            });
+        }
+        for (field, value) in [
+            ("signed_package.package_id", self.package_id.as_str()),
+            ("signed_package.revision", self.revision.as_str()),
+            (
+                "signed_package.technology_name",
+                self.technology_name.as_str(),
+            ),
+            ("signed_package.publisher_id", self.publisher_id.as_str()),
+            (
+                "signed_package.signing_key_id",
+                self.signing_key_id.as_str(),
+            ),
+            ("signed_package.stack_name", self.stack_name.as_str()),
+        ] {
+            validate_technology_text(field, value)?;
+        }
+        if self.process_node_nm == 0 {
+            return Err(TechnologyBindingError::InvalidSignedPackage(
+                "process node must be greater than zero".to_owned(),
+            ));
+        }
+        if self.execution_targets.is_empty() {
+            return Err(TechnologyBindingError::InvalidSignedPackage(
+                "at least one execution target is required".to_owned(),
+            ));
+        }
+        for index in 1..self.execution_targets.len() {
+            if self.execution_targets[index - 1] >= self.execution_targets[index] {
+                return Err(TechnologyBindingError::InvalidSignedPackage(
+                    "execution targets must be strictly sorted and unique".to_owned(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_registry(
+        &self,
+        registry: &crate::state::pdk_config::PdkTechnologyRegistry,
+    ) -> Result<(), TechnologyBindingError> {
+        self.validate()?;
+        let package = registry
+            .validated_packages()
+            .iter()
+            .find(|package| {
+                package
+                    .manifest()
+                    .package_id
+                    .eq_ignore_ascii_case(&self.package_id)
+                    && package.manifest().revision == self.revision
+                    && package.manifest_digest() == self.manifest_digest
+                    && package.archive_digest() == self.archive_digest
+            })
+            .ok_or_else(|| TechnologyBindingError::SignedPackageUnavailable {
+                package_id: self.package_id.clone(),
+                revision: self.revision.clone(),
+            })?;
+        let observed = Self::from_validated_package(package)?;
+        if &observed != self {
+            return Err(TechnologyBindingError::SignedPackageMetadataDrift {
+                package_id: self.package_id.clone(),
+                revision: self.revision.clone(),
+            });
+        }
+        package
+            .runtime_compatibility()
+            .map_err(TechnologyBindingError::SignedPackageRuntime)
+    }
+
+    #[must_use]
+    pub fn package_id(&self) -> &str {
+        &self.package_id
+    }
+
+    #[must_use]
+    pub fn revision(&self) -> &str {
+        &self.revision
+    }
+
+    #[must_use]
+    pub const fn manifest_digest(&self) -> crate::product::ContentDigest {
+        self.manifest_digest
+    }
+
+    #[must_use]
+    pub const fn archive_digest(&self) -> crate::product::ContentDigest {
+        self.archive_digest
+    }
+
+    #[must_use]
+    pub fn technology_name(&self) -> &str {
+        &self.technology_name
+    }
+
+    #[must_use]
+    pub fn publisher_id(&self) -> &str {
+        &self.publisher_id
+    }
+
+    #[must_use]
+    pub fn signing_key_id(&self) -> &str {
+        &self.signing_key_id
+    }
+
+    #[must_use]
+    pub const fn process_node_nm(&self) -> u32 {
+        self.process_node_nm
+    }
+
+    #[must_use]
+    pub fn stack_name(&self) -> &str {
+        &self.stack_name
+    }
+
+    #[must_use]
+    pub fn display_label(&self) -> String {
+        format!("{} {}", self.package_id, self.revision)
+    }
+}
+
+/// Exact project-owned attachment to a content-pinned model technology and an
+/// optional immutable signed PDK package revision. Runtime use requires the
+/// signed pin to resolve against the currently trusted registry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectTechnologyBinding {
@@ -29,6 +200,8 @@ pub struct ProjectTechnologyBinding {
     pub(super) model_count: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) process_sections: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) signed_package: Option<ProjectSignedTechnologyPin>,
 }
 
 impl ProjectTechnologyBinding {
@@ -60,6 +233,7 @@ impl ProjectTechnologyBinding {
             source_edges: library.source_edges.clone(),
             model_count: library.models.len(),
             process_sections,
+            signed_package: None,
         };
         binding.validate()?;
         Ok(binding)
@@ -141,6 +315,9 @@ impl ProjectTechnologyBinding {
                 return Err(TechnologyBindingError::UnsortedProcessSections);
             }
         }
+        if let Some(pin) = &self.signed_package {
+            pin.validate()?;
+        }
         Ok(())
     }
 
@@ -154,6 +331,10 @@ impl ProjectTechnologyBinding {
         if let Some(node) = &self.technology_node {
             label.push_str(" · ");
             label.push_str(node);
+        }
+        if let Some(pin) = &self.signed_package {
+            label.push_str(" · signed ");
+            label.push_str(&pin.display_label());
         }
         label
     }
@@ -201,7 +382,13 @@ impl ProjectTechnologyBinding {
         &self,
         library: &crate::state::model_library::ModelLibrary,
     ) -> Result<(), TechnologyBindingError> {
-        let observed = Self::from_model_library(library)?;
+        let mut observed = Self::from_model_library(library)?;
+        // The live model catalog can prove only its own authenticated source
+        // closure. The signed PDK pin is independently resolved against the
+        // trusted technology registry, so carry the accepted pin across this
+        // comparison instead of treating its deliberate absence from
+        // `from_model_library` as catalog drift.
+        observed.signed_package = self.signed_package.clone();
         if &observed != self {
             return Err(TechnologyBindingError::CatalogDrift {
                 library: self.model_library.clone(),
@@ -219,6 +406,574 @@ impl ProjectTechnologyBinding {
     pub fn process_sections(&self) -> &[String] {
         &self.process_sections
     }
+
+    #[must_use]
+    pub fn signed_package(&self) -> Option<&ProjectSignedTechnologyPin> {
+        self.signed_package.as_ref()
+    }
+
+    pub(crate) fn with_signed_package(
+        mut self,
+        package: &crate::state::pdk_config::ValidatedPdkTechnologyPackage,
+    ) -> Result<Self, TechnologyBindingError> {
+        self.signed_package = Some(ProjectSignedTechnologyPin::from_validated_package(package)?);
+        self.validate()?;
+        Ok(self)
+    }
+
+    pub(crate) fn validate_signed_package(
+        &self,
+        registry: &crate::state::pdk_config::PdkTechnologyRegistry,
+    ) -> Result<(), TechnologyBindingError> {
+        self.signed_package
+            .as_ref()
+            .ok_or(TechnologyBindingError::MissingSignedPackage)?
+            .validate_registry(registry)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProjectTechnologyChangeAction {
+    Attach,
+    Replace,
+}
+
+/// Human and authorization context captured before a project technology
+/// transaction starts. This is intentionally separate from the recovery
+/// checkpoint evidence, which is produced only after the exact pre-change
+/// project snapshot has been durably written and read-back verified.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectTechnologyChangeAuthority {
+    actor_id: String,
+    authority_id: String,
+    reason: String,
+}
+
+impl ProjectTechnologyChangeAuthority {
+    pub fn new(
+        actor_id: impl Into<String>,
+        authority_id: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> Result<Self, ProjectDescriptorError> {
+        let authority = Self {
+            actor_id: actor_id.into(),
+            authority_id: authority_id.into(),
+            reason: reason.into(),
+        };
+        authority.validate()?;
+        Ok(authority)
+    }
+
+    fn validate(&self) -> Result<(), ProjectDescriptorError> {
+        validate_project_audit_text("technology_change.actor_id", &self.actor_id, 240)?;
+        validate_project_audit_text("technology_change.authority_id", &self.authority_id, 240)?;
+        validate_project_audit_text("technology_change.reason", &self.reason, 1_024)
+    }
+}
+
+/// Exact checkpoint proof required to authorize one project technology
+/// mutation. Callers cannot claim a checkpoint for a different project
+/// revision because the descriptor validates this evidence at commit time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectTechnologyChangeContext {
+    authority: ProjectTechnologyChangeAuthority,
+    checkpoint_id: Uuid,
+    checkpoint_project_revision: ObjectRevision,
+    checkpoint_created_unix_ms: u64,
+    checkpoint_snapshot_digest: ContentDigest,
+    checkpoint_snapshot_byte_len: u64,
+}
+
+impl ProjectTechnologyChangeContext {
+    pub fn new(
+        authority: ProjectTechnologyChangeAuthority,
+        checkpoint_id: Uuid,
+        checkpoint_project_revision: ObjectRevision,
+        checkpoint_created_unix_ms: u64,
+        checkpoint_snapshot_digest: ContentDigest,
+        checkpoint_snapshot_byte_len: u64,
+    ) -> Result<Self, ProjectDescriptorError> {
+        let context = Self {
+            authority,
+            checkpoint_id,
+            checkpoint_project_revision,
+            checkpoint_created_unix_ms,
+            checkpoint_snapshot_digest,
+            checkpoint_snapshot_byte_len,
+        };
+        context.validate()?;
+        Ok(context)
+    }
+
+    fn validate(&self) -> Result<(), ProjectDescriptorError> {
+        self.authority.validate()?;
+        if self.checkpoint_id.is_nil() {
+            return Err(ProjectDescriptorError::InvalidTechnologyCheckpoint(
+                "checkpoint identity must not be nil".to_owned(),
+            ));
+        }
+        if self.checkpoint_created_unix_ms == 0 {
+            return Err(ProjectDescriptorError::InvalidTechnologyCheckpoint(
+                "checkpoint creation time must be greater than zero".to_owned(),
+            ));
+        }
+        if self.checkpoint_snapshot_byte_len == 0 {
+            return Err(ProjectDescriptorError::InvalidTechnologyCheckpoint(
+                "checkpoint snapshot must not be empty".to_owned(),
+            ));
+        }
+        if self.checkpoint_snapshot_digest == ContentDigest::from_bytes([0; 32]) {
+            return Err(ProjectDescriptorError::InvalidTechnologyCheckpoint(
+                "checkpoint snapshot digest must not be the zero sentinel".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectTechnologyChangeReceipt {
+    schema_version: u16,
+    sequence: u64,
+    project_id: ProjectId,
+    action: ProjectTechnologyChangeAction,
+    actor_id: String,
+    authority_id: String,
+    reason: String,
+    from_project_revision: ObjectRevision,
+    to_project_revision: ObjectRevision,
+    before_binding_digest: Option<ContentDigest>,
+    after_binding_digest: ContentDigest,
+    before_binding_label: Option<String>,
+    after_binding_label: String,
+    checkpoint_id: Uuid,
+    checkpoint_project_revision: ObjectRevision,
+    checkpoint_created_unix_ms: u64,
+    checkpoint_snapshot_digest: ContentDigest,
+    checkpoint_snapshot_byte_len: u64,
+    previous_receipt_digest: Option<ContentDigest>,
+    receipt_digest: ContentDigest,
+}
+
+#[derive(Serialize)]
+struct ProjectTechnologyChangeReceiptPayload<'a> {
+    schema_version: u16,
+    sequence: u64,
+    project_id: ProjectId,
+    action: ProjectTechnologyChangeAction,
+    actor_id: &'a str,
+    authority_id: &'a str,
+    reason: &'a str,
+    from_project_revision: ObjectRevision,
+    to_project_revision: ObjectRevision,
+    before_binding_digest: Option<ContentDigest>,
+    after_binding_digest: ContentDigest,
+    before_binding_label: &'a Option<String>,
+    after_binding_label: &'a str,
+    checkpoint_id: Uuid,
+    checkpoint_project_revision: ObjectRevision,
+    checkpoint_created_unix_ms: u64,
+    checkpoint_snapshot_digest: ContentDigest,
+    checkpoint_snapshot_byte_len: u64,
+    previous_receipt_digest: Option<ContentDigest>,
+}
+
+impl ProjectTechnologyChangeReceipt {
+    fn calculate_digest(&self) -> Result<ContentDigest, ProjectDescriptorError> {
+        let payload = ProjectTechnologyChangeReceiptPayload {
+            schema_version: self.schema_version,
+            sequence: self.sequence,
+            project_id: self.project_id,
+            action: self.action,
+            actor_id: &self.actor_id,
+            authority_id: &self.authority_id,
+            reason: &self.reason,
+            from_project_revision: self.from_project_revision,
+            to_project_revision: self.to_project_revision,
+            before_binding_digest: self.before_binding_digest,
+            after_binding_digest: self.after_binding_digest,
+            before_binding_label: &self.before_binding_label,
+            after_binding_label: &self.after_binding_label,
+            checkpoint_id: self.checkpoint_id,
+            checkpoint_project_revision: self.checkpoint_project_revision,
+            checkpoint_created_unix_ms: self.checkpoint_created_unix_ms,
+            checkpoint_snapshot_digest: self.checkpoint_snapshot_digest,
+            checkpoint_snapshot_byte_len: self.checkpoint_snapshot_byte_len,
+            previous_receipt_digest: self.previous_receipt_digest,
+        };
+        let bytes = serde_json::to_vec(&payload)
+            .map_err(|error| ProjectDescriptorError::Serialization(error.to_string()))?;
+        Ok(ContentDigest::from_bytes(
+            sha2::Sha256::digest(bytes).into(),
+        ))
+    }
+
+    #[must_use]
+    pub const fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    #[must_use]
+    pub const fn action(&self) -> ProjectTechnologyChangeAction {
+        self.action
+    }
+
+    #[must_use]
+    pub fn actor_id(&self) -> &str {
+        &self.actor_id
+    }
+
+    #[must_use]
+    pub fn authority_id(&self) -> &str {
+        &self.authority_id
+    }
+
+    #[must_use]
+    pub fn reason(&self) -> &str {
+        &self.reason
+    }
+
+    #[must_use]
+    pub const fn from_project_revision(&self) -> ObjectRevision {
+        self.from_project_revision
+    }
+
+    #[must_use]
+    pub const fn to_project_revision(&self) -> ObjectRevision {
+        self.to_project_revision
+    }
+
+    #[must_use]
+    pub fn after_binding_label(&self) -> &str {
+        &self.after_binding_label
+    }
+
+    #[must_use]
+    pub const fn checkpoint_id(&self) -> Uuid {
+        self.checkpoint_id
+    }
+
+    #[must_use]
+    pub const fn checkpoint_snapshot_digest(&self) -> ContentDigest {
+        self.checkpoint_snapshot_digest
+    }
+
+    #[must_use]
+    pub const fn receipt_digest(&self) -> ContentDigest {
+        self.receipt_digest
+    }
+}
+
+/// Exact semantic operation retained by the project library audit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ProjectLibraryMutation {
+    CreateCell {
+        library: String,
+        cell: String,
+    },
+    CreateView {
+        library: String,
+        cell: String,
+        view: String,
+    },
+    CopyCell {
+        source_library: String,
+        source_cell: String,
+        target_library: String,
+        target_cell: String,
+    },
+    RenameCell {
+        library: String,
+        from_cell: String,
+        to_cell: String,
+    },
+    DeleteCell {
+        library: String,
+        cell: String,
+    },
+    DeleteView {
+        library: String,
+        cell: String,
+        view: String,
+    },
+    RollbackPublication {
+        publication_id: Uuid,
+        publication_label: String,
+        snapshot_digest: ContentDigest,
+        actor_id: String,
+        authority_id: String,
+        reason: String,
+    },
+}
+
+impl ProjectLibraryMutation {
+    #[must_use]
+    pub const fn operation_label(&self) -> &'static str {
+        match self {
+            Self::CreateCell { .. } => "cell creation",
+            Self::CreateView { .. } => "view creation",
+            Self::CopyCell { .. } => "cell copy",
+            Self::RenameCell { .. } => "cell rename",
+            Self::DeleteCell { .. } => "cell deletion",
+            Self::DeleteView { .. } => "view deletion",
+            Self::RollbackPublication { .. } => "library publication rollback",
+        }
+    }
+
+    fn validate(&self) -> Result<(), ProjectDescriptorError> {
+        let fields: &[(&str, &str)] = match self {
+            Self::CreateCell { library, cell } | Self::DeleteCell { library, cell } => {
+                &[("library", library), ("cell", cell)]
+            }
+            Self::CreateView {
+                library,
+                cell,
+                view,
+            }
+            | Self::DeleteView {
+                library,
+                cell,
+                view,
+            } => &[("library", library), ("cell", cell), ("view", view)],
+            Self::CopyCell {
+                source_library,
+                source_cell,
+                target_library,
+                target_cell,
+            } => &[
+                ("source_library", source_library),
+                ("source_cell", source_cell),
+                ("target_library", target_library),
+                ("target_cell", target_cell),
+            ],
+            Self::RenameCell {
+                library,
+                from_cell,
+                to_cell,
+            } => &[
+                ("library", library),
+                ("from_cell", from_cell),
+                ("to_cell", to_cell),
+            ],
+            Self::RollbackPublication {
+                publication_label,
+                actor_id,
+                authority_id,
+                reason,
+                ..
+            } => &[
+                ("publication_label", publication_label),
+                ("actor_id", actor_id),
+                ("authority_id", authority_id),
+                ("reason", reason),
+            ],
+        };
+        for (field, value) in fields {
+            validate_library_audit_text(field, value)?;
+        }
+
+        match self {
+            Self::CopyCell {
+                source_library,
+                source_cell,
+                target_library,
+                target_cell,
+            } if crate::state::canonical_cell_view_owner_key(source_library, source_cell, "")
+                == crate::state::canonical_cell_view_owner_key(target_library, target_cell, "") =>
+            {
+                Err(ProjectDescriptorError::LibraryAuditCorrupted(
+                    "cell copy source and target identities are equal".to_owned(),
+                ))
+            }
+            Self::RenameCell {
+                library,
+                from_cell,
+                to_cell,
+            } if crate::state::canonical_cell_view_owner_key(library, from_cell, "")
+                == crate::state::canonical_cell_view_owner_key(library, to_cell, "") =>
+            {
+                Err(ProjectDescriptorError::LibraryAuditCorrupted(
+                    "cell rename source and target identities are equal".to_owned(),
+                ))
+            }
+            Self::RollbackPublication { publication_id, .. } if publication_id.is_nil() => {
+                Err(ProjectDescriptorError::LibraryAuditCorrupted(
+                    "library publication rollback identity must not be nil".to_owned(),
+                ))
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+/// Immutable hash-chained record of one project library membership change.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectLibraryMutationReceipt {
+    schema_version: u16,
+    sequence: u64,
+    project_id: ProjectId,
+    mutation: ProjectLibraryMutation,
+    from_project_revision: ObjectRevision,
+    to_project_revision: ObjectRevision,
+    from_library_revision: u64,
+    to_library_revision: u64,
+    previous_receipt_digest: Option<ContentDigest>,
+    receipt_digest: ContentDigest,
+}
+
+#[derive(Serialize)]
+struct ProjectLibraryMutationReceiptPayload<'a> {
+    schema_version: u16,
+    sequence: u64,
+    project_id: ProjectId,
+    mutation: &'a ProjectLibraryMutation,
+    from_project_revision: ObjectRevision,
+    to_project_revision: ObjectRevision,
+    from_library_revision: u64,
+    to_library_revision: u64,
+    previous_receipt_digest: Option<ContentDigest>,
+}
+
+impl ProjectLibraryMutationReceipt {
+    fn calculate_digest(&self) -> Result<ContentDigest, ProjectDescriptorError> {
+        let bytes = serde_json::to_vec(&ProjectLibraryMutationReceiptPayload {
+            schema_version: self.schema_version,
+            sequence: self.sequence,
+            project_id: self.project_id,
+            mutation: &self.mutation,
+            from_project_revision: self.from_project_revision,
+            to_project_revision: self.to_project_revision,
+            from_library_revision: self.from_library_revision,
+            to_library_revision: self.to_library_revision,
+            previous_receipt_digest: self.previous_receipt_digest,
+        })
+        .map_err(|error| ProjectDescriptorError::Serialization(error.to_string()))?;
+        Ok(ContentDigest::from_bytes(
+            sha2::Sha256::digest(bytes).into(),
+        ))
+    }
+
+    #[must_use]
+    pub const fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    #[must_use]
+    pub fn mutation(&self) -> &ProjectLibraryMutation {
+        &self.mutation
+    }
+
+    #[must_use]
+    pub const fn from_project_revision(&self) -> ObjectRevision {
+        self.from_project_revision
+    }
+
+    #[must_use]
+    pub const fn to_project_revision(&self) -> ObjectRevision {
+        self.to_project_revision
+    }
+
+    #[must_use]
+    pub const fn from_library_revision(&self) -> u64 {
+        self.from_library_revision
+    }
+
+    #[must_use]
+    pub const fn to_library_revision(&self) -> u64 {
+        self.to_library_revision
+    }
+
+    #[must_use]
+    pub const fn previous_receipt_digest(&self) -> Option<ContentDigest> {
+        self.previous_receipt_digest
+    }
+
+    #[must_use]
+    pub const fn receipt_digest(&self) -> ContentDigest {
+        self.receipt_digest
+    }
+}
+
+/// Fully preflighted descriptor-side portion of a library transaction.
+#[derive(Debug)]
+pub(crate) struct PreparedProjectLibraryMutation {
+    receipt: ProjectLibraryMutationReceipt,
+}
+
+impl PreparedProjectLibraryMutation {
+    #[must_use]
+    pub(crate) const fn minimum_library_revision(&self) -> u64 {
+        self.receipt.to_library_revision
+    }
+}
+
+pub(super) fn validate_library_audit_text(
+    field: &str,
+    value: &str,
+) -> Result<(), ProjectDescriptorError> {
+    if value.is_empty() {
+        return Err(ProjectDescriptorError::LibraryAuditCorrupted(format!(
+            "{field} is required"
+        )));
+    }
+    if value != value.trim() {
+        return Err(ProjectDescriptorError::LibraryAuditCorrupted(format!(
+            "{field} must not begin or end with whitespace"
+        )));
+    }
+    if value.chars().count() > 240 {
+        return Err(ProjectDescriptorError::LibraryAuditCorrupted(format!(
+            "{field} exceeds 240 Unicode scalar values"
+        )));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(ProjectDescriptorError::LibraryAuditCorrupted(format!(
+            "{field} contains a control character"
+        )));
+    }
+    Ok(())
+}
+
+fn technology_binding_digest(
+    binding: Option<&ProjectTechnologyBinding>,
+) -> Result<Option<ContentDigest>, ProjectDescriptorError> {
+    binding
+        .map(|binding| {
+            serde_json::to_vec(binding)
+                .map(|bytes| ContentDigest::from_bytes(sha2::Sha256::digest(bytes).into()))
+                .map_err(|error| ProjectDescriptorError::Serialization(error.to_string()))
+        })
+        .transpose()
+}
+
+fn validate_project_audit_text(
+    field: &'static str,
+    value: &str,
+    maximum: usize,
+) -> Result<(), ProjectDescriptorError> {
+    if value.is_empty() {
+        return Err(ProjectDescriptorError::RequiredField(field));
+    }
+    if value != value.trim() {
+        return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
+            "{field} must not begin or end with whitespace"
+        )));
+    }
+    if value.chars().count() > maximum {
+        return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
+            "{field} exceeds {maximum} Unicode scalar values"
+        )));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
+            "{field} contains a control character"
+        )));
+    }
+    Ok(())
 }
 
 pub(super) fn validate_retained_model_sources(
@@ -313,6 +1068,24 @@ pub enum TechnologyBindingError {
         "attached model library '{library}' no longer matches the accepted technology contract"
     )]
     CatalogDrift { library: String },
+    #[error("signed technology pin schema {found} is unsupported; this build supports {supported}")]
+    UnsupportedSignedPackageSchema { found: u16, supported: u16 },
+    #[error("signed technology package pin is invalid: {0}")]
+    InvalidSignedPackage(String),
+    #[error("project technology binding has no signed PDK package pin")]
+    MissingSignedPackage,
+    #[error("signed PDK package '{package_id}' revision '{revision}' is not currently trusted")]
+    SignedPackageUnavailable {
+        package_id: String,
+        revision: String,
+    },
+    #[error("signed PDK package '{package_id}' revision '{revision}' metadata has drifted")]
+    SignedPackageMetadataDrift {
+        package_id: String,
+        revision: String,
+    },
+    #[error("signed PDK package is incompatible with this runtime: {0}")]
+    SignedPackageRuntime(String),
 }
 
 /// Metadata for the active RSpice project.
@@ -337,6 +1110,12 @@ pub struct ProjectDescriptor {
     pub technology: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) technology_binding: Option<ProjectTechnologyBinding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) technology_change_audit: Vec<ProjectTechnologyChangeReceipt>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) library_mutation_audit: Vec<ProjectLibraryMutationReceipt>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) library_publications: Vec<ProjectLibraryPublicationReceipt>,
     pub description: String,
 }
 
@@ -361,6 +1140,12 @@ impl<'de> Deserialize<'de> for ProjectDescriptor {
             technology: Option<String>,
             #[serde(default)]
             technology_binding: Option<ProjectTechnologyBinding>,
+            #[serde(default)]
+            technology_change_audit: Vec<ProjectTechnologyChangeReceipt>,
+            #[serde(default)]
+            library_mutation_audit: Vec<ProjectLibraryMutationReceipt>,
+            #[serde(default)]
+            library_publications: Vec<ProjectLibraryPublicationReceipt>,
             description: String,
         }
 
@@ -403,6 +1188,7 @@ impl<'de> Deserialize<'de> for ProjectDescriptor {
                     &descriptor.top_cell,
                     &descriptor.technology,
                     &descriptor.technology_binding,
+                    &descriptor.technology_change_audit,
                     &descriptor.description,
                 ))
                 .map_err(D::Error::custom)?;
@@ -426,6 +1212,9 @@ impl<'de> Deserialize<'de> for ProjectDescriptor {
             top_cell: descriptor.top_cell,
             technology: descriptor.technology,
             technology_binding: descriptor.technology_binding,
+            technology_change_audit: descriptor.technology_change_audit,
+            library_mutation_audit: descriptor.library_mutation_audit,
+            library_publications: descriptor.library_publications,
             description: descriptor.description,
         })
     }
@@ -443,6 +1232,9 @@ impl Default for ProjectDescriptor {
             top_cell: DEFAULT_TOP_CELL.to_string(),
             technology: None,
             technology_binding: None,
+            technology_change_audit: Vec::new(),
+            library_mutation_audit: Vec::new(),
+            library_publications: Vec::new(),
             description: String::new(),
         }
     }
@@ -519,6 +1311,9 @@ impl ProjectDescriptor {
                 return Err(ProjectDescriptorError::TechnologyLabelMismatch);
             }
         }
+        self.validate_technology_change_audit()?;
+        self.validate_library_mutation_audit()?;
+        self.validate_library_publications()?;
         Ok(())
     }
 
@@ -527,9 +1322,181 @@ impl ProjectDescriptor {
         self.technology_binding.as_ref()
     }
 
+    #[must_use]
+    pub fn technology_change_audit(&self) -> &[ProjectTechnologyChangeReceipt] {
+        &self.technology_change_audit
+    }
+
+    #[must_use]
+    pub fn library_mutation_audit(&self) -> &[ProjectLibraryMutationReceipt] {
+        &self.library_mutation_audit
+    }
+
+    /// Preflight an exact library membership mutation, including the complete
+    /// receipt and both next revisions, before any live catalog state changes.
+    pub(crate) fn prepare_library_mutation(
+        &self,
+        mutation: ProjectLibraryMutation,
+        library_revision: u64,
+    ) -> Result<PreparedProjectLibraryMutation, ProjectDescriptorError> {
+        self.validate_library_mutation_audit()?;
+        mutation.validate()?;
+        if self.library_mutation_audit.len() >= MAX_PROJECT_LIBRARY_MUTATION_RECEIPTS {
+            return Err(ProjectDescriptorError::LibraryAuditLimit {
+                maximum: MAX_PROJECT_LIBRARY_MUTATION_RECEIPTS,
+            });
+        }
+
+        let to_project_revision = self.revision.next()?;
+        let to_library_revision = library_revision
+            .checked_add(1)
+            .ok_or(ProjectDescriptorError::LibraryRevisionExhausted)?;
+        let sequence = u64::try_from(self.library_mutation_audit.len())
+            .ok()
+            .and_then(|value| value.checked_add(1))
+            .ok_or(ProjectDescriptorError::LibraryAuditSequenceExhausted)?;
+        let mut receipt = ProjectLibraryMutationReceipt {
+            schema_version: PROJECT_LIBRARY_MUTATION_RECEIPT_SCHEMA_VERSION,
+            sequence,
+            project_id: self.id,
+            mutation,
+            from_project_revision: self.revision,
+            to_project_revision,
+            from_library_revision: library_revision,
+            to_library_revision,
+            previous_receipt_digest: self
+                .library_mutation_audit
+                .last()
+                .map(ProjectLibraryMutationReceipt::receipt_digest),
+            receipt_digest: ContentDigest::from_bytes([0; 32]),
+        };
+        receipt.receipt_digest = receipt.calculate_digest()?;
+
+        let mut candidate = self.clone();
+        candidate.revision = to_project_revision;
+        candidate.library_mutation_audit.push(receipt.clone());
+        candidate.validate()?;
+        Ok(PreparedProjectLibraryMutation { receipt })
+    }
+
+    /// Publish a receipt that was fully constructed and validated before the
+    /// catalog mutation. The caller owns the matching catalog revision check.
+    pub(crate) fn publish_library_mutation(
+        &mut self,
+        prepared: PreparedProjectLibraryMutation,
+        observed_library_revision: u64,
+    ) -> Result<ProjectLibraryMutationReceipt, ProjectDescriptorError> {
+        let mut receipt = prepared.receipt;
+        assert_eq!(
+            self.id, receipt.project_id,
+            "library mutation receipt belongs to a different project"
+        );
+        assert_eq!(
+            self.revision, receipt.from_project_revision,
+            "project changed after the library mutation was preflighted"
+        );
+        assert_eq!(
+            self.library_mutation_audit
+                .last()
+                .map(ProjectLibraryMutationReceipt::receipt_digest),
+            receipt.previous_receipt_digest,
+            "library mutation audit changed after preflight"
+        );
+        if observed_library_revision < receipt.to_library_revision {
+            return Err(ProjectDescriptorError::LibraryAuditCorrupted(
+                "library revision did not advance during the prepared mutation".to_owned(),
+            ));
+        }
+        receipt.to_library_revision = observed_library_revision;
+        receipt.receipt_digest = receipt.calculate_digest()?;
+
+        let mut candidate = self.clone();
+        candidate.revision = receipt.to_project_revision;
+        candidate.library_mutation_audit.push(receipt.clone());
+        candidate.validate()?;
+        *self = candidate;
+        Ok(receipt)
+    }
+
+    fn validate_library_mutation_audit(&self) -> Result<(), ProjectDescriptorError> {
+        if self.library_mutation_audit.len() > MAX_PROJECT_LIBRARY_MUTATION_RECEIPTS {
+            return Err(ProjectDescriptorError::LibraryAuditLimit {
+                maximum: MAX_PROJECT_LIBRARY_MUTATION_RECEIPTS,
+            });
+        }
+
+        let mut previous_receipt_digest = None;
+        let mut previous_project_revision = None;
+        let mut previous_library_revision = None;
+        for (index, receipt) in self.library_mutation_audit.iter().enumerate() {
+            let expected_sequence = u64::try_from(index)
+                .ok()
+                .and_then(|value| value.checked_add(1))
+                .ok_or(ProjectDescriptorError::LibraryAuditSequenceExhausted)?;
+            if receipt.schema_version != PROJECT_LIBRARY_MUTATION_RECEIPT_SCHEMA_VERSION {
+                return Err(ProjectDescriptorError::LibraryAuditCorrupted(format!(
+                    "receipt[{index}] schema {} is unsupported",
+                    receipt.schema_version
+                )));
+            }
+            if receipt.sequence != expected_sequence {
+                return Err(ProjectDescriptorError::LibraryAuditCorrupted(format!(
+                    "receipt[{index}] sequence is {}, expected {expected_sequence}",
+                    receipt.sequence
+                )));
+            }
+            if receipt.project_id != self.id {
+                return Err(ProjectDescriptorError::LibraryAuditCorrupted(format!(
+                    "receipt[{index}] belongs to a different project"
+                )));
+            }
+            if receipt.previous_receipt_digest != previous_receipt_digest
+                || receipt.calculate_digest()? != receipt.receipt_digest
+            {
+                return Err(ProjectDescriptorError::LibraryAuditCorrupted(format!(
+                    "receipt[{index}] has invalid content or chain linkage"
+                )));
+            }
+            receipt.mutation.validate()?;
+            if receipt.from_project_revision.next()? != receipt.to_project_revision {
+                return Err(ProjectDescriptorError::LibraryAuditCorrupted(format!(
+                    "receipt[{index}] does not advance exactly one project revision"
+                )));
+            }
+            if receipt.to_project_revision > self.revision {
+                return Err(ProjectDescriptorError::LibraryAuditCorrupted(format!(
+                    "receipt[{index}] claims a future project revision"
+                )));
+            }
+            if receipt.to_library_revision <= receipt.from_library_revision {
+                return Err(ProjectDescriptorError::LibraryAuditCorrupted(format!(
+                    "receipt[{index}] does not advance the library revision"
+                )));
+            }
+            if previous_project_revision
+                .is_some_and(|previous| receipt.from_project_revision < previous)
+            {
+                return Err(ProjectDescriptorError::LibraryAuditCorrupted(format!(
+                    "receipt[{index}] project revision regresses"
+                )));
+            }
+            if previous_library_revision
+                .is_some_and(|previous| receipt.from_library_revision < previous)
+            {
+                return Err(ProjectDescriptorError::LibraryAuditCorrupted(format!(
+                    "receipt[{index}] library revision regresses"
+                )));
+            }
+            previous_receipt_digest = Some(receipt.receipt_digest);
+            previous_project_revision = Some(receipt.to_project_revision);
+            previous_library_revision = Some(receipt.to_library_revision);
+        }
+        Ok(())
+    }
+
     /// Attach an exact, validated technology contract as one atomic project
     /// metadata revision. Reattaching the identical binding is a no-op.
-    pub fn attach_technology(
+    pub(crate) fn attach_technology(
         &mut self,
         binding: ProjectTechnologyBinding,
     ) -> Result<ObjectRevision, ProjectDescriptorError> {
@@ -540,11 +1507,246 @@ impl ProjectDescriptor {
         {
             return Ok(self.revision);
         }
+        if !self.technology_change_audit.is_empty() {
+            return Err(ProjectDescriptorError::TechnologyAuditRequired);
+        }
         let next_revision = self.revision.next()?;
         self.technology = Some(label);
         self.technology_binding = Some(binding);
         self.revision = next_revision;
         Ok(next_revision)
+    }
+
+    /// Commit an exact technology change and its checkpoint-backed authority
+    /// receipt as one atomic project descriptor revision.
+    pub fn attach_technology_audited(
+        &mut self,
+        binding: ProjectTechnologyBinding,
+        context: ProjectTechnologyChangeContext,
+    ) -> Result<(ObjectRevision, ProjectTechnologyChangeReceipt), ProjectDescriptorError> {
+        binding.validate()?;
+        context.validate()?;
+        self.validate_technology_change_audit()?;
+        let label = binding.display_label();
+        if self.technology_binding.as_ref() == Some(&binding)
+            && self.technology.as_deref() == Some(label.as_str())
+        {
+            return Err(ProjectDescriptorError::NoOpTechnologyChange);
+        }
+        if context.checkpoint_project_revision != self.revision {
+            return Err(ProjectDescriptorError::TechnologyCheckpointRevision {
+                checkpoint: context.checkpoint_project_revision.get(),
+                current: self.revision.get(),
+            });
+        }
+        if self.technology_change_audit.len() >= MAX_PROJECT_TECHNOLOGY_CHANGE_RECEIPTS {
+            return Err(ProjectDescriptorError::TechnologyAuditLimit {
+                maximum: MAX_PROJECT_TECHNOLOGY_CHANGE_RECEIPTS,
+            });
+        }
+
+        let next_revision = self.revision.next()?;
+        let before_binding_digest = technology_binding_digest(self.technology_binding.as_ref())?;
+        let after_binding_digest = technology_binding_digest(Some(&binding))?.ok_or_else(|| {
+            ProjectDescriptorError::Serialization(
+                "technology binding digest was not produced".to_owned(),
+            )
+        })?;
+        let action = if before_binding_digest.is_some() {
+            ProjectTechnologyChangeAction::Replace
+        } else {
+            ProjectTechnologyChangeAction::Attach
+        };
+        let mut receipt = ProjectTechnologyChangeReceipt {
+            schema_version: PROJECT_TECHNOLOGY_CHANGE_RECEIPT_SCHEMA_VERSION,
+            sequence: u64::try_from(self.technology_change_audit.len())
+                .ok()
+                .and_then(|value| value.checked_add(1))
+                .ok_or(ProjectDescriptorError::TechnologyAuditSequenceExhausted)?,
+            project_id: self.id,
+            action,
+            actor_id: context.authority.actor_id,
+            authority_id: context.authority.authority_id,
+            reason: context.authority.reason,
+            from_project_revision: self.revision,
+            to_project_revision: next_revision,
+            before_binding_digest,
+            after_binding_digest,
+            before_binding_label: self.technology.clone(),
+            after_binding_label: label.clone(),
+            checkpoint_id: context.checkpoint_id,
+            checkpoint_project_revision: context.checkpoint_project_revision,
+            checkpoint_created_unix_ms: context.checkpoint_created_unix_ms,
+            checkpoint_snapshot_digest: context.checkpoint_snapshot_digest,
+            checkpoint_snapshot_byte_len: context.checkpoint_snapshot_byte_len,
+            previous_receipt_digest: self
+                .technology_change_audit
+                .last()
+                .map(ProjectTechnologyChangeReceipt::receipt_digest),
+            receipt_digest: ContentDigest::from_bytes([0; 32]),
+        };
+        receipt.receipt_digest = receipt.calculate_digest()?;
+
+        let mut candidate = self.clone();
+        candidate.technology = Some(label);
+        candidate.technology_binding = Some(binding);
+        candidate.revision = next_revision;
+        candidate.technology_change_audit.push(receipt.clone());
+        candidate.validate()?;
+        *self = candidate;
+        Ok((next_revision, receipt))
+    }
+
+    fn validate_technology_change_audit(&self) -> Result<(), ProjectDescriptorError> {
+        if self.technology_change_audit.len() > MAX_PROJECT_TECHNOLOGY_CHANGE_RECEIPTS {
+            return Err(ProjectDescriptorError::TechnologyAuditLimit {
+                maximum: MAX_PROJECT_TECHNOLOGY_CHANGE_RECEIPTS,
+            });
+        }
+        if self.technology_change_audit.is_empty() {
+            return Ok(());
+        }
+
+        let mut previous_receipt_digest = None;
+        let mut previous_to_revision = None;
+        let mut previous_after_binding_digest = None;
+        let mut previous_after_binding_label: Option<&str> = None;
+        for (index, receipt) in self.technology_change_audit.iter().enumerate() {
+            let expected_sequence = u64::try_from(index)
+                .ok()
+                .and_then(|value| value.checked_add(1))
+                .ok_or(ProjectDescriptorError::TechnologyAuditSequenceExhausted)?;
+            if receipt.schema_version != PROJECT_TECHNOLOGY_CHANGE_RECEIPT_SCHEMA_VERSION {
+                return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
+                    "receipt[{index}] schema {} is unsupported",
+                    receipt.schema_version
+                )));
+            }
+            if receipt.sequence != expected_sequence {
+                return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
+                    "receipt[{index}] sequence is {}, expected {expected_sequence}",
+                    receipt.sequence
+                )));
+            }
+            if receipt.project_id != self.id {
+                return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
+                    "receipt[{index}] belongs to a different project"
+                )));
+            }
+            if receipt.previous_receipt_digest != previous_receipt_digest
+                || receipt.calculate_digest()? != receipt.receipt_digest
+            {
+                return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
+                    "receipt[{index}] has invalid content or chain linkage"
+                )));
+            }
+            validate_project_audit_text("technology_change.actor_id", &receipt.actor_id, 240)?;
+            validate_project_audit_text(
+                "technology_change.authority_id",
+                &receipt.authority_id,
+                240,
+            )?;
+            validate_project_audit_text("technology_change.reason", &receipt.reason, 1_024)?;
+            validate_project_audit_text(
+                "technology_change.after_binding_label",
+                &receipt.after_binding_label,
+                1_024,
+            )?;
+            if receipt
+                .before_binding_label
+                .as_deref()
+                .is_some_and(|label| {
+                    validate_project_audit_text(
+                        "technology_change.before_binding_label",
+                        label,
+                        1_024,
+                    )
+                    .is_err()
+                })
+            {
+                return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
+                    "receipt[{index}] has an invalid preceding binding label"
+                )));
+            }
+            if receipt.checkpoint_id.is_nil()
+                || receipt.checkpoint_created_unix_ms == 0
+                || receipt.checkpoint_snapshot_byte_len == 0
+                || receipt.checkpoint_snapshot_digest == ContentDigest::from_bytes([0; 32])
+            {
+                return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
+                    "receipt[{index}] has invalid checkpoint evidence"
+                )));
+            }
+            if receipt.checkpoint_project_revision != receipt.from_project_revision {
+                return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
+                    "receipt[{index}] checkpoint does not capture its pre-change project revision"
+                )));
+            }
+            if receipt.from_project_revision.next()? != receipt.to_project_revision {
+                return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
+                    "receipt[{index}] does not advance exactly one project revision"
+                )));
+            }
+            if receipt.to_project_revision > self.revision {
+                return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
+                    "receipt[{index}] claims a future project revision"
+                )));
+            }
+            if let Some(previous) = previous_to_revision {
+                if receipt.from_project_revision < previous {
+                    return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
+                        "receipt[{index}] project revision regresses"
+                    )));
+                }
+                if receipt.before_binding_digest != previous_after_binding_digest
+                    || receipt.before_binding_label.as_deref() != previous_after_binding_label
+                {
+                    return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
+                        "receipt[{index}] does not continue the preceding technology state"
+                    )));
+                }
+            }
+            match receipt.action {
+                ProjectTechnologyChangeAction::Attach => {
+                    if receipt.before_binding_digest.is_some()
+                        || receipt.before_binding_label.is_some()
+                    {
+                        return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
+                            "receipt[{index}] attach transition has a preceding binding"
+                        )));
+                    }
+                }
+                ProjectTechnologyChangeAction::Replace => {
+                    if receipt.before_binding_digest.is_none()
+                        || receipt.before_binding_label.is_none()
+                        || receipt.before_binding_digest == Some(receipt.after_binding_digest)
+                    {
+                        return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
+                            "receipt[{index}] replacement transition is invalid or a no-op"
+                        )));
+                    }
+                }
+            }
+            previous_receipt_digest = Some(receipt.receipt_digest);
+            previous_to_revision = Some(receipt.to_project_revision);
+            previous_after_binding_digest = Some(receipt.after_binding_digest);
+            previous_after_binding_label = Some(receipt.after_binding_label.as_str());
+        }
+
+        let final_receipt = self.technology_change_audit.last().ok_or_else(|| {
+            ProjectDescriptorError::TechnologyAuditCorrupted(
+                "technology audit unexpectedly has no final receipt".to_owned(),
+            )
+        })?;
+        let current_digest = technology_binding_digest(self.technology_binding.as_ref())?;
+        if current_digest != Some(final_receipt.after_binding_digest)
+            || self.technology.as_deref() != Some(final_receipt.after_binding_label.as_str())
+        {
+            return Err(ProjectDescriptorError::TechnologyAuditCorrupted(
+                "current project technology does not match the final receipt".to_owned(),
+            ));
+        }
+        Ok(())
     }
 
     /// Validate the local portion of `project.name` from the frozen field
@@ -619,6 +1821,9 @@ impl ProjectDescriptor {
         copy.id = ProjectId::new();
         copy.revision = ObjectRevision::INITIAL;
         copy.path = Some(path);
+        copy.technology_change_audit.clear();
+        copy.library_mutation_audit.clear();
+        copy.library_publications.clear();
         copy
     }
 
@@ -647,6 +1852,42 @@ pub enum ProjectDescriptorError {
     RequiredField(&'static str),
     #[error("legacy technology label does not match the exact project technology binding")]
     TechnologyLabelMismatch,
+    #[error("technology changes require an audited checkpoint-backed transaction")]
+    TechnologyAuditRequired,
+    #[error(
+        "technology change conflicts with physical layout {owner}; migrate or remove that layout before changing its exact signed PDK pin"
+    )]
+    TechnologyConflictsWithPhysicalLayout { owner: String },
+    #[error("technology change is identical to the current project binding")]
+    NoOpTechnologyChange,
+    #[error(
+        "technology checkpoint captured project revision {checkpoint}, but the current revision is {current}"
+    )]
+    TechnologyCheckpointRevision { checkpoint: u64, current: u64 },
+    #[error("technology checkpoint evidence is invalid: {0}")]
+    InvalidTechnologyCheckpoint(String),
+    #[error("technology change audit is limited to {maximum} receipts")]
+    TechnologyAuditLimit { maximum: usize },
+    #[error("technology change audit sequence is exhausted")]
+    TechnologyAuditSequenceExhausted,
+    #[error("technology change audit is corrupted: {0}")]
+    TechnologyAuditCorrupted(String),
+    #[error("project library mutation audit is limited to {maximum} receipts")]
+    LibraryAuditLimit { maximum: usize },
+    #[error("project library mutation audit sequence is exhausted")]
+    LibraryAuditSequenceExhausted,
+    #[error("project library content revision is exhausted")]
+    LibraryRevisionExhausted,
+    #[error("project library mutation audit is corrupted: {0}")]
+    LibraryAuditCorrupted(String),
+    #[error("project library publication audit is limited to {maximum} receipts")]
+    LibraryPublicationLimit { maximum: usize },
+    #[error("project library publication sequence is exhausted")]
+    LibraryPublicationSequenceExhausted,
+    #[error("project library publication audit is corrupted: {0}")]
+    LibraryPublicationCorrupted(String),
+    #[error("project descriptor serialization failed: {0}")]
+    Serialization(String),
     #[error(transparent)]
     Technology(#[from] TechnologyBindingError),
     #[error(transparent)]

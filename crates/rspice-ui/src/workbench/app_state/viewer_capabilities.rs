@@ -4,7 +4,7 @@
 //! the toolbar for a viewer is derived from the viewer rather than
 //! maintained alongside it.
 
-use crate::workbench::app_state::{ActiveViewer, AppState};
+use crate::workbench::app_state::{ActiveViewer, AppState, SpecializedViewerCacheProvenance};
 
 /// Availability metadata for a specialized viewer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,7 +49,9 @@ impl AppState {
         self.ui.results_seen_version = 0;
         self.ui.results.clear_project_scoped_state();
         self.dialogs.drc_results = None;
+        self.dialogs.drc_checked_version = 0;
         self.dialogs.drc_cycle = None;
+        self.clear_all_design_checks();
         self.log_buffer
             .clear_source(crate::diagnostics::LogSource::Drc);
         self.clear_specialized_viewer_data();
@@ -70,6 +72,8 @@ impl AppState {
         self.analysis
             .eye_diagram_state
             .load_data(crate::analysis::eye_diagram::EyeData::default());
+        self.analysis.cache_authority.fft = None;
+        self.analysis.cache_authority.eye = None;
     }
 
     /// Clear all specialized (non-waveform) viewer data caches.
@@ -85,6 +89,126 @@ impl AppState {
         self.analysis.nyquist_state.clear();
         self.analysis.smith_chart_state.clear_traces();
         self.analysis.pole_zero_state.clear();
+        self.analysis.cache_authority = Default::default();
+    }
+
+    /// Exact immutable result currently selected in the Results workspace.
+    pub(crate) fn active_specialized_viewer_cache_provenance(
+        &self,
+    ) -> Option<SpecializedViewerCacheProvenance> {
+        let run = self.simulation.active_run()?;
+        let analysis = self.simulation.active_analysis()?;
+        Some(SpecializedViewerCacheProvenance::for_analysis(
+            run.dataset_id,
+            analysis,
+        ))
+    }
+
+    /// Bind a freshly populated mutable viewer cache to its immutable owner.
+    pub(crate) fn bind_specialized_viewer_cache(
+        &mut self,
+        viewer: ActiveViewer,
+        provenance: SpecializedViewerCacheProvenance,
+    ) {
+        *self.specialized_viewer_cache_authority_mut(viewer) = Some(provenance);
+    }
+
+    /// Forget cache ownership while a controller replaces or clears its data.
+    pub(crate) fn clear_specialized_viewer_cache_authority(&mut self, viewer: ActiveViewer) {
+        *self.specialized_viewer_cache_authority_mut(viewer) = None;
+    }
+
+    /// Remove mutable viewer data that does not belong to the active result.
+    ///
+    /// Capability checks reject a mismatch synchronously, so a selection
+    /// change cannot expose stale data even before this cleanup runs. The
+    /// controller calls this after selection/polling to release the stale
+    /// payload and keep every direct cache consumer safe as well.
+    pub(crate) fn synchronize_specialized_viewer_cache_authority(&mut self) {
+        let active = self.active_specialized_viewer_cache_provenance();
+        for viewer in [
+            ActiveViewer::BodePlot,
+            ActiveViewer::Nyquist,
+            ActiveViewer::SmithChart,
+            ActiveViewer::Histogram,
+            ActiveViewer::Fft,
+            ActiveViewer::EyeDiagram,
+        ] {
+            let retained = self.specialized_viewer_cache_authority(viewer);
+            let unbound_data = retained.is_none() && self.specialized_viewer_cache_has_data(viewer);
+            let belongs_to_another_result = retained.is_some() && retained != active;
+            if unbound_data || belongs_to_another_result {
+                self.clear_specialized_viewer_cache(viewer);
+            }
+        }
+    }
+
+    fn clear_specialized_viewer_cache(&mut self, viewer: ActiveViewer) {
+        match viewer {
+            ActiveViewer::BodePlot => self
+                .analysis
+                .bode_plot_state
+                .load_data(crate::analysis::bode::BodeData::new()),
+            ActiveViewer::Nyquist => self.analysis.nyquist_state.clear(),
+            ActiveViewer::SmithChart => self.analysis.smith_chart_state.clear_traces(),
+            ActiveViewer::Histogram => self.analysis.histogram_state.clear(),
+            ActiveViewer::Fft => self.analysis.fft_state.clear(),
+            ActiveViewer::EyeDiagram => self
+                .analysis
+                .eye_diagram_state
+                .load_data(crate::analysis::eye_diagram::EyeData::default()),
+            ActiveViewer::Waveform | ActiveViewer::PoleZero => return,
+        }
+        self.clear_specialized_viewer_cache_authority(viewer);
+    }
+
+    fn specialized_viewer_cache_authority(
+        &self,
+        viewer: ActiveViewer,
+    ) -> Option<SpecializedViewerCacheProvenance> {
+        match viewer {
+            ActiveViewer::BodePlot => self.analysis.cache_authority.bode,
+            ActiveViewer::Nyquist => self.analysis.cache_authority.nyquist,
+            ActiveViewer::SmithChart => self.analysis.cache_authority.smith,
+            ActiveViewer::Histogram => self.analysis.cache_authority.histogram,
+            ActiveViewer::Fft => self.analysis.cache_authority.fft,
+            ActiveViewer::EyeDiagram => self.analysis.cache_authority.eye,
+            ActiveViewer::Waveform | ActiveViewer::PoleZero => None,
+        }
+    }
+
+    fn specialized_viewer_cache_authority_mut(
+        &mut self,
+        viewer: ActiveViewer,
+    ) -> &mut Option<SpecializedViewerCacheProvenance> {
+        match viewer {
+            ActiveViewer::BodePlot => &mut self.analysis.cache_authority.bode,
+            ActiveViewer::Nyquist => &mut self.analysis.cache_authority.nyquist,
+            ActiveViewer::SmithChart => &mut self.analysis.cache_authority.smith,
+            ActiveViewer::Histogram => &mut self.analysis.cache_authority.histogram,
+            ActiveViewer::Fft => &mut self.analysis.cache_authority.fft,
+            ActiveViewer::EyeDiagram => &mut self.analysis.cache_authority.eye,
+            ActiveViewer::Waveform | ActiveViewer::PoleZero => {
+                panic!("waveform and pole-zero viewers do not own mutable cache provenance")
+            }
+        }
+    }
+
+    fn specialized_viewer_cache_matches_active(&self, viewer: ActiveViewer) -> bool {
+        self.active_specialized_viewer_cache_provenance()
+            .is_some_and(|active| self.specialized_viewer_cache_authority(viewer) == Some(active))
+    }
+
+    fn specialized_viewer_cache_has_data(&self, viewer: ActiveViewer) -> bool {
+        match viewer {
+            ActiveViewer::BodePlot => !self.analysis.bode_plot_state.is_empty(),
+            ActiveViewer::Nyquist => !self.analysis.nyquist_state.is_empty(),
+            ActiveViewer::SmithChart => !self.analysis.smith_chart_state.traces.is_empty(),
+            ActiveViewer::Histogram => !self.analysis.histogram_state.is_empty(),
+            ActiveViewer::Fft => self.analysis.fft_state.has_data(),
+            ActiveViewer::EyeDiagram => self.analysis.eye_diagram_state.trace_count() > 0,
+            ActiveViewer::Waveform | ActiveViewer::PoleZero => false,
+        }
     }
 
     /// Resolve whether a viewer can currently be opened with meaningful data.
@@ -92,15 +216,19 @@ impl AppState {
         match viewer {
             ActiveViewer::Waveform => ViewerCapability::available("Always available"),
             ActiveViewer::SmithChart => {
-                if self.analysis.smith_chart_state.traces.is_empty() {
+                if !self.specialized_viewer_cache_matches_active(viewer)
+                    || self.analysis.smith_chart_state.traces.is_empty()
+                {
                     ViewerCapability::unavailable("Requires S-parameter complex traces")
                 } else {
-                    ViewerCapability::available("S-parameter traces loaded")
+                    ViewerCapability::available("Active analysis S-parameter traces loaded")
                 }
             }
             ActiveViewer::EyeDiagram => {
-                if self.analysis.eye_diagram_state.trace_count() > 0 {
-                    ViewerCapability::available("Eye traces loaded")
+                if self.specialized_viewer_cache_matches_active(viewer)
+                    && self.analysis.eye_diagram_state.trace_count() > 0
+                {
+                    ViewerCapability::available("Active analysis eye traces loaded")
                 } else if self.active_analysis_supports_eye_diagram() {
                     ViewerCapability::available(
                         "Can derive eye data from active transient waveforms",
@@ -110,24 +238,30 @@ impl AppState {
                 }
             }
             ActiveViewer::Histogram => {
-                if self.analysis.histogram_state.is_empty() {
+                if !self.specialized_viewer_cache_matches_active(viewer)
+                    || self.analysis.histogram_state.is_empty()
+                {
                     ViewerCapability::unavailable("Requires histogram bins from sweep/MC data")
                 } else {
-                    ViewerCapability::available("Histogram data loaded")
+                    ViewerCapability::available("Active analysis histogram data loaded")
                 }
             }
             ActiveViewer::BodePlot => {
-                if self.analysis.bode_plot_state.is_empty() {
+                if !self.specialized_viewer_cache_matches_active(viewer)
+                    || self.analysis.bode_plot_state.is_empty()
+                {
                     ViewerCapability::unavailable("Requires AC/transfer-function response data")
                 } else {
-                    ViewerCapability::available("Frequency-response data loaded")
+                    ViewerCapability::available("Active analysis frequency-response data loaded")
                 }
             }
             ActiveViewer::Nyquist => {
-                if self.analysis.nyquist_state.is_empty() {
+                if !self.specialized_viewer_cache_matches_active(viewer)
+                    || self.analysis.nyquist_state.is_empty()
+                {
                     ViewerCapability::unavailable("Requires complex loop-gain/AC response data")
                 } else {
-                    ViewerCapability::available("Nyquist curves loaded")
+                    ViewerCapability::available("Active analysis Nyquist curves loaded")
                 }
             }
             ActiveViewer::Fft => {
@@ -138,8 +272,8 @@ impl AppState {
                     .as_ref()
                     .map(|data| !data.is_empty())
                     .unwrap_or(false);
-                if has_spectrum {
-                    ViewerCapability::available("FFT spectrum data loaded")
+                if self.specialized_viewer_cache_matches_active(viewer) && has_spectrum {
+                    ViewerCapability::available("Active analysis FFT spectrum data loaded")
                 } else if self.active_analysis_supports_fft() {
                     ViewerCapability::available("Can derive FFT from active transient waveforms")
                 } else {
@@ -209,13 +343,29 @@ mod tests {
     };
     use crate::diagnostics::{LogSeverity, LogSource};
     use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
+    use crate::workbench::app_state::SpecializedViewerCacheAuthority;
+
+    fn retained_analysis(
+        id: u64,
+        analysis_type: crate::state::AnalysisType,
+        digest_byte: u8,
+    ) -> crate::state::AnalysisResult {
+        let provenance = crate::state::AnalysisResultProvenance::new(
+            crate::product::AnalysisInstanceId::new(),
+            crate::product::ObjectRevision::INITIAL,
+            crate::product::ContentDigest::from_bytes([digest_byte; 32]),
+            Vec::new(),
+        )
+        .expect("test analysis provenance");
+        crate::state::AnalysisResult::new(id, analysis_type, format!("analysis {id}"))
+            .with_provenance(provenance)
+    }
 
     fn seed_result_viewers(state: &mut AppState) {
-        state
-            .simulation
-            .runs
-            .push(crate::state::SimulationRun::new(1));
-        state.simulation.active_run_idx = Some(0);
+        let mut run = crate::state::SimulationRun::new(1);
+        run.add_analysis(retained_analysis(1, crate::state::AnalysisType::Ac, 0x11));
+        state.simulation.runs.push(run);
+        assert!(state.simulation.select_run(0));
 
         state
             .analysis
@@ -258,6 +408,20 @@ mod tests {
                 8.0,
                 WindowFunction::Rectangular,
             ));
+
+        let provenance = state
+            .active_specialized_viewer_cache_provenance()
+            .expect("seeded active result");
+        for viewer in [
+            ActiveViewer::BodePlot,
+            ActiveViewer::Nyquist,
+            ActiveViewer::SmithChart,
+            ActiveViewer::Histogram,
+            ActiveViewer::Fft,
+            ActiveViewer::EyeDiagram,
+        ] {
+            state.bind_specialized_viewer_cache(viewer, provenance);
+        }
     }
 
     fn seed_blocking_drc_result(state: &mut AppState) {
@@ -303,6 +467,87 @@ mod tests {
                 viewer.name()
             );
         }
+    }
+
+    #[test]
+    fn compatible_run_and_analysis_switches_never_inherit_another_result_cache() {
+        let mut state = AppState::default();
+        seed_result_viewers(&mut state);
+
+        state.simulation.runs[0].add_analysis(retained_analysis(
+            2,
+            crate::state::AnalysisType::Ac,
+            0x12,
+        ));
+        let mut second_run = crate::state::SimulationRun::new(2);
+        second_run.add_analysis(retained_analysis(1, crate::state::AnalysisType::Ac, 0x21));
+        state.simulation.runs.push(second_run);
+
+        assert!(state.simulation.select_analysis(1));
+        for viewer in [
+            ActiveViewer::BodePlot,
+            ActiveViewer::Nyquist,
+            ActiveViewer::SmithChart,
+            ActiveViewer::Histogram,
+        ] {
+            assert!(
+                !state.viewer_is_available(viewer),
+                "{} must reject cache data from another analysis identity",
+                viewer.name()
+            );
+        }
+
+        assert!(state.simulation.select_run(1));
+        for viewer in [
+            ActiveViewer::BodePlot,
+            ActiveViewer::Nyquist,
+            ActiveViewer::SmithChart,
+            ActiveViewer::Histogram,
+        ] {
+            assert!(
+                !state.viewer_is_available(viewer),
+                "{} must reject cache data from another dataset",
+                viewer.name()
+            );
+        }
+    }
+
+    #[test]
+    fn incompatible_run_switch_rejects_and_releases_all_specialized_caches() {
+        let mut state = AppState::default();
+        seed_result_viewers(&mut state);
+
+        let mut incompatible = crate::state::SimulationRun::new(2);
+        incompatible.add_analysis(retained_analysis(1, crate::state::AnalysisType::DcOp, 0x31));
+        state.simulation.runs.push(incompatible);
+        assert!(state.simulation.select_run(1));
+
+        for viewer in [
+            ActiveViewer::BodePlot,
+            ActiveViewer::Nyquist,
+            ActiveViewer::SmithChart,
+            ActiveViewer::Histogram,
+            ActiveViewer::Fft,
+            ActiveViewer::EyeDiagram,
+        ] {
+            assert!(
+                !state.viewer_is_available(viewer),
+                "{} must reject cache data from an incompatible dataset",
+                viewer.name()
+            );
+        }
+
+        state.synchronize_specialized_viewer_cache_authority();
+        assert!(state.analysis.bode_plot_state.is_empty());
+        assert!(state.analysis.nyquist_state.is_empty());
+        assert!(state.analysis.smith_chart_state.traces.is_empty());
+        assert!(state.analysis.histogram_state.is_empty());
+        assert!(!state.analysis.fft_state.has_data());
+        assert_eq!(state.analysis.eye_diagram_state.trace_count(), 0);
+        assert_eq!(
+            state.analysis.cache_authority,
+            SpecializedViewerCacheAuthority::default()
+        );
     }
 
     #[test]
@@ -366,41 +611,45 @@ mod tests {
     #[test]
     fn clearing_design_execution_context_clears_project_scoped_results_state() {
         use crate::workbench::documents::result_document::{
-            ExprEditor, ExprSeries, ExprTrace, PlotView, ResultViewer,
+            AnalysisPresentationKey, ExprEditor, ExprSeries, ExprTrace, PlotView, ResultViewer,
         };
 
         let mut state = AppState::default();
+        let analysis = crate::state::AnalysisResult::new(
+            71,
+            crate::state::AnalysisType::Transient,
+            "Transient",
+        );
+        let analysis_key =
+            AnalysisPresentationKey::new(crate::product::DatasetId::new(), &analysis);
         state.ui.results_seen_version = 99;
         let results = &mut state.ui.results;
         results.viewer = ResultViewer::Fft;
         results.phase_continuous = true;
         results.cursors.place(1.0);
         results.cursor_strip = Some(0);
-        results.hidden_strips.insert(0);
-        results.maximized_strip = Some(0);
-        results.views.insert(
-            (ResultViewer::Waves, 0, 0),
-            PlotView {
-                x: Some((0.0, 1.0)),
-                y: Some((-1.0, 1.0)),
-                y_right: None,
-            },
-        );
-        results.exprs.insert(
-            0,
+        results.hidden_strips.insert(analysis_key);
+        results.maximized_strip = Some(analysis_key);
+        *results.plot_view_mut(ResultViewer::Waves, 0) = PlotView {
+            x: Some((0.0, 1.0)),
+            y: Some((-1.0, 1.0)),
+            y_right: None,
+        };
+        results.analysis_exprs.insert(
+            analysis_key,
             vec![ExprTrace {
                 text: "V(out)/V(in)".to_string(),
                 visible: true,
             }],
         );
         results.expr_editor = Some(ExprEditor {
-            analysis_index: 0,
+            analysis: analysis_key,
             text: "V(out)".to_string(),
             error: Some("stale".to_string()),
             want_focus: false,
         });
-        results.expr_cache.insert(
-            (0, "V(out)".to_string()),
+        results.analysis_expr_cache.insert(
+            (analysis_key, "V(out)".to_string()),
             ExprSeries {
                 version: 10,
                 series: Err("stale".to_string()),
@@ -422,9 +671,10 @@ mod tests {
         assert!(results.hidden_strips.is_empty());
         assert_eq!(results.maximized_strip, None);
         assert!(results.views.is_empty());
-        assert!(results.exprs.is_empty());
+        assert!(results.analysis_exprs.is_empty());
         assert!(results.expr_editor.is_none());
         assert!(results.expr_cache.is_empty());
+        assert!(results.analysis_expr_cache.is_empty());
         assert!(results.rf_pin.is_empty());
         assert!(results.op_filter.is_empty());
         assert_eq!(results.op_sort, None);

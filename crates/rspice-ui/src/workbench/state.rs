@@ -9,6 +9,7 @@ mod session_views;
 pub use session_views::*;
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
@@ -241,6 +242,7 @@ pub enum WorkspaceDocumentId {
     SimulationPlan,
     AnalysisSetup(crate::product::AnalysisInstanceId),
     ResultDataset(crate::product::DatasetId),
+    VisualizationDocument(crate::product::ResultDocumentId),
     Verification,
     Models,
     NetlistSource,
@@ -252,10 +254,42 @@ impl WorkspaceDocumentId {
             Self::Project => Workspace::Project,
             Self::CellView(_) => Workspace::Design,
             Self::SimulationPlan | Self::AnalysisSetup(_) => Workspace::Simulate,
-            Self::ResultDataset(_) => Workspace::Results,
+            Self::ResultDataset(_) | Self::VisualizationDocument(_) => Workspace::Results,
             Self::Verification => Workspace::Verify,
             Self::Models => Workspace::Models,
             Self::NetlistSource => Workspace::Netlist,
+        }
+    }
+}
+
+/// Runtime draft for the dataset-driven Create Result Document transaction.
+///
+/// IDs, rather than translated labels or row positions, cross the modal
+/// boundary. The project-owned document is created only after the workflow
+/// module revalidates every selection against current retained datasets.
+#[derive(Debug, Clone)]
+pub struct CreateResultDocumentDialogState {
+    pub open: bool,
+    pub name: String,
+    pub name_touched: bool,
+    pub dataset_id: Option<crate::product::DatasetId>,
+    pub family_id: String,
+    pub viewer_id: String,
+    pub layout_id: String,
+    pub validation_error: Option<String>,
+}
+
+impl Default for CreateResultDocumentDialogState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            name: String::new(),
+            name_touched: false,
+            dataset_id: None,
+            family_id: "waveform-worksheet".to_owned(),
+            viewer_id: "viewer-waveform".to_owned(),
+            layout_id: "two-linked-panes".to_owned(),
+            validation_error: None,
         }
     }
 }
@@ -362,7 +396,7 @@ impl EngineeringProfile {
     pub const fn detail(self) -> &'static str {
         match self {
             Self::AnalogIc => {
-                "Schematic, custom layout, AMS, variation, reliability, PDK, model and sign-off workflows."
+                "Schematic, custom layout, AMS, RF/periodic, variation, reliability, PDK, model and sign-off workflows."
             }
             Self::RfMicrowave => {
                 "Periodic, network, load-pull, EM, RF display, measurement and application-design workflows."
@@ -608,25 +642,57 @@ impl ConsolePage {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum ProjectPage {
-    #[serde(alias = "Overview", alias = "Activity")]
+    #[serde(alias = "Dashboard", alias = "Activity")]
     #[default]
-    Dashboard,
+    Overview,
+    Library,
     Configuration,
-    Technology,
+    #[serde(alias = "Technology")]
     Dependencies,
     Recovery,
 }
 
 impl ProjectPage {
+    pub const ALL: [Self; 5] = [
+        Self::Overview,
+        Self::Library,
+        Self::Configuration,
+        Self::Dependencies,
+        Self::Recovery,
+    ];
+
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Dashboard => "Project overview",
-            Self::Configuration => "Testbench configuration",
-            Self::Technology => "Technology & PDK",
-            Self::Dependencies => "Dependency manifest",
-            Self::Recovery => "Recovery center",
+            Self::Overview => "Overview",
+            Self::Library => "Library",
+            Self::Configuration => "Configuration",
+            Self::Dependencies => "Dependencies",
+            Self::Recovery => "Recovery",
+        }
+    }
+}
+
+/// Persistent page selection inside the canonical Library/Cellview Manager.
+///
+/// The specialist surface is another projection over the project-owned
+/// `LibraryManager`; this enum retains only which projection is visible and
+/// never duplicates library, symbol, or form content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum LibraryCellviewPage {
+    #[default]
+    Libraries,
+    SymbolForm,
+}
+
+impl LibraryCellviewPage {
+    pub const ALL: [Self; 2] = [Self::Libraries, Self::SymbolForm];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Libraries => "Libraries",
+            Self::SymbolForm => "Symbol & form",
         }
     }
 }
@@ -815,12 +881,52 @@ pub struct WorkbenchState {
     pub documents: WorkspaceDocumentRegistry,
     #[serde(default)]
     pub project_page: ProjectPage,
+    /// Device-local filters and row selections for the Project workspace.
+    /// They affect presentation only and never participate in project
+    /// revisioning, execution snapshots, or recovery checkpoints.
+    #[serde(default)]
+    pub project_library_filter: String,
+    #[serde(default)]
+    pub project_dependency_filter: String,
+    #[serde(default)]
+    pub project_dependency_selection: Option<String>,
+    #[serde(default)]
+    pub project_recovery_filter: String,
+    #[serde(default)]
+    pub project_checkpoint_selection: Option<String>,
+    /// Device-local projection retained by the Library/Cellview specialist
+    /// route. Authoritative library, cellview, symbol, and form records remain
+    /// in the project domains.
+    #[serde(default)]
+    pub library_cellview_page: LibraryCellviewPage,
     #[serde(default)]
     pub verification_page: VerificationPage,
     #[serde(default)]
     pub verification: VerificationSessionState,
     #[serde(default)]
     pub models_page: ModelsPage,
+    /// Native confirmation owner for detaching every executable source from a
+    /// shipped pack. This is never restored across an application session.
+    #[serde(skip)]
+    pub model_catalog_detach_pack: Option<String>,
+    /// Session-local project catalog pins. They are navigation preferences,
+    /// not project evidence or release state.
+    #[serde(default)]
+    pub model_catalog_pinned: HashSet<String>,
+    /// Device-local Include Graph depth control. This changes only the graph
+    /// projection; the complete authenticated closure remains authoritative.
+    #[serde(default)]
+    pub model_include_direct_only: bool,
+    /// Stable source selection shown by the Include Graph inspector.
+    #[serde(default)]
+    pub model_include_selected_library: Option<String>,
+    #[serde(default)]
+    pub model_include_selected_source: Option<PathBuf>,
+    /// Presentation-only definition table controls for the Include Graph.
+    #[serde(default)]
+    pub model_include_definition_query: String,
+    #[serde(default)]
+    pub model_include_exceptions_only: bool,
     /// Models & PDKs catalog filters and stable presentation selections.
     /// Model, source, symbol, and PDK records remain in their owning domains.
     #[serde(default)]
@@ -901,6 +1007,9 @@ pub struct WorkbenchState {
     #[serde(default)]
     pub visualization_studio:
         crate::workbench::documents::visualization_studio::VisualizationStudioState,
+    /// Runtime-only draft for the project-owned result-document transaction.
+    #[serde(skip)]
+    pub create_result_document: CreateResultDocumentDialogState,
     /// Session-local selection and editor drafts for the project-owned report
     /// documents.
     #[serde(default)]
@@ -988,10 +1097,23 @@ impl Default for WorkbenchState {
             console_page: ConsolePage::Console,
             design_panel: DesignPanel::Navigator,
             documents: WorkspaceDocumentRegistry::default(),
-            project_page: ProjectPage::Dashboard,
+            project_page: ProjectPage::Overview,
+            project_library_filter: String::new(),
+            project_dependency_filter: String::new(),
+            project_dependency_selection: None,
+            project_recovery_filter: String::new(),
+            project_checkpoint_selection: None,
+            library_cellview_page: LibraryCellviewPage::Libraries,
             verification_page: VerificationPage::Yield,
             verification: VerificationSessionState::default(),
             models_page: ModelsPage::Models,
+            model_catalog_detach_pack: None,
+            model_catalog_pinned: HashSet::new(),
+            model_include_direct_only: false,
+            model_include_selected_library: None,
+            model_include_selected_source: None,
+            model_include_definition_query: String::new(),
+            model_include_exceptions_only: false,
             models_view: ModelsWorkbenchViewState::default(),
             active_analysis: default_analysis_index(),
             active_analysis_instance: None,
@@ -1015,6 +1137,7 @@ impl Default for WorkbenchState {
             jobs_manager: JobsManagerState::default(),
             specialist_tool_browser: SpecialistToolBrowserState::default(),
             visualization_studio: crate::workbench::documents::visualization_studio::VisualizationStudioState::default(),
+            create_result_document: CreateResultDocumentDialogState::default(),
             report_authoring: ReportAuthoringState::default(),
             model_editor: crate::workbench::documents::model_editor::ModelEditorState::default(),
             model_correlation: crate::workbench::documents::model_correlation::ModelCorrelationWorkspaceState::default(),
@@ -1034,6 +1157,8 @@ impl WorkbenchState {
             || self.preflight.open
             || self.notification_center_open
             || self.model_correlation.dialog_open()
+            || self.create_result_document.open
+            || self.model_catalog_detach_pack.is_some()
             || self.simulation_workflow.is_some()
             || self.verification.regression_baseline_picker_open
             || self.verification.tuning_review_open
@@ -1232,7 +1357,13 @@ impl WorkbenchState {
         let mut used = HashSet::new();
 
         studio.panes.retain_mut(|pane| {
-            let canonical_document_id = result_viewer_document_id(pane.viewer);
+            let Some(canonical_document_id) = result_viewer_document_id(pane.viewer) else {
+                // Dataset-native projections (currently Manifest) are owned
+                // by the Results frame and can never become Visualization
+                // Studio panes. Reject malformed/restored presentation state
+                // instead of assigning it a misleading viewer document.
+                return false;
+            };
             if pane.viewer_document_id != canonical_document_id {
                 pane.viewer_document_id = canonical_document_id.to_owned();
             }
@@ -1709,8 +1840,9 @@ fn allocate_restored_identity(used: &HashSet<u64>, next_identity: &mut u64) -> O
     Some(allocated)
 }
 
-const fn result_viewer_document_id(viewer: super::ResultViewer) -> &'static str {
-    match viewer {
+const fn result_viewer_document_id(viewer: super::ResultViewer) -> Option<&'static str> {
+    Some(match viewer {
+        super::ResultViewer::Manifest => return None,
         super::ResultViewer::Waves => "viewer-waveform",
         super::ResultViewer::Bode | super::ResultViewer::Nyquist => "viewer-bode",
         super::ResultViewer::Fft | super::ResultViewer::NoiseContrib => "viewer-spectrum",
@@ -1723,7 +1855,7 @@ const fn result_viewer_document_id(viewer: super::ResultViewer) -> &'static str 
         }
         super::ResultViewer::Smith => "viewer-smith",
         super::ResultViewer::PoleZero => "viewer-pz",
-    }
+    })
 }
 
 #[cfg(test)]

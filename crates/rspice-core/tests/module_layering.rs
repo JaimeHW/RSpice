@@ -215,7 +215,10 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
         for entry in entries {
             let path = entry.expect("directory entry").path();
             if path.is_dir() {
-                if path.file_name().is_some_and(|name| name == "veriloga_generated") {
+                if path
+                    .file_name()
+                    .is_some_and(|name| name == "veriloga_generated")
+                {
                     continue;
                 }
                 pending.push(path);

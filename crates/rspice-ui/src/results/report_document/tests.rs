@@ -115,6 +115,7 @@ fn all_block_kinds() -> Vec<ReportBlockKind> {
             caption: "Closed-loop gain".to_owned(),
             alternative_text: "Gain and phase across the requested frequency range.".to_owned(),
             sizing: FigureSizing::FitWidth,
+            source_locator: None,
             reference: ReportReferenceMode::Frozen {
                 snapshot: plot_snapshot,
                 artifact: FrozenReportArtifact::new(
@@ -306,6 +307,10 @@ fn linked_and_frozen_reference_currentness_is_explicit_and_auditable() {
                         caption: "Gain".to_owned(),
                         alternative_text: "Gain versus frequency.".to_owned(),
                         sizing: FigureSizing::FitWidth,
+                        source_locator: Some(ReportFigureSourceLocator {
+                            page_id: 1,
+                            pane_id: 1,
+                        }),
                         reference: ReportReferenceMode::Linked {
                             snapshot: linked_snapshot.clone(),
                         },
@@ -346,6 +351,7 @@ fn linked_and_frozen_reference_currentness_is_explicit_and_auditable() {
             .unwrap(),
         ],
         available_datasets: vec![linked_dataset],
+        figure_artifacts: Vec::new(),
     };
     let first = document.audit_references(&inventory).unwrap();
     assert_eq!(
@@ -398,6 +404,10 @@ fn audit_distinguishes_missing_source_dataset_and_changed_content() {
                     caption: "Noise".to_owned(),
                     alternative_text: "Input-referred noise density.".to_owned(),
                     sizing: FigureSizing::FitWidth,
+                    source_locator: Some(ReportFigureSourceLocator {
+                        page_id: 1,
+                        pane_id: 1,
+                    }),
                     reference: ReportReferenceMode::Linked {
                         snapshot: snapshot.clone(),
                     },
@@ -427,6 +437,7 @@ fn audit_distinguishes_missing_source_dataset_and_changed_content() {
         .audit_references(&ReportReferenceInventory {
             sources: vec![changed_entry.clone()],
             available_datasets: vec![binding],
+            figure_artifacts: Vec::new(),
         })
         .unwrap();
     assert_eq!(
@@ -441,6 +452,7 @@ fn audit_distinguishes_missing_source_dataset_and_changed_content() {
                 ..changed_entry
             }],
             available_datasets: Vec::new(),
+            figure_artifacts: Vec::new(),
         })
         .unwrap();
     assert_eq!(
@@ -870,6 +882,153 @@ fn document_template_and_page_update_policy_are_transactional() {
 }
 
 #[test]
+fn page_publication_settings_are_revisioned_and_exactly_bound() {
+    let (mut document, page_id, _) = document_with_section();
+    let (_, binding) = dataset_snapshot(73);
+    let initial_page_revision = document.page(page_id).unwrap().revision();
+    let second_page_revision = initial_page_revision.next().unwrap();
+    let third_page_revision = second_page_revision.next().unwrap();
+
+    document
+        .transact(
+            document.revision(),
+            vec![
+                ReportEdit::SetPageInclusion {
+                    page_id,
+                    expected_page_revision: initial_page_revision,
+                    inclusion: ReportPageInclusion::AppendixOnly,
+                },
+                ReportEdit::SetPageEvidenceBinding {
+                    page_id,
+                    expected_page_revision: second_page_revision,
+                    evidence_binding: ReportPageEvidenceBinding::ExactDataset { binding },
+                },
+                ReportEdit::SetPageBlockedGateTextPolicy {
+                    page_id,
+                    expected_page_revision: third_page_revision,
+                    policy: ReportBlockedGateTextPolicy::SummarizeWithLink,
+                },
+            ],
+            73,
+        )
+        .unwrap();
+
+    let page = document.page(page_id).unwrap();
+    assert_eq!(page.inclusion(), ReportPageInclusion::AppendixOnly);
+    assert_eq!(
+        page.evidence_binding(),
+        ReportPageEvidenceBinding::ExactDataset { binding }
+    );
+    assert_eq!(
+        page.blocked_gate_text_policy(),
+        ReportBlockedGateTextPolicy::SummarizeWithLink
+    );
+    let restored: ReportDocument =
+        serde_json::from_slice(&serde_json::to_vec(&document).unwrap()).unwrap();
+    assert_eq!(restored, document);
+}
+
+#[test]
+fn report_block_inclusion_is_revision_checked_and_persistent() {
+    let (mut document, _, section_id) = document_with_section();
+    let receipt = document
+        .transact(
+            document.revision(),
+            vec![ReportEdit::AddBlock {
+                section_id,
+                kind: ReportBlockKind::Prose(ProseBlock {
+                    style: ProseStyle::Body,
+                    markdown: "Nominal response remains inside specification.".to_owned(),
+                }),
+            }],
+            75,
+        )
+        .unwrap();
+    let block_id = match receipt.created[0] {
+        ReportEntityRef::Block(id) => id,
+        _ => unreachable!(),
+    };
+    let initial_revision = document.block(block_id).unwrap().revision();
+
+    document
+        .transact(
+            document.revision(),
+            vec![ReportEdit::SetBlockEnabled {
+                block_id,
+                expected_block_revision: initial_revision,
+                enabled: false,
+            }],
+            76,
+        )
+        .unwrap();
+
+    let block = document.block(block_id).unwrap();
+    assert!(!block.enabled());
+    assert_eq!(block.revision(), initial_revision.next().unwrap());
+    let unchanged = document.clone();
+    assert!(matches!(
+        document.transact(
+            document.revision(),
+            vec![ReportEdit::SetBlockEnabled {
+                block_id,
+                expected_block_revision: initial_revision,
+                enabled: true,
+            }],
+            77,
+        ),
+        Err(ReportError::EntityRevisionConflict { .. })
+    ));
+    assert_eq!(document, unchanged);
+
+    let restored: ReportDocument =
+        serde_json::from_slice(&serde_json::to_vec(&document).unwrap()).unwrap();
+    assert_eq!(restored, document);
+}
+
+#[test]
+fn add_block_to_sectionless_page_is_one_atomic_revision() {
+    let mut document = ReportDocument::new("Atomic report").unwrap();
+    let receipt = document
+        .transact(
+            document.revision(),
+            vec![ReportEdit::AddPage {
+                title: "Summary".to_owned(),
+            }],
+            81,
+        )
+        .unwrap();
+    let page_id = match receipt.created[0] {
+        ReportEntityRef::Page(id) => id,
+        _ => unreachable!(),
+    };
+    let expected_page_revision = document.page(page_id).unwrap().revision();
+    let document_revision = document.revision();
+    let receipt = document
+        .transact(
+            document_revision,
+            vec![ReportEdit::AddBlockToPage {
+                page_id,
+                expected_page_revision,
+                kind: ReportBlockKind::Prose(ProseBlock {
+                    style: ProseStyle::ExecutiveSummary,
+                    markdown: "One atomic page-content insertion.".to_owned(),
+                }),
+            }],
+            82,
+        )
+        .unwrap();
+
+    assert_eq!(document.revision(), document_revision.next().unwrap());
+    assert_eq!(receipt.created.len(), 2);
+    assert!(matches!(receipt.created[0], ReportEntityRef::Section(_)));
+    assert!(matches!(receipt.created[1], ReportEntityRef::Block(_)));
+    let page = document.page(page_id).unwrap();
+    assert_eq!(page.sections().len(), 1);
+    assert_eq!(page.sections()[0].title(), "Page content");
+    assert_eq!(page.sections()[0].blocks().len(), 1);
+}
+
+#[test]
 fn invalid_tables_notes_sources_and_duplicate_bindings_fail_closed() {
     let (snapshot, binding) = dataset_snapshot(80);
     let invalid_table = ReportBlockKind::DataTable(DataTableBlock {
@@ -897,6 +1056,7 @@ fn invalid_tables_notes_sources_and_duplicate_bindings_fail_closed() {
         caption: "Wrong source".to_owned(),
         alternative_text: "This must fail source-kind validation.".to_owned(),
         sizing: FigureSizing::Natural,
+        source_locator: None,
         reference: ReportReferenceMode::Linked {
             snapshot: dataset_snapshot(81).0,
         },
@@ -1114,6 +1274,9 @@ fn version_one_initial_snapshots_migrate_without_fabricating_history() {
         revision: ObjectRevision::INITIAL,
         title: "Imported page".to_owned(),
         update_policy: ReportPageUpdatePolicy::RefreshLinkedAutomatically,
+        inclusion: ReportPageInclusion::Included,
+        evidence_binding: ReportPageEvidenceBinding::Unbound,
+        blocked_gate_text_policy: ReportBlockedGateTextPolicy::VerbatimFromSource,
         sections: vec![ReportSection {
             id: ReportSectionId::new(),
             created_at_document_revision: ObjectRevision::INITIAL,
@@ -1123,6 +1286,7 @@ fn version_one_initial_snapshots_migrate_without_fabricating_history() {
                 id: ReportBlockId::new(),
                 created_at_document_revision: ObjectRevision::INITIAL,
                 revision: ObjectRevision::INITIAL,
+                enabled: true,
                 kind: all_block_kinds().remove(5),
             }],
         }],
@@ -1133,6 +1297,8 @@ fn version_one_initial_snapshots_migrate_without_fabricating_history() {
         revision: ObjectRevision::INITIAL,
         title: "Legacy report".to_owned(),
         template: ReportTemplate::ReleaseVerification42,
+        output_formats: ReportOutputFormats::default(),
+        publication_profile: ReportPublicationProfile::default(),
         pages: vec![page],
         receipts: Vec::new(),
         tombstones: Vec::new(),
@@ -1373,6 +1539,328 @@ fn schema_two_migration_retains_an_explicit_current_source_baseline() {
         migrated.revision_history().records()[1].prior_revision_identity(),
         Some(migrated.revision_history().records()[0].revision_identity())
     );
+}
+
+#[test]
+fn schema_three_migration_preserves_authenticated_default_page_policies() {
+    let (document, _, _) = document_with_section();
+    let mut schema_three = serde_json::to_value(&document).unwrap();
+    schema_three["schema_version"] = serde_json::json!(3);
+
+    let migrated: ReportDocument = serde_json::from_value(schema_three).unwrap();
+
+    assert_eq!(migrated, document);
+    assert_eq!(migrated.schema_version(), ReportDocument::SCHEMA_VERSION);
+    for page in migrated.pages() {
+        assert_eq!(page.inclusion(), ReportPageInclusion::Included);
+        assert_eq!(page.evidence_binding(), ReportPageEvidenceBinding::Unbound);
+        assert_eq!(
+            page.blocked_gate_text_policy(),
+            ReportBlockedGateTextPolicy::VerbatimFromSource
+        );
+    }
+}
+
+#[test]
+fn schema_three_migration_rejects_mislabeled_schema_four_page_policies() {
+    let (mut document, page_id, _) = document_with_section();
+    let page_revision = document.page(page_id).unwrap().revision();
+    document
+        .transact(
+            document.revision(),
+            vec![ReportEdit::SetPageInclusion {
+                page_id,
+                expected_page_revision: page_revision,
+                inclusion: ReportPageInclusion::AppendixOnly,
+            }],
+            74,
+        )
+        .unwrap();
+    let mut mislabeled = serde_json::to_value(document).unwrap();
+    mislabeled["schema_version"] = serde_json::json!(3);
+
+    assert!(matches!(
+        serde_json::from_value::<ReportDocument>(mislabeled),
+        Err(_)
+    ));
+}
+
+#[test]
+fn schema_four_migration_preserves_authenticated_default_block_inclusion() {
+    let (mut document, _, section_id) = document_with_section();
+    document
+        .transact(
+            document.revision(),
+            vec![ReportEdit::AddBlock {
+                section_id,
+                kind: ReportBlockKind::Prose(ProseBlock {
+                    style: ProseStyle::Method,
+                    markdown: "Retained schema-four block.".to_owned(),
+                }),
+            }],
+            78,
+        )
+        .unwrap();
+    let mut schema_four = serde_json::to_value(&document).unwrap();
+    schema_four["schema_version"] = serde_json::json!(4);
+
+    let migrated: ReportDocument = serde_json::from_value(schema_four).unwrap();
+
+    assert_eq!(migrated, document);
+    assert_eq!(migrated.schema_version(), ReportDocument::SCHEMA_VERSION);
+    assert!(
+        migrated
+            .pages()
+            .iter()
+            .flat_map(|page| page.sections())
+            .flat_map(|section| section.blocks())
+            .all(ReportBlock::enabled)
+    );
+}
+
+#[test]
+fn schema_four_migration_rejects_mislabeled_disabled_blocks() {
+    let (mut document, _, section_id) = document_with_section();
+    let receipt = document
+        .transact(
+            document.revision(),
+            vec![ReportEdit::AddBlock {
+                section_id,
+                kind: ReportBlockKind::Prose(ProseBlock {
+                    style: ProseStyle::Warning,
+                    markdown: "Disabled only in schema five.".to_owned(),
+                }),
+            }],
+            79,
+        )
+        .unwrap();
+    let block_id = match receipt.created[0] {
+        ReportEntityRef::Block(id) => id,
+        _ => unreachable!(),
+    };
+    let block_revision = document.block(block_id).unwrap().revision();
+    document
+        .transact(
+            document.revision(),
+            vec![ReportEdit::SetBlockEnabled {
+                block_id,
+                expected_block_revision: block_revision,
+                enabled: false,
+            }],
+            80,
+        )
+        .unwrap();
+    let mut mislabeled = serde_json::to_value(document).unwrap();
+    mislabeled["schema_version"] = serde_json::json!(4);
+
+    assert!(serde_json::from_value::<ReportDocument>(mislabeled).is_err());
+}
+
+#[test]
+fn publication_policy_is_revisioned_and_reconstructable() {
+    let mut document = ReportDocument::new("Publication policy").unwrap();
+    let initial_revision = document.revision();
+    let output_formats = ReportOutputFormats {
+        pdf_a: true,
+        html_bundle: false,
+        canonical_json: true,
+        selected_csv: true,
+    };
+    let publication_profile = ReportPublicationProfile {
+        template: ReportPublicationTemplate::CustomerDatasheet,
+        page_size: ReportPublicationPageSize::A3Landscape,
+        draft_marking: ReportDraftMarking::NeverWatermark,
+        numbering: ReportPageNumbering::ContinuousPageNumbers,
+        table_precision: ReportTablePrecision::FullStoredF64,
+    };
+
+    document
+        .transact_with_context(
+            document.revision(),
+            vec![
+                ReportEdit::SetOutputFormats { output_formats },
+                ReportEdit::SetPublicationProfile {
+                    publication_profile,
+                },
+            ],
+            81,
+            "publication-editor",
+            "Set exact report publication policy",
+        )
+        .unwrap();
+
+    assert_eq!(document.output_formats(), output_formats);
+    assert_eq!(document.publication_profile(), publication_profile);
+    let prior = document
+        .reconstruct_revision(document.id(), initial_revision)
+        .unwrap();
+    assert_eq!(prior.output_formats(), ReportOutputFormats::default());
+    assert_eq!(
+        prior.publication_profile(),
+        ReportPublicationProfile::default()
+    );
+    let current = document
+        .reconstruct_revision(document.id(), document.revision())
+        .unwrap();
+    assert_eq!(current.output_formats(), output_formats);
+    assert_eq!(current.publication_profile(), publication_profile);
+}
+
+#[test]
+fn report_rejects_disabling_every_output_format_atomically() {
+    let mut document = ReportDocument::new("Publication policy").unwrap();
+    let before = document.clone();
+    let result = document.transact(
+        document.revision(),
+        vec![ReportEdit::SetOutputFormats {
+            output_formats: ReportOutputFormats {
+                pdf_a: false,
+                html_bundle: false,
+                canonical_json: false,
+                selected_csv: false,
+            },
+        }],
+        82,
+    );
+
+    assert!(matches!(
+        result,
+        Err(ReportError::InvalidValue {
+            field: "report-document.output-formats",
+            ..
+        })
+    ));
+    assert_eq!(document, before);
+}
+
+#[test]
+fn schema_five_migration_preserves_authenticated_default_publication_policy() {
+    let document = ReportDocument::new("Schema five report").unwrap();
+    let mut schema_five = serde_json::to_value(&document).unwrap();
+    schema_five["schema_version"] = serde_json::json!(5);
+
+    let migrated: ReportDocument = serde_json::from_value(schema_five).unwrap();
+
+    assert_eq!(migrated, document);
+    assert_eq!(migrated.schema_version(), ReportDocument::SCHEMA_VERSION);
+    assert_eq!(migrated.output_formats(), ReportOutputFormats::default());
+    assert_eq!(
+        migrated.publication_profile(),
+        ReportPublicationProfile::default()
+    );
+}
+
+#[test]
+fn schema_five_migration_rejects_mislabeled_publication_policy() {
+    let mut document = ReportDocument::new("Schema six report").unwrap();
+    document
+        .transact(
+            document.revision(),
+            vec![ReportEdit::SetOutputFormats {
+                output_formats: ReportOutputFormats {
+                    selected_csv: true,
+                    ..ReportOutputFormats::default()
+                },
+            }],
+            83,
+        )
+        .unwrap();
+    let mut mislabeled = serde_json::to_value(document).unwrap();
+    mislabeled["schema_version"] = serde_json::json!(5);
+
+    assert!(serde_json::from_value::<ReportDocument>(mislabeled).is_err());
+}
+
+#[test]
+fn schema_six_migration_preserves_reports_without_figure_locators() {
+    let document = ReportDocument::new("Schema six report").unwrap();
+    let mut schema_six = serde_json::to_value(&document).unwrap();
+    schema_six["schema_version"] = serde_json::json!(6);
+
+    let migrated: ReportDocument = serde_json::from_value(schema_six).unwrap();
+
+    assert_eq!(migrated, document);
+    assert_eq!(migrated.schema_version(), ReportDocument::SCHEMA_VERSION);
+}
+
+#[test]
+fn schema_six_migration_rejects_mislabeled_figure_locator() {
+    let (mut document, _, section_id) = document_with_section();
+    let (snapshot, _) = visualization_snapshot(ObjectRevision::INITIAL, 91);
+    document
+        .transact(
+            document.revision(),
+            vec![ReportEdit::AddBlock {
+                section_id,
+                kind: ReportBlockKind::PlotFigure(PlotFigureBlock {
+                    caption: "Exact pane".to_owned(),
+                    alternative_text: "One exact linked visualization pane.".to_owned(),
+                    sizing: FigureSizing::FitWidth,
+                    source_locator: Some(ReportFigureSourceLocator {
+                        page_id: 1,
+                        pane_id: 2,
+                    }),
+                    reference: ReportReferenceMode::Linked { snapshot },
+                }),
+            }],
+            92,
+        )
+        .unwrap();
+    let mut mislabeled = serde_json::to_value(document).unwrap();
+    mislabeled["schema_version"] = serde_json::json!(6);
+
+    let error = serde_json::from_value::<ReportDocument>(mislabeled).unwrap_err();
+
+    assert!(error.to_string().contains("schema version 6"));
+}
+
+#[test]
+fn schema_six_migration_rejects_linked_figure_without_inventing_a_locator() {
+    fn clear_figure_locators(page: &mut ReportPage) {
+        for section in &mut page.sections {
+            for block in &mut section.blocks {
+                if let ReportBlockKind::PlotFigure(figure) = &mut block.kind {
+                    figure.source_locator = None;
+                }
+            }
+        }
+    }
+
+    let (mut document, _, section_id) = document_with_section();
+    let (snapshot, _) = visualization_snapshot(ObjectRevision::INITIAL, 93);
+    document
+        .transact(
+            document.revision(),
+            vec![ReportEdit::AddBlock {
+                section_id,
+                kind: ReportBlockKind::PlotFigure(PlotFigureBlock {
+                    caption: "Legacy linked figure".to_owned(),
+                    alternative_text: "A schema-six link has no exact pane identity.".to_owned(),
+                    sizing: FigureSizing::FitWidth,
+                    source_locator: Some(ReportFigureSourceLocator {
+                        page_id: 1,
+                        pane_id: 1,
+                    }),
+                    reference: ReportReferenceMode::Linked { snapshot },
+                }),
+            }],
+            94,
+        )
+        .unwrap();
+    document.schema_version = 6;
+    for page in &mut document.pages {
+        clear_figure_locators(page);
+    }
+    for record in &mut document.revision_history.records {
+        for page in &mut record.snapshot.pages {
+            clear_figure_locators(page);
+        }
+    }
+
+    assert!(matches!(
+        document.migrate(),
+        Err(ReportError::UnsafeLegacyMigration { version: 6 })
+    ));
 }
 
 #[test]

@@ -746,7 +746,14 @@ impl VoltageSources {
         let width_was_omitted = width.is_nan();
         let xyce_defaults = matches!(dialect, crate::config::SpiceDialect::Xyce);
         let ngspice_defaults = matches!(dialect, crate::config::SpiceDialect::Ngspice);
-        let stop_time_defaults = xyce_defaults || ngspice_defaults;
+        // Only Xyce resolves an omitted PER to the transient stop. ngspice 46
+        // resolves it to TR + PW + TF, so the waveform repeats for the rest of
+        // the run rather than firing once. Measured against ngspice 46 on
+        // `tests/ngspice/general/rtlinv.cir`, whose source is
+        // `pulse(0 5 2ns 2ns 2ns 80ns)`: v(1) rises at 3ns, falls at 85ns,
+        // and rises again at 88ns and 172ns — a period of tr+pw+tf = 84ns,
+        // not a single pulse held low to tstop.
+        let stop_time_defaults = xyce_defaults;
 
         let td = if delay.is_finite() {
             delay.max(0.0)
@@ -2233,7 +2240,16 @@ mod tests {
     }
 
     #[test]
-    fn ngspice_pulse_omitted_period_defaults_to_transient_stop_time() {
+    /// An omitted PER repeats the waveform, it does not hold the source at V1
+    /// until the transient stop.
+    ///
+    /// Measured against ngspice 46 for exactly this source,
+    /// `pulse(0 1 10u 1u 1u 100m)` over `tran 200u 400m`: v(1) rises at
+    /// 10.65 us, falls at 100.0117 ms, and then rises again at 100.0130 ms,
+    /// 200.0150 ms and 300.0170 ms. That is a period of TR + PW + TF, so the
+    /// second cycle begins at TD + PER = 100.012 ms and the source is already
+    /// climbing 0.08 us later.
+    fn ngspice_pulse_omitted_period_repeats_after_the_waveform_duration() {
         let spec = SourceSpec::Pulse {
             v1: 0.0,
             v2: 1.0,
@@ -2253,7 +2269,16 @@ mod tests {
         );
         assert_close(
             VoltageSources::evaluate_source_at_time_with_context(&spec, 100.01208e-3, ctx),
-            0.0,
+            0.08,
+        );
+        // Second and third cycles land where ngspice put them.
+        assert_close(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 150.0e-3, ctx),
+            1.0,
+        );
+        assert_close(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 250.0e-3, ctx),
+            1.0,
         );
     }
 

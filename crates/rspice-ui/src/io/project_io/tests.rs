@@ -7,10 +7,12 @@
 
 use super::*;
 use crate::state::{
-    AnalysisResult, AnalysisType, CellViewRef, OpenCellView, OperatingPointValue,
+    AnalysisResult, AnalysisType, Cell, CellViewRef, LayoutEdit, LayoutInstance, LayoutObjectId,
+    LayoutOrientation, LayoutPoint, LayoutTransform, OpenCellView, OperatingPointValue,
     PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationRun,
-    SimulationRunProvenance, SimulationState, WaveformData,
+    SimulationRunProvenance, SimulationState, View, ViewType, WaveformData,
 };
+use crate::workbench::app_state::AppState;
 
 #[test]
 fn in_memory_project_text_is_size_checked_before_parsing() {
@@ -44,6 +46,95 @@ fn current_project_text_routes_to_direct_deserialization() {
         ProjectTextLoadRoute::Direct,
         "legacy ID injection is permitted only when both keys are absent"
     );
+}
+
+fn project_with_two_authoritative_layout_documents() -> (ProjectFile, CellViewRef, CellViewRef) {
+    let mut state = AppState::default();
+    state.provision_test_project_technology_contract();
+    let top = CellViewRef::new("user", "top", "layout");
+    let child = CellViewRef::new("user", "child", "layout");
+    {
+        let library = state
+            .library_manager
+            .get_library_mut("user")
+            .expect("default project library");
+        library
+            .get_cell_mut("top")
+            .expect("default top cell")
+            .add_view(View::new("layout", ViewType::Layout));
+        let mut child_cell = Cell::new("child");
+        child_cell.add_view(View::new("layout", ViewType::Layout));
+        library.add_cell(child_cell);
+    }
+    state
+        .initialize_physical_layout_document(top.clone())
+        .expect("top layout initializes");
+    state
+        .initialize_physical_layout_document(child.clone())
+        .expect("child layout initializes");
+    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
+        .expect("two-layout project snapshot validates");
+    (project, top, child)
+}
+
+fn insert_layout_instance(project: &mut ProjectFile, owner: &CellViewRef, master: CellViewRef) {
+    let mut document = project
+        .workspace
+        .physical_layout_document(owner)
+        .expect("layout owner document")
+        .clone();
+    let revision = document.revision();
+    document
+        .apply_transaction(
+            revision,
+            &[LayoutEdit::InsertInstance {
+                id: LayoutObjectId::new(),
+                value: LayoutInstance {
+                    master,
+                    transform: LayoutTransform {
+                        origin: LayoutPoint::new(0, 0),
+                        orientation: LayoutOrientation::R0,
+                    },
+                    array: None,
+                    terminal_bindings: Default::default(),
+                    properties: Default::default(),
+                },
+            }],
+        )
+        .expect("layout instance transaction is locally valid");
+    project
+        .workspace
+        .commit_physical_layout_document(document)
+        .expect("layout document commits");
+}
+
+#[test]
+fn project_validation_rejects_layout_hierarchy_without_authoritative_master_document() {
+    let (mut project, top, child) = project_with_two_authoritative_layout_documents();
+    insert_layout_instance(&mut project, &top, child.clone());
+    assert!(project.workspace.remove_physical_layout_document(&child));
+
+    let error = project
+        .validate()
+        .expect_err("missing authoritative layout master must fail closed");
+    assert!(
+        error
+            .to_string()
+            .contains("no authoritative physical-layout document"),
+        "{error}"
+    );
+}
+
+#[test]
+fn project_validation_rejects_recursive_physical_layout_hierarchy() {
+    let (mut project, top, child) = project_with_two_authoritative_layout_documents();
+    insert_layout_instance(&mut project, &top, child.clone());
+    insert_layout_instance(&mut project, &child, top);
+
+    let error = project
+        .validate()
+        .expect_err("recursive layout hierarchy must fail closed");
+    assert!(error.to_string().contains("recursive cycle"), "{error}");
 }
 
 fn seal_legacy_unattributed(run: &mut SimulationRun) {
@@ -555,7 +646,8 @@ fn project_file_rejects_unsupported_design_management_schema() {
 #[test]
 fn project_file_round_trips_project_owned_report_documents() {
     use crate::results::report_document::{
-        ReportDocument, ReportEdit, ReportPageUpdatePolicy, ReportTemplate,
+        ReportBlockedGateTextPolicy, ReportDocument, ReportEdit, ReportPageEvidenceBinding,
+        ReportPageInclusion, ReportPageUpdatePolicy, ReportTemplate,
     };
 
     let mut libraries = LibraryManager::with_primitives();
@@ -573,17 +665,43 @@ fn project_file_round_trips_project_owned_report_documents() {
         )
         .expect("add page");
     let page = report.pages()[0].clone();
+    let exact_binding = crate::product::DatasetBinding::new(
+        crate::product::DatasetId::new(),
+        crate::product::ContentDigest::from_bytes([0x6a; 32]),
+    );
+    let second_page_revision = page.revision().next().expect("page revision");
+    let third_page_revision = second_page_revision.next().expect("page revision");
+    let fourth_page_revision = third_page_revision.next().expect("page revision");
     report
         .transact(
             report.revision(),
-            vec![ReportEdit::SetPageUpdatePolicy {
-                page_id: page.id(),
-                expected_page_revision: page.revision(),
-                update_policy: ReportPageUpdatePolicy::FreezeSelectedRevision,
-            }],
+            vec![
+                ReportEdit::SetPageUpdatePolicy {
+                    page_id: page.id(),
+                    expected_page_revision: page.revision(),
+                    update_policy: ReportPageUpdatePolicy::FreezeSelectedRevision,
+                },
+                ReportEdit::SetPageInclusion {
+                    page_id: page.id(),
+                    expected_page_revision: second_page_revision,
+                    inclusion: ReportPageInclusion::AppendixOnly,
+                },
+                ReportEdit::SetPageEvidenceBinding {
+                    page_id: page.id(),
+                    expected_page_revision: third_page_revision,
+                    evidence_binding: ReportPageEvidenceBinding::ExactDataset {
+                        binding: exact_binding,
+                    },
+                },
+                ReportEdit::SetPageBlockedGateTextPolicy {
+                    page_id: page.id(),
+                    expected_page_revision: fourth_page_revision,
+                    policy: ReportBlockedGateTextPolicy::SummarizeWithLink,
+                },
+            ],
             11,
         )
-        .expect("set page policy");
+        .expect("set page publication policies");
     workspace.report_documents.push(report.clone());
     workspace.report_documents_dirty = true;
     let project = ProjectFile::new(workspace, libraries);
@@ -1871,6 +1989,5 @@ fn missing_persisted_lifecycle_restores_as_explicit_legacy_unknown() {
     assert_eq!(restored.execution_target, None);
     assert_eq!(restored.lifecycle, SimulationRunLifecycle::LegacyUnknown);
 }
-
 
 mod migration;

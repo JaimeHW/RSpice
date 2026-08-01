@@ -306,7 +306,6 @@ impl PwlData {
             .fold(f64::NEG_INFINITY, f64::max);
         Some((min, max))
     }
-
 }
 
 /// Format a value with engineering notation for SPICE compatibility.

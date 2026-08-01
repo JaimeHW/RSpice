@@ -14,7 +14,9 @@ use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, select_mono_with_response,
 };
 
-use crate::workbench::app::{HierarchyDescendEditMode, HierarchyParentContext, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::{
+    HierarchyDescendEditMode, HierarchyParentContext, RSpiceApp, SchematicEditAuthority,
+};
 use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} EDIT CONTEXT";

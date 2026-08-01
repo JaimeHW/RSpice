@@ -94,9 +94,7 @@ impl Engine {
         if conv_cfg.source_stepping {
             self.record_convergence(|quality| {
                 if quality.source_stepping_count == 0 {
-                    log::warn!(
-                        "gmin stepping did not converge; falling back to source stepping."
-                    );
+                    log::warn!("gmin stepping did not converge; falling back to source stepping.");
                 }
                 quality.record_source_stepping();
             });
@@ -1373,12 +1371,15 @@ impl Engine {
             };
         let junction_gmin = self.effective_device_junction_gmin(gmin_floor);
         let mut use_transient_current_seed = false;
-        let mut solution = match self
-            .linear_presolve_for_guess_with_linear_stamp(circuit, matrix, |circuit, matrix, rhs| {
+        let mut solution = match self.linear_presolve_for_guess_with_linear_stamp(
+            circuit,
+            matrix,
+            |circuit, matrix, rhs| {
                 Self::stamp_transient_operating_point_linear(
                     circuit, matrix, rhs, time, 0.0, false,
                 );
-            }) {
+            },
+        ) {
             Some(solution) => solution,
             None if self.config.spice_dialect == SpiceDialect::Xyce
                 && circuit.has_xyce_core_inductors() =>
@@ -1395,9 +1396,7 @@ impl Engine {
                     circuit,
                     matrix,
                     |circuit, matrix, rhs| {
-                        Self::stamp_transient_current_seed_linear(
-                            circuit, matrix, rhs, time, 0.0,
-                        );
+                        Self::stamp_transient_current_seed_linear(circuit, matrix, rhs, time, 0.0);
                     },
                 );
                 if seeded.is_some() {
@@ -1467,11 +1466,7 @@ impl Engine {
             circuit.refresh_jiles_atherton_inductances(&solution);
             if use_transient_current_seed {
                 Self::stamp_transient_current_seed_linear(
-                    circuit,
-                    matrix,
-                    &mut rhs,
-                    time,
-                    gmin_floor,
+                    circuit, matrix, &mut rhs, time, gmin_floor,
                 );
             } else {
                 Self::stamp_transient_operating_point_linear(
@@ -1576,11 +1571,7 @@ impl Engine {
                         circuit.refresh_jiles_atherton_inductances(&new_solution);
                         if use_transient_current_seed {
                             Self::stamp_transient_current_seed_linear(
-                                circuit,
-                                matrix,
-                                rhs,
-                                time,
-                                gmin_floor,
+                                circuit, matrix, rhs, time, gmin_floor,
                             );
                         } else {
                             Self::stamp_transient_operating_point_linear(

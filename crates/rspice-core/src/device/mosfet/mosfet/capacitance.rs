@@ -85,21 +85,33 @@ impl Mosfet {
         oxide_cap: Value,
     ) -> (Value, Value, Value) {
         let _ = vgb;
+        // Berkeley/ngspice DEVqmeyer clamps VDSAT before both the weak-
+        // inversion and above-threshold partitions. Xyce deliberately does
+        // not; keep its law in `xyce_meyer_intrinsic_capacitances`.
+        const MAGIC_VDS: Value = 0.025;
 
         let vgst = vgs - von;
         let vds = vgs - vgd;
+        let vdsat = vdsat.max(MAGIC_VDS);
 
         if vgst <= -phi {
             (0.0, 0.0, oxide_cap / 2.0)
         } else if vgst <= -phi / 2.0 {
             (0.0, 0.0, -vgst * oxide_cap / (2.0 * phi))
         } else if vgst <= 0.0 {
-            // Xyce's DeviceSupport::qmeyer does not partition Cgd in the
-            // weak-inversion branch.  It also deliberately uses the raw
-            // VDSAT supplied by the Level-1/2 load (without a floor).
-            let capgs = vgst * oxide_cap / (1.5 * phi) + oxide_cap / 3.0;
+            let mut capgs = vgst * oxide_cap / (1.5 * phi) + oxide_cap / 3.0;
+            let capgd = if vds >= vdsat {
+                0.0
+            } else {
+                let vddif = 2.0 * vdsat - vds;
+                let vddif1 = vdsat - vds;
+                let vddif2 = vddif * vddif;
+                let capgd = capgs * (1.0 - vdsat * vdsat / vddif2);
+                capgs *= 1.0 - vddif1 * vddif1 / vddif2;
+                capgd
+            };
             let capgb = -vgst * oxide_cap / (2.0 * phi);
-            (capgs, 0.0, capgb)
+            (capgs.max(0.0), capgd.max(0.0), capgb.max(0.0))
         } else if vdsat <= vds {
             (oxide_cap / 3.0, 0.0, 0.0)
         } else {
@@ -108,7 +120,7 @@ impl Mosfet {
             let vddif2 = vddif * vddif;
             let capgd = oxide_cap * (1.0 - vdsat * vdsat / vddif2) / 3.0;
             let capgs = oxide_cap * (1.0 - vddif1 * vddif1 / vddif2) / 3.0;
-            (capgs, capgd, 0.0)
+            (capgs.max(0.0), capgd.max(0.0), 0.0)
         }
     }
 
@@ -228,10 +240,10 @@ impl Mosfet {
             (mode, von, vdsat)
         };
 
+        let use_xyce_meyer =
+            self.body_junction_model == MosBodyJunctionModel::XyceClassicLinearizedReverse;
         let (cgs_int, cgd_int, cgb_int) = if mode > 0.0 {
-            if self.uses_mos3_core()
-                && self.body_junction_model == MosBodyJunctionModel::XyceClassicLinearizedReverse
-            {
+            if use_xyce_meyer {
                 Self::xyce_meyer_intrinsic_capacitances(
                     vgs_m, vgd_m, vgb_m, von, vdsat, phi, oxide_cap,
                 )
@@ -239,9 +251,7 @@ impl Mosfet {
                 Self::meyer_intrinsic_capacitances(vgs_m, vgd_m, vgb_m, von, vdsat, phi, oxide_cap)
             }
         } else {
-            let (capgd_int, capgs_int, capgb_int) = if self.uses_mos3_core()
-                && self.body_junction_model == MosBodyJunctionModel::XyceClassicLinearizedReverse
-            {
+            let (capgd_int, capgs_int, capgb_int) = if use_xyce_meyer {
                 Self::xyce_meyer_intrinsic_capacitances(
                     vgd_m, vgs_m, vgb_m, von, vdsat, phi, oxide_cap,
                 )
@@ -615,6 +625,50 @@ mod tests {
             1.0e-12,
             1.0e-24,
         );
+    }
+
+    #[test]
+    fn classic_meyer_keeps_ngspice_weak_inversion_partition_and_vdsat_floor() {
+        let phi = 0.6;
+        let oxide_cap = 3.0e-12;
+        let von = 0.8;
+        let vgs = 0.75;
+        let vds = 0.01;
+        let raw_vdsat = 0.0;
+        let capgs_unpartitioned = (vgs - von) * oxide_cap / (1.5 * phi) + oxide_cap / 3.0;
+        let vdsat = 0.025;
+        let vddif = 2.0 * vdsat - vds;
+        let expected = (
+            capgs_unpartitioned * (1.0 - (vdsat - vds) * (vdsat - vds) / (vddif * vddif)),
+            capgs_unpartitioned * (1.0 - vdsat * vdsat / (vddif * vddif)),
+            -(vgs - von) * oxide_cap / (2.0 * phi),
+        );
+
+        assert_caps_close(
+            Mosfet::meyer_intrinsic_capacitances(
+                vgs,
+                vgs - vds,
+                vgs,
+                von,
+                raw_vdsat,
+                phi,
+                oxide_cap,
+            ),
+            expected,
+            1.0e-12,
+            1.0e-24,
+        );
+        let xyce = Mosfet::xyce_meyer_intrinsic_capacitances(
+            vgs,
+            vgs - vds,
+            vgs,
+            von,
+            raw_vdsat,
+            phi,
+            oxide_cap,
+        );
+        assert_close("Xyce Cgs", xyce.0, capgs_unpartitioned, 1.0e-12, 1.0e-24);
+        assert_eq!(xyce.1, 0.0);
     }
 
     #[test]

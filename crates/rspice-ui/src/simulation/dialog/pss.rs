@@ -136,7 +136,6 @@ impl PssConfig {
             self.num_harmonics,
         )
     }
-
 }
 
 /// Raw persisted PSS editor state.

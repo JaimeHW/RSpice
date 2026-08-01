@@ -814,9 +814,7 @@ fn report_pz(
         use super::export::{ColumnData, ExportColumn, ExportTable};
 
         let singularity =
-            |label: &str,
-             index: usize,
-             value: &rspice_core::analysis::pole_zero::Complex| {
+            |label: &str, index: usize, value: &rspice_core::analysis::pole_zero::Complex| {
                 ExportColumn {
                     name: format!("{label}({})", index + 1),
                     var_type: "frequency".to_string(),

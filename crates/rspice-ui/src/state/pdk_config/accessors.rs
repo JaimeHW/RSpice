@@ -52,9 +52,4 @@ impl PdkConfig {
     pub fn remove_env_override(&mut self, name: &str) {
         self.remove_env_var(name);
     }
-
-    /// Load configuration or return default if not found/error
-    pub fn load_or_default() -> Self {
-        Self::load().unwrap_or_default()
-    }
 }

@@ -6,12 +6,12 @@
 
 use egui::{Painter, Rect, Stroke};
 
-use crate::workbench::app_state::{AppState, SchematicKeyboardFocus};
 use crate::state::{
     Component, DesignNote, DesignNoteKind, DesignReviewState, NetGraph, Point,
     SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicNetHighlighting,
     SchematicReviewMarkerVisibility,
 };
+use crate::workbench::app_state::{AppState, SchematicKeyboardFocus};
 
 use super::super::symbols::SymbolLibrary;
 use super::SchematicSymbolContext;
@@ -22,10 +22,10 @@ use super::documentation_shapes::{
     documentation_shape_at, draw_documentation_shape, world_bounds as documentation_shape_bounds,
 };
 use super::drawing::{
-    draw_bus, draw_bus_tap, draw_component, draw_junction, draw_probe, draw_wire,
+    draw_bus, draw_bus_tap, draw_component, draw_junction, draw_probe, draw_wire, probe_at_screen,
     probe_world_bounds,
 };
-use super::grid::draw_grid;
+use super::drawing_sheet::ActiveDrawingSheet;
 use super::net_labels::{draw_net_label, net_label_at, world_bounds as net_label_world_bounds};
 use super::sheet_visibility::{
     active_junction_at, active_sheet_has_objects, object_is_on_active_sheet,
@@ -64,18 +64,26 @@ pub(super) fn draw_scene(
     state: &AppState,
     symbol_library: Option<&SymbolLibrary>,
     symbol_context: &SchematicSymbolContext,
+    drawing_sheet: &ActiveDrawingSheet,
 ) {
-    painter.rect_filled(
-        available,
-        0.0,
-        crate::ui::tokens::active_palette().canvas_bg,
-    );
-    draw_grid(painter, available, state);
+    super::drawing_sheet::draw_base(painter, available, viewport, state, drawing_sheet);
 
     // First-run guidance: an empty sheet says what to do next instead of
     // presenting a silent dot field.
     if !active_sheet_has_objects(state) {
-        draw_empty_hint(painter, available);
+        let drawing_area = drawing_sheet
+            .geometry
+            .drawing_area
+            .screen_rect(viewport)
+            .intersect(available);
+        draw_empty_hint(
+            painter,
+            if drawing_area.is_positive() {
+                drawing_area
+            } else {
+                available
+            },
+        );
     }
 
     let preview_bounds = if state.schematic.selection_rect.is_active() {
@@ -343,6 +351,16 @@ pub(super) fn draw_scene(
     // Probe flags are durable output intent and remain visible above authored
     // conductor/text layers. Their reference is the exact bound expression
     // when resolved, otherwise the stable unbound P<n> marker identity.
+    let hovered_probe = if state.schematic.tool == crate::state::Tool::Select {
+        let probes = objects_on_active_sheet(state, &state.schematic.probes, |item| item.id);
+        painter
+            .ctx()
+            .pointer_hover_pos()
+            .filter(|pointer| available.contains(*pointer))
+            .and_then(|pointer| probe_at_screen(viewport, probes.as_ref(), pointer))
+    } else {
+        None
+    };
     for probe in &state.schematic.probes {
         if !object_is_on_active_sheet(state, probe.id) {
             continue;
@@ -355,7 +373,17 @@ pub(super) fn draw_scene(
         {
             continue;
         }
-        draw_probe(painter, viewport, probe);
+        let mut selected = state.schematic.selection.has_probe(probe.id);
+        if !selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
+            selected = max.x >= min_x && min.x <= max_x && max.y >= min_y && min.y <= max_y;
+        }
+        draw_probe(
+            painter,
+            viewport,
+            probe,
+            selected,
+            hovered_probe == Some(probe.id),
+        );
     }
 
     if let Some((hx, hy)) = state.dialogs.interaction.hover_wire_vertex {
@@ -374,6 +402,15 @@ pub(super) fn draw_scene(
             );
         }
     }
+
+    super::drawing_sheet::draw_overflow_advisories(
+        painter,
+        available,
+        viewport,
+        state,
+        symbol_context,
+        drawing_sheet,
+    );
 
     // Check results last — violation badges annotate everything below.
     if state.ui.schematic_visibility.annotations == SchematicAnnotationVisibility::ViolationsOnly {
@@ -464,7 +501,7 @@ pub(super) fn keyboard_focus_matches_selection(
             })
         }
         SchematicKeyboardFocus::NetLabel(id) => selection.single_net_label() == Some(id),
-        SchematicKeyboardFocus::Probe(_) => selection.is_empty(),
+        SchematicKeyboardFocus::Probe(id) => selection.single_probe() == Some(id),
         SchematicKeyboardFocus::DesignNote(id) => selection.single_design_note() == Some(id),
         SchematicKeyboardFocus::DocumentationShape(id) => {
             selection.single_documentation_shape() == Some(id)
@@ -1025,12 +1062,12 @@ fn empty_hint_estimated_width(line: &str) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::app_state::AppState;
     use crate::state::{
         AnalysisResult, AnalysisType, ComponentType, DcOpResult, Junction, OperatingPointValue,
         PortDirection, PortSpec, ResolvedCellSymbol, SimulationRun, SymbolDocument, SymbolPin,
         SymbolShape,
     };
+    use crate::workbench::app_state::AppState;
     use std::collections::HashMap;
 
     fn port(name: &str, direction: PortDirection) -> PortSpec {

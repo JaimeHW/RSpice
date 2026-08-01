@@ -14,7 +14,6 @@ pub enum PzAnalysisType {
     ZerosOnly,
 }
 
-
 /// Transfer function type
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum PzTransferType {
@@ -75,7 +74,6 @@ impl PzConfig {
         }
         Ok(())
     }
-
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]

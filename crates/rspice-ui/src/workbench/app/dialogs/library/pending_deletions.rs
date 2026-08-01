@@ -3,13 +3,231 @@
 //! Deletion is staged rather than immediate so the dialog can report what
 //! else references the object before it is removed.
 
-use crate::diagnostics::ConsoleMessage;
+use egui::Context;
 
-use super::{RSpiceApp, VERILOGA_LIBRARY_NAME};
+use crate::diagnostics::ConsoleMessage;
+use crate::state::ProjectSourceOwner;
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, kv_row};
+use crate::workbench::app::dialogs::state::LibraryDeletionTarget;
+use crate::workbench::{AppState, RSpiceApp};
+
+use super::VERILOGA_LIBRARY_NAME;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct LibraryDeletionImpact {
+    views: usize,
+    open_views: usize,
+    dirty_open_views: usize,
+    instance_references: usize,
+    source_bundles: usize,
+    configuration_roots: usize,
+    project_root: bool,
+}
+
+impl AppState {
+    pub(crate) fn open_library_cell_deletion_review(
+        &mut self,
+        library: &str,
+        cell: &str,
+    ) -> Result<(), String> {
+        self.open_library_deletion_review(LibraryDeletionTarget::Cell {
+            library: library.to_owned(),
+            cell: cell.to_owned(),
+        })
+    }
+
+    pub(crate) fn open_library_view_deletion_review(
+        &mut self,
+        library: &str,
+        cell: &str,
+        view: &str,
+    ) -> Result<(), String> {
+        self.open_library_deletion_review(LibraryDeletionTarget::View {
+            library: library.to_owned(),
+            cell: cell.to_owned(),
+            view: view.to_owned(),
+        })
+    }
+
+    fn open_library_deletion_review(
+        &mut self,
+        target: LibraryDeletionTarget,
+    ) -> Result<(), String> {
+        validate_library_deletion_target(self, &target)?;
+        if self.pending_delete_cell.is_some() || self.pending_delete_view.is_some() {
+            return Err("Another library deletion is already pending.".to_owned());
+        }
+        self.dialogs.library_deletion_review.target = Some(target);
+        self.dialogs
+            .library_deletion_review
+            .expected_library_revision = self.library_manager.revision();
+        self.dialogs.library_deletion_review.error = None;
+        Ok(())
+    }
+
+    fn confirm_library_deletion_review(&mut self) -> Result<(), String> {
+        let review = &self.dialogs.library_deletion_review;
+        let target = review
+            .target
+            .clone()
+            .ok_or_else(|| "No library deletion is awaiting confirmation.".to_owned())?;
+        if self.library_manager.revision() != review.expected_library_revision {
+            return Err(
+                "The library catalog changed after this review opened. Review the deletion again."
+                    .to_owned(),
+            );
+        }
+        validate_library_deletion_target(self, &target)?;
+        let roots = self.workspace.configuration_sets.roots_in_scope(
+            target.library(),
+            target.cell(),
+            target.view(),
+        );
+        if !roots.is_empty() {
+            let names = roots
+                .iter()
+                .take(4)
+                .map(|configuration| configuration.name())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(format!(
+                "Configuration roots still reference this {} ({names}). Rebind or remove them before deletion.",
+                target.kind_label().to_ascii_lowercase()
+            ));
+        }
+        if self.pending_delete_cell.is_some() || self.pending_delete_view.is_some() {
+            return Err("Another library deletion is already pending.".to_owned());
+        }
+
+        match target {
+            LibraryDeletionTarget::Cell { library, cell } => {
+                self.pending_delete_cell = Some((library, cell));
+            }
+            LibraryDeletionTarget::View {
+                library,
+                cell,
+                view,
+            } => {
+                self.pending_delete_view = Some((library, cell, view));
+            }
+        }
+        self.dialogs.library_deletion_review.close();
+        Ok(())
+    }
+}
 
 impl RSpiceApp {
+    pub(in crate::workbench) fn process_library_deletion_review_dialog(&mut self, ctx: &Context) {
+        let Some(target) = self.state.dialogs.library_deletion_review.target.clone() else {
+            return;
+        };
+        let impact = library_deletion_impact(&self.state, &target);
+        let revision_current = self.state.library_manager.revision()
+            == self
+                .state
+                .dialogs
+                .library_deletion_review
+                .expected_library_revision;
+        let target_validation = validate_library_deletion_target(&self.state, &target);
+        let root_blocker = impact.configuration_roots > 0;
+        let can_delete = revision_current && target_validation.is_ok() && !root_blocker;
+        let target_path = target.display_path();
+        let view_count = impact.views.to_string();
+        let open_count = format!(
+            "{} ({} with working changes)",
+            impact.open_views, impact.dirty_open_views
+        );
+        let reference_count = impact.instance_references.to_string();
+        let source_count = impact.source_bundles.to_string();
+        let root_count = impact.configuration_roots.to_string();
+        let project_root = if impact.project_root { "yes" } else { "no" };
+        let stale_error = (!revision_current).then_some(
+            "The library catalog changed after this review opened. Cancel and review the deletion again.",
+        );
+        let validation_error = target_validation.as_ref().err().map(String::as_str);
+        let root_error = root_blocker.then_some(
+            "A configuration root cannot be deleted. Rebind or remove the configuration first.",
+        );
+        let retained_error = self.state.dialogs.library_deletion_review.error.as_deref();
+        let displayed_error = stale_error
+            .or(validation_error)
+            .or(root_error)
+            .or(retained_error);
+        let title = match target {
+            LibraryDeletionTarget::Cell { .. } => "Delete cell",
+            LibraryDeletionTarget::View { .. } => "Delete view",
+        };
+        let description = match target {
+            LibraryDeletionTarget::Cell { .. } => {
+                "Permanently remove the exact cell, all of its views, owned sources, open documents, and loaded workspace buffers."
+            }
+            LibraryDeletionTarget::View { .. } => {
+                "Permanently remove the exact view, its owned source, open document, and loaded workspace buffer."
+            }
+        };
+        let choice = Dialog::new("Library", title, "Delete")
+            .description(description)
+            .size(DialogSize::Transaction)
+            .ghost("Cancel")
+            .destructive()
+            .primary_enabled(can_delete)
+            .hint("Permanent project mutation")
+            .show(ctx, |ui| {
+                kv_row(ui, "Target", &target_path);
+                kv_row(ui, "Object", target.kind_label());
+                if matches!(target, LibraryDeletionTarget::Cell { .. }) {
+                    kv_row(ui, "Views removed", &view_count);
+                }
+                kv_row(ui, "Open views", &open_count);
+                kv_row(ui, "Instance references", &reference_count);
+                kv_row(ui, "Owned source bundles", &source_count);
+                kv_row(ui, "Configuration roots", &root_count);
+                kv_row(ui, "Project root", project_root);
+
+                ui.add_space(8.0);
+                let t = Tokens::get(ui.ctx());
+                ui.label(
+                    egui::RichText::new(
+                        "This action removes the selected object from the current project. It cannot be undone from the schematic-local history.",
+                    )
+                    .font(theme::sans(tokens::FS_0, FontWeight::Medium))
+                    .color(t.color.warn),
+                );
+                if let Some(error) = displayed_error {
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new(error)
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.err),
+                    );
+                }
+            });
+
+        match choice {
+            DialogChoice::Primary => {
+                if let Err(error) = self.state.confirm_library_deletion_review() {
+                    self.state.dialogs.library_deletion_review.error = Some(error);
+                }
+            }
+            DialogChoice::Ghost | DialogChoice::Cancelled => {
+                self.state.dialogs.library_deletion_review.close();
+            }
+            DialogChoice::Secondary | DialogChoice::None => {}
+        }
+    }
+
     pub(in crate::workbench) fn process_pending_library_deletions(&mut self) {
         if let Some((lib_name, cell_name)) = self.state.pending_delete_cell.take() {
+            let target = LibraryDeletionTarget::Cell {
+                library: lib_name.clone(),
+                cell: cell_name.clone(),
+            };
+            if let Err(error) = validate_library_deletion_target(&self.state, &target) {
+                self.state.push_user_message(ConsoleMessage::error(error));
+                return;
+            }
             if block_configuration_root_deletion(&mut self.state, &lib_name, &cell_name, None) {
                 return;
             }
@@ -21,13 +239,23 @@ impl RSpiceApp {
                         return;
                     }
                 };
+            let project_mutation = match self.state.preflight_project_library_mutation(
+                crate::state::ProjectLibraryMutation::DeleteCell {
+                    library: lib_name.clone(),
+                    cell: cell_name.clone(),
+                },
+            ) {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    self.state.push_user_message(ConsoleMessage::error(error));
+                    return;
+                }
+            };
             let mut deleted = false;
             if let Some(lib) = self.state.library_manager.get_library_mut(&lib_name) {
                 deleted = lib.remove_cell(&cell_name);
                 if deleted {
-                    if apply_design_management_removal(&mut self.state, ownership_removal) {
-                        self.invalidate_simulation_preflight();
-                    }
+                    apply_design_management_removal(&mut self.state, ownership_removal);
                     remove_project_sources_for_deleted_scope(
                         &mut self.state,
                         &lib_name,
@@ -36,6 +264,8 @@ impl RSpiceApp {
                     );
                     self.state
                         .prune_workspace_after_cell_deleted(&lib_name, &cell_name);
+                    self.state
+                        .publish_project_library_mutation(project_mutation);
                     self.state.push_user_message(ConsoleMessage::info(format!(
                         "Deleted cell '{}' from library '{}'",
                         cell_name, lib_name
@@ -48,6 +278,15 @@ impl RSpiceApp {
         }
 
         if let Some((lib_name, cell_name, view_name)) = self.state.pending_delete_view.take() {
+            let target = LibraryDeletionTarget::View {
+                library: lib_name.clone(),
+                cell: cell_name.clone(),
+                view: view_name.clone(),
+            };
+            if let Err(error) = validate_library_deletion_target(&self.state, &target) {
+                self.state.push_user_message(ConsoleMessage::error(error));
+                return;
+            }
             if block_configuration_root_deletion(
                 &mut self.state,
                 &lib_name,
@@ -68,15 +307,26 @@ impl RSpiceApp {
                     return;
                 }
             };
+            let project_mutation = match self.state.preflight_project_library_mutation(
+                crate::state::ProjectLibraryMutation::DeleteView {
+                    library: lib_name.clone(),
+                    cell: cell_name.clone(),
+                    view: view_name.clone(),
+                },
+            ) {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    self.state.push_user_message(ConsoleMessage::error(error));
+                    return;
+                }
+            };
             let mut deleted = false;
             if let Some(lib) = self.state.library_manager.get_library_mut(&lib_name)
                 && let Some(cell) = lib.get_cell_mut(&cell_name)
             {
                 deleted = cell.remove_view(&view_name);
                 if deleted {
-                    if apply_design_management_removal(&mut self.state, ownership_removal) {
-                        self.invalidate_simulation_preflight();
-                    }
+                    apply_design_management_removal(&mut self.state, ownership_removal);
                     remove_project_sources_for_deleted_scope(
                         &mut self.state,
                         &lib_name,
@@ -85,6 +335,8 @@ impl RSpiceApp {
                     );
                     self.state
                         .prune_workspace_after_view_deleted(&lib_name, &cell_name, &view_name);
+                    self.state
+                        .publish_project_library_mutation(project_mutation);
                     self.state.push_user_message(ConsoleMessage::info(format!(
                         "Deleted view '{}' from cell '{}'",
                         view_name, cell_name
@@ -95,6 +347,130 @@ impl RSpiceApp {
                 self.persist_global_veriloga_library_with_feedback();
             }
         }
+    }
+}
+
+fn validate_library_deletion_target(
+    state: &AppState,
+    target: &LibraryDeletionTarget,
+) -> Result<(), String> {
+    if state.workbench.safe_mode.project_read_only() {
+        return Err("The project is open read-only; library objects cannot be deleted.".to_owned());
+    }
+    let library = state
+        .library_manager
+        .get_library(target.library())
+        .ok_or_else(|| format!("Library '{}' no longer exists.", target.library()))?;
+    if library.read_only {
+        return Err(format!(
+            "Library '{}' is read-only; its objects cannot be deleted.",
+            target.library()
+        ));
+    }
+    let cell = library.get_cell(target.cell()).ok_or_else(|| {
+        format!(
+            "Cell '{}/{}' no longer exists.",
+            target.library(),
+            target.cell()
+        )
+    })?;
+    if let Some(view) = target.view()
+        && cell.get_view(view).is_none()
+    {
+        return Err(format!(
+            "View '{}/{}/{}' no longer exists.",
+            target.library(),
+            target.cell(),
+            view
+        ));
+    }
+    Ok(())
+}
+
+fn library_deletion_impact(
+    state: &AppState,
+    target: &LibraryDeletionTarget,
+) -> LibraryDeletionImpact {
+    let matches = |reference: &crate::state::CellViewRef| {
+        reference.library == target.library()
+            && reference.cell == target.cell()
+            && target.view().is_none_or(|view| reference.view == view)
+    };
+    let views = state
+        .library_manager
+        .get_library(target.library())
+        .and_then(|library| library.get_cell(target.cell()))
+        .map_or(0, |cell| {
+            target.view().map_or_else(
+                || cell.view_count(),
+                |view| usize::from(cell.get_view(view).is_some()),
+            )
+        });
+    let open_views = state
+        .workspace
+        .open_views
+        .iter()
+        .filter(|open| matches(&open.reference))
+        .count();
+    let dirty_open_views = state
+        .workspace
+        .open_views
+        .iter()
+        .filter(|open| matches(&open.reference) && open.dirty)
+        .count();
+    let source_bundles = state
+        .workspace
+        .project_sources
+        .iter_bundles()
+        .filter(|bundle| {
+            matches!(
+                bundle.owner(),
+                ProjectSourceOwner::CellView { reference } if matches(reference)
+            )
+        })
+        .count();
+    let configuration_roots = state
+        .workspace
+        .configuration_sets
+        .roots_in_scope(target.library(), target.cell(), target.view())
+        .len();
+    let project_root = state.workspace.project.root_library == target.library()
+        && state.workspace.project.top_cell == target.cell()
+        && target
+            .view()
+            .is_none_or(|view| view == crate::state::workspace::DEFAULT_SCHEMATIC_VIEW);
+
+    let count_references = |schematic: &crate::state::SchematicState| {
+        schematic
+            .components
+            .iter()
+            .filter(|component| {
+                component.library_cell.as_ref().is_some_and(|binding| {
+                    binding.library == target.library()
+                        && binding.cell == target.cell()
+                        && target.view().is_none_or(|view| binding.view == view)
+                })
+            })
+            .count()
+    };
+    let active_key = state.workspace.active_view.key();
+    let instance_references = count_references(&state.schematic)
+        + state
+            .workspace
+            .schematic_buffers
+            .iter()
+            .filter(|(key, _)| !key.eq_ignore_ascii_case(&active_key))
+            .map(|(_, schematic)| count_references(schematic))
+            .sum::<usize>();
+
+    LibraryDeletionImpact {
+        views,
+        open_views,
+        dirty_open_views,
+        instance_references,
+        source_bundles,
+        configuration_roots,
+        project_root,
     }
 }
 
@@ -128,11 +504,6 @@ fn prepare_design_management_removal(
     {
         return Ok(None);
     }
-    state
-        .workspace
-        .project
-        .next_revision()
-        .map_err(|error| format!("Could not advance the project revision: {error}"))?;
     Ok(Some(PendingDesignManagementRemoval { catalog }))
 }
 
@@ -143,16 +514,7 @@ fn apply_design_management_removal(
     let Some(removal) = removal else {
         return false;
     };
-    state
-        .workspace
-        .project
-        .advance_revision()
-        .expect("the project revision was preflighted without intervening mutation");
     state.workspace.design_management = removal.catalog;
-    state.workspace.project_metadata_dirty = true;
-    state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
-    state.ui.netlist.current_generation_input_digest = None;
-    state.clear_project_design_history();
     true
 }
 
@@ -239,8 +601,12 @@ mod tests {
             last_window_title: String::new(),
             symbol_library: None,
             simulation_controller: crate::simulation::SimulationController::new(),
-            file_workflow_io: Box::new(crate::workbench::workflows::file_workflow::NativeFileWorkflowIo),
-            export_workflow_io: Box::new(crate::workbench::workflows::export_workflow::NativeExportWorkflowIo),
+            file_workflow_io: Box::new(
+                crate::workbench::workflows::file_workflow::NativeFileWorkflowIo,
+            ),
+            export_workflow_io: Box::new(
+                crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,
+            ),
         }
     }
 
@@ -429,13 +795,128 @@ mod tests {
     }
 
     #[test]
+    fn deletion_review_is_exact_revision_bound_and_only_confirmation_stages_mutation() {
+        let mut state = state_with_open_amp_cell();
+
+        state
+            .open_library_cell_deletion_review("work", "amp")
+            .expect("writable exact cell should open a deletion review");
+
+        assert_eq!(
+            state.dialogs.library_deletion_review.target,
+            Some(LibraryDeletionTarget::Cell {
+                library: "work".to_owned(),
+                cell: "amp".to_owned(),
+            })
+        );
+        assert!(state.pending_delete_cell.is_none());
+        assert!(state.pending_delete_view.is_none());
+
+        state
+            .confirm_library_deletion_review()
+            .expect("unchanged reviewed cell should stage deletion");
+
+        assert_eq!(
+            state.pending_delete_cell,
+            Some(("work".to_owned(), "amp".to_owned()))
+        );
+        assert!(state.dialogs.library_deletion_review.target.is_none());
+        assert!(
+            state
+                .library_manager
+                .get_library("work")
+                .and_then(|library| library.get_cell("amp"))
+                .is_some(),
+            "confirmation stages the existing deletion transaction; it does not mutate inline"
+        );
+    }
+
+    #[test]
+    fn deletion_review_rejects_stale_and_read_only_targets_without_staging() {
+        let mut state = state_with_open_amp_cell();
+        state
+            .open_library_view_deletion_review("work", "amp", "symbol")
+            .expect("writable exact view should open a deletion review");
+        state.library_manager.add_library(Library::new("unrelated"));
+
+        let stale_error = state
+            .confirm_library_deletion_review()
+            .expect_err("catalog revision changes must invalidate the review");
+
+        assert!(stale_error.contains("changed after this review opened"));
+        assert!(state.pending_delete_view.is_none());
+        assert!(state.dialogs.library_deletion_review.target.is_some());
+        state.dialogs.library_deletion_review.close();
+
+        state
+            .library_manager
+            .get_library_mut("work")
+            .expect("work library exists")
+            .read_only = true;
+        let read_only_error = state
+            .open_library_cell_deletion_review("work", "amp")
+            .expect_err("read-only library must fail closed");
+        assert!(read_only_error.contains("read-only"));
+        assert!(state.pending_delete_cell.is_none());
+        assert!(state.dialogs.library_deletion_review.target.is_none());
+    }
+
+    #[test]
+    fn deletion_review_reports_loaded_dependents_without_double_counting_active_buffer() {
+        let mut state = state_with_open_amp_cell();
+        state
+            .workspace
+            .open_views
+            .iter_mut()
+            .find(|open| open.reference == CellViewRef::new("work", "amp", "schematic"))
+            .expect("amp schematic is open")
+            .dirty = true;
+        let keep = state
+            .workspace
+            .schematic_buffers
+            .get_mut(&CellViewRef::new("work", "keep", "schematic").key())
+            .expect("keep schematic buffer exists");
+        keep.add_library_cell_component(
+            Point::origin(),
+            LibraryCellInstance::new("work", "amp", "schematic"),
+        );
+        let target = LibraryDeletionTarget::Cell {
+            library: "work".to_owned(),
+            cell: "amp".to_owned(),
+        };
+
+        let impact = library_deletion_impact(&state, &target);
+
+        assert_eq!(impact.views, 2);
+        assert_eq!(impact.open_views, 1);
+        assert_eq!(impact.dirty_open_views, 1);
+        assert_eq!(impact.instance_references, 1);
+    }
+
+    #[test]
     fn deleting_open_cell_prunes_workspace_references_and_restores_valid_focus() {
         let mut app = app_with_state(state_with_open_amp_cell());
         let source_id = insert_cell_source(&mut app.state, "amp", "behavior");
+        let project_revision_before = app.state.workspace.project.revision().get();
         app.state.pending_delete_cell = Some(("work".to_string(), "amp".to_string()));
 
         app.process_pending_library_deletions();
 
+        assert_eq!(
+            app.state.workspace.project.revision().get(),
+            project_revision_before + 1
+        );
+        assert!(matches!(
+            app.state
+                .workspace
+                .project
+                .library_mutation_audit()
+                .last()
+                .map(|receipt| receipt.mutation()),
+            Some(crate::state::ProjectLibraryMutation::DeleteCell { library, cell })
+                if library == "work" && cell == "amp"
+        ));
+        assert!(app.state.workspace.project_metadata_dirty);
         assert!(
             app.state
                 .library_manager
@@ -495,6 +976,19 @@ mod tests {
 
         app.process_pending_library_deletions();
 
+        assert!(matches!(
+            app.state
+                .workspace
+                .project
+                .library_mutation_audit()
+                .last()
+                .map(|receipt| receipt.mutation()),
+            Some(crate::state::ProjectLibraryMutation::DeleteView {
+                library,
+                cell,
+                view,
+            }) if library == "work" && cell == "amp" && view == "symbol"
+        ));
         assert!(
             app.state
                 .library_manager

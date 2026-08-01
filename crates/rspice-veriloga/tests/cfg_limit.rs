@@ -184,11 +184,7 @@ fn differentiate_at(bias: f64) -> Row {
 
     let entries = row
         .iter()
-        .map(|entry| {
-            entry
-                .and_then(|value| snapshot.value(value))
-                .unwrap_or(0.0)
-        })
+        .map(|entry| entry.and_then(|value| snapshot.value(value)).unwrap_or(0.0))
         .collect();
     Row {
         entries,

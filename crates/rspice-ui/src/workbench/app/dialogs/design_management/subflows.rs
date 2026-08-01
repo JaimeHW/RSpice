@@ -9,6 +9,7 @@ pub(super) fn design_management_subflow_body(
     workspace: &crate::state::ProjectWorkspace,
     libraries: &crate::state::LibraryManager,
     schematic: &crate::state::SchematicState,
+    drawing_sheet_personal: &crate::workbench::DrawingSheetPersonalPreferences,
     write_allowed: bool,
 ) -> egui::Response {
     let page = dialog.page;
@@ -57,6 +58,7 @@ pub(super) fn design_management_subflow_body(
             workspace,
             libraries,
             schematic,
+            drawing_sheet_personal,
             write_allowed,
         ));
         if let Some(receipt) = dialog.receipt.as_deref() {
@@ -75,6 +77,7 @@ pub(super) fn subflow_fields(
     workspace: &crate::state::ProjectWorkspace,
     _libraries: &crate::state::LibraryManager,
     _schematic: &crate::state::SchematicState,
+    drawing_sheet_personal: &crate::workbench::DrawingSheetPersonalPreferences,
     write_allowed: bool,
 ) -> egui::Response {
     let page = dialog.page;
@@ -127,6 +130,105 @@ pub(super) fn subflow_fields(
                 &mut dialog.inputs.sheet_port_policy,
                 write_allowed,
             );
+            let settings = workspace.design_management.drawing_sheet_settings();
+            let current = dialog
+                .draft
+                .as_ref()
+                .and_then(|draft| draft.sheet_catalog(&dialog.owner_key))
+                .and_then(|catalog| catalog.active())
+                .map(|sheet| {
+                    sheet
+                        .page_format()
+                        .try_update(|format| {
+                            format.inheritance = DrawingSheetInheritance::Explicit;
+                        })
+                        .expect("an active sheet format can be captured explicitly")
+                        .without_project_owned_title_values()
+                });
+            let t = Tokens::get(ui.ctx());
+            ui.label(
+                egui::RichText::new("Drawing sheet")
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_dim),
+            );
+            if settings.new_sheet_policy == DrawingSheetNewSheetPolicy::Ask {
+                egui::ComboBox::from_id_salt("new-sheet-drawing-format")
+                    .selected_text(dialog.inputs.sheet_page_format.display())
+                    .width(ui.available_width())
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut dialog.inputs.sheet_page_format,
+                            settings.default_format.clone(),
+                            format!(
+                                "Project default \u{00b7} {}",
+                                settings.default_format.display()
+                            ),
+                        );
+                        if let Some(current) = current.clone() {
+                            ui.selectable_value(
+                                &mut dialog.inputs.sheet_page_format,
+                                current.clone(),
+                                format!("Current sheet \u{00b7} {}", current.display()),
+                            );
+                        }
+                        ui.separator();
+                        for standard in DrawingSheetStandard::ALL {
+                            let format = SchematicSheetFormat::from_standard(
+                                standard,
+                                dialog.inputs.sheet_page_format.orientation,
+                            );
+                            ui.selectable_value(
+                                &mut dialog.inputs.sheet_page_format,
+                                format,
+                                standard.label(),
+                            );
+                        }
+                        if !settings.presets.is_empty() {
+                            ui.separator();
+                            for preset in &settings.presets {
+                                ui.selectable_value(
+                                    &mut dialog.inputs.sheet_page_format,
+                                    preset.format.clone(),
+                                    format!("Custom \u{00b7} {}", preset.name),
+                                );
+                            }
+                        }
+                        let uncaptured_personal = drawing_sheet_personal
+                            .presets
+                            .iter()
+                            .filter(|preset| settings.find_preset(&preset.id).is_none())
+                            .collect::<Vec<_>>();
+                        if !uncaptured_personal.is_empty() {
+                            ui.separator();
+                            ui.weak("Personal custom sizes");
+                            for preset in uncaptured_personal {
+                                ui.selectable_value(
+                                    &mut dialog.inputs.sheet_page_format,
+                                    preset.format.clone(),
+                                    format!("Personal \u{00b7} {}", preset.name),
+                                );
+                            }
+                        }
+                    });
+                ui.weak(
+                    "The project policy asks for an explicit drawing-sheet choice on every new sheet. A selected personal size is copied into the project before the sheet is created.",
+                );
+            } else {
+                let mut format_label = dialog.inputs.sheet_page_format.display();
+                ui.add_enabled(
+                    false,
+                    egui::TextEdit::singleline(&mut format_label).desired_width(f32::INFINITY),
+                );
+                ui.weak(match settings.new_sheet_policy {
+                    DrawingSheetNewSheetPolicy::ProjectDefault => {
+                        "This sheet will follow the project drawing-sheet default."
+                    }
+                    DrawingSheetNewSheetPolicy::MatchCurrent => {
+                        "This sheet will copy the current sheet's format as an explicit snapshot."
+                    }
+                    DrawingSheetNewSheetPolicy::Ask => unreachable!(),
+                });
+            }
             response
         }
         DesignManagementPage::ReorderSheets => {

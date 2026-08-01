@@ -1221,7 +1221,7 @@ pub(super) fn simulation_result_from_worker_pss(
         waveforms,
         measurements: measure_results(measurements),
         periodic_state: Some(std::sync::Arc::new(operating_point)),
-            convergence: Default::default(),
+        convergence: Default::default(),
     }
 }
 

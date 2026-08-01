@@ -8,13 +8,13 @@
 
 mod evidence;
 mod execution;
-mod vector;
 mod promotion;
+mod vector;
 
 pub use evidence::*;
 pub use execution::*;
-pub use vector::*;
 pub use promotion::*;
+pub use vector::*;
 
 use std::{cmp::Ordering, collections::BTreeSet, fmt, path::Path};
 
@@ -199,7 +199,6 @@ impl Ord for FiniteValue {
     }
 }
 
-
 /// A versioned group displayed as one suite row in the Tests surface.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -270,7 +269,6 @@ impl QualificationSuite {
         )
     }
 }
-
 
 /// Exact identity of a vector at one immutable suite revision.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1832,7 +1830,6 @@ fn at_path(mut error: QualificationValidationError, path: &str) -> Qualification
     error.path = path.to_owned();
     error
 }
-
 
 #[cfg(test)]
 mod tests;

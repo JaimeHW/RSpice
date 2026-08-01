@@ -17,9 +17,7 @@ pub use document::{
     NetlistDocument, NetlistDocumentId, SourceLocator, ValidationDiagnostic, content_digest,
 };
 pub(crate) use outline::parse_include_directives;
-pub use outline::{
-    NetlistOutline, OutlineEntry, OutlineEntryKind,
-};
+pub use outline::{NetlistOutline, OutlineEntry, OutlineEntryKind};
 pub use search::{
     FindDirection, FindError, FindMatch, FindOptions, ReplaceScope, find_all_in_source,
     replace_in_source,

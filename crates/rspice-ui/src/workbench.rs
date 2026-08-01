@@ -61,27 +61,30 @@ mod surfaces;
 pub(crate) mod tools;
 pub(crate) mod workflows;
 
-pub use routing::availability::{
-    SurfaceExecutionAvailability, SurfaceRouteUnavailable, route_availability, surface_availability,
-};
-pub use workflows::capability_workflow::CapabilityWorkflowId;
 pub(crate) use cross_probe::synchronize_schematic_cross_probe;
-pub use routing::navigation::{
-    BrowserHistoryEffect, RouteTransition, RouteTransitionSource, SurfaceNavigation,
-};
-pub use preferences::{
-    BackgroundTaskAttention, ChoicePreference, ComplexNumberDisplay, ConsoleLaunchBehavior,
-    CursorInterpolation, EngineeringExportFormat, LargeDatasetDisplay, ResultPresentationPolicy,
-    ScalarPreference, TogglePreference, UserPreferences, WorkspacePreferences, WorkspacePreset,
-};
 pub use documents::result_document::ResultViewer;
+pub(crate) use lifecycle::session::{SchematicSelectionRecovery, SchematicVisibilityRecovery};
 pub use lifecycle::session::{
     SelectionBulkFilter, SelectionBulkHierarchyScope, SelectionBulkObjectKind, SymbolClipboard,
     SymbolDocumentSnapshot, SymbolGridSpacing, SymbolSelection, SymbolTool, UiSessionState,
     UiSessionStateSer, mirror_point_h_about, mirror_point_v_about, mirror_shape_h_about,
     mirror_shape_v_about, rotate_point_cw_about, rotate_shape_cw_about,
 };
-pub(crate) use lifecycle::session::{SchematicSelectionRecovery, SchematicVisibilityRecovery};
+pub use lifecycle::window_session::ApplicationWindowId;
+pub(crate) use preferences::DrawingSheetPersonalPreferences;
+pub use preferences::{
+    BackgroundTaskAttention, ChoicePreference, ComplexNumberDisplay, ConsoleLaunchBehavior,
+    CursorInterpolation, EngineeringExportFormat, LargeDatasetDisplay, ResultPresentationPolicy,
+    ScalarPreference, TogglePreference, UserPreferences, WorkspacePreferences, WorkspacePreset,
+};
+pub use routing::availability::{
+    SurfaceExecutionAvailability, SurfaceRouteUnavailable, route_availability, surface_availability,
+};
+pub use routing::navigation::{
+    BrowserHistoryEffect, RouteTransition, RouteTransitionSource, SurfaceNavigation,
+};
+pub use routing::surface_catalog::{SurfaceArchetype, SurfaceId};
+pub use routing::surface_route::SurfaceRoute;
 pub use shortcuts::{
     ChordTimeoutPolicy, ContextPrecedencePolicy, ProtectedShortcutPolicy, ShortcutBindingSlot,
     ShortcutPreferences, ShortcutProfileAudit, ShortcutProfileIssue, ShortcutProfileIssueCode,
@@ -89,13 +92,7 @@ pub use shortcuts::{
     shortcut_context_precedence_rank,
 };
 pub use state::{EngineeringProfile, WorkbenchState};
-pub use routing::surface_catalog::{
-    SurfaceArchetype, SurfaceId,
-};
-pub use routing::surface_route::SurfaceRoute;
-pub use lifecycle::window_session::{
-    ApplicationWindowId,
-};
+pub use workflows::capability_workflow::CapabilityWorkflowId;
 
 pub use app::RSpiceApp;
 pub use app_state::AppState;

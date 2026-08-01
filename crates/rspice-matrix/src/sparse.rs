@@ -1419,10 +1419,7 @@ impl ComplexMatrix {
     /// Distortion and sensitivity analyses use this to contract directional
     /// derivatives of the small-signal MNA operator while retaining the
     /// circuit's sparse structure.
-    pub fn multiply_vector(
-        &self,
-        vector: &[Complex64],
-    ) -> Result<Vec<Complex64>, SolverError> {
+    pub fn multiply_vector(&self, vector: &[Complex64]) -> Result<Vec<Complex64>, SolverError> {
         self.check_stamping_error()?;
         if self.ncols != vector.len() {
             return Err(SolverError::InvalidCircuit(format!(
@@ -1660,7 +1657,10 @@ pub fn solve_sparse(triplets: &TripletMatrix, rhs: &[Value]) -> Result<Vec<Value
 }
 
 /// Simple Gaussian elimination for small systems or fallback
-pub(crate) fn solve_gauss(mut a: Vec<Vec<Value>>, mut b: Vec<Value>) -> Result<Vec<Value>, SolverError> {
+pub(crate) fn solve_gauss(
+    mut a: Vec<Vec<Value>>,
+    mut b: Vec<Value>,
+) -> Result<Vec<Value>, SolverError> {
     let n = b.len();
 
     if n == 0 {

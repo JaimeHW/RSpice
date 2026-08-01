@@ -93,7 +93,10 @@ pub enum ExecutionOutcome {
     /// Every requested analysis ran to completion with finite results.
     Completed,
     /// An analysis terminated with a clean numerical refusal.
-    Refused { analysis: String, diagnostic: String },
+    Refused {
+        analysis: String,
+        diagnostic: String,
+    },
     /// The deck did not parse, or did not build into a circuit.
     Rejected { diagnostic: String },
     /// The deck exceeded its time budget.

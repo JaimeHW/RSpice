@@ -69,9 +69,7 @@ impl RenameValidation {
 /// object. This is the single availability predicate used by menus, the
 /// command palette, and keyboard dispatch.
 pub(crate) fn rename_selection_available(state: &AppState) -> bool {
-    !state.schematic.read_only
-        && !state.active_view_read_only()
-        && selected_rename_target(state).is_some()
+    !state.schematic_edit_read_only() && selected_rename_target(state).is_some()
 }
 
 /// Capture the current selection into an isolated stable-identity draft.
@@ -79,8 +77,7 @@ pub(crate) fn open_selected_object_rename(state: &mut AppState) -> bool {
     if state.dialogs.rename_selection.open
         || state.dialogs.object_properties.open
         || state.tabbed_property_dialog.open
-        || state.schematic.read_only
-        || state.active_view_read_only()
+        || state.schematic_edit_read_only()
     {
         return false;
     }
@@ -414,7 +411,7 @@ fn reference_summary(schematic: &SchematicState, target: &RenameSelectionTarget)
 
 fn rename_session_error(state: &AppState) -> Option<String> {
     let dialog = &state.dialogs.rename_selection;
-    if state.schematic.read_only || state.active_view_read_only() {
+    if state.schematic_edit_read_only() {
         return Some("The active schematic is read-only; no name can be changed.".to_owned());
     }
     if dialog.design_execution_epoch != state.design_execution_epoch {

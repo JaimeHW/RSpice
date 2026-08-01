@@ -1,7 +1,7 @@
 //! New Cell — small modal on the dialog primitive: target library, name,
 //! description, and the views to seed the cell with.
 
-use super::shared::{DialogActionOutcome, validate_lcv_name};
+use super::shared::{DialogActionOutcome, LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};
 use super::{Context, RSpiceApp, VERILOGA_LIBRARY_NAME};
 use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight};
@@ -29,6 +29,11 @@ impl RSpiceApp {
         if self.state.dialogs.new_cell_library.is_empty() && !lib_names.is_empty() {
             self.state.dialogs.new_cell_library = lib_names[0].clone();
         }
+        let catalog_current =
+            self.state.library_manager.revision() == self.state.dialogs.new_cell_library_revision;
+        if !catalog_current {
+            self.state.dialogs.new_cell_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
+        }
 
         let dialogs = &mut self.state.dialogs;
         let choice = Dialog::new("Library", "New cell", "Create")
@@ -37,7 +42,7 @@ impl RSpiceApp {
             )
             .size(DialogSize::Transaction)
             .ghost("Cancel")
-            .primary_enabled(!dialogs.new_cell_name.trim().is_empty())
+            .primary_enabled(catalog_current && !dialogs.new_cell_name.trim().is_empty())
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
                 let t = Tokens::get(ui.ctx());
@@ -137,6 +142,10 @@ impl RSpiceApp {
         let name = self.state.dialogs.new_cell_name.trim().to_string();
         let library = self.state.dialogs.new_cell_library.clone();
 
+        if self.state.library_manager.revision() != self.state.dialogs.new_cell_library_revision {
+            self.state.dialogs.new_cell_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
+            return outcome;
+        }
         if let Some(error) = validate_lcv_name(&name, "Cell name") {
             self.state.dialogs.new_cell_error = Some(error);
             return outcome;
@@ -150,6 +159,12 @@ impl RSpiceApp {
             self.state.dialogs.new_cell_error = Some(format!("Library '{}' not found", library));
             return outcome;
         };
+        if lib_ro.read_only {
+            self.state.dialogs.new_cell_error = Some(format!(
+                "Library '{library}' is read only; create the cell in an editable library"
+            ));
+            return outcome;
+        }
         let requested_identity = crate::state::canonical_cell_view_owner_key(&library, &name, "");
         if lib_ro.cells.values().any(|cell| {
             crate::state::canonical_cell_view_owner_key(&library, &cell.name, "")
@@ -177,6 +192,18 @@ impl RSpiceApp {
             cell.add_view(View::new("testbench", ViewType::Testbench));
         }
 
+        let project_mutation = match self.state.preflight_project_library_mutation(
+            crate::state::ProjectLibraryMutation::CreateCell {
+                library: library.clone(),
+                cell: name.clone(),
+            },
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.state.dialogs.new_cell_error = Some(error);
+                return outcome;
+            }
+        };
         let seeded_schematic = self.state.new_schematic_document();
         if let Some(lib) = self.state.library_manager.get_library_mut(&library) {
             lib.add_cell(cell);
@@ -199,6 +226,8 @@ impl RSpiceApp {
                     .schematic_buffers
                     .insert(reference.key(), seeded_schematic.clone());
             }
+            self.state
+                .publish_project_library_mutation(project_mutation);
             self.state.push_user_message(ConsoleMessage::info(format!(
                 "Created cell '{}' in library '{}'",
                 name, library
@@ -257,10 +286,27 @@ mod tests {
         app.state.dialogs.new_cell_name = "amp".to_owned();
         app.state.dialogs.new_cell_create_schematic = true;
         app.state.dialogs.new_cell_create_testbench = true;
+        app.state.dialogs.new_cell_library_revision = app.state.library_manager.revision();
+        let project_revision_before = app.state.workspace.project.revision().get();
 
         let outcome = app.handle_new_cell_create_action();
 
         assert!(outcome.close);
+        assert_eq!(
+            app.state.workspace.project.revision().get(),
+            project_revision_before + 1
+        );
+        assert!(matches!(
+            app.state
+                .workspace
+                .project
+                .library_mutation_audit()
+                .last()
+                .map(|receipt| receipt.mutation()),
+            Some(crate::state::ProjectLibraryMutation::CreateCell { library, cell })
+                if library == "policy_test" && cell == "amp"
+        ));
+        assert!(app.state.workspace.project_metadata_dirty);
         for view in ["schematic", "testbench"] {
             let key = crate::state::CellViewRef::new("policy_test", "amp", view).key();
             let document = app
@@ -293,6 +339,7 @@ mod tests {
         app.state.dialogs.new_cell_library = "identity_test".to_owned();
         app.state.dialogs.new_cell_name = "\u{e9}TAGE".to_owned();
         app.state.dialogs.new_cell_create_schematic = true;
+        app.state.dialogs.new_cell_library_revision = app.state.library_manager.revision();
         let buffers_before = app.state.workspace.schematic_buffers.len();
 
         let outcome = app.handle_new_cell_create_action();
@@ -312,6 +359,69 @@ mod tests {
                 .new_cell_error
                 .as_deref()
                 .is_some_and(|error| error.contains("canonical cell identity"))
+        );
+    }
+
+    #[test]
+    fn new_cell_rejects_read_only_library_without_mutation() {
+        let mut app = RSpiceApp::test_instance();
+        let mut library = Library::new("read_only_test");
+        library.read_only = true;
+        app.state.library_manager.add_library(library);
+        app.state.dialogs.new_cell_library = "read_only_test".to_owned();
+        app.state.dialogs.new_cell_name = "amp".to_owned();
+        app.state.dialogs.new_cell_library_revision = app.state.library_manager.revision();
+        let revision_before = app.state.workspace.project.revision();
+
+        let outcome = app.handle_new_cell_create_action();
+
+        assert!(!outcome.close);
+        assert!(
+            app.state
+                .library_manager
+                .get_library("read_only_test")
+                .is_some_and(|library| library.get_cell("amp").is_none())
+        );
+        assert_eq!(app.state.workspace.project.revision(), revision_before);
+        assert!(
+            app.state
+                .dialogs
+                .new_cell_error
+                .as_deref()
+                .is_some_and(|error| error.contains("read only"))
+        );
+    }
+
+    #[test]
+    fn new_cell_rejects_catalog_change_after_dialog_open_without_mutation() {
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .library_manager
+            .add_library(Library::new("stale_test"));
+        app.state.dialogs.new_cell_library = "stale_test".to_owned();
+        app.state.dialogs.new_cell_name = "amp".to_owned();
+        app.state.dialogs.new_cell_library_revision = app.state.library_manager.revision();
+        app.state
+            .library_manager
+            .add_library(Library::new("intervening_change"));
+        let project_revision_before = app.state.workspace.project.revision();
+
+        let outcome = app.handle_new_cell_create_action();
+
+        assert!(!outcome.close);
+        assert!(
+            app.state
+                .library_manager
+                .get_library("stale_test")
+                .is_some_and(|library| library.get_cell("amp").is_none())
+        );
+        assert_eq!(
+            app.state.workspace.project.revision(),
+            project_revision_before
+        );
+        assert_eq!(
+            app.state.dialogs.new_cell_error.as_deref(),
+            Some(LIBRARY_CATALOG_STALE_MESSAGE)
         );
     }
 }

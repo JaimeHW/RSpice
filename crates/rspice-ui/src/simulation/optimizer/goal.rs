@@ -70,5 +70,4 @@ impl OptimizationGoal {
             weight: 1.0,
         }
     }
-
 }

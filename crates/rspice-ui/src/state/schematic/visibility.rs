@@ -7,9 +7,8 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Canvas grid rendering style selected from the richer toolbar popover.
-/// The `G` / View command is a master on/off action for grid and snapping;
-/// it does not replace these independent display choices.
+/// Canvas grid rendering style selected by the toolbar cycle and the richer
+/// canvas-settings transaction. Snapping remains independently configurable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum GridStyle {
     /// One dot per snap point (default).
@@ -21,6 +20,33 @@ pub enum GridStyle {
     Off,
 }
 
+/// Device-local construction layers drawn around the permanent schematic
+/// paper boundary.
+///
+/// The paper edge itself is intentionally absent: it is authored document
+/// geometry and cannot be hidden. These switches only suppress supporting
+/// editing detail and never affect project data, print, or export policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DrawingSheetLayerVisibility {
+    pub margins: bool,
+    pub zones: bool,
+    pub title_block: bool,
+    pub registration_marks: bool,
+    pub dimensions_at_detail_zoom: bool,
+}
+
+impl Default for DrawingSheetLayerVisibility {
+    fn default() -> Self {
+        Self {
+            margins: true,
+            zones: true,
+            title_block: true,
+            registration_marks: true,
+            dimensions_at_detail_zoom: true,
+        }
+    }
+}
 
 /// Device-local hierarchy context shown around the active schematic.
 ///

@@ -3,8 +3,8 @@
 //! Builds the port-ordered network dataset and writes it in the requested
 //! format when the run configuration asked for an export.
 
-use crate::diagnostics::ConsoleMessage;
 use super::*;
+use crate::diagnostics::ConsoleMessage;
 
 impl SimulationController {
     pub(super) fn maybe_export_touchstone_for_run(

@@ -106,7 +106,10 @@ fn declared_submodules(source: &str) -> BTreeSet<String> {
 /// the `foo.rs` sibling of its `foo/` directory. `src/lib.rs` covers the crate
 /// root.
 fn possible_parents(root: &Path, path: &Path) -> Vec<PathBuf> {
-    let dir = path.parent().expect("source file has a parent").to_path_buf();
+    let dir = path
+        .parent()
+        .expect("source file has a parent")
+        .to_path_buf();
     if dir == root {
         return vec![root.join("lib.rs")];
     }

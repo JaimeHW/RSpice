@@ -113,7 +113,13 @@ impl NonlinearDeviceParams {
     }
 
     /// Create voltage-controlled switch parameters
-    pub(crate) fn voltage_switch(vt: Value, vh: Value, ron: Value, roff: Value, smooth: Value) -> Self {
+    pub(crate) fn voltage_switch(
+        vt: Value,
+        vh: Value,
+        ron: Value,
+        roff: Value,
+        smooth: Value,
+    ) -> Self {
         Self {
             vth: vt,
             vh: vh.abs(),

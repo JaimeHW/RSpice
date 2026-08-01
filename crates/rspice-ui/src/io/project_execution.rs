@@ -11,19 +11,21 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use crate::workbench::app_state::SimSetupState;
 use crate::product::{ContentDigest, ProjectId};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::model_library::is_foreign_platform_absolute_path;
 use crate::state::model_library::{
-    DeviceModel, ModelCorrelationState, ModelDefinitionMetadata, ModelLibrary, ModelLibraryManager,
-    ModelQualificationState, ModelSectionQualification, ModelSourceAuthority, ModelSourceContent,
-    ModelSourceEdge, ModelSourceEvidenceBinding, ModelSourcePin, ParameterDataType, ParameterValue,
-    ProcessCorner as LibraryProcessCorner, ProjectModelDefinition, ProjectModelRevisionDefinition,
-    first_unreachable_source, is_portable_absolute_path,
+    DeviceModel, ModelCorrelationState, ModelDefinitionMetadata,
+    ModelLibrary, ModelLibraryManager, ModelQualificationState,
+    ModelSectionQualification, ModelSourceAuthority, ModelSourceContent, ModelSourceEdge,
+    ModelSourceEvidenceBinding, ModelSourcePin, ModelSubcircuitInterface, ParameterDataType,
+    ParameterValue, ProcessCorner as LibraryProcessCorner, ProjectModelDefinition,
+    ProjectModelRevisionDefinition, first_unreachable_source, is_portable_absolute_path,
+    subcircuit_interface_key,
 };
+use crate::workbench::app_state::SimSetupState;
 
-pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 9;
+pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 15;
 const LEGACY_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 0;
 const UNPINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 1;
 const PATH_PINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 2;
@@ -33,6 +35,12 @@ const PLAN_CATALOG_SCHEMA_VERSION: u32 = 5;
 const RETAINED_MODEL_SOURCE_BYTES_SCHEMA_VERSION: u32 = 6;
 const MODEL_SOURCE_AUTHORITY_SCHEMA_VERSION: u32 = 7;
 const MODEL_AUTHORING_QUALIFICATION_SCHEMA_VERSION: u32 = 8;
+const MODEL_MEASUREMENT_CORRELATION_SCHEMA_VERSION: u32 = 9;
+const MODEL_BIN_AUDIT_SCHEMA_VERSION: u32 = 10;
+const TYPED_CORNER_DOMAIN_SCHEMA_VERSION: u32 = 11;
+const RETAINED_IMPORTED_SOURCE_AUTHORITY_SCHEMA_VERSION: u32 = 12;
+const EXPLICIT_MODEL_DEFINITION_RESOLUTION_SCHEMA_VERSION: u32 = 13;
+const RETAINED_SUBCIRCUIT_INTERFACE_SCHEMA_VERSION: u32 = 14;
 const RETIRED_SINGLETON_ANALYSIS_FIELDS: &[&str] = &[
     "enabled",
     "analysis_order",
@@ -88,6 +96,17 @@ impl<'de> Deserialize<'de> for ProjectExecutionContext {
             schema_version: u32,
             simulation_plan: serde_json::Value,
             model_libraries: Vec<ProjectModelLibrary>,
+            /// Retired with the local Models workspace. The field is still
+            /// accepted, and discarded, so a project written by a build that
+            /// carried the ledger still loads under `deny_unknown_fields`.
+            /// Nothing writes it back.
+            #[serde(default)]
+            #[allow(dead_code)]
+            model_bin_audit_receipts: serde::de::IgnoredAny,
+            /// Retired alongside `model_bin_audit_receipts`.
+            #[serde(default)]
+            #[allow(dead_code)]
+            model_definition_resolutions: serde::de::IgnoredAny,
         }
 
         let persisted = PersistedExecutionContext::deserialize(deserializer)?;
@@ -148,6 +167,8 @@ pub struct ProjectModelLibrary {
     pub source_edges: Vec<ModelSourceEdge>,
     pub models: HashMap<String, DeviceModel>,
     #[serde(default)]
+    pub subcircuits: HashMap<String, ModelSubcircuitInterface>,
+    #[serde(default)]
     pub model_definition_metadata: HashMap<String, ModelDefinitionMetadata>,
     #[serde(default)]
     pub model_qualification: HashMap<String, ModelQualificationState>,
@@ -160,7 +181,7 @@ pub struct ProjectModelLibrary {
 
 impl ProjectExecutionContext {
     pub fn from_state(
-        _project_id: ProjectId,
+        project_id: ProjectId,
         simulation_plan: &SimSetupState,
         model_libraries: &ModelLibraryManager,
     ) -> Result<Self, String> {
@@ -277,6 +298,71 @@ impl ProjectExecutionContext {
                 // defaults preserve those projects with an honest empty
                 // correlation ledger; no datasets, metrics, or review
                 // evidence are inferred during migration.
+                self.schema_version = MODEL_MEASUREMENT_CORRELATION_SCHEMA_VERSION;
+                self.migrate_to_current(project_id)
+            }
+            MODEL_MEASUREMENT_CORRELATION_SCHEMA_VERSION => {
+                // Schema 9 persisted measurement-correlation evidence but
+                // predated durable geometry-bin audit receipts. The empty
+                // serde default is the only honest migration; no audit is
+                // inferred from model cards or prior execution artifacts.
+                self.schema_version = MODEL_BIN_AUDIT_SCHEMA_VERSION;
+                self.migrate_to_current(project_id)
+            }
+            MODEL_BIN_AUDIT_SCHEMA_VERSION => {
+                // Schema 10 persisted model-bin audit evidence but predated
+                // typed corner-domain composition. Serde defaults preserve
+                // the historic file_path + corner-name meaning; execution
+                // resolves that pair as one required composite section.
+                self.schema_version = TYPED_CORNER_DOMAIN_SCHEMA_VERSION;
+                self.migrate_to_current(project_id)
+            }
+            TYPED_CORNER_DOMAIN_SCHEMA_VERSION => {
+                // Schema 11 introduced typed corner-domain composition but
+                // predated retained imported-source authority. Existing
+                // project-owned and external bindings retain their exact
+                // authority; no installed-pack origin is inferred from paths.
+                self.schema_version = RETAINED_IMPORTED_SOURCE_AUTHORITY_SCHEMA_VERSION;
+                self.migrate_to_current(project_id)
+            }
+            RETAINED_IMPORTED_SOURCE_AUTHORITY_SCHEMA_VERSION => {
+                // Schema 12 introduced retained imported-source authority but
+                // predated explicit contested-definition provider contracts.
+                // An empty migration is the only safe choice: any overlap
+                // remains blocked until a user selects an exact provider.
+                self.schema_version = EXPLICIT_MODEL_DEFINITION_RESOLUTION_SCHEMA_VERSION;
+                self.migrate_to_current(project_id)
+            }
+            EXPLICIT_MODEL_DEFINITION_RESOLUTION_SCHEMA_VERSION => {
+                // Schema 13 retained executable subcircuit source bytes but no
+                // durable interface catalog. Reconstruct only from the exact
+                // authenticated closure already inside the project; never
+                // inspect a live path or infer terminals from a symbol.
+                for (index, library) in self.model_libraries.iter_mut().enumerate() {
+                    library.subcircuits =
+                        authenticated_subcircuit_projection(library).map_err(|error| {
+                            format!(
+                                "model_libraries[{index}] subcircuit metadata migration failed: {error}"
+                            )
+                        })?;
+                }
+                self.schema_version = RETAINED_SUBCIRCUIT_INTERFACE_SCHEMA_VERSION;
+                self.migrate_to_current(project_id)
+            }
+            RETAINED_SUBCIRCUIT_INTERFACE_SCHEMA_VERSION => {
+                // Schema 14 retained exact model-card values and source lines,
+                // but discarded whether an active card came from the selected
+                // `.lib` section or the top level. Recover that provenance only
+                // by reparsing the authenticated bytes already in the project.
+                // Source-less built-ins and legacy repair-only external
+                // bindings honestly remain top-level/unknown.
+                for (index, library) in self.model_libraries.iter_mut().enumerate() {
+                    migrate_authenticated_model_sections(library).map_err(|error| {
+                        format!(
+                            "model_libraries[{index}] model-section provenance migration failed: {error}"
+                        )
+                    })?;
+                }
                 self.schema_version = PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION;
                 Ok(())
             }
@@ -360,6 +446,7 @@ impl From<&ModelLibrary> for ProjectModelLibrary {
             source_contents: library.source_contents.clone(),
             source_edges: library.source_edges.clone(),
             models: library.models.clone(),
+            subcircuits: library.subcircuits.clone(),
             model_definition_metadata: library.model_definition_metadata.clone(),
             model_qualification: library.model_qualification.clone(),
             model_correlation: library.model_correlation.clone(),
@@ -425,6 +512,14 @@ impl ProjectModelLibrary {
                         .clone();
                 }
             }
+            for subcircuit in self.subcircuits.values_mut() {
+                if let Some(path) = subcircuit.file_path.as_mut() {
+                    *path = path_map
+                        .get(path)
+                        .expect("validated subcircuit source has a restored path identity")
+                        .clone();
+                }
+            }
             for corner in self.corners.values_mut() {
                 if let Some(path) = corner.file_path.as_mut() {
                     *path = path_map
@@ -449,6 +544,7 @@ impl ProjectModelLibrary {
             source_contents: self.source_contents,
             source_edges: self.source_edges,
             models: self.models,
+            subcircuits: self.subcircuits,
             model_definition_metadata: self.model_definition_metadata,
             model_qualification: self.model_qualification,
             model_correlation: self.model_correlation,
@@ -625,6 +721,239 @@ fn validate_choice_indices(plan: &SimSetupState) -> Result<(), String> {
     Ok(())
 }
 
+fn authenticated_subcircuit_projection(
+    library: &ProjectModelLibrary,
+) -> Result<HashMap<String, ModelSubcircuitInterface>, String> {
+    if library.source_contents.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let root = library
+        .root_path
+        .as_ref()
+        .ok_or_else(|| "retained source bytes have no root identity".to_owned())?;
+    let sources = library
+        .source_contents
+        .iter()
+        .map(|content| (content.path.clone(), content.bytes.clone()));
+    let dependencies =
+        library
+            .source_edges
+            .iter()
+            .map(|edge| rspice_core::library::ResolvedLibDependency {
+                owner: edge.owner.clone(),
+                requested_path: edge.requested_path.clone(),
+                target: edge.target.clone(),
+            });
+    let mut parser = rspice_core::library::LibParser::new(
+        root.parent().unwrap_or_else(|| std::path::Path::new(".")),
+    );
+    let parsed = parser
+        .parse_authenticated_closure(root.clone(), sources, dependencies)
+        .map_err(|error| format!("retained source closure cannot be authenticated: {error}"))?;
+    if !parsed.is_ok() {
+        return Err(format!(
+            "retained source closure does not parse: {}",
+            parsed
+                .errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ")
+        ));
+    }
+    parsed_subcircuit_projection(library, &parsed, root)
+}
+
+fn migrate_authenticated_model_sections(library: &mut ProjectModelLibrary) -> Result<(), String> {
+    if library.source_contents.is_empty() {
+        for model in library.models.values_mut() {
+            model.section = None;
+        }
+        return Ok(());
+    }
+
+    let root = library
+        .root_path
+        .as_ref()
+        .ok_or_else(|| "retained source bytes have no root identity".to_owned())?;
+    let sources = library
+        .source_contents
+        .iter()
+        .map(|content| (content.path.clone(), content.bytes.clone()));
+    let dependencies =
+        library
+            .source_edges
+            .iter()
+            .map(|edge| rspice_core::library::ResolvedLibDependency {
+                owner: edge.owner.clone(),
+                requested_path: edge.requested_path.clone(),
+                target: edge.target.clone(),
+            });
+    let mut parser = rspice_core::library::LibParser::new(
+        root.parent().unwrap_or_else(|| std::path::Path::new(".")),
+    );
+    let parsed = parser
+        .parse_authenticated_closure(root.clone(), sources, dependencies)
+        .map_err(|error| format!("retained source closure cannot be authenticated: {error}"))?;
+    if !parsed.is_ok() {
+        return Err(format!(
+            "retained source closure does not parse: {}",
+            parsed
+                .errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ")
+        ));
+    }
+
+    let projection = parsed_model_projection(library, &parsed, root)?;
+    if projection.len() != library.models.len() {
+        return Err(
+            "persisted model catalog does not exactly cover the authenticated active cards"
+                .to_owned(),
+        );
+    }
+    for (name, persisted) in &mut library.models {
+        let candidate = projection.get(name).ok_or_else(|| {
+            format!("persisted model '{name}' is absent from the authenticated active cards")
+        })?;
+        if !parsed_model_projection_matches_without_section(persisted, candidate) {
+            return Err(format!(
+                "persisted model '{name}' is not an exact projection of its authenticated card"
+            ));
+        }
+        persisted.section.clone_from(&candidate.section);
+    }
+    Ok(())
+}
+
+fn parsed_model_projection(
+    library: &ProjectModelLibrary,
+    parsed: &rspice_core::library::LibParseResult,
+    root: &std::path::Path,
+) -> Result<HashMap<String, DeviceModel>, String> {
+    let mut projection = HashMap::new();
+    for model in &parsed.top_level_models {
+        let model = ModelLibraryManager::convert_parsed_model(model, root);
+        projection.insert(model.name.clone(), model);
+    }
+    let section_names = persisted_active_model_section_names(library)?;
+    let mut section_definitions = HashMap::<String, (String, String)>::new();
+    for requested_section in section_names {
+        let matching_sections = parsed
+            .sections
+            .iter()
+            .filter(|section| section.name.eq_ignore_ascii_case(&requested_section))
+            .collect::<Vec<_>>();
+        if matching_sections.is_empty() {
+            return Err(format!(
+                "selected corner requires section '{requested_section}', which is absent from the authenticated closure"
+            ));
+        }
+        for section in matching_sections {
+            for parsed_model in &section.models {
+                let canonical = parsed_model.name.to_ascii_lowercase();
+                if let Some((first_section, first_name)) = section_definitions
+                    .insert(canonical, (section.name.clone(), parsed_model.name.clone()))
+                {
+                    return Err(format!(
+                        "active model '{}' resolves from both sections '{}' and '{}'",
+                        first_name, first_section, section.name
+                    ));
+                }
+                let model = ModelLibraryManager::convert_parsed_model_in_section(
+                    parsed_model,
+                    root,
+                    Some(&section.name),
+                );
+                insert_case_insensitive_model_projection(&mut projection, model);
+            }
+        }
+    }
+    Ok(projection)
+}
+
+fn insert_case_insensitive_model_projection(
+    projection: &mut HashMap<String, DeviceModel>,
+    model: DeviceModel,
+) {
+    if let Some(existing) = projection
+        .keys()
+        .find(|name| name.eq_ignore_ascii_case(&model.name))
+        .cloned()
+    {
+        projection.remove(&existing);
+    }
+    projection.insert(model.name.clone(), model);
+}
+
+fn persisted_active_model_section_names(
+    library: &ProjectModelLibrary,
+) -> Result<Vec<String>, String> {
+    if matches!(
+        library.source_authority,
+        ModelSourceAuthority::ProjectOwned { .. }
+    ) && !library.model_definition_metadata.is_empty()
+    {
+        return Ok(Vec::new());
+    }
+    let Some(selected_corner) = library.selected_corner.as_deref() else {
+        return Ok(Vec::new());
+    };
+    let corner = library.corners.get(selected_corner).ok_or_else(|| {
+        format!("selected corner '{selected_corner}' does not exist in the corner catalog")
+    })?;
+    let mut sections = BTreeMap::<String, String>::new();
+    for binding in corner.effective_section_bindings() {
+        sections
+            .entry(binding.section.to_ascii_lowercase())
+            .or_insert(binding.section);
+    }
+    if sections.is_empty() {
+        if corner.file_path.is_none() && library.source_closure.is_empty() {
+            return Ok(Vec::new());
+        }
+        return Err(format!(
+            "selected corner '{selected_corner}' has no executable section bindings"
+        ));
+    }
+    Ok(sections.into_values().collect())
+}
+
+fn parsed_subcircuit_projection(
+    _library: &ProjectModelLibrary,
+    parsed: &rspice_core::library::LibParseResult,
+    root: &std::path::Path,
+) -> Result<HashMap<String, ModelSubcircuitInterface>, String> {
+    let mut projection = HashMap::new();
+    let mut canonical_names = HashMap::<String, String>::new();
+    let mut insert = |subcircuit: &rspice_core::library::ParsedSubcircuit,
+                      section: Option<&str>|
+     -> Result<(), String> {
+        let interface = ModelLibraryManager::convert_parsed_subcircuit(subcircuit, root, section);
+        let key = subcircuit_interface_key(interface.section.as_deref(), &interface.name);
+        let canonical = key.to_ascii_lowercase();
+        if let Some(first) = canonical_names.insert(canonical, key.clone()) {
+            return Err(format!(
+                "subcircuit identity '{key}' duplicates '{first}' case-insensitively"
+            ));
+        }
+        projection.insert(key, interface);
+        Ok(())
+    };
+
+    for subcircuit in &parsed.top_level_subcircuits {
+        insert(subcircuit, None)?;
+    }
+    for section in &parsed.sections {
+        for subcircuit in &section.subcircuits {
+            insert(subcircuit, Some(&section.name))?;
+        }
+    }
+    Ok(projection)
+}
+
 fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), String> {
     let mut names = HashSet::with_capacity(libraries.len());
     for (library_index, library) in libraries.iter().enumerate() {
@@ -637,6 +966,16 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
                 "model_libraries contains duplicate library name '{}'",
                 library.name
             ));
+        }
+        let mut case_folded_models = HashMap::<String, &str>::new();
+        for model_key in library.models.keys() {
+            if let Some(first) =
+                case_folded_models.insert(model_key.to_ascii_lowercase(), model_key)
+            {
+                return Err(format!(
+                    "{context}.models contains case-insensitive duplicate names '{first}' and '{model_key}'"
+                ));
+            }
         }
         if let Some(path) = &library.root_path
             && path.as_os_str().is_empty()
@@ -662,17 +1001,23 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
                     ));
                 }
             }
-            ModelSourceAuthority::ProjectOwned { digest, .. } => {
+            ModelSourceAuthority::RetainedImport { digest, .. }
+            | ModelSourceAuthority::ProjectOwned { digest, .. } => {
+                let authority = if library.source_authority.is_project_owned() {
+                    "project_owned"
+                } else {
+                    "retained_import"
+                };
                 let Some(root_path) = library.root_path.as_ref() else {
                     return Err(format!(
-                        "{context}.source_authority project_owned requires a root identity"
+                        "{context}.source_authority {authority} requires a root identity"
                     ));
                 };
                 if library.source_closure.is_empty()
                     || library.source_closure.len() != library.source_contents.len()
                 {
                     return Err(format!(
-                        "{context}.source_authority project_owned requires exact retained bytes for its complete source closure"
+                        "{context}.source_authority {authority} requires exact retained bytes for its complete source closure"
                     ));
                 }
                 let root_pin = library
@@ -681,12 +1026,12 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
                     .find(|source| source.path == *root_path)
                     .ok_or_else(|| {
                         format!(
-                            "{context}.source_authority project_owned closure does not contain its root identity"
+                            "{context}.source_authority {authority} closure does not contain its root identity"
                         )
                     })?;
                 if root_pin.digest != digest {
                     return Err(format!(
-                        "{context}.source_authority project_owned root bytes do not match the authority digest"
+                        "{context}.source_authority {authority} root bytes do not match the authority digest"
                     ));
                 }
             }
@@ -828,10 +1173,7 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
                     "{context}.source_edges must be strictly sorted by owner, requested path, and target"
                 ));
             }
-            if (matches!(
-                library.source_authority,
-                ModelSourceAuthority::ProjectOwned { .. }
-            ) || !library.source_edges.is_empty())
+            if (library.source_authority.uses_retained_bytes() || !library.source_edges.is_empty())
                 && let Some(unreachable) = first_unreachable_source(
                     root_path,
                     &library.source_closure,
@@ -855,9 +1197,17 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
                 selected
             ));
         }
+        let mut case_folded_corners = HashMap::<String, &str>::new();
         for (corner_key, corner) in &library.corners {
             if corner_key.trim().is_empty() {
                 return Err(format!("{context}.corners contains an empty section name"));
+            }
+            if let Some(first) =
+                case_folded_corners.insert(corner_key.to_ascii_lowercase(), corner_key)
+            {
+                return Err(format!(
+                    "{context}.corners contains case-insensitive duplicate names '{first}' and '{corner_key}'"
+                ));
             }
             if corner.name != *corner_key {
                 return Err(format!(
@@ -879,7 +1229,27 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
                     "{context}.corners['{corner_key}'] source path is not a member of the authenticated library closure"
                 ));
             }
+            if let Err(errors) = corner.validate_contract() {
+                // Unbound required domains are a durable draft state. They
+                // remain visible in Models > Corners and fail only when that
+                // corner is selected for execution. Every other structural
+                // defect is rejected during project restore.
+                let structural = errors
+                    .into_iter()
+                    .filter(|error| !error.contains("section is required but not bound"))
+                    .collect::<Vec<_>>();
+                if !structural.is_empty() {
+                    return Err(format!(
+                        "{context}.corners['{corner_key}'] has an invalid section contract: {}",
+                        structural.join("; ")
+                    ));
+                }
+            }
         }
+        let active_model_sections = persisted_active_model_section_names(library)?
+            .into_iter()
+            .map(|section| section.to_ascii_lowercase())
+            .collect::<BTreeSet<_>>();
         for (model_key, model) in &library.models {
             if model_key.trim().is_empty() {
                 return Err(format!("{context}.models contains an empty model name"));
@@ -895,12 +1265,102 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
                     "{context}.models['{model_key}'] source path is not a member of the authenticated library closure"
                 ));
             }
+            if let Some(section) = model.section.as_deref() {
+                if section.trim().is_empty()
+                    || section.chars().any(|character| {
+                        character.is_whitespace()
+                            || character == '"'
+                            || character == '\''
+                            || character.is_control()
+                    })
+                {
+                    return Err(format!(
+                        "{context}.models['{model_key}'].section contains an unsupported section identity"
+                    ));
+                }
+                if !library.corners.contains_key(section) {
+                    return Err(format!(
+                        "{context}.models['{model_key}'].section references unknown section '{section}'"
+                    ));
+                }
+                if !active_model_sections.contains(&section.to_ascii_lowercase()) {
+                    return Err(format!(
+                        "{context}.models['{model_key}'].section '{section}' is not bound by the library's selected executable corner"
+                    ));
+                }
+            }
             validate_model_numbers(&context, model_key, model)?;
+        }
+        let mut case_folded_subcircuits = HashMap::<String, &str>::new();
+        for (subcircuit_key, subcircuit) in &library.subcircuits {
+            if subcircuit_key.trim().is_empty() {
+                return Err(format!(
+                    "{context}.subcircuits contains an empty subcircuit name"
+                ));
+            }
+            if let Some(first) =
+                case_folded_subcircuits.insert(subcircuit_key.to_ascii_lowercase(), subcircuit_key)
+            {
+                return Err(format!(
+                    "{context}.subcircuits contains case-insensitive duplicate names '{first}' and '{subcircuit_key}'"
+                ));
+            }
+            let expected_key =
+                subcircuit_interface_key(subcircuit.section.as_deref(), &subcircuit.name);
+            if expected_key != *subcircuit_key {
+                return Err(format!(
+                    "{context}.subcircuits key '{subcircuit_key}' does not match embedded subcircuit identity '{expected_key}'"
+                ));
+            }
+            let mut ports = HashSet::with_capacity(subcircuit.ports.len());
+            for (port_index, port) in subcircuit.ports.iter().enumerate() {
+                if port.trim().is_empty() {
+                    return Err(format!(
+                        "{context}.subcircuits['{subcircuit_key}'].ports[{port_index}] must not be empty"
+                    ));
+                }
+                if !ports.insert(port.to_ascii_lowercase()) {
+                    return Err(format!(
+                        "{context}.subcircuits['{subcircuit_key}'].ports contains duplicate terminal '{port}'"
+                    ));
+                }
+            }
+            let mut parameters = HashSet::with_capacity(subcircuit.parameter_defaults.len());
+            for (parameter, value) in &subcircuit.parameter_defaults {
+                if parameter.trim().is_empty() || value.trim().is_empty() {
+                    return Err(format!(
+                        "{context}.subcircuits['{subcircuit_key}'].parameter_defaults contains an empty name or value"
+                    ));
+                }
+                if !parameters.insert(parameter.to_ascii_lowercase()) {
+                    return Err(format!(
+                        "{context}.subcircuits['{subcircuit_key}'].parameter_defaults contains case-insensitive duplicate parameter '{parameter}'"
+                    ));
+                }
+            }
+            if !source_path_is_authorized(library, subcircuit.file_path.as_ref()) {
+                return Err(format!(
+                    "{context}.subcircuits['{subcircuit_key}'] source path is not a member of the authenticated library closure"
+                ));
+            }
+            if subcircuit.source_line.is_some_and(|line| line == 0) {
+                return Err(format!(
+                    "{context}.subcircuits['{subcircuit_key}'].source_line must be one-based"
+                ));
+            }
+            if let Some(section) = subcircuit.section.as_deref()
+                && !library.corners.contains_key(section)
+            {
+                return Err(format!(
+                    "{context}.subcircuits['{subcircuit_key}'] references unknown section '{section}'"
+                ));
+            }
         }
         validate_model_authoring_records(&context, library)?;
     }
     Ok(())
 }
+
 
 fn source_path_is_authorized(library: &ProjectModelLibrary, source_path: Option<&PathBuf>) -> bool {
     if library.source_closure.is_empty() {
@@ -913,7 +1373,8 @@ fn source_path_is_authorized(library: &ProjectModelLibrary, source_path: Option<
                 source_path.is_some_and(|path| is_portable_absolute_path(path))
             }
             ModelSourceAuthority::BuiltIn => source_path.is_none(),
-            ModelSourceAuthority::ProjectOwned { .. } => false,
+            ModelSourceAuthority::RetainedImport { .. }
+            | ModelSourceAuthority::ProjectOwned { .. } => false,
         }
     } else {
         source_path.is_some_and(|path| {
@@ -992,41 +1453,30 @@ fn validate_authenticated_source_projection(
         ));
     }
 
-    if matches!(
-        library.source_authority,
-        ModelSourceAuthority::ProjectOwned { .. }
-    ) {
-        let mut executable_models = parsed.top_level_models.iter().collect::<Vec<_>>();
-        if let Some(selected_corner) = library.selected_corner.as_deref()
-            && let Some(section) = parsed.get_section(selected_corner)
-        {
-            executable_models.extend(&section.models);
-        }
-        let parsed_models = executable_models
-            .into_iter()
-            .map(|model| ModelLibraryManager::convert_parsed_model(model, root))
-            .collect::<Vec<_>>();
-        for (model_name, model) in &library.models {
-            if !parsed_models
-                .iter()
-                .any(|candidate| parsed_model_projection_matches(model, candidate))
-            {
-                return Err(format!(
-                    "{context}.models['{model_name}'] is not an exact projection of any model card in the authenticated source closure"
-                ));
-            }
-        }
-        let expected_model_names = parsed_models
-            .iter()
-            .map(|model| model.name.as_str())
-            .collect::<BTreeSet<_>>();
-        if library.models.len() != expected_model_names.len()
-            || expected_model_names
-                .iter()
-                .any(|model_name| !library.models.contains_key(*model_name))
-        {
+    let parsed_subcircuits = parsed_subcircuit_projection(library, &parsed, root)
+        .map_err(|error| format!("{context}.subcircuits cannot be projected: {error}"))?;
+    if library.subcircuits != parsed_subcircuits {
+        return Err(format!(
+            "{context}.subcircuits is not the exact interface projection of the authenticated source closure"
+        ));
+    }
+
+    let parsed_models = parsed_model_projection(library, &parsed, root)
+        .map_err(|error| format!("{context}.models cannot be projected: {error}"))?;
+    if library.models.len() != parsed_models.len() {
+        return Err(format!(
+            "{context}.models does not exactly cover the top-level and selected-section model cards in the authenticated source closure"
+        ));
+    }
+    for (model_name, model) in &library.models {
+        let Some(candidate) = parsed_models.get(model_name) else {
             return Err(format!(
-                "{context}.models does not exactly cover the top-level and selected-section model cards in the authenticated source closure"
+                "{context}.models['{model_name}'] is absent from the authenticated active model cards"
+            ));
+        };
+        if !parsed_model_projection_matches(model, candidate) {
+            return Err(format!(
+                "{context}.models['{model_name}'] is not an exact projection of its authenticated active model card"
             ));
         }
     }
@@ -1034,6 +1484,14 @@ fn validate_authenticated_source_projection(
 }
 
 fn parsed_model_projection_matches(persisted: &DeviceModel, parsed: &DeviceModel) -> bool {
+    persisted.section == parsed.section
+        && parsed_model_projection_matches_without_section(persisted, parsed)
+}
+
+fn parsed_model_projection_matches_without_section(
+    persisted: &DeviceModel,
+    parsed: &DeviceModel,
+) -> bool {
     persisted.name == parsed.name
         && persisted.model_type == parsed.model_type
         && persisted.spice_type == parsed.spice_type
@@ -1484,7 +1942,6 @@ fn model_source_warnings(libraries: &[ProjectModelLibrary]) -> Vec<String> {
         })
         .collect()
 }
-
 
 #[cfg(test)]
 mod tests;

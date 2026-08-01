@@ -39,6 +39,7 @@ rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0" }
 # Serialization
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
+semver.workspace = true
 csv = "1.3"
 rust_xlsxwriter = { version = "0.92", default-features = false }
 arrow-array = "56"
@@ -48,6 +49,10 @@ thiserror.workspace = true
 sha2 = "0.10"
 regex = "1.12"
 similar = "2.7"
+# Signed PDK callbacks run in a deterministic, fuel-metered interpreter on
+# every supported target. No WASI integration is linked, so callbacks receive
+# only the explicit RSpice host capabilities declared by their signed contract.
+wasmi = { version = "1.1.0", default-features = false, features = ["std", "extra-checks", "prefer-btree-collections"] }
 
 # Logging
 log = "0.4"
@@ -80,6 +85,7 @@ winit = "0.30"
 
 # egui - Commercial-grade immediate mode GUI with native wgpu rendering
 egui = "0.35.0"
+egui_extras = "0.35.0"
 
 # SVG parsing and deterministic software rendering. System font discovery stays
 # disabled: hardcopy rendering loads only RSpice's pinned IBM Plex assets.
@@ -108,6 +114,7 @@ ed25519-dalek = { version = "2", default-features = false, features = ["std", "f
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand = "0.8"
 lopdf = { version = "0.44", default-features = false }
+wat = "1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Native builds expose egui's semantic tree to platform assistive technology

@@ -1,19 +1,20 @@
 //! The Results workspace.
 //!
-//! A docbar with run context,
-//! viewer tabs and viewer-local controls; a document well carrying the
-//! active viewer (waveform strips, Bode, FFT, eye, histogram, and the
-//! Nyquist/Smith/pole-zero diagnostics); and a right panel that swaps to
-//! the active viewer's instrument readout (cursors, margins, harmonics, eye
-//! metrics, distribution stats).
+//! A 41 px dataset-viewer tab strip, a distinct 31 px plot instrument or
+//! purpose strip, a fill-height document well carrying the active viewer
+//! (waveform strips, Bode, FFT, eye, histogram, and the
+//! Nyquist/Smith/pole-zero diagnostics), and a content-fit readout strip.
 
 mod bode;
+mod create_document;
 mod eye;
 mod fft;
 mod hist;
+pub(crate) mod manifest;
 mod noise_contrib;
 mod nyquist;
 mod op_inspector;
+mod persistent_document;
 mod pz;
 mod sensitivity;
 mod smith;
@@ -24,6 +25,24 @@ mod transfer_function;
 pub(crate) fn open_specification_editor(state: &mut AppState) {
     specs::open_editor(state);
 }
+
+/// Open the dataset/manifest browser in its canonical Results frame.
+///
+/// The navigator and inspector are parts of that frame; this command exposes
+/// them instead of creating a second dataset browser with independent state.
+pub(crate) fn open_dataset_browser(app: &mut RSpiceApp) {
+    app.state.workbench.activate(Workspace::Results);
+    app.state.workbench.navigator_visible = true;
+    app.state.workbench.inspector_visible = true;
+    app.state.workbench.focus_navigator_search = true;
+    app.state.ui.results.viewer = ResultViewer::Manifest;
+}
+
+/// Open a fresh immutable-dataset-bound result-document transaction.
+pub(crate) fn open_create_document(app: &mut RSpiceApp) {
+    create_document::open(app);
+}
+
 mod strip;
 mod waves;
 pub(crate) use waves::copy_cursor_text;
@@ -35,22 +54,93 @@ use std::collections::HashSet;
 use egui::{Ui, WidgetInfo, WidgetType};
 use serde::{Deserialize, Serialize};
 
-use crate::product::DatasetId;
+use super::visualization_family::SourceSampleSelection;
+use crate::product::{AnalysisInstanceId, DatasetId};
 use crate::simulation::SimulationController;
 use crate::simulation::controller::DerivedViewerLoadState;
-use crate::state::{SharedWaveformValues, WaveformData};
-use crate::ui::plot::{CursorPair, DecimationCache};
+use crate::state::{AnalysisResult, SharedWaveformValues, SimulationRun, WaveformData};
+use crate::ui::plot::{CursorPair, DecimationCache, InteractionMode};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, docbar_at_height};
 use crate::workbench::app_state::ActiveViewer;
-use super::visualization_family::SourceSampleSelection;
+use crate::workbench::design_system::WorkbenchIcon;
+use crate::workbench::state::Workspace;
 use crate::workbench::{AppState, RSpiceApp};
 
 pub type WaveformSeries = (SharedWaveformValues, SharedWaveformValues);
 pub type WaveformSeriesResult = Result<WaveformSeries, String>;
 type WindowStatsKey = (u64, u64, u64);
 type WindowStats = Option<(f64, f64, f64)>;
+
+/// Stable identity of one retained analysis within one immutable dataset.
+///
+/// Current results use the exact prepared-task identity. A legacy result has
+/// no such provenance, so its run-local analysis id is safe only when paired
+/// with the immutable dataset id. Neither representation depends on vector
+/// position, which prevents presentation state from moving to another
+/// analysis when retained results are reordered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub(crate) struct AnalysisPresentationKey {
+    dataset_id: DatasetId,
+    source: AnalysisPresentationSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+enum AnalysisPresentationSource {
+    Prepared(AnalysisInstanceId),
+    Legacy(u64),
+}
+
+impl AnalysisPresentationKey {
+    pub(crate) fn new(dataset_id: DatasetId, analysis: &AnalysisResult) -> Self {
+        let source = analysis.provenance().map_or(
+            AnalysisPresentationSource::Legacy(analysis.id),
+            |provenance| AnalysisPresentationSource::Prepared(provenance.source_instance_id()),
+        );
+        Self { dataset_id, source }
+    }
+
+    pub(crate) const fn dataset_id(self) -> DatasetId {
+        self.dataset_id
+    }
+
+    pub(crate) fn resolve<'a>(self, run: &'a SimulationRun) -> Option<(usize, &'a AnalysisResult)> {
+        (run.dataset_id == self.dataset_id)
+            .then(|| {
+                run.analyses
+                    .iter()
+                    .enumerate()
+                    .find(|(_, analysis)| Self::new(run.dataset_id, analysis) == self)
+            })
+            .flatten()
+    }
+}
+
+/// Stable identity of one source waveform representation inside an analysis.
+///
+/// `source_name` follows the retained waveform through reordering. `kind` and
+/// `family_group` distinguish real/imaginary, magnitude/phase, and projected
+/// family traces that intentionally share the same source waveform.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub(crate) struct TracePresentationKey {
+    source_name: String,
+    kind: u8,
+    family_group: u64,
+}
+
+/// Fully dataset-bound identity of one presented waveform.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub(crate) struct WaveformPresentationKey {
+    analysis: AnalysisPresentationKey,
+    trace: TracePresentationKey,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum PlotPresentationKey {
+    Global(usize),
+    Analysis(AnalysisPresentationKey),
+}
 
 /// The result viewers, in tab order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
@@ -84,10 +174,15 @@ pub enum ResultViewer {
     Smith,
     /// Legacy pole-zero surface.
     PoleZero,
+    /// Immutable task and retained-value inventory for the active dataset.
+    ///
+    /// This is dataset-native and deliberately has no Visualization Studio
+    /// viewer-document identity.
+    Manifest,
 }
 
 impl ResultViewer {
-    /// Tab label (mono, uppercase by design).
+    /// Compact command/status label.
     pub fn label(self) -> &'static str {
         match self {
             ResultViewer::Waves => "WAVES",
@@ -104,6 +199,7 @@ impl ResultViewer {
             ResultViewer::Nyquist => "NYQ",
             ResultViewer::Smith => "SMITH",
             ResultViewer::PoleZero => "PZ",
+            ResultViewer::Manifest => "MANIFEST",
         }
     }
 
@@ -125,6 +221,72 @@ impl ResultViewer {
         ResultViewer::Smith,
         ResultViewer::PoleZero,
     ];
+    const DATASET_NATIVE: [ResultViewer; 1] = [ResultViewer::Manifest];
+
+    /// Human-readable document-tab label from the upgraded Results mockup.
+    const fn tab_label(self) -> &'static str {
+        match self {
+            ResultViewer::Waves => "Waves",
+            ResultViewer::Bode => "Bode",
+            ResultViewer::Fft => "FFT",
+            ResultViewer::Eye => "Eye",
+            ResultViewer::Hist => "Histogram",
+            ResultViewer::Op => "OP",
+            ResultViewer::NoiseContrib => "Noise",
+            ResultViewer::Contribution => "Sensitivity",
+            ResultViewer::TransferFunction => "XF",
+            ResultViewer::Specs => "Specs",
+            ResultViewer::Table => "Table",
+            ResultViewer::Nyquist => "Nyquist",
+            ResultViewer::Smith => "Smith",
+            ResultViewer::PoleZero => "PZ",
+            ResultViewer::Manifest => "Manifest",
+        }
+    }
+
+    const fn tab_icon(self) -> WorkbenchIcon {
+        match self {
+            ResultViewer::Waves | ResultViewer::NoiseContrib => WorkbenchIcon::Results,
+            ResultViewer::Bode
+            | ResultViewer::Fft
+            | ResultViewer::Hist
+            | ResultViewer::Contribution => WorkbenchIcon::Results,
+            ResultViewer::Eye
+            | ResultViewer::Nyquist
+            | ResultViewer::Smith
+            | ResultViewer::PoleZero => WorkbenchIcon::Target,
+            ResultViewer::Op
+            | ResultViewer::TransferFunction
+            | ResultViewer::Specs
+            | ResultViewer::Table => WorkbenchIcon::Grid,
+            ResultViewer::Manifest => WorkbenchIcon::Layers,
+        }
+    }
+}
+
+/// Mutually exclusive primary pointer tool for instrument-style result plots.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum ResultPlotTool {
+    /// Normal result interaction: cursors/markers plus wheel zoom and panning.
+    #[default]
+    Cursor,
+    /// Primary drag draws a zoom rectangle.
+    BoxZoom,
+    /// Primary drag pans the plot viewport.
+    Pan,
+    /// Primary click or drag places the active pane's horizontal cursor.
+    HorizontalCursor,
+}
+
+impl ResultPlotTool {
+    const fn interaction_mode(self) -> InteractionMode {
+        match self {
+            Self::Cursor => InteractionMode::All,
+            Self::BoxZoom => InteractionMode::Zoom,
+            Self::Pan => InteractionMode::Pan,
+            Self::HorizontalCursor => InteractionMode::Select,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -253,16 +415,16 @@ impl MarkerKind {
 /// A user-placed marker on a waveform strip.
 ///
 /// The anchor is a *signal*, not one solve of it: `y` is resampled from the
-/// trace every frame, so a marker survives zoom, pan, and re-simulation and
-/// can never drift off the curve it annotates.
+/// trace every frame, so a marker survives zoom, pan, and retained-vector
+/// reordering without drifting onto a different dataset or curve.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResultMarker {
     /// Stable per-session id. Renders as `M{id}`.
     pub id: u32,
-    /// The strip (analysis index) this marker lives on.
-    pub analysis_index: usize,
-    /// Run-independent identity of the trace the marker rides.
-    pub anchor: u64,
+    /// Dataset-bound identity of the strip this marker lives on.
+    pub analysis: AnalysisPresentationKey,
+    /// Dataset-bound identity of the trace the marker rides.
+    pub anchor: WaveformPresentationKey,
     /// Display name of the anchored trace, for the marker list.
     pub trace_name: String,
     /// Anchor position in the strip's X data space.
@@ -270,6 +432,23 @@ pub struct ResultMarker {
     pub kind: MarkerKind,
     /// Free text shown after the id on the tag. May be empty.
     pub note: String,
+}
+
+/// Stable identity of one unit-scoped waveform pane.
+///
+/// The analysis key retains the exact dataset identity; the unit is the pane
+/// grouping contract and remains independent of transient pane ordinals.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct WavePanePresentationKey {
+    pub analysis: AnalysisPresentationKey,
+    pub unit: String,
+}
+
+/// One horizontal measurement cursor bound to an exact waveform pane.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct HorizontalWaveCursor {
+    pub pane: WavePanePresentationKey,
+    pub y: f64,
 }
 
 /// The marker tool: armed, a plot click drops a marker on the nearest
@@ -291,10 +470,21 @@ impl MarkerTool {
 pub struct ResultsState {
     /// Active viewer tab.
     pub viewer: ResultViewer,
+    /// Device-local page selection for each project-owned result document.
+    ///
+    /// Page selection is presentation state, not part of the immutable
+    /// visualization document. Stable document and page identities prevent a
+    /// project reload or page reorder from selecting a different page.
+    persistent_document_pages: std::collections::HashMap<
+        crate::product::ResultDocumentId,
+        crate::results::visualization_document::PageId,
+    >,
     /// The A│B cursor tool.
     pub cursor_tool: CursorTool,
     /// The marker tool.
     pub marker_tool: MarkerTool,
+    /// Primary plot pointer tool shown in the 31 px instrument strip.
+    plot_tool: ResultPlotTool,
     /// Exact retained waveform selected from a trace chip. This is only an
     /// identity into the canonical result dataset; it never copies samples or
     /// creates a second result owner.
@@ -308,8 +498,20 @@ pub struct ResultsState {
     pub editing_marker: Option<u32>,
     /// A/B cursors (data-space X of the strip they live on).
     pub cursors: CursorPair,
-    /// Which strip (analysis index) the cursors were placed on.
+    /// Dataset-bound strip identity the cursors were placed on.
     pub cursor_strip: Option<usize>,
+    /// Exact visible trace nearest cursor A when A was placed.
+    pub(super) cursor_a_anchor: Option<WaveformPresentationKey>,
+    /// Unit-scoped waveform pane receiving instrument actions.
+    pub(super) active_wave_pane: Option<WavePanePresentationKey>,
+    /// Horizontal cursor, bound to the pane whose Y axis owns its value.
+    pub(super) horizontal_cursor: Option<HorizontalWaveCursor>,
+    /// Draw exact project specification bounds compatible with visible axes.
+    pub(super) show_spec_limits: bool,
+    /// Draw derived min/max curves only when retained family samples exist.
+    pub(super) show_family_envelope: bool,
+    /// Draw unlabeled minor subdivisions between authoritative major ticks.
+    pub(super) show_minor_grid: bool,
     /// Share the same A/B cursor positions across every compatible waveform
     /// strip instead of scoping them to `cursor_strip`.
     pub linked_cursors: bool,
@@ -326,9 +528,9 @@ pub struct ResultsState {
     /// are presentation state and never alter source WaveformData visibility.
     hidden_family_traces: HashSet<waves::FamilyTraceVisibilityKey>,
     /// Strips hidden via the strip-close action.
-    pub hidden_strips: HashSet<usize>,
+    pub hidden_strips: HashSet<AnalysisPresentationKey>,
     /// Strip currently maximized via the strip action, if any.
-    pub maximized_strip: Option<usize>,
+    pub maximized_strip: Option<AnalysisPresentationKey>,
     /// Cached FFT display arrays for the active spectrum revision.
     pub fft_series: Option<FftSeries>,
     /// Cached Bode margins + extremes for the active data version.
@@ -340,18 +542,26 @@ pub struct ResultsState {
     /// `simulation.data_version` last seen by the workspace; when it
     /// advances, cursors are cleared so they never report stale data.
     seen_version: u64,
-    /// Zoom/pan overrides per plot, keyed by (viewer, strip index). Survives
+    /// Zoom/pan overrides per plot, keyed by stable plot identity. Survives
     /// re-runs on purpose — keeping the zoomed window across parameter
     /// tweaks is how engineers compare iterations.
-    pub views: std::collections::HashMap<(ResultViewer, usize, usize), PlotView>,
-    /// User expression traces per waves strip (analysis index), evaluated by
+    pub views: std::collections::HashMap<(ResultViewer, PlotPresentationKey, usize), PlotView>,
+    /// User expression traces per dataset-bound waves strip, evaluated by
     /// the calculator against that analysis' waveforms.
+    /// Compatibility projection for integrations that still address the
+    /// active run by ordinal. The Results document migrates these entries
+    /// into `analysis_exprs` before use; stable state lives there.
     pub exprs: std::collections::HashMap<usize, Vec<ExprTrace>>,
+    pub(crate) analysis_exprs: std::collections::HashMap<AnalysisPresentationKey, Vec<ExprTrace>>,
+    /// Identity map behind the ordinal compatibility projection.
+    expr_projection_keys: std::collections::HashMap<usize, AnalysisPresentationKey>,
     /// The inline expression editor, when open (one strip at a time).
     pub expr_editor: Option<ExprEditor>,
-    /// Evaluated expression series, keyed by (analysis index, expression);
+    /// Evaluated expression series, keyed by (stable analysis, expression);
     /// refreshed when the simulation data version advances.
     pub expr_cache: std::collections::HashMap<(usize, String), ExprSeries>,
+    pub(crate) analysis_expr_cache:
+        std::collections::HashMap<(AnalysisPresentationKey, String), ExprSeries>,
     /// Pinned data point per XY viewer (trace slot, point index) — the
     /// Smith/Nyquist/PZ click-to-pin readout.
     pub rf_pin: std::collections::HashMap<ResultViewer, (usize, usize)>,
@@ -377,17 +587,74 @@ pub struct ResultsState {
     pub table_status: Option<String>,
 }
 
-/// Stable-enough session identity for a selected retained waveform.
+/// Stable session identity for a selected retained waveform.
 ///
-/// The dataset id prevents a run switch from silently relabelling the
-/// selection, while the indices make lookup constant-time. The source name is
-/// retained as an additional fail-closed check against stale/reordered data.
+/// The immutable dataset, prepared analysis identity, and source waveform
+/// name survive retained-result reordering. Duplicate source names fail
+/// closed instead of silently inheriting an old ordinal selection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SelectedResultTrace {
-    pub dataset_id: DatasetId,
-    pub analysis_index: usize,
-    pub waveform_index: usize,
-    pub source_name: String,
+    waveform: WaveformPresentationKey,
+}
+
+impl SelectedResultTrace {
+    pub(crate) fn from_identity(
+        analysis: AnalysisPresentationKey,
+        source_name: impl Into<String>,
+    ) -> Self {
+        Self {
+            waveform: WaveformPresentationKey {
+                analysis,
+                trace: TracePresentationKey {
+                    source_name: source_name.into(),
+                    kind: 0,
+                    family_group: 0,
+                },
+            },
+        }
+    }
+
+    pub(crate) fn from_run_indices(
+        run: &SimulationRun,
+        analysis_index: usize,
+        waveform_index: usize,
+    ) -> Option<Self> {
+        let analysis = run.analyses.get(analysis_index)?;
+        let waveform = analysis.waveforms.get(waveform_index)?;
+        Some(Self::from_identity(
+            AnalysisPresentationKey::new(run.dataset_id, analysis),
+            waveform.name.clone(),
+        ))
+    }
+
+    pub(crate) const fn analysis_key(&self) -> AnalysisPresentationKey {
+        self.waveform.analysis
+    }
+
+    pub(crate) fn source_name(&self) -> &str {
+        &self.waveform.trace.source_name
+    }
+
+    pub(crate) const fn dataset_id(&self) -> DatasetId {
+        self.waveform.analysis.dataset_id()
+    }
+
+    pub(crate) fn resolve<'a>(
+        &self,
+        run: &'a SimulationRun,
+    ) -> Option<(usize, usize, &'a AnalysisResult, &'a WaveformData)> {
+        let (analysis_index, analysis) = self.waveform.analysis.resolve(run)?;
+        let mut matching = analysis
+            .waveforms
+            .iter()
+            .enumerate()
+            .filter(|(_, waveform)| waveform.name == self.waveform.trace.source_name);
+        let (waveform_index, waveform) = matching.next()?;
+        matching
+            .next()
+            .is_none()
+            .then_some((analysis_index, waveform_index, analysis, waveform))
+    }
 }
 
 /// One user expression trace on a waves strip.
@@ -405,10 +672,10 @@ fn default_visible() -> bool {
 }
 
 /// State of the inline expression editor under a strip header.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ExprEditor {
-    /// The strip (analysis index) the editor is attached to.
-    pub analysis_index: usize,
+    /// The dataset-bound strip the editor is attached to.
+    pub analysis: AnalysisPresentationKey,
     /// Text being edited.
     pub text: String,
     /// Last evaluation error, shown inline.
@@ -435,21 +702,14 @@ impl ResultsState {
     ) -> Option<&'a SelectedResultTrace> {
         let selected = self.selected_trace.as_ref()?;
         let run = simulation.active_run()?;
-        if run.dataset_id != selected.dataset_id {
-            return None;
-        }
-        let waveform = run
-            .analyses
-            .get(selected.analysis_index)?
-            .waveforms
-            .get(selected.waveform_index)?;
-        (waveform.name == selected.source_name).then_some(selected)
+        selected.resolve(run).map(|_| selected)
     }
 
     /// Clear cursors (Esc, Clear action).
     pub fn clear_cursors(&mut self) {
         self.cursors.clear();
         self.cursor_strip = None;
+        self.cursor_a_anchor = None;
     }
 
     /// Arm or disarm the A│B tool. Disarming clears the pair, because a
@@ -465,6 +725,21 @@ impl ResultsState {
     /// armed and at least cursor A is placed.
     pub fn cursor_readout_active(&self) -> bool {
         self.cursor_tool.is_armed() && self.cursors.any()
+    }
+
+    /// Whether an ordinary plot click should place A/B. Box-zoom and pan own
+    /// their primary drag/click gestures even while existing cursors remain
+    /// visible in the readout strip.
+    pub(super) fn cursor_placement_enabled(&self) -> bool {
+        self.plot_tool == ResultPlotTool::Cursor && self.cursor_tool.is_armed()
+    }
+
+    pub(super) fn horizontal_cursor_placement_enabled(&self) -> bool {
+        self.plot_tool == ResultPlotTool::HorizontalCursor
+    }
+
+    pub(super) fn cursor_a_is_next(&self) -> bool {
+        self.cursors.a.is_none() || self.cursors.b.is_some()
     }
 
     pub fn toggle_linked_cursors(&mut self) {
@@ -483,8 +758,8 @@ impl ResultsState {
     /// Place a marker and return its id.
     pub fn add_marker(
         &mut self,
-        analysis_index: usize,
-        anchor: u64,
+        analysis: AnalysisPresentationKey,
+        anchor: WaveformPresentationKey,
         trace_name: String,
         x: f64,
     ) -> u32 {
@@ -492,7 +767,7 @@ impl ResultsState {
         let id = self.next_marker_id;
         self.markers.push(ResultMarker {
             id,
-            analysis_index,
+            analysis,
             anchor,
             trace_name,
             x,
@@ -515,10 +790,13 @@ impl ResultsState {
     }
 
     /// Markers on one strip, in placement order.
-    pub fn strip_markers(&self, analysis_index: usize) -> impl Iterator<Item = &ResultMarker> {
+    pub fn strip_markers(
+        &self,
+        analysis: AnalysisPresentationKey,
+    ) -> impl Iterator<Item = &ResultMarker> {
         self.markers
             .iter()
-            .filter(move |marker| marker.analysis_index == analysis_index)
+            .filter(move |marker| marker.analysis == analysis)
     }
 
     fn set_sample_selection(&mut self, selection: Option<SourceSampleSelection>) {
@@ -530,6 +808,7 @@ impl ResultsState {
         if current != next {
             self.models = waves::ModelsCache::default();
             self.expr_cache.clear();
+            self.analysis_expr_cache.clear();
             self.cache = DecimationCache::default();
             self.derived = DerivedSeries::default();
             self.clear_cursors();
@@ -548,6 +827,65 @@ impl ResultsState {
         self.clear_cursors();
     }
 
+    fn reconcile_expression_projection(&mut self, simulation: &crate::state::SimulationState) {
+        let Some(run) = simulation.active_run() else {
+            self.exprs.clear();
+            self.expr_projection_keys.clear();
+            return;
+        };
+        let current = run
+            .analyses
+            .iter()
+            .enumerate()
+            .map(|(index, analysis)| {
+                (
+                    index,
+                    AnalysisPresentationKey::new(run.dataset_id, analysis),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        // An ordinal row may be imported only while it still names the
+        // identity it named when this projection was emitted. A reorder
+        // therefore cannot relabel an expression as belonging to the new
+        // occupant of the same slot.
+        for (index, key) in &current {
+            let may_import = self
+                .expr_projection_keys
+                .get(index)
+                .is_none_or(|projected| projected == key);
+            if may_import && let Some(projected) = self.exprs.get(index) {
+                self.analysis_exprs.insert(*key, projected.clone());
+            }
+        }
+        self.exprs = current
+            .iter()
+            .filter_map(|(index, key)| {
+                self.analysis_exprs
+                    .get(key)
+                    .cloned()
+                    .map(|exprs| (*index, exprs))
+            })
+            .collect();
+        self.expr_projection_keys = current.into_iter().collect();
+    }
+
+    fn sync_expression_projection(
+        &mut self,
+        analysis: AnalysisPresentationKey,
+        analysis_index: usize,
+    ) {
+        match self.analysis_exprs.get(&analysis).cloned() {
+            Some(exprs) => {
+                self.exprs.insert(analysis_index, exprs);
+            }
+            None => {
+                self.exprs.remove(&analysis_index);
+            }
+        }
+        self.expr_projection_keys.insert(analysis_index, analysis);
+    }
+
     /// Clear result UI state that is tied to the active project/design data.
     pub fn clear_project_scoped_state(&mut self) {
         let viewer = self.viewer;
@@ -559,9 +897,24 @@ impl ResultsState {
         };
     }
 
+    pub(crate) fn persistent_document_page(
+        &self,
+        document_id: crate::product::ResultDocumentId,
+    ) -> Option<crate::results::visualization_document::PageId> {
+        self.persistent_document_pages.get(&document_id).copied()
+    }
+
+    fn select_persistent_document_page(
+        &mut self,
+        document_id: crate::product::ResultDocumentId,
+        page_id: crate::results::visualization_document::PageId,
+    ) {
+        self.persistent_document_pages.insert(document_id, page_id);
+    }
+
     /// The zoom/pan override for a single-pane plot.
     pub fn plot_view(&self, viewer: ResultViewer, index: usize) -> PlotView {
-        self.plot_view_pane(viewer, index, 0)
+        self.plot_view_pane_for(viewer, PlotPresentationKey::Global(index), 0)
     }
 
     /// The zoom/pan override for one pane of one plot.
@@ -569,10 +922,28 @@ impl ResultsState {
     /// Y is per pane because each pane carries its own unit — one zoom
     /// factor across volts and amps would mean nothing.
     pub fn plot_view_pane(&self, viewer: ResultViewer, index: usize, pane: usize) -> PlotView {
+        self.plot_view_pane_for(viewer, PlotPresentationKey::Global(index), pane)
+    }
+
+    fn plot_view_pane_for(
+        &self,
+        viewer: ResultViewer,
+        plot: PlotPresentationKey,
+        pane: usize,
+    ) -> PlotView {
         self.views
-            .get(&(viewer, index, pane))
+            .get(&(viewer, plot, pane))
             .copied()
             .unwrap_or_default()
+    }
+
+    pub(super) fn analysis_plot_view_pane(
+        &self,
+        viewer: ResultViewer,
+        analysis: AnalysisPresentationKey,
+        pane: usize,
+    ) -> PlotView {
+        self.plot_view_pane_for(viewer, PlotPresentationKey::Analysis(analysis), pane)
     }
 
     /// Mutable zoom/pan override for one pane of one plot.
@@ -582,7 +953,25 @@ impl ResultsState {
         index: usize,
         pane: usize,
     ) -> &mut PlotView {
-        self.views.entry((viewer, index, pane)).or_default()
+        self.plot_view_pane_mut_for(viewer, PlotPresentationKey::Global(index), pane)
+    }
+
+    fn plot_view_pane_mut_for(
+        &mut self,
+        viewer: ResultViewer,
+        plot: PlotPresentationKey,
+        pane: usize,
+    ) -> &mut PlotView {
+        self.views.entry((viewer, plot, pane)).or_default()
+    }
+
+    pub(super) fn analysis_plot_view_pane_mut(
+        &mut self,
+        viewer: ResultViewer,
+        analysis: AnalysisPresentationKey,
+        pane: usize,
+    ) -> &mut PlotView {
+        self.plot_view_pane_mut_for(viewer, PlotPresentationKey::Analysis(analysis), pane)
     }
 
     /// Mutable zoom/pan override for a single-pane plot.
@@ -594,15 +983,74 @@ impl ResultsState {
     /// Fitting a strip fits all of it — leaving one pane zoomed would make
     /// the strip's panes disagree about the window they show.
     pub fn reset_plot_view(&mut self, viewer: ResultViewer, index: usize) {
+        self.reset_plot_view_for(viewer, PlotPresentationKey::Global(index));
+    }
+
+    fn reset_plot_view_for(&mut self, viewer: ResultViewer, plot: PlotPresentationKey) {
         self.views
-            .retain(|(key_viewer, key_index, _), _| (*key_viewer, *key_index) != (viewer, index));
+            .retain(|(key_viewer, key_plot, _), _| (*key_viewer, *key_plot) != (viewer, plot));
+    }
+
+    pub(super) fn reset_analysis_plot_view(
+        &mut self,
+        viewer: ResultViewer,
+        analysis: AnalysisPresentationKey,
+    ) {
+        self.reset_plot_view_for(viewer, PlotPresentationKey::Analysis(analysis));
+    }
+
+    pub(super) fn reset_analysis_plot_view_pane(
+        &mut self,
+        viewer: ResultViewer,
+        analysis: AnalysisPresentationKey,
+        pane: usize,
+    ) {
+        self.views
+            .remove(&(viewer, PlotPresentationKey::Analysis(analysis), pane));
+    }
+
+    /// Reset every pane and plot owned by one viewer (the viewer-wide FIT/F
+    /// action). This deliberately does not assume a single plot at slot zero.
+    pub(crate) fn reset_viewer_plot_views(&mut self, viewer: ResultViewer) {
+        self.views
+            .retain(|(key_viewer, _, _), _| *key_viewer != viewer);
     }
 
     /// Whether any pane of one plot is zoomed away from the automatic view.
     pub fn strip_is_zoomed(&self, viewer: ResultViewer, index: usize) -> bool {
+        self.plot_is_zoomed(viewer, PlotPresentationKey::Global(index))
+    }
+
+    fn plot_is_zoomed(&self, viewer: ResultViewer, plot: PlotPresentationKey) -> bool {
         self.views.iter().any(|((key_viewer, key_index, _), view)| {
-            (*key_viewer, *key_index) == (viewer, index) && view.is_zoomed()
+            (*key_viewer, *key_index) == (viewer, plot) && view.is_zoomed()
         })
+    }
+
+    pub(super) fn analysis_strip_is_zoomed(
+        &self,
+        viewer: ResultViewer,
+        analysis: AnalysisPresentationKey,
+    ) -> bool {
+        self.plot_is_zoomed(viewer, PlotPresentationKey::Analysis(analysis))
+    }
+
+    /// Restore a strip addressed by the current run's transient ordinal.
+    /// Command/search integrations may still produce an ordinal, but the
+    /// retained presentation state is removed by its stable identity.
+    pub(crate) fn restore_analysis_strip(
+        &mut self,
+        simulation: &crate::state::SimulationState,
+        analysis_index: usize,
+    ) {
+        let Some(run) = simulation.active_run() else {
+            return;
+        };
+        let Some(analysis) = run.analyses.get(analysis_index) else {
+            return;
+        };
+        self.hidden_strips
+            .remove(&AnalysisPresentationKey::new(run.dataset_id, analysis));
     }
 }
 
@@ -741,6 +1189,33 @@ impl DerivedSeries {
                 magnitude
                     .iter()
                     .map(|&m| 20.0 * m.max(1e-30).log10())
+                    .collect::<Vec<_>>(),
+            )
+        })
+    }
+
+    /// Key-space bit separating power-density dB entries from ordinary
+    /// magnitude-dB entries. Noise spectra remain retained as exact power
+    /// densities; this cache is presentation-only.
+    const POWER_DB_KEY_BIT: u64 = 1 << 61;
+
+    /// Ten times log10 of a non-negative power-density series.
+    ///
+    /// Zero has no finite logarithm and is therefore a gap in the derived
+    /// curve. Cursor readouts continue to report the exact retained linear
+    /// value; no artificial display floor becomes result evidence.
+    pub fn db_power(&mut self, key: u64, power: &[f64]) -> SharedWaveformValues {
+        self.get_or(Self::POWER_DB_KEY_BIT | key, || {
+            std::sync::Arc::new(
+                power
+                    .iter()
+                    .map(|&value| {
+                        if value.is_finite() && value > 0.0 {
+                            10.0 * value.log10()
+                        } else {
+                            f64::NAN
+                        }
+                    })
                     .collect::<Vec<_>>(),
             )
         })
@@ -975,6 +1450,16 @@ pub fn waveform_color(waveform: &WaveformData, index: usize, t: &Tokens) -> egui
 pub fn well_hint(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
     let rect = ui.available_rect_before_wrap();
+    let response = ui.interact(
+        rect,
+        ui.id().with(("result-well-status", text)),
+        egui::Sense::hover(),
+    );
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, text));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Status);
+        node.set_label(text);
+    });
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -991,6 +1476,33 @@ pub fn well_hint(ui: &mut Ui, text: &str) {
 /// Render the Results workspace center view (docbar + active viewer).
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     show_with_chrome(ui, app, ResultChrome::Full);
+    create_document::show(ui.ctx(), app);
+}
+
+/// Render one project-owned result document selected by its stable identity.
+///
+/// Unlike the dataset quick-view, this projection is driven by the exact
+/// pages, panes, viewer identities, and immutable bindings retained in the
+/// project document.
+pub(crate) fn show_persistent_document(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    document_id: crate::product::ResultDocumentId,
+) {
+    persistent_document::show(ui, app, document_id);
+    create_document::show(ui.ctx(), app);
+}
+
+/// Resolve and select the primary binding of a project-owned result document.
+///
+/// Document-tab activation and post-create activation share this path so a
+/// document can never select one retained result when created and a different
+/// one when reopened.
+pub(crate) fn activate_persistent_document(
+    state: &mut AppState,
+    document_id: crate::product::ResultDocumentId,
+) -> bool {
+    persistent_document::activate(state, document_id)
 }
 
 /// Render the compact upgraded-mockup projection used beside another
@@ -1007,7 +1519,6 @@ enum ResultChrome {
 }
 
 fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
-    crate::ui::plot::set_interaction_mode(ui.ctx(), crate::ui::plot::InteractionMode::All);
     app.state.ui.results.set_sample_selection(None);
     prepare_viewer_state(app);
     let plan_before_docbar = app
@@ -1017,9 +1528,18 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         .as_ref()
         .map(|plan| (plan.id(), plan.revision()));
     match chrome {
-        ResultChrome::Full => show_docbar(ui, &mut app.state),
+        ResultChrome::Full => {
+            show_docbar(ui, app);
+            if viewer_has_sheet_bar(app.state.ui.results.viewer) {
+                show_sheet_bar(ui, &mut app.state);
+            }
+        }
         ResultChrome::CompactSplit => show_compact_docbar(ui, &mut app.state),
     }
+    crate::ui::plot::set_interaction_mode(
+        ui.ctx(),
+        app.state.ui.results.plot_tool.interaction_mode(),
+    );
     let plan_after_docbar = app
         .state
         .sim_setup
@@ -1046,6 +1566,20 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     if strip_height > 0.0 {
         waves::readout_strip(ui, &mut app.state, strip_height);
     }
+}
+
+/// Structured result documents own their controls inside their content and
+/// therefore collapse the conditional 31 px sheet row completely. Plot and
+/// custom-canvas sheets retain that row for their instrument or purpose bar.
+const fn viewer_has_sheet_bar(viewer: ResultViewer) -> bool {
+    !matches!(
+        viewer,
+        ResultViewer::Op
+            | ResultViewer::TransferFunction
+            | ResultViewer::Specs
+            | ResultViewer::Table
+            | ResultViewer::Manifest
+    )
 }
 
 /// Height of the stage's readout strip for the active viewer, or zero.
@@ -1085,12 +1619,25 @@ pub(crate) fn show_embedded_with_sample_selection(
     show_viewer_well(ui, app, ResultChrome::Full);
 }
 
+/// Render one already-resolved persistent pane through an exact existing
+/// viewer. The caller owns binding and compatibility checks; this helper only
+/// refreshes renderer caches and deliberately restores the requested viewer
+/// after quick-view reconciliation so no fallback viewer can be substituted.
+pub(super) fn show_persistent_pane_viewer(ui: &mut Ui, app: &mut RSpiceApp, viewer: ResultViewer) {
+    app.state.ui.results.set_sample_selection(None);
+    prepare_viewer_state(app);
+    app.state.ui.results.viewer = viewer;
+    show_viewer_well(ui, app, ResultChrome::Full);
+}
+
 fn prepare_viewer_state(app: &mut RSpiceApp) {
     let data_version = app.state.simulation.data_version;
     let results = &mut app.state.ui.results;
     if results.seen_version != data_version {
         results.seen_version = data_version;
         results.clear_cursors();
+        results.horizontal_cursor = None;
+        results.active_wave_pane = None;
         results.selected_trace = None;
         // Pinned XY readouts index into the old run's point arrays;
         // a same-shape new run would silently relabel them.
@@ -1109,8 +1656,20 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     let well = ui.available_rect_before_wrap();
     ui.painter().rect_filled(well, 0.0, t.color.canvas_bg);
     app.state.ui.results.well_rect = Some(well);
+    let viewer = app.state.ui.results.viewer;
+    let panel = ui.interact(
+        well,
+        ui.id().with(("result-viewer-panel", viewer)),
+        egui::Sense::hover(),
+    );
+    let panel_label = format!("{} result viewer", viewer.tab_label());
+    panel.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &panel_label));
+    ui.ctx().accesskit_node_builder(panel.id, |node| {
+        node.set_role(egui::accesskit::Role::TabPanel);
+        node.set_label(panel_label);
+    });
 
-    if !app.state.simulation.has_results() {
+    if viewer != ResultViewer::Manifest && !app.state.simulation.has_results() {
         let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
             crate::workbench::commands::vocabulary::Command::RunSimulation,
             crate::workbench::app_state::runtime_command_platform(ui.ctx()),
@@ -1125,7 +1684,6 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         return;
     }
 
-    let viewer = app.state.ui.results.viewer;
     match viewer {
         ResultViewer::Waves => match chrome {
             ResultChrome::Full => waves::show(ui, &mut app.state),
@@ -1152,6 +1710,7 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         ResultViewer::Nyquist => nyquist::show(ui, &mut app.state),
         ResultViewer::Smith => smith::show(ui, &mut app.state),
         ResultViewer::PoleZero => pz::show(ui, &mut app.state),
+        ResultViewer::Manifest => manifest::show(ui, &app.state),
     }
 }
 
@@ -1159,8 +1718,7 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
 /// controls, result-document creation and properties remain owned by the full
 /// Results workspace; every compatible existing viewer stays reachable here.
 fn show_compact_docbar(ui: &mut Ui, state: &mut AppState) {
-    let height = result_docbar_height(ui.available_width());
-    docbar_at_height(ui, height, |ui| {
+    docbar_at_height(ui, RESULT_VIEWER_TABS_HEIGHT, |ui| {
         let tabs = egui::ScrollArea::horizontal()
             .id_salt("rspice.results.split.viewer-tabs")
             .auto_shrink([false, true])
@@ -1174,89 +1732,389 @@ fn show_compact_docbar(ui: &mut Ui, state: &mut AppState) {
     });
 }
 
-fn show_docbar(ui: &mut Ui, state: &mut AppState) {
-    let local_width = ui.available_width();
-    let compact = local_width <= RESULT_ACTIONS_COMPACT_BREAKPOINT;
-    let height = result_docbar_height(local_width);
-    docbar_at_height(ui, height, |ui| {
+fn show_docbar(ui: &mut Ui, app: &mut RSpiceApp) {
+    show_docbar_for_family(ui, app, None);
+}
+
+pub(super) fn show_persistent_docbar(ui: &mut Ui, app: &mut RSpiceApp, family_label: &str) {
+    show_docbar_for_family(ui, app, Some(family_label));
+}
+
+fn show_docbar_for_family(ui: &mut Ui, app: &mut RSpiceApp, family_label: Option<&str>) {
+    let mut create_document = false;
+    let mut open_properties = false;
+    docbar_at_height(ui, RESULT_VIEWER_TABS_HEIGHT, |ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
-            let trailing_width = result_trailing_width(local_width, state.ui.results.viewer);
+            open_properties =
+                viewer_picker(ui, WorkbenchIcon::Sliders, "Properties…", "Plot properties");
+            create_document = viewer_picker(
+                ui,
+                WorkbenchIcon::Add,
+                "Create result document…",
+                "Create a dataset-bound result document",
+            );
+            viewer_picker_separator(ui);
+
+            let tabs_size = ui.available_size();
             ui.allocate_ui_with_layout(
-                egui::vec2(trailing_width, ui.available_height()),
-                egui::Layout::right_to_left(egui::Align::Center),
+                tabs_size,
+                egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
-                    if compact {
-                        compact_result_actions(ui, state);
-                    } else {
-                        inline_result_actions(ui, state);
-                    }
+                    egui::ScrollArea::horizontal()
+                        .id_salt("rspice.results.viewer-tabs")
+                        .auto_shrink([false, true])
+                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                        .show(ui, |ui| {
+                            let tabs = ui.horizontal(|ui| {
+                                viewer_tabs_filtered(ui, &mut app.state, |viewer| {
+                                    family_label
+                                        .is_none_or(|family| family_allows_viewer(family, viewer))
+                                })
+                            });
+                            ui.ctx().accesskit_node_builder(tabs.response.id, |node| {
+                                node.set_role(egui::accesskit::Role::TabList);
+                                node.set_label("Compatible result viewers");
+                            });
+                        });
                 },
             );
-            ui.separator();
+        });
+    });
 
-            // Run context and trailing actions remain fixed. Only the tab list
-            // owns horizontal overflow, matching the mockup's flex contract.
+    if create_document {
+        create_document::open(app);
+    } else if open_properties {
+        crate::workbench::documents::visualization_studio::open(app);
+        crate::workbench::documents::visualization_studio::open_document_properties(app);
+    }
+}
+
+const RESULT_VIEWER_TABS_HEIGHT: f32 = 41.0;
+const RESULT_VIEWER_TAB_HEIGHT: f32 = 30.0;
+const RESULT_SHEET_BAR_HEIGHT: f32 = 31.0;
+const RESULT_INSTRUMENT_CONTROL_HEIGHT: f32 = 23.0;
+
+fn viewer_picker(ui: &mut Ui, icon: WorkbenchIcon, label: &str, accessible_label: &str) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let galley = ui.painter().layout_no_wrap(
+        label.to_owned(),
+        theme::sans(tokens::FS_1, FontWeight::Regular),
+        t.color.text_dim,
+    );
+    let width = galley.size().x + 36.0;
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(width, RESULT_VIEWER_TAB_HEIGHT),
+        egui::Sense::click(),
+    );
+    response
+        .widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), accessible_label));
+    if ui.is_rect_visible(rect) {
+        let hovered = response.hovered();
+        if hovered {
+            ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+        }
+        let color = if hovered {
+            t.color.text
+        } else {
+            t.color.text_dim
+        };
+        icon.paint(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                egui::pos2(rect.left() + 14.0, rect.center().y),
+                egui::vec2(13.0, 13.0),
+            ),
+            color,
+        );
+        ui.painter().galley(
+            egui::pos2(rect.left() + 26.0, rect.center().y - galley.size().y * 0.5),
+            galley,
+            color,
+        );
+        theme::paint_focus_ring(ui, &response, rect);
+    }
+    response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
+}
+
+fn viewer_picker_separator(ui: &mut Ui) {
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(1.0, RESULT_VIEWER_TAB_HEIGHT),
+        egui::Sense::hover(),
+    );
+    ui.painter().vline(
+        rect.center().x,
+        rect.y_range(),
+        egui::Stroke::new(1.0, Tokens::get(ui.ctx()).color.border),
+    );
+}
+
+fn show_sheet_bar(ui: &mut Ui, state: &mut AppState) {
+    let t = Tokens::get(ui.ctx());
+    let viewer = state.ui.results.viewer;
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), RESULT_SHEET_BAR_HEIGHT),
+        egui::Sense::hover(),
+    );
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        egui::Stroke::new(1.0, t.color.border),
+    );
+    let accessible_label = if viewer == ResultViewer::Waves {
+        "Plot instrument controls"
+    } else {
+        "Result sheet controls"
+    };
+    response
+        .widget_info(|| WidgetInfo::labeled(WidgetType::Other, ui.is_enabled(), accessible_label));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Toolbar);
+        node.set_label(accessible_label);
+    });
+
+    let content = rect.shrink2(egui::vec2(8.0, 0.0));
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(content)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    child.spacing_mut().item_spacing.x = 4.0;
+    if viewer == ResultViewer::Waves {
+        show_wave_instrument(&mut child, state);
+    } else {
+        child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            inline_result_actions(ui, state);
             let remaining = ui.available_size();
             ui.allocate_ui_with_layout(
                 remaining,
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
-                    run_selector(ui, state);
-                    ui.separator();
-                    let tabs_size = ui.available_size();
-                    ui.allocate_ui_with_layout(
-                        tabs_size,
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            egui::ScrollArea::horizontal()
-                                .id_salt("rspice.results.viewer-tabs")
-                                .auto_shrink([false, true])
-                                .scroll_bar_visibility(
-                                    egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
-                                )
-                                .show(ui, |ui| {
-                                    let tabs = ui.horizontal(|ui| viewer_tabs(ui, state));
-                                    ui.ctx().accesskit_node_builder(tabs.response.id, |node| {
-                                        node.set_role(egui::accesskit::Role::TabList);
-                                        node.set_label("Result viewers");
-                                    });
-                                });
-                        },
+                    ui.label(
+                        egui::RichText::new(sheet_purpose(state))
+                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_dim),
                     );
                 },
             );
         });
+    }
+}
+
+fn show_wave_instrument(ui: &mut Ui, state: &mut AppState) {
+    let t = Tokens::get(ui.ctx());
+    waves::reconcile_active_pane(state, &t);
+    let limits_available = waves::spec_limits_available(state, &t);
+    let envelope_available = waves::family_envelope_available(state, &t);
+    let marker_available = waves::marker_at_cursor_a_available(state, &t);
+    if !limits_available {
+        state.ui.results.show_spec_limits = false;
+    }
+    if !envelope_available {
+        state.ui.results.show_family_envelope = false;
+    }
+
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        export_menu(ui, state);
+        let remaining = ui.available_size();
+        ui.allocate_ui_with_layout(
+            remaining,
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                let cursor_active = state.ui.results.plot_tool == ResultPlotTool::Cursor
+                    && state.ui.results.cursor_tool.is_armed();
+                if instrument_control(ui, "A|B", cursor_active, "A/B cursor tool").clicked() {
+                    if cursor_active {
+                        state.ui.results.toggle_cursor_tool();
+                    } else {
+                        state.ui.results.plot_tool = ResultPlotTool::Cursor;
+                        if !state.ui.results.cursor_tool.is_armed() {
+                            state.ui.results.toggle_cursor_tool();
+                        }
+                    }
+                }
+                if instrument_control(
+                    ui,
+                    "H",
+                    state.ui.results.plot_tool == ResultPlotTool::HorizontalCursor,
+                    "Horizontal cursor - click or drag in the active pane",
+                )
+                .clicked()
+                {
+                    state.ui.results.plot_tool = ResultPlotTool::HorizontalCursor;
+                }
+
+                instrument_separator(ui);
+                if instrument_control(
+                    ui,
+                    "BOX",
+                    state.ui.results.plot_tool == ResultPlotTool::BoxZoom,
+                    "Box zoom - drag a region",
+                )
+                .clicked()
+                {
+                    state.ui.results.plot_tool = ResultPlotTool::BoxZoom;
+                }
+                if instrument_control(
+                    ui,
+                    "PAN",
+                    state.ui.results.plot_tool == ResultPlotTool::Pan,
+                    "Pan viewport - drag the plot",
+                )
+                .clicked()
+                {
+                    state.ui.results.plot_tool = ResultPlotTool::Pan;
+                }
+
+                instrument_separator(ui);
+                if instrument_control(ui, "Z+", false, "Zoom active pane in 2x").clicked() {
+                    waves::zoom_active_pane(state, &t, 0.5);
+                }
+                if instrument_control(ui, "Z-", false, "Zoom active pane out 2x").clicked() {
+                    waves::zoom_active_pane(state, &t, 2.0);
+                }
+                if instrument_control(ui, "FIT", false, "Fit active waveform pane").clicked() {
+                    waves::fit_active_pane(state, &t);
+                }
+
+                instrument_separator(ui);
+                if ui
+                    .add_enabled_ui(limits_available, |ui| {
+                        instrument_control(
+                            ui,
+                            "LIM",
+                            state.ui.results.show_spec_limits,
+                            "Show exact compatible project specification limits",
+                        )
+                    })
+                    .inner
+                    .clicked()
+                {
+                    state.ui.results.show_spec_limits = !state.ui.results.show_spec_limits;
+                }
+                if ui
+                    .add_enabled_ui(envelope_available, |ui| {
+                        instrument_control(
+                            ui,
+                            "ENV",
+                            state.ui.results.show_family_envelope,
+                            "Show min/max envelope from retained family samples",
+                        )
+                    })
+                    .inner
+                    .clicked()
+                {
+                    state.ui.results.show_family_envelope = !state.ui.results.show_family_envelope;
+                }
+                if instrument_control(
+                    ui,
+                    "GRID",
+                    state.ui.results.show_minor_grid,
+                    "Show minor waveform grid",
+                )
+                .clicked()
+                {
+                    state.ui.results.show_minor_grid = !state.ui.results.show_minor_grid;
+                }
+                if ui
+                    .add_enabled_ui(marker_available, |ui| {
+                        instrument_control(
+                            ui,
+                            "+M",
+                            false,
+                            "Drop marker at cursor A on selected or nearest visible trace",
+                        )
+                    })
+                    .inner
+                    .clicked()
+                {
+                    waves::drop_marker_at_cursor_a(state, &t);
+                }
+            },
+        );
     });
 }
 
-const RESULT_DOCBAR_DESKTOP_HEIGHT: f32 = 41.0;
-const RESULT_DOCBAR_PHONE_HEIGHT: f32 = 39.0;
-const RESULT_DOCBAR_PHONE_BREAKPOINT: f32 = 560.0;
-const RESULT_ACTIONS_COMPACT_BREAKPOINT: f32 = 760.0;
-
-fn result_docbar_height(local_width: f32) -> f32 {
-    if local_width <= RESULT_DOCBAR_PHONE_BREAKPOINT {
-        RESULT_DOCBAR_PHONE_HEIGHT
-    } else {
-        RESULT_DOCBAR_DESKTOP_HEIGHT
+fn instrument_control<'a>(
+    ui: &mut Ui,
+    label: &'a str,
+    active: bool,
+    tooltip: &'a str,
+) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
+    let galley = ui.painter().layout_no_wrap(
+        label.to_owned(),
+        theme::mono(tokens::FS_0, FontWeight::Medium),
+        if active {
+            t.color.accent
+        } else {
+            t.color.text_dim
+        },
+    );
+    let width = (galley.size().x + 12.0).max(26.0);
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(width, RESULT_INSTRUMENT_CONTROL_HEIGHT),
+        egui::Sense::click(),
+    );
+    response
+        .widget_info(|| WidgetInfo::selected(WidgetType::Button, ui.is_enabled(), active, tooltip));
+    if ui.is_rect_visible(rect) {
+        let hover = response.hovered();
+        if active || hover {
+            ui.painter().rect_filled(
+                rect,
+                2.0,
+                if active {
+                    t.color.accent_dim
+                } else {
+                    t.color.bg_hover
+                },
+            );
+        }
+        if active {
+            ui.painter().hline(
+                egui::Rangef::new(rect.left() + 2.0, rect.right() - 2.0),
+                rect.bottom() - 0.5,
+                egui::Stroke::new(1.0, t.color.accent),
+            );
+        }
+        ui.painter().galley(
+            egui::pos2(
+                rect.center().x - galley.size().x * 0.5,
+                rect.center().y - galley.size().y * 0.5,
+            ),
+            galley,
+            if active {
+                t.color.accent
+            } else if hover {
+                t.color.text
+            } else {
+                t.color.text_dim
+            },
+        );
+        theme::paint_focus_ring(ui, &response, rect);
     }
+    response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(tooltip)
 }
 
-fn result_trailing_width(local_width: f32, viewer: ResultViewer) -> f32 {
-    if local_width <= RESULT_ACTIONS_COMPACT_BREAKPOINT {
-        return local_width.min(92.0);
-    }
-    let desired: f32 = match viewer {
-        ResultViewer::Waves => 390.0,
-        ResultViewer::Op => 300.0,
-        ResultViewer::Specs => 230.0,
-        ResultViewer::Table => 420.0,
-        ResultViewer::Eye => 150.0,
-        ResultViewer::Fft => 230.0,
-        _ => 90.0,
-    };
-    desired.min(local_width * 0.55)
+fn instrument_separator(ui: &mut Ui) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(7.0, 17.0), egui::Sense::hover());
+    ui.painter().vline(
+        rect.center().x,
+        rect.y_range(),
+        egui::Stroke::new(1.0, Tokens::get(ui.ctx()).color.border),
+    );
+}
+
+fn sheet_purpose(state: &AppState) -> String {
+    let viewer = state.ui.results.viewer;
+    let detail = viewer_availability(state, viewer).reason;
+    format!("{} · {detail}", viewer.tab_label())
 }
 
 fn export_menu(ui: &mut Ui, state: &mut AppState) {
@@ -1400,234 +2258,15 @@ fn inline_result_actions(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
-fn compact_result_actions(ui: &mut Ui, state: &mut AppState) {
-    ui.menu_button("Actions…", |ui| {
-        ui.set_min_width(230.0);
-        if ui.button("Export result data (CSV)…").clicked() {
-            state.ui.export_csv_requested = true;
-            ui.close();
-        }
-        if ui.button("Export viewer image (PNG)…").clicked() {
-            state.ui.export_png_requested = true;
-            ui.close();
-        }
-        ui.separator();
-        match state.ui.results.viewer {
-            ResultViewer::Waves => {
-                if !state.ui.results.hidden_strips.is_empty()
-                    && ui.button("Restore hidden strips").clicked()
-                {
-                    state.ui.results.hidden_strips.clear();
-                    ui.close();
-                }
-                if ui.button("Clear cursors A/B").clicked() {
-                    state.ui.results.clear_cursors();
-                    ui.close();
-                }
-                // The readout strip edits markers one row at a time; this is
-                // the way out when there are more of them than rows.
-                let markers = state.ui.results.markers.len();
-                if markers > 0 && ui.button(format!("Remove all {markers} markers")).clicked() {
-                    state.ui.results.markers.clear();
-                    state.ui.results.editing_marker = None;
-                    ui.close();
-                }
-                let mut linked = state.ui.results.linked_cursors;
-                if ui.checkbox(&mut linked, "Linked A/B cursors").changed() {
-                    state.ui.results.linked_cursors = linked;
-                }
-            }
-            ResultViewer::Eye => {
-                ui.checkbox(
-                    &mut state.analysis.eye_diagram_state.show_mask,
-                    "Compliance mask",
-                );
-            }
-            ResultViewer::Op => {
-                ui.label("Device filter");
-                let response = ui.add(
-                    egui::TextEdit::singleline(&mut state.ui.results.op_filter)
-                        .desired_width(210.0)
-                        .font(theme::mono(tokens::FS_1, FontWeight::Regular))
-                        .hint_text("filter devices…"),
-                );
-                if response.changed() {
-                    ui.ctx().request_repaint();
-                }
-                if !state.ui.results.op_filter.is_empty() && ui.button("Clear filter").clicked() {
-                    state.ui.results.op_filter.clear();
-                }
-            }
-            ResultViewer::Specs => {
-                if state.ui.results.spec_drafts.is_some() {
-                    if ui.button("Discard specification edits").clicked() {
-                        state.ui.results.spec_drafts = None;
-                        ui.close();
-                    }
-                    if ui.button("Apply specification edits").clicked() {
-                        if !specs::apply_drafts(state) {
-                            state.push_sim_message(crate::diagnostics::ConsoleMessage::warning(
-                                "Specs not applied — fix the invalid bound first",
-                            ));
-                        } else {
-                            ui.close();
-                        }
-                    }
-                } else if ui.button("Edit specifications…").clicked() {
-                    specs::open_editor(state);
-                    ui.close();
-                }
-            }
-            ResultViewer::Fft => {
-                if let Some(data) = state.analysis.fft_state.data.as_ref() {
-                    ui.label(format!(
-                        "{} · {}",
-                        data.window.display_name(),
-                        data.fft_size
-                    ));
-                }
-            }
-            _ => {
-                ui.label("No viewer-local controls");
-            }
-        }
-    });
-}
-
-/// The run shelf: run context + overlay control in one docbar popover.
-///
-/// Grammar per the results-v2 design: the active run reads in the button
-/// (with the overlay count when comparing); the popover lists the history —
-/// status dot, label, analyses, elapsed — with click-to-activate rows and
-/// per-run overlay toggles ("signal owns hue, run owns weight").
-fn run_selector(ui: &mut Ui, state: &mut AppState) {
-    let t = Tokens::get(ui.ctx());
-    let overlay_count = state.simulation.overlay_dataset_ids.len();
-    let label = match state.simulation.active_run() {
-        Some(run) if overlay_count > 0 => format!("run #{} +{overlay_count}", run.id),
-        Some(run) => format!("run #{}", run.id),
-        None => "no runs".to_owned(),
-    };
-
-    let mut select_run: Option<usize> = None;
-    let mut toggle_overlay: Option<DatasetId> = None;
-    let mut clear_overlays = false;
-
-    ui.menu_button(
-        egui::RichText::new(label).font(theme::mono(tokens::FS_1, FontWeight::Regular)),
-        |ui| {
-            ui.set_min_width(290.0);
-            let active_id = state.simulation.active_run().map(|run| run.dataset_id);
-
-            for (index, run) in state.simulation.runs.iter().enumerate() {
-                let is_active = Some(run.dataset_id) == active_id;
-                let overlaid = state.simulation.is_dataset_overlaid(run.dataset_id);
-
-                ui.horizontal(|ui| {
-                    // Status dot: ok / failed.
-                    let (dot, _) =
-                        ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-                    ui.painter().circle_filled(
-                        dot.center(),
-                        3.0,
-                        if run.success { t.color.ok } else { t.color.err },
-                    );
-
-                    // Row body: click activates the run.
-                    let analyses: Vec<&str> = run
-                        .analyses
-                        .iter()
-                        .map(|analysis| analysis.analysis_type.short_label())
-                        .collect();
-                    let body = format!(
-                        "{} · {} · {:.1} s",
-                        run.label,
-                        if analyses.is_empty() {
-                            "no analyses".to_owned()
-                        } else {
-                            analyses.join(" ")
-                        },
-                        run.elapsed_time
-                    );
-                    let accessibility_body = body.clone();
-                    let text = egui::RichText::new(body)
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(if is_active {
-                            t.color.text
-                        } else {
-                            t.color.text_dim
-                        });
-                    let run_response = ui
-                        .add(egui::Label::new(text).sense(egui::Sense::click()))
-                        .on_hover_text("Activate this run");
-                    run_response.widget_info(|| {
-                        egui::WidgetInfo::labeled(
-                            egui::WidgetType::SelectableLabel,
-                            ui.is_enabled(),
-                            &accessibility_body,
-                        )
-                    });
-                    ui.ctx().accesskit_node_builder(run_response.id, |node| {
-                        node.set_role(egui::accesskit::Role::ListBoxOption);
-                        node.set_selected(is_active);
-                    });
-                    theme::paint_focus_ring(ui, &run_response, run_response.rect);
-                    if run_response.clicked() {
-                        select_run = Some(index);
-                        ui.close();
-                    }
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if is_active {
-                            ui.label(
-                                egui::RichText::new("active")
-                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                    .color(t.color.accent),
-                            );
-                        } else {
-                            let mut on = overlaid;
-                            if ui
-                                .checkbox(&mut on, "overlay")
-                                .on_hover_text(
-                                    "Draw this run's traces under the active run \
-                                     (same signal color, reduced weight)",
-                                )
-                                .changed()
-                            {
-                                toggle_overlay = Some(run.dataset_id);
-                            }
-                        }
-                    });
-                });
-            }
-
-            if overlay_count > 0 {
-                ui.separator();
-                if ui.button("Clear overlays").clicked() {
-                    clear_overlays = true;
-                    ui.close();
-                }
-            }
-        },
-    )
-    .response
-    .on_hover_text("Run history — activate a run or overlay runs for comparison");
-
-    if let Some(index) = select_run {
-        state.simulation.select_run(index);
-        state.ui.results.clear_cursors();
-    }
-    if let Some(dataset_id) = toggle_overlay {
-        state.simulation.toggle_dataset_overlay(dataset_id);
-        state.ui.results.clear_cursors();
-    }
-    if clear_overlays {
-        state.simulation.clear_dataset_overlays();
-        state.ui.results.clear_cursors();
-    }
-}
-
 fn viewer_tabs(ui: &mut Ui, state: &mut AppState) {
+    viewer_tabs_filtered(ui, state, |_| true);
+}
+
+fn viewer_tabs_filtered(
+    ui: &mut Ui,
+    state: &mut AppState,
+    mut include: impl FnMut(ResultViewer) -> bool,
+) {
     let t = Tokens::get(ui.ctx());
     ui.spacing_mut().item_spacing.x = 0.0;
 
@@ -1635,30 +2274,45 @@ fn viewer_tabs(ui: &mut Ui, state: &mut AppState) {
     let mut clicked: Option<ResultViewer> = None;
 
     for viewer in ResultViewer::PRIMARY {
-        if viewer_tab(
-            ui,
-            viewer,
-            current == viewer,
-            viewer_availability(state, viewer),
-        ) {
+        let availability = viewer_availability(state, viewer);
+        if !include(viewer) || !availability.available {
+            continue;
+        }
+        if viewer_tab(ui, viewer, current == viewer, availability) {
             clicked = Some(viewer);
         }
     }
-    // Legacy surfaces, gated on data availability and visually set apart.
-    let tab_height = ui.available_height().min(40.0);
-    let (sep, _) = ui.allocate_exact_size(egui::vec2(13.0, tab_height), egui::Sense::hover());
-    ui.painter().vline(
-        sep.center().x,
-        egui::Rangef::new(sep.center().y - 7.0, sep.center().y + 7.0),
-        egui::Stroke::new(1.0, t.color.border),
-    );
+    let has_primary = ResultViewer::PRIMARY
+        .into_iter()
+        .any(|viewer| include(viewer) && viewer_availability(state, viewer).available);
+    let has_legacy = ResultViewer::LEGACY
+        .into_iter()
+        .any(|viewer| include(viewer) && viewer_availability(state, viewer).available);
+    if has_primary && has_legacy {
+        // Legacy surfaces, gated on data availability and visually set apart.
+        let tab_height = ui.available_height().min(40.0);
+        let (sep, _) = ui.allocate_exact_size(egui::vec2(13.0, tab_height), egui::Sense::hover());
+        ui.painter().vline(
+            sep.center().x,
+            egui::Rangef::new(sep.center().y - 7.0, sep.center().y + 7.0),
+            egui::Stroke::new(1.0, t.color.border),
+        );
+    }
     for viewer in ResultViewer::LEGACY {
-        if viewer_tab(
-            ui,
-            viewer,
-            current == viewer,
-            viewer_availability(state, viewer),
-        ) {
+        let availability = viewer_availability(state, viewer);
+        if !include(viewer) || !availability.available {
+            continue;
+        }
+        if viewer_tab(ui, viewer, current == viewer, availability) {
+            clicked = Some(viewer);
+        }
+    }
+    for viewer in ResultViewer::DATASET_NATIVE {
+        let availability = viewer_availability(state, viewer);
+        if !include(viewer) || !availability.available {
+            continue;
+        }
+        if viewer_tab(ui, viewer, current == viewer, availability) {
             clicked = Some(viewer);
         }
     }
@@ -1667,15 +2321,49 @@ fn viewer_tabs(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
+fn family_allows_viewer(family_label: &str, viewer: ResultViewer) -> bool {
+    if viewer == ResultViewer::Manifest {
+        return true;
+    }
+    match family_label {
+        "Waveform worksheet" => matches!(
+            viewer,
+            ResultViewer::Waves
+                | ResultViewer::Eye
+                | ResultViewer::TransferFunction
+                | ResultViewer::Table
+        ),
+        "Frequency & stability" => matches!(
+            viewer,
+            ResultViewer::Bode
+                | ResultViewer::NoiseContrib
+                | ResultViewer::TransferFunction
+                | ResultViewer::Nyquist
+                | ResultViewer::PoleZero
+        ),
+        "RF & network" => matches!(viewer, ResultViewer::Fft | ResultViewer::Smith),
+        "Statistics & yield" => matches!(viewer, ResultViewer::Hist | ResultViewer::Contribution),
+        // These specialist mockup families have no native quick modes. They
+        // resolve to the dataset manifest rather than substituting an
+        // unrelated electrical viewer.
+        "Digital & AMS events" | "Fields & physical" | "Photonics" | "Report page" => false,
+        // Imported or migrated documents with no recognized family label keep
+        // their exact retained panes reachable.
+        _ => true,
+    }
+}
+
 fn reconcile_active_viewer(state: &mut AppState) {
-    if !state.simulation.has_results()
-        || viewer_availability(state, state.ui.results.viewer).available
-    {
+    if viewer_availability(state, state.ui.results.viewer).available {
+        return;
+    }
+    if state.simulation.active_run().is_none() {
         return;
     }
     if let Some(viewer) = ResultViewer::PRIMARY
         .into_iter()
         .chain(ResultViewer::LEGACY)
+        .chain(ResultViewer::DATASET_NATIVE)
         .find(|viewer| viewer_availability(state, *viewer).available)
     {
         state.ui.results.viewer = viewer;
@@ -1697,19 +2385,26 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
             }
         }
         ResultViewer::Bode => {
-            if active_run
+            let has_ac_response = active_run
                 .and_then(|run| {
                     crate::state::ac_bode_summary_for_selection(
                         run,
                         state.simulation.active_analysis_idx,
                     )
                 })
-                .is_some()
-            {
-                ViewerAvailability::available("AC magnitude response is available")
+                .is_some();
+            let has_noise_spectrum = active_run.is_some_and(|run| {
+                run.analyses
+                    .iter()
+                    .any(bode::ordinary_noise_spectrum_is_renderable)
+            });
+            if has_ac_response || has_noise_spectrum {
+                ViewerAvailability::available(
+                    "An AC response or ordinary noise spectrum is available",
+                )
             } else {
                 ViewerAvailability::unavailable(
-                    "Requires a usable AC magnitude response in the active dataset",
+                    "Requires a usable AC response or ordinary noise spectrum in the active dataset",
                 )
             }
         }
@@ -1717,14 +2412,12 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         ResultViewer::Eye => specialized_availability(state, ActiveViewer::EyeDiagram),
         ResultViewer::Hist => specialized_availability(state, ActiveViewer::Histogram),
         ResultViewer::Op => {
-            if active_run.is_some_and(|run| {
-                run.analyses.iter().any(|analysis| {
-                    analysis
-                        .device_op
-                        .as_ref()
-                        .is_some_and(|report| !report.is_empty())
-                })
-            }) {
+            if state
+                .simulation
+                .active_analysis()
+                .and_then(|analysis| analysis.device_op.as_ref())
+                .is_some_and(|report| !report.is_empty())
+            {
                 ViewerAvailability::available("Device operating-point data is available")
             } else {
                 ViewerAvailability::unavailable(
@@ -1796,6 +2489,13 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         ResultViewer::Nyquist => specialized_availability(state, ActiveViewer::Nyquist),
         ResultViewer::Smith => specialized_availability(state, ActiveViewer::SmithChart),
         ResultViewer::PoleZero => specialized_availability(state, ActiveViewer::PoleZero),
+        ResultViewer::Manifest => {
+            if active_run.is_some() {
+                ViewerAvailability::available("The immutable active-dataset inventory is available")
+            } else {
+                ViewerAvailability::unavailable("Requires a selected retained dataset")
+            }
+        }
     }
 }
 
@@ -1822,21 +2522,25 @@ fn viewer_tab(
 
     let mut job = egui::text::LayoutJob::default();
     job.append(
-        viewer.label(),
+        viewer.tab_label(),
         0.0,
         egui::TextFormat {
-            font_id: theme::mono(tokens::FS_0, FontWeight::Regular),
+            font_id: theme::sans(tokens::FS_1, FontWeight::Regular),
             color: egui::Color32::PLACEHOLDER,
-            extra_letter_spacing: 0.05 * tokens::FS_0,
             ..Default::default()
         },
     );
     let galley = ui.fonts_mut(|f| f.layout_job(job));
 
-    let height = ui.available_height().min(40.0);
-    let horizontal_padding = if height <= 38.5 { 16.0 } else { 20.0 };
+    let height = RESULT_VIEWER_TAB_HEIGHT.min(ui.available_height());
+    let horizontal_padding = 20.0;
+    let icon_width = 13.0;
+    let icon_gap = 6.0;
     let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(galley.size().x + horizontal_padding, height),
+        egui::vec2(
+            galley.size().x + horizontal_padding + icon_width + icon_gap,
+            height,
+        ),
         if availability.available {
             egui::Sense::click()
         } else {
@@ -1847,7 +2551,7 @@ fn viewer_tab(
         WidgetInfo::labeled(
             WidgetType::SelectableLabel,
             availability.available && ui.is_enabled(),
-            viewer.label(),
+            viewer.tab_label(),
         )
     });
     ui.ctx().accesskit_node_builder(response.id, |node| {
@@ -1882,9 +2586,17 @@ fn viewer_tab(
     if fill != egui::Color32::TRANSPARENT {
         painter.rect_filled(rect, 0.0, fill);
     }
+    let icon_rect = egui::Rect::from_center_size(
+        egui::pos2(
+            rect.left() + horizontal_padding * 0.5 + icon_width * 0.5,
+            rect.center().y,
+        ),
+        egui::vec2(icon_width, icon_width),
+    );
+    viewer.tab_icon().paint(painter, icon_rect, text_color);
     painter.galley(
         egui::pos2(
-            rect.left() + horizontal_padding * 0.5,
+            icon_rect.right() + icon_gap,
             rect.center().y - galley.size().y * 0.5,
         ),
         galley,
@@ -1967,9 +2679,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ResultViewer::Nyquist => nyquist::right_panel(ui, state),
         ResultViewer::Smith => smith::right_panel(ui, state),
         ResultViewer::PoleZero => pz::right_panel(ui, state),
+        ResultViewer::Manifest => manifest::right_panel(ui, state),
     }
 }
-
 
 #[cfg(test)]
 mod availability_tests {
@@ -1989,24 +2701,121 @@ mod availability_tests {
     }
 
     #[test]
+    fn presentation_state_follows_analysis_identity_after_reorder() {
+        let first =
+            AnalysisResult::new(101, AnalysisType::Transient, "TRAN A").with_waveforms(vec![
+                WaveformData::new("V(a)", vec![0.0, 1.0], vec![1.0, 2.0], "#ffbd2e"),
+            ]);
+        let second =
+            AnalysisResult::new(202, AnalysisType::Transient, "TRAN B").with_waveforms(vec![
+                WaveformData::new("V(b)", vec![0.0, 1.0], vec![3.0, 4.0], "#4ec9b0"),
+            ]);
+        let mut state = AppState::default();
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(first);
+        run.add_analysis(second);
+        let dataset_id = run.dataset_id;
+        let first_key = AnalysisPresentationKey::new(dataset_id, &run.analyses[0]);
+        let second_key = AnalysisPresentationKey::new(dataset_id, &run.analyses[1]);
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+
+        state.ui.results.hidden_strips.insert(first_key);
+        state.ui.results.maximized_strip = Some(second_key);
+        state.ui.results.analysis_exprs.insert(
+            first_key,
+            vec![ExprTrace {
+                text: "V(a) * 2".to_owned(),
+                visible: true,
+            }],
+        );
+        state
+            .ui
+            .results
+            .analysis_plot_view_pane_mut(ResultViewer::Waves, first_key, 0)
+            .x = Some((0.25, 0.75));
+        state.ui.results.table.analysis = Some(second_key);
+
+        state.simulation.runs[0].analyses.swap(0, 1);
+        let reordered = state.simulation.active_run().expect("active retained run");
+        assert_eq!(
+            first_key.resolve(reordered).map(|(index, _)| index),
+            Some(1)
+        );
+        assert_eq!(
+            second_key.resolve(reordered).map(|(index, _)| index),
+            Some(0)
+        );
+        assert!(state.ui.results.hidden_strips.contains(&first_key));
+        assert_eq!(state.ui.results.maximized_strip, Some(second_key));
+        assert_eq!(
+            state.ui.results.analysis_exprs[&first_key][0].text,
+            "V(a) * 2"
+        );
+        assert_eq!(
+            state
+                .ui
+                .results
+                .analysis_plot_view_pane(ResultViewer::Waves, first_key, 0)
+                .x,
+            Some((0.25, 0.75))
+        );
+        assert_eq!(state.ui.results.table.analysis, Some(second_key));
+    }
+
+    #[test]
+    fn table_and_marker_waveform_identity_survive_waveform_reorder() {
+        let analysis =
+            AnalysisResult::new(101, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new("V(a)", vec![0.0, 1.0], vec![1.0, 2.0], "#ffbd2e"),
+                WaveformData::new("V(b)", vec![0.0, 1.0], vec![3.0, 4.0], "#4ec9b0"),
+            ]);
+        let mut state = state_with_analysis(analysis);
+        let run = state.simulation.active_run().expect("active retained run");
+        let analysis_key = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+        let trace = TracePresentationKey {
+            source_name: "V(a)".to_owned(),
+            kind: 0,
+            family_group: 0,
+        };
+        let waveform = WaveformPresentationKey {
+            analysis: analysis_key,
+            trace: trace.clone(),
+        };
+        state.ui.results.table.analysis = Some(analysis_key);
+        state.ui.results.table.columns = vec![trace];
+        state
+            .ui
+            .results
+            .add_marker(analysis_key, waveform.clone(), "V(a)".to_owned(), 0.5);
+
+        state.simulation.runs[0].analyses[0].waveforms.swap(0, 1);
+        assert_eq!(
+            state.ui.results.table.columns[0].source_name, "V(a)",
+            "the selected table column must not become the new waveform at slot zero"
+        );
+        assert_eq!(state.ui.results.markers[0].anchor, waveform);
+        assert_eq!(
+            state.ui.results.markers[0].anchor.trace.source_name, "V(a)",
+            "the marker must remain attached to its source signal"
+        );
+    }
+
+    #[test]
     fn selected_trace_identity_fails_closed_after_active_dataset_changes() {
         let analysis =
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
                 WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e"),
             ]);
         let mut state = state_with_analysis(analysis.clone());
-        let dataset_id = state
-            .simulation
-            .active_run()
-            .expect("active retained run")
-            .dataset_id
-            .clone();
-        state.ui.results.selected_trace = Some(SelectedResultTrace {
-            dataset_id,
-            analysis_index: 0,
-            waveform_index: 0,
-            source_name: "V(out)".to_owned(),
-        });
+        state.ui.results.selected_trace = Some(
+            SelectedResultTrace::from_run_indices(
+                state.simulation.active_run().expect("active retained run"),
+                0,
+                0,
+            )
+            .expect("selected retained trace"),
+        );
         assert!(
             state
                 .ui
@@ -2044,6 +2853,35 @@ mod availability_tests {
         assert!(!viewer_availability(&state, ResultViewer::Hist).available);
         assert!(!viewer_availability(&state, ResultViewer::NoiseContrib).available);
         assert!(!viewer_availability(&state, ResultViewer::Contribution).available);
+    }
+
+    #[test]
+    fn op_viewer_requires_the_selected_analysis_device_report() {
+        let report = rspice_core::circuit::DeviceOpReport {
+            entries: vec![rspice_core::circuit::DeviceOpEntry {
+                name: "M1".to_owned(),
+                device_kind: "MOSFET",
+                region: Some("saturation"),
+                params: Vec::new(),
+            }],
+        };
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::DcOp, "OP with report").with_device_op(report),
+        );
+        run.add_analysis(AnalysisResult::new(
+            2,
+            AnalysisType::DcOp,
+            "OP without report",
+        ));
+        let mut state = AppState::default();
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+
+        assert!(state.simulation.select_analysis(1));
+        assert!(!viewer_availability(&state, ResultViewer::Op).available);
+        assert!(state.simulation.select_analysis(0));
+        assert!(viewer_availability(&state, ResultViewer::Op).available);
     }
 
     #[test]
@@ -2089,11 +2927,96 @@ mod availability_tests {
     }
 
     #[test]
-    fn result_strip_matches_mockup_heights_and_bounds_trailing_controls() {
-        assert_eq!(result_docbar_height(1280.0), 41.0);
-        assert_eq!(result_docbar_height(390.0), 39.0);
-        assert_eq!(result_trailing_width(390.0, ResultViewer::Waves), 92.0);
-        assert!(result_trailing_width(720.0, ResultViewer::Waves) <= 720.0 * 0.55);
+    fn result_shell_matches_mockup_bar_geometry() {
+        assert_eq!(RESULT_VIEWER_TABS_HEIGHT, 41.0);
+        assert_eq!(RESULT_VIEWER_TAB_HEIGHT, 30.0);
+        assert_eq!(RESULT_SHEET_BAR_HEIGHT, 31.0);
+        assert_eq!(RESULT_INSTRUMENT_CONTROL_HEIGHT, 23.0);
+    }
+
+    #[test]
+    fn structured_result_documents_collapse_the_conditional_sheet_bar() {
+        for viewer in [
+            ResultViewer::Op,
+            ResultViewer::TransferFunction,
+            ResultViewer::Specs,
+            ResultViewer::Table,
+            ResultViewer::Manifest,
+        ] {
+            assert!(!viewer_has_sheet_bar(viewer), "{viewer:?}");
+        }
+        for viewer in [
+            ResultViewer::Waves,
+            ResultViewer::Bode,
+            ResultViewer::Fft,
+            ResultViewer::Eye,
+            ResultViewer::Hist,
+            ResultViewer::NoiseContrib,
+            ResultViewer::Contribution,
+            ResultViewer::Nyquist,
+            ResultViewer::Smith,
+            ResultViewer::PoleZero,
+        ] {
+            assert!(viewer_has_sheet_bar(viewer), "{viewer:?}");
+        }
+    }
+
+    #[test]
+    fn persistent_document_families_expose_only_their_mockup_viewers() {
+        assert!(family_allows_viewer(
+            "Waveform worksheet",
+            ResultViewer::Waves
+        ));
+        assert!(family_allows_viewer(
+            "Waveform worksheet",
+            ResultViewer::Eye
+        ));
+        assert!(!family_allows_viewer(
+            "Waveform worksheet",
+            ResultViewer::Smith
+        ));
+
+        assert!(family_allows_viewer(
+            "Frequency & stability",
+            ResultViewer::Bode
+        ));
+        assert!(family_allows_viewer(
+            "Frequency & stability",
+            ResultViewer::PoleZero
+        ));
+        assert!(!family_allows_viewer(
+            "Frequency & stability",
+            ResultViewer::Hist
+        ));
+
+        assert!(family_allows_viewer(
+            "Statistics & yield",
+            ResultViewer::Contribution
+        ));
+        assert!(!family_allows_viewer(
+            "Statistics & yield",
+            ResultViewer::Nyquist
+        ));
+        assert!(!family_allows_viewer(
+            "Fields & physical",
+            ResultViewer::Waves
+        ));
+        assert!(!family_allows_viewer("Report page", ResultViewer::Waves));
+        for family in [
+            "Waveform worksheet",
+            "Frequency & stability",
+            "RF & network",
+            "Statistics & yield",
+            "Digital & AMS events",
+            "Fields & physical",
+            "Photonics",
+            "Report page",
+        ] {
+            assert!(
+                family_allows_viewer(family, ResultViewer::Manifest),
+                "{family}"
+            );
+        }
     }
 
     #[test]

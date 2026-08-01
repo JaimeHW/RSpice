@@ -315,28 +315,22 @@ impl SpecialistWorkspaceRow {
                 SurfaceId::ReleaseCockpit
                     | SurfaceId::MultiTestStudio
                     | SurfaceId::AmsWorkbench
+                    | SurfaceId::RfWorkbench
                     | SurfaceId::HighSigmaWorkbench
-                    | SurfaceId::LayoutWorkbench
-                    | SurfaceId::LvsPexWorkbench
-                    | SurfaceId::EmWorkbench
                     | SurfaceId::ReliabilityWorkbench
                     | SurfaceId::VisualizationStudio
                     | SurfaceId::DigitalEventWorkbench
                     | SurfaceId::StatisticalVisualizationWorkbench
                     | SurfaceId::ReportAuthoring
                     | SurfaceId::ModelEditor
-                    | SurfaceId::PcellDesigner
                     | SurfaceId::ModelExtraction
                     | SurfaceId::ModelCorrelation
                     | SurfaceId::JobDiagnostics
                     | SurfaceId::RegressionOrchestration
                     | SurfaceId::ApiBrowser
-                    | SurfaceId::FastspiceWorkbench
                     | SurfaceId::LibraryCharacterization
                     | SurfaceId::PdkTechnologyAdmin
                     | SurfaceId::CliBatchWorkbench
-                    | SurfaceId::DesignMigrationWorkbench
-                    | SurfaceId::CosimulationWorkbench
                     | SurfaceId::SolverQualificationCenter
                     | SurfaceId::DeckCompatibilityCenter
                     | SurfaceId::ProtectedIpCenter
@@ -349,14 +343,9 @@ impl SpecialistWorkspaceRow {
                     | SurfaceId::RfWorkbench
                     | SurfaceId::RfApplicationWorkbench
                     | SurfaceId::HighSigmaWorkbench
-                    | SurfaceId::LayoutWorkbench
-                    | SurfaceId::LvsPexWorkbench
-                    | SurfaceId::EmWorkbench
-                    | SurfaceId::SiPiWorkbench
                     | SurfaceId::ReliabilityWorkbench
                     | SurfaceId::VisualizationStudio
                     | SurfaceId::RfDataDisplayWorkbench
-                    | SurfaceId::MeasurementInterchangeWorkbench
                     | SurfaceId::StatisticalVisualizationWorkbench
                     | SurfaceId::ReportAuthoring
                     | SurfaceId::ModelEditor
@@ -366,9 +355,7 @@ impl SpecialistWorkspaceRow {
                     | SurfaceId::RegressionOrchestration
                     | SurfaceId::ApiBrowser
                     | SurfaceId::PdkTechnologyAdmin
-                    | SurfaceId::InstrumentWorkbench
                     | SurfaceId::CliBatchWorkbench
-                    | SurfaceId::CosimulationWorkbench
                     | SurfaceId::SolverQualificationCenter
                     | SurfaceId::DeckCompatibilityCenter
                     | SurfaceId::ProtectedIpCenter
@@ -378,22 +365,14 @@ impl SpecialistWorkspaceRow {
                 self.surface_id,
                 SurfaceId::ReleaseCockpit
                     | SurfaceId::MultiTestStudio
-                    | SurfaceId::EmWorkbench
-                    | SurfaceId::SiPiWorkbench
                     | SurfaceId::ReliabilityWorkbench
                     | SurfaceId::VisualizationStudio
-                    | SurfaceId::MeasurementInterchangeWorkbench
                     | SurfaceId::ReportAuthoring
                     | SurfaceId::JobDiagnostics
                     | SurfaceId::RegressionOrchestration
                     | SurfaceId::ApiBrowser
-                    | SurfaceId::HeterogeneousWorkbench
                     | SurfaceId::PdkTechnologyAdmin
-                    | SurfaceId::InstrumentWorkbench
-                    | SurfaceId::PcbWorkbench
                     | SurfaceId::CliBatchWorkbench
-                    | SurfaceId::CosimulationWorkbench
-                    | SurfaceId::ComplianceLabWorkbench
                     | SurfaceId::SolverQualificationCenter
                     | SurfaceId::DeckCompatibilityCenter
                     | SurfaceId::ProtectedIpCenter
@@ -403,10 +382,8 @@ impl SpecialistWorkspaceRow {
                 self.surface_id,
                 SurfaceId::ReleaseCockpit
                     | SurfaceId::MultiTestStudio
-                    | SurfaceId::EmWorkbench
                     | SurfaceId::ReliabilityWorkbench
                     | SurfaceId::VisualizationStudio
-                    | SurfaceId::MeasurementInterchangeWorkbench
                     | SurfaceId::StatisticalVisualizationWorkbench
                     | SurfaceId::ReportAuthoring
                     | SurfaceId::ModelEditor
@@ -415,10 +392,7 @@ impl SpecialistWorkspaceRow {
                     | SurfaceId::JobDiagnostics
                     | SurfaceId::RegressionOrchestration
                     | SurfaceId::ApiBrowser
-                    | SurfaceId::PowerElectronicsWorkbench
-                    | SurfaceId::InstrumentWorkbench
                     | SurfaceId::CliBatchWorkbench
-                    | SurfaceId::CosimulationWorkbench
                     | SurfaceId::SolverQualificationCenter
                     | SurfaceId::DeckCompatibilityCenter
                     | SurfaceId::ProtectedIpCenter
@@ -428,7 +402,6 @@ impl SpecialistWorkspaceRow {
                 self.surface_id,
                 SurfaceId::ReleaseCockpit
                     | SurfaceId::MultiTestStudio
-                    | SurfaceId::EmWorkbench
                     | SurfaceId::ReliabilityWorkbench
                     | SurfaceId::VisualizationStudio
                     | SurfaceId::ReportAuthoring
@@ -437,12 +410,8 @@ impl SpecialistWorkspaceRow {
                     | SurfaceId::JobDiagnostics
                     | SurfaceId::RegressionOrchestration
                     | SurfaceId::ApiBrowser
-                    | SurfaceId::PhotonicsWorkbench
-                    | SurfaceId::HeterogeneousWorkbench
                     | SurfaceId::PdkTechnologyAdmin
                     | SurfaceId::CliBatchWorkbench
-                    | SurfaceId::CosimulationWorkbench
-                    | SurfaceId::QuantumWorkbench
                     | SurfaceId::SolverQualificationCenter
                     | SurfaceId::DeckCompatibilityCenter
                     | SurfaceId::ProtectedIpCenter
@@ -479,8 +448,8 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 41] = [
         surface_id: SurfaceId::ReleaseCockpit,
         owner: Workspace::Verify,
         purpose: "Freeze, package, approve, promote, supersede, revoke, and roll back release candidates without overriding source-owned gates.",
-        tier: CanonicalTier::ReleaseTarget,
-        evidence_role: "eligible only when all capability gates pass",
+        tier: CanonicalTier::Preview,
+        evidence_role: "non-sign-off until separately qualified",
         primary_module_id: "results-verification",
         module_availability: CommercialModuleAvailability::Included,
     },
@@ -524,8 +493,8 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 41] = [
         surface_id: SurfaceId::LayoutWorkbench,
         owner: Workspace::Design,
         purpose: "Author hierarchical custom layout with exact geometry, connectivity, constraints, and in-design checks.",
-        tier: CanonicalTier::ReleaseTarget,
-        evidence_role: "eligible only when all capability gates pass",
+        tier: CanonicalTier::Preview,
+        evidence_role: "non-sign-off until separately qualified",
         primary_module_id: "physical-integration",
         module_availability: CommercialModuleAvailability::OptionalModule,
     },
@@ -578,8 +547,8 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 41] = [
         surface_id: SurfaceId::DigitalEventWorkbench,
         owner: Workspace::Results,
         purpose: "Inspect digital, analog, protocol, assertion, and mixed-domain events with linked exact-time navigation.",
-        tier: CanonicalTier::ReleaseTarget,
-        evidence_role: "eligible only when all capability gates pass",
+        tier: CanonicalTier::Preview,
+        evidence_role: "non-sign-off until separately qualified",
         primary_module_id: "results-verification",
         module_availability: CommercialModuleAvailability::Included,
     },
@@ -596,8 +565,8 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 41] = [
         surface_id: SurfaceId::MeasurementInterchangeWorkbench,
         owner: Workspace::Results,
         purpose: "Import, map, calibrate, de-embed, compare, and publish reviewed measurement datasets.",
-        tier: CanonicalTier::ReleaseTarget,
-        evidence_role: "eligible only when all capability gates pass",
+        tier: CanonicalTier::Preview,
+        evidence_role: "non-sign-off until separately qualified",
         primary_module_id: "results-verification",
         module_availability: CommercialModuleAvailability::Included,
     },
@@ -632,8 +601,8 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 41] = [
         surface_id: SurfaceId::PcellDesigner,
         owner: Workspace::Models,
         purpose: "Design typed parameterized geometry, terminals, interactions, tests, signing, and migrations.",
-        tier: CanonicalTier::ReleaseTarget,
-        evidence_role: "eligible only when all capability gates pass",
+        tier: CanonicalTier::Preview,
+        evidence_role: "non-sign-off until separately qualified",
         primary_module_id: "models-pdk",
         module_availability: CommercialModuleAvailability::Included,
     },
@@ -641,8 +610,8 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 41] = [
         surface_id: SurfaceId::ModelExtraction,
         owner: Workspace::Models,
         purpose: "Fit versioned model candidates to measured data with bounds, objectives, diagnostics, and retained histories.",
-        tier: CanonicalTier::ReleaseTarget,
-        evidence_role: "eligible only when all capability gates pass",
+        tier: CanonicalTier::Preview,
+        evidence_role: "non-sign-off until separately qualified",
         primary_module_id: "models-pdk",
         module_availability: CommercialModuleAvailability::Included,
     },
@@ -650,8 +619,8 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 41] = [
         surface_id: SurfaceId::ModelCorrelation,
         owner: Workspace::Models,
         purpose: "Correlate model predictions and qualified measurements with explicit metrics, uncertainty, and source bindings.",
-        tier: CanonicalTier::ReleaseTarget,
-        evidence_role: "eligible only when all capability gates pass",
+        tier: CanonicalTier::Preview,
+        evidence_role: "non-sign-off until separately qualified",
         primary_module_id: "models-pdk",
         module_availability: CommercialModuleAvailability::Included,
     },
@@ -668,8 +637,8 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 41] = [
         surface_id: SurfaceId::RegressionOrchestration,
         owner: Workspace::Netlist,
         purpose: "Orchestrate stable plan and command references, dependencies, retries, and artifact routing without copying setup.",
-        tier: CanonicalTier::ReleaseTarget,
-        evidence_role: "eligible only when all capability gates pass",
+        tier: CanonicalTier::Preview,
+        evidence_role: "non-sign-off until separately qualified",
         primary_module_id: "enterprise-automation",
         module_availability: CommercialModuleAvailability::EnterpriseControlled,
     },
@@ -677,8 +646,8 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 41] = [
         surface_id: SurfaceId::ApiBrowser,
         owner: Workspace::Netlist,
         purpose: "Discover typed automation objects, members, examples, permissions, compatibility, and sandbox behavior.",
-        tier: CanonicalTier::ReleaseTarget,
-        evidence_role: "eligible only when all capability gates pass",
+        tier: CanonicalTier::Preview,
+        evidence_role: "non-sign-off until separately qualified",
         primary_module_id: "enterprise-automation",
         module_availability: CommercialModuleAvailability::EnterpriseControlled,
     },
@@ -713,8 +682,8 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 41] = [
         surface_id: SurfaceId::LibraryCharacterization,
         owner: Workspace::Models,
         purpose: "Define cell sets, arcs, templates, conditions, execution, failures, formats, and publication candidates.",
-        tier: CanonicalTier::ReleaseTarget,
-        evidence_role: "eligible only when all capability gates pass",
+        tier: CanonicalTier::Preview,
+        evidence_role: "non-sign-off until separately qualified",
         primary_module_id: "models-pdk",
         module_availability: CommercialModuleAvailability::Included,
     },
@@ -722,8 +691,8 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 41] = [
         surface_id: SurfaceId::PdkTechnologyAdmin,
         owner: Workspace::Models,
         purpose: "Administer signed technology packages, layer resources, stream maps, recognition, extraction, trust, and audit.",
-        tier: CanonicalTier::ReleaseTarget,
-        evidence_role: "eligible only when all capability gates pass",
+        tier: CanonicalTier::Preview,
+        evidence_role: "non-sign-off until separately qualified",
         primary_module_id: "models-pdk",
         module_availability: CommercialModuleAvailability::Included,
     },
@@ -740,8 +709,8 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 41] = [
         surface_id: SurfaceId::InstrumentWorkbench,
         owner: Workspace::Results,
         purpose: "Configure safe instrument sessions, calibration, acquisition, uncertainty, de-embedding, and reviewed publication.",
-        tier: CanonicalTier::ReleaseTarget,
-        evidence_role: "eligible only when all capability gates pass",
+        tier: CanonicalTier::Preview,
+        evidence_role: "non-sign-off until separately qualified",
         primary_module_id: "results-verification",
         module_availability: CommercialModuleAvailability::Included,
     },
@@ -767,8 +736,8 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 41] = [
         surface_id: SurfaceId::DesignMigrationWorkbench,
         owner: Workspace::Design,
         purpose: "Dry-run and review technology, device, geometry, electrical, verification, and rollback migrations.",
-        tier: CanonicalTier::ReleaseTarget,
-        evidence_role: "eligible only when all capability gates pass",
+        tier: CanonicalTier::Preview,
+        evidence_role: "non-sign-off until separately qualified",
         primary_module_id: "physical-integration",
         module_availability: CommercialModuleAvailability::OptionalModule,
     },
@@ -812,8 +781,8 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 41] = [
         surface_id: SurfaceId::SolverQualificationCenter,
         owner: Workspace::Simulate,
         purpose: "Qualify numerical engines, analyses, models, targets, platforms, tolerances, and reproducibility independently.",
-        tier: CanonicalTier::ReleaseTarget,
-        evidence_role: "eligible only when all capability gates pass",
+        tier: CanonicalTier::Internal,
+        evidence_role: "internal qualification authority only",
         primary_module_id: "enterprise-automation",
         module_availability: CommercialModuleAvailability::EnterpriseControlled,
     },
@@ -830,8 +799,8 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 41] = [
         surface_id: SurfaceId::ProtectedIpCenter,
         owner: Workspace::Models,
         purpose: "Review package trust, entitlement, target eligibility, redaction, diagnostics, retention, and protected execution policy.",
-        tier: CanonicalTier::ReleaseTarget,
-        evidence_role: "eligible only when all capability gates pass",
+        tier: CanonicalTier::Preview,
+        evidence_role: "non-sign-off until separately qualified",
         primary_module_id: "models-pdk",
         module_availability: CommercialModuleAvailability::Included,
     },

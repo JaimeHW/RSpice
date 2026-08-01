@@ -2,7 +2,6 @@
 
 use egui::{Align, Frame, Layout, Panel, Sense, Ui, Vec2};
 
-use crate::state::SchematicGridPitch;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
@@ -36,6 +35,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 app.state.project_lifecycle.project_open,
                 app.state.schematic.is_dirty || app.state.workspace.any_dirty(),
                 app.state.workspace.project.revision().get(),
+                app.state.workspace.project.display_name(),
             );
             let zoom_command = if app.state.workbench.workspace == Workspace::Results {
                 Command::ZoomFit
@@ -117,8 +117,13 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         if visibility.selection {
                             status_item_sized(ui, &selection, StatusMark::None, false, widths[2]);
                         }
-                        status_item_sized(ui, &revision.text, revision_mark, false, widths[3])
-                            .on_hover_text(&revision.detail);
+                        let revision_response =
+                            status_item_sized(ui, &revision.text, revision_mark, false, widths[3]);
+                        ui.ctx()
+                            .accesskit_node_builder(revision_response.id, |node| {
+                                node.set_description(revision.detail.clone());
+                            });
+                        revision_response.on_hover_text(&revision.detail);
                     },
                 );
 
@@ -295,40 +300,49 @@ struct RevisionStatus {
     dirty: bool,
 }
 
-fn revision_status_summary(project_open: bool, dirty: bool, revision: u64) -> RevisionStatus {
+fn revision_status_summary(
+    project_open: bool,
+    dirty: bool,
+    revision: u64,
+    project_name: &str,
+) -> RevisionStatus {
     if !project_open {
         return RevisionStatus {
-            text: "No project revision".to_owned(),
-            detail: "Open a project to establish revision state".to_owned(),
+            text: "No project".to_owned(),
+            detail: "No project open".to_owned(),
             dirty: false,
         };
     }
     if dirty {
         RevisionStatus {
-            text: "Unsaved".to_owned(),
-            detail: format!("Project revision {revision} has unsaved changes"),
+            text: "Unsaved changes".to_owned(),
+            detail: format!("Unsaved changes in {project_name}; press Control S to save"),
             dirty: true,
         }
     } else {
         RevisionStatus {
             text: "Saved".to_owned(),
-            detail: format!("Project revision {revision} is saved"),
+            detail: format!("Project saved; no unsaved changes at revision {revision}"),
             dirty: false,
         }
     }
 }
 
-fn schematic_pitch_mm(pitch: SchematicGridPitch) -> f64 {
-    match pitch {
-        SchematicGridPitch::Mil50 => 1.27,
-        SchematicGridPitch::Mil25 => 0.635,
-        SchematicGridPitch::Metric => 0.5,
-    }
+fn schematic_cursor_summary(
+    state: &crate::workbench::app_state::AppState,
+    grid_x: f64,
+    grid_y: f64,
+) -> String {
+    let grid = f64::from(state.schematic.grid_size.max(1));
+    let sheet = crate::schematic::view::drawing_sheet::ActiveDrawingSheet::resolve(state);
+    sheet.cursor_status(grid_x * grid, grid_y * grid)
 }
 
-fn schematic_coordinates_summary(x: f64, y: f64, pitch: SchematicGridPitch) -> String {
-    let pitch_mm = schematic_pitch_mm(pitch);
-    format!("x {:.2} · y {:.2} mm", x * pitch_mm, y * pitch_mm)
+fn empty_schematic_cursor_summary(state: &crate::workbench::app_state::AppState) -> String {
+    let unit = crate::schematic::view::drawing_sheet::ActiveDrawingSheet::resolve(state)
+        .format
+        .display_unit;
+    format!("x — · y — {}", unit.suffix())
 }
 
 fn engineering_context_summary(app: &RSpiceApp) -> String {
@@ -336,42 +350,45 @@ fn engineering_context_summary(app: &RSpiceApp) -> String {
         return "No project loaded".to_owned();
     }
     match app.state.workbench.workspace {
-        Workspace::Design => app.state.ui.canvas_hover.map_or_else(
-            || {
-                if matches!(
-                    app.state.workspace.active_view_type(),
-                    crate::state::ViewType::Layout
-                ) {
-                    "x — · y — layout".to_owned()
-                } else {
-                    "x — · y — mm".to_owned()
-                }
-            },
-            |(x, y)| {
-                if matches!(
-                    app.state.workspace.active_view_type(),
-                    crate::state::ViewType::Layout
-                ) {
-                    app.state.pdk_config.layout_database_unit.map_or_else(
-                        || format!("x {x:.0} · y {y:.0} DBU unavailable"),
-                        |dbu| {
-                            let policy = app.state.ui.preferences.quantity_presentation_policy();
-                            format!(
-                                "x {} · y {}",
-                                policy.format_layout_coordinate(x, dbu),
-                                policy.format_layout_coordinate(y, dbu)
-                            )
-                        },
-                    )
-                } else {
-                    schematic_coordinates_summary(
-                        x,
-                        y,
-                        app.state.schematic.document_policy.grid_pitch,
-                    )
-                }
-            },
-        ),
+        Workspace::Design => {
+            let view_type = app.state.workspace.active_view_type();
+            app.state.ui.canvas_hover.map_or_else(
+                || match view_type {
+                    crate::state::ViewType::Schematic | crate::state::ViewType::Testbench => {
+                        empty_schematic_cursor_summary(&app.state)
+                    }
+                    crate::state::ViewType::Layout => "x — · y — layout".to_owned(),
+                    crate::state::ViewType::Symbol => {
+                        format!("x — · y — · grid {}", app.state.schematic.grid_size.max(1))
+                    }
+                    _ => format!("revision {}", app.state.workspace.project.revision().get()),
+                },
+                |(x, y)| match view_type {
+                    crate::state::ViewType::Schematic | crate::state::ViewType::Testbench => {
+                        schematic_cursor_summary(&app.state, x, y)
+                    }
+                    crate::state::ViewType::Layout => {
+                        app.state.pdk_config.layout_database_unit.map_or_else(
+                            || format!("x {x:.0} · y {y:.0} DBU unavailable"),
+                            |dbu| {
+                                let policy =
+                                    app.state.ui.preferences.quantity_presentation_policy();
+                                format!(
+                                    "x {} · y {}",
+                                    policy.format_layout_coordinate(x, dbu),
+                                    policy.format_layout_coordinate(y, dbu)
+                                )
+                            },
+                        )
+                    }
+                    crate::state::ViewType::Symbol => format!(
+                        "x {x:.0} · y {y:.0} · grid {}",
+                        app.state.schematic.grid_size.max(1)
+                    ),
+                    _ => format!("revision {}", app.state.workspace.project.revision().get()),
+                },
+            )
+        }
         Workspace::Results => results_cursor_summary(app),
         Workspace::Project
         | Workspace::Simulate
@@ -820,40 +837,43 @@ mod tests {
     #[test]
     fn revision_status_distinguishes_saved_unsaved_and_closed_projects() {
         assert_eq!(
-            revision_status_summary(true, false, 7),
+            revision_status_summary(true, false, 7, "Precision Sensor AFE"),
             RevisionStatus {
                 text: "Saved".to_owned(),
-                detail: "Project revision 7 is saved".to_owned(),
+                detail: "Project saved; no unsaved changes at revision 7".to_owned(),
                 dirty: false,
             }
         );
         assert_eq!(
-            revision_status_summary(true, true, 7),
+            revision_status_summary(true, true, 7, "Precision Sensor AFE"),
             RevisionStatus {
-                text: "Unsaved".to_owned(),
-                detail: "Project revision 7 has unsaved changes".to_owned(),
+                text: "Unsaved changes".to_owned(),
+                detail: "Unsaved changes in Precision Sensor AFE; press Control S to save"
+                    .to_owned(),
                 dirty: true,
             }
         );
         assert_eq!(
-            revision_status_summary(false, true, 7).text,
-            "No project revision"
+            revision_status_summary(false, true, 7, "Precision Sensor AFE"),
+            RevisionStatus {
+                text: "No project".to_owned(),
+                detail: "No project open".to_owned(),
+                dirty: false,
+            }
         );
     }
 
     #[test]
-    fn schematic_coordinates_use_the_document_grid_pitch_in_millimeters() {
+    fn schematic_coordinates_use_the_permanent_sheet_origin_and_status_context() {
+        let mut state = crate::workbench::app_state::AppState::default();
+        state.schematic.grid_size = 10;
         assert_eq!(
-            schematic_coordinates_summary(2.0, -1.0, SchematicGridPitch::Mil50),
-            "x 2.54 · y -1.27 mm"
+            schematic_cursor_summary(&state, -14.0, -4.0),
+            "x 0 · y 0 mm"
         );
         assert_eq!(
-            schematic_coordinates_summary(2.0, -1.0, SchematicGridPitch::Mil25),
-            "x 1.27 · y -0.64 mm"
-        );
-        assert_eq!(
-            schematic_coordinates_summary(2.0, -1.0, SchematicGridPitch::Metric),
-            "x 1.00 · y -0.50 mm"
+            schematic_cursor_summary(&state, -15.0, -4.0),
+            "x -2.5 · y 0 mm · off sheet"
         );
     }
 }

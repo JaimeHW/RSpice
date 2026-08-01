@@ -338,7 +338,6 @@ impl SimulationRunner {
         }
         Ok(())
     }
-
 }
 
 fn lock_progress<'a>(

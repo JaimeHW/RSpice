@@ -20,9 +20,8 @@ use stage::*;
 
 use dock::{
     active_family_sample_selection, concept_banner, dock_action, dock_body, empty_note,
-    labeled_combo, numeric_policy,
-    paint_bottom_rule, paint_top_rule, panel_heading, policy_row, property_row, separator,
-    table_header,
+    labeled_combo, numeric_policy, paint_bottom_rule, paint_top_rule, panel_heading, policy_row,
+    property_row, separator, table_header,
 };
 
 use std::collections::{BTreeMap, HashSet};
@@ -35,7 +34,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::analysis::calculator;
 use crate::diagnostics::ConsoleMessage;
-use crate::product::{DatasetBinding, DatasetId};
+use crate::product::{AnalysisInstanceId, DatasetBinding, DatasetId};
 use crate::results::plot_export_preset::{
     ColorProfile, DeterministicNamingTemplate, ExportBackground, ExportPageSize,
     FontEmbeddingPolicy, FontPolicy, MetadataProvenancePolicy, PageGeometry, PageMargins,
@@ -47,12 +46,13 @@ use crate::results::viewer_catalog::{
     ViewerGroup, viewer_compatibility, viewer_document,
 };
 use crate::results::visualization_document::{
-    AccessibleColorPalette, ColumnRole, ComparisonExecutionContract, ComparisonPolicy,
-    ComparisonReceipt, ComparisonRequest, FamilyAggregationMethod, FamilyAggregationPolicy,
-    FamilyDimension as DocumentFamilyDimension, FamilyEncodingMap, FamilyPresentationPolicy,
-    FamilyXDimension, FamilyXOrdering, MissingPointPolicy, NumericTolerance, PageUpdatePolicy,
-    RowAlignmentPolicy, SourceColumn, SourceDataset, SourceRow, TypedValue, ValueType,
-    compare_source_datasets,
+    AccessibleColorPalette, ColumnRole, ComparisonAlignmentMethod, ComparisonExecutionContract,
+    ComparisonExtrapolationPolicy, ComparisonInterpolationPolicy, ComparisonPolicy,
+    ComparisonPrecisionPolicy, ComparisonReceipt, ComparisonRequest, ComparisonResamplingPolicy,
+    FamilyAggregationMethod, FamilyAggregationPolicy, FamilyDimension as DocumentFamilyDimension,
+    FamilyEncodingMap, FamilyPresentationPolicy, FamilyXDimension, FamilyXOrdering,
+    MissingPointPolicy, NumericTolerance, PageUpdatePolicy, RowAlignmentPolicy, SourceColumn,
+    SourceDataset, SourceRow, TypedValue, ValueType, compare_source_datasets,
 };
 use crate::state::{
     AnalysisResult, AnalysisResultPayload, AnalysisType, SensitivityResultMode,
@@ -67,7 +67,9 @@ use crate::workbench::{AppState, RSpiceApp};
 
 use crate::workbench::{
     ChoicePreference, ResultViewer, RouteTransitionSource, ScalarPreference, SurfaceId,
-    SurfaceRoute, design_system::WorkbenchIcon, state::Workspace,
+    SurfaceRoute,
+    design_system::WorkbenchIcon,
+    state::{Workspace, WorkspaceDocumentId},
 };
 
 use super::result_document;
@@ -340,6 +342,147 @@ pub struct VisualizationMeasurement {
     pub value: f64,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum ComparisonAlignmentDraft {
+    #[default]
+    FirstThresholdCrossing,
+    AbsoluteXAxis,
+    CrossCorrelation,
+}
+
+impl ComparisonAlignmentDraft {
+    const ALL: [Self; 3] = [
+        Self::FirstThresholdCrossing,
+        Self::AbsoluteXAxis,
+        Self::CrossCorrelation,
+    ];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::FirstThresholdCrossing => "First threshold crossing",
+            Self::AbsoluteXAxis => "Absolute X axis",
+            Self::CrossCorrelation => "Cross-correlation alignment",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum VisualizationDifferenceKind {
+    Absolute,
+    Relative,
+    Normalized,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VisualizationDifferenceSeries {
+    pub id: u64,
+    pub kind: VisualizationDifferenceKind,
+    pub values: Vec<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VisualizationDifferenceTraceSet {
+    pub id: u64,
+    pub baseline: DatasetBinding,
+    pub candidate: DatasetBinding,
+    pub signal_key: String,
+    pub signal_label: String,
+    pub coordinate_unit: Option<String>,
+    pub coordinates: Vec<f64>,
+    pub absolute: VisualizationDifferenceSeries,
+    pub relative: VisualizationDifferenceSeries,
+    pub normalized: VisualizationDifferenceSeries,
+    pub execution: ComparisonExecutionContract,
+    /// Normalized difference is `|candidate - baseline| /
+    /// (absolute + relative * |baseline|)`.
+    pub tolerance: NumericTolerance,
+}
+
+impl VisualizationDifferenceTraceSet {
+    fn retained_numeric_values(&self) -> Result<usize, String> {
+        self.coordinates
+            .len()
+            .checked_mul(4)
+            .ok_or_else(|| "Difference-trace retained-value count overflowed".to_owned())
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.id == 0
+            || self.absolute.id == 0
+            || self.relative.id == 0
+            || self.normalized.id == 0
+            || self.baseline.dataset_id == self.candidate.dataset_id
+        {
+            return Err(
+                "Difference traces require non-zero stable identities and distinct immutable sources"
+                    .to_owned(),
+            );
+        }
+        if self.absolute.kind != VisualizationDifferenceKind::Absolute
+            || self.relative.kind != VisualizationDifferenceKind::Relative
+            || self.normalized.kind != VisualizationDifferenceKind::Normalized
+        {
+            return Err(
+                "Difference-trace series identities do not match their quantities".to_owned(),
+            );
+        }
+        if !self.tolerance.absolute.is_finite()
+            || self.tolerance.absolute < 0.0
+            || !self.tolerance.relative.is_finite()
+            || self.tolerance.relative < 0.0
+        {
+            return Err("Difference-trace tolerance must be finite and non-negative".to_owned());
+        }
+        if self.signal_key.trim().is_empty()
+            || self.signal_key != self.signal_key.trim()
+            || self.signal_key.len() > 256
+            || self.signal_key.chars().any(char::is_control)
+            || self.signal_label.trim().is_empty()
+            || self.signal_label.len() > 1_024
+            || self.signal_label.chars().any(char::is_control)
+            || self.coordinate_unit.as_ref().is_some_and(|unit| {
+                unit.trim().is_empty()
+                    || unit != unit.trim()
+                    || unit.len() > 64
+                    || unit.chars().any(char::is_control)
+            })
+        {
+            return Err("Difference traces require bounded signal and unit metadata".to_owned());
+        }
+        let row_count = self.coordinates.len();
+        if row_count == 0
+            || self.absolute.values.len() != row_count
+            || self.relative.values.len() != row_count
+            || self.normalized.values.len() != row_count
+        {
+            return Err(
+                "Difference-trace coordinate and quantity series must have identical non-zero lengths"
+                    .to_owned(),
+            );
+        }
+        if self
+            .coordinates
+            .iter()
+            .any(|coordinate| !coordinate.is_finite())
+            || self.coordinates.windows(2).any(|pair| pair[0] >= pair[1])
+            || self
+                .absolute
+                .values
+                .iter()
+                .chain(&self.relative.values)
+                .chain(&self.normalized.values)
+                .any(|value| !value.is_finite() || *value < 0.0)
+        {
+            return Err(
+                "Difference-trace coordinates must increase and every retained quantity must be finite and non-negative"
+                    .to_owned(),
+            );
+        }
+        self.execution.validate().map_err(|error| error.to_string())
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum VisualizationAutoscale {
@@ -458,6 +601,8 @@ pub struct VisualizationStudioState {
     #[serde(default)]
     pub comparison_receipts: Vec<ComparisonReceipt>,
     #[serde(default)]
+    pub difference_trace_sets: Vec<VisualizationDifferenceTraceSet>,
+    #[serde(default)]
     pub autoscale: VisualizationAutoscale,
     #[serde(default)]
     pub complex_projection: ComplexProjection,
@@ -532,9 +677,23 @@ pub struct VisualizationStudioState {
     #[serde(skip)]
     draft_comparison_dataset: Option<DatasetId>,
     #[serde(skip)]
+    draft_comparison_candidates: Vec<DatasetId>,
+    #[serde(skip)]
+    draft_comparison_data_version: u64,
+    #[serde(skip)]
     draft_comparison_absolute_tolerance: f64,
     #[serde(skip)]
     draft_comparison_relative_tolerance: f64,
+    #[serde(skip)]
+    draft_comparison_alignment: ComparisonAlignmentDraft,
+    #[serde(skip)]
+    draft_comparison_alignment_signal: String,
+    #[serde(skip)]
+    draft_comparison_threshold: f64,
+    #[serde(skip)]
+    draft_comparison_maximum_lag_samples: u32,
+    #[serde(skip)]
+    draft_comparison_difference_trace: bool,
     #[serde(skip)]
     draft_export_preset_name: String,
     #[serde(skip)]
@@ -574,6 +733,7 @@ impl Default for VisualizationStudioState {
             family_policies: BTreeMap::new(),
             report_page_policies: BTreeMap::new(),
             comparison_receipts: Vec::new(),
+            difference_trace_sets: Vec::new(),
             autoscale: VisualizationAutoscale::default(),
             complex_projection: ComplexProjection::default(),
             display_lod: DisplayLodPolicy::default(),
@@ -611,8 +771,15 @@ impl Default for VisualizationStudioState {
             draft_family_marker_dimension: String::new(),
             draft_family_exclude_missing: false,
             draft_comparison_dataset: None,
+            draft_comparison_candidates: Vec::new(),
+            draft_comparison_data_version: 0,
             draft_comparison_absolute_tolerance: 0.0,
             draft_comparison_relative_tolerance: 0.0,
+            draft_comparison_alignment: ComparisonAlignmentDraft::default(),
+            draft_comparison_alignment_signal: String::new(),
+            draft_comparison_threshold: 0.0,
+            draft_comparison_maximum_lag_samples: 128,
+            draft_comparison_difference_trace: true,
             draft_export_preset_name: "Publication vector · A4".to_owned(),
             draft_export_preset_scope: Some(PlotExportPresetScope::Project),
             operation_state: OperationState::NotStarted,
@@ -675,6 +842,8 @@ const REPORT_PAGE_TEMPLATES: [&str; 3] = [
 ];
 const MAX_REPORT_PAGE_TITLE_BYTES: usize = 120;
 const MAX_COMPARISON_RECEIPTS: usize = 512;
+const MAX_DIFFERENCE_TRACE_SETS: usize = 4_096;
+const MAX_DIFFERENCE_TRACE_NUMERIC_VALUES: usize = 8_000_000;
 
 impl VisualizationStudioState {
     fn allocate_identity(&mut self) -> Option<u64> {
@@ -735,7 +904,13 @@ impl VisualizationStudioState {
             if pane.id == 0 || !identities.insert(pane.id) {
                 return Err("Visualization pane identities must be unique and non-zero".to_owned());
             }
-            if pane.viewer_document_id != viewer_document_id(pane.viewer) {
+            let Some(canonical_document_id) = viewer_document_id(pane.viewer) else {
+                return Err(format!(
+                    "Pane {} uses a dataset-native projection that cannot be retained by Visualization Studio",
+                    pane.id
+                ));
+            };
+            if pane.viewer_document_id != canonical_document_id {
                 return Err(format!(
                     "Pane {} viewer identity does not match its registered document",
                     pane.id
@@ -773,6 +948,36 @@ impl VisualizationStudioState {
             receipt
                 .validate_structure()
                 .map_err(|error| error.to_string())?;
+        }
+        if self.difference_trace_sets.len() > MAX_DIFFERENCE_TRACE_SETS {
+            return Err(format!(
+                "Visualization difference traces exceed the supported limit of {MAX_DIFFERENCE_TRACE_SETS} signal sets"
+            ));
+        }
+        let mut retained_difference_values = 0_usize;
+        for trace_set in &self.difference_trace_sets {
+            trace_set.validate()?;
+            for identity in [
+                trace_set.id,
+                trace_set.absolute.id,
+                trace_set.relative.id,
+                trace_set.normalized.id,
+            ] {
+                if !identities.insert(identity) {
+                    return Err(
+                        "Visualization difference-trace identities must be globally unique"
+                            .to_owned(),
+                    );
+                }
+            }
+            retained_difference_values = retained_difference_values
+                .checked_add(trace_set.retained_numeric_values()?)
+                .ok_or_else(|| "Difference-trace retained-value count overflowed".to_owned())?;
+            if retained_difference_values > MAX_DIFFERENCE_TRACE_NUMERIC_VALUES {
+                return Err(format!(
+                    "Visualization difference traces exceed the supported limit of {MAX_DIFFERENCE_TRACE_NUMERIC_VALUES} retained numeric values"
+                ));
+            }
         }
         for annotation in &self.annotations {
             if annotation.id == 0 || !identities.insert(annotation.id) || !annotation.x.is_finite()
@@ -867,6 +1072,14 @@ impl VisualizationStudioState {
                 .chain(self.annotations.iter().map(|annotation| annotation.id))
                 .chain(self.markers.iter().map(|marker| marker.id))
                 .chain(self.measurements.iter().map(|measurement| measurement.id))
+                .chain(self.difference_trace_sets.iter().flat_map(|trace_set| {
+                    [
+                        trace_set.id,
+                        trace_set.absolute.id,
+                        trace_set.relative.id,
+                        trace_set.normalized.id,
+                    ]
+                }))
                 .max()
                 .unwrap_or_default()
                 .saturating_add(1)
@@ -901,6 +1114,27 @@ impl VisualizationStudioState {
             self.comparison_receipts
                 .drain(..self.comparison_receipts.len() - MAX_COMPARISON_RECEIPTS);
         }
+        let mut retained_difference_values = 0_usize;
+        self.difference_trace_sets.retain(|trace_set| {
+            if trace_set.validate().is_err() {
+                return false;
+            }
+            let Ok(values) = trace_set.retained_numeric_values() else {
+                return false;
+            };
+            let Some(next) = retained_difference_values.checked_add(values) else {
+                return false;
+            };
+            if next > MAX_DIFFERENCE_TRACE_NUMERIC_VALUES {
+                return false;
+            }
+            retained_difference_values = next;
+            true
+        });
+        if self.difference_trace_sets.len() > MAX_DIFFERENCE_TRACE_SETS {
+            self.difference_trace_sets
+                .truncate(MAX_DIFFERENCE_TRACE_SETS);
+        }
     }
 }
 
@@ -920,24 +1154,24 @@ fn commit_visualization_revision(app: &mut RSpiceApp) -> bool {
 }
 
 pub(crate) fn open(app: &mut RSpiceApp) {
+    if let Err(error) = navigate_to_visualization_studio(app) {
+        app.state.push_user_message(ConsoleMessage::warning(error));
+    }
+}
+
+fn navigate_to_visualization_studio(app: &mut RSpiceApp) -> Result<(), String> {
     let route = SurfaceRoute::surface(SurfaceId::VisualizationStudio);
-    match app
-        .state
+    app.state
         .workbench
         .navigate(route, RouteTransitionSource::User)
-    {
-        Ok(_) => {
-            app.state.workbench.workspace = Workspace::Results;
-            app.state.workbench.visualization_studio.normalize();
-            app.state
-                .workbench
-                .specialist_tool_browser
-                .record_recent(SurfaceId::VisualizationStudio);
-        }
-        Err(error) => app
-            .state
-            .push_user_message(ConsoleMessage::warning(error.to_string())),
-    }
+        .map_err(|error| error.to_string())?;
+    app.state.workbench.workspace = Workspace::Results;
+    app.state.workbench.visualization_studio.normalize();
+    app.state
+        .workbench
+        .specialist_tool_browser
+        .record_recent(SurfaceId::VisualizationStudio);
+    Ok(())
 }
 
 pub(crate) fn open_add_pane(app: &mut RSpiceApp) {
@@ -960,8 +1194,258 @@ pub(crate) fn open_measurement_editor(app: &mut RSpiceApp) {
     open_dock(app, VisualizationDock::Measurement);
 }
 
+pub(crate) fn open_annotation_editor(app: &mut RSpiceApp) {
+    open_dock(app, VisualizationDock::Annotation);
+}
+
+pub(crate) fn open_family_slicing(app: &mut RSpiceApp) {
+    open_dock(app, VisualizationDock::FamilySlice);
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ResultsComparisonSource {
+    dataset_id: DatasetId,
+    analysis_sequence: u64,
+    viewer: ResultViewer,
+}
+
+fn retained_document_analysis<'a>(
+    run: &'a SimulationRun,
+    source_id: AnalysisInstanceId,
+) -> Option<&'a AnalysisResult> {
+    run.analyses.iter().find(|analysis| {
+        analysis.provenance().map_or_else(
+            || {
+                let name = format!("legacy-analysis-v1/{}", analysis.id);
+                AnalysisInstanceId::from_namespace(run.dataset_id.as_uuid(), name.as_bytes())
+                    == source_id
+            },
+            |provenance| {
+                provenance.source_instance_id() == source_id
+                    || provenance.authored_source_instance_id() == source_id
+            },
+        )
+    })
+}
+
+fn active_results_comparison_source(state: &AppState) -> Result<ResultsComparisonSource, String> {
+    if state.workbench.workspace != Workspace::Results {
+        return Err("Open a result document before comparing datasets.".to_owned());
+    }
+    let document = crate::workbench::chrome::document_bar::active_document_id(state)
+        .ok_or_else(|| "No active result document is available.".to_owned())?;
+    let mut authored_analysis = None;
+    let mut viewer = state.ui.results.viewer;
+    let (dataset_id, expected_digest) = match document {
+        WorkspaceDocumentId::ResultDataset(dataset_id) => {
+            state
+                .simulation
+                .runs
+                .iter()
+                .find(|run| run.dataset_id == dataset_id)
+                .ok_or_else(|| "The active result dataset is no longer retained.".to_owned())?;
+            (dataset_id, None)
+        }
+        WorkspaceDocumentId::VisualizationDocument(document_id) => {
+            let document = state
+                .workspace
+                .visualization_document(document_id)
+                .ok_or_else(|| "The active result document is no longer retained.".to_owned())?;
+            if let Some((pane, pane_binding)) = document
+                .panes()
+                .iter()
+                .find_map(|pane| pane.binding.map(|binding| (pane, binding)))
+            {
+                authored_analysis = Some(pane_binding.analysis_id);
+                viewer =
+                    renderer_for_viewer_document(&pane.viewer_id).unwrap_or(ResultViewer::Waves);
+                (
+                    pane_binding.dataset.dataset_id,
+                    Some(pane_binding.dataset.content_digest),
+                )
+            } else {
+                let binding = document
+                    .datasets()
+                    .first()
+                    .map(SourceDataset::binding)
+                    .ok_or_else(|| {
+                        "The active result document has no immutable dataset binding.".to_owned()
+                    })?;
+                (binding.dataset_id, Some(binding.content_digest))
+            }
+        }
+        _ => return Err("The active document is not a result dataset.".to_owned()),
+    };
+    let run = state
+        .simulation
+        .runs
+        .iter()
+        .find(|run| run.dataset_id == dataset_id)
+        .ok_or_else(|| "The active result document's dataset is no longer retained.".to_owned())?;
+    if expected_digest.is_some_and(|digest| run.dataset_content_digest() != digest) {
+        return Err(
+            "The active result document's immutable dataset digest does not match retained data."
+                .to_owned(),
+        );
+    }
+    let analysis = if let Some(authored_analysis) = authored_analysis {
+        retained_document_analysis(run, authored_analysis).ok_or_else(|| {
+            "The active result document's authored analysis is no longer retained.".to_owned()
+        })?
+    } else if state
+        .simulation
+        .active_run()
+        .is_some_and(|active| active.dataset_id == dataset_id)
+    {
+        state
+            .simulation
+            .active_analysis()
+            .or_else(|| run.analyses.first())
+            .ok_or_else(|| "The active result dataset contains no analysis.".to_owned())?
+    } else {
+        run.analyses
+            .first()
+            .ok_or_else(|| "The active result dataset contains no analysis.".to_owned())?
+    };
+    Ok(ResultsComparisonSource {
+        dataset_id,
+        analysis_sequence: analysis.id,
+        viewer,
+    })
+}
+
+pub(crate) fn results_comparison_available(state: &AppState) -> bool {
+    active_results_comparison_source(state).is_ok_and(|source| {
+        !dock::compatible_comparison_dataset_ids(state, source.dataset_id, source.analysis_sequence)
+            .is_empty()
+    })
+}
+
+fn select_results_comparison_source(
+    app: &mut RSpiceApp,
+    source: ResultsComparisonSource,
+) -> Result<(), String> {
+    let run_index = app
+        .state
+        .simulation
+        .runs
+        .iter()
+        .position(|run| run.dataset_id == source.dataset_id)
+        .ok_or_else(|| "The candidate dataset is no longer retained.".to_owned())?;
+    let analysis_index = app.state.simulation.runs[run_index]
+        .analyses
+        .iter()
+        .position(|analysis| analysis.id == source.analysis_sequence)
+        .ok_or_else(|| "The candidate analysis is no longer retained.".to_owned())?;
+    if !app.state.simulation.select_run(run_index)
+        || !app.state.simulation.select_analysis(analysis_index)
+    {
+        return Err("The candidate dataset could not be activated.".to_owned());
+    }
+    Ok(())
+}
+
+fn bind_comparison_owner(
+    app: &mut RSpiceApp,
+    source: ResultsComparisonSource,
+) -> Result<(), String> {
+    let viewer_document = viewer_document_id(source.viewer)
+        .ok_or_else(|| {
+            "Dataset-native result projections cannot be bound as Visualization Studio panes"
+                .to_owned()
+        })?
+        .to_owned();
+    let studio = &mut app.state.workbench.visualization_studio;
+    studio.normalize();
+    let pane_id = studio
+        .panes
+        .iter()
+        .find(|pane| {
+            pane.dataset_id == source.dataset_id
+                && pane.analysis_sequence == source.analysis_sequence
+                && pane.viewer == source.viewer
+        })
+        .map(|pane| pane.id);
+    let pane_id = if let Some(pane_id) = pane_id {
+        pane_id
+    } else {
+        studio.transact(|studio| {
+            let pane_id = studio
+                .allocate_identity()
+                .ok_or_else(|| "Visualization pane identity space is exhausted.".to_owned())?;
+            studio.panes.push(VisualizationPane {
+                id: pane_id,
+                viewer: source.viewer,
+                viewer_document_id: viewer_document.clone(),
+                dataset_id: source.dataset_id,
+                analysis_sequence: source.analysis_sequence,
+                x_link: None,
+                cursor_group: None,
+                page: "Engineering".to_owned(),
+                placement: VisualizationPanePlacement::BelowSelected,
+            });
+            Ok(pane_id)
+        })?
+    };
+    studio.active_pane = Some(pane_id);
+    studio.selected_viewer_document = viewer_document;
+    studio.applied_link_pane = None;
+    studio.section = VisualizationSection::Viewers;
+    app.state.ui.results.viewer = source.viewer;
+    Ok(())
+}
+
+pub(crate) fn open_results_comparison(app: &mut RSpiceApp) {
+    if let Err(error) = open_results_comparison_inner(app) {
+        app.state.push_user_message(ConsoleMessage::warning(error));
+    }
+}
+
+fn open_results_comparison_inner(app: &mut RSpiceApp) -> Result<(), String> {
+    let source = active_results_comparison_source(&app.state)?;
+    let comparison_datasets = dock::compatible_comparison_dataset_ids(
+        &app.state,
+        source.dataset_id,
+        source.analysis_sequence,
+    );
+    if comparison_datasets.is_empty() {
+        return Err(
+            "A second compatible immutable dataset with an exact matching analysis and coordinate axis is required."
+                .to_owned(),
+        );
+    }
+    navigate_to_visualization_studio(app)?;
+    select_results_comparison_source(app, source)?;
+    bind_comparison_owner(app, source)?;
+    let comparison_data_version = app.state.simulation.data_version;
+    initialize_comparison_dock(
+        &mut app.state.workbench.visualization_studio,
+        comparison_datasets,
+        comparison_data_version,
+    );
+    Ok(())
+}
+
 pub(crate) fn export_document(app: &mut RSpiceApp) {
     open_dock(app, VisualizationDock::Export);
+}
+
+fn initialize_comparison_dock(
+    studio: &mut VisualizationStudioState,
+    comparison_datasets: Vec<DatasetId>,
+    comparison_data_version: u64,
+) {
+    studio.draft_comparison_dataset = comparison_datasets.first().copied();
+    studio.draft_comparison_candidates = comparison_datasets;
+    studio.draft_comparison_data_version = comparison_data_version;
+    studio.draft_comparison_absolute_tolerance = 0.0;
+    studio.draft_comparison_relative_tolerance = 0.0;
+    studio.draft_comparison_alignment = ComparisonAlignmentDraft::default();
+    studio.draft_comparison_alignment_signal.clear();
+    studio.draft_comparison_threshold = 0.0;
+    studio.draft_comparison_maximum_lag_samples = 128;
+    studio.draft_comparison_difference_trace = true;
+    studio.dock = Some(VisualizationDock::Comparison);
 }
 
 fn open_dock(app: &mut RSpiceApp, dock: VisualizationDock) {
@@ -1006,14 +1490,14 @@ fn open_dock(app: &mut RSpiceApp, dock: VisualizationDock) {
             .get(&pane.id)
             .cloned()
     });
-    let comparison_dataset = active_binding.and_then(|(active, _)| {
-        app.state
-            .simulation
-            .runs
-            .iter()
-            .find(|run| run.dataset_id != active)
-            .map(|run| run.dataset_id)
-    });
+    let comparison_datasets = if dock == VisualizationDock::Comparison {
+        active_binding.map_or_else(Vec::new, |(dataset, analysis)| {
+            dock::compatible_comparison_dataset_ids(&app.state, dataset, analysis)
+        })
+    } else {
+        Vec::new()
+    };
+    let comparison_data_version = app.state.simulation.data_version;
     let studio = &mut app.state.workbench.visualization_studio;
     match dock {
         VisualizationDock::AddPane => {
@@ -1099,9 +1583,7 @@ fn open_dock(app: &mut RSpiceApp, dock: VisualizationDock) {
             );
         }
         VisualizationDock::Comparison => {
-            studio.draft_comparison_dataset = comparison_dataset;
-            studio.draft_comparison_absolute_tolerance = 0.0;
-            studio.draft_comparison_relative_tolerance = 0.0;
+            initialize_comparison_dock(studio, comparison_datasets, comparison_data_version);
         }
         VisualizationDock::ExportPreset => {
             if studio.draft_export_preset_name.trim().is_empty() {
@@ -1115,7 +1597,9 @@ fn open_dock(app: &mut RSpiceApp, dock: VisualizationDock) {
         | VisualizationDock::Annotation
         | VisualizationDock::Export => {}
     }
-    studio.dock = Some(dock);
+    if dock != VisualizationDock::Comparison {
+        studio.dock = Some(dock);
+    }
 }
 
 fn initialize_family_draft(
@@ -1253,8 +1737,11 @@ fn reconcile_document(app: &mut RSpiceApp) {
         .simulation
         .active_analysis()
         .map(|analysis| analysis.id);
-    let viewer = app.state.ui.results.viewer;
-    let viewer_document_id = viewer_document_id(viewer).to_owned();
+    let requested_viewer = app.state.ui.results.viewer;
+    let (viewer, viewer_document_id) = viewer_document_id(requested_viewer).map_or_else(
+        || (ResultViewer::Waves, "viewer-waveform".to_owned()),
+        |document_id| (requested_viewer, document_id.to_owned()),
+    );
     let studio = &mut app.state.workbench.visualization_studio;
     studio.normalize();
     if studio.panes.is_empty()
@@ -1463,7 +1950,6 @@ fn synchronize_runtime_policies(app: &mut RSpiceApp) {
         .set_memory_budget_mib(tile_memory_mib);
 }
 
-
 fn resolved_viewer_availability_for_binding(
     state: &AppState,
     definition: &ViewerDocumentDefinition,
@@ -1547,6 +2033,9 @@ fn resolved_viewer_availability_for_binding(
         | ResultViewer::Nyquist => {
             binding_is_active && result_document::viewer_is_available(state, viewer)
         }
+        // Manifest is a dataset-native Results projection and therefore can
+        // never be resolved from a Visualization Studio document definition.
+        ResultViewer::Manifest => false,
     };
     if !available {
         return Err(if binding_is_active {
@@ -1576,8 +2065,9 @@ fn renderer_for_viewer_document(id: &str) -> Option<ResultViewer> {
     }
 }
 
-fn viewer_document_id(viewer: ResultViewer) -> &'static str {
-    match viewer {
+fn viewer_document_id(viewer: ResultViewer) -> Option<&'static str> {
+    Some(match viewer {
+        ResultViewer::Manifest => return None,
         ResultViewer::Waves => "viewer-waveform",
         ResultViewer::Bode | ResultViewer::Nyquist => "viewer-bode",
         ResultViewer::Fft | ResultViewer::NoiseContrib => "viewer-spectrum",
@@ -1588,7 +2078,7 @@ fn viewer_document_id(viewer: ResultViewer) -> &'static str {
         ResultViewer::PoleZero => "viewer-pz",
         ResultViewer::Contribution => "viewer-contribution",
         ResultViewer::TransferFunction => "viewer-transfer-function",
-    }
+    })
 }
 
 fn available_analysis_ids(state: &AppState) -> Vec<&'static str> {
@@ -1784,11 +2274,13 @@ fn add_viewer_pane_bound(
     }
 }
 
-
 #[cfg(test)]
 mod integrity_scan_tests {
+    use super::dock::{
+        evaluate_scalar_measurement, execute_comparison_draft,
+        execute_comparison_draft_with_differences, retain_difference_trace_sets,
+    };
     use super::*;
-    use super::dock::{evaluate_scalar_measurement, execute_comparison_draft};
     use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SpecEntry, WaveformData};
 
     fn app_with_exact_source() -> RSpiceApp {
@@ -2046,6 +2538,10 @@ mod integrity_scan_tests {
             .workbench
             .visualization_studio
             .draft_comparison_absolute_tolerance = 0.1;
+        app.state
+            .workbench
+            .visualization_studio
+            .draft_comparison_alignment = ComparisonAlignmentDraft::AbsoluteXAxis;
         let candidate_digest = app
             .state
             .simulation
@@ -2053,12 +2549,49 @@ mod integrity_scan_tests {
             .unwrap()
             .dataset_content_digest();
 
-        let receipt = execute_comparison_draft(&app).expect("exact comparison must execute");
+        let execution = execute_comparison_draft_with_differences(&app)
+            .expect("exact comparison and checked difference traces must execute");
+        let receipt = execution.receipt.clone();
+        let result =
+            app.state.workbench.visualization_studio.transact(|studio| {
+                retain_difference_trace_sets(studio, execution.difference_traces)
+            });
+        result.expect("derived series identities must commit atomically");
 
         assert_eq!(receipt.rows_compared, 3);
+        assert!(matches!(
+            receipt.policy.execution.alignment,
+            ComparisonAlignmentMethod::AbsoluteXAxis
+        ));
+        let trace_set = &app
+            .state
+            .workbench
+            .visualization_studio
+            .difference_trace_sets[0];
+        assert_eq!(trace_set.coordinates, vec![0.0, 0.5, 1.0]);
+        assert!(
+            trace_set
+                .absolute
+                .values
+                .iter()
+                .all(|value| (*value - 0.05).abs() <= 1.0e-12)
+        );
+        assert!(
+            trace_set
+                .normalized
+                .values
+                .iter()
+                .all(|value| (*value - 0.5).abs() <= 1.0e-12)
+        );
         assert_eq!(
-            receipt.policy.execution,
-            ComparisonExecutionContract::default()
+            HashSet::from([
+                trace_set.id,
+                trace_set.absolute.id,
+                trace_set.relative.id,
+                trace_set.normalized.id,
+            ])
+            .len(),
+            4
         );
         assert_eq!(
             receipt.disposition,
@@ -2072,6 +2605,245 @@ mod integrity_scan_tests {
                 .dataset_content_digest(),
             candidate_digest
         );
+    }
+
+    #[test]
+    fn comparison_records_threshold_and_cross_correlation_alignment_parameters() {
+        let mut threshold_app = app_with_exact_source();
+        threshold_app.state.simulation.runs[0].analyses[0].waveforms = vec![WaveformData::new(
+            "V(out)",
+            vec![0.0, 1.0, 2.0],
+            vec![-1.0, 1.0, 3.0],
+            "#00aaff",
+        )];
+        let mut threshold_baseline = SimulationRun::new(2);
+        threshold_baseline.add_analysis(
+            AnalysisResult::new(29, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new(
+                    "V(out)",
+                    vec![10.0, 11.0, 12.0],
+                    vec![-2.0, 2.0, 4.0],
+                    "#00aaff",
+                ),
+            ]),
+        );
+        let threshold_baseline_id = threshold_baseline.dataset_id;
+        threshold_app.state.simulation.runs.push(threshold_baseline);
+        let threshold_studio = &mut threshold_app.state.workbench.visualization_studio;
+        threshold_studio.draft_comparison_dataset = Some(threshold_baseline_id);
+        threshold_studio.draft_comparison_alignment =
+            ComparisonAlignmentDraft::FirstThresholdCrossing;
+        threshold_studio.draft_comparison_alignment_signal = "V(out)".to_owned();
+        threshold_studio.draft_comparison_threshold = 0.0;
+        threshold_studio.draft_comparison_difference_trace = false;
+
+        let threshold_receipt =
+            execute_comparison_draft(&threshold_app).expect("threshold alignment must execute");
+        assert!(matches!(
+            threshold_receipt.policy.execution.alignment,
+            ComparisonAlignmentMethod::FirstThresholdCrossing {
+                signal_key,
+                threshold: 0.0,
+                baseline_crossing: 10.5,
+                candidate_crossing: 0.5,
+            } if signal_key == "signal:0"
+        ));
+        assert_eq!(
+            threshold_receipt.policy.execution.resampling,
+            ComparisonResamplingPolicy::BaselineOntoCandidateGrid
+        );
+
+        let mut correlation_app = app_with_exact_source();
+        correlation_app.state.simulation.runs[0].analyses[0].waveforms = vec![WaveformData::new(
+            "V(out)",
+            vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+            vec![0.0, 0.0, 1.0, 0.0, -1.0, 0.0],
+            "#00aaff",
+        )];
+        let mut correlation_baseline = SimulationRun::new(2);
+        correlation_baseline.add_analysis(
+            AnalysisResult::new(29, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new(
+                    "V(out)",
+                    vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+                    vec![0.0, 1.0, 0.0, -1.0, 0.0, 0.0],
+                    "#00aaff",
+                ),
+            ]),
+        );
+        let correlation_baseline_id = correlation_baseline.dataset_id;
+        correlation_app
+            .state
+            .simulation
+            .runs
+            .push(correlation_baseline);
+        let correlation_studio = &mut correlation_app.state.workbench.visualization_studio;
+        correlation_studio.draft_comparison_dataset = Some(correlation_baseline_id);
+        correlation_studio.draft_comparison_alignment = ComparisonAlignmentDraft::CrossCorrelation;
+        correlation_studio.draft_comparison_alignment_signal = "V(out)".to_owned();
+        correlation_studio.draft_comparison_maximum_lag_samples = 2;
+        correlation_studio.draft_comparison_difference_trace = false;
+
+        let correlation_receipt =
+            execute_comparison_draft(&correlation_app).expect("correlation alignment must execute");
+        assert!(matches!(
+            correlation_receipt.policy.execution.alignment,
+            ComparisonAlignmentMethod::CrossCorrelation {
+                selected_lag_samples: 1,
+                sample_interval: 1.0,
+                baseline_shift: 1.0,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn comparison_fails_closed_for_nonmonotonic_source_coordinates() {
+        let mut app = app_with_exact_source();
+        app.state.simulation.runs[0].analyses[0].waveforms = vec![WaveformData::new(
+            "V(out)",
+            vec![0.0, 1.0, 2.0],
+            vec![0.0, 1.0, 2.0],
+            "#00aaff",
+        )];
+        let mut baseline = SimulationRun::new(2);
+        baseline.add_analysis(
+            AnalysisResult::new(29, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new(
+                    "V(out)",
+                    vec![0.0, 1.0, 0.5],
+                    vec![0.0, 1.0, 2.0],
+                    "#00aaff",
+                ),
+            ]),
+        );
+        let baseline_id = baseline.dataset_id;
+        app.state.simulation.runs.push(baseline);
+        app.state
+            .workbench
+            .visualization_studio
+            .draft_comparison_dataset = Some(baseline_id);
+        app.state
+            .workbench
+            .visualization_studio
+            .draft_comparison_alignment = ComparisonAlignmentDraft::AbsoluteXAxis;
+
+        let error = execute_comparison_draft(&app)
+            .expect_err("nonmonotonic immutable data must never be resampled");
+        assert!(error.contains("nonmonotonic"));
+    }
+
+    #[test]
+    fn results_comparison_handoff_rebinds_a_stale_owner_to_the_active_document() {
+        let mut app = app_with_exact_source();
+        app.state.project_lifecycle.project_open = true;
+        app.state.workbench.workspace = Workspace::Results;
+        let candidate_id = app.state.simulation.runs[0].dataset_id;
+        app.state
+            .workbench
+            .documents
+            .activate(WorkspaceDocumentId::ResultDataset(candidate_id));
+
+        let mut baseline = SimulationRun::new(2);
+        baseline.add_analysis(
+            AnalysisResult::new(29, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new(
+                    "V(out)",
+                    vec![0.0, 0.5, 1.0],
+                    vec![-1.20, 2.45, 3.95],
+                    "#00aaff",
+                ),
+            ]),
+        );
+        let baseline_id = baseline.dataset_id;
+        app.state.simulation.runs.push(baseline);
+
+        app.state.workbench.visualization_studio.panes = vec![VisualizationPane {
+            id: 1,
+            viewer: ResultViewer::Waves,
+            viewer_document_id: viewer_document_id(ResultViewer::Waves)
+                .expect("waveform viewer has a catalog document")
+                .to_owned(),
+            dataset_id: baseline_id,
+            analysis_sequence: 29,
+            x_link: None,
+            cursor_group: None,
+            page: "Engineering".to_owned(),
+            placement: VisualizationPanePlacement::BelowSelected,
+        }];
+        app.state.workbench.visualization_studio.active_pane = Some(1);
+        app.state.workbench.visualization_studio.next_identity = 2;
+
+        open_results_comparison_inner(&mut app)
+            .expect("a compatible retained baseline must open the real comparison owner");
+
+        assert_eq!(
+            app.state.workbench.current_route().surface_id(),
+            SurfaceId::VisualizationStudio
+        );
+        assert_eq!(
+            app.state.simulation.active_run().map(|run| run.dataset_id),
+            Some(candidate_id)
+        );
+        assert_eq!(
+            app.state
+                .simulation
+                .active_analysis()
+                .map(|analysis| analysis.id),
+            Some(17)
+        );
+        let owner = app
+            .state
+            .workbench
+            .visualization_studio
+            .active_pane()
+            .expect("comparison handoff must activate an exact owner pane");
+        assert_eq!(owner.dataset_id, candidate_id);
+        assert_eq!(owner.analysis_sequence, 17);
+        assert_eq!(
+            app.state
+                .workbench
+                .visualization_studio
+                .draft_comparison_dataset,
+            Some(baseline_id)
+        );
+        assert_eq!(
+            app.state.workbench.visualization_studio.dock,
+            Some(VisualizationDock::Comparison)
+        );
+    }
+
+    #[test]
+    fn results_comparison_fails_closed_before_navigation_without_a_compatible_baseline() {
+        let mut app = app_with_exact_source();
+        app.state.project_lifecycle.project_open = true;
+        app.state.workbench.workspace = Workspace::Results;
+        let candidate_id = app.state.simulation.runs[0].dataset_id;
+        app.state
+            .workbench
+            .documents
+            .activate(WorkspaceDocumentId::ResultDataset(candidate_id));
+        let route_before = app.state.workbench.current_route();
+
+        let mut incompatible = SimulationRun::new(2);
+        incompatible.add_analysis(
+            AnalysisResult::new(29, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new(
+                    "V(other)",
+                    vec![0.0, 0.25, 1.0],
+                    vec![0.0, 1.0, 0.0],
+                    "#00aaff",
+                ),
+            ]),
+        );
+        app.state.simulation.runs.push(incompatible);
+
+        assert!(!results_comparison_available(&app.state));
+        let error = open_results_comparison_inner(&mut app)
+            .expect_err("an incompatible retained run must not open a comparison owner");
+        assert!(error.contains("second compatible immutable dataset"));
+        assert_eq!(app.state.workbench.current_route(), route_before);
+        assert_eq!(app.state.workbench.visualization_studio.dock, None);
     }
 
     #[test]

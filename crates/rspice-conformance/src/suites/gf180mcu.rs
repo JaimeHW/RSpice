@@ -274,8 +274,7 @@ impl DeviceRunner {
             // The deck's own `.temp`, in kelvin. Every case is a
             // characterisation point at a stated temperature and none of them
             // is the engine default.
-            temperature: temperature_c
-                .map_or(defaults.temperature, |celsius| celsius + 273.15),
+            temperature: temperature_c.map_or(defaults.temperature, |celsius| celsius + 273.15),
             // The dialect is left at its default rather than pinned to
             // `Ngspice`, which the sibling suites do. GF180MCU's MOS cards are
             // binned across dotted names (`nmos_3p3.0`, `.1`, …) selected by

@@ -6,11 +6,23 @@
 
 use std::borrow::Cow;
 
-use egui::{Align2, Color32, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
+use egui::{Align, Align2, Color32, Layout, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
+use egui_extras::{Column, TableBuilder};
 
 use crate::results::report_document::{
-    ReportBlockKind, ReportDocument, ReportEdit, ReportEntityRef, ReportPageId,
-    ReportPageUpdatePolicy, ReportReferenceMode, ReportSourceId, ReportTemplate, TableCell,
+    DataTableBlock, DatasheetBlock, DatasheetField, EvidenceBlock, FigureSizing, PlotFigureBlock,
+    ProseBlock, ProseStyle, ReportBlockId, ReportBlockKind, ReportBlockedGateTextPolicy,
+    ReportDocument, ReportDraftMarking, ReportEdit, ReportEntityRef, ReportFigureSourceLocator,
+    ReportOutputFormats, ReportPageEvidenceBinding, ReportPageId, ReportPageInclusion,
+    ReportPageNumbering, ReportPageUpdatePolicy, ReportPublicationPageSize,
+    ReportPublicationProfile, ReportPublicationTemplate, ReportReferenceMode,
+    ReportReferenceSnapshot, ReportSourceId, ReportTablePrecision, ReportTemplate,
+    RequirementDisposition, RequirementEntry, RequirementsBlock, ReviewNoteBlock, ReviewNoteStatus,
+    SpecificationDisposition, SpecificationEntry, SpecificationsBlock, TableCell, TableColumn,
+};
+use crate::results::visualization_document::{PageId, PaneId};
+use crate::results::visualization_raster::{
+    VisualizationRasterProfile, render_visualization_report_figure,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -26,19 +38,15 @@ use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
 const DESKTOP_BREAKPOINT: f32 = 1_020.0;
 const STACK_BREAKPOINT: f32 = 820.0;
-const OUTLINE_DESKTOP_WIDTH: f32 = 220.0;
+const OUTLINE_DESKTOP_WIDTH: f32 = 250.0;
 const OUTLINE_TABLET_WIDTH: f32 = 180.0;
-const INSPECTOR_WIDTH: f32 = 280.0;
+const INSPECTOR_WIDTH: f32 = 300.0;
 const PANEL_GAP: f32 = 0.0;
+const TITLE_ACTION_STACK_BREAKPOINT: f32 = 560.0;
 const OUTLINE_HEADER_HEIGHT: f32 = 39.0;
 const OUTLINE_ROW_HEIGHT: f32 = 34.0;
 const PREVIEW_MIN_HEIGHT: f32 = 420.0;
-const INSPECTOR_SECTION_HEIGHT: f32 = 29.0;
-const INSPECTOR_ROW_HEIGHT: f32 = 29.0;
-const INSPECTOR_SECTION_PADDING: f32 = 17.0;
-const PREVIEW_BLOCKS_PER_PAGE: usize = 16;
-const PREVIEW_PROSE_CHARACTERS: usize = 4_096;
-
+const INSPECTOR_PUBLICATION_CONTENT_HEIGHT: f32 = 820.0;
 const PAPER: Color32 = Color32::from_rgb(255, 255, 255);
 const PAPER_PANEL: Color32 = Color32::from_rgb(246, 247, 247);
 const PAPER_TEXT: Color32 = Color32::from_rgb(32, 36, 40);
@@ -46,6 +54,87 @@ const PAPER_MUTED: Color32 = Color32::from_rgb(82, 89, 94);
 const PAPER_FAINT: Color32 = Color32::from_rgb(98, 105, 110);
 const PAPER_BORDER: Color32 = Color32::from_rgb(205, 210, 213);
 const PAPER_ACCENT: Color32 = Color32::from_rgb(122, 93, 0);
+
+fn paper_switch(ui: &mut Ui, value: &mut bool) -> egui::Response {
+    const TRACK_SIZE: Vec2 = Vec2::new(32.0, 18.0);
+    const HIT_SIZE: Vec2 = Vec2::new(40.0, 28.0);
+    let (rect, mut response) = ui.allocate_exact_size(HIT_SIZE, Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Checkbox,
+            ui.is_enabled(),
+            *value,
+            "Include report element",
+        )
+    });
+    if response.clicked() {
+        *value = !*value;
+        response.mark_changed();
+    }
+
+    let track = Rect::from_center_size(rect.center(), TRACK_SIZE);
+    let fill = if *value {
+        PAPER_ACCENT
+    } else if response.hovered() {
+        Color32::from_rgb(225, 228, 229)
+    } else {
+        PAPER_PANEL
+    };
+    ui.painter().rect(
+        track,
+        TRACK_SIZE.y * 0.5,
+        fill,
+        Stroke::new(1.0, if *value { PAPER_ACCENT } else { PAPER_BORDER }),
+        egui::StrokeKind::Inside,
+    );
+    let knob_x = if *value {
+        track.right() - 7.0
+    } else {
+        track.left() + 7.0
+    };
+    ui.painter().circle_filled(
+        egui::pos2(knob_x, track.center().y),
+        5.5,
+        if *value { PAPER } else { PAPER_MUTED },
+    );
+    theme::paint_focus_ring(ui, &response, rect);
+    response
+}
+
+fn paint_dashed_rect(ui: &Ui, rect: Rect, color: Color32) {
+    const DASH: f32 = 4.0;
+    const GAP: f32 = 3.0;
+    let stroke = Stroke::new(1.0, color);
+    let painter = ui.painter();
+
+    let mut x = rect.left();
+    while x < rect.right() {
+        let end = (x + DASH).min(rect.right());
+        painter.line_segment(
+            [egui::pos2(x, rect.top()), egui::pos2(end, rect.top())],
+            stroke,
+        );
+        painter.line_segment(
+            [egui::pos2(x, rect.bottom()), egui::pos2(end, rect.bottom())],
+            stroke,
+        );
+        x += DASH + GAP;
+    }
+
+    let mut y = rect.top();
+    while y < rect.bottom() {
+        let end = (y + DASH).min(rect.bottom());
+        painter.line_segment(
+            [egui::pos2(rect.left(), y), egui::pos2(rect.left(), end)],
+            stroke,
+        );
+        painter.line_segment(
+            [egui::pos2(rect.right(), y), egui::pos2(rect.right(), end)],
+            stroke,
+        );
+        y += DASH + GAP;
+    }
+}
 
 const INITIAL_PAGES: [(&str, &str); 7] = [
     ("1", "Executive summary"),
@@ -64,11 +153,39 @@ enum ComposerLayout {
     Stacked,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PageMoveDirection {
+    Earlier,
+    Later,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PageSettingEdit {
+    Title(String),
+    Inclusion(ReportPageInclusion),
+    EvidenceBinding(ReportPageEvidenceBinding),
+    BlockedGateText(ReportBlockedGateTextPolicy),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DocumentPublicationEdit {
+    OutputFormats(ReportOutputFormats),
+    PublicationProfile(ReportPublicationProfile),
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct PaneSeparators {
     top: bool,
     right: bool,
     bottom: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReportFigureOption {
+    document_index: usize,
+    page_id: PageId,
+    pane_id: PaneId,
+    label: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -132,7 +249,7 @@ fn composer_pane_heights(
     layout: ComposerLayout,
     available_height: f32,
     page_count: usize,
-    page_selected: bool,
+    _page_selected: bool,
 ) -> ComposerPaneHeights {
     let viewport_height = if available_height.is_finite() {
         available_height.max(1.0)
@@ -140,9 +257,7 @@ fn composer_pane_heights(
         PREVIEW_MIN_HEIGHT
     };
     let outline_content = OUTLINE_HEADER_HEIGHT + OUTLINE_ROW_HEIGHT * page_count as f32;
-    let inspector_sections = if page_selected { 2.0 } else { 1.0 };
-    let inspector_content = inspector_sections
-        * (INSPECTOR_SECTION_HEIGHT + INSPECTOR_ROW_HEIGHT * 5.0 + INSPECTOR_SECTION_PADDING);
+    let inspector_content = INSPECTOR_PUBLICATION_CONTENT_HEIGHT;
 
     match layout {
         ComposerLayout::ThreeColumn => ComposerPaneHeights {
@@ -184,6 +299,32 @@ pub(crate) fn open(app: &mut RSpiceApp) {
                 error.to_string(),
             ));
     }
+}
+
+pub(crate) fn can_open(state: &AppState) -> bool {
+    state.project_lifecycle.project_open
+}
+
+pub(crate) fn can_save_document(state: &AppState) -> bool {
+    state.workbench.current_route().surface_id() == SurfaceId::ReportAuthoring
+        && report_mutation_allowed(state)
+        && active_document(state).is_some()
+        && state.workspace.report_documents_dirty
+}
+
+pub(crate) fn can_add_page(state: &AppState) -> bool {
+    state.workbench.current_route().surface_id() == SurfaceId::ReportAuthoring
+        && report_mutation_allowed(state)
+        && active_document(state).is_some()
+}
+
+pub(crate) fn can_edit_page_properties(state: &AppState) -> bool {
+    if state.workbench.current_route().surface_id() != SurfaceId::ReportAuthoring
+        || !report_mutation_allowed(state)
+    {
+        return false;
+    }
+    active_document(state).is_some_and(|document| selected_page_id(state, document).is_some())
 }
 
 pub(crate) fn save_document(app: &mut RSpiceApp) {
@@ -245,6 +386,367 @@ pub(crate) fn open_page_properties(app: &mut RSpiceApp) {
     editor.page_properties_open = true;
 }
 
+fn can_move_selected_page(state: &AppState, direction: PageMoveDirection) -> bool {
+    if !report_mutation_allowed(state) {
+        return false;
+    }
+    let Some(document) = active_document(state) else {
+        return false;
+    };
+    let Some(page_id) = selected_page_id(state, document) else {
+        return false;
+    };
+    let Some(index) = document
+        .pages()
+        .iter()
+        .position(|page| page.id() == page_id)
+    else {
+        return false;
+    };
+    match direction {
+        PageMoveDirection::Earlier => index > 0,
+        PageMoveDirection::Later => index + 1 < document.pages().len(),
+    }
+}
+
+fn move_selected_page(app: &mut RSpiceApp, direction: PageMoveDirection) {
+    if !report_mutation_allowed(&app.state) {
+        let reason = report_mutation_block_reason(&app.state).to_owned();
+        app.state.workbench.report_authoring.transaction_error = Some(reason.clone());
+        app.state
+            .push_user_message(crate::diagnostics::ConsoleMessage::warning(reason));
+        return;
+    }
+    let selected_page =
+        active_document(&app.state).and_then(|document| selected_page_id(&app.state, document));
+    let Some(page_id) = selected_page else {
+        return;
+    };
+    let revision_note = match direction {
+        PageMoveDirection::Earlier => "Move report page earlier",
+        PageMoveDirection::Later => "Move report page later",
+    };
+    let result = active_document_mut(&mut app.state).and_then(|document| {
+        let Some(index) = document
+            .pages()
+            .iter()
+            .position(|page| page.id() == page_id)
+        else {
+            return Err("The selected report page no longer exists.".to_owned());
+        };
+        let expected_page_revision = document.pages()[index].revision();
+        let before = match direction {
+            PageMoveDirection::Earlier if index > 0 => Some(document.pages()[index - 1].id()),
+            PageMoveDirection::Later if index + 1 < document.pages().len() => {
+                document.pages().get(index + 2).map(|page| page.id())
+            }
+            _ => return Ok(false),
+        };
+        document
+            .transact_with_context(
+                document.revision(),
+                vec![ReportEdit::MovePage {
+                    page_id,
+                    expected_page_revision,
+                    before,
+                }],
+                timestamp_unix_ms(),
+                "rspice-local-session",
+                revision_note,
+            )
+            .map(|_| true)
+            .map_err(|error| error.to_string())
+    });
+    match result {
+        Ok(changed) => {
+            app.state.workbench.report_authoring.selected_page = Some(page_id);
+            app.state.workbench.report_authoring.preview_block_page = 0;
+            app.state.workbench.report_authoring.transaction_error = None;
+            app.state.workspace.report_documents_dirty |= changed;
+        }
+        Err(error) => {
+            app.state.workbench.report_authoring.transaction_error = Some(error.clone());
+            app.state
+                .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+        }
+    }
+}
+
+fn commit_page_setting(app: &mut RSpiceApp, page_id: ReportPageId, setting: PageSettingEdit) {
+    if !report_mutation_allowed(&app.state) {
+        let reason = report_mutation_block_reason(&app.state).to_owned();
+        app.state.workbench.report_authoring.transaction_error = Some(reason.clone());
+        app.state
+            .push_user_message(crate::diagnostics::ConsoleMessage::warning(reason));
+        return;
+    }
+    if let PageSettingEdit::Title(title) = &setting
+        && !valid_page_title(title)
+    {
+        app.state.workbench.report_authoring.transaction_error = Some(
+            "The page title must be trimmed, non-empty, single-line text of at most 512 characters."
+                .to_owned(),
+        );
+        return;
+    }
+    let result = active_document_mut(&mut app.state).and_then(|document| {
+        let page = document
+            .page(page_id)
+            .ok_or_else(|| "The selected report page no longer exists.".to_owned())?;
+        let expected_page_revision = page.revision();
+        let (edit, revision_note) = match setting {
+            PageSettingEdit::Title(title) if page.title() != title => (
+                ReportEdit::UpdatePageTitle {
+                    page_id,
+                    expected_page_revision,
+                    title,
+                },
+                "Update report page title",
+            ),
+            PageSettingEdit::Inclusion(inclusion) if page.inclusion() != inclusion => (
+                ReportEdit::SetPageInclusion {
+                    page_id,
+                    expected_page_revision,
+                    inclusion,
+                },
+                "Update report page inclusion",
+            ),
+            PageSettingEdit::EvidenceBinding(evidence_binding)
+                if page.evidence_binding() != evidence_binding =>
+            {
+                (
+                    ReportEdit::SetPageEvidenceBinding {
+                        page_id,
+                        expected_page_revision,
+                        evidence_binding,
+                    },
+                    "Update report page evidence binding",
+                )
+            }
+            PageSettingEdit::BlockedGateText(policy)
+                if page.blocked_gate_text_policy() != policy =>
+            {
+                (
+                    ReportEdit::SetPageBlockedGateTextPolicy {
+                        page_id,
+                        expected_page_revision,
+                        policy,
+                    },
+                    "Update report blocked-gate text policy",
+                )
+            }
+            _ => return Ok(false),
+        };
+        document
+            .transact_with_context(
+                document.revision(),
+                vec![edit],
+                timestamp_unix_ms(),
+                "rspice-local-session",
+                revision_note,
+            )
+            .map(|_| true)
+            .map_err(|error| error.to_string())
+    });
+    match result {
+        Ok(changed) => {
+            app.state.workbench.report_authoring.selected_page = Some(page_id);
+            app.state.workbench.report_authoring.preview_block_page = 0;
+            app.state.workbench.report_authoring.transaction_error = None;
+            app.state.workspace.report_documents_dirty |= changed;
+        }
+        Err(error) => {
+            app.state.workbench.report_authoring.transaction_error = Some(error.clone());
+            app.state
+                .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+        }
+    }
+}
+
+fn commit_document_publication_setting(
+    app: &mut RSpiceApp,
+    document_id: crate::product::ResultDocumentId,
+    setting: DocumentPublicationEdit,
+) {
+    if !report_mutation_allowed(&app.state) {
+        let reason = report_mutation_block_reason(&app.state).to_owned();
+        app.state.workbench.report_authoring.transaction_error = Some(reason.clone());
+        app.state
+            .push_user_message(crate::diagnostics::ConsoleMessage::warning(reason));
+        return;
+    }
+    let result = active_document_mut(&mut app.state).and_then(|document| {
+        if document.id() != document_id {
+            return Err(
+                "The report document changed before its publication policy committed.".to_owned(),
+            );
+        }
+        let (edit, revision_note) = match setting {
+            DocumentPublicationEdit::OutputFormats(output_formats)
+                if document.output_formats() != output_formats =>
+            {
+                (
+                    ReportEdit::SetOutputFormats { output_formats },
+                    "Update report output formats",
+                )
+            }
+            DocumentPublicationEdit::PublicationProfile(publication_profile)
+                if document.publication_profile() != publication_profile =>
+            {
+                (
+                    ReportEdit::SetPublicationProfile {
+                        publication_profile,
+                    },
+                    "Update report publication profile",
+                )
+            }
+            _ => return Ok(false),
+        };
+        document
+            .transact_with_context(
+                document.revision(),
+                vec![edit],
+                timestamp_unix_ms(),
+                "rspice-local-session",
+                revision_note,
+            )
+            .map(|_| true)
+            .map_err(|error| error.to_string())
+    });
+    match result {
+        Ok(changed) => {
+            app.state.workspace.report_documents_dirty |= changed;
+            app.state.workbench.report_authoring.transaction_error = None;
+        }
+        Err(error) => {
+            app.state.workbench.report_authoring.transaction_error = Some(error.clone());
+            app.state
+                .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+        }
+    }
+}
+
+fn set_report_block_enabled(
+    app: &mut RSpiceApp,
+    document_id: crate::product::ResultDocumentId,
+    block_id: ReportBlockId,
+    enabled: bool,
+) {
+    if !report_mutation_allowed(&app.state) {
+        let reason = report_mutation_block_reason(&app.state).to_owned();
+        app.state.workbench.report_authoring.transaction_error = Some(reason.clone());
+        app.state
+            .push_user_message(crate::diagnostics::ConsoleMessage::warning(reason));
+        return;
+    }
+    let timestamp = timestamp_unix_ms();
+    let result = active_document_mut(&mut app.state).and_then(|document| {
+        if document.id() != document_id {
+            return Err(
+                "The report document changed before the element update committed.".to_owned(),
+            );
+        }
+        let block = document
+            .block(block_id)
+            .ok_or_else(|| "The selected report element no longer exists.".to_owned())?;
+        if block.enabled() == enabled {
+            return Ok(false);
+        }
+        document
+            .transact_with_context(
+                document.revision(),
+                vec![ReportEdit::SetBlockEnabled {
+                    block_id,
+                    expected_block_revision: block.revision(),
+                    enabled,
+                }],
+                timestamp,
+                "rspice-local-session",
+                if enabled {
+                    "Include report page element"
+                } else {
+                    "Exclude report page element"
+                },
+            )
+            .map(|_| true)
+            .map_err(|error| error.to_string())
+    });
+    match result {
+        Ok(changed) => {
+            app.state.workbench.report_authoring.selected_report_block = Some(block_id);
+            app.state.workbench.report_authoring.preview_block_page = 0;
+            app.state.workbench.report_authoring.transaction_error = None;
+            app.state.workspace.report_documents_dirty |= changed;
+        }
+        Err(error) => {
+            app.state.workbench.report_authoring.transaction_error = Some(error.clone());
+            app.state
+                .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+        }
+    }
+}
+
+fn evidence_binding_label(state: &AppState, evidence_binding: ReportPageEvidenceBinding) -> String {
+    match evidence_binding {
+        ReportPageEvidenceBinding::Unbound => "Unbound — select evidence".to_owned(),
+        ReportPageEvidenceBinding::LatestAcceptedRun => {
+            "Latest accepted run — resolve on draft build".to_owned()
+        }
+        ReportPageEvidenceBinding::ExactDataset { binding } => state
+            .simulation
+            .runs
+            .iter()
+            .find(|run| {
+                run.dataset_id == binding.dataset_id
+                    && run.dataset_content_digest() == binding.content_digest
+            })
+            .map_or_else(
+                || {
+                    let dataset_id = binding.dataset_id.to_string();
+                    format!(
+                        "Dataset {}… · immutable",
+                        dataset_id.get(..8).unwrap_or(&dataset_id)
+                    )
+                },
+                |run| format!("Run {} · immutable", run.id),
+            ),
+    }
+}
+
+fn evidence_binding_options(
+    state: &AppState,
+    current: ReportPageEvidenceBinding,
+) -> Vec<(String, ReportPageEvidenceBinding)> {
+    let mut options = state
+        .simulation
+        .runs
+        .iter()
+        .filter(|run| !run.analyses.is_empty())
+        .map(|run| {
+            let binding =
+                crate::product::DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
+            (
+                format!("Run {} · immutable", run.id),
+                ReportPageEvidenceBinding::ExactDataset { binding },
+            )
+        })
+        .collect::<Vec<_>>();
+    if !options.iter().any(|(_, option)| *option == current)
+        && matches!(current, ReportPageEvidenceBinding::ExactDataset { .. })
+    {
+        options.push((evidence_binding_label(state, current), current));
+    }
+    options.push((
+        "Latest accepted run — resolve on draft build".to_owned(),
+        ReportPageEvidenceBinding::LatestAcceptedRun,
+    ));
+    options.push((
+        "Unbound — select evidence".to_owned(),
+        ReportPageEvidenceBinding::Unbound,
+    ));
+    options
+}
+
 fn open_create_document(app: &mut RSpiceApp) {
     if !report_mutation_allowed(&app.state) {
         return;
@@ -276,14 +778,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 
         synchronize_report_selection(&mut app.state);
 
-        workspace_title_row(ui, |ui| {
-            code_workspace_heading(
-                ui,
-                "REPORT AUTHORING · ENGINEERING DRAFT",
-                "Engineering report composer",
-                "Author and save the versioned report document, its page order, and page properties.",
-            );
-        });
+        report_title_row(ui, app);
 
         let Some(document) = active_document(&app.state).cloned() else {
             empty_report_workspace(ui, app);
@@ -306,21 +801,11 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     ui.allocate_ui_with_layout(
                         Vec2::new(OUTLINE_DESKTOP_WIDTH, available.y),
                         egui::Layout::top_down(egui::Align::Min),
-                        |ui| {
-                            outline(
-                                ui,
-                                app,
-                                &document,
-                                selected_page,
-                                outline_separators,
-                            )
-                        },
+                        |ui| outline(ui, app, &document, selected_page, outline_separators),
                     );
-                    let preview_width = (available.x
-                        - OUTLINE_DESKTOP_WIDTH
-                        - INSPECTOR_WIDTH
-                        - PANEL_GAP * 2.0)
-                        .max(1.0);
+                    let preview_width =
+                        (available.x - OUTLINE_DESKTOP_WIDTH - INSPECTOR_WIDTH - PANEL_GAP * 2.0)
+                            .max(1.0);
                     ui.allocate_ui_with_layout(
                         Vec2::new(preview_width, available.y),
                         egui::Layout::top_down(egui::Align::Min),
@@ -329,7 +814,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     ui.allocate_ui_with_layout(
                         Vec2::new(INSPECTOR_WIDTH, available.y),
                         egui::Layout::top_down(egui::Align::Min),
-                        |ui| inspector(ui, &document, selected_page, inspector_separators),
+                        |ui| inspector(ui, app, &document, selected_page, inspector_separators),
                     );
                 });
             }
@@ -343,15 +828,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                             ui.allocate_ui_with_layout(
                                 Vec2::new(OUTLINE_TABLET_WIDTH, heights.outline),
                                 egui::Layout::top_down(egui::Align::Min),
-                                |ui| {
-                                    outline(
-                                        ui,
-                                        app,
-                                        &document,
-                                        selected_page,
-                                        outline_separators,
-                                    )
-                                },
+                                |ui| outline(ui, app, &document, selected_page, outline_separators),
                             );
                             ui.allocate_ui_with_layout(
                                 Vec2::new(
@@ -359,28 +836,13 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                                     heights.preview,
                                 ),
                                 egui::Layout::top_down(egui::Align::Min),
-                                |ui| {
-                                    preview(
-                                        ui,
-                                        app,
-                                        &document,
-                                        selected_page,
-                                        preview_separators,
-                                    )
-                                },
+                                |ui| preview(ui, app, &document, selected_page, preview_separators),
                             );
                         });
                         ui.allocate_ui_with_layout(
                             Vec2::new(local_width, heights.inspector),
                             egui::Layout::top_down(egui::Align::Min),
-                            |ui| {
-                                inspector(
-                                    ui,
-                                    &document,
-                                    selected_page,
-                                    inspector_separators,
-                                )
-                            },
+                            |ui| inspector(ui, app, &document, selected_page, inspector_separators),
                         );
                     });
             }
@@ -392,40 +854,17 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                         ui.allocate_ui_with_layout(
                             Vec2::new(local_width, heights.outline),
                             egui::Layout::top_down(egui::Align::Min),
-                            |ui| {
-                                outline(
-                                    ui,
-                                    app,
-                                    &document,
-                                    selected_page,
-                                    outline_separators,
-                                )
-                            },
+                            |ui| outline(ui, app, &document, selected_page, outline_separators),
                         );
                         ui.allocate_ui_with_layout(
                             Vec2::new(local_width, heights.preview),
                             egui::Layout::top_down(egui::Align::Min),
-                            |ui| {
-                                preview(
-                                    ui,
-                                    app,
-                                    &document,
-                                    selected_page,
-                                    preview_separators,
-                                )
-                            },
+                            |ui| preview(ui, app, &document, selected_page, preview_separators),
                         );
                         ui.allocate_ui_with_layout(
                             Vec2::new(local_width, heights.inspector),
                             egui::Layout::top_down(egui::Align::Min),
-                            |ui| {
-                                inspector(
-                                    ui,
-                                    &document,
-                                    selected_page,
-                                    inspector_separators,
-                                )
-                            },
+                            |ui| inspector(ui, app, &document, selected_page, inspector_separators),
                         );
                     });
             }
@@ -435,6 +874,97 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     create_document_dialog(ui.ctx(), app);
     add_page_dialog(ui.ctx(), app);
     page_properties_dialog(ui.ctx(), app);
+    remove_report_block_dialog(ui.ctx(), app);
+    insert_result_document_dialog(ui.ctx(), app);
+    add_report_element_dialog(ui.ctx(), app);
+}
+
+fn report_title_row(ui: &mut Ui, app: &mut RSpiceApp) {
+    workspace_title_row(ui, |ui| {
+        if ui.available_width() <= TITLE_ACTION_STACK_BREAKPOINT {
+            report_title_heading(ui);
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                let width = ((ui.available_width() - 6.0) * 0.5).max(1.0);
+                report_release_button(ui, app, width);
+                report_plan_button(ui, app, width);
+            });
+        } else {
+            let release_width = report_title_button_width(ui, "Release closure", false);
+            let plan_width = report_title_button_width(ui, "Plan report artifact…", true);
+            let actions_width = release_width + 6.0 + plan_width;
+            let heading_width = (ui.available_width() - actions_width - 12.0).max(1.0);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                ui.allocate_ui_with_layout(
+                    Vec2::new(heading_width, 0.0),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        ui.set_width(heading_width);
+                        report_title_heading(ui);
+                    },
+                );
+                ui.add_space(6.0);
+                report_release_button(ui, app, 0.0);
+                report_plan_button(ui, app, 0.0);
+            });
+        }
+    });
+}
+
+fn report_title_heading(ui: &mut Ui) {
+    code_workspace_heading(
+        ui,
+        "REPORT AUTHORING · ENGINEERING DRAFT",
+        "Engineering report composer",
+        "Author traceable pages, locked run references, publication plots and machine-readable appendices. Release closure alone owns package assembly and promotion.",
+    );
+}
+
+fn report_release_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
+    let mut button = Button::new("Release closure");
+    if width > 0.0 {
+        button = button.min_width(width).max_width(width);
+    }
+    if button.show(ui).clicked() {
+        open_release_cockpit(app);
+    }
+}
+
+fn report_plan_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
+    let writable = report_mutation_allowed(&app.state);
+    let mut button = Button::new("Plan report artifact…")
+        .accent()
+        .enabled(writable);
+    if width > 0.0 {
+        button = button.min_width(width).max_width(width);
+    }
+    let response = button
+        .show(ui)
+        .on_disabled_hover_text(report_mutation_block_reason(&app.state));
+    if response.clicked() {
+        open_create_document(app);
+    }
+}
+
+fn report_title_button_width(ui: &Ui, label: &str, accent: bool) -> f32 {
+    let t = Tokens::get(ui.ctx());
+    let font = theme::sans(
+        tokens::FS_0,
+        if accent {
+            FontWeight::SemiBold
+        } else {
+            FontWeight::Regular
+        },
+    );
+    let content = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), font, t.color.text)
+        .size()
+        .x
+        + 20.0;
+    content.max(if t.metrics.ctl_h >= 44.0 { 44.0 } else { 0.0 })
 }
 
 fn empty_report_workspace(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -507,24 +1037,88 @@ fn outline(
             theme::sans(tokens::FS_2, FontWeight::SemiBold),
             t.color.text,
         );
-        let button_rect = Rect::from_center_size(
-            head.right_center() - Vec2::new(19.5, 0.0),
-            Vec2::new(29.0, 29.0),
+        const CONTROL_SIZE: f32 = 29.0;
+        const CONTROL_GAP: f32 = 2.0;
+        const CONTROL_COUNT: f32 = 4.0;
+        let controls_width = CONTROL_SIZE * CONTROL_COUNT + CONTROL_GAP * (CONTROL_COUNT - 1.0);
+        let controls_rect = Rect::from_center_size(
+            head.right_center() - Vec2::new(5.0 + controls_width * 0.5, 0.0),
+            Vec2::new(controls_width, CONTROL_SIZE),
         );
-        let mut properties = ui.new_child(
+        let mut controls = ui.new_child(
             egui::UiBuilder::new()
-                .max_rect(button_rect)
-                .layout(egui::Layout::top_down(egui::Align::Min)),
+                .max_rect(controls_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
-        let properties_enabled = report_mutation_allowed(&app.state);
-        let properties_response = properties
+        controls.spacing_mut().item_spacing.x = CONTROL_GAP;
+        let writable = report_mutation_allowed(&app.state);
+        let add_response = controls
+            .add_enabled_ui(writable, |ui| {
+                icon_button(
+                    ui,
+                    WorkbenchIcon::Add,
+                    "Add report page",
+                    false,
+                    Vec2::splat(CONTROL_SIZE),
+                )
+            })
+            .inner
+            .on_disabled_hover_text(report_mutation_block_reason(&app.state));
+        if add_response.clicked() {
+            open_add_page(app);
+        }
+
+        let move_earlier_enabled = can_move_selected_page(&app.state, PageMoveDirection::Earlier);
+        let move_earlier_response = controls
+            .add_enabled_ui(move_earlier_enabled, |ui| {
+                icon_button(
+                    ui,
+                    WorkbenchIcon::ArrowLeft,
+                    "Move page earlier",
+                    false,
+                    Vec2::splat(CONTROL_SIZE),
+                )
+            })
+            .inner
+            .on_disabled_hover_text(if writable {
+                "The selected page is already first."
+            } else {
+                report_mutation_block_reason(&app.state)
+            });
+        if move_earlier_response.clicked() {
+            move_selected_page(app, PageMoveDirection::Earlier);
+        }
+
+        let move_later_enabled = can_move_selected_page(&app.state, PageMoveDirection::Later);
+        let move_later_response = controls
+            .add_enabled_ui(move_later_enabled, |ui| {
+                icon_button(
+                    ui,
+                    WorkbenchIcon::ArrowRight,
+                    "Move page later",
+                    false,
+                    Vec2::splat(CONTROL_SIZE),
+                )
+            })
+            .inner
+            .on_disabled_hover_text(if writable {
+                "The selected page is already last."
+            } else {
+                report_mutation_block_reason(&app.state)
+            });
+        if move_later_response.clicked() {
+            move_selected_page(app, PageMoveDirection::Later);
+        }
+
+        let properties_enabled = writable && selected_page.is_some();
+        let properties_response = controls
             .add_enabled_ui(properties_enabled, |ui| {
                 icon_button(
                     ui,
                     WorkbenchIcon::Sliders,
                     "Page properties",
                     false,
-                    Vec2::new(29.0, 29.0),
+                    Vec2::splat(CONTROL_SIZE),
                 )
             })
             .inner
@@ -542,9 +1136,11 @@ fn outline(
                     let selected = Some(page.id()) == selected_page;
                     if outline_row(ui, marker, page.title(), selected).clicked() {
                         app.state.workbench.report_authoring.selected_page = Some(page.id());
+                        app.state.workbench.report_authoring.selected_report_block = None;
                         app.state.workbench.report_authoring.preview_block_page = 0;
                     }
                 }
+                page_settings(ui, app, document, selected_page);
             });
     });
     paint_pane_separators(ui, pane.response.rect, separators, t.color.border);
@@ -593,6 +1189,181 @@ fn outline_row(ui: &mut Ui, marker: &str, label: &str, selected: bool) -> egui::
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
+fn page_settings(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    document: &ReportDocument,
+    selected_page: Option<ReportPageId>,
+) {
+    let Some(page) = selected_page.and_then(|page_id| document.page(page_id)) else {
+        return;
+    };
+    let page_id = page.id();
+    {
+        let editor = &mut app.state.workbench.report_authoring;
+        if editor.inline_page_settings_page != Some(page_id) {
+            editor.inline_page_settings_page = Some(page_id);
+            editor.inline_page_title_draft = page.title().to_owned();
+            editor.transaction_error = None;
+        }
+    }
+    let t = Tokens::get(ui.ctx());
+    let page_marker = document
+        .pages()
+        .iter()
+        .position(|candidate| candidate.id() == page_id)
+        .map(|index| page_marker(index, page.title()))
+        .unwrap_or("+");
+    let section_title = format!("Page settings · {page_marker}");
+    code_inspector_section(ui, &section_title, None, |ui| {
+        egui::Frame::new()
+            .inner_margin(egui::Margin {
+                left: 10,
+                right: 10,
+                top: 8,
+                bottom: 10,
+            })
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width().max(1.0));
+                report_form_label(ui, "Page title");
+                let title_response = ui.add_sized(
+                    Vec2::new(ui.available_width(), t.metrics.ctl_h),
+                    egui::TextEdit::singleline(
+                        &mut app.state.workbench.report_authoring.inline_page_title_draft,
+                    )
+                    .font(theme::mono(tokens::FS_1, FontWeight::Regular)),
+                );
+                if title_response.has_focus()
+                    && ui.input(|input| input.key_pressed(egui::Key::Escape))
+                {
+                    app.state.workbench.report_authoring.inline_page_title_draft =
+                        page.title().to_owned();
+                    title_response.surrender_focus();
+                } else if title_response.lost_focus() {
+                    let title = app
+                        .state
+                        .workbench
+                        .report_authoring
+                        .inline_page_title_draft
+                        .trim()
+                        .to_owned();
+                    app.state.workbench.report_authoring.inline_page_title_draft = title.clone();
+                    commit_page_setting(app, page_id, PageSettingEdit::Title(title));
+                }
+
+                ui.add_space(8.0);
+                report_form_label(ui, "Include in artifact");
+                const INCLUSION_OPTIONS: [(ReportPageInclusion, &str); 3] = [
+                    (ReportPageInclusion::Included, "Included"),
+                    (
+                        ReportPageInclusion::ExcludedFromDraft,
+                        "Excluded from draft",
+                    ),
+                    (ReportPageInclusion::AppendixOnly, "Appendix only"),
+                ];
+                let inclusion_labels = INCLUSION_OPTIONS
+                    .iter()
+                    .map(|(_, label)| (*label).to_owned())
+                    .collect::<Vec<_>>();
+                let inclusion_current = report_page_inclusion_label(page.inclusion());
+                if let Some(index) = select(
+                    ui,
+                    "report-page-inclusion",
+                    "Include report page in artifact",
+                    inclusion_current,
+                    &inclusion_labels,
+                    ui.available_width(),
+                ) && let Some((inclusion, _)) = INCLUSION_OPTIONS.get(index)
+                {
+                    commit_page_setting(app, page_id, PageSettingEdit::Inclusion(*inclusion));
+                }
+
+                ui.add_space(8.0);
+                report_form_label(ui, "Evidence binding");
+                let evidence_options =
+                    evidence_binding_options(&app.state, page.evidence_binding());
+                let evidence_labels = evidence_options
+                    .iter()
+                    .map(|(label, _)| label.clone())
+                    .collect::<Vec<_>>();
+                let evidence_current = evidence_binding_label(&app.state, page.evidence_binding());
+                if let Some(index) = select(
+                    ui,
+                    "report-page-evidence-binding",
+                    "Report page evidence binding",
+                    &evidence_current,
+                    &evidence_labels,
+                    ui.available_width(),
+                ) && let Some((_, evidence_binding)) = evidence_options.get(index)
+                {
+                    commit_page_setting(
+                        app,
+                        page_id,
+                        PageSettingEdit::EvidenceBinding(*evidence_binding),
+                    );
+                }
+
+                ui.add_space(8.0);
+                report_form_label(ui, "Blocked-gate text");
+                const GATE_TEXT_OPTIONS: [(ReportBlockedGateTextPolicy, &str); 2] = [
+                    (
+                        ReportBlockedGateTextPolicy::VerbatimFromSource,
+                        "State verbatim from source",
+                    ),
+                    (
+                        ReportBlockedGateTextPolicy::SummarizeWithLink,
+                        "Summarize with link",
+                    ),
+                ];
+                let gate_text_labels = GATE_TEXT_OPTIONS
+                    .iter()
+                    .map(|(_, label)| (*label).to_owned())
+                    .collect::<Vec<_>>();
+                let gate_text_current =
+                    report_blocked_gate_text_policy_label(page.blocked_gate_text_policy());
+                if let Some(index) = select(
+                    ui,
+                    "report-page-gate-text",
+                    "Blocked-gate text policy",
+                    gate_text_current,
+                    &gate_text_labels,
+                    ui.available_width(),
+                ) && let Some((policy, _)) = GATE_TEXT_OPTIONS.get(index)
+                {
+                    commit_page_setting(app, page_id, PageSettingEdit::BlockedGateText(*policy));
+                }
+
+                if let Some(error) = app
+                    .state
+                    .workbench
+                    .report_authoring
+                    .transaction_error
+                    .as_deref()
+                {
+                    ui.add_space(8.0);
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(error)
+                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                .color(t.color.err),
+                        )
+                        .wrap(),
+                    );
+                }
+            });
+    });
+}
+
+fn report_form_label(ui: &mut Ui, label: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.label(
+        egui::RichText::new(label)
+            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+            .color(t.color.text_dim),
+    );
+    ui.add_space(4.0);
+}
+
 fn preview(
     ui: &mut Ui,
     app: &mut RSpiceApp,
@@ -601,6 +1372,7 @@ fn preview(
     separators: PaneSeparators,
 ) {
     let t = Tokens::get(ui.ctx());
+    let summary_metrics = ReportSummaryMetrics::from_state(&app.state);
     let width = ui.available_width();
     let height = ui.available_height();
     let pane = egui::Frame::new()
@@ -671,19 +1443,10 @@ fn preview(
                             ui.add_space(24.0);
                             section_heading(ui, marker, title, &description);
                             ui.add_space(28.0);
-                            summary_grid(ui, document, page, compact);
+                            summary_grid(ui, summary_metrics, compact);
                             if let Some(page) = page {
                                 ui.add_space(28.0);
-                                render_page_contents(
-                                    ui,
-                                    page,
-                                    compact,
-                                    &mut app
-                                        .state
-                                        .workbench
-                                        .report_authoring
-                                        .preview_block_page,
-                                );
+                                page_elements(ui, app, document, page, compact);
                             }
                             ui.add_space(24.0);
                             paper_label(
@@ -746,23 +1509,117 @@ fn section_heading(ui: &mut Ui, marker: &str, title: &str, description: &str) {
     });
 }
 
-fn summary_grid(
-    ui: &mut Ui,
-    document: &ReportDocument,
-    page: Option<&crate::results::report_document::ReportPage>,
-    compact: bool,
-) {
-    let page_sections = page.map_or(0, |page| page.sections().len());
-    let page_blocks = page.map_or(0, |page| {
-        page.sections()
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReportJointYield {
+    passing: usize,
+    total: usize,
+}
+
+impl ReportJointYield {
+    fn from_results(results: &[crate::services::yield_manager::YieldResult]) -> Option<Self> {
+        let total = results.first()?.total_runs;
+        if total == 0
+            || results
+                .iter()
+                .any(|result| result.total_runs != total || result.trail.len() != total)
+        {
+            return None;
+        }
+        let passing = (0..total)
+            .filter(|index| results.iter().all(|result| result.trail[*index]))
+            .count();
+        Some(Self { passing, total })
+    }
+
+    fn percent(self) -> f64 {
+        self.passing as f64 / self.total as f64 * 100.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReportSummaryMetrics {
+    checks_passing: usize,
+    checks_total: usize,
+    joint_yield: Option<ReportJointYield>,
+    pvt_completed: Option<usize>,
+    pvt_total: Option<usize>,
+}
+
+impl ReportSummaryMetrics {
+    fn from_state(state: &AppState) -> Self {
+        let run = state.simulation.active_run();
+        let checks_total = state.workspace.specs.len();
+        let checks_passing = state
+            .workspace
+            .specs
             .iter()
-            .map(|section| section.blocks().len())
-            .sum()
-    });
+            .filter(|spec| {
+                run.and_then(|run| {
+                    run.analyses
+                        .iter()
+                        .rev()
+                        .filter(|analysis| analysis.success && analysis.provenance.is_some())
+                        .flat_map(|analysis| analysis.measurements.iter())
+                        .find(|measurement| {
+                            measurement.name.eq_ignore_ascii_case(&spec.measurement)
+                        })
+                        .and_then(|measurement| measurement.value)
+                        .filter(|value| value.is_finite())
+                })
+                .is_some_and(|value| spec.passes(value))
+            })
+            .count();
+
+        let joint_yield = state
+            .simulation
+            .yield_results_for_active_dataset()
+            .and_then(ReportJointYield::from_results);
+
+        let pvt_progress = run
+            .and_then(|run| {
+                run.analyses.iter().rev().find(|analysis| {
+                    analysis.analysis_type == crate::state::AnalysisType::Corner
+                        && analysis.success
+                        && analysis.provenance.is_some()
+                })
+            })
+            .and_then(|analysis| match analysis.family_metadata.as_ref() {
+                Some(crate::state::AnalysisResultFamilyMetadata::Corner {
+                    x_values,
+                    failed_corners,
+                    ..
+                }) if !x_values.is_empty() && *failed_corners <= x_values.len() => {
+                    Some((x_values.len() - *failed_corners, x_values.len()))
+                }
+                _ => None,
+            });
+
+        Self {
+            checks_passing,
+            checks_total,
+            joint_yield,
+            pvt_completed: pvt_progress.map(|(completed, _)| completed),
+            pvt_total: pvt_progress.map(|(_, total)| total),
+        }
+    }
+}
+
+fn summary_grid(ui: &mut Ui, metrics: ReportSummaryMetrics, compact: bool) {
+    let yield_value = metrics.joint_yield.map_or_else(
+        || "not run".to_owned(),
+        |joint| format!("{:.1}%", joint.percent()),
+    );
+    let pvt_value = metrics.pvt_completed.zip(metrics.pvt_total).map_or_else(
+        || "not run".to_owned(),
+        |(completed, total)| format!("{completed} / {total}"),
+    );
     let cells = [
-        (document.pages().len().to_string(), "document pages"),
-        (page_sections.to_string(), "selected-page sections"),
-        (page_blocks.to_string(), "selected-page blocks"),
+        (
+            format!("{} / {}", metrics.checks_passing, metrics.checks_total),
+            "configured checks passing",
+        ),
+        (yield_value, "Monte Carlo yield estimate"),
+        (pvt_value, "PVT points completed"),
     ];
     if compact {
         for (value, label) in cells {
@@ -808,427 +1665,300 @@ fn summary_cell(ui: &mut Ui, value: &str, label: &str) {
         });
 }
 
-fn render_page_contents(
+fn page_elements(
     ui: &mut Ui,
+    app: &mut RSpiceApp,
+    document: &ReportDocument,
     page: &crate::results::report_document::ReportPage,
     compact: bool,
-    preview_block_page: &mut usize,
 ) {
-    if page.sections().is_empty() {
-        paper_label(
-            ui,
-            "This page contains no report sections.",
-            theme::sans(tokens::FS_1, FontWeight::Regular),
-            PAPER_MUTED,
-        );
-        return;
-    }
-    let block_count = page
-        .sections()
-        .iter()
-        .map(|section| section.blocks().len())
-        .sum::<usize>();
-    let (clamped_page, block_start, block_end, page_count) =
-        preview_block_window(block_count, *preview_block_page);
-    *preview_block_page = clamped_page;
-    if page_count > 1 {
-        preview_pagination(
-            ui,
-            preview_block_page,
-            clamped_page,
-            block_start,
-            block_end,
-            block_count,
-            page_count,
-        );
-        ui.add_space(16.0);
-    }
-
-    let mut section_block_start = 0_usize;
-    for (section_index, section) in page.sections().iter().enumerate() {
-        let section_block_end = section_block_start.saturating_add(section.blocks().len());
-        let render_empty_section = section.blocks().is_empty()
-            && clamped_page == empty_section_preview_page(section_block_start);
-        let intersects_window = section_block_end > block_start && section_block_start < block_end;
-        if !render_empty_section && !intersects_window {
-            section_block_start = section_block_end;
-            continue;
-        }
-        let heading = format!("{}. {}", section_index + 1, section.title());
-        paper_label(
-            ui,
-            &heading,
-            theme::sans(17.0, FontWeight::SemiBold),
-            PAPER_TEXT,
-        );
-        ui.add_space(8.0);
-        if section.blocks().is_empty() {
-            paper_label(
-                ui,
-                "This section contains no report content blocks.",
-                theme::sans(tokens::FS_1, FontWeight::Regular),
-                PAPER_FAINT,
-            );
-        }
-        let local_start = block_start
-            .saturating_sub(section_block_start)
-            .min(section.blocks().len());
-        let local_end = block_end
-            .saturating_sub(section_block_start)
-            .min(section.blocks().len());
-        for block in &section.blocks()[local_start..local_end] {
-            egui::Frame::new()
-                .fill(PAPER)
-                .stroke(Stroke::new(1.0, PAPER_BORDER))
-                .inner_margin(egui::Margin::same(if compact { 10 } else { 14 }))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    render_report_block(ui, block);
-                });
-            ui.add_space(8.0);
-        }
-        ui.add_space(16.0);
-        section_block_start = section_block_end;
-    }
-}
-
-fn preview_block_window(block_count: usize, requested_page: usize) -> (usize, usize, usize, usize) {
-    let page_count = block_count.div_ceil(PREVIEW_BLOCKS_PER_PAGE).max(1);
-    let clamped_page = requested_page.min(page_count - 1);
-    let start = clamped_page.saturating_mul(PREVIEW_BLOCKS_PER_PAGE);
-    let end = start
-        .saturating_add(PREVIEW_BLOCKS_PER_PAGE)
-        .min(block_count);
-    (clamped_page, start, end, page_count)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn preview_pagination(
-    ui: &mut Ui,
-    selected_page: &mut usize,
-    current_page: usize,
-    block_start: usize,
-    block_end: usize,
-    block_count: usize,
-    page_count: usize,
-) {
-    ui.horizontal(|ui| {
-        if Button::new("Previous")
-            .enabled(current_page > 0)
-            .show(ui)
-            .clicked()
-        {
-            *selected_page = current_page - 1;
-        }
-        paper_label(
-            ui,
-            &format!(
-                "Blocks {}–{} of {} · page {} of {}",
-                block_start + 1,
-                block_end,
-                block_count,
-                current_page + 1,
-                page_count
-            ),
-            theme::mono(tokens::FS_0, FontWeight::Medium),
-            PAPER_MUTED,
-        );
-        if Button::new("Next")
-            .enabled(current_page + 1 < page_count)
-            .show(ui)
-            .clicked()
-        {
-            *selected_page = current_page + 1;
-        }
-    });
-}
-
-fn render_report_block(ui: &mut Ui, block: &crate::results::report_document::ReportBlock) {
     paper_label(
         ui,
-        report_block_kind_label(block.kind()),
-        theme::mono(tokens::FS_0, FontWeight::SemiBold),
-        PAPER_ACCENT,
+        "Page elements",
+        theme::sans(tokens::FS_3, FontWeight::SemiBold),
+        PAPER_TEXT,
     );
-    ui.add_space(6.0);
-    match block.kind() {
-        ReportBlockKind::PlotFigure(figure) => {
-            report_block_title(ui, &figure.caption);
-            paper_label(
-                ui,
-                &figure.alternative_text,
-                theme::sans(tokens::FS_1, FontWeight::Regular),
-                PAPER_MUTED,
-            );
-            paper_label(
-                ui,
-                &format!("Figure sizing · {}", figure_sizing_label(figure.sizing)),
-                theme::mono(tokens::FS_0, FontWeight::Regular),
-                PAPER_FAINT,
-            );
-            report_reference_line(ui, &figure.reference);
-        }
-        ReportBlockKind::DataTable(table) => {
-            report_block_title(ui, &table.title);
-            let column_width = 156.0;
-            let row_height = 25.0;
-            let table_width = column_width * table.columns.len() as f32;
-            egui::ScrollArea::horizontal()
-                .id_salt(("report-data-table", block.id()))
-                .show(ui, |ui| {
-                    ui.set_min_width(table_width);
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::ZERO;
-                        for column in &table.columns {
-                            let heading = column.unit.as_ref().map_or_else(
-                                || column.heading.clone(),
-                                |unit| format!("{} ({unit})", column.heading),
-                            );
-                            ui.add_sized(
-                                Vec2::new(column_width, row_height),
-                                egui::Label::new(
-                                    egui::RichText::new(heading)
+    ui.add_space(8.0);
+
+    let blocks = page
+        .sections()
+        .iter()
+        .flat_map(|section| section.blocks())
+        .collect::<Vec<_>>();
+    if blocks.is_empty() {
+        egui::Frame::new()
+            .fill(PAPER)
+            .stroke(Stroke::new(1.0, PAPER_BORDER))
+            .inner_margin(egui::Margin::same(14))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                paper_label(
+                    ui,
+                    "No page elements. Add authored content or insert an immutable result document.",
+                    theme::sans(tokens::FS_1, FontWeight::Regular),
+                    PAPER_MUTED,
+                );
+            });
+    } else {
+        ScrollArea::horizontal()
+            .id_salt(("report-page-elements", page.id()))
+            .show(ui, |ui| {
+                ui.set_min_width(if compact {
+                    680.0
+                } else {
+                    ui.available_width().max(680.0)
+                });
+                let previous_faint_background = ui.visuals().faint_bg_color;
+                ui.visuals_mut().faint_bg_color = Color32::from_rgb(249, 249, 247);
+                TableBuilder::new(ui)
+                    .id_salt(("report-page-elements-table", page.id()))
+                    .striped(true)
+                    .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                    .column(Column::remainder().at_least(150.0))
+                    .column(Column::initial(110.0).at_least(96.0))
+                    .column(Column::remainder().at_least(180.0))
+                    .column(Column::initial(104.0).at_least(90.0))
+                    .column(Column::initial(46.0).at_least(42.0))
+                    .header(27.0, |mut header| {
+                        for label in ["Element", "Type", "Bound source", "State", "On"] {
+                            header.col(|ui| {
+                                ui.painter().rect_filled(
+                                    ui.max_rect(),
+                                    0.0,
+                                    Color32::from_rgb(244, 243, 239),
+                                );
+                                ui.label(
+                                    egui::RichText::new(label)
                                         .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                                        .color(PAPER_TEXT),
-                                )
-                                .truncate(),
-                            );
+                                        .color(PAPER_MUTED),
+                                );
+                            });
+                        }
+                    })
+                    .body(|mut body| {
+                        for block in blocks {
+                            body.row(24.0, |mut row| {
+                                row.col(|ui| {
+                                    let selected =
+                                        app.state.workbench.report_authoring.selected_report_block
+                                            == Some(block.id());
+                                    if ui
+                                        .selectable_label(
+                                            selected,
+                                            egui::RichText::new(report_block_element_title(
+                                                block.kind(),
+                                            ))
+                                            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                                            .color(PAPER_TEXT),
+                                        )
+                                        .clicked()
+                                    {
+                                        app.state
+                                            .workbench
+                                            .report_authoring
+                                            .selected_report_block = Some(block.id());
+                                    }
+                                });
+                                row.col(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(report_block_kind_label(block.kind()))
+                                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                            .color(PAPER_MUTED),
+                                    );
+                                });
+                                row.col(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(report_block_bound_source(
+                                            block.kind(),
+                                        ))
+                                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                        .color(PAPER_MUTED),
+                                    );
+                                });
+                                row.col(|ui| {
+                                    let (state, color) = report_block_state(&app.state, block);
+                                    ui.label(
+                                        egui::RichText::new(state)
+                                            .font(theme::sans(tokens::FS_0, FontWeight::Medium))
+                                            .color(color),
+                                    );
+                                });
+                                row.col(|ui| {
+                                    let mut enabled = block.enabled();
+                                    let response = ui
+                                        .add_enabled_ui(report_mutation_allowed(&app.state), |ui| {
+                                            paper_switch(ui, &mut enabled)
+                                        })
+                                        .inner
+                                        .on_disabled_hover_text(report_mutation_block_reason(
+                                            &app.state,
+                                        ));
+                                    if response.changed() {
+                                        set_report_block_enabled(
+                                            app,
+                                            document.id(),
+                                            block.id(),
+                                            enabled,
+                                        );
+                                    }
+                                });
+                            });
                         }
                     });
-                    if table.rows.is_empty() {
-                        paper_label(
-                            ui,
-                            "No table rows.",
-                            theme::sans(tokens::FS_0, FontWeight::Regular),
-                            PAPER_FAINT,
-                        );
-                    } else {
-                        egui::ScrollArea::vertical()
-                            .id_salt(("report-data-table-rows", block.id()))
-                            .max_height(row_height * table.rows.len().min(12) as f32)
-                            .auto_shrink([false, true])
-                            .show_rows(ui, row_height, table.rows.len(), |ui, range| {
-                                for row_index in range {
-                                    ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing = Vec2::ZERO;
-                                        for cell in &table.rows[row_index] {
-                                            ui.add_sized(
-                                                Vec2::new(column_width, row_height),
-                                                egui::Label::new(
-                                                    egui::RichText::new(table_cell_text(cell))
-                                                        .font(theme::mono(
-                                                            tokens::FS_0,
-                                                            FontWeight::Regular,
-                                                        ))
-                                                        .color(PAPER_MUTED),
-                                                )
-                                                .truncate(),
-                                            );
-                                        }
-                                    });
-                                }
-                            });
-                    }
-                });
-            report_reference_line(ui, &table.reference);
+                ui.visuals_mut().faint_bg_color = previous_faint_background;
+            });
+    }
+
+    ui.add_space(10.0);
+    let writable = report_mutation_allowed(&app.state);
+    let selected_block_exists = app
+        .state
+        .workbench
+        .report_authoring
+        .selected_report_block
+        .is_some_and(|block_id| document.block(block_id).is_some());
+    let retained_figure_available = !report_figure_options(&app.state).is_empty();
+    ui.horizontal_wrapped(|ui| {
+        let add = Button::new("Add element…")
+            .enabled(writable)
+            .show(ui)
+            .on_disabled_hover_text(report_mutation_block_reason(&app.state));
+        if add.clicked() {
+            open_add_report_element(app);
         }
-        ReportBlockKind::Datasheet(datasheet) => {
-            report_block_title(ui, &datasheet.title);
-            virtualized_report_rows(
-                ui,
-                ("report-datasheet-fields", block.id()),
-                datasheet.fields.len(),
-                |ui, index| {
-                    let field = &datasheet.fields[index];
-                    let label = format!("{} ({})", field.label, field.key);
-                    let value = field.unit.as_ref().map_or_else(
-                        || field.value.clone(),
-                        |unit| format!("{} {unit}", field.value),
-                    );
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 12.0;
-                        let label_width = (ui.available_width() * 0.42).max(1.0);
-                        ui.add_sized(
-                            Vec2::new(label_width, 25.0),
-                            egui::Label::new(
-                                egui::RichText::new(label)
-                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                    .color(PAPER_MUTED),
-                            )
-                            .truncate(),
-                        );
-                        ui.add_sized(
-                            Vec2::new(ui.available_width(), 25.0),
-                            egui::Label::new(
-                                egui::RichText::new(value)
-                                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                                    .color(PAPER_TEXT),
-                            )
-                            .truncate(),
-                        );
-                    });
-                },
-            );
-            report_reference_line(ui, &datasheet.reference);
+        let remove = Button::new("Remove")
+            .enabled(writable && selected_block_exists)
+            .show(ui)
+            .on_disabled_hover_text(if writable {
+                "Select a page element to remove."
+            } else {
+                report_mutation_block_reason(&app.state)
+            });
+        if remove.clicked() {
+            app.state
+                .workbench
+                .report_authoring
+                .remove_report_block_open = true;
+            app.state.workbench.report_authoring.transaction_error = None;
         }
-        ReportBlockKind::Requirements(requirements) => {
-            report_block_title(ui, &requirements.title);
-            virtualized_report_rows(
-                ui,
-                ("report-requirement-entries", block.id()),
-                requirements.entries.len(),
-                |ui, index| {
-                    let entry = &requirements.entries[index];
-                    let text = format!(
-                        "{} · {} · {}{}",
-                        entry.requirement_id,
-                        requirement_disposition_label(entry.disposition),
-                        entry.statement,
-                        entry
-                            .evidence_label
-                            .as_ref()
-                            .map_or_else(String::new, |label| format!(" · evidence {label}"))
-                    );
-                    ui.add_sized(
-                        Vec2::new(ui.available_width(), 25.0),
-                        egui::Label::new(
-                            egui::RichText::new(&text)
-                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                .color(PAPER_MUTED),
-                        )
-                        .truncate(),
-                    )
-                    .on_hover_text(text);
-                },
-            );
-            report_reference_line(ui, &requirements.reference);
+        let insert = Button::new("Insert result document…")
+            .enabled(writable && retained_figure_available)
+            .show(ui)
+            .on_disabled_hover_text(if writable {
+                "Create or retain a result document before inserting it into this report page."
+            } else {
+                report_mutation_block_reason(&app.state)
+            });
+        if insert.clicked() {
+            open_insert_result_document(app);
         }
-        ReportBlockKind::Specifications(specifications) => {
-            report_block_title(ui, &specifications.title);
-            virtualized_report_rows(
-                ui,
-                ("report-specification-entries", block.id()),
-                specifications.entries.len(),
-                |ui, index| {
-                    let entry = &specifications.entries[index];
-                    let text = format!(
-                        "{} · {} · {} · {}",
-                        entry.expression,
-                        entry.limit,
-                        entry.measured.as_deref().unwrap_or("not measured"),
-                        specification_disposition_label(entry.disposition)
-                    );
-                    ui.add_sized(
-                        Vec2::new(ui.available_width(), 25.0),
-                        egui::Label::new(
-                            egui::RichText::new(&text)
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(PAPER_MUTED),
-                        )
-                        .truncate(),
-                    )
-                    .on_hover_text(text);
-                },
-            );
-            report_reference_line(ui, &specifications.reference);
-        }
-        ReportBlockKind::Prose(prose) => {
+    });
+    let banner = egui::Frame::new()
+        .fill(PAPER)
+        .outer_margin(egui::Margin::same(8))
+        .inner_margin(egui::Margin::same(8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
             paper_label(
                 ui,
-                &format!("Style · {}", prose_style_label(prose.style)),
-                theme::mono(tokens::FS_0, FontWeight::Regular),
-                PAPER_FAINT,
-            );
-            ui.add_space(4.0);
-            let (preview, truncated) =
-                bounded_text_preview(&prose.markdown, PREVIEW_PROSE_CHARACTERS);
-            paper_label(
-                ui,
-                preview.as_ref(),
+                "Release closure validates this artifact against exact immutable result revisions and dataset bindings before building a signed package. Report elements may state blocked gates but cannot change source-owned gate state.",
                 theme::sans(tokens::FS_1, FontWeight::Regular),
                 PAPER_TEXT,
             );
-            if truncated {
-                ui.add_space(4.0);
-                paper_label(
-                    ui,
-                    "Preview truncated for interactive rendering. Published output retains the complete source text.",
-                    theme::mono(tokens::FS_0, FontWeight::Regular),
-                    PAPER_FAINT,
-                );
-            }
-        }
-        ReportBlockKind::ReviewNote(note) => {
-            report_block_title(
-                ui,
-                &format!(
-                    "{} · {}",
-                    note.author,
-                    review_note_status_label(note.status)
-                ),
-            );
-            paper_label(
-                ui,
-                &note.message,
-                theme::sans(tokens::FS_1, FontWeight::Regular),
-                PAPER_MUTED,
-            );
-            paper_label(
-                ui,
-                &format!(
-                    "Created {} · resolved {}",
-                    note.created_at_unix_ms,
-                    note.resolved_at_unix_ms
-                        .map_or_else(|| "not resolved".to_owned(), |value| value.to_string())
-                ),
-                theme::mono(tokens::FS_0, FontWeight::Regular),
-                PAPER_FAINT,
-            );
-        }
-        ReportBlockKind::Evidence(evidence) => {
-            report_block_title(ui, &evidence.title);
-            paper_label(
-                ui,
-                &evidence.summary,
-                theme::sans(tokens::FS_1, FontWeight::Regular),
-                PAPER_MUTED,
-            );
-            report_reference_line(ui, &evidence.reference);
-        }
-    }
-    ui.add_space(7.0);
-    paper_label(
-        ui,
-        &format!("Block {} · revision {}", block.id(), block.revision().get()),
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        PAPER_FAINT,
-    );
-}
-
-fn virtualized_report_rows(
-    ui: &mut Ui,
-    id: impl std::hash::Hash + std::fmt::Debug,
-    row_count: usize,
-    mut render_row: impl FnMut(&mut Ui, usize),
-) {
-    const ROW_HEIGHT: f32 = 25.0;
-    const VISIBLE_ROWS: usize = 12;
-    ScrollArea::vertical()
-        .id_salt(id)
-        .max_height(ROW_HEIGHT * row_count.min(VISIBLE_ROWS) as f32)
-        .auto_shrink([false, true])
-        .show_rows(ui, ROW_HEIGHT, row_count, |ui, range| {
-            for index in range {
-                render_row(ui, index);
-            }
         });
+    paint_dashed_rect(ui, banner.response.rect, PAPER_BORDER);
 }
 
-fn empty_section_preview_page(preceding_block_count: usize) -> usize {
-    preceding_block_count
-        .saturating_sub(1)
-        .checked_div(PREVIEW_BLOCKS_PER_PAGE)
-        .unwrap_or(0)
+fn report_block_element_title(kind: &ReportBlockKind) -> Cow<'_, str> {
+    match kind {
+        ReportBlockKind::PlotFigure(block) => Cow::Borrowed(&block.caption),
+        ReportBlockKind::DataTable(block) => Cow::Borrowed(&block.title),
+        ReportBlockKind::Datasheet(block) => Cow::Borrowed(&block.title),
+        ReportBlockKind::Requirements(block) => Cow::Borrowed(&block.title),
+        ReportBlockKind::Specifications(block) => Cow::Borrowed(&block.title),
+        ReportBlockKind::Prose(block) => {
+            let (text, _) = bounded_text_preview(&block.markdown, 56);
+            text
+        }
+        ReportBlockKind::ReviewNote(block) => Cow::Owned(format!("Review note · {}", block.author)),
+        ReportBlockKind::Evidence(block) => Cow::Borrowed(&block.title),
+    }
+}
+
+fn report_block_bound_source(kind: &ReportBlockKind) -> String {
+    kind.reference().map_or_else(
+        || "Authored report source".to_owned(),
+        |reference| {
+            format!(
+                "{} · {}",
+                report_source_label(&reference.snapshot().source),
+                if reference.is_frozen() {
+                    "frozen"
+                } else {
+                    "linked"
+                }
+            )
+        },
+    )
+}
+
+fn report_block_state(
+    state: &AppState,
+    block: &crate::results::report_document::ReportBlock,
+) -> (&'static str, Color32) {
+    if !block.enabled() {
+        ("excluded", PAPER_FAINT)
+    } else if block
+        .kind()
+        .reference()
+        .is_some_and(ReportReferenceMode::is_frozen)
+    {
+        ("frozen", Color32::from_rgb(72, 122, 78))
+    } else if block
+        .kind()
+        .reference()
+        .is_some_and(|reference| !report_reference_resolves(state, reference))
+    {
+        ("source missing", Color32::from_rgb(177, 64, 52))
+    } else if block.kind().reference().is_some() {
+        ("bound", Color32::from_rgb(72, 122, 78))
+    } else {
+        ("authored", PAPER_MUTED)
+    }
+}
+
+fn report_reference_resolves(state: &AppState, reference: &ReportReferenceMode) -> bool {
+    let snapshot = reference.snapshot();
+    match &snapshot.source {
+        ReportSourceId::VisualizationDocument { document_id } => state
+            .workspace
+            .visualization_documents
+            .iter()
+            .find(|document| document.id() == *document_id)
+            .is_some_and(|document| {
+                snapshot.source_revision == Some(document.revision())
+                    && document
+                        .content_digest()
+                        .is_ok_and(|digest| digest == snapshot.content_digest)
+            }),
+        ReportSourceId::Dataset { dataset_id } => state.simulation.runs.iter().any(|run| {
+            run.dataset_id == *dataset_id
+                && run.dataset_content_digest() == snapshot.content_digest
+                && snapshot.dataset_bindings.iter().any(|binding| {
+                    binding.dataset_id == *dataset_id
+                        && binding.content_digest == snapshot.content_digest
+                })
+        }),
+        ReportSourceId::VerificationEvidence { .. } => {
+            snapshot.dataset_bindings.iter().all(|binding| {
+                state.simulation.runs.iter().any(|run| {
+                    run.dataset_id == binding.dataset_id
+                        && run.dataset_content_digest() == binding.content_digest
+                })
+            })
+        }
+        ReportSourceId::ExternalRecord { .. } => true,
+    }
 }
 
 fn bounded_text_preview(value: &str, maximum_characters: usize) -> (Cow<'_, str>, bool) {
@@ -1241,51 +1971,6 @@ fn bounded_text_preview(value: &str, maximum_characters: usize) -> (Cow<'_, str>
             (Cow::Owned(preview), true)
         },
     )
-}
-
-fn report_block_title(ui: &mut Ui, title: &str) {
-    paper_label(
-        ui,
-        title,
-        theme::sans(tokens::FS_2, FontWeight::SemiBold),
-        PAPER_TEXT,
-    );
-    ui.add_space(5.0);
-}
-
-fn report_reference_line(ui: &mut Ui, reference: &ReportReferenceMode) {
-    let snapshot = reference.snapshot();
-    let revision = snapshot.source_revision.map_or_else(
-        || "immutable".to_owned(),
-        |revision| revision.get().to_string(),
-    );
-    let artifact = reference
-        .frozen_artifact()
-        .map_or_else(String::new, |artifact| {
-            format!(
-                " · artifact {} · digest {}",
-                artifact.media_type(),
-                artifact.content_digest()
-            )
-        });
-    paper_label(
-        ui,
-        &format!(
-            "{} · {} · revision {} · digest {} · {} dataset binding(s){}",
-            if reference.is_frozen() {
-                "Frozen"
-            } else {
-                "Linked"
-            },
-            report_source_label(&snapshot.source),
-            revision,
-            snapshot.content_digest,
-            snapshot.dataset_bindings.len(),
-            artifact,
-        ),
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        PAPER_FAINT,
-    );
 }
 
 fn report_source_label(source: &ReportSourceId) -> String {
@@ -1316,73 +2001,6 @@ fn report_block_kind_label(kind: &ReportBlockKind) -> &'static str {
     }
 }
 
-fn requirement_disposition_label(
-    disposition: crate::results::report_document::RequirementDisposition,
-) -> &'static str {
-    use crate::results::report_document::RequirementDisposition;
-    match disposition {
-        RequirementDisposition::NotEvaluated => "not evaluated",
-        RequirementDisposition::Passed => "passed",
-        RequirementDisposition::Failed => "failed",
-        RequirementDisposition::Waived => "waived",
-    }
-}
-
-fn specification_disposition_label(
-    disposition: crate::results::report_document::SpecificationDisposition,
-) -> &'static str {
-    use crate::results::report_document::SpecificationDisposition;
-    match disposition {
-        SpecificationDisposition::NotEvaluated => "not evaluated",
-        SpecificationDisposition::InSpecification => "in specification",
-        SpecificationDisposition::OutOfSpecification => "out of specification",
-        SpecificationDisposition::Informational => "informational",
-    }
-}
-
-fn review_note_status_label(
-    status: crate::results::report_document::ReviewNoteStatus,
-) -> &'static str {
-    use crate::results::report_document::ReviewNoteStatus;
-    match status {
-        ReviewNoteStatus::Open => "open",
-        ReviewNoteStatus::Addressed => "addressed",
-        ReviewNoteStatus::Accepted => "accepted",
-    }
-}
-
-fn figure_sizing_label(sizing: crate::results::report_document::FigureSizing) -> &'static str {
-    use crate::results::report_document::FigureSizing;
-    match sizing {
-        FigureSizing::FitWidth => "fit width",
-        FigureSizing::FitPage => "fit page",
-        FigureSizing::Natural => "natural",
-    }
-}
-
-fn prose_style_label(style: crate::results::report_document::ProseStyle) -> &'static str {
-    use crate::results::report_document::ProseStyle;
-    match style {
-        ProseStyle::Body => "body",
-        ProseStyle::ExecutiveSummary => "executive summary",
-        ProseStyle::Method => "method",
-        ProseStyle::Conclusion => "conclusion",
-        ProseStyle::Warning => "warning",
-    }
-}
-
-fn table_cell_text(cell: &TableCell) -> String {
-    match cell {
-        TableCell::Empty => "—".to_owned(),
-        TableCell::Text(value) => value.clone(),
-        TableCell::Number { value, unit } => unit
-            .as_ref()
-            .map_or_else(|| value.to_string(), |unit| format!("{value} {unit}")),
-        TableCell::Integer(value) => value.to_string(),
-        TableCell::Boolean(value) => value.to_string(),
-    }
-}
-
 fn paper_label(ui: &mut Ui, text: &str, font: egui::FontId, color: Color32) {
     ui.add(
         egui::Label::new(egui::RichText::new(text).font(font).color(color))
@@ -1393,45 +2011,434 @@ fn paper_label(ui: &mut Ui, text: &str, font: egui::FontId, color: Color32) {
 
 fn inspector(
     ui: &mut Ui,
+    app: &mut RSpiceApp,
     document: &ReportDocument,
-    selected_page: Option<ReportPageId>,
+    _selected_page: Option<ReportPageId>,
     separators: PaneSeparators,
 ) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width();
     let height = ui.available_height();
+    let writable = report_mutation_allowed(&app.state);
+    let blocked_reason = report_mutation_block_reason(&app.state);
+    let mut pending_edit = None;
+    let mut open_release_owner = false;
+    let mut open_package_assembly = false;
     let pane = egui::Frame::new().fill(t.color.bg_panel).show(ui, |ui| {
         ui.set_min_size(Vec2::new(width.max(1.0), height.max(1.0)));
         ScrollArea::vertical()
             .id_salt("report-authoring.inspector")
             .show(ui, |ui| {
-                code_inspector_section(ui, "Report document", None, |ui| {
+                code_inspector_section(ui, "Output formats", None, |ui| {
                     code_inspector_property_list(ui, |ui| {
-                        property_row(ui, "Title", document.title());
-                        property_row(ui, "Identity", &document.id().to_string());
-                        property_row(ui, "Revision", &document.revision().get().to_string());
-                        property_row(ui, "Template", report_template_label(document.template()));
-                        property_row(ui, "Pages", &document.pages().len().to_string());
+                        let mut output_formats = document.output_formats();
+                        let enabled_count = [
+                            output_formats.pdf_a,
+                            output_formats.html_bundle,
+                            output_formats.canonical_json,
+                            output_formats.selected_csv,
+                        ]
+                        .into_iter()
+                        .filter(|enabled| *enabled)
+                        .count();
+                        let pdf_a_enabled = output_formats.pdf_a;
+                        let html_bundle_enabled = output_formats.html_bundle;
+                        let canonical_json_enabled = output_formats.canonical_json;
+                        let selected_csv_enabled = output_formats.selected_csv;
+                        let mut changed = false;
+                        changed |= inspector_switch_row(
+                            ui,
+                            "PDF/A",
+                            &mut output_formats.pdf_a,
+                            writable && (!pdf_a_enabled || enabled_count > 1),
+                            writable && pdf_a_enabled && enabled_count == 1,
+                            blocked_reason,
+                        );
+                        changed |= inspector_switch_row(
+                            ui,
+                            "HTML bundle",
+                            &mut output_formats.html_bundle,
+                            writable && (!html_bundle_enabled || enabled_count > 1),
+                            writable && html_bundle_enabled && enabled_count == 1,
+                            blocked_reason,
+                        );
+                        changed |= inspector_switch_row(
+                            ui,
+                            "Canonical JSON",
+                            &mut output_formats.canonical_json,
+                            writable && (!canonical_json_enabled || enabled_count > 1),
+                            writable && canonical_json_enabled && enabled_count == 1,
+                            blocked_reason,
+                        );
+                        changed |= inspector_switch_row(
+                            ui,
+                            "Selected CSV",
+                            &mut output_formats.selected_csv,
+                            writable && (!selected_csv_enabled || enabled_count > 1),
+                            writable && selected_csv_enabled && enabled_count == 1,
+                            blocked_reason,
+                        );
+                        if changed {
+                            pending_edit =
+                                Some(DocumentPublicationEdit::OutputFormats(output_formats));
+                        }
                     });
                 });
-                if let Some(page) = selected_page.and_then(|id| document.page(id)) {
-                    code_inspector_section(ui, "Selected page", None, |ui| {
-                        code_inspector_property_list(ui, |ui| {
-                            property_row(ui, "Title", page.title());
-                            property_row(ui, "Identity", &page.id().to_string());
-                            property_row(ui, "Revision", &page.revision().get().to_string());
-                            property_row(
-                                ui,
-                                "Update policy",
-                                page_update_policy_label(page.update_policy()),
-                            );
-                            property_row(ui, "Sections", &page.sections().len().to_string());
-                        });
+                code_inspector_section(ui, "Publication", None, |ui| {
+                    code_inspector_property_list(ui, |ui| {
+                        let mut profile = document.publication_profile();
+                        let mut changed = false;
+                        changed |= inspector_publication_select(
+                            ui,
+                            "report-publication-template",
+                            "Template",
+                            &mut profile.template,
+                            &[
+                                (
+                                    ReportPublicationTemplate::OrganizationVerificationReport,
+                                    "Organization verification report",
+                                ),
+                                (
+                                    ReportPublicationTemplate::CustomerDatasheet,
+                                    "Customer datasheet",
+                                ),
+                                (
+                                    ReportPublicationTemplate::InternalReviewMemo,
+                                    "Internal review memo",
+                                ),
+                            ],
+                            writable,
+                            blocked_reason,
+                        );
+                        changed |= inspector_publication_select(
+                            ui,
+                            "report-publication-page-size",
+                            "Page size",
+                            &mut profile.page_size,
+                            &[
+                                (ReportPublicationPageSize::A4Portrait, "A4 portrait"),
+                                (
+                                    ReportPublicationPageSize::UsLetterPortrait,
+                                    "US Letter portrait",
+                                ),
+                                (ReportPublicationPageSize::A3Landscape, "A3 landscape"),
+                            ],
+                            writable,
+                            blocked_reason,
+                        );
+                        changed |= inspector_publication_select(
+                            ui,
+                            "report-publication-draft-marking",
+                            "Draft marking",
+                            &mut profile.draft_marking,
+                            &[
+                                (
+                                    ReportDraftMarking::WatermarkWhileGatesOpen,
+                                    "Watermark while gates are open",
+                                ),
+                                (ReportDraftMarking::NeverWatermark, "Never watermark"),
+                            ],
+                            writable,
+                            blocked_reason,
+                        );
+                        changed |= inspector_publication_select(
+                            ui,
+                            "report-publication-numbering",
+                            "Numbering",
+                            &mut profile.numbering,
+                            &[
+                                (
+                                    ReportPageNumbering::SectionPageOfTotal,
+                                    "Section · page of total",
+                                ),
+                                (
+                                    ReportPageNumbering::ContinuousPageNumbers,
+                                    "Continuous page numbers",
+                                ),
+                            ],
+                            writable,
+                            blocked_reason,
+                        );
+                        changed |= inspector_publication_select(
+                            ui,
+                            "report-publication-precision",
+                            "Precision in tables",
+                            &mut profile.table_precision,
+                            &[
+                                (
+                                    ReportTablePrecision::SevenSignificantDigits,
+                                    "7 significant digits",
+                                ),
+                                (ReportTablePrecision::FullStoredF64, "Full stored f64"),
+                                (
+                                    ReportTablePrecision::MatchSourceDisplay,
+                                    "Match source display",
+                                ),
+                            ],
+                            writable,
+                            blocked_reason,
+                        );
+                        if changed {
+                            pending_edit =
+                                Some(DocumentPublicationEdit::PublicationProfile(profile));
+                        }
                     });
+                });
+                code_inspector_section(ui, "Release handoff", None, |ui| {
+                    code_inspector_property_list(ui, |ui| {
+                        let (bound_result, exact_binding) =
+                            report_bound_result_label(&app.state, document);
+                        property_row(ui, "Artifact identity", &document.id().to_string());
+                        property_row(ui, "Bound result", &bound_result);
+                        property_row(ui, "Candidate", "Not attached");
+                        property_row(
+                            ui,
+                            "Compatibility",
+                            if exact_binding {
+                                "awaiting candidate review"
+                            } else {
+                                "result binding incomplete"
+                            },
+                        );
+                        property_row(ui, "Package owner", "Release closure");
+                        property_row(ui, "Physical DRC", "No retained DRC evidence");
+                    });
+                    release_handoff_card(
+                        ui,
+                        document,
+                        report_bound_result_label(&app.state, document).1,
+                        &mut open_release_owner,
+                    );
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.add_space(10.0);
+                        if Button::new("Open package assembly").show(ui).clicked() {
+                            open_package_assembly = true;
+                        }
+                    });
+                    ui.add_space(8.0);
+                });
+                if let Some(error) = &app.state.workbench.report_authoring.transaction_error {
+                    ui.add_space(8.0);
+                    ui.colored_label(t.color.err, error);
+                    ui.add_space(8.0);
                 }
             });
     });
     paint_pane_separators(ui, pane.response.rect, separators, t.color.border);
+    if let Some(setting) = pending_edit {
+        commit_document_publication_setting(app, document.id(), setting);
+    }
+    if open_release_owner || open_package_assembly {
+        open_release_cockpit(app);
+    }
+}
+
+fn inspector_switch_row(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut bool,
+    enabled: bool,
+    protected_last_output: bool,
+    blocked_reason: &str,
+) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let before = *value;
+    ui.horizontal(|ui| {
+        ui.set_width(ui.available_width());
+        ui.add_space(10.0);
+        ui.label(
+            egui::RichText::new(label)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(10.0);
+            let response = ui
+                .add_enabled_ui(enabled, |ui| paper_switch(ui, value))
+                .inner;
+            if !enabled {
+                response.on_disabled_hover_text(if protected_last_output {
+                    "At least one report output format must remain enabled."
+                } else {
+                    blocked_reason
+                });
+            }
+        });
+    });
+    *value != before
+}
+
+fn inspector_publication_select<T>(
+    ui: &mut Ui,
+    id: &'static str,
+    label: &str,
+    value: &mut T,
+    options: &[(T, &'static str)],
+    enabled: bool,
+    blocked_reason: &str,
+) -> bool
+where
+    T: Copy + PartialEq,
+{
+    let t = Tokens::get(ui.ctx());
+    let selected = options
+        .iter()
+        .position(|(candidate, _)| candidate == value)
+        .unwrap_or(0);
+    ui.horizontal(|ui| {
+        ui.add_space(10.0);
+        ui.label(
+            egui::RichText::new(label)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_dim),
+        );
+    });
+    let labels = options
+        .iter()
+        .map(|(_, label)| (*label).to_owned())
+        .collect::<Vec<_>>();
+    let mut selected_index = None;
+    ui.horizontal(|ui| {
+        ui.add_space(10.0);
+        let width = (ui.available_width() - 20.0).max(80.0);
+        let output = ui.add_enabled_ui(enabled, |ui| {
+            select(ui, id, label, options[selected].1, &labels, width)
+        });
+        if !enabled {
+            output.response.on_disabled_hover_text(blocked_reason);
+        }
+        selected_index = output.inner;
+    });
+    ui.add_space(5.0);
+    if let Some(index) = selected_index.filter(|index| *index < options.len()) {
+        let next = options[index].0;
+        if *value != next {
+            *value = next;
+            return true;
+        }
+    }
+    false
+}
+
+fn report_bound_result_label(state: &AppState, document: &ReportDocument) -> (String, bool) {
+    let mut binding = None;
+    for page in document.pages() {
+        let ReportPageEvidenceBinding::ExactDataset {
+            binding: page_binding,
+        } = page.evidence_binding()
+        else {
+            return ("Exact immutable result required".to_owned(), false);
+        };
+        match binding {
+            None => binding = Some(page_binding),
+            Some(existing) if existing == page_binding => {}
+            Some(_) => return ("Multiple immutable result bindings".to_owned(), false),
+        }
+    }
+    let Some(binding) = binding else {
+        return ("No report pages are bound".to_owned(), false);
+    };
+    let label = state
+        .simulation
+        .runs
+        .iter()
+        .find(|run| {
+            run.dataset_id == binding.dataset_id
+                && run.dataset_content_digest() == binding.content_digest
+        })
+        .map_or_else(
+            || {
+                let dataset_id = binding.dataset_id.to_string();
+                format!(
+                    "Dataset {}… · immutable",
+                    dataset_id.get(..8).unwrap_or(&dataset_id)
+                )
+            },
+            |run| format!("Run {} · immutable", run.id),
+        );
+    (label, true)
+}
+
+fn release_handoff_card(
+    ui: &mut Ui,
+    document: &ReportDocument,
+    exact_result_binding: bool,
+    open_owner: &mut bool,
+) {
+    let t = Tokens::get(ui.ctx());
+    let shown = egui::Frame::new()
+        .fill(t.color.bg_panel_2)
+        .stroke(Stroke::new(1.0, t.color.border))
+        .inner_margin(egui::Margin::symmetric(10, 8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("OWNED BY RELEASE CLOSURE")
+                        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                        .color(t.color.text_dim),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new(if exact_result_binding {
+                            "ready for candidate review"
+                        } else {
+                            "binding incomplete"
+                        })
+                        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                        .color(if exact_result_binding {
+                            t.color.ok
+                        } else {
+                            t.color.err
+                        }),
+                    );
+                });
+            });
+            ui.add_space(5.0);
+            let id = document.id().to_string();
+            ui.label(
+                egui::RichText::new(format!(
+                    "Attach report {} to a release candidate",
+                    id.get(..8).unwrap_or(&id)
+                ))
+                .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
+                .color(t.color.text),
+            );
+            ui.label(
+                egui::RichText::new(
+                    "Compatibility review only; packaging and promotion remain external.",
+                )
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_dim),
+            );
+            ui.add_space(6.0);
+            let button_width = ui.available_width();
+            if Button::new("Open owner →")
+                .min_width(button_width)
+                .show(ui)
+                .clicked()
+            {
+                *open_owner = true;
+            }
+        });
+    ui.painter().hline(
+        shown.response.rect.x_range(),
+        shown.response.rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+}
+
+fn open_release_cockpit(app: &mut RSpiceApp) {
+    if let Err(error) = app.state.workbench.navigate(
+        SurfaceRoute::surface(SurfaceId::ReleaseCockpit),
+        RouteTransitionSource::User,
+    ) {
+        app.state
+            .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+                "Cannot open release package assembly: {error}"
+            )));
+    }
 }
 
 fn paint_pane_separators(ui: &Ui, rect: Rect, separators: PaneSeparators, color: Color32) {
@@ -1579,6 +2586,23 @@ fn commit_create_document(app: &mut RSpiceApp) {
             .report_authoring
             .create_document_template,
     );
+    let initial_evidence_binding = app
+        .state
+        .simulation
+        .active_run()
+        .filter(|run| !run.analyses.is_empty())
+        .or_else(|| {
+            app.state
+                .simulation
+                .newest_retained_result_run_index()
+                .and_then(|index| app.state.simulation.runs.get(index))
+        })
+        .map(|run| ReportPageEvidenceBinding::ExactDataset {
+            binding: crate::product::DatasetBinding::new(
+                run.dataset_id,
+                run.dataset_content_digest(),
+            ),
+        });
     let result = ReportDocument::new_with_template(title, template)
         .map_err(|error| error.to_string())
         .and_then(|mut document| {
@@ -1597,6 +2621,26 @@ fn commit_create_document(app: &mut RSpiceApp) {
                     format!("Create {} report outline", report_template_label(template)),
                 )
                 .map_err(|error| error.to_string())?;
+            if let Some(evidence_binding) = initial_evidence_binding {
+                let edits = document
+                    .pages()
+                    .iter()
+                    .map(|page| ReportEdit::SetPageEvidenceBinding {
+                        page_id: page.id(),
+                        expected_page_revision: page.revision(),
+                        evidence_binding,
+                    })
+                    .collect();
+                document
+                    .transact_with_context(
+                        document.revision(),
+                        edits,
+                        timestamp_unix_ms(),
+                        "rspice-local-session",
+                        "Bind initial report pages to active result dataset",
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
             Ok(document)
         });
     match result {
@@ -1855,6 +2899,1126 @@ fn page_properties_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
     }
 }
 
+fn open_add_report_element(app: &mut RSpiceApp) {
+    if !report_mutation_allowed(&app.state) || active_document(&app.state).is_none() {
+        return;
+    }
+    let editor = &mut app.state.workbench.report_authoring;
+    editor.add_report_element_kind = 0;
+    editor.add_report_element_title = "Engineering summary".to_owned();
+    editor.add_report_element_primary =
+        "Describe the conclusion and its supporting evidence.".to_owned();
+    editor.add_report_element_secondary.clear();
+    editor.add_report_element_tertiary.clear();
+    editor.add_report_element_style = 0;
+    editor.add_report_element_status = 0;
+    editor.add_report_element_source_run = 0;
+    editor.add_report_element_open = true;
+    editor.transaction_error = None;
+}
+
+fn add_report_element_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
+    if !app.state.workbench.report_authoring.add_report_element_open {
+        return;
+    }
+    const KIND_LABELS: [&str; 7] = [
+        "Authored prose",
+        "Data table",
+        "Datasheet field",
+        "Requirement statement",
+        "Specification result",
+        "Review note",
+        "Verification evidence",
+    ];
+    const PROSE_STYLE_LABELS: [&str; 5] = [
+        "Body",
+        "Executive summary",
+        "Method",
+        "Conclusion",
+        "Warning",
+    ];
+    let run_options = app
+        .state
+        .simulation
+        .runs
+        .iter()
+        .filter(|run| !run.analyses.is_empty())
+        .map(|run| format!("Run {} · immutable dataset", run.id))
+        .collect::<Vec<_>>();
+    let kind_index = app
+        .state
+        .workbench
+        .report_authoring
+        .add_report_element_kind
+        .min(KIND_LABELS.len() - 1);
+    let source_required = matches!(kind_index, 1 | 2 | 3 | 4 | 6);
+    let valid = valid_add_report_element_draft(&app.state, !run_options.is_empty());
+    let writable = report_mutation_allowed(&app.state);
+    let error = app
+        .state
+        .workbench
+        .report_authoring
+        .transaction_error
+        .clone();
+    let choice = Dialog::new(
+        "REPORT AUTHORING · PAGE ELEMENT CATALOG",
+        "Add report element",
+        "Add element",
+    )
+    .description(
+        "Create one validated report element. Source-derived elements bind to one exact immutable dataset; result plots use Insert result document.",
+    )
+    .ghost("Cancel")
+    .primary_enabled(valid && writable)
+    .initial_focus(DialogInitialFocus::BodyControl)
+    .show_with_initial_body_focus(ctx, |ui| {
+        let label_width = 134.0_f32.min(ui.available_width() * 0.34);
+        ui.horizontal(|ui| {
+            ui.add_sized(
+                Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
+                egui::Label::new("Element type"),
+            );
+            let options = KIND_LABELS
+                .iter()
+                .map(|label| (*label).to_owned())
+                .collect::<Vec<_>>();
+            if let Some(index) = select(
+                ui,
+                "report-add-element-kind",
+                "Report element type",
+                KIND_LABELS[kind_index],
+                &options,
+                ui.available_width(),
+            ) {
+                reset_add_report_element_kind(app, index);
+            }
+        });
+        ui.add_space(8.0);
+        let focus = input_row(
+            ui,
+            if kind_index == 5 { "Author" } else { "Element title" },
+            &mut app
+                .state
+                .workbench
+                .report_authoring
+                .add_report_element_title,
+        );
+
+        let (primary_label, secondary_label, tertiary_label) =
+            add_report_element_field_labels(kind_index);
+        ui.add_space(8.0);
+        if matches!(kind_index, 0 | 3 | 5 | 6) {
+            dialog_text_area(
+                ui,
+                primary_label,
+                &mut app
+                    .state
+                    .workbench
+                    .report_authoring
+                    .add_report_element_primary,
+            );
+        } else {
+            input_row(
+                ui,
+                primary_label,
+                &mut app
+                    .state
+                    .workbench
+                    .report_authoring
+                    .add_report_element_primary,
+            );
+        }
+        if let Some(label) = secondary_label {
+            ui.add_space(8.0);
+            input_row(
+                ui,
+                label,
+                &mut app
+                    .state
+                    .workbench
+                    .report_authoring
+                    .add_report_element_secondary,
+            );
+        }
+        if let Some(label) = tertiary_label {
+            ui.add_space(8.0);
+            input_row(
+                ui,
+                label,
+                &mut app
+                    .state
+                    .workbench
+                    .report_authoring
+                    .add_report_element_tertiary,
+            );
+        }
+
+        if kind_index == 0 {
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.add_sized(
+                    Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
+                    egui::Label::new("Prose style"),
+                );
+                let style_index = app
+                    .state
+                    .workbench
+                    .report_authoring
+                    .add_report_element_style
+                    .min(PROSE_STYLE_LABELS.len() - 1);
+                let labels = PROSE_STYLE_LABELS
+                    .iter()
+                    .map(|label| (*label).to_owned())
+                    .collect::<Vec<_>>();
+                if let Some(index) = select(
+                    ui,
+                    "report-add-prose-style",
+                    "Report prose style",
+                    PROSE_STYLE_LABELS[style_index],
+                    &labels,
+                    ui.available_width(),
+                ) {
+                    app.state
+                        .workbench
+                        .report_authoring
+                        .add_report_element_style = index;
+                }
+            });
+        }
+        if matches!(kind_index, 3 | 4 | 5) {
+            ui.add_space(8.0);
+            let status_labels: &[&str] = match kind_index {
+                3 => &["Not evaluated", "Passed", "Failed", "Waived"],
+                4 => &[
+                    "Not evaluated",
+                    "In specification",
+                    "Out of specification",
+                    "Informational",
+                ],
+                _ => &["Open", "Addressed", "Accepted"],
+            };
+            ui.horizontal(|ui| {
+                ui.add_sized(
+                    Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
+                    egui::Label::new("Status"),
+                );
+                let status_index = app
+                    .state
+                    .workbench
+                    .report_authoring
+                    .add_report_element_status
+                    .min(status_labels.len() - 1);
+                let labels = status_labels
+                    .iter()
+                    .map(|label| (*label).to_owned())
+                    .collect::<Vec<_>>();
+                if let Some(index) = select(
+                    ui,
+                    "report-add-element-status",
+                    "Report element status",
+                    status_labels[status_index],
+                    &labels,
+                    ui.available_width(),
+                ) {
+                    app.state
+                        .workbench
+                        .report_authoring
+                        .add_report_element_status = index;
+                }
+            });
+        }
+        if source_required {
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.add_sized(
+                    Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
+                    egui::Label::new("Bound source"),
+                );
+                let run_index = app
+                    .state
+                    .workbench
+                    .report_authoring
+                    .add_report_element_source_run
+                    .min(run_options.len().saturating_sub(1));
+                let current = run_options
+                    .get(run_index)
+                    .map_or("No immutable dataset retained", String::as_str);
+                if let Some(index) = select(
+                    ui,
+                    "report-add-element-source",
+                    "Immutable dataset source",
+                    current,
+                    &run_options,
+                    ui.available_width(),
+                ) {
+                    app.state
+                        .workbench
+                        .report_authoring
+                        .add_report_element_source_run = index;
+                }
+            });
+            if run_options.is_empty() {
+                ui.colored_label(
+                    Tokens::get(ui.ctx()).color.warn,
+                    "Run and retain an analysis before adding this source-derived element.",
+                );
+            }
+        }
+        if !writable {
+            ui.colored_label(
+                Tokens::get(ui.ctx()).color.err,
+                report_mutation_block_reason(&app.state),
+            );
+        }
+        if let Some(error) = &error {
+            ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
+        }
+        Some(focus.id)
+    });
+    match choice {
+        DialogChoice::Primary if valid && writable => commit_add_report_element(app),
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            app.state.workbench.report_authoring.add_report_element_open = false;
+            app.state.workbench.report_authoring.transaction_error = None;
+        }
+        _ => {}
+    }
+}
+
+fn dialog_text_area(ui: &mut Ui, label: &str, value: &mut String) -> egui::Response {
+    let label_width = 134.0_f32.min(ui.available_width() * 0.34);
+    ui.horizontal_top(|ui| {
+        ui.add_sized(Vec2::new(label_width, 82.0), egui::Label::new(label));
+        ui.add_sized(
+            Vec2::new(ui.available_width(), 82.0),
+            egui::TextEdit::multiline(value)
+                .desired_rows(4)
+                .font(theme::mono(tokens::FS_1, FontWeight::Regular)),
+        )
+    })
+    .inner
+}
+
+fn add_report_element_field_labels(
+    kind_index: usize,
+) -> (&'static str, Option<&'static str>, Option<&'static str>) {
+    match kind_index {
+        1 => (
+            "Column heading",
+            Some("Cell value"),
+            Some("Unit (optional)"),
+        ),
+        2 => ("Field label", Some("Field value"), Some("Unit (optional)")),
+        3 => (
+            "Requirement statement",
+            Some("Requirement ID"),
+            Some("Evidence label (optional)"),
+        ),
+        4 => (
+            "Expression",
+            Some("Limit"),
+            Some("Measured value (optional)"),
+        ),
+        5 => ("Review message", None, None),
+        6 => ("Evidence summary", None, None),
+        _ => ("Report text", None, None),
+    }
+}
+
+fn reset_add_report_element_kind(app: &mut RSpiceApp, kind_index: usize) {
+    let editor = &mut app.state.workbench.report_authoring;
+    editor.add_report_element_kind = kind_index.min(6);
+    let (title, primary, secondary) = match editor.add_report_element_kind {
+        1 => ("Data table", "Value", "0"),
+        2 => ("Datasheet", "Parameter", "Value"),
+        3 => ("Requirement", "State the requirement.", "REQ-1"),
+        4 => ("Specification", "V(out)", "<= 1 V"),
+        5 => ("rspice-local-session", "Review note.", ""),
+        6 => (
+            "Verification evidence",
+            "Summarize the retained evidence.",
+            "",
+        ),
+        _ => (
+            "Engineering summary",
+            "Describe the conclusion and its supporting evidence.",
+            "",
+        ),
+    };
+    editor.add_report_element_title = title.to_owned();
+    editor.add_report_element_primary = primary.to_owned();
+    editor.add_report_element_secondary = secondary.to_owned();
+    editor.add_report_element_tertiary.clear();
+    editor.add_report_element_style = 0;
+    editor.add_report_element_status = 0;
+    editor.transaction_error = None;
+}
+
+fn valid_add_report_element_draft(state: &AppState, source_available: bool) -> bool {
+    let editor = &state.workbench.report_authoring;
+    let kind = editor.add_report_element_kind.min(6);
+    let title = editor.add_report_element_title.trim();
+    let primary = editor.add_report_element_primary.trim();
+    let secondary = editor.add_report_element_secondary.trim();
+    let source_valid = !matches!(kind, 1 | 2 | 3 | 4 | 6) || source_available;
+    let title_limit = if kind == 5 { 256 } else { 512 };
+    let primary_limit = match kind {
+        1 | 2 => 256,
+        4 => 4_096,
+        _ => 65_536,
+    };
+    let secondary_valid = match kind {
+        1 | 2 => !secondary.is_empty() && secondary.len() <= 16_384,
+        3 => {
+            !secondary.is_empty()
+                && secondary.len() <= 256
+                && !secondary.chars().any(|character| {
+                    character.is_control()
+                        || character.is_whitespace()
+                        || matches!(character, '/' | '\\')
+                })
+        }
+        4 => !secondary.is_empty() && secondary.len() <= 4_096,
+        _ => true,
+    };
+    let tertiary_valid = match kind {
+        1 | 2 => editor.add_report_element_tertiary.trim().len() <= 64,
+        3 => editor.add_report_element_tertiary.trim().len() <= 512,
+        4 => editor.add_report_element_tertiary.trim().len() <= 4_096,
+        _ => editor.add_report_element_tertiary.trim().is_empty(),
+    };
+    !title.is_empty()
+        && title.len() <= title_limit
+        && !title.chars().any(char::is_control)
+        && !primary.is_empty()
+        && primary.len() <= primary_limit
+        && !primary
+            .chars()
+            .any(|ch| ch.is_control() && ch != '\n' && ch != '\t')
+        && secondary_valid
+        && tertiary_valid
+        && source_valid
+}
+
+fn report_dataset_snapshot(
+    state: &AppState,
+    filtered_run_index: usize,
+) -> Result<(ReportReferenceSnapshot, crate::product::DatasetBinding), String> {
+    let run = state
+        .simulation
+        .runs
+        .iter()
+        .filter(|run| !run.analyses.is_empty())
+        .nth(filtered_run_index)
+        .ok_or_else(|| "The selected immutable dataset is no longer retained.".to_owned())?;
+    let binding = crate::product::DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
+    let snapshot = ReportReferenceSnapshot::new(
+        ReportSourceId::Dataset {
+            dataset_id: binding.dataset_id,
+        },
+        None,
+        binding.content_digest,
+        vec![binding],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok((snapshot, binding))
+}
+
+fn commit_add_report_element(app: &mut RSpiceApp) {
+    if !report_mutation_allowed(&app.state) {
+        app.state.workbench.report_authoring.transaction_error =
+            Some(report_mutation_block_reason(&app.state).to_owned());
+        return;
+    }
+    let editor = &app.state.workbench.report_authoring;
+    let kind_index = editor.add_report_element_kind.min(6);
+    let title = editor.add_report_element_title.trim().to_owned();
+    let primary = editor.add_report_element_primary.trim().to_owned();
+    let secondary = editor.add_report_element_secondary.trim().to_owned();
+    let tertiary = editor.add_report_element_tertiary.trim().to_owned();
+    let style = editor.add_report_element_style;
+    let status = editor.add_report_element_status;
+    let source_index = editor.add_report_element_source_run;
+    let reference = if matches!(kind_index, 1 | 2 | 3 | 4 | 6) {
+        match report_dataset_snapshot(&app.state, source_index) {
+            Ok((snapshot, _)) => Some(ReportReferenceMode::Linked { snapshot }),
+            Err(error) => {
+                app.state.workbench.report_authoring.transaction_error = Some(error);
+                return;
+            }
+        }
+    } else {
+        None
+    };
+    let timestamp = timestamp_unix_ms();
+    let kind = match kind_index {
+        1 => ReportBlockKind::DataTable(DataTableBlock {
+            title,
+            columns: vec![TableColumn {
+                key: report_field_key(&primary),
+                heading: primary,
+                unit: (!tertiary.is_empty()).then_some(tertiary),
+            }],
+            rows: vec![vec![TableCell::Text(secondary)]],
+            reference: reference.expect("source-derived table has reference"),
+        }),
+        2 => ReportBlockKind::Datasheet(DatasheetBlock {
+            title,
+            fields: vec![DatasheetField {
+                key: report_field_key(&primary),
+                label: primary,
+                value: secondary,
+                unit: (!tertiary.is_empty()).then_some(tertiary),
+            }],
+            reference: reference.expect("source-derived datasheet has reference"),
+        }),
+        3 => ReportBlockKind::Requirements(RequirementsBlock {
+            title,
+            entries: vec![RequirementEntry {
+                requirement_id: secondary,
+                statement: primary,
+                disposition: match status {
+                    1 => RequirementDisposition::Passed,
+                    2 => RequirementDisposition::Failed,
+                    3 => RequirementDisposition::Waived,
+                    _ => RequirementDisposition::NotEvaluated,
+                },
+                evidence_label: (!tertiary.is_empty()).then_some(tertiary),
+            }],
+            reference: reference.expect("source-derived requirement has reference"),
+        }),
+        4 => ReportBlockKind::Specifications(SpecificationsBlock {
+            title,
+            entries: vec![SpecificationEntry {
+                expression: primary,
+                limit: secondary,
+                measured: (!tertiary.is_empty()).then_some(tertiary),
+                disposition: match status {
+                    1 => SpecificationDisposition::InSpecification,
+                    2 => SpecificationDisposition::OutOfSpecification,
+                    3 => SpecificationDisposition::Informational,
+                    _ => SpecificationDisposition::NotEvaluated,
+                },
+            }],
+            reference: reference.expect("source-derived specification has reference"),
+        }),
+        5 => ReportBlockKind::ReviewNote(ReviewNoteBlock {
+            author: title,
+            status: match status {
+                1 => ReviewNoteStatus::Addressed,
+                2 => ReviewNoteStatus::Accepted,
+                _ => ReviewNoteStatus::Open,
+            },
+            message: primary,
+            created_at_unix_ms: timestamp,
+            resolved_at_unix_ms: (status != 0).then_some(timestamp),
+        }),
+        6 => {
+            let (_, binding) = match report_dataset_snapshot(&app.state, source_index) {
+                Ok(value) => value,
+                Err(error) => {
+                    app.state.workbench.report_authoring.transaction_error = Some(error);
+                    return;
+                }
+            };
+            let mut identity_material = Vec::with_capacity(48);
+            identity_material.extend_from_slice(binding.dataset_id.as_uuid().as_bytes());
+            identity_material.extend_from_slice(binding.content_digest.as_bytes());
+            let evidence_id = crate::product::VerificationEvidenceId::from_namespace(
+                uuid::Uuid::from_bytes([
+                    0x6f, 0x34, 0x1a, 0x28, 0xca, 0x3e, 0x4e, 0x62, 0x9e, 0x4c, 0x77, 0xa0, 0x72,
+                    0x44, 0x1b, 0x0f,
+                ]),
+                &identity_material,
+            );
+            let dataset_reference = reference.expect("source-derived evidence has reference");
+            let snapshot = dataset_reference.snapshot();
+            let evidence_snapshot = match ReportReferenceSnapshot::new(
+                ReportSourceId::VerificationEvidence { evidence_id },
+                None,
+                snapshot.content_digest,
+                snapshot.dataset_bindings.clone(),
+            ) {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    app.state.workbench.report_authoring.transaction_error =
+                        Some(error.to_string());
+                    return;
+                }
+            };
+            ReportBlockKind::Evidence(EvidenceBlock {
+                title,
+                summary: primary,
+                reference: ReportReferenceMode::Linked {
+                    snapshot: evidence_snapshot,
+                },
+            })
+        }
+        _ => ReportBlockKind::Prose(ProseBlock {
+            style: match style {
+                1 => ProseStyle::ExecutiveSummary,
+                2 => ProseStyle::Method,
+                3 => ProseStyle::Conclusion,
+                4 => ProseStyle::Warning,
+                _ => ProseStyle::Body,
+            },
+            markdown: format!("## {title}\n\n{primary}"),
+        }),
+    };
+    let Some(page_id) =
+        active_document(&app.state).and_then(|document| selected_page_id(&app.state, document))
+    else {
+        app.state.workbench.report_authoring.transaction_error =
+            Some("Select a report page before adding an element.".to_owned());
+        return;
+    };
+    let result = active_document_mut(&mut app.state).and_then(|document| {
+        let page = document
+            .page(page_id)
+            .ok_or_else(|| "The selected report page no longer exists.".to_owned())?;
+        document
+            .transact_with_context(
+                document.revision(),
+                vec![ReportEdit::AddBlockToPage {
+                    page_id,
+                    expected_page_revision: page.revision(),
+                    kind,
+                }],
+                timestamp,
+                "rspice-local-session",
+                "Add report page element",
+            )
+            .map_err(|error| error.to_string())
+    });
+    match result {
+        Ok(receipt) => {
+            app.state.workbench.report_authoring.selected_report_block =
+                receipt.created.iter().find_map(|entity| match entity {
+                    ReportEntityRef::Block(id) => Some(*id),
+                    _ => None,
+                });
+            app.state.workbench.report_authoring.add_report_element_open = false;
+            app.state.workbench.report_authoring.preview_block_page = 0;
+            app.state.workbench.report_authoring.transaction_error = None;
+            app.state.workspace.report_documents_dirty = true;
+        }
+        Err(error) => app.state.workbench.report_authoring.transaction_error = Some(error),
+    }
+}
+
+fn report_field_key(label: &str) -> String {
+    let mut key = String::with_capacity(label.len().min(128));
+    let mut pending_separator = false;
+    for ch in label.chars() {
+        if ch.is_ascii_alphanumeric() {
+            if pending_separator && !key.is_empty() {
+                key.push('_');
+            }
+            pending_separator = false;
+            key.push(ch.to_ascii_lowercase());
+        } else {
+            pending_separator = true;
+        }
+        if key.len() >= 128 {
+            break;
+        }
+    }
+    if key.is_empty() {
+        "value".to_owned()
+    } else {
+        key
+    }
+}
+
+fn remove_report_block_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
+    if !app
+        .state
+        .workbench
+        .report_authoring
+        .remove_report_block_open
+    {
+        return;
+    }
+    let block_id = app.state.workbench.report_authoring.selected_report_block;
+    let block_title = block_id
+        .and_then(|id| active_document(&app.state)?.block(id))
+        .map(|block| report_block_element_title(block.kind()).into_owned())
+        .unwrap_or_else(|| "Unavailable report element".to_owned());
+    let valid = block_id.is_some_and(|id| {
+        active_document(&app.state).is_some_and(|document| document.block(id).is_some())
+    });
+    let writable = report_mutation_allowed(&app.state);
+    let error = app
+        .state
+        .workbench
+        .report_authoring
+        .transaction_error
+        .clone();
+    let choice = Dialog::new(
+        "REPORT AUTHORING · PAGE ELEMENT",
+        "Remove page element",
+        "Remove",
+    )
+    .description(
+        "Remove the selected element from this report revision. Its stable identity is retained as a tombstone in the report audit history.",
+    )
+    .ghost("Cancel")
+    .primary_enabled(valid && writable)
+    .initial_focus(DialogInitialFocus::Primary)
+    .show(ctx, |ui| {
+        ui.label(format!("Element: {block_title}"));
+        if !writable {
+            ui.colored_label(
+                Tokens::get(ui.ctx()).color.err,
+                report_mutation_block_reason(&app.state),
+            );
+        }
+        if let Some(error) = &error {
+            ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
+        }
+    });
+    match choice {
+        DialogChoice::Primary if valid && writable => commit_remove_report_block(app),
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            app.state
+                .workbench
+                .report_authoring
+                .remove_report_block_open = false;
+            app.state.workbench.report_authoring.transaction_error = None;
+        }
+        _ => {}
+    }
+}
+
+fn commit_remove_report_block(app: &mut RSpiceApp) {
+    if !report_mutation_allowed(&app.state) {
+        app.state.workbench.report_authoring.transaction_error =
+            Some(report_mutation_block_reason(&app.state).to_owned());
+        return;
+    }
+    let Some(block_id) = app.state.workbench.report_authoring.selected_report_block else {
+        app.state.workbench.report_authoring.transaction_error =
+            Some("Select a report page element before removing it.".to_owned());
+        return;
+    };
+    let result = active_document_mut(&mut app.state).and_then(|document| {
+        let block = document
+            .block(block_id)
+            .ok_or_else(|| "The selected report element no longer exists.".to_owned())?;
+        document
+            .transact_with_context(
+                document.revision(),
+                vec![ReportEdit::Remove {
+                    entity: ReportEntityRef::Block(block_id),
+                    expected_entity_revision: block.revision(),
+                }],
+                timestamp_unix_ms(),
+                "rspice-local-session",
+                "Remove report page element",
+            )
+            .map_err(|error| error.to_string())
+    });
+    match result {
+        Ok(_) => {
+            app.state.workbench.report_authoring.selected_report_block = None;
+            app.state
+                .workbench
+                .report_authoring
+                .remove_report_block_open = false;
+            app.state.workbench.report_authoring.preview_block_page = 0;
+            app.state.workbench.report_authoring.transaction_error = None;
+            app.state.workspace.report_documents_dirty = true;
+        }
+        Err(error) => app.state.workbench.report_authoring.transaction_error = Some(error),
+    }
+}
+
+fn report_figure_options(state: &AppState) -> Vec<ReportFigureOption> {
+    let mut options = Vec::new();
+    for (document_index, document) in state.workspace.visualization_documents.iter().enumerate() {
+        for page in document.pages() {
+            let mut panes = document
+                .panes()
+                .iter()
+                .filter(|pane| pane.page_id == page.id)
+                .collect::<Vec<_>>();
+            panes.sort_by_key(|pane| (pane.order, pane.id.get()));
+            options.extend(panes.into_iter().map(|pane| ReportFigureOption {
+                document_index,
+                page_id: page.id,
+                pane_id: pane.id,
+                label: format!("{} · {} · {}", document.title(), page.title, pane.title),
+            }));
+        }
+    }
+    options
+}
+
+fn open_insert_result_document(app: &mut RSpiceApp) {
+    let options = report_figure_options(&app.state);
+    if !report_mutation_allowed(&app.state) || options.is_empty() {
+        return;
+    }
+    let first = &options[0];
+    let source = &app.state.workspace.visualization_documents[first.document_index];
+    let editor = &mut app.state.workbench.report_authoring;
+    editor.insert_result_document_index = 0;
+    editor.insert_result_caption = first.label.clone();
+    editor.insert_result_alternative_text = format!(
+        "Result figure {} at immutable visualization revision {}.",
+        first.label,
+        source.revision().get()
+    );
+    editor.insert_result_sizing = 0;
+    editor.insert_result_frozen = false;
+    editor.insert_result_document_open = true;
+    editor.transaction_error = None;
+}
+
+fn insert_result_document_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
+    if !app
+        .state
+        .workbench
+        .report_authoring
+        .insert_result_document_open
+    {
+        return;
+    }
+    const SIZING_LABELS: [&str; 3] = ["Fit width", "Fit page", "Natural size"];
+    let figure_options = report_figure_options(&app.state);
+    let source_options = figure_options
+        .iter()
+        .map(|option| option.label.clone())
+        .collect::<Vec<_>>();
+    let source_index = app
+        .state
+        .workbench
+        .report_authoring
+        .insert_result_document_index
+        .min(source_options.len().saturating_sub(1));
+    let caption = app
+        .state
+        .workbench
+        .report_authoring
+        .insert_result_caption
+        .trim();
+    let alternative_text = app
+        .state
+        .workbench
+        .report_authoring
+        .insert_result_alternative_text
+        .trim();
+    let valid = !source_options.is_empty()
+        && !caption.is_empty()
+        && caption.len() <= 2_048
+        && !caption.chars().any(char::is_control)
+        && !alternative_text.is_empty()
+        && alternative_text.len() <= 8_192
+        && !alternative_text
+            .chars()
+            .any(|ch| ch.is_control() && ch != '\n' && ch != '\t');
+    let writable = report_mutation_allowed(&app.state);
+    let error = app
+        .state
+        .workbench
+        .report_authoring
+        .transaction_error
+        .clone();
+    let choice = Dialog::new(
+        "REPORT AUTHORING · IMMUTABLE RESULT SOURCE",
+        "Insert result document",
+        "Insert result document",
+    )
+    .description(
+        "Insert one exact visualization-document revision with all immutable dataset bindings retained for publication audit.",
+    )
+    .ghost("Cancel")
+    .primary_enabled(valid && writable)
+    .initial_focus(DialogInitialFocus::BodyControl)
+    .show_with_initial_body_focus(ctx, |ui| {
+        let label_width = 132.0_f32.min(ui.available_width() * 0.34);
+        ui.horizontal(|ui| {
+            ui.add_sized(
+                Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
+                egui::Label::new("Result document"),
+            );
+            let current = source_options
+                .get(source_index)
+                .map_or("No retained result documents", String::as_str);
+            if let Some(index) = select(
+                ui,
+                "report-insert-result-source",
+                "Immutable result document",
+                current,
+                &source_options,
+                ui.available_width(),
+            ) {
+                app.state
+                    .workbench
+                    .report_authoring
+                    .insert_result_document_index = index;
+                if let Some(option) = figure_options.get(index) {
+                    let revision = app.state.workspace.visualization_documents
+                        [option.document_index]
+                        .revision()
+                        .get();
+                    app.state
+                        .workbench
+                        .report_authoring
+                        .insert_result_caption = option.label.clone();
+                    app.state
+                        .workbench
+                        .report_authoring
+                        .insert_result_alternative_text = format!(
+                        "Result figure {} at immutable visualization revision {revision}.",
+                        option.label
+                    );
+                }
+            }
+        });
+        ui.add_space(8.0);
+        let focus = input_row(
+            ui,
+            "Caption",
+            &mut app
+                .state
+                .workbench
+                .report_authoring
+                .insert_result_caption,
+        );
+        ui.add_space(8.0);
+        input_row(
+            ui,
+            "Alternative text",
+            &mut app
+                .state
+                .workbench
+                .report_authoring
+                .insert_result_alternative_text,
+        );
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.add_sized(
+                Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
+                egui::Label::new("Sizing"),
+            );
+            let sizing_index = app
+                .state
+                .workbench
+                .report_authoring
+                .insert_result_sizing
+                .min(SIZING_LABELS.len() - 1);
+            let labels = SIZING_LABELS
+                .iter()
+                .map(|label| (*label).to_owned())
+                .collect::<Vec<_>>();
+            if let Some(index) = select(
+                ui,
+                "report-insert-result-sizing",
+                "Result figure sizing",
+                SIZING_LABELS[sizing_index],
+                &labels,
+                ui.available_width(),
+            ) {
+                app.state
+                    .workbench
+                    .report_authoring
+                    .insert_result_sizing = index;
+            }
+        });
+        ui.add_space(8.0);
+        ui.checkbox(
+            &mut app
+                .state
+                .workbench
+                .report_authoring
+                .insert_result_frozen,
+            "Freeze self-contained source payload in this report revision",
+        );
+        ui.label(if app
+            .state
+            .workbench
+            .report_authoring
+            .insert_result_frozen
+        {
+            "The exact source snapshot and deterministic publication PNG are embedded and digest-authenticated."
+        } else {
+            "The block remains linked to one exact immutable visualization revision."
+        });
+        if !writable {
+            ui.colored_label(
+                Tokens::get(ui.ctx()).color.err,
+                report_mutation_block_reason(&app.state),
+            );
+        }
+        if let Some(error) = &error {
+            ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
+        }
+        Some(focus.id)
+    });
+    match choice {
+        DialogChoice::Primary if valid && writable => commit_insert_result_document(app),
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            app.state
+                .workbench
+                .report_authoring
+                .insert_result_document_open = false;
+            app.state.workbench.report_authoring.transaction_error = None;
+        }
+        _ => {}
+    }
+}
+
+fn commit_insert_result_document(app: &mut RSpiceApp) {
+    if !report_mutation_allowed(&app.state) {
+        app.state.workbench.report_authoring.transaction_error =
+            Some(report_mutation_block_reason(&app.state).to_owned());
+        return;
+    }
+    let option_index = app
+        .state
+        .workbench
+        .report_authoring
+        .insert_result_document_index;
+    let figure_options = report_figure_options(&app.state);
+    let Some(option) = figure_options.get(option_index).cloned() else {
+        app.state.workbench.report_authoring.transaction_error =
+            Some("The selected result figure no longer exists.".to_owned());
+        return;
+    };
+    let Some(source) = app
+        .state
+        .workspace
+        .visualization_documents
+        .get(option.document_index)
+        .cloned()
+    else {
+        app.state.workbench.report_authoring.transaction_error =
+            Some("The selected result document no longer exists.".to_owned());
+        return;
+    };
+    let caption = app
+        .state
+        .workbench
+        .report_authoring
+        .insert_result_caption
+        .trim()
+        .to_owned();
+    let alternative_text = app
+        .state
+        .workbench
+        .report_authoring
+        .insert_result_alternative_text
+        .trim()
+        .to_owned();
+    let sizing = match app.state.workbench.report_authoring.insert_result_sizing {
+        1 => FigureSizing::FitPage,
+        2 => FigureSizing::Natural,
+        _ => FigureSizing::FitWidth,
+    };
+    let source_digest = match source.content_digest() {
+        Ok(digest) => digest,
+        Err(error) => {
+            app.state.workbench.report_authoring.transaction_error =
+                Some(format!("The result document is invalid: {error}"));
+            return;
+        }
+    };
+    let dataset_bindings = source
+        .datasets()
+        .iter()
+        .map(|dataset| dataset.binding())
+        .collect::<Vec<_>>();
+    let snapshot = match ReportReferenceSnapshot::new(
+        ReportSourceId::VisualizationDocument {
+            document_id: source.id(),
+        },
+        Some(source.revision()),
+        source_digest,
+        dataset_bindings,
+    ) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            app.state.workbench.report_authoring.transaction_error = Some(error.to_string());
+            return;
+        }
+    };
+    let reference = if app.state.workbench.report_authoring.insert_result_frozen {
+        let raster = match render_visualization_report_figure(
+            &source,
+            &snapshot,
+            option.page_id,
+            option.pane_id,
+            &VisualizationRasterProfile::default(),
+        ) {
+            Ok(raster) => raster,
+            Err(error) => {
+                app.state.workbench.report_authoring.transaction_error = Some(format!(
+                    "The selected result figure cannot be frozen for publication: {error}"
+                ));
+                return;
+            }
+        };
+        ReportReferenceMode::Frozen {
+            snapshot,
+            artifact: raster.artifact().clone(),
+        }
+    } else {
+        ReportReferenceMode::Linked { snapshot }
+    };
+    let Some(page_id) =
+        active_document(&app.state).and_then(|document| selected_page_id(&app.state, document))
+    else {
+        app.state.workbench.report_authoring.transaction_error =
+            Some("Select a report page before inserting a result document.".to_owned());
+        return;
+    };
+    let result = active_document_mut(&mut app.state).and_then(|document| {
+        let page = document
+            .page(page_id)
+            .ok_or_else(|| "The selected report page no longer exists.".to_owned())?;
+        document
+            .transact_with_context(
+                document.revision(),
+                vec![ReportEdit::AddBlockToPage {
+                    page_id,
+                    expected_page_revision: page.revision(),
+                    kind: ReportBlockKind::PlotFigure(PlotFigureBlock {
+                        caption,
+                        alternative_text,
+                        sizing,
+                        source_locator: Some(ReportFigureSourceLocator {
+                            page_id: option.page_id.get(),
+                            pane_id: option.pane_id.get(),
+                        }),
+                        reference,
+                    }),
+                }],
+                timestamp_unix_ms(),
+                "rspice-local-session",
+                "Insert immutable result document into report page",
+            )
+            .map_err(|error| error.to_string())
+    });
+    match result {
+        Ok(receipt) => {
+            app.state.workbench.report_authoring.selected_report_block =
+                receipt.created.iter().find_map(|entity| match entity {
+                    ReportEntityRef::Block(id) => Some(*id),
+                    _ => None,
+                });
+            app.state
+                .workbench
+                .report_authoring
+                .insert_result_document_open = false;
+            app.state.workbench.report_authoring.preview_block_page = 0;
+            app.state.workbench.report_authoring.transaction_error = None;
+            app.state.workspace.report_documents_dirty = true;
+        }
+        Err(error) => app.state.workbench.report_authoring.transaction_error = Some(error),
+    }
+}
+
 fn commit_page_properties(app: &mut RSpiceApp) {
     if !report_mutation_allowed(&app.state) {
         app.state.workbench.report_authoring.transaction_error =
@@ -1873,6 +4037,7 @@ fn commit_page_properties(app: &mut RSpiceApp) {
         .page_title_draft
         .trim()
         .to_owned();
+    let inline_title = title.clone();
     let timestamp = timestamp_unix_ms();
     let template =
         report_template_from_index(app.state.workbench.report_authoring.report_template_draft);
@@ -1926,6 +4091,11 @@ fn commit_page_properties(app: &mut RSpiceApp) {
         Ok(changed) => {
             app.state.workbench.report_authoring.selected_page = Some(page_id);
             app.state.workbench.report_authoring.preview_block_page = 0;
+            app.state
+                .workbench
+                .report_authoring
+                .inline_page_settings_page = Some(page_id);
+            app.state.workbench.report_authoring.inline_page_title_draft = inline_title;
             app.state.workbench.report_authoring.page_properties_open = false;
             app.state.workbench.report_authoring.transaction_error = None;
             app.state.workspace.report_documents_dirty |= changed;
@@ -1954,20 +4124,42 @@ fn synchronize_report_selection(state: &mut AppState) {
             .map(ReportDocument::id);
         state.workbench.report_authoring.preview_block_page = 0;
     }
-    if let Some(document) = active_document(state) {
-        let page_valid = state
-            .workbench
-            .report_authoring
-            .selected_page
-            .is_some_and(|id| document.page(id).is_some());
-        if !page_valid {
-            state.workbench.report_authoring.selected_page =
-                document.pages().first().map(|page| page.id());
+    let current_page = state.workbench.report_authoring.selected_page;
+    let current_block = state.workbench.report_authoring.selected_report_block;
+    let selection = active_document(state).map(|document| {
+        let selected_page = current_page
+            .filter(|page_id| document.page(*page_id).is_some())
+            .or_else(|| document.pages().first().map(|page| page.id()));
+        let selected_block_is_on_page = current_block.is_some_and(|block_id| {
+            selected_page
+                .and_then(|page_id| document.page(page_id))
+                .is_some_and(|page| {
+                    page.sections()
+                        .iter()
+                        .flat_map(|section| section.blocks())
+                        .any(|block| block.id() == block_id)
+                })
+        });
+        (selected_page, selected_block_is_on_page)
+    });
+    if let Some((selected_page, selected_block_is_on_page)) = selection {
+        if current_page != selected_page {
+            state.workbench.report_authoring.selected_page = selected_page;
             state.workbench.report_authoring.preview_block_page = 0;
+        }
+        if !selected_block_is_on_page {
+            state.workbench.report_authoring.selected_report_block = None;
         }
     } else {
         state.workbench.report_authoring.selected_page = None;
+        state.workbench.report_authoring.selected_report_block = None;
         state.workbench.report_authoring.preview_block_page = 0;
+        state.workbench.report_authoring.inline_page_settings_page = None;
+        state
+            .workbench
+            .report_authoring
+            .inline_page_title_draft
+            .clear();
     }
 }
 
@@ -2078,10 +4270,25 @@ fn page_update_policy_label(policy: ReportPageUpdatePolicy) -> &'static str {
     }
 }
 
-fn page_marker(index: usize, title: &str) -> &str {
+fn report_page_inclusion_label(inclusion: ReportPageInclusion) -> &'static str {
+    match inclusion {
+        ReportPageInclusion::Included => "Included",
+        ReportPageInclusion::ExcludedFromDraft => "Excluded from draft",
+        ReportPageInclusion::AppendixOnly => "Appendix only",
+    }
+}
+
+fn report_blocked_gate_text_policy_label(policy: ReportBlockedGateTextPolicy) -> &'static str {
+    match policy {
+        ReportBlockedGateTextPolicy::VerbatimFromSource => "State verbatim from source",
+        ReportBlockedGateTextPolicy::SummarizeWithLink => "Summarize with link",
+    }
+}
+
+fn page_marker(_index: usize, title: &str) -> &str {
     INITIAL_PAGES
-        .get(index)
-        .filter(|(_, expected)| *expected == title)
+        .iter()
+        .find(|(_, expected)| *expected == title)
         .map_or("+", |(marker, _)| *marker)
 }
 
@@ -2095,6 +4302,9 @@ mod tests {
 
     #[test]
     fn responsive_report_builder_matches_mockup_breakpoints() {
+        assert_eq!(OUTLINE_DESKTOP_WIDTH, 250.0);
+        assert_eq!(OUTLINE_TABLET_WIDTH, 180.0);
+        assert_eq!(INSPECTOR_WIDTH, 300.0);
         assert_eq!(
             ComposerLayout::resolve(1_280.0),
             ComposerLayout::ThreeColumn
@@ -2109,6 +4319,60 @@ mod tests {
         );
         assert_eq!(ComposerLayout::resolve(820.0), ComposerLayout::Stacked);
         assert_eq!(ComposerLayout::resolve(390.0), ComposerLayout::Stacked);
+    }
+
+    #[test]
+    fn report_commands_open_for_review_and_gate_mutations_by_exact_authority() {
+        let mut app = RSpiceApp::test_instance();
+        assert!(crate::workbench::surface_availability(SurfaceId::ReportAuthoring).can_open());
+        assert!(
+            crate::workbench::commands::vocabulary::command_catalog()
+                .any(|command| command == Command::ReportAuthoring)
+        );
+        assert_eq!(Command::ReportAuthoring.stable_id(), "report-page-editor");
+        assert_eq!(
+            Command::ReportAuthoring.spec().label,
+            "Report page and datasheet editor…"
+        );
+        for contextual_command in [
+            Command::SaveReportDocument,
+            Command::AddReportPage,
+            Command::ReportPageProperties,
+        ] {
+            assert!(
+                !crate::workbench::commands::vocabulary::command_catalog()
+                    .any(|command| command == contextual_command)
+            );
+        }
+        assert!(Command::ReportAuthoring.is_enabled(&app));
+        assert!(!Command::SaveReportDocument.is_enabled(&app));
+        assert!(!Command::AddReportPage.is_enabled(&app));
+        assert!(!Command::ReportPageProperties.is_enabled(&app));
+
+        Command::ReportAuthoring.execute(&mut app);
+        assert_eq!(
+            app.state.workbench.current_route().surface_id(),
+            SurfaceId::ReportAuthoring
+        );
+
+        app.state.workbench.report_authoring.create_document_title =
+            "Verification report".to_owned();
+        commit_create_document(&mut app);
+        assert!(Command::SaveReportDocument.is_enabled(&app));
+        assert!(Command::AddReportPage.is_enabled(&app));
+        assert!(Command::ReportPageProperties.is_enabled(&app));
+
+        app.state.workbench.safe_mode.activate(
+            crate::workbench::state::LocalSafeModeOptions {
+                open_project_read_only: true,
+                ..crate::workbench::state::LocalSafeModeOptions::default()
+            },
+            "report command authority test".to_owned(),
+        );
+        assert!(Command::ReportAuthoring.is_enabled(&app));
+        assert!(!Command::SaveReportDocument.is_enabled(&app));
+        assert!(!Command::AddReportPage.is_enabled(&app));
+        assert!(!Command::ReportPageProperties.is_enabled(&app));
     }
 
     #[test]
@@ -2167,14 +4431,14 @@ mod tests {
         );
         let tablet_tall = composer_pane_heights(
             ComposerLayout::TwoColumnInspectorBelow,
-            1_000.0,
+            1_600.0,
             INITIAL_PAGES.len(),
             true,
         );
         assert!(tablet_tall.preview > tablet_short.preview);
         assert!(tablet_tall.inspector > tablet_short.inspector);
         assert!(tablet_short.preview + tablet_short.inspector + 0.01 >= 640.0);
-        assert!(tablet_tall.preview + tablet_tall.inspector + 0.01 >= 1_000.0);
+        assert!(tablet_tall.preview + tablet_tall.inspector + 0.01 >= 1_600.0);
 
         let compact_seven =
             composer_pane_heights(ComposerLayout::Stacked, 720.0, INITIAL_PAGES.len(), true);
@@ -2185,10 +4449,12 @@ mod tests {
     }
 
     #[test]
-    fn incomplete_publication_contract_keeps_surface_and_commands_unexposed() {
-        assert!(!crate::workbench::surface_availability(SurfaceId::ReportAuthoring).can_open());
+    fn contextual_report_commands_stay_out_of_the_searchable_registry() {
+        assert!(crate::workbench::commands::vocabulary::COMMAND_REGISTRY.contains(&Command::ReportAuthoring));
+        // The three mutating commands act on the active document and page, so
+        // they stay bound to the surface's own affordances rather than the
+        // palette, where they would have no exact subject to resolve against.
         for command in [
-            Command::ReportAuthoring,
             Command::SaveReportDocument,
             Command::AddReportPage,
             Command::ReportPageProperties,
@@ -2242,6 +4508,431 @@ mod tests {
             document_id
         );
         assert_eq!(app.state.workbench.report_authoring.selected_page, page_id);
+    }
+
+    #[test]
+    fn report_plan_binds_initial_pages_to_the_active_immutable_dataset() {
+        let mut app = RSpiceApp::test_instance();
+        let mut run = crate::state::SimulationRun::new(41);
+        run.add_analysis(crate::state::AnalysisResult::new(
+            1,
+            crate::state::AnalysisType::Transient,
+            "retained transient",
+        ));
+        let expected_binding =
+            crate::product::DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
+        app.state.simulation.runs = vec![run];
+        app.state.simulation.active_run_idx = Some(0);
+        app.state.workbench.report_authoring.create_document_title =
+            "Verification report".to_owned();
+
+        commit_create_document(&mut app);
+
+        let document = active_document(&app.state).expect("active report");
+        assert!(document.pages().iter().all(|page| {
+            page.evidence_binding()
+                == ReportPageEvidenceBinding::ExactDataset {
+                    binding: expected_binding,
+                }
+        }));
+        assert_eq!(
+            document
+                .revision_history()
+                .records()
+                .last()
+                .expect("binding revision")
+                .revision_note(),
+            "Bind initial report pages to active result dataset"
+        );
+    }
+
+    #[test]
+    fn report_page_settings_commit_canonical_revision_checked_transactions() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.report_authoring.create_document_title =
+            "Verification report".to_owned();
+        commit_create_document(&mut app);
+        let page_id = app
+            .state
+            .workbench
+            .report_authoring
+            .selected_page
+            .expect("selected page");
+        let initial_revision = active_document(&app.state)
+            .expect("active report")
+            .revision();
+        app.state.workspace.report_documents_dirty = false;
+
+        commit_page_setting(
+            &mut app,
+            page_id,
+            PageSettingEdit::Title("Decision and release summary".to_owned()),
+        );
+        commit_page_setting(
+            &mut app,
+            page_id,
+            PageSettingEdit::Inclusion(ReportPageInclusion::AppendixOnly),
+        );
+        commit_page_setting(
+            &mut app,
+            page_id,
+            PageSettingEdit::EvidenceBinding(ReportPageEvidenceBinding::LatestAcceptedRun),
+        );
+        commit_page_setting(
+            &mut app,
+            page_id,
+            PageSettingEdit::BlockedGateText(ReportBlockedGateTextPolicy::SummarizeWithLink),
+        );
+
+        let document = active_document(&app.state).expect("active report");
+        let page = document.page(page_id).expect("selected page");
+        assert_eq!(page.title(), "Decision and release summary");
+        assert_eq!(page.inclusion(), ReportPageInclusion::AppendixOnly);
+        assert_eq!(
+            page.evidence_binding(),
+            ReportPageEvidenceBinding::LatestAcceptedRun
+        );
+        assert_eq!(
+            page.blocked_gate_text_policy(),
+            ReportBlockedGateTextPolicy::SummarizeWithLink
+        );
+        assert_eq!(document.revision().get(), initial_revision.get() + 4);
+        assert!(app.state.workspace.report_documents_dirty);
+        assert!(
+            app.state
+                .workbench
+                .report_authoring
+                .transaction_error
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn report_page_order_controls_commit_revision_checked_moves() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.report_authoring.create_document_title =
+            "Verification report".to_owned();
+        commit_create_document(&mut app);
+        let page_ids = active_document(&app.state)
+            .expect("active report")
+            .pages()
+            .iter()
+            .map(|page| page.id())
+            .collect::<Vec<_>>();
+        let page_to_move = page_ids[1];
+        app.state.workbench.report_authoring.selected_page = Some(page_to_move);
+        app.state.workspace.report_documents_dirty = false;
+
+        assert!(can_move_selected_page(
+            &app.state,
+            PageMoveDirection::Earlier
+        ));
+        assert!(can_move_selected_page(&app.state, PageMoveDirection::Later));
+        move_selected_page(&mut app, PageMoveDirection::Earlier);
+
+        let document = active_document(&app.state).expect("active report");
+        assert_eq!(document.pages()[0].id(), page_to_move);
+        assert_eq!(document.pages()[1].id(), page_ids[0]);
+        assert_eq!(
+            document
+                .revision_history()
+                .records()
+                .last()
+                .expect("move revision")
+                .revision_note(),
+            "Move report page earlier"
+        );
+        assert!(app.state.workspace.report_documents_dirty);
+        assert_eq!(
+            app.state.workbench.report_authoring.selected_page,
+            Some(page_to_move)
+        );
+
+        app.state.workspace.report_documents_dirty = false;
+        move_selected_page(&mut app, PageMoveDirection::Later);
+        let document = active_document(&app.state).expect("active report");
+        assert_eq!(
+            document
+                .pages()
+                .iter()
+                .map(|page| page.id())
+                .collect::<Vec<_>>(),
+            page_ids
+        );
+        assert_eq!(
+            document
+                .revision_history()
+                .records()
+                .last()
+                .expect("move revision")
+                .revision_note(),
+            "Move report page later"
+        );
+        assert!(app.state.workspace.report_documents_dirty);
+    }
+
+    #[test]
+    fn report_page_order_controls_fail_closed_at_document_boundaries() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.report_authoring.create_document_title =
+            "Verification report".to_owned();
+        commit_create_document(&mut app);
+        let first_page = active_document(&app.state).expect("active report").pages()[0].id();
+        app.state.workbench.report_authoring.selected_page = Some(first_page);
+        app.state.workspace.report_documents_dirty = false;
+        let revision = active_document(&app.state)
+            .expect("active report")
+            .revision();
+
+        assert!(!can_move_selected_page(
+            &app.state,
+            PageMoveDirection::Earlier
+        ));
+        move_selected_page(&mut app, PageMoveDirection::Earlier);
+
+        assert_eq!(
+            active_document(&app.state)
+                .expect("active report")
+                .revision(),
+            revision
+        );
+        assert!(!app.state.workspace.report_documents_dirty);
+    }
+
+    #[test]
+    fn report_element_catalog_commits_every_non_plot_block_kind() {
+        let mut app = RSpiceApp::test_instance();
+        let mut run = crate::state::SimulationRun::new(83);
+        run.add_analysis(crate::state::AnalysisResult::new(
+            1,
+            crate::state::AnalysisType::Transient,
+            "retained transient",
+        ));
+        app.state.simulation.runs = vec![run];
+        app.state.simulation.active_run_idx = Some(0);
+        app.state.workbench.report_authoring.create_document_title =
+            "Verification report".to_owned();
+        commit_create_document(&mut app);
+
+        for kind_index in 0..=6 {
+            reset_add_report_element_kind(&mut app, kind_index);
+            assert!(valid_add_report_element_draft(&app.state, true));
+            commit_add_report_element(&mut app);
+            assert!(
+                app.state
+                    .workbench
+                    .report_authoring
+                    .transaction_error
+                    .is_none()
+            );
+        }
+
+        let document = active_document(&app.state).expect("active report");
+        let page_id = app
+            .state
+            .workbench
+            .report_authoring
+            .selected_page
+            .expect("selected page");
+        let page = document.page(page_id).expect("selected page");
+        assert_eq!(page.sections().len(), 1);
+        let blocks = page.sections()[0].blocks();
+        assert_eq!(blocks.len(), 7);
+        assert!(matches!(blocks[0].kind(), ReportBlockKind::Prose(_)));
+        assert!(matches!(blocks[1].kind(), ReportBlockKind::DataTable(_)));
+        assert!(matches!(blocks[2].kind(), ReportBlockKind::Datasheet(_)));
+        assert!(matches!(blocks[3].kind(), ReportBlockKind::Requirements(_)));
+        assert!(matches!(
+            blocks[4].kind(),
+            ReportBlockKind::Specifications(_)
+        ));
+        assert!(matches!(blocks[5].kind(), ReportBlockKind::ReviewNote(_)));
+        assert!(matches!(blocks[6].kind(), ReportBlockKind::Evidence(_)));
+        assert!(blocks.iter().all(|block| block.enabled()));
+    }
+
+    #[test]
+    fn page_element_toggle_and_remove_are_canonical_transactions() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.report_authoring.create_document_title =
+            "Verification report".to_owned();
+        commit_create_document(&mut app);
+        reset_add_report_element_kind(&mut app, 0);
+        commit_add_report_element(&mut app);
+        let document_id = active_document(&app.state).expect("active report").id();
+        let block_id = app
+            .state
+            .workbench
+            .report_authoring
+            .selected_report_block
+            .expect("new block selected");
+
+        set_report_block_enabled(&mut app, document_id, block_id, false);
+        assert!(
+            !active_document(&app.state)
+                .expect("active report")
+                .block(block_id)
+                .expect("block")
+                .enabled()
+        );
+        app.state
+            .workbench
+            .report_authoring
+            .remove_report_block_open = true;
+        commit_remove_report_block(&mut app);
+        let document = active_document(&app.state).expect("active report");
+        assert!(document.block(block_id).is_none());
+        assert!(
+            document
+                .tombstones()
+                .iter()
+                .any(|tombstone| tombstone.entity == ReportEntityRef::Block(block_id))
+        );
+        assert_eq!(
+            app.state.workbench.report_authoring.selected_report_block,
+            None
+        );
+    }
+
+    #[test]
+    fn publication_inspector_edits_are_canonical_document_transactions() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.report_authoring.create_document_title =
+            "Verification report".to_owned();
+        commit_create_document(&mut app);
+        let document_id = active_document(&app.state).expect("active report").id();
+        let initial_revision = active_document(&app.state)
+            .expect("active report")
+            .revision();
+        let output_formats = ReportOutputFormats {
+            pdf_a: true,
+            html_bundle: false,
+            canonical_json: true,
+            selected_csv: true,
+        };
+        commit_document_publication_setting(
+            &mut app,
+            document_id,
+            DocumentPublicationEdit::OutputFormats(output_formats),
+        );
+        let publication_profile = ReportPublicationProfile {
+            template: ReportPublicationTemplate::CustomerDatasheet,
+            page_size: ReportPublicationPageSize::A3Landscape,
+            draft_marking: ReportDraftMarking::NeverWatermark,
+            numbering: ReportPageNumbering::ContinuousPageNumbers,
+            table_precision: ReportTablePrecision::FullStoredF64,
+        };
+        commit_document_publication_setting(
+            &mut app,
+            document_id,
+            DocumentPublicationEdit::PublicationProfile(publication_profile),
+        );
+
+        let document = active_document(&app.state).expect("active report");
+        assert_eq!(document.output_formats(), output_formats);
+        assert_eq!(document.publication_profile(), publication_profile);
+        assert_eq!(document.revision().get(), initial_revision.get() + 2);
+        assert!(app.state.workspace.report_documents_dirty);
+        assert!(
+            app.state
+                .workbench
+                .report_authoring
+                .transaction_error
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn inserting_result_document_binds_exact_revision_digest_and_dataset() {
+        use crate::results::visualization_document::{
+            ColumnRole, SourceColumn, SourceDataset, SourceRow, TypedValue, ValueType,
+            VisualizationDocument,
+        };
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.report_authoring.create_document_title =
+            "Verification report".to_owned();
+        commit_create_document(&mut app);
+        let binding = crate::product::DatasetBinding::new(
+            crate::product::DatasetId::new(),
+            crate::product::ContentDigest::from_bytes([0x83; 32]),
+        );
+        let dataset = SourceDataset::new(
+            binding,
+            vec![
+                SourceColumn::new(
+                    "time",
+                    "Time",
+                    ValueType::Real,
+                    ColumnRole::Coordinate,
+                    Some("s".to_owned()),
+                )
+                .unwrap(),
+                SourceColumn::new(
+                    "vout",
+                    "V(out)",
+                    ValueType::Real,
+                    ColumnRole::Signal,
+                    Some("V".to_owned()),
+                )
+                .unwrap(),
+            ],
+            vec![SourceRow::new(vec![
+                TypedValue::Real(0.0),
+                TypedValue::Real(1.0),
+            ])],
+        )
+        .unwrap();
+        let source = VisualizationDocument::new("Nominal response", vec![dataset]).unwrap();
+        let source_id = source.id();
+        let source_revision = source.revision();
+        let source_digest = source.content_digest().unwrap();
+        let expected_page_id = source.pages()[0].id.get();
+        let expected_pane_id = source.panes()[0].id.get();
+        app.state.workspace.visualization_documents.push(source);
+
+        open_insert_result_document(&mut app);
+        commit_insert_result_document(&mut app);
+
+        let block_id = app
+            .state
+            .workbench
+            .report_authoring
+            .selected_report_block
+            .expect("inserted plot selected");
+        let block = active_document(&app.state)
+            .expect("active report")
+            .block(block_id)
+            .expect("inserted plot");
+        let ReportBlockKind::PlotFigure(figure) = block.kind() else {
+            panic!("inserted block must be a plot figure");
+        };
+        let snapshot = figure.reference.snapshot();
+        assert_eq!(
+            snapshot.source,
+            ReportSourceId::VisualizationDocument {
+                document_id: source_id
+            }
+        );
+        assert_eq!(snapshot.source_revision, Some(source_revision));
+        assert_eq!(snapshot.content_digest, source_digest);
+        assert_eq!(snapshot.dataset_bindings, vec![binding]);
+        assert_eq!(
+            figure.source_locator,
+            Some(ReportFigureSourceLocator {
+                page_id: expected_page_id,
+                pane_id: expected_pane_id,
+            })
+        );
+        assert!(report_reference_resolves(&app.state, &figure.reference));
+    }
+
+    #[test]
+    fn report_page_markers_remain_semantically_stable_after_reordering() {
+        assert_eq!(page_marker(0, "Executive summary"), "1");
+        assert_eq!(page_marker(5, "Executive summary"), "1");
+        assert_eq!(page_marker(0, "Run manifests"), "A");
+        assert_eq!(page_marker(7, "Custom appendix"), "+");
     }
 
     #[test]
@@ -2300,35 +4991,17 @@ mod tests {
     }
 
     #[test]
-    fn report_preview_block_window_is_bounded_and_clamped() {
-        assert_eq!(preview_block_window(0, 0), (0, 0, 0, 1));
-        assert_eq!(preview_block_window(16, 0), (0, 0, 16, 1));
-        assert_eq!(preview_block_window(17, 0), (0, 0, 16, 2));
-        assert_eq!(preview_block_window(17, 1), (1, 16, 17, 2));
-        assert_eq!(preview_block_window(17, usize::MAX), (1, 16, 17, 2));
-        assert_eq!(preview_block_window(8_192, 511), (511, 8_176, 8_192, 512));
-    }
-
-    #[test]
-    fn empty_sections_follow_preceding_blocks_across_preview_pages() {
-        assert_eq!(empty_section_preview_page(0), 0);
-        assert_eq!(empty_section_preview_page(1), 0);
-        assert_eq!(empty_section_preview_page(16), 0);
-        assert_eq!(empty_section_preview_page(17), 1);
-        assert_eq!(empty_section_preview_page(100), 6);
-    }
-
-    #[test]
     fn prose_preview_is_unicode_safe_and_bounded() {
-        let exact = "a".repeat(PREVIEW_PROSE_CHARACTERS);
-        let (preview, truncated) = bounded_text_preview(&exact, PREVIEW_PROSE_CHARACTERS);
+        const MAXIMUM_CHARACTERS: usize = 4_096;
+        let exact = "a".repeat(MAXIMUM_CHARACTERS);
+        let (preview, truncated) = bounded_text_preview(&exact, MAXIMUM_CHARACTERS);
         assert!(!truncated);
         assert_eq!(preview, exact);
 
         let oversized = format!("{}é-tail", exact);
-        let (preview, truncated) = bounded_text_preview(&oversized, PREVIEW_PROSE_CHARACTERS);
+        let (preview, truncated) = bounded_text_preview(&oversized, MAXIMUM_CHARACTERS);
         assert!(truncated);
-        assert_eq!(preview.chars().count(), PREVIEW_PROSE_CHARACTERS + 1);
+        assert_eq!(preview.chars().count(), MAXIMUM_CHARACTERS + 1);
         assert!(preview.ends_with('…'));
     }
 
@@ -2351,5 +5024,101 @@ mod tests {
                 .and_then(|document| document.pages().first())
                 .map(|page| page.id())
         );
+    }
+
+    #[test]
+    fn report_joint_yield_requires_aligned_all_spec_sample_trails() {
+        fn result(
+            measurement: &str,
+            trail: Vec<bool>,
+        ) -> crate::services::yield_manager::YieldResult {
+            let total_runs = trail.len();
+            let pass_count = trail.iter().filter(|passed| **passed).count();
+            crate::services::yield_manager::YieldResult {
+                spec: crate::services::yield_manager::YieldSpec::lower(measurement, 0.0, "V"),
+                total_runs,
+                pass_count,
+                fail_count: total_runs - pass_count,
+                yield_percent: pass_count as f64 / total_runs as f64 * 100.0,
+                stats: crate::services::yield_manager::DistributionStats::default(),
+                trail,
+                samples: vec![0.0; total_runs],
+            }
+        }
+
+        let aligned = [
+            result("V(out)", vec![true, true, false]),
+            result("I(V1)", vec![true, false, true]),
+        ];
+        assert_eq!(
+            ReportJointYield::from_results(&aligned),
+            Some(ReportJointYield {
+                passing: 1,
+                total: 3,
+            })
+        );
+
+        let misaligned = [
+            result("V(out)", vec![true, false]),
+            result("I(V1)", vec![true]),
+        ];
+        assert_eq!(ReportJointYield::from_results(&misaligned), None);
+    }
+
+    #[test]
+    fn report_summary_uses_verified_spec_and_exact_corner_evidence() {
+        fn provenance(seed: u8) -> crate::state::AnalysisResultProvenance {
+            crate::state::AnalysisResultProvenance::new(
+                crate::product::AnalysisInstanceId::new(),
+                crate::product::ObjectRevision::INITIAL,
+                crate::product::ContentDigest::from_bytes([seed; 32]),
+                Vec::new(),
+            )
+            .expect("test provenance is valid")
+        }
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.workspace.specs = vec![
+            crate::state::SpecEntry {
+                measurement: "gain".to_owned(),
+                min: Some(10.0),
+                max: None,
+                unit: "V/V".to_owned(),
+            },
+            crate::state::SpecEntry {
+                measurement: "bandwidth".to_owned(),
+                min: Some(1_000.0),
+                max: None,
+                unit: "Hz".to_owned(),
+            },
+        ];
+        let checks = crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Ac, "AC")
+            .with_measurements(vec![
+                rspice_core::MeasureResult::success("gain", 12.0),
+                rspice_core::MeasureResult::success("bandwidth", 900.0),
+            ])
+            .with_provenance(provenance(0x31));
+        let corners =
+            crate::state::AnalysisResult::new(2, crate::state::AnalysisType::Corner, "PVT")
+                .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::Corner {
+                    x_values: vec![0.0, 1.0, 2.0],
+                    x_label: "corner".to_owned(),
+                    x_unit: String::new(),
+                    temperatures_c: vec![-40.0, 27.0, 125.0],
+                    corner_labels: vec!["ss".to_owned(), "tt".to_owned(), "ff".to_owned()],
+                    failed_corners: 1,
+                })
+                .with_provenance(provenance(0x32));
+        let mut run = crate::state::SimulationRun::new(1);
+        run.add_analysis(checks);
+        run.add_analysis(corners);
+        app.state.simulation.runs = vec![run];
+        app.state.simulation.active_run_idx = Some(0);
+
+        let metrics = ReportSummaryMetrics::from_state(&app.state);
+        assert_eq!(metrics.checks_passing, 1);
+        assert_eq!(metrics.checks_total, 2);
+        assert_eq!(metrics.pvt_completed, Some(2));
+        assert_eq!(metrics.pvt_total, Some(3));
     }
 }

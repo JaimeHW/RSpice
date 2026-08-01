@@ -154,7 +154,6 @@ impl DragState {
         self.last_pos = None;
         self.drag_type = DragType::None;
     }
-
 }
 
 // =============================================================================
@@ -178,7 +177,6 @@ pub enum DragType {
     /// Dragging a wire vertex
     WireVertex,
 }
-
 
 // =============================================================================
 // Tests

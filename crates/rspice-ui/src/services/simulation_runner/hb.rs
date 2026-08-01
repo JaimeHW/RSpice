@@ -42,7 +42,6 @@ impl HbToneRunConfig {
             name: None,
         }
     }
-
 }
 
 /// Harmonic Balance run configuration passed from the simulation pipeline.

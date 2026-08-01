@@ -27,6 +27,7 @@ use crate::product::{
 
 const MAX_PAGES: usize = 256;
 const MAX_SECTIONS_PER_PAGE: usize = 256;
+const MAX_SECTIONS_TOTAL: usize = 8_192;
 const MAX_BLOCKS_PER_SECTION: usize = 1_024;
 const MAX_BLOCKS_TOTAL: usize = 8_192;
 const MAX_TRANSACTION_EDITS: usize = 256;
@@ -361,7 +362,20 @@ pub struct ReportBlock {
     #[serde(default)]
     created_at_document_revision: ObjectRevision,
     revision: ObjectRevision,
+    #[serde(
+        default = "report_block_enabled_default",
+        skip_serializing_if = "report_block_enabled_is_default"
+    )]
+    enabled: bool,
     kind: ReportBlockKind,
+}
+
+const fn report_block_enabled_default() -> bool {
+    true
+}
+
+const fn report_block_enabled_is_default(enabled: &bool) -> bool {
+    *enabled
 }
 
 impl ReportBlock {
@@ -378,6 +392,11 @@ impl ReportBlock {
     #[must_use]
     pub const fn created_at_document_revision(&self) -> ObjectRevision {
         self.created_at_document_revision
+    }
+
+    #[must_use]
+    pub const fn enabled(&self) -> bool {
+        self.enabled
     }
 
     #[must_use]
@@ -431,6 +450,15 @@ pub struct ReportPage {
     revision: ObjectRevision,
     title: String,
     update_policy: ReportPageUpdatePolicy,
+    #[serde(default, skip_serializing_if = "ReportPageInclusion::is_default")]
+    inclusion: ReportPageInclusion,
+    #[serde(default, skip_serializing_if = "ReportPageEvidenceBinding::is_default")]
+    evidence_binding: ReportPageEvidenceBinding,
+    #[serde(
+        default,
+        skip_serializing_if = "ReportBlockedGateTextPolicy::is_default"
+    )]
+    blocked_gate_text_policy: ReportBlockedGateTextPolicy,
     sections: Vec<ReportSection>,
 }
 
@@ -461,6 +489,21 @@ impl ReportPage {
     }
 
     #[must_use]
+    pub const fn inclusion(&self) -> ReportPageInclusion {
+        self.inclusion
+    }
+
+    #[must_use]
+    pub const fn evidence_binding(&self) -> ReportPageEvidenceBinding {
+        self.evidence_binding
+    }
+
+    #[must_use]
+    pub const fn blocked_gate_text_policy(&self) -> ReportBlockedGateTextPolicy {
+        self.blocked_gate_text_policy
+    }
+
+    #[must_use]
     pub fn sections(&self) -> &[ReportSection] {
         &self.sections
     }
@@ -475,6 +518,12 @@ pub enum ReportEdit {
     SetTemplate {
         template: ReportTemplate,
     },
+    SetOutputFormats {
+        output_formats: ReportOutputFormats,
+    },
+    SetPublicationProfile {
+        publication_profile: ReportPublicationProfile,
+    },
     AddPage {
         title: String,
     },
@@ -487,6 +536,21 @@ pub enum ReportEdit {
         page_id: ReportPageId,
         expected_page_revision: ObjectRevision,
         update_policy: ReportPageUpdatePolicy,
+    },
+    SetPageInclusion {
+        page_id: ReportPageId,
+        expected_page_revision: ObjectRevision,
+        inclusion: ReportPageInclusion,
+    },
+    SetPageEvidenceBinding {
+        page_id: ReportPageId,
+        expected_page_revision: ObjectRevision,
+        evidence_binding: ReportPageEvidenceBinding,
+    },
+    SetPageBlockedGateTextPolicy {
+        page_id: ReportPageId,
+        expected_page_revision: ObjectRevision,
+        policy: ReportBlockedGateTextPolicy,
     },
     MovePage {
         page_id: ReportPageId,
@@ -511,6 +575,16 @@ pub enum ReportEdit {
     AddBlock {
         section_id: ReportSectionId,
         kind: ReportBlockKind,
+    },
+    AddBlockToPage {
+        page_id: ReportPageId,
+        expected_page_revision: ObjectRevision,
+        kind: ReportBlockKind,
+    },
+    SetBlockEnabled {
+        block_id: ReportBlockId,
+        expected_block_revision: ObjectRevision,
+        enabled: bool,
     },
     ReplaceBlock {
         block_id: ReportBlockId,
@@ -586,16 +660,92 @@ impl ReportReferenceInventoryEntry {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReportReferenceFigureArtifact {
+    block_id: ReportBlockId,
+    source: ReportReferenceSnapshot,
+    source_locator: ReportFigureSourceLocator,
+    artifact: FrozenReportArtifact,
+}
+
+impl ReportReferenceFigureArtifact {
+    pub fn new(
+        block_id: ReportBlockId,
+        source: ReportReferenceSnapshot,
+        source_locator: ReportFigureSourceLocator,
+        artifact: FrozenReportArtifact,
+    ) -> Result<Self, ReportError> {
+        let value = Self {
+            block_id,
+            source,
+            source_locator,
+            artifact,
+        };
+        value.validate()?;
+        Ok(value)
+    }
+
+    #[must_use]
+    pub const fn block_id(&self) -> ReportBlockId {
+        self.block_id
+    }
+
+    #[must_use]
+    pub const fn source(&self) -> &ReportReferenceSnapshot {
+        &self.source
+    }
+
+    #[must_use]
+    pub const fn source_locator(&self) -> &ReportFigureSourceLocator {
+        &self.source_locator
+    }
+
+    #[must_use]
+    pub const fn artifact(&self) -> &FrozenReportArtifact {
+        &self.artifact
+    }
+
+    fn validate(&self) -> Result<(), ReportError> {
+        self.source.validate()?;
+        if !matches!(
+            &self.source.source,
+            ReportSourceId::VisualizationDocument { .. }
+        ) {
+            return Err(ReportError::InvalidReferenceKind {
+                block: "report-reference-figure-artifact",
+                expected: "visualization-document",
+            });
+        }
+        if self.source_locator.page_id == 0 || self.source_locator.pane_id == 0 {
+            return Err(ReportError::InvalidValue {
+                field: "report-reference-figure-artifact.source-locator",
+                message: "page and pane stable IDs must both be non-zero".to_owned(),
+            });
+        }
+        self.artifact.validate()?;
+        if self.artifact.media_type() != "image/png" {
+            return Err(ReportError::InvalidValue {
+                field: "report-reference-figure-artifact.media-type",
+                message: "resolved report figure artifacts must use image/png".to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ReportReferenceInventory {
     pub sources: Vec<ReportReferenceInventoryEntry>,
     pub available_datasets: Vec<DatasetBinding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub figure_artifacts: Vec<ReportReferenceFigureArtifact>,
 }
 
 impl ReportReferenceInventory {
     pub fn validate(&self) -> Result<(), ReportError> {
         if self.sources.len() > MAX_BLOCKS_TOTAL
             || self.available_datasets.len() > MAX_DATASET_BINDINGS
+            || self.figure_artifacts.len() > MAX_BLOCKS_TOTAL
         {
             return Err(ReportError::InvalidValue {
                 field: "reference-inventory",
@@ -614,6 +764,34 @@ impl ReportReferenceInventory {
                 dataset_bindings: source.dataset_bindings.clone(),
             }
             .validate()?;
+        }
+        let mut figure_blocks = HashSet::with_capacity(self.figure_artifacts.len());
+        for figure in &self.figure_artifacts {
+            figure.validate()?;
+            if !figure_blocks.insert(figure.block_id()) {
+                return Err(ReportError::InvalidValue {
+                    field: "reference-inventory.figure-artifacts",
+                    message: format!(
+                        "report block {} has more than one resolved figure artifact",
+                        figure.block_id()
+                    ),
+                });
+            }
+            let snapshot = figure.source();
+            if !self.sources.iter().any(|source| {
+                source.source == snapshot.source
+                    && source.source_revision == snapshot.source_revision
+                    && source.content_digest == snapshot.content_digest
+                    && source.dataset_bindings == snapshot.dataset_bindings
+            }) {
+                return Err(ReportError::InvalidValue {
+                    field: "reference-inventory.figure-artifacts",
+                    message: format!(
+                        "report block {} figure payload has no exact source inventory entry",
+                        figure.block_id()
+                    ),
+                });
+            }
         }
         validate_dataset_bindings(&self.available_datasets)
     }
@@ -694,6 +872,10 @@ pub struct ReportDocumentSnapshot {
     revision: ObjectRevision,
     title: String,
     template: ReportTemplate,
+    #[serde(default, skip_serializing_if = "ReportOutputFormats::is_default")]
+    output_formats: ReportOutputFormats,
+    #[serde(default, skip_serializing_if = "ReportPublicationProfile::is_default")]
+    publication_profile: ReportPublicationProfile,
     pages: Vec<ReportPage>,
     receipts: Vec<ReportMutationReceipt>,
     tombstones: Vec<ReportTombstone>,
@@ -719,6 +901,16 @@ impl ReportDocumentSnapshot {
     #[must_use]
     pub const fn template(&self) -> ReportTemplate {
         self.template
+    }
+
+    #[must_use]
+    pub const fn output_formats(&self) -> ReportOutputFormats {
+        self.output_formats
+    }
+
+    #[must_use]
+    pub const fn publication_profile(&self) -> ReportPublicationProfile {
+        self.publication_profile
     }
 
     #[must_use]
@@ -963,6 +1155,10 @@ pub struct ReportDocument {
     revision: ObjectRevision,
     title: String,
     template: ReportTemplate,
+    #[serde(default, skip_serializing_if = "ReportOutputFormats::is_default")]
+    output_formats: ReportOutputFormats,
+    #[serde(default, skip_serializing_if = "ReportPublicationProfile::is_default")]
+    publication_profile: ReportPublicationProfile,
     pages: Vec<ReportPage>,
     receipts: Vec<ReportMutationReceipt>,
     tombstones: Vec<ReportTombstone>,
@@ -978,6 +1174,10 @@ struct ReportDocumentWire {
     revision: ObjectRevision,
     title: String,
     template: ReportTemplate,
+    #[serde(default)]
+    output_formats: ReportOutputFormats,
+    #[serde(default)]
+    publication_profile: ReportPublicationProfile,
     #[serde(default)]
     pages: Vec<ReportPage>,
     #[serde(default)]
@@ -1027,6 +1227,15 @@ impl<'de> Deserialize<'de> for ReportDocument {
                         .to_owned(),
                 }));
             }
+            (3..=6, ReportRevisionHistoryWireField::Value(history)) => history,
+            (version @ (3..=6), ReportRevisionHistoryWireField::Missing) => {
+                return Err(serde::de::Error::custom(ReportError::InvalidValue {
+                    field: "report-document.revision-history",
+                    message: format!(
+                        "schema {version} documents must retain their revision history"
+                    ),
+                }));
+            }
             (1 | 2, ReportRevisionHistoryWireField::Missing) => ReportRevisionHistory {
                 origin: ReportRevisionHistoryOrigin::Native,
                 records: Vec::new(),
@@ -1056,6 +1265,8 @@ impl<'de> Deserialize<'de> for ReportDocument {
             revision: wire.revision,
             title: wire.title,
             template: wire.template,
+            output_formats: wire.output_formats,
+            publication_profile: wire.publication_profile,
             pages: wire.pages,
             receipts: wire.receipts,
             tombstones: wire.tombstones,
@@ -1069,7 +1280,7 @@ impl<'de> Deserialize<'de> for ReportDocument {
 }
 
 impl ReportDocument {
-    pub const SCHEMA_VERSION: u16 = 3;
+    pub const SCHEMA_VERSION: u16 = 7;
 
     pub fn new(title: impl Into<String>) -> Result<Self, ReportError> {
         Self::new_with_template(title, ReportTemplate::ReleaseVerification42)
@@ -1085,6 +1296,8 @@ impl ReportDocument {
             revision: ObjectRevision::INITIAL,
             title: title.into(),
             template,
+            output_formats: ReportOutputFormats::default(),
+            publication_profile: ReportPublicationProfile::default(),
             pages: Vec::new(),
             receipts: Vec::new(),
             tombstones: Vec::new(),
@@ -1126,6 +1339,16 @@ impl ReportDocument {
     #[must_use]
     pub const fn template(&self) -> ReportTemplate {
         self.template
+    }
+
+    #[must_use]
+    pub const fn output_formats(&self) -> ReportOutputFormats {
+        self.output_formats
+    }
+
+    #[must_use]
+    pub const fn publication_profile(&self) -> ReportPublicationProfile {
+        self.publication_profile
     }
 
     #[must_use]
@@ -1195,6 +1418,8 @@ impl ReportDocument {
             revision: snapshot.revision,
             title: snapshot.title.clone(),
             template: snapshot.template,
+            output_formats: snapshot.output_formats,
+            publication_profile: snapshot.publication_profile,
             pages: snapshot.pages.clone(),
             receipts: snapshot.receipts.clone(),
             tombstones: snapshot.tombstones.clone(),
@@ -1296,6 +1521,8 @@ impl ReportDocument {
             revision: self.revision,
             title: self.title.clone(),
             template: self.template,
+            output_formats: self.output_formats,
+            publication_profile: self.publication_profile,
             pages: self.pages.clone(),
             receipts: self.receipts.clone(),
             tombstones: self.tombstones.clone(),
@@ -1443,6 +1670,8 @@ impl ReportDocument {
             revision: self.revision,
             title: self.title.clone(),
             template: self.template,
+            output_formats: self.output_formats,
+            publication_profile: self.publication_profile,
             pages: self.pages.clone(),
             receipts: self.receipts.clone(),
             tombstones: self.tombstones.clone(),
@@ -1621,16 +1850,127 @@ impl ReportDocument {
                 )?;
                 Ok(())
             }
+            3 => {
+                // Schema four adds page-publication policies. Every new field
+                // has a serialization-omitted default matching schema three,
+                // so the authenticated schema-three snapshot and record
+                // digests remain byte-for-byte valid during this metadata-only
+                // upgrade.
+                let uses_schema_four_page_policy = |page: &ReportPage| {
+                    !page.inclusion.is_default()
+                        || !page.evidence_binding.is_default()
+                        || !page.blocked_gate_text_policy.is_default()
+                };
+                if self.pages.iter().any(uses_schema_four_page_policy)
+                    || self
+                        .revision_history
+                        .records
+                        .iter()
+                        .flat_map(|record| record.snapshot.pages.iter())
+                        .any(uses_schema_four_page_policy)
+                {
+                    return Err(ReportError::UnsafeLegacyMigration { version: 3 });
+                }
+                self.schema_version = 4;
+                self.migrate()
+            }
+            4 => {
+                // Schema five adds report-block inclusion. Enabled is the
+                // serialization-omitted default, so an authentic schema-four
+                // source and every retained history snapshot keep the exact
+                // bytes and digests they had before this metadata-only
+                // upgrade. A disabled block in a schema-four envelope is a
+                // mislabeled schema-five value and is rejected fail-closed.
+                let uses_schema_five_block_policy = |page: &ReportPage| {
+                    page.sections
+                        .iter()
+                        .flat_map(|section| section.blocks.iter())
+                        .any(|block| !block.enabled)
+                };
+                if self.pages.iter().any(uses_schema_five_block_policy)
+                    || self
+                        .revision_history
+                        .records
+                        .iter()
+                        .flat_map(|record| record.snapshot.pages.iter())
+                        .any(uses_schema_five_block_policy)
+                {
+                    return Err(ReportError::UnsafeLegacyMigration { version: 4 });
+                }
+                self.schema_version = 5;
+                self.migrate()
+            }
+            5 => {
+                // Schema six adds document output formats and publication
+                // policy. Their defaults are omitted from serialization, so
+                // authentic schema-five source and history snapshot bytes
+                // remain unchanged. A non-default value in a schema-five
+                // envelope is a mislabeled schema-six document and must fail
+                // closed rather than acquiring unauthenticated policy.
+                let uses_schema_six_publication_policy =
+                    |output_formats: ReportOutputFormats,
+                     publication_profile: ReportPublicationProfile| {
+                        !output_formats.is_default() || !publication_profile.is_default()
+                    };
+                if uses_schema_six_publication_policy(self.output_formats, self.publication_profile)
+                    || self.revision_history.records.iter().any(|record| {
+                        uses_schema_six_publication_policy(
+                            record.snapshot.output_formats,
+                            record.snapshot.publication_profile,
+                        )
+                    })
+                {
+                    return Err(ReportError::UnsafeLegacyMigration { version: 5 });
+                }
+                self.schema_version = 6;
+                self.migrate()
+            }
+            6 => {
+                // Schema seven adds an exact visualization page/pane locator
+                // to linked plot figures. An authentic schema-six linked
+                // figure cannot supply that identity, and selecting a pane
+                // during migration would invent engineering provenance. A
+                // locator inside a schema-six envelope is likewise a
+                // mislabeled schema-seven document. Both forms fail closed.
+                let has_unmigratable_figure = |page: &ReportPage| {
+                    page.sections
+                        .iter()
+                        .flat_map(|section| section.blocks.iter())
+                        .any(|block| {
+                            matches!(
+                                &block.kind,
+                                ReportBlockKind::PlotFigure(figure)
+                                    if figure.source_locator.is_some()
+                                        || matches!(
+                                            &figure.reference,
+                                            ReportReferenceMode::Linked { .. }
+                                        )
+                            )
+                        })
+                };
+                if self.pages.iter().any(has_unmigratable_figure)
+                    || self
+                        .revision_history
+                        .records
+                        .iter()
+                        .flat_map(|record| record.snapshot.pages.iter())
+                        .any(has_unmigratable_figure)
+                {
+                    return Err(ReportError::UnsafeLegacyMigration { version: 6 });
+                }
+                self.schema_version = Self::SCHEMA_VERSION;
+                Ok(())
+            }
             version => Err(ReportError::UnsupportedSchemaVersion(version)),
         }
     }
-
 }
 
 #[derive(Clone, Copy)]
 struct ReportDocumentContentView<'a> {
     revision: ObjectRevision,
     title: &'a str,
+    output_formats: ReportOutputFormats,
     pages: &'a [ReportPage],
     receipts: &'a [ReportMutationReceipt],
     tombstones: &'a [ReportTombstone],
@@ -1642,6 +1982,7 @@ impl<'a> ReportDocumentContentView<'a> {
         Self {
             revision: document.revision,
             title: &document.title,
+            output_formats: document.output_formats,
             pages: &document.pages,
             receipts: &document.receipts,
             tombstones: &document.tombstones,
@@ -1653,6 +1994,7 @@ impl<'a> ReportDocumentContentView<'a> {
         Self {
             revision: snapshot.revision,
             title: &snapshot.title,
+            output_formats: snapshot.output_formats,
             pages: &snapshot.pages,
             receipts: &snapshot.receipts,
             tombstones: &snapshot.tombstones,
@@ -1662,8 +2004,18 @@ impl<'a> ReportDocumentContentView<'a> {
 
     fn validate(self) -> Result<(), ReportError> {
         validate_label("report-document.title", self.title, 512)?;
+        self.output_formats.validate()?;
         if self.pages.len() > MAX_PAGES {
             return Err(ReportError::CapacityExceeded("report pages"));
+        }
+        let section_count = self
+            .pages
+            .iter()
+            .map(|page| page.sections.len())
+            .try_fold(0_usize, usize::checked_add)
+            .ok_or(ReportError::CapacityExceeded("report sections"))?;
+        if section_count > MAX_SECTIONS_TOTAL {
+            return Err(ReportError::CapacityExceeded("report sections"));
         }
         let block_count = self
             .pages
@@ -2203,7 +2555,6 @@ impl From<RevisionError> for ReportError {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests;

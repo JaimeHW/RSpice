@@ -17,7 +17,7 @@ use super::commands::vocabulary::Command;
 use super::design_system::property_row;
 use super::state::{
     ConsolePage, PreflightIssue, PreflightRemediation, PreflightReport, PreflightToast,
-    PreparedPreflightContract, VerificationPage, Workspace,
+    PreparedPreflightContract, ProjectPage, VerificationPage, Workspace,
 };
 
 const ISSUE_TABLE_HEADERS: [&str; 5] = ["Order", "Check", "Observed", "Required", "Action"];
@@ -357,6 +357,44 @@ fn collect_report(state: &AppState) -> PreflightReport {
                         remediation: PreflightRemediation::SimulationPlan,
                     });
                 }
+            }
+        }
+    }
+
+    match state.workspace.project.technology_binding() {
+        None => blockers.push(PreflightIssue {
+            check: "Project technology contract".to_owned(),
+            observed: "No exact model-source and signed PDK package binding is attached".to_owned(),
+            required:
+                "A project-owned binding to authenticated model sources and one trusted signed PDK revision"
+                    .to_owned(),
+            remediation: PreflightRemediation::ProjectTechnology,
+        }),
+        Some(binding) => {
+            if let Err(error) = state
+                .model_library_manager
+                .validate_attached_technology(Some(binding))
+            {
+                blockers.push(PreflightIssue {
+                    check: "Project model technology".to_owned(),
+                    observed: error,
+                    required:
+                        "The exact attached model-source closure must resolve without catalog drift"
+                            .to_owned(),
+                    remediation: PreflightRemediation::ProjectTechnology,
+                });
+            }
+            if let Err(error) =
+                binding.validate_signed_package(&state.pdk_config.technology_registry)
+            {
+                blockers.push(PreflightIssue {
+                    check: "Project signed PDK".to_owned(),
+                    observed: error.to_string(),
+                    required:
+                        "The exact attached package revision must remain signature-trusted and compatible with this runtime"
+                            .to_owned(),
+                    remediation: PreflightRemediation::ProjectTechnology,
+                });
             }
         }
     }
@@ -1267,6 +1305,7 @@ fn remediation_label(remediation: PreflightRemediation) -> &'static str {
     match remediation {
         PreflightRemediation::DesignChecks => "Run source checks",
         PreflightRemediation::SimulationPlan => "Open plan",
+        PreflightRemediation::ProjectTechnology => "Attach technology",
     }
 }
 
@@ -1278,6 +1317,9 @@ fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemediation) {
         }
         PreflightRemediation::SimulationPlan => {
             Command::OpenWorkspace(Workspace::Simulate).execute(app);
+        }
+        PreflightRemediation::ProjectTechnology => {
+            Command::ProjectPage(ProjectPage::Dependencies).execute(app);
         }
     }
 }

@@ -171,6 +171,7 @@ pub enum StretchTarget {
 /// A stretch was rejected before any document mutation occurred.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StretchSelectionError {
+    ProbeSelectionUnsupported,
     StaleTarget,
     CoordinateOverflow,
     DegenerateGeometry { object_id: u64 },
@@ -190,6 +191,9 @@ pub enum StretchSelectionError {
 impl std::fmt::Display for StretchSelectionError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::ProbeSelectionUnsupported => formatter.write_str(
+                "Probe markers cannot be stretched; move the retained probe marker instead.",
+            ),
             Self::StaleTarget => formatter
                 .write_str("The selected stretch handle no longer exists in the active schematic."),
             Self::CoordinateOverflow => {
@@ -426,6 +430,13 @@ pub struct SchematicState {
     #[serde(skip)]
     pub needs_fit: bool,
 
+    /// One-shot request to frame the authored drawing-sheet paper boundary.
+    ///
+    /// This is deliberately distinct from [`Self::needs_fit`], which frames
+    /// schematic objects and may include content parked off the paper.
+    #[serde(skip)]
+    pub needs_drawing_sheet_fit: bool,
+
     /// One-shot request to pan the view so this schematic-space point sits at
     /// the canvas center (violation cycling). Consumed on the next render,
     /// like `needs_fit`; the zoom level is left alone.
@@ -476,6 +487,12 @@ pub struct SchematicState {
 
 impl Default for SchematicState {
     fn default() -> Self {
+        let document_policy = SchematicDocumentPolicy::default();
+        let grid_size = document_policy.grid_pitch.canvas_grid_size();
+        let snap_engine = SnapEngine {
+            grid_size,
+            ..SnapEngine::default()
+        };
         Self {
             components: Vec::new(),
             wires: Vec::new(),
@@ -488,8 +505,8 @@ impl Default for SchematicState {
             tool: Tool::default(),
             wire_drawing: WireDrawing::default(),
             bus_drawing: BusDrawing::default(),
-            grid_size: 10,
-            document_policy: SchematicDocumentPolicy::default(),
+            grid_size,
+            document_policy,
             zoom: 1.0,
             pan: (0.0, 0.0),
             current_file: None,
@@ -511,15 +528,29 @@ impl Default for SchematicState {
             net_mapping: HashMap::new(),
             is_dirty: false,
             needs_fit: false,
+            needs_drawing_sheet_fit: false,
             center_request: None,
             read_only: false,
             needs_history_reset: false,
             topology_version: 0,
-            snap_engine: SnapEngine::default(),
+            snap_engine,
             selection_rect: super::selection::SelectionRect::default(),
             net_highlight: super::net_highlight::NetHighlightState::default(),
             undo_history: super::undo_history::UndoHistory::default(),
             canvas_cache: super::canvas_cache::CanvasCache::default(),
         }
+    }
+}
+
+impl SchematicState {
+    /// Reconcile every in-document runtime projection of the authoritative
+    /// project-portable grid pitch.
+    ///
+    /// Call this after restoring history or installing session-owned snap
+    /// target preferences into a newly activated document.
+    pub(crate) fn reconcile_grid_pitch_runtime(&mut self) {
+        let grid_size = self.document_policy.grid_pitch.canvas_grid_size();
+        self.grid_size = grid_size;
+        self.snap_engine.grid_size = grid_size;
     }
 }

@@ -12,6 +12,7 @@ mod runtime;
 mod target;
 pub mod x64;
 
+pub(crate) use abi::NativeRuntimeErrorKind;
 pub use abi::{
     EvalContext, rspice_absdelay_state_native, rspice_laplace_step_native, rspice_limexp,
     rspice_limited_exp, rspice_slew_state_native, rspice_timer_state_native,

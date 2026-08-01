@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 use super::Point;
 
 pub const MAX_SCHEMATIC_PROBE_REFERENCE_LEN: usize = 256;
+const PROBE_CROSSHAIR_HALF_SPAN: i32 = 13;
+const PROBE_LABEL_X_OFFSET: i32 = 13;
+const PROBE_LABEL_ASCENT: i32 = 22;
+const PROBE_LABEL_ADVANCE: i32 = 7;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -59,6 +63,28 @@ impl SchematicProbe {
                 .map_err(|error| format!("probe source expression is invalid: {error}"))?;
         }
         Ok(())
+    }
+
+    /// Conservative authored-space bounds used for fit, culling, selection
+    /// layout, and hardcopy policy. The canvas font scales with the drawing,
+    /// so its advance is stable in schematic coordinates.
+    #[must_use]
+    pub fn world_bounds(&self) -> (Point, Point) {
+        let label_characters = i32::try_from(self.reference.chars().count()).unwrap_or(i32::MAX);
+        let label_width = label_characters.saturating_mul(PROBE_LABEL_ADVANCE);
+        (
+            Point::new(
+                self.position.x.saturating_sub(PROBE_CROSSHAIR_HALF_SPAN),
+                self.position.y.saturating_sub(PROBE_LABEL_ASCENT),
+            ),
+            Point::new(
+                self.position
+                    .x
+                    .saturating_add(PROBE_LABEL_X_OFFSET)
+                    .saturating_add(label_width),
+                self.position.y.saturating_add(PROBE_CROSSHAIR_HALF_SPAN),
+            ),
+        )
     }
 }
 

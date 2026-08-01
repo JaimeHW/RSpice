@@ -71,6 +71,9 @@ impl SchematicState {
         self.clipboard
             .documentation_shapes
             .retain(|shape| shape.validate().is_ok());
+        self.clipboard
+            .probes
+            .retain(|probe| probe.validate().is_ok());
         if self.wires.len() != wire_count_before_repair {
             self.bump_topology_version();
         }
@@ -328,6 +331,7 @@ impl SchematicState {
             .iter()
             .map(|shape| shape.id)
             .collect();
+        let probe_ids: HashSet<u64> = self.probes.iter().map(|probe| probe.id).collect();
 
         self.selection
             .components
@@ -361,6 +365,7 @@ impl SchematicState {
         self.selection
             .documentation_shapes
             .retain(|id| documentation_shape_ids.contains(id));
+        self.selection.probes.retain(|id| probe_ids.contains(id));
 
         self.connections.retain(|connection| {
             component_ids.contains(&connection.component_id)
@@ -387,7 +392,7 @@ mod tests {
     use crate::state::{
         Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
         DesignNote, DesignNoteKind, DocumentationShape, DocumentationShapeGeometry, Junction,
-        NetLabel, Point, SchematicState,
+        NetLabel, Point, SchematicProbe, SchematicState,
     };
     use std::collections::HashSet;
 
@@ -671,6 +676,33 @@ mod tests {
         );
         assert!(ids.iter().all(|id| *id != 0));
         assert!(schematic.selection.documentation_shapes.is_empty());
+        assert_eq!(schematic.topology_version(), topology);
+        let fresh = schematic.next_id();
+        assert_ne!(fresh, 59);
+        assert!(!ids.contains(&fresh));
+    }
+
+    #[test]
+    fn recalculate_repairs_probe_collisions_and_prunes_stale_probe_selection() {
+        let mut schematic = SchematicState::default();
+        schematic
+            .components
+            .push(Component::new(59, ComponentType::Resistor, Point::origin()));
+        schematic.probes = vec![
+            SchematicProbe::new(59, Point::new(10, 20), "V(out)", Some("V(out)".to_owned()))
+                .unwrap(),
+            SchematicProbe::new(59, Point::new(30, 40), "V(in)", Some("V(in)".to_owned())).unwrap(),
+        ];
+        schematic.selection.select_probe(59);
+        schematic.selection.select_probe(999);
+        let topology = schematic.topology_version();
+
+        schematic.recalculate_runtime_state();
+
+        let ids: HashSet<_> = schematic.probes.iter().map(|probe| probe.id).collect();
+        assert_eq!(ids.len(), 2);
+        assert!(!ids.contains(&59), "component identity retains priority");
+        assert!(schematic.selection.probes.is_empty());
         assert_eq!(schematic.topology_version(), topology);
         let fresh = schematic.next_id();
         assert_ne!(fresh, 59);

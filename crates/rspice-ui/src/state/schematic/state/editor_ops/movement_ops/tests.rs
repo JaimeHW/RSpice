@@ -9,8 +9,8 @@ use crate::state::{
     Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Cell, Component, ComponentType,
     DesignNote, DesignNoteKind, DocumentationShape, DocumentationShapeGeometry, Junction, Library,
     LibraryCellInstance, LibraryManager, PortDirection, PortSpec, ResolvedCellSymbol,
-    SchematicState, SymbolDocument, SymbolPin, SymbolResolver, View, ViewType, Wire,
-    WireConnection,
+    SchematicProbe, SchematicState, SymbolDocument, SymbolPin, SymbolResolver, View, ViewType,
+    Wire, WireConnection,
 };
 use std::collections::HashMap;
 
@@ -268,6 +268,30 @@ fn selected_design_note_moves_as_one_non_electrical_drag_transaction() {
     assert!(schematic.undo());
     assert_eq!(schematic.design_notes, vec![original]);
     assert_eq!(schematic.topology_version(), topology);
+}
+
+#[test]
+fn selected_probe_moves_as_one_non_electrical_drag_transaction() {
+    let original =
+        SchematicProbe::new(75, Point::new(10, 20), "V(out)", Some("V(out)".to_owned())).unwrap();
+    let mut schematic = SchematicState::default();
+    schematic.probes.push(original.clone());
+    schematic.selection.select_only_probe(original.id);
+    schematic.init_undo_history();
+    let topology = schematic.topology_version();
+
+    schematic.begin_operation("move selection");
+    schematic.move_selection_with_rubber_band(Point::new(3, 4));
+    schematic.move_selection(Point::new(7, 6));
+    assert!(schematic.end_operation());
+
+    assert_eq!(schematic.probes[0].position, Point::new(20, 30));
+    assert_eq!(schematic.topology_version(), topology);
+    assert_eq!(schematic.undo_description(), Some("move selection"));
+    assert!(schematic.undo());
+    assert_eq!(schematic.probes, vec![original]);
+    assert_eq!(schematic.topology_version(), topology);
+    assert!(!schematic.can_undo());
 }
 
 #[test]

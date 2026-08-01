@@ -77,6 +77,8 @@ thread_local! {
 mod actions;
 mod command_palette;
 mod dialogs;
+#[cfg(target_arch = "wasm32")]
+mod pdk_persistence;
 mod schematic;
 
 pub use dialogs::confirmation_state::{
@@ -90,6 +92,21 @@ pub(crate) use dialogs::configuration_sets::{
 
 pub(crate) use dialogs::design_management::{
     DesignManagementDialogState, open_design_management_dialog,
+};
+
+pub(crate) use dialogs::drawing_sheet_defaults::{
+    DrawingSheetDefaultsDialogState, open_drawing_sheet_defaults,
+};
+pub(crate) use dialogs::drawing_sheet_presets::{
+    DrawingSheetPresetDialogsState, capture_personal_preset_into_project,
+    open_custom_sheet_size_library,
+};
+pub(crate) use dialogs::drawing_sheet_setup::{
+    DrawingSheetSetupState, drawing_sheet_setup_available, open_drawing_sheet_setup,
+    open_drawing_sheet_setup_for_state, open_drawing_sheet_setup_with_preset,
+};
+pub(crate) use dialogs::drawing_sheet_support::{
+    DrawingSheetSupportState, open_sheet_format_manager, open_title_block_fields,
 };
 
 pub(crate) use dialogs::connectivity_manager::{
@@ -110,6 +127,10 @@ pub(crate) use dialogs::project_revision_history::{
 
 pub(crate) use dialogs::create_model_bound_symbol::{
     CreateModelBoundSymbolDialogState, open_create_model_bound_symbol_dialog,
+    open_create_subcircuit_bound_symbol_dialog,
+};
+pub(crate) use dialogs::symbol_definition::{
+    open_symbol_import_dialog_for, open_symbol_parameter_form_dialog_for,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -122,12 +143,13 @@ pub(crate) use dialogs::state::{
     DesignNoteDialogState, DesignNoteObjectPropertiesDraft, DocumentationShapeDialogState,
     DocumentationShapeObjectPropertiesDraft, EngineeringTableDialogPage,
     EngineeringTableDialogState, EngineeringTableExportFormat, EngineeringTableExportScope,
-    FullScreenPanels, FullScreenScope, HelpCenterPage, HierarchyDescendEditMode,
+    FullScreenPanels, FullScreenScope, GridSnapRoutingDialogState, GridSnapRoutingDraft,
+    GridSnapRoutingFocusTarget, GridSnapSpacingChoice, HelpCenterPage, HierarchyDescendEditMode,
     HierarchyParentContext, MoveSelectionDialogState, NamedNetObjectPropertiesDraft,
     NetLabelObjectPropertiesDraft, NetLabelPlacementDialogState, NewWindowInitialContent,
     ObjectPropertiesDraft, PinPortDialogState, RenameSelectionTarget, ReplaceInstanceOpen,
-    StretchSelectionDialogState, ViewOperation, ViewOperationDialogState, WindowLayoutChoice,
-    WindowSessionPage, WindowWorkflow,
+    StretchSelectionDialogState, TechnologyAttachmentDialogState, ViewOperation,
+    ViewOperationDialogState, WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
 };
 pub use dialogs::state::{DialogState, LicensePhase};
 
@@ -143,7 +165,10 @@ pub(crate) use schematic::named_net::{
 };
 
 pub(crate) use dialogs::check_and_save::open_check_and_save_dialog;
+pub(crate) use dialogs::drawing_sheet_layers::open_drawing_sheet_layers_dialog;
+pub(crate) use dialogs::drawing_sheet_overflow::open_drawing_sheet_overflow_review;
 pub(crate) use dialogs::engineering_table::open_engineering_table_dialog;
+pub(crate) use dialogs::grid_snap_routing::open_grid_snap_routing_dialog;
 pub(crate) use dialogs::hierarchy::create::{
     create_hierarchy_available, open_create_hierarchy_dialog,
 };
@@ -319,9 +344,10 @@ impl RSpiceApp {
         restore_global_veriloga_library(&mut state.library_manager, &mut state.workspace);
         state.restore_active_schematic_from_workspace();
         crate::workbench::lifecycle::project_lifecycle::initialize_from_session(&mut state);
-        dialogs::pdk_workflow::load_persisted_pdk_sources_at_startup(&mut state);
         #[cfg(target_arch = "wasm32")]
         initialize_browser_surface_navigation(&mut state, &cc.egui_ctx);
+        #[cfg(target_arch = "wasm32")]
+        pdk_persistence::initialize_browser_pdk_persistence(&cc.egui_ctx);
 
         // A license file on disk wins over (or backfills) the session copy.
         #[cfg(not(target_arch = "wasm32"))]
@@ -399,6 +425,8 @@ impl RSpiceApp {
         synchronize_browser_surface_navigation(&mut self.state);
         #[cfg(target_arch = "wasm32")]
         self.state.poll_shortcut_library_persistence();
+        #[cfg(target_arch = "wasm32")]
+        self.poll_browser_pdk_persistence(ctx);
         self.handle_shortcuts(ctx);
         #[cfg(target_arch = "wasm32")]
         crate::workbench::browser::file_import::register_text_import_repaint_context(ctx);
@@ -428,6 +456,10 @@ impl RSpiceApp {
         }
         #[cfg(target_arch = "wasm32")]
         crate::workbench::workflows::netlist_workflow::poll_browser_netlist_import(&mut self.state);
+        #[cfg(target_arch = "wasm32")]
+        crate::workbench::workflows::result_import_workflow::poll_browser_result_dataset_import(
+            &mut self.state,
+        );
         self.simulation_controller
             .update(&mut self.state, self.export_workflow_io.as_ref());
         if self.state.simulation.is_running {
@@ -617,6 +649,9 @@ impl RSpiceApp {
         self.render_command_palette(ctx);
         self.render_bus_tap_dialog(ctx);
         self.render_net_label_dialog(ctx);
+        self.render_grid_snap_routing_dialog(ctx);
+        self.render_drawing_sheet_layers_dialog(ctx);
+        self.render_drawing_sheet_overflow_dialog(ctx);
         self.render_schematic_visibility_dialog(ctx);
         self.render_descend_hierarchy_dialog(ctx);
         self.render_engineering_table_dialog(ctx);
@@ -638,6 +673,10 @@ impl RSpiceApp {
         self.render_create_model_bound_symbol_dialog(ctx);
         self.render_symbol_definition_dialogs(ctx);
         self.render_configuration_sets_dialog(ctx);
+        self.render_drawing_sheet_setup_dialog(ctx);
+        self.render_drawing_sheet_defaults_dialog(ctx);
+        self.render_drawing_sheet_preset_dialogs(ctx);
+        self.render_drawing_sheet_support_dialogs(ctx);
         self.render_hardcopy_dialog(ctx);
         self.render_object_properties_dialog(ctx);
         self.render_rename_selection_dialog(ctx);
@@ -654,6 +693,7 @@ impl RSpiceApp {
         self.process_new_view_dialog(ctx);
         self.process_copy_cell_dialog(ctx);
         self.process_rename_cell_dialog(ctx);
+        self.process_library_deletion_review_dialog(ctx);
         #[cfg(not(target_arch = "wasm32"))]
         self.process_autosave_restore_dialog(ctx);
         self.process_pending_library_deletions();
@@ -1135,6 +1175,16 @@ mod tests {
         state
     }
 
+    fn schematic_readiness(state: &AppState) -> Option<String> {
+        crate::workbench::app_state::run_preflight::run_preflight_block_reason(
+            &state.sim_setup,
+            &state.workspace,
+            &state.schematic,
+            &state.model_library_manager,
+            state.current_blocking_drc_result(),
+        )
+    }
+
     fn drc_result(violation_type: DrcViolationType, severity: Option<DrcSeverity>) -> DrcResult {
         let mut result = DrcResult::new();
         let mut violation = DrcViolation::new(
@@ -1231,7 +1281,7 @@ mod tests {
         state.dialogs.drc_results = Some(drc_result(DrcViolationType::MissingGround, None));
         state.dialogs.drc_checked_version = state.schematic.topology_version().wrapping_sub(1);
         assert!(
-            state.can_run_simulation(),
+            schematic_readiness(&state).is_none(),
             "stale DRC results should not block after schematic edits"
         );
 
@@ -1241,7 +1291,7 @@ mod tests {
         ));
         state.dialogs.drc_checked_version = state.schematic.topology_version();
         assert!(
-            state.can_run_simulation(),
+            schematic_readiness(&state).is_none(),
             "warning-only DRC results should not block simulation"
         );
     }
@@ -1257,7 +1307,7 @@ mod tests {
         state.dialogs.drc_checked_version = state.schematic.topology_version();
 
         assert!(
-            state.can_run_simulation(),
+            schematic_readiness(&state).is_none(),
             "an unrelated active-editor DRC receipt must not block the configured root"
         );
     }
@@ -1300,9 +1350,19 @@ mod tests {
         state.ui.code_workspace.veriloga.receipt = None;
 
         assert!(
-            state.can_run_simulation(),
+            schematic_readiness(&state).is_none(),
             "only an executable deck that references project Verilog-A may require its runtime"
         );
+    }
+
+    #[test]
+    fn full_run_readiness_requires_an_exact_trusted_project_technology_contract() {
+        let state = runnable_state();
+        let reason = state
+            .simulation_run_preflight_block_reason()
+            .expect("missing project technology must block");
+        assert!(reason.contains("authenticated model-source and signed PDK binding"));
+        assert!(!state.can_run_simulation());
     }
 
     #[test]

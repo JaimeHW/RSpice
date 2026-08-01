@@ -6,6 +6,7 @@
 
 use super::vocabulary::{CommandSpec, command_catalog};
 use super::*;
+use crate::state::Wire;
 use crate::workbench::state::{ModelsPage, ProjectPage};
 
 fn app_with_selected_authored_symbol() -> RSpiceApp {
@@ -158,37 +159,139 @@ fn horizontal_coordinate_reflection_is_labeled_by_its_vertical_mirror_axis() {
 }
 
 #[test]
-fn canvas_grid_command_truthfully_toggles_grid_and_snap_as_one_master() {
+fn drawing_sheet_file_commands_keep_the_canonical_palette_identities() {
+    let expected = [
+        (Command::PageSetup, "page-setup", "Page setup…"),
+        (
+            Command::SheetFormatManager,
+            "sheet-format-manager",
+            "Sheet formats across this document…",
+        ),
+        (
+            Command::CustomSheetSizes,
+            "sheet-preset-library",
+            "Custom sheet sizes…",
+        ),
+    ];
+    let searchable = command_catalog().collect::<Vec<_>>();
+
+    for (command, stable_id, label) in expected {
+        assert_eq!(command.stable_id(), stable_id);
+        assert_eq!(command.spec().label, label);
+        assert_eq!(Command::from_stable_id(stable_id), Some(command));
+        assert!(searchable.contains(&command), "{stable_id}");
+    }
+}
+
+#[test]
+fn authored_page_setup_never_falls_back_to_symbol_hardcopy_media() {
+    let mut app = app_with_selected_authored_symbol();
+    app.state.project_lifecycle.project_open = true;
+    app.state
+        .open_workspace_view(crate::state::CellViewRef::new(
+            "command_test",
+            "amp",
+            "symbol",
+        ));
+    assert!(active_symbol_editor(&app));
+    assert!(
+        crate::workbench::hardcopy_adapters::sources::active_app_hardcopy_source_available(
+            &app.state
+        ),
+        "the symbol is a valid print/export source"
+    );
+
+    assert!(!Command::PageSetup.is_enabled(&app));
+    Command::PageSetup.execute(&mut app);
+
+    assert!(!app.state.dialogs.drawing_sheet_setup.open);
+    assert!(
+        !app.state.dialogs.hardcopy.open,
+        "authored Page Setup must not substitute output-media setup"
+    );
+}
+
+#[test]
+fn document_sheet_commands_open_their_real_surfaces_only_in_schematic_context() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.project_open = true;
+    app.state.workbench.workspace = Workspace::Design;
+    let key = app.state.workspace.active_key();
+    app.state
+        .workspace
+        .design_management
+        .bootstrap_for_cell_view(&key, "Main", [])
+        .unwrap();
+
+    assert!(Command::SheetFormatManager.is_enabled(&app));
+    assert!(Command::CustomSheetSizes.is_enabled(&app));
+
+    Command::SheetFormatManager.execute(&mut app);
+    assert!(app.state.dialogs.drawing_sheet_support.manager.open);
+
+    Command::CustomSheetSizes.execute(&mut app);
+    assert!(app.state.dialogs.drawing_sheet_presets.any_open());
+
+    let mut results = RSpiceApp::test_instance();
+    results.state.project_lifecycle.project_open = true;
+    results.state.workbench.workspace = Workspace::Results;
+    assert!(!Command::PageSetup.is_enabled(&results));
+    assert!(!Command::SheetFormatManager.is_enabled(&results));
+    assert!(!Command::CustomSheetSizes.is_enabled(&results));
+}
+
+#[test]
+fn sheet_format_manager_requires_live_schematic_edit_authority() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.project_open = true;
+    app.state.workbench.workspace = Workspace::Design;
+    let key = app.state.workspace.active_key();
+    app.state
+        .workspace
+        .design_management
+        .bootstrap_for_cell_view(&key, "Main", [])
+        .unwrap();
+    app.state.schematic.read_only = true;
+
+    assert_eq!(
+        Command::SheetFormatManager.availability(&app),
+        CommandAvailability::Disabled("the active schematic is read-only")
+    );
+    Command::SheetFormatManager.execute(&mut app);
+    assert!(!app.state.dialogs.drawing_sheet_support.manager.open);
+}
+
+#[test]
+fn canvas_grid_command_cycles_display_without_mutating_snap_configuration() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
-    app.state.ui.set_grid_style(crate::state::GridStyle::Lines);
+    app.state.ui.set_grid_style(crate::state::GridStyle::Dots);
     app.state.schematic.snap_engine.enabled = true;
     app.state.schematic.snap_engine.snap_to_wire_segments = false;
     app.state.ui.schematic_snap = app.state.schematic.snap_engine.clone();
 
-    assert_eq!(Command::CycleGrid.stable_id(), "toggle-grid");
-    assert_eq!(Command::CycleGrid.spec().label, "Canvas grid and snap");
+    assert_eq!(Command::CycleGrid.stable_id(), "cycle-grid");
+    assert_eq!(Command::CycleGrid.spec().label, "Cycle grid display");
 
     Command::CycleGrid.execute(&mut app);
-
-    assert_eq!(app.state.ui.grid, crate::state::GridStyle::Off);
-    assert!(!app.state.schematic.snap_engine.enabled);
-    assert!(!app.state.ui.schematic_snap.enabled);
-    assert!(
-        !app.state.schematic.snap_engine.snap_to_wire_segments,
-        "the master toggle must preserve detailed target choices"
-    );
-
-    Command::CycleGrid.execute(&mut app);
-
     assert_eq!(app.state.ui.grid, crate::state::GridStyle::Lines);
     assert!(app.state.schematic.snap_engine.enabled);
     assert!(app.state.ui.schematic_snap.enabled);
-    assert!(!app.state.schematic.snap_engine.snap_to_wire_segments);
+    assert!(
+        !app.state.schematic.snap_engine.snap_to_wire_segments,
+        "display cycling must preserve detailed snap target choices"
+    );
+
+    Command::CycleGrid.execute(&mut app);
+    assert_eq!(app.state.ui.grid, crate::state::GridStyle::Off);
+    assert!(app.state.schematic.snap_engine.enabled);
+
+    Command::CycleGrid.execute(&mut app);
+    assert_eq!(app.state.ui.grid, crate::state::GridStyle::Dots);
 }
 
 #[test]
-fn canvas_grid_command_uses_the_symbol_editors_grid_and_snap_pair() {
+fn canvas_grid_command_does_not_reinterpret_symbol_snap_policy() {
     let mut app = app_with_selected_authored_symbol();
     app.state
         .open_workspace_view(crate::state::CellViewRef::new(
@@ -206,7 +309,38 @@ fn canvas_grid_command_uses_the_symbol_editors_grid_and_snap_pair() {
 
     Command::CycleGrid.execute(&mut app);
     assert!(app.state.ui.symbol.show_grid);
-    assert!(app.state.ui.symbol.snap_to_grid);
+    assert!(!app.state.ui.symbol.snap_to_grid);
+}
+
+#[test]
+fn safe_mode_disables_schematic_mutation_commands_but_keeps_canvas_settings_available() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.workspace = Workspace::Design;
+    app.state.workbench.safe_mode.activate(
+        crate::workbench::state::LocalSafeModeOptions {
+            open_project_read_only: true,
+            ..Default::default()
+        },
+        String::new(),
+    );
+
+    for command in [
+        Command::PlaceInstance,
+        Command::PlaceWire,
+        Command::PlaceBus,
+        Command::PlaceBusTap,
+        Command::PlaceJunction,
+        Command::PlaceLabel,
+        Command::PlacePin,
+        Command::PlaceText,
+    ] {
+        assert!(!command.is_enabled(&app), "{command:?}");
+    }
+    assert!(Command::CycleGrid.is_enabled(&app));
+    assert!(Command::GridSnapRouting.is_enabled(&app));
+
+    Command::PlaceWire.execute(&mut app);
+    assert_eq!(app.state.schematic.tool, Tool::Select);
 }
 
 fn app_with_every_complete_schematic_object() -> RSpiceApp {
@@ -298,6 +432,44 @@ fn edit_command_enablement_covers_every_complete_schematic_object_class() {
     assert!(
         !Command::Duplicate.is_enabled(&app),
         "a fixed-offset duplicate cannot invent a valid junction target"
+    );
+}
+
+#[test]
+fn delete_promotes_live_wire_handles_without_enabling_partial_copy_or_cut() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.workspace = Workspace::Design;
+    app.state.schematic.wires.push(Wire::new(
+        17,
+        vec![
+            crate::state::Point::new(0, 0),
+            crate::state::Point::new(20, 0),
+            crate::state::Point::new(20, 20),
+        ],
+    ));
+
+    app.state
+        .schematic
+        .selection
+        .select_only_wire_segment(17, 1);
+    assert!(Command::Delete.is_enabled(&app));
+    assert!(!Command::Copy.is_enabled(&app));
+    assert!(!Command::Cut.is_enabled(&app));
+    assert!(!Command::Duplicate.is_enabled(&app));
+
+    app.state.schematic.selection.select_only_wire_vertex(17, 1);
+    assert!(Command::Delete.is_enabled(&app));
+    assert!(!Command::Copy.is_enabled(&app));
+    assert!(!Command::Cut.is_enabled(&app));
+    assert!(!Command::Duplicate.is_enabled(&app));
+
+    app.state
+        .schematic
+        .selection
+        .select_only_wire_segment(17, 2);
+    assert!(
+        !Command::Delete.is_enabled(&app),
+        "an out-of-range wire handle is stale, not a deletable object"
     );
 }
 
@@ -499,7 +671,7 @@ fn move_selection_requires_one_live_object_in_an_editable_active_schematic() {
     assert!(!Command::MoveSelection.is_enabled(&app));
     assert_eq!(
         Command::MoveSelection.availability(&app),
-        CommandAvailability::Disabled("select an editable object")
+        CommandAvailability::Disabled("the active schematic is read-only")
     );
 
     app.state.schematic.read_only = false;
@@ -533,7 +705,7 @@ fn stretch_selection_requires_one_live_eligible_geometry_target() {
     assert!(!Command::StretchSelection.is_enabled(&app));
     assert_eq!(
         Command::StretchSelection.availability(&app),
-        CommandAvailability::Disabled("select an editable object")
+        CommandAvailability::Disabled("the active schematic is read-only")
     );
 
     app.state.schematic.read_only = false;
@@ -568,7 +740,7 @@ fn array_selection_requires_a_live_eligible_editable_selection() {
     assert!(!Command::ArraySelection.is_enabled(&app));
     assert_eq!(
         Command::ArraySelection.availability(&app),
-        CommandAvailability::Disabled("select an editable object")
+        CommandAvailability::Disabled("the active schematic is read-only")
     );
 
     app.state.schematic.read_only = false;
@@ -961,7 +1133,7 @@ fn incompatible_result_viewer_command_is_disabled_and_cannot_navigate() {
     assert_eq!(
         command.availability(&app),
         CommandAvailability::Disabled(
-            "Requires a usable AC magnitude response in the active dataset"
+            "Requires a usable AC response or ordinary noise spectrum in the active dataset"
         )
     );
     command.execute(&mut app);
@@ -991,12 +1163,38 @@ fn exposed_results_calculator_opens_the_real_editor_dialog() {
 
 #[test]
 fn truthful_results_menu_routes_keep_their_stable_dispatch_identities() {
-    assert_eq!(
-        Command::ResultViewer(crate::workbench::ResultViewer::Waves).stable_id(),
-        "waveforms"
-    );
-    assert_eq!(Command::WaveformCalculator.stable_id(), "calculator");
-    assert_eq!(Command::ExportWaveformsCsv.stable_id(), "export-waveforms");
+    for (command, stable_id) in [
+        (
+            Command::ResultViewer(crate::workbench::ResultViewer::Waves),
+            "waveforms",
+        ),
+        (Command::DatasetManifestBrowser, "dataset-browser"),
+        (Command::CreateResultDocument, "create-result-document"),
+        (Command::CompareResultDatasets, "compare-datasets"),
+        (Command::VisualizationTraceManager, "trace-manager"),
+        (Command::VisualizationCursorManager, "cursor-manager"),
+        (Command::ReviewNotes, "annotation-manager"),
+        (Command::WaveformCalculator, "calculator"),
+        (Command::MeasurementLibrary, "measurement-library"),
+        (Command::FamilySlicing, "family-slicing"),
+        (Command::VisualizationDocumentProperties, "plot-properties"),
+        (Command::ImportResultDataset, "import-dataset"),
+        (Command::ExportWaveformsCsv, "export-results"),
+        (Command::ReportAuthoring, "report-page-editor"),
+    ] {
+        assert_eq!(command.stable_id(), stable_id);
+        assert_eq!(Command::from_stable_id(stable_id), Some(command));
+        assert!(vocabulary::COMMAND_REGISTRY.contains(&command));
+        assert!(command_catalog().any(|candidate| candidate == command));
+    }
+
+    for unavailable in [
+        Command::SaveReportDocument,
+        Command::AddReportPage,
+        Command::ReportPageProperties,
+    ] {
+        assert!(!command_catalog().any(|candidate| candidate == unavailable));
+    }
 }
 
 #[test]
@@ -1030,6 +1228,15 @@ fn split_results_is_truthfully_gated_by_context_and_materialized_evidence() {
 fn schematic_zoom_commands_match_the_mockup_bounds_and_request_a_real_fit() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
+
+    app.state.schematic.zoom = 1.0;
+    Command::ZoomIn.execute(&mut app);
+    assert!((app.state.schematic.zoom - 1.2).abs() < f64::EPSILON);
+
+    app.state.schematic.zoom = 1.0;
+    app.execute_shortcut_command(Command::ZoomOut);
+    assert!((app.state.schematic.zoom - (1.0 / 1.2)).abs() < f64::EPSILON);
+
     app.state.schematic.zoom = 0.251;
     Command::ZoomOut.execute(&mut app);
     assert_eq!(app.state.schematic.zoom, 0.25);
@@ -1041,10 +1248,16 @@ fn schematic_zoom_commands_match_the_mockup_bounds_and_request_a_real_fit() {
     app.state.schematic.zoom = 3.5;
     app.state.schematic.pan = (127.0, -81.0);
     app.state.schematic.needs_fit = false;
+    app.state.schematic.needs_drawing_sheet_fit = false;
     Command::ZoomFit.execute(&mut app);
     assert_eq!(app.state.schematic.zoom, 3.5);
     assert_eq!(app.state.schematic.pan, (127.0, -81.0));
+    assert!(!app.state.schematic.needs_fit);
+    assert!(app.state.schematic.needs_drawing_sheet_fit);
+
+    Command::FitSchematicContent.execute(&mut app);
     assert!(app.state.schematic.needs_fit);
+    assert!(!app.state.schematic.needs_drawing_sheet_fit);
 }
 
 #[test]
@@ -1200,6 +1413,50 @@ fn all_workspace_commands_are_discoverable() {
 }
 
 #[test]
+fn every_project_tab_has_one_discoverable_command_with_a_stable_identity() {
+    let expected = [
+        (ProjectPage::Overview, "project-overview"),
+        (ProjectPage::Library, "project-library"),
+        (
+            ProjectPage::Configuration,
+            "project-testbench-configuration",
+        ),
+        (ProjectPage::Dependencies, "project-dependencies"),
+        (ProjectPage::Recovery, "project-recovery"),
+    ];
+    assert_eq!(ProjectPage::ALL.len(), expected.len());
+
+    for (page, stable_id) in expected {
+        let command = Command::ProjectPage(page);
+        assert!(
+            vocabulary::COMMAND_REGISTRY.contains(&command),
+            "project tab is absent from the command registry: {page:?}"
+        );
+        assert_eq!(command.stable_id(), stable_id);
+        assert_eq!(Command::from_stable_id(stable_id), Some(command));
+        assert!(
+            command.requires_open_project(),
+            "project tab bypasses the open-project boundary: {page:?}"
+        );
+    }
+}
+
+#[test]
+fn project_tab_commands_activate_the_project_workspace_and_exact_tab() {
+    for page in ProjectPage::ALL {
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.project_open = true;
+        app.state.workbench.workspace = Workspace::Results;
+        app.state.workbench.project_page = ProjectPage::Overview;
+
+        Command::ProjectPage(page).execute(&mut app);
+
+        assert_eq!(app.state.workbench.workspace, Workspace::Project);
+        assert_eq!(app.state.workbench.project_page, page);
+    }
+}
+
+#[test]
 fn protected_commands_keep_the_exact_mockup_action_ids() {
     assert_eq!(Command::CommandPalette.spec().id, "command-palette");
     assert_eq!(Command::ToggleFocusMode.spec().id, "toggle-focus-mode");
@@ -1274,6 +1531,88 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
 }
 
 #[test]
+fn design_specialist_command_routes_to_the_existing_real_browser() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+
+    let command = Command::DesignSpecialistWorkspaces;
+    assert_eq!(command.stable_id(), "specialist-tools-design");
+    assert_eq!(Command::from_stable_id(command.stable_id()), Some(command));
+    assert_eq!(command.availability(&app), CommandAvailability::Available);
+
+    command.execute(&mut app);
+
+    assert_eq!(
+        app.state.workbench.current_route().surface_id(),
+        crate::workbench::SurfaceId::SpecialistToolBrowser
+    );
+}
+
+#[test]
+fn design_menu_commands_explain_wrong_context_and_read_only_states() {
+    let authoring_commands = [
+        Command::PlaceInstance,
+        Command::PlaceWire,
+        Command::PlaceBus,
+        Command::PlaceBusTap,
+        Command::PlaceJunction,
+        Command::PlaceLabel,
+        Command::PlaceProbe,
+        Command::PlacePin,
+        Command::PlaceText,
+        Command::PlaceShape,
+        Command::MoveSelection,
+        Command::StretchSelection,
+        Command::ArraySelection,
+        Command::ReplaceInstance,
+        Command::CreateHierarchy,
+    ];
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.project_open = true;
+    app.state.workbench.activate(Workspace::Results);
+
+    for command in authoring_commands {
+        assert_eq!(
+            command.availability(&app),
+            CommandAvailability::Disabled("open an editable schematic or testbench"),
+            "{command:?}"
+        );
+    }
+    assert_eq!(
+        Command::AscendHierarchy.availability(&app),
+        CommandAvailability::Disabled("open a schematic or testbench")
+    );
+    assert_eq!(
+        Command::DescendHierarchy.availability(&app),
+        CommandAvailability::Disabled("open a schematic or testbench")
+    );
+    assert_eq!(
+        Command::CheckAndSave.availability(&app),
+        CommandAvailability::Disabled("open an editable schematic or testbench")
+    );
+
+    app.state.workbench.activate(Workspace::Design);
+    app.state.schematic.read_only = true;
+    for command in authoring_commands {
+        assert_eq!(
+            command.availability(&app),
+            CommandAvailability::Disabled("the active schematic is read-only"),
+            "{command:?}"
+        );
+    }
+    assert_eq!(
+        Command::CheckAndSave.availability(&app),
+        CommandAvailability::Disabled("the active schematic is read-only")
+    );
+
+    app.state.project_lifecycle.project_open = false;
+    assert_eq!(
+        Command::OpenWorkspace(Workspace::Design).availability(&app),
+        CommandAvailability::Disabled("no project is open")
+    );
+}
+
+#[test]
 fn only_exactly_implemented_reset_actions_are_discoverable() {
     let searchable = command_catalog().collect::<Vec<_>>();
     assert!(vocabulary::COMMAND_REGISTRY.contains(&Command::ResetActiveView));
@@ -1303,6 +1642,7 @@ fn project_operation_gate_covers_every_mutating_project_command() {
         Command::OpenDocument,
         Command::ImportNetlist,
         Command::ImportVerilogA,
+        Command::ImportResultDataset,
         Command::CheckAndSave,
         Command::ModelEditor,
     ] {
@@ -1313,6 +1653,23 @@ fn project_operation_gate_covers_every_mutating_project_command() {
     }
     assert!(!Command::Copy.blocked_by_project_operation());
     assert!(!Command::ExportWaveformsCsv.blocked_by_project_operation());
+}
+
+#[test]
+fn result_dataset_import_has_mockup_authoritative_command_identity_and_gates() {
+    assert_eq!(Command::ImportResultDataset.stable_id(), "import-dataset");
+    assert_eq!(
+        Command::ImportResultDataset.spec().label,
+        "Import result dataset…"
+    );
+    assert_eq!(Command::ImportResultDataset.spec().group, "Results");
+    assert!(vocabulary::COMMAND_REGISTRY.contains(&Command::ImportResultDataset));
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.project_open = true;
+    assert!(Command::ImportResultDataset.is_enabled(&app));
+    app.state.simulation.is_running = true;
+    assert!(!Command::ImportResultDataset.is_enabled(&app));
 }
 
 #[test]
@@ -1939,6 +2296,17 @@ fn closed_projects_expose_only_the_project_workspace() {
 }
 
 #[test]
+fn new_cell_command_captures_exact_library_catalog_revision() {
+    let mut app = RSpiceApp::test_instance();
+    let revision = app.state.library_manager.revision();
+
+    Command::NewCell.execute(&mut app);
+
+    assert!(app.state.dialogs.new_cell_dialog);
+    assert_eq!(app.state.dialogs.new_cell_library_revision, revision);
+}
+
+#[test]
 fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
     // This independent expectation list prevents the predicate under test
     // from silently omitting a newly exposed submenu route.
@@ -1946,6 +2314,7 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         Command::NewCell,
         Command::ImportNetlist,
         Command::ImportVerilogA,
+        Command::ImportResultDataset,
         Command::ExportSchematicSvg,
         Command::ExportWaveformsCsv,
         Command::ExportNetlist(crate::io::NetlistFormat::Spice),
@@ -1953,11 +2322,16 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         Command::CheckAndSave,
         Command::SelectionBulkEdit,
         Command::ConnectivityManager,
+        Command::ProjectPage(ProjectPage::Overview),
+        Command::ProjectPage(ProjectPage::Library),
         Command::ProjectPage(ProjectPage::Configuration),
+        Command::ProjectPage(ProjectPage::Dependencies),
+        Command::ProjectPage(ProjectPage::Recovery),
         Command::PreflightChecks,
         Command::SimulationOptions,
         Command::GenerateNetlist,
         Command::WaveformCalculator,
+        Command::CompareResultDatasets,
         Command::ResultViewer(crate::workbench::ResultViewer::Waves),
         Command::EditSpecifications,
         Command::VerificationPage(VerificationPage::Yield),

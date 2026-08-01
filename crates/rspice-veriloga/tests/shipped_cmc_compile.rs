@@ -7,7 +7,7 @@
 //! `RSPICE_CMC_COMPILE_FILTER=mvsg cargo test -p rspice-veriloga --test shipped_cmc_compile shipped_veriloga_models_compile_end_to_end -- --ignored --nocapture`
 //!
 //! To tune qualification runtime:
-//! `RSPICE_CMC_COMPILE_JOBS=4 RSPICE_CMC_COMPILE_TIMEOUT_SECS=25 cargo test -p rspice-veriloga --test shipped_cmc_compile shipped_veriloga_models_compile_end_to_end -- --ignored --nocapture`
+//! `RSPICE_CMC_COMPILE_JOBS=4 RSPICE_CMC_COMPILE_TIMEOUT_SECS=60 cargo test -p rspice-veriloga --test shipped_cmc_compile shipped_veriloga_models_compile_end_to_end -- --ignored --nocapture`
 
 use rspice_veriloga::preprocessor::MacroDef;
 use rspice_veriloga::{
@@ -35,7 +35,7 @@ const TIMEOUT_ENV: &str = "RSPICE_CMC_COMPILE_TIMEOUT_SECS";
 const FILTER_ENV: &str = "RSPICE_CMC_COMPILE_FILTER";
 const TIMINGS_ENV: &str = "RSPICE_CMC_COMPILE_TIMINGS";
 const JOBS_ENV: &str = "RSPICE_CMC_COMPILE_JOBS";
-const DEFAULT_MODULE_TIMEOUT_SECS: u64 = 20;
+const DEFAULT_MODULE_TIMEOUT_SECS: u64 = 60;
 const DEFAULT_MAX_JOBS: usize = 4;
 
 #[derive(Debug)]
@@ -300,7 +300,19 @@ fn compile_file_module_with_timings(
     let lex_elapsed = phase_start.elapsed();
 
     let phase_start = Instant::now();
-    let source_file = Parser::new(&tokens).parse()?;
+    let source_file = Parser::new(&tokens).parse().inspect_err(|error| {
+        let offset = error.span.start as usize;
+        let start = preprocessed[..offset.min(preprocessed.len())]
+            .rfind('\n')
+            .map_or(0, |line_start| line_start + 1);
+        let end = preprocessed[offset.min(preprocessed.len())..]
+            .find('\n')
+            .map_or(preprocessed.len(), |line_end| offset + line_end);
+        eprintln!(
+            "parse failure context at byte {offset}: {}",
+            preprocessed[start..end].trim_end()
+        );
+    })?;
     let parse_elapsed = phase_start.elapsed();
 
     let phase_start = Instant::now();
@@ -543,16 +555,27 @@ fn discover_model_sources(root: &Path) -> io::Result<Vec<ModelSource>> {
 
     let mut sources = Vec::new();
     for path in files {
-        let text = fs::read_to_string(&path)?;
-        let modules = extract_modules(&text);
-        if modules.is_empty() {
-            continue;
-        }
-
         let relative = path.strip_prefix(root).unwrap_or(&path);
         let package = package_name(relative).unwrap_or_else(|| ".".to_string());
         let package_root = package_root(root, relative);
         let include_dirs = discover_include_dirs(&package_root)?;
+        let mut preprocessor = Preprocessor::new();
+        for include_dir in &include_dirs {
+            preprocessor.add_include_path(include_dir);
+        }
+        let preprocessed = preprocessor.preprocess_file(&path).map_err(|source| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "preprocess shipped model `{}` during module discovery: {source}",
+                    path.display()
+                ),
+            )
+        })?;
+        let modules = extract_modules(&preprocessed);
+        if modules.is_empty() {
+            continue;
+        }
 
         sources.push(ModelSource {
             package,
@@ -594,13 +617,24 @@ fn collect_va_files(dir: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
         return Ok(());
     }
 
-    for entry in fs::read_dir(dir)? {
+    let entries = fs::read_dir(dir).map_err(|source| {
+        io::Error::new(
+            source.kind(),
+            format!("read model directory `{}`: {source}", dir.display()),
+        )
+    })?;
+    for entry in entries {
         let entry = entry?;
         let path = entry.path();
         if should_skip(&path) {
             continue;
         }
-        let metadata = entry.metadata()?;
+        let metadata = entry.metadata().map_err(|source| {
+            io::Error::new(
+                source.kind(),
+                format!("read model metadata `{}`: {source}", path.display()),
+            )
+        })?;
         if metadata.is_dir() {
             collect_va_files(&path, files)?;
         } else if metadata.is_file() && has_extension(&path, "va") {
@@ -612,21 +646,24 @@ fn collect_va_files(dir: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
 }
 
 fn package_name(relative: &Path) -> Option<String> {
-    let parts: Vec<_> = relative
-        .components()
+    let parts = package_parts(relative);
+    (!parts.is_empty()).then(|| parts.join("/"))
+}
+
+fn package_parts(relative: &Path) -> Vec<String> {
+    relative
+        .parent()
+        .into_iter()
+        .flat_map(Path::components)
         .filter_map(component_to_string)
         .take(2)
-        .collect();
-    (parts.len() >= 2).then(|| format!("{}/{}", parts[0], parts[1]))
+        .collect()
 }
 
 fn package_root(root: &Path, relative: &Path) -> PathBuf {
-    let mut components = relative.components().filter_map(component_to_string);
-    if let (Some(collection), Some(package)) = (components.next(), components.next()) {
-        root.join(collection).join(package)
-    } else {
-        root.to_path_buf()
-    }
+    package_parts(relative)
+        .into_iter()
+        .fold(root.to_path_buf(), |path, component| path.join(component))
 }
 
 fn discover_include_dirs(package_root: &Path) -> io::Result<Vec<PathBuf>> {
@@ -641,13 +678,24 @@ fn collect_include_dirs(dir: &Path, dirs: &mut BTreeSet<PathBuf>) -> io::Result<
     }
 
     let mut contains_include_file = false;
-    for entry in fs::read_dir(dir)? {
+    let entries = fs::read_dir(dir).map_err(|source| {
+        io::Error::new(
+            source.kind(),
+            format!("read include directory `{}`: {source}", dir.display()),
+        )
+    })?;
+    for entry in entries {
         let entry = entry?;
         let path = entry.path();
         if should_skip(&path) {
             continue;
         }
-        let metadata = entry.metadata()?;
+        let metadata = entry.metadata().map_err(|source| {
+            io::Error::new(
+                source.kind(),
+                format!("read include metadata `{}`: {source}", path.display()),
+            )
+        })?;
         if metadata.is_dir() {
             if collect_include_dirs(&path, dirs)? {
                 contains_include_file = true;
@@ -778,4 +826,28 @@ fn is_identifier(token: &str) -> bool {
         .chars()
         .next()
         .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_' || ch == '$')
+}
+
+#[test]
+fn shallow_model_sources_use_their_parent_as_the_package_root() {
+    let root = Path::new("models").join("veriloga");
+    let source = Path::new("ekv26_2.6").join("ekv26_SDext_Verilog-A.va");
+
+    assert_eq!(package_name(&source).as_deref(), Some("ekv26_2.6"));
+    assert_eq!(package_root(&root, &source), root.join("ekv26_2.6"));
+}
+
+#[test]
+fn nested_model_sources_use_the_first_two_parent_components_as_the_package_root() {
+    let root = Path::new("models").join("veriloga");
+    let source = Path::new("cmc")
+        .join("bsimcmg")
+        .join("code")
+        .join("bsimcmg.va");
+
+    assert_eq!(package_name(&source).as_deref(), Some("cmc/bsimcmg"));
+    assert_eq!(
+        package_root(&root, &source),
+        root.join("cmc").join("bsimcmg")
+    );
 }

@@ -21,7 +21,7 @@ mod qualification;
 mod types;
 
 pub use authoring::ProjectModelDefinition;
-pub use corner::ProcessCorner;
+pub use corner::{CornerSectionBinding, CornerSectionDomain, ProcessCorner};
 pub use correlation::{
     CorrelationAggregation, CorrelationAlignmentEvidence, CorrelationAlignmentPolicy,
     CorrelationCalculation, CorrelationDatasetClass, CorrelationDatasetRevision,
@@ -43,9 +43,11 @@ pub use definition_metadata::{
 pub(crate) use library::is_foreign_platform_absolute_path;
 pub use library::{
     ModelLibrary, ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourcePin,
+    ModelSubcircuitInterface,
 };
 pub(crate) use library::{
     first_unreachable_source, is_portable_absolute_path, project_owned_source_path,
+    subcircuit_interface_key,
 };
 pub use manager::{
     ModelLibraryManager, PackModelHit, ProjectModelCommit, SealedModelExecutionSources,

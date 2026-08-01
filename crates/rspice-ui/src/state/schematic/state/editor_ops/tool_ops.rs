@@ -9,6 +9,24 @@
 use super::super::*;
 
 impl SchematicState {
+    /// Whether changing grid, snap, or routing policy would alter an
+    /// interaction that is already in progress.
+    ///
+    /// Merely arming a placement tool is safe: the next placement should use
+    /// the newly applied policy. In contrast, routed conductors,
+    /// multi-click documentation shapes, keyboard-driven shape placement,
+    /// rubber-band selection, and pending drag transactions have already
+    /// captured canvas coordinates under the current policy and must finish
+    /// or be cancelled first.
+    pub fn canvas_settings_change_blocked(&self) -> bool {
+        self.wire_drawing.active
+            || self.bus_drawing.active
+            || !self.documentation_shape_drawing.points.is_empty()
+            || self.documentation_shape_drawing.keyboard_active
+            || self.selection_rect.is_active()
+            || self.has_pending_operation()
+    }
+
     /// Arm one tool through the single conductor-lifecycle boundary.
     ///
     /// Switching tools cancels every incompatible unfinished route, and
@@ -71,5 +89,37 @@ impl SchematicState {
         }
         self.selection.clear();
         self.selection_rect.cancel();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canvas_settings_are_blocked_only_by_in_progress_canvas_interactions() {
+        let mut schematic = SchematicState::default();
+        schematic.arm_tool(Tool::Place(ComponentType::Resistor));
+        assert!(
+            !schematic.canvas_settings_change_blocked(),
+            "an armed tool has not committed any coordinates yet"
+        );
+
+        schematic.wire_drawing.active = true;
+        assert!(schematic.canvas_settings_change_blocked());
+        schematic.wire_drawing.clear();
+
+        schematic.documentation_shape_drawing.keyboard_active = true;
+        assert!(schematic.canvas_settings_change_blocked());
+        schematic.documentation_shape_drawing.clear();
+
+        schematic.selection_rect.start_at(Point::origin());
+        assert!(schematic.canvas_settings_change_blocked());
+        schematic.selection_rect.cancel();
+
+        schematic.begin_operation("drag selection");
+        assert!(schematic.canvas_settings_change_blocked());
+        schematic.cancel_operation();
+        assert!(!schematic.canvas_settings_change_blocked());
     }
 }

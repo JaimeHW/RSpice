@@ -111,14 +111,11 @@ impl CheckAndSaveValidationReport {
                 format!("Project descriptor is invalid: {error}"),
             );
         }
-        if let Err(error) = state
-            .model_library_manager
-            .validate_attached_technology(state.workspace.project.technology_binding())
-        {
+        if let Err(error) = state.validate_project_technology_contract() {
             insert_finding(
                 &mut findings,
                 CheckAndSaveFindingLevel::Blocker,
-                "models",
+                "technology",
                 "technology-binding-invalid",
                 error,
             );

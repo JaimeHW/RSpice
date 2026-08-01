@@ -112,6 +112,7 @@ enum LauncherAction {
     EmptyWorkbench,
     Browse,
     NewProject,
+    OpenNetlist,
     Open(RecentFile),
     Page(ProjectLauncherPage),
     Recover(RecoveryCandidate),
@@ -407,6 +408,10 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
                 dismiss_launcher(app);
                 Command::NewProject.execute(app);
             }
+            LauncherAction::OpenNetlist => {
+                dismiss_launcher(app);
+                Command::OpenNetlist.execute(app);
+            }
             LauncherAction::Open(recent) => {
                 dismiss_launcher(app);
                 app.open_recent_file(recent);
@@ -457,7 +462,9 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
 /// browser-back traversal from immediately reopening a dismissed launcher.
 fn dismiss_launcher(app: &mut RSpiceApp) {
     app.state.workbench.project_launcher_open = false;
-    if app.state.workbench.current_route().surface_id() != crate::workbench::SurfaceId::ProjectLauncher {
+    if app.state.workbench.current_route().surface_id()
+        != crate::workbench::SurfaceId::ProjectLauncher
+    {
         return;
     }
     if app
@@ -468,9 +475,9 @@ fn dismiss_launcher(app: &mut RSpiceApp) {
     {
         return;
     }
-    let fallback = crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::from_workspace(
-        app.state.workbench.workspace,
-    ));
+    let fallback = crate::workbench::SurfaceRoute::surface(
+        crate::workbench::SurfaceId::from_workspace(app.state.workbench.workspace),
+    );
     if let Err(error) = app
         .state
         .workbench
@@ -487,7 +494,9 @@ fn dismiss_launcher(app: &mut RSpiceApp) {
 /// `popstate` would clear the push and restore the launcher's predecessor.
 fn replace_launcher_with_workspace(app: &mut RSpiceApp, workspace: Workspace) {
     app.state.workbench.project_launcher_open = false;
-    let destination = crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::from_workspace(workspace));
+    let destination = crate::workbench::SurfaceRoute::surface(
+        crate::workbench::SurfaceId::from_workspace(workspace),
+    );
     if let Err(error) = app
         .state
         .workbench
@@ -1002,12 +1011,26 @@ fn project_heading_actions(
         {
             *action = Some(LauncherAction::NewProject);
         }
+        if Button::new("Open SPICE deck…")
+            .icon(Icon::File)
+            .show(ui)
+            .clicked()
+        {
+            *action = Some(LauncherAction::OpenNetlist);
+        }
         if Button::new("Browse…").icon(Icon::Folder).show(ui).clicked() {
             *action = Some(LauncherAction::Browse);
         }
     } else {
         if Button::new("Browse…").icon(Icon::Folder).show(ui).clicked() {
             *action = Some(LauncherAction::Browse);
+        }
+        if Button::new("Open SPICE deck…")
+            .icon(Icon::File)
+            .show(ui)
+            .clicked()
+        {
+            *action = Some(LauncherAction::OpenNetlist);
         }
         if Button::new("New project")
             .icon(Icon::Add)
@@ -1888,7 +1911,9 @@ mod tests {
         app.state
             .workbench
             .replace_route(
-                crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::ProjectLauncher),
+                crate::workbench::SurfaceRoute::surface(
+                    crate::workbench::SurfaceId::ProjectLauncher,
+                ),
                 crate::workbench::RouteTransitionSource::BrowserPop,
             )
             .expect("Project Launcher has a canonical executor");
@@ -1920,7 +1945,8 @@ mod tests {
 
         replace_launcher_with_workspace(&mut app, Workspace::Project);
 
-        let destination = crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::Project);
+        let destination =
+            crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::Project);
         assert_eq!(app.state.workbench.current_route(), destination);
         assert_eq!(
             app.state.workbench.take_browser_history_effect(),

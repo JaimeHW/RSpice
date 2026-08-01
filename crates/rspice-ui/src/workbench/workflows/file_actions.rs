@@ -11,7 +11,10 @@ pub(in crate::workbench) fn action_file_new(state: &mut AppState) {
     crate::workbench::workflows::file_workflow::create_new_schematic(state);
 }
 
-pub(in crate::workbench) fn action_file_open_with_io(state: &mut AppState, io: &(impl FileWorkflowIo + ?Sized)) {
+pub(in crate::workbench) fn action_file_open_with_io(
+    state: &mut AppState,
+    io: &(impl FileWorkflowIo + ?Sized),
+) {
     crate::workbench::workflows::file_workflow::open_schematic_from_dialog_with_io(state, io);
 }
 

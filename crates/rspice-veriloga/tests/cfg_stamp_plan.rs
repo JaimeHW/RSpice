@@ -7,9 +7,7 @@
 
 use rspice_veriloga::VerilogACompiler;
 use rspice_veriloga::canonical_ir::cfg_lower::CfgModel;
-use rspice_veriloga::canonical_ir::{
-    AdSeed, CanonicalIrArtifact, differentiate, optimize_cfg,
-};
+use rspice_veriloga::canonical_ir::{AdSeed, CanonicalIrArtifact, differentiate, optimize_cfg};
 use rspice_veriloga::rust_backend::stamp_plan::StampPlan;
 
 #[test]

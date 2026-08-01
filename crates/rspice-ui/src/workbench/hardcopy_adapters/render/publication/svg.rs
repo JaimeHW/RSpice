@@ -209,6 +209,7 @@ pub(super) fn write_svg_primitive(
             size,
             color,
             anchor,
+            rotation,
         } => {
             let (x, y) = transform.point(*origin);
             let size = transform.length(*size);
@@ -218,14 +219,34 @@ pub(super) fn write_svg_primitive(
                 TextAnchor::Middle => "middle",
                 TextAnchor::End => "end",
             };
+            let rotation = match rotation {
+                SceneTextRotation::Upright => String::new(),
+                SceneTextRotation::Clockwise90 => {
+                    format!(" transform=\"rotate(90 {x:.3} {y:.3})\"")
+                }
+                SceneTextRotation::CounterClockwise90 => {
+                    format!(" transform=\"rotate(-90 {x:.3} {y:.3})\"")
+                }
+            };
             write!(
                 output,
-                "<text x=\"{x:.3}\" y=\"{y:.3}\" fill=\"{}\" font-family=\"{family}\" font-weight=\"{weight}\" font-size=\"{size:.3}\" text-anchor=\"{anchor}\">",
-                svg_color(resolve_color(plan, *color))
+                "<text x=\"{x:.3}\" y=\"{y:.3}\" fill=\"{}\" font-family=\"{family}\" font-weight=\"{weight}\" font-size=\"{size:.3}\" text-anchor=\"{anchor}\"{rotation}>",
+                svg_color(resolve_color(plan, *color)),
             )
             .expect("write to string");
             escape_xml_into(text, output);
             output.push_str("</text>");
+        }
+        ScenePrimitive::ClippedGroup {
+            source_origin,
+            destination_origin,
+            primitives,
+            ..
+        } => {
+            let transform = transform.remap(*source_origin, *destination_origin);
+            for primitive in primitives {
+                write_svg_primitive(output, plan, transform, primitive);
+            }
         }
     }
 }
@@ -272,11 +293,12 @@ pub(super) fn write_svg_hatch_defs(
     legend: &[LegendEntry],
 ) {
     let mut seen = Vec::<String>::new();
-    for fill in primitives
-        .iter()
-        .filter_map(primitive_fill)
-        .chain(legend.iter().filter_map(|entry| entry.fill))
-    {
+    let mut fills = Vec::new();
+    for primitive in primitives {
+        collect_primitive_fills(primitive, &mut fills);
+    }
+    fills.extend(legend.iter().filter_map(|entry| entry.fill));
+    for fill in fills {
         let SceneFill::CrossHatch {
             color,
             line_width,
@@ -301,6 +323,17 @@ pub(super) fn write_svg_hatch_defs(
     }
 }
 
+fn collect_primitive_fills(primitive: &ScenePrimitive, fills: &mut Vec<SceneFill>) {
+    if let Some(fill) = primitive_fill(primitive) {
+        fills.push(fill);
+    }
+    if let ScenePrimitive::ClippedGroup { primitives, .. } = primitive {
+        for primitive in primitives {
+            collect_primitive_fills(primitive, fills);
+        }
+    }
+}
+
 pub(super) fn primitive_fill(primitive: &ScenePrimitive) -> Option<SceneFill> {
     match primitive {
         ScenePrimitive::Polyline { fill, .. }
@@ -308,7 +341,8 @@ pub(super) fn primitive_fill(primitive: &ScenePrimitive) -> Option<SceneFill> {
         | ScenePrimitive::Circle { fill, .. } => *fill,
         ScenePrimitive::Line { .. }
         | ScenePrimitive::RasterImage { .. }
-        | ScenePrimitive::Text { .. } => None,
+        | ScenePrimitive::Text { .. }
+        | ScenePrimitive::ClippedGroup { .. } => None,
     }
 }
 

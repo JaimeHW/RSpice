@@ -13,14 +13,14 @@ mod projection;
 mod schema;
 mod vscode;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use import_io::import_shortcut_artifact_source;
 #[cfg(target_arch = "wasm32")]
 pub use import_io::{
     BrowserShortcutArtifactImportCancelOutcome, cancel_browser_shortcut_artifact_import,
     poll_browser_shortcut_artifact_import, start_browser_shortcut_artifact_import,
 };
 pub use import_io::{ReadyShortcutArtifactSource, ShortcutArtifactImportOutcome};
-#[cfg(not(target_arch = "wasm32"))]
-pub use import_io::import_shortcut_artifact_source;
 pub use io::{
     PreparedShortcutArtifact, ShortcutArtifactExportOutcome, ShortcutArtifactFormat,
     export_shortcut_artifact, prepare_shortcut_artifact,

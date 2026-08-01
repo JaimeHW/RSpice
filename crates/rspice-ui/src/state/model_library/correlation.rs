@@ -1748,7 +1748,5 @@ impl ModelCorrelationState {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests;

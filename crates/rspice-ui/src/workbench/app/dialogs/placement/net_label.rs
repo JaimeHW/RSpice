@@ -68,7 +68,7 @@ pub(crate) fn open_net_label_placement(state: &mut AppState, anchor: Point) -> b
     if state.dialogs.application_modal_open() {
         return false;
     }
-    if state.schematic.read_only || state.active_view_read_only() {
+    if state.schematic_edit_read_only() {
         state.deny_read_only_edit();
         return false;
     }

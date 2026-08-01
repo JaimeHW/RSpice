@@ -41,8 +41,9 @@
 mod ac;
 mod builder;
 pub use builder::{
-    XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION, build_native_xyce_memristor,
-    validate_native_xyce_ltra_model_contract,
+    ModelBinAxisRange, ModelBinCardGeometry, ModelBinCardInspection, ModelBinInspection,
+    ModelBinInstanceInspection, ModelBinSelectionKind, XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION,
+    build_native_xyce_memristor, validate_native_xyce_ltra_model_contract,
 };
 
 mod config_resolver;
@@ -70,7 +71,6 @@ mod transient;
 pub mod waveform;
 
 pub use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
-pub use step::{MaterializedStepRun, StepPlan, StepPlanLimits};
 #[cfg(feature = "veriloga")]
 pub use builder::{
     ProjectVerilogARuntimeRegistration, VerilogACacheEntry, VerilogACachePruneReport,
@@ -89,7 +89,9 @@ pub use config_resolver::{
     ConvergencePreset, SimulationConfigOverrides, resolve_simulation_config,
 };
 pub use core::Engine;
-pub use dc::{DcSweepPointResult, bounded_dc_sweep_points, canonical_device_parameter_sweep_source};
+pub use dc::{
+    DcSweepPointResult, bounded_dc_sweep_points, canonical_device_parameter_sweep_source,
+};
 pub use error::{
     SimulationError, SimulationErrorCategory, SimulationErrorCode, SimulationErrorDescriptor,
 };
@@ -103,13 +105,14 @@ pub use pss::{
 };
 pub use pss_noise::OscPnoiseResult;
 pub use result::{TransientDeviceOpTrace, TransientResult, TransientStoreTrace};
-pub use waveform::{CompressionConfig, TransientResultCompressed, WaveformRecorder};
 pub use stb::StbAnalysisResult;
+pub use step::{MaterializedStepRun, StepPlan, StepPlanLimits};
 pub use transient::{TransientCheckpoint, netlist_fingerprint};
+pub use waveform::{CompressionConfig, TransientResultCompressed, WaveformRecorder};
 
+pub(crate) use source_values::extract_dc_value_with_limits;
 /// Independent-source introspection: the DC and AC quantities a parsed
 /// [`SourceSpec`](crate::netlist::SourceSpec) carries, as the engine reads
 /// them. Frontends showing a source's operating value need the engine's own
 /// interpretation rather than a second parse of the same spec.
 pub use source_values::{extract_ac_value, extract_dc_value};
-pub(crate) use source_values::extract_dc_value_with_limits;

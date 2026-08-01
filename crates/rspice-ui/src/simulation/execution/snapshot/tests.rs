@@ -183,6 +183,50 @@ fn project_runtime() -> crate::simulation::veriloga::PreparedVerilogARuntime {
     .unwrap()
 }
 
+fn signed_pdk_runtime() -> crate::simulation::veriloga::PreparedVerilogARuntime {
+    let (archive, trust, authority) =
+        crate::state::pdk_config::signed_veriloga_technology_test_fixture();
+    let mut registry = crate::state::pdk_config::PdkTechnologyRegistry::default();
+    registry
+        .install_archive_bytes(
+            &archive,
+            &trust,
+            &authority,
+            "Prepare signed PDK runtime snapshot fixture",
+        )
+        .unwrap();
+    let package = registry.validated_packages()[0].clone();
+    let sealed = registry
+        .seal_model_sources_for_binding(&package.binding(), package.archive_digest())
+        .unwrap();
+    crate::simulation::veriloga::compile_signed_pdk_source_runtime(
+        &sealed.binding,
+        sealed.archive_digest,
+        &sealed.veriloga_artifacts,
+        &sealed.veriloga_bindings[0],
+    )
+    .unwrap()
+}
+
+#[test]
+fn snapshot_rejects_positive_area_model_bin_overlap_before_dispatch() {
+    let mut ambiguous = parts();
+    ambiguous.executable_netlist = "ambiguous binned mosfet\n\
+         V1 d 0 1\n\
+         M1 d d 0 0 NCH W=1u L=0.5u\n\
+         .model NCH.0 NMOS LEVEL=1 LMIN=0.28u LMAX=0.7u WMIN=0.5u WMAX=2u VTO=0.4\n\
+         .model NCH.1 NMOS LEVEL=1 LMIN=0.4u LMAX=1.2u WMIN=0.5u WMAX=2u VTO=0.9\n\
+         .op\n\
+         .end\n"
+        .to_owned();
+
+    let error = PreparedRunSnapshot::new(ambiguous)
+        .expect_err("an ambiguous model-bin instance must never reach dispatch");
+    assert_eq!(error.stage(), PreparationStage::ModelBindings);
+    assert!(error.message().contains("MOSFET 'M1'"));
+    assert!(error.message().contains("model family 'NCH' is ambiguous"));
+}
+
 #[test]
 fn snapshot_requires_the_exact_aliased_project_runtime_directive() {
     let runtime = project_runtime();
@@ -214,6 +258,26 @@ fn snapshot_requires_the_exact_aliased_project_runtime_directive() {
     exact.project_veriloga_runtimes =
         crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime]).unwrap();
     assert!(PreparedRunSnapshot::new(exact).is_ok());
+}
+
+#[test]
+fn snapshot_binds_signed_pdk_veriloga_runtime_and_archive_provenance() {
+    let runtime = signed_pdk_runtime();
+    assert!(
+        runtime
+            .provenance_label()
+            .starts_with("signed-pdk-veriloga:__rspice_pdk__/")
+    );
+    let directive = crate::simulation::veriloga::project_veriloga_directive(
+        runtime.source_key(),
+        runtime.netlist_alias(),
+    );
+    let mut prepared = parts();
+    prepared.executable_netlist = format!("signed PDK runtime\n{directive}\n.op\n.end\n");
+    prepared.project_veriloga_runtimes =
+        crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime]).unwrap();
+    let snapshot = PreparedRunSnapshot::new(prepared).expect("signed runtime snapshot validates");
+    assert_eq!(snapshot.metadata().model_identity_count, 1);
 }
 
 #[test]

@@ -206,13 +206,7 @@ impl Engine {
                 &companion_coeff,
             )
             .map_err(SimulationError::Circuit)?;
-        circuit.stamp_transient_inductor_companions(
-            matrix,
-            rhs,
-            dt,
-            &companion_coeff,
-            num_nodes,
-        );
+        circuit.stamp_transient_inductor_companions(matrix, rhs, dt, &companion_coeff, num_nodes);
         if ctx.xyce_one_step_order2 {
             circuit
                 .inductors

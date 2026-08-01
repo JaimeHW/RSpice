@@ -6,15 +6,13 @@
 //! installations, and the device-local persistence behind both.
 
 pub(crate) mod artifacts;
-pub(crate) mod library_persistence;
 mod library;
-pub(crate) mod profile_workflow;
+pub(crate) mod library_persistence;
 mod profile;
+pub(crate) mod profile_workflow;
 mod types;
 
-pub use library::{
-    ShortcutProfileLibrary, ShortcutProfileLibraryError,
-};
+pub use library::{ShortcutProfileLibrary, ShortcutProfileLibraryError};
 pub(crate) use profile::shortcut_contexts_overlap;
 pub use profile::{
     ShortcutPreferences, ShortcutProfileAudit, ShortcutProfileIssue, ShortcutProfileIssueCode,
@@ -23,7 +21,6 @@ pub use profile::{
 pub use types::{
     ChordTimeoutPolicy, CommandShortcutOverride, ContextPrecedencePolicy,
     MAX_SHORTCUT_SEQUENCE_STROKES, ProfileShortcutBinding, ProtectedShortcutPolicy,
-    ResolvedShortcutBinding, ShortcutBindingSlot, ShortcutBindingSource,
-    ShortcutPolicies, ShortcutProfileError, ShortcutSequence, ShortcutStroke,
-    SingleKeyCanvasPolicy,
+    ResolvedShortcutBinding, ShortcutBindingSlot, ShortcutBindingSource, ShortcutPolicies,
+    ShortcutProfileError, ShortcutSequence, ShortcutStroke, SingleKeyCanvasPolicy,
 };

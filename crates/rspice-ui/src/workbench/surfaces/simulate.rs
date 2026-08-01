@@ -842,23 +842,7 @@ fn build_envelope_source_catalog(app: &RSpiceApp) -> EnvelopeSourceCatalog {
 }
 
 fn envelope_source_catalog_input_digest(app: &RSpiceApp) -> ContentDigest {
-    let plan_identity = app.state.sim_setup.analysis_plan.as_ref().map_or_else(
-        || "none".to_owned(),
-        |plan| format!("{}:{}", plan.id(), plan.revision().get()),
-    );
-    let model_library_identity = serde_json::to_string(&app.state.model_library_manager)
-        .unwrap_or_else(|error| format!("model-library-serialization-error:{error}"));
-    let material = format!(
-        "{}\0{}\0{}\0{}\0{:?}\0{}\0{}",
-        app.state.design_execution_epoch,
-        app.state.workspace.project.revision().get(),
-        app.state.workspace.simulation_root_reference().key(),
-        plan_identity,
-        app.state.sim_setup.reference_pvt.process,
-        app.state.sim_setup.options.to_spice_options(),
-        model_library_identity,
-    );
-    crate::workbench::documents::netlist_document::source_content_digest(&material)
+    crate::simulation::controller::prepared_run::design_inspection_input_digest(&app.state)
 }
 
 fn build_envelope_source_catalog_with_digest(
@@ -866,79 +850,9 @@ fn build_envelope_source_catalog_with_digest(
     source_digest: ContentDigest,
 ) -> EnvelopeSourceCatalog {
     let catalog = (|| -> Result<(Vec<String>, String), String> {
-        let projection = app
-            .state
-            .workspace
-            .configuration_execution_projection(
-                &app.state.library_manager,
-                &app.state.workspace.active_view,
-                &app.state.schematic,
-            )
-            .map_err(|error| error.to_string())?;
-        let root_reference = projection.root().clone();
-        let root_schematic = projection
-            .root_schematic()
-            .ok_or_else(|| "the configured simulation root is not materialized".to_owned())?;
-        let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
-            &app.state.library_manager,
-            &projection,
-        );
-        let plan = app.state.sim_setup.stable_analysis_plan()?;
-        let payload = app
-            .state
-            .workspace
-            .active_plan_data(plan.id())
-            .ok_or_else(|| {
-                format!(
-                    "simulation plan {} has no plan-owned configuration payload",
-                    plan.id()
-                )
-            })?;
-        let analysis_instances = plan
-            .instances()
-            .iter()
-            .filter(|instance| instance.enabled())
-            .map(crate::simulation::plan::AnalysisInstance::id)
-            .collect::<Vec<_>>();
-        let generated =
-            crate::simulation::netlist_gen::generate_netlist_hierarchical_with_variables(
-                root_schematic,
-                &[],
-                &hierarchy,
-                &payload.design_variables,
-                crate::simulation::netlist_gen::DesignVariableNetlistContext {
-                    active_cell: &root_reference,
-                    analysis_instances: &analysis_instances,
-                },
-            );
-        if !generated.errors.is_empty() {
-            return Err(generated.errors.join("; "));
-        }
-        let source = app
-            .state
-            .workspace
-            .bind_generated_netlist_provenance(generated.netlist);
-        let sealed_models = app
-            .state
-            .model_library_manager
-            .seal_execution_sources()
-            .map_err(|error| format!("could not seal configured model sources: {error}"))?;
-        let model_cards = sealed_models
-            .reference_process_model_cards(app.state.sim_setup.reference_pvt.process)
-            .map_err(|error| format!("could not bind reference process models: {error}"))?;
-        let source = crate::simulation::controller::SimulationController::apply_reference_model_bindings_to_netlist(
-            &source,
-            &model_cards,
-        );
-        let source = crate::simulation::controller::SimulationController::apply_simulation_options_to_netlist(
-            &source,
-            &app.state.sim_setup.options,
-        );
-        let (source, _) =
-            crate::simulation::controller::prepared_run::expand_generated_dependencies(
-                &source,
-                root_schematic.current_file.as_deref(),
-                &app.state.model_library_manager,
+        let source =
+            crate::simulation::controller::SimulationController::prepare_design_netlist_for_inspection(
+                &app.state,
             )
             .map_err(|error| error.to_string())?;
         let netlist = rspice_core::Netlist::parse(&source).map_err(|error| error.to_string())?;
@@ -1893,7 +1807,6 @@ fn preflight_cell(
     );
 }
 
-
 #[cfg(test)]
 fn dependency_repair_cta(
     plan: &crate::simulation::plan::SimulationPlan,
@@ -2135,7 +2048,6 @@ fn format_plan_issue(issue: &AnalysisPlanIssue) -> String {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests;

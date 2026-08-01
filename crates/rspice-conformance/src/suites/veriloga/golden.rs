@@ -331,9 +331,7 @@ impl StampAudit {
         let mut significant: Vec<StampAuditEntry> = self
             .entries
             .iter()
-            .filter(|entry| {
-                entry.unverifiable() && entry.stamped.abs() > self.significance_floor
-            })
+            .filter(|entry| entry.unverifiable() && entry.stamped.abs() > self.significance_floor)
             .copied()
             .collect();
         significant.sort_by(|left, right| right.stamped.abs().total_cmp(&left.stamped.abs()));
@@ -394,10 +392,7 @@ impl GoldenHarness {
     /// dense. That is the worst case, and more importantly it is the same case
     /// for every model and every revision, which is what makes captured records
     /// comparable.
-    pub fn new(
-        model_name: &str,
-        overrides: &[(String, Value)],
-    ) -> Result<Self, GoldenError> {
+    pub fn new(model_name: &str, overrides: &[(String, Value)]) -> Result<Self, GoldenError> {
         let model_name = builtins::builtin_names()
             .iter()
             .find(|name| name.eq_ignore_ascii_case(model_name))
@@ -713,7 +708,12 @@ impl GoldenHarness {
                     + sampled[0][row])
                     / (12.0 * step);
                 asymmetry[row * size + col] = one_sided_gap(
-                    [sampled[0][row], sampled[1][row], sampled[2][row], sampled[3][row]],
+                    [
+                        sampled[0][row],
+                        sampled[1][row],
+                        sampled[2][row],
+                        sampled[3][row],
+                    ],
                     step,
                 );
             }
@@ -758,7 +758,12 @@ impl GoldenHarness {
                     + sampled[0][row])
                     / (12.0 * step);
                 asymmetry[row * size + col] = one_sided_gap(
-                    [sampled[0][row], sampled[1][row], sampled[2][row], sampled[3][row]],
+                    [
+                        sampled[0][row],
+                        sampled[1][row],
+                        sampled[2][row],
+                        sampled[3][row],
+                    ],
                     step,
                 );
             }
@@ -1086,7 +1091,11 @@ mod tests {
 
         let entry = audit.entries[0];
         assert!(!entry.discontinuous);
-        assert_eq!(audit.failures(1.0e-3).len(), 1, "a smooth error still fails");
+        assert_eq!(
+            audit.failures(1.0e-3).len(),
+            1,
+            "a smooth error still fails"
+        );
     }
 
     #[test]
@@ -1145,10 +1154,7 @@ mod tests {
         let audit = StampAudit {
             model_name: "fixture",
             significance_floor: 1.0e-9,
-            entries: vec![
-                entry(1.0, 1.0, 0.0),
-                entry(1.0, 9.0e9, Value::INFINITY),
-            ],
+            entries: vec![entry(1.0, 1.0, 0.0), entry(1.0, 9.0e9, Value::INFINITY)],
         };
         assert_eq!(audit.checked().count(), 1);
         assert_eq!(audit.checked_fraction(), 0.5);

@@ -43,9 +43,10 @@ impl CircuitData {
             let np = self.inductors.node_pos[index];
             let nn = self.inductors.node_neg[index];
             let branch = num_nodes + self.inductors.branch_indices[index];
-            let is_core = core_bindings.iter().any(|binding| {
-                binding.inductor_index == index && binding.device.is_xyce_core()
-            }) || grouped_indices.contains(&index);
+            let is_core = core_bindings
+                .iter()
+                .any(|binding| binding.inductor_index == index && binding.device.is_xyce_core())
+                || grouped_indices.contains(&index);
 
             // Core rows own the constitutive branch equation, but their MNA
             // KCL/branch-incidence entries are still needed here.  Do not
@@ -129,6 +130,21 @@ impl CircuitData {
                 .xyce_core_groups
                 .iter()
                 .all(|group| group.device.is_xyce_core())
+    }
+
+    /// Whether any Xyce Core in the deck is LEVEL=2.
+    ///
+    /// GMIN continuation deforms only the nodal equations, so a deck whose
+    /// Cores are all LEVEL=1 has nothing for the deformation to regularize.
+    /// A LEVEL=2 Core keeps the general rescue path because its constitutive
+    /// trial can still require globalization, and that is true of a single
+    /// winding as much as a coupled set — unlike
+    /// [`Self::has_xyce_core_shared_level2`], which asks the narrower question
+    /// of whether the stabilized Picard Jacobian applies.
+    pub(crate) fn has_xyce_core_level2(&self) -> bool {
+        self.xyce_core_groups
+            .iter()
+            .any(|group| group.device.is_xyce_core() && group.device.is_xyce_core_level2())
     }
 
     /// Whether a shared LEVEL=2 Xyce Core has the coupled constitutive
@@ -770,19 +786,18 @@ impl CircuitData {
                     // non-monotone tangent from the solve matrix avoids a
                     // spurious relative-winding mode while preserving the
                     // exact converged solution.
-                    let static_derivative = if stabilized_jacobian
-                        && group.device.is_xyce_core_level2()
-                    {
-                        0.0
-                    } else {
-                        d_mid_d_current.map_or(0.0, |value| {
-                            if one_step_order2 {
-                                static_scale * voltages[i] * value / (trial.mid * trial.mid)
-                            } else {
-                                -static_scale * voltages[i] * value / (trial.mid * trial.mid)
-                            }
-                        })
-                    };
+                    let static_derivative =
+                        if stabilized_jacobian && group.device.is_xyce_core_level2() {
+                            0.0
+                        } else {
+                            d_mid_d_current.map_or(0.0, |value| {
+                                if one_step_order2 {
+                                    static_scale * voltages[i] * value / (trial.mid * trial.mid)
+                                } else {
+                                    -static_scale * voltages[i] * value / (trial.mid * trial.mid)
+                                }
+                            })
+                        };
                     let charge_derivative_j = if one_step_order2 {
                         charge_coeff * l0 / dt
                     } else {

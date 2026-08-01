@@ -5,11 +5,11 @@
 //! branch allocation, and whole-circuit orchestration.
 
 use super::{NodeId, TwoTerminalStamp, project_two_terminal_voltage};
-use crate::numerics::integration::{CompanionCoefficients, IntegrationMethod};
 use crate::device::{
     Bjt, Diode, Ekv3Device, EkvMosfet, MatrixStamper, Mosfet, NonlinearConvergenceCriteria,
     SolutionDependentCapacitor, SolutionDependentCapacitorLinearization, Vdmos,
 };
+use crate::numerics::integration::{CompanionCoefficients, IntegrationMethod};
 use crate::solver::{CscIndex, StaticMatrix, TripletMatrix};
 use crate::{Complex64, Value};
 use std::sync::{Arc, OnceLock, RwLock};

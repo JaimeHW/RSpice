@@ -86,10 +86,70 @@ impl CustomPaper {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthoredSheetMedia {
+    section_ordinal: u32,
+    name: String,
+    width: Length,
+    height: Length,
+}
+
+impl AuthoredSheetMedia {
+    pub fn try_new(
+        section_ordinal: u32,
+        name: impl Into<String>,
+        width: Length,
+        height: Length,
+    ) -> Result<Self, HardcopyError> {
+        let media = Self {
+            section_ordinal,
+            name: name.into(),
+            width,
+            height,
+        };
+        media.validate()?;
+        Ok(media)
+    }
+
+    fn validate(&self) -> Result<(), HardcopyError> {
+        validate_text("authored sheet media name", &self.name, 128)?;
+        validate_page_dimension("authored sheet media width", self.width)?;
+        validate_page_dimension("authored sheet media height", self.height)
+    }
+
+    #[must_use]
+    pub const fn section_ordinal(&self) -> u32 {
+        self.section_ordinal
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[must_use]
+    pub const fn dimensions(&self) -> (Length, Length) {
+        (self.width, self.height)
+    }
+
+    #[must_use]
+    pub const fn portrait_dimensions(&self) -> (Length, Length) {
+        if self.width.0 <= self.height.0 {
+            (self.width, self.height)
+        } else {
+            (self.height, self.width)
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "kebab-case")]
 pub enum PaperSize {
     Standard(StandardPaper),
     Custom(CustomPaper),
+    /// Resolve each governed schematic section to its own authored physical
+    /// sheet. The sealed media inventory is part of the hardcopy plan digest,
+    /// so mixed-size output cannot drift after preview approval.
+    MatchAuthoredSheets(Vec<AuthoredSheetMedia>),
 }
 
 impl PaperSize {
@@ -97,6 +157,22 @@ impl PaperSize {
         match self {
             Self::Standard(_) => Ok(()),
             Self::Custom(custom) => custom.validate(),
+            Self::MatchAuthoredSheets(media) => {
+                if media.is_empty() || media.len() > 4_096 {
+                    return Err(HardcopyError::InvalidAuthoredSheetMedia(
+                        "media count must be within 1..=4096",
+                    ));
+                }
+                for (index, entry) in media.iter().enumerate() {
+                    entry.validate()?;
+                    if entry.section_ordinal != index as u32 {
+                        return Err(HardcopyError::InvalidAuthoredSheetMedia(
+                            "media ordinals must be contiguous and canonical",
+                        ));
+                    }
+                }
+                Ok(())
+            }
         }
     }
 
@@ -105,11 +181,24 @@ impl PaperSize {
         let (width, height) = match self {
             Self::Standard(paper) => paper.portrait_dimensions(),
             Self::Custom(custom) => custom.dimensions(),
+            Self::MatchAuthoredSheets(media) => media
+                .first()
+                .expect("validated authored-sheet media is nonempty")
+                .portrait_dimensions(),
         };
         if width <= height {
             (width, height)
         } else {
             (height, width)
+        }
+    }
+
+    pub(super) fn authored_media(&self, section_ordinal: u32) -> Option<&AuthoredSheetMedia> {
+        match self {
+            Self::MatchAuthoredSheets(media) => media
+                .get(section_ordinal as usize)
+                .filter(|entry| entry.section_ordinal == section_ordinal),
+            Self::Standard(_) | Self::Custom(_) => None,
         }
     }
 }
@@ -176,8 +265,18 @@ impl PhysicalPageSetup {
 
     pub(super) fn validate(&self) -> Result<(), HardcopyError> {
         self.paper.validate()?;
-        let (width, height) = self.paper.portrait_dimensions();
-        validate_margins(width, height, self.margins)?;
+        match &self.paper {
+            PaperSize::MatchAuthoredSheets(media) => {
+                for entry in media {
+                    let (width, height) = entry.dimensions();
+                    validate_margins(width, height, self.margins)?;
+                }
+            }
+            PaperSize::Standard(_) | PaperSize::Custom(_) => {
+                let (width, height) = self.paper.portrait_dimensions();
+                validate_margins(width, height, self.margins)?;
+            }
+        }
         if let Bleed::Uniform(bleed) = self.bleed {
             if bleed == Length::ZERO
                 || [

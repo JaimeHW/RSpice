@@ -975,6 +975,11 @@ impl<'a> Parser<'a> {
         let mut statements = Vec::new();
         let mut variables = Vec::new();
         while !self.check(TokenKind::End) && !self.at_end() {
+            // Attributes may decorate block-local declarations (for example
+            // operating-point metadata emitted by CMC model macros). They do
+            // not change local-variable semantics, but must be consumed before
+            // deciding whether the next item is a declaration or statement.
+            self.parse_attributes()?;
             // Block-local variable declarations (LRM allows them in named
             // blocks; accept them in unnamed blocks for robustness)
             if matches!(
@@ -2582,6 +2587,28 @@ mod tests {
             panic!("expected block");
         };
         assert_eq!(block.variables.len(), 1);
+        assert_eq!(block.statements.len(), 2);
+    }
+
+    #[test]
+    fn attributes_may_decorate_block_local_variable_declarations() {
+        let m = parse_module(
+            r#"module a(p, n);
+                inout p, n;
+                electrical p, n;
+                analog begin : calc
+                    (* desc="Effective width", units="m" *) real width;
+                    width = V(p, n);
+                    I(p, n) <+ width;
+                end
+            endmodule"#,
+        );
+        let stmts = &m.analog_block.as_ref().unwrap().statements;
+        let AnalogStatement::Block(block) = &stmts[0] else {
+            panic!("expected block");
+        };
+        assert_eq!(block.variables.len(), 1);
+        assert_eq!(block.variables[0].items[0].name.as_str(), "width");
         assert_eq!(block.statements.len(), 2);
     }
 
