@@ -1074,7 +1074,13 @@ fn source_files_have_no_byte_order_mark() {
 /// document beside a symbol. Each value is built once, consumed once, and
 /// never collected, and the struct variants' shape is the wire format. Both
 /// allows name the reason at the module they sit on.
-const MAX_LINT_SUPPRESSIONS: usize = 33;
+/// 33 -> 38 for five naming lints that are wrong about this domain: four
+/// enums whose variants share a word because the product does (`By sheet`,
+/// `operating point`, the Command Palette), and the aging mechanisms HCI and
+/// NBTI, which nobody spells `Hci` and `Nbti`. The fifth candidate,
+/// `VariantDifferenceKind`, was renamed instead — every difference between
+/// variants is a difference between overrides, so the postfix carried nothing.
+const MAX_LINT_SUPPRESSIONS: usize = 38;
 
 /// The crate does not accumulate lint suppressions.
 #[test]

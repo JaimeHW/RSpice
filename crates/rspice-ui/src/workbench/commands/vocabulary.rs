@@ -41,6 +41,10 @@ impl CommandPlatform {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// `CommandPalette` is the feature's name, the same one the shortcut
+// preferences show the user. Trimming it to `Palette` to stop repeating the
+// enum would rename a thing that exists.
+#[allow(clippy::enum_variant_names)]
 pub enum Command {
     OpenWorkspace(Workspace),
     ProjectLauncher,

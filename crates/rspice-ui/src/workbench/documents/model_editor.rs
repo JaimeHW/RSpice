@@ -116,6 +116,9 @@ pub enum QualificationAuthoringProbe {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+// The unparsed form of `QualificationSample`, which it has to spell the same
+// way to be recognisable as the same choice.
+#[allow(clippy::enum_variant_names)]
 pub enum QualificationAuthoringSample {
     #[default]
     OperatingPoint,

@@ -293,6 +293,10 @@ impl QualificationProbe {
 /// Exact result point selected from the declared analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
+// A point is what these select: the operating point, a sweep point, a
+// frequency point, a time point. `Operating` and `Time` would name the axis
+// instead of the sample on it.
+#[allow(clippy::enum_variant_names)]
 pub enum QualificationSample {
     OperatingPoint,
     FirstSweepPoint,

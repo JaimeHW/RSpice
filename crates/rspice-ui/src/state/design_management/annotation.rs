@@ -4,6 +4,10 @@ use super::*;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+// The dialog offers these as "By device family", "By sheet", "By hierarchy",
+// and the saved policy spells them the same way. The shared word is the
+// product's, not an accident of naming.
+#[allow(clippy::enum_variant_names)]
 pub enum AnnotationPrefixAllocation {
     #[default]
     ByDeviceFamily,
