@@ -1035,6 +1035,7 @@ impl ModelLibraryManager {
     /// rows; the catalogue view is a browser, not a dump. An empty query
     /// returns nothing rather than everything, so opening the tab does not
     /// stream a 16 MB index off disk.
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub fn search_pack_models(&self, query: &str, limit: usize) -> Vec<PackModelHit> {
         let trimmed = query.trim();
         if trimmed.is_empty() {
@@ -1280,6 +1281,7 @@ impl ModelLibraryManager {
     }
 
     /// Clear all
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub fn clear(&mut self) {
         self.libraries.clear();
         self.selected_library = None;
@@ -1481,6 +1483,7 @@ impl ModelLibraryManager {
     /// fail closed because a single-file picker cannot prove dependency bytes;
     /// multi-file libraries must arrive in a project whose complete retained
     /// source closure was captured by the desktop importer.
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub fn load_library_bytes(
         &mut self,
         file_name: &str,
@@ -1621,6 +1624,7 @@ impl ModelLibraryManager {
     }
 
     /// Resolve all process-specific sources required by a PVT run.
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub fn corner_model_bindings(
         &self,
         processes: &[CornerProcess],

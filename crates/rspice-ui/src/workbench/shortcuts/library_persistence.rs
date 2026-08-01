@@ -41,6 +41,7 @@ impl ShortcutLibraryPersistenceError {
     }
 
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub const fn code(&self) -> &'static str {
         self.code
     }
@@ -49,6 +50,7 @@ impl ShortcutLibraryPersistenceError {
     /// it verbatim; the native path matches on the variant instead, so this
     /// looks unused on a native-only build.
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub fn message(&self) -> &str {
         &self.message
     }
@@ -57,6 +59,7 @@ impl ShortcutLibraryPersistenceError {
     /// exact stored bytes afterwards. The caller must not restore stale CAS
     /// authority or attempt another write until storage is reloaded.
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub fn is_commit_in_doubt(&self) -> bool {
         self.code == "shortcut-library.browser-commit-in-doubt"
     }
@@ -579,6 +582,7 @@ fn prepare_update(
 }
 
 #[cfg(any(test, not(target_arch = "wasm32")))]
+#[cfg(any(test, target_arch = "wasm32"))]
 fn edit_in_store(
     store: &impl ShortcutLibraryStore,
     predecessor: &PersistedShortcutProfileLibrary,

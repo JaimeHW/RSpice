@@ -49,6 +49,7 @@ impl ShortcutArtifactFormat {
     }
 
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub const fn mime_type(self) -> &'static str {
         match self {
             Self::Json => "application/json",

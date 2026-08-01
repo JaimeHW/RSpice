@@ -961,6 +961,7 @@ impl PdkTechnologyRegistry {
     /// retaining its bindings and audit history. Browser persistence stores
     /// these potentially large immutable payloads in a content-addressed
     /// object store instead of embedding them in one configuration record.
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub(super) fn take_archives_for_browser_persistence(
         &mut self,
     ) -> Vec<SignedPdkTechnologyArchive> {
@@ -972,6 +973,7 @@ impl PdkTechnologyRegistry {
     /// Reattach exact signed archive payloads loaded from the browser object
     /// store. This deliberately restores no runtime trust; the caller must
     /// run `revalidate_installed` against the current publisher trust store.
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub(super) fn restore_archives_from_browser_persistence(
         &mut self,
         archives: Vec<SignedPdkTechnologyArchive>,

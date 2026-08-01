@@ -1499,6 +1499,7 @@ impl WorkbenchState {
     /// Only the browser build reads this: `app::apply_browser_history_delta`
     /// refuses a forward jump that would leave the in-app task stack.
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub fn forward_route_count(&self) -> usize {
         self.navigation.forward_entries().len()
     }
@@ -1542,6 +1543,7 @@ impl WorkbenchState {
         Some(transition)
     }
 
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub fn navigate_forward(&mut self, source: RouteTransitionSource) -> Option<RouteTransition> {
         self.navigate_forward_steps(1, source)
     }
@@ -1549,6 +1551,7 @@ impl WorkbenchState {
     /// Atomically advance across up to `count` known routes, reconciling the
     /// foreground surface only once from the original route to the final
     /// destination.
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub fn navigate_forward_steps(
         &mut self,
         count: usize,
@@ -1606,6 +1609,7 @@ impl WorkbenchState {
         }
     }
 
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub fn take_browser_history_effect(&mut self) -> Option<BrowserHistoryEffect> {
         self.navigation.take_browser_effect()
     }

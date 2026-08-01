@@ -26,6 +26,7 @@ impl SurfaceExecutionAvailability {
     }
 
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub const fn reason(self) -> Option<&'static str> {
         match self {
             Self::Available { .. } => None,

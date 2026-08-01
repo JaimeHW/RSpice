@@ -162,21 +162,25 @@ impl SurfaceNavigation {
     }
 
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub fn forward_entries(&self) -> &[SurfaceRoute] {
         &self.forward
     }
 
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub fn recent_entries(&self) -> &[SurfaceRoute] {
         &self.recent
     }
 
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub const fn can_go_back(&self) -> bool {
         !self.back.is_empty()
     }
 
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub const fn can_go_forward(&self) -> bool {
         !self.forward.is_empty()
     }
@@ -342,6 +346,7 @@ impl SurfaceNavigation {
 
     /// Atomically traverse up to `count` known forward entries and emit one
     /// browser traversal effect for the final destination.
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub(crate) fn go_forward_steps(
         &mut self,
         count: usize,
@@ -378,6 +383,7 @@ impl SurfaceNavigation {
         })
     }
 
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub(crate) fn take_browser_effect(&mut self) -> Option<BrowserHistoryEffect> {
         self.pending_browser_effects.pop_front()
     }
