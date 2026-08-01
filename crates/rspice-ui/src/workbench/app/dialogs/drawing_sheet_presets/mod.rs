@@ -45,7 +45,7 @@ const LIBRARY_EYEBROW: &str = "DRAWING SHEET \u{00b7} PROJECT AND PERSONAL PRESE
 const LIBRARY_TITLE: &str = "Custom sheet sizes";
 const LIBRARY_DESCRIPTION: &str = "Named custom sheet sizes available to this project, where they came from, and which sheets depend on them.";
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub(crate) struct DrawingSheetPresetDialogsState {
     library_open: bool,
     search: String,
@@ -62,24 +62,6 @@ pub(crate) struct DrawingSheetPresetDialogsState {
 
 #[cfg(target_arch = "wasm32")]
 type ImportMailbox = std::sync::Arc<std::sync::Mutex<Option<Result<(String, String), String>>>>;
-
-impl Default for DrawingSheetPresetDialogsState {
-    fn default() -> Self {
-        Self {
-            library_open: false,
-            search: String::new(),
-            edit: None,
-            catalog_revision: 0,
-            baseline_personal: DrawingSheetPersonalPreferences::default(),
-            editor: None,
-            transfer: PresetTransferState::default(),
-            delete: None,
-            error: None,
-            #[cfg(target_arch = "wasm32")]
-            import_mailbox: None,
-        }
-    }
-}
 
 impl DrawingSheetPresetDialogsState {
     pub(crate) fn any_open(&self) -> bool {

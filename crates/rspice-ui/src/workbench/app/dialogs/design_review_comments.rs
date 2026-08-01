@@ -123,8 +123,9 @@ struct EvidenceCandidate {
     digest: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 enum ReviewAction {
+    #[default]
     None,
     Select(u64),
     NewComment,
@@ -133,12 +134,6 @@ enum ReviewAction {
     AttachEvidence(usize),
     Resolve,
     Reopen,
-}
-
-impl Default for ReviewAction {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 pub(crate) fn open_design_review_comments(state: &mut AppState) {

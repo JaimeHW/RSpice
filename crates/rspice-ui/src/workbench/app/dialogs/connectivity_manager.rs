@@ -239,8 +239,9 @@ enum RevealTarget {
     Violation(DrcLocation),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 enum ConnectivityBodyAction {
+    #[default]
     None,
     Reveal(RevealTarget),
     Refresh,
@@ -248,12 +249,6 @@ enum ConnectivityBodyAction {
     ReviewAliases,
     RouteRepair(String),
     OpenSourceMap,
-}
-
-impl Default for ConnectivityBodyAction {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 pub(crate) fn open_connectivity_manager(state: &mut AppState) {
