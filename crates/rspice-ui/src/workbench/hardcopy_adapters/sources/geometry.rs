@@ -337,59 +337,6 @@ pub(super) fn map_result_coordinate(
     Ok(mapped.round() as i64)
 }
 
-#[cfg(test)]
-mod drawing_sheet_geometry_tests {
-    use super::*;
-    use crate::state::DocumentationShapeGeometry;
-
-    #[test]
-    fn authored_sheet_bounds_stop_at_paper_even_when_bleed_is_configured() {
-        let format = SchematicSheetFormat::default()
-            .try_update(|draft| draft.bleed_um = 5_000)
-            .unwrap();
-        let bounds = authored_sheet_bounds(&format).unwrap();
-        let (width_um, height_um) = format.oriented_dimensions_um();
-        assert_eq!(bounds.maximum.x_um - bounds.minimum.x_um, width_um as i64);
-        assert_eq!(bounds.maximum.y_um - bounds.minimum.y_um, height_um as i64);
-    }
-
-    #[test]
-    fn schematic_bounds_include_major_arc_cardinal_extrema() {
-        let arc = DocumentationShape::new(
-            1,
-            DocumentationShapeGeometry::Arc {
-                start: Point::new(10, 0),
-                through: Point::new(0, -10),
-                end: Point::new(0, 10),
-            },
-        )
-        .unwrap();
-        let schematic = SemanticSchematic {
-            view_path: "library/cell/schematic".to_owned(),
-            drawing_sheet: None,
-            drawing_sheet_title_values: std::collections::BTreeMap::new(),
-            grid_pitch_units: 10,
-            components: Vec::new(),
-            wires: Vec::new(),
-            buses: Vec::new(),
-            bus_taps: Vec::new(),
-            junctions: Vec::new(),
-            net_labels: Vec::new(),
-            design_notes: Vec::new(),
-            documentation_shapes: vec![arc],
-        };
-        let bounds = schematic_bounds(&schematic).unwrap();
-        assert_eq!(
-            bounds.minimum.x_um,
-            (-10 - SCHEMATIC_EDGE_ALLOWANCE_UNITS) * SCHEMATIC_UNIT_UM
-        );
-        assert_eq!(
-            bounds.maximum.x_um,
-            (10 + SCHEMATIC_EDGE_ALLOWANCE_UNITS) * SCHEMATIC_UNIT_UM
-        );
-    }
-}
-
 pub(super) fn clipped_plot_paths(
     points: &[(f64, f64)],
     x_minimum: f64,
@@ -675,5 +622,58 @@ impl HardcopySourceSetMember {
             resolved.authority().content_digest(),
             resolved.authority().scope().clone(),
         )
+    }
+}
+
+#[cfg(test)]
+mod drawing_sheet_geometry_tests {
+    use super::*;
+    use crate::state::DocumentationShapeGeometry;
+
+    #[test]
+    fn authored_sheet_bounds_stop_at_paper_even_when_bleed_is_configured() {
+        let format = SchematicSheetFormat::default()
+            .try_update(|draft| draft.bleed_um = 5_000)
+            .unwrap();
+        let bounds = authored_sheet_bounds(&format).unwrap();
+        let (width_um, height_um) = format.oriented_dimensions_um();
+        assert_eq!(bounds.maximum.x_um - bounds.minimum.x_um, width_um as i64);
+        assert_eq!(bounds.maximum.y_um - bounds.minimum.y_um, height_um as i64);
+    }
+
+    #[test]
+    fn schematic_bounds_include_major_arc_cardinal_extrema() {
+        let arc = DocumentationShape::new(
+            1,
+            DocumentationShapeGeometry::Arc {
+                start: Point::new(10, 0),
+                through: Point::new(0, -10),
+                end: Point::new(0, 10),
+            },
+        )
+        .unwrap();
+        let schematic = SemanticSchematic {
+            view_path: "library/cell/schematic".to_owned(),
+            drawing_sheet: None,
+            drawing_sheet_title_values: std::collections::BTreeMap::new(),
+            grid_pitch_units: 10,
+            components: Vec::new(),
+            wires: Vec::new(),
+            buses: Vec::new(),
+            bus_taps: Vec::new(),
+            junctions: Vec::new(),
+            net_labels: Vec::new(),
+            design_notes: Vec::new(),
+            documentation_shapes: vec![arc],
+        };
+        let bounds = schematic_bounds(&schematic).unwrap();
+        assert_eq!(
+            bounds.minimum.x_um,
+            (-10 - SCHEMATIC_EDGE_ALLOWANCE_UNITS) * SCHEMATIC_UNIT_UM
+        );
+        assert_eq!(
+            bounds.maximum.x_um,
+            (10 + SCHEMATIC_EDGE_ALLOWANCE_UNITS) * SCHEMATIC_UNIT_UM
+        );
     }
 }

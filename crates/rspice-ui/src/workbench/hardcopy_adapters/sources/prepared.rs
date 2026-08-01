@@ -1445,7 +1445,7 @@ impl PreparedRetainedHardcopyResolution {
     /// worker. Consuming `self` avoids cloning large retained result arrays.
     /// The returned bytes are bounded and authenticated as one atomic unit.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub(crate) fn to_worker_snapshot_json(self) -> Result<Vec<u8>, HardcopySourceError> {
+    pub(crate) fn into_worker_snapshot_json(self) -> Result<Vec<u8>, HardcopySourceError> {
         let snapshot = PreparedRetainedHardcopyWorkerSnapshot::capture(self)?;
         let bytes = serde_json::to_vec(&snapshot)
             .map_err(|error| HardcopySourceError::Serialization(error.to_string()))?;

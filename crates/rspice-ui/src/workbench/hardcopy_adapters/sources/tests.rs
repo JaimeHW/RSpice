@@ -366,7 +366,7 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
     );
     assert_eq!(all.hardcopy_sections().unwrap().len(), 3);
 
-    let worker_bytes = all.to_worker_snapshot_json().unwrap();
+    let worker_bytes = all.worker_snapshot_json().unwrap();
     let round_trip = ResolvedHardcopyDocument::from_worker_snapshot_json(&worker_bytes).unwrap();
     assert_eq!(round_trip, all);
 
@@ -931,7 +931,7 @@ fn retained_linked_report_figure_resolves_identically_in_process_and_worker_snap
     let prepared =
         prepare_retained_hardcopy_resolution(&state, &source_key, HardcopyScope::CompleteReport)
             .unwrap();
-    let worker_bytes = prepared.to_worker_snapshot_json().unwrap();
+    let worker_bytes = prepared.into_worker_snapshot_json().unwrap();
     let restored =
         PreparedRetainedHardcopyResolution::from_worker_snapshot_json(&worker_bytes).unwrap();
     assert_eq!(restored.resolve_owned().unwrap(), synchronous);
@@ -1782,7 +1782,7 @@ fn ungoverned_current_sheet_and_worker_use_the_canvas_project_default() {
     let prepared =
         prepare_retained_hardcopy_resolution(&state, &source_key, HardcopyScope::CurrentSheet)
             .unwrap();
-    let bytes = prepared.to_worker_snapshot_json().unwrap();
+    let bytes = prepared.into_worker_snapshot_json().unwrap();
     let restored = PreparedRetainedHardcopyResolution::from_worker_snapshot_json(&bytes).unwrap();
     assert_eq!(restored.resolve_owned().unwrap(), synchronous);
 }
@@ -1847,7 +1847,7 @@ fn prepared_design_worker_fixture() -> (PreparedRetainedHardcopyResolution, Reso
 #[test]
 fn prepared_worker_snapshot_round_trips_exact_owner_before_resolution() {
     let (prepared, expected) = prepared_design_worker_fixture();
-    let bytes = prepared.to_worker_snapshot_json().unwrap();
+    let bytes = prepared.into_worker_snapshot_json().unwrap();
     assert!(bytes.len() <= MAX_WORKER_SNAPSHOT_BYTES);
     let restored = PreparedRetainedHardcopyResolution::from_worker_snapshot_json(&bytes).unwrap();
     assert_eq!(restored.resolve_owned().unwrap(), expected);
@@ -1856,7 +1856,7 @@ fn prepared_worker_snapshot_round_trips_exact_owner_before_resolution() {
 #[test]
 fn prepared_worker_snapshot_rejects_tamper_unknown_fields_and_stale_identity() {
     let (prepared, _) = prepared_design_worker_fixture();
-    let bytes = prepared.to_worker_snapshot_json().unwrap();
+    let bytes = prepared.into_worker_snapshot_json().unwrap();
 
     let mut tampered: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     tampered["payload"]["identity"]["display_name"] =
@@ -1898,7 +1898,7 @@ fn prepared_worker_snapshot_rejects_tamper_unknown_fields_and_stale_identity() {
 #[test]
 fn prepared_worker_snapshot_rejects_unknown_owner_fields_even_with_resealed_transport() {
     let (prepared, _) = prepared_design_worker_fixture();
-    let bytes = prepared.to_worker_snapshot_json().unwrap();
+    let bytes = prepared.into_worker_snapshot_json().unwrap();
     let mut snapshot: PreparedRetainedHardcopyWorkerSnapshot =
         serde_json::from_slice(&bytes).unwrap();
     let PreparedRetainedHardcopyWorkerPayload::Schematic { schematic, .. } = &mut snapshot.payload

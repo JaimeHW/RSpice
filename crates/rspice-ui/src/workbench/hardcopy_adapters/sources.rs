@@ -843,10 +843,6 @@ pub(crate) fn active_app_hardcopy_source_available(state: &AppState) -> bool {
     }
 }
 
-/// Resolve a persisted source set against the currently retained application
-/// authorities. Members are processed in definition order and the operation
-/// returns no partial aggregate if any member is missing, stale, or invalid.
-
 /// Resolve an exact ordered source set with a caller-provided retained-source
 /// lookup. This is the state-facing boundary used both by project persistence
 /// and by worker-owned source snapshots.

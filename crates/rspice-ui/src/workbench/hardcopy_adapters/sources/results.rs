@@ -7,6 +7,7 @@
 //! showed it has gone.
 
 use super::*;
+#[cfg(test)]
 use crate::workbench::documents::result_document::manifest::ManifestViewModel;
 
 /// Resolve an active Visualization Studio pane without depending on a window,

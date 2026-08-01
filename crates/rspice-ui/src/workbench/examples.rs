@@ -33,7 +33,9 @@
 //!   `(x+20, y∓10)`; netlists as `E out+ out− in+ in−`. `mirror_h` puts the
 //!   output on the right.
 
-use crate::state::{Component, ComponentType, Point, Rotation, SchematicState, Wire};
+use crate::state::SchematicState;
+#[cfg(test)]
+use crate::state::{Component, ComponentType, Point, Rotation, Wire};
 
 // =============================================================================
 // Example Circuit Definitions

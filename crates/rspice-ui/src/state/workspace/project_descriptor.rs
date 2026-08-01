@@ -636,12 +636,12 @@ impl ProjectTechnologyChangeReceipt {
     }
 
     #[must_use]
-    pub const fn from_project_revision(&self) -> ObjectRevision {
+    pub const fn source_project_revision(&self) -> ObjectRevision {
         self.from_project_revision
     }
 
     #[must_use]
-    pub const fn to_project_revision(&self) -> ObjectRevision {
+    pub const fn target_project_revision(&self) -> ObjectRevision {
         self.to_project_revision
     }
 
@@ -868,22 +868,22 @@ impl ProjectLibraryMutationReceipt {
     }
 
     #[must_use]
-    pub const fn from_project_revision(&self) -> ObjectRevision {
+    pub const fn source_project_revision(&self) -> ObjectRevision {
         self.from_project_revision
     }
 
     #[must_use]
-    pub const fn to_project_revision(&self) -> ObjectRevision {
+    pub const fn target_project_revision(&self) -> ObjectRevision {
         self.to_project_revision
     }
 
     #[must_use]
-    pub const fn from_library_revision(&self) -> u64 {
+    pub const fn source_library_revision(&self) -> u64 {
         self.from_library_revision
     }
 
     #[must_use]
-    pub const fn to_library_revision(&self) -> u64 {
+    pub const fn target_library_revision(&self) -> u64 {
         self.to_library_revision
     }
 

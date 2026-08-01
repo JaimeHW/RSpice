@@ -411,7 +411,7 @@ fn execute_request(
             }
             vec![
                 resolved
-                    .to_worker_snapshot_json()
+                    .worker_snapshot_json()
                     .map_err(|error| error.to_string())?,
             ]
         }
@@ -768,7 +768,7 @@ mod browser {
         repaint: egui::Context,
     ) -> Result<HardcopyWorkerTicket, String> {
         let snapshot = prepared
-            .to_worker_snapshot_json()
+            .into_worker_snapshot_json()
             .map_err(|error| error.to_string())?;
         start(
             epoch,
@@ -790,7 +790,7 @@ mod browser {
         repaint: egui::Context,
     ) -> Result<HardcopyWorkerTicket, String> {
         let snapshot = source
-            .to_worker_snapshot_json()
+            .worker_snapshot_json()
             .map_err(|error| error.to_string())?;
         start(
             epoch,
@@ -818,7 +818,7 @@ mod browser {
         repaint: egui::Context,
     ) -> Result<HardcopyWorkerTicket, String> {
         let snapshot = source
-            .to_worker_snapshot_json()
+            .worker_snapshot_json()
             .map_err(|error| error.to_string())?;
         start(
             epoch,
@@ -1577,7 +1577,7 @@ mod tests {
             vec![
                 fixture
                     .prepared
-                    .to_worker_snapshot_json()
+                    .into_worker_snapshot_json()
                     .expect("prepared snapshot encodes"),
             ],
         )
@@ -1611,7 +1611,7 @@ mod tests {
                 vec![
                     wrong_key
                         .prepared
-                        .to_worker_snapshot_json()
+                        .into_worker_snapshot_json()
                         .expect("prepared snapshot encodes"),
                 ],
             ),
@@ -1634,7 +1634,7 @@ mod tests {
                 vec![
                     wrong_scope
                         .prepared
-                        .to_worker_snapshot_json()
+                        .into_worker_snapshot_json()
                         .expect("prepared snapshot encodes"),
                 ],
             ),
@@ -1666,7 +1666,7 @@ mod tests {
             vec![
                 fixture
                     .source
-                    .to_worker_snapshot_json()
+                    .worker_snapshot_json()
                     .expect("source snapshot encodes"),
             ],
         )
@@ -1708,7 +1708,7 @@ mod tests {
                 vec![
                     fixture
                         .source
-                        .to_worker_snapshot_json()
+                        .worker_snapshot_json()
                         .expect("source snapshot encodes"),
                 ],
             ),
@@ -1745,7 +1745,7 @@ mod tests {
             vec![
                 fixture
                     .source
-                    .to_worker_snapshot_json()
+                    .worker_snapshot_json()
                     .expect("source snapshot encodes"),
             ],
         )
@@ -1802,7 +1802,7 @@ mod tests {
             vec![
                 fixture
                     .source
-                    .to_worker_snapshot_json()
+                    .worker_snapshot_json()
                     .expect("source snapshot encodes"),
             ],
         )
@@ -1844,7 +1844,7 @@ mod tests {
                 vec![
                     fixture
                         .source
-                        .to_worker_snapshot_json()
+                        .worker_snapshot_json()
                         .expect("source snapshot encodes"),
                 ],
             ),
@@ -1884,7 +1884,7 @@ mod tests {
             vec![
                 fixture
                     .source
-                    .to_worker_snapshot_json()
+                    .worker_snapshot_json()
                     .expect("source snapshot encodes"),
             ],
         )

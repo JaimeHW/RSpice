@@ -96,11 +96,6 @@ pub fn get_primary_property_name(kind: ComponentType) -> &'static str {
 /// Formats a key-value HashMap into a SPICE-format parameter string.
 ///
 /// Uses standard SPICE format: `key1=value1 key2=value2`
-/// Values containing spaces are quoted.
-///
-/// # Arguments
-/// * `params` - HashMap of parameter name to string value
-///
 // =============================================================================
 // Property Collection (Component → PropertyValue HashMap)
 // =============================================================================

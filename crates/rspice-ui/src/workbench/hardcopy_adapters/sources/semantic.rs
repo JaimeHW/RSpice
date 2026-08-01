@@ -570,7 +570,7 @@ impl ResolvedHardcopyDocument {
 
     /// Bounded serde envelope for browser dedicated-worker transfer.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub(crate) fn to_worker_snapshot_json(&self) -> Result<Vec<u8>, HardcopySourceError> {
+    pub(crate) fn worker_snapshot_json(&self) -> Result<Vec<u8>, HardcopySourceError> {
         let snapshot = ResolvedHardcopyWorkerSnapshot::from_resolved(self)?;
         let bytes = serde_json::to_vec(&snapshot)
             .map_err(|error| HardcopySourceError::Serialization(error.to_string()))?;

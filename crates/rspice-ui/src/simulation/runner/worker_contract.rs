@@ -173,7 +173,6 @@ fn worker_request_op_config_mut(
             WorkerAnalysisSpec::DcOp(config) => Some(config),
             _ => None,
         },
-        _ => None,
     }
 }
 
@@ -190,7 +189,6 @@ fn worker_request_op_config(
             WorkerAnalysisSpec::DcOp(config) => Some(config),
             _ => None,
         },
-        _ => None,
     }
 }
 
