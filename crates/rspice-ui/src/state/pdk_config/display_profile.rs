@@ -732,8 +732,8 @@ fn validate_revision(
     validate_binding(&revision.technology)?;
     if revision.technology != package.binding() {
         return Err(PdkDisplayProfileError::TechnologyMismatch {
-            expected: package.binding(),
-            actual: revision.technology.clone(),
+            expected: Box::new(package.binding()),
+            actual: Box::new(revision.technology.clone()),
         });
     }
     if revision.entries.is_empty() || revision.entries.len() > MAX_PDK_DISPLAY_PROFILE_ENTRIES {
@@ -868,10 +868,12 @@ pub enum PdkDisplayProfileError {
     UnknownLayerPurpose(String),
     #[error("display profile omits layer purposes: {0:?}")]
     MissingLayerPurposes(Vec<String>),
+    /// Boxed: two inline bindings made every `Result` in this module carry
+    /// the mismatch payload on the success path as well.
     #[error("display profile is bound to {actual:?}, expected {expected:?}")]
     TechnologyMismatch {
-        expected: PdkTechnologyBinding,
-        actual: PdkTechnologyBinding,
+        expected: Box<PdkTechnologyBinding>,
+        actual: Box<PdkTechnologyBinding>,
     },
     #[error("display profile '{profile_id}' revision {revision} does not exist")]
     MissingRevision { profile_id: String, revision: u64 },
