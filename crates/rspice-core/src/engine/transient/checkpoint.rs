@@ -1864,8 +1864,15 @@ impl Drop for TemporaryCheckpoint {
     }
 }
 
-fn atomic_write_checkpoint(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+fn write_and_close(mut file: std::fs::File, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write as _;
+
+    file.write_all(bytes)?;
+    file.flush()?;
+    file.sync_all()
+}
+
+fn atomic_write_checkpoint(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
@@ -1901,7 +1908,7 @@ fn atomic_write_checkpoint(path: &std::path::Path, bytes: &[u8]) -> std::io::Res
             Err(error) => return Err(error),
         }
     }
-    let (temporary_path, mut file) = opened.ok_or_else(|| {
+    let (temporary_path, file) = opened.ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::AlreadyExists,
             "could not allocate a unique checkpoint temporary file",
@@ -1912,10 +1919,9 @@ fn atomic_write_checkpoint(path: &std::path::Path, bytes: &[u8]) -> std::io::Res
         armed: true,
     };
 
-    file.write_all(bytes)?;
-    file.flush()?;
-    file.sync_all()?;
-    drop(file);
+    // Consumed so the handle is closed before the rename: Windows refuses to
+    // replace a file that is still open.
+    write_and_close(file, bytes)?;
 
     // Recheck immediately before replacing the namespace entry. Rename and
     // MoveFileEx replace a racing symlink itself; checkpoint bytes are never
