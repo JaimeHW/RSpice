@@ -112,7 +112,7 @@ ed25519-dalek = { version = "2", default-features = false, features = ["std", "f
 # The matching `rand_core` feature on ed25519-dalek is dev-only for the same
 # reason: `cargo test` unions it in, `cargo build` never sees it.
 ed25519-dalek = { version = "2", features = ["rand_core"] }
-rand = "0.8"
+rand = "0.10"
 lopdf = { version = "0.44", default-features = false }
 wat = "1"
 
