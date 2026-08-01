@@ -491,24 +491,6 @@ impl LteEstimator {
         }
     }
 
-    /// Record an accepted solution and make the order used for its next LTE
-    /// estimate explicit.
-    ///
-    /// Xyce's OneStep may promote an accepted order-one trial before it
-    /// commits the point to history.  Updating the estimator order together
-    /// with that history keeps the first subsequent LTE calculation aligned
-    /// with the coefficients that produced the accepted point.
-    pub(crate) fn record_with_order(
-        &mut self,
-        solution: &[Value],
-        prefix_len: usize,
-        dt: Value,
-        order: u8,
-    ) {
-        self.method_order = u32::from(order.max(1));
-        self.record_prefix(solution, prefix_len, dt);
-    }
-
     /// Estimate LTE using linear extrapolation vs actual value
     /// Returns (lte_estimate, should_accept)
     pub fn estimate(&self, current: &[Value], dt: Value) -> (Value, bool) {
