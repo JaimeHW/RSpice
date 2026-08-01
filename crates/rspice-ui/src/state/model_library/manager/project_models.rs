@@ -172,6 +172,7 @@ impl ModelLibraryManager {
 
     /// Replace one editable project model using optimistic source-revision
     /// guards. External, built-in, multi-card, and stale sources fail closed.
+    #[cfg(test)]
     pub fn replace_project_model(
         &mut self,
         library_name: &str,

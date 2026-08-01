@@ -229,6 +229,7 @@ impl PreparedVerilogARuntime {
         &self.source_key
     }
 
+    #[cfg(test)]
     pub const fn source_digest(&self) -> crate::product::ContentDigest {
         self.source_digest
     }

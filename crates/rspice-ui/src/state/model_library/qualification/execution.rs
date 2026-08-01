@@ -100,6 +100,7 @@ impl QualificationExecutionSession {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn is_finished(&self) -> bool {
         self.finished
     }

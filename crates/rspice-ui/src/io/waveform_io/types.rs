@@ -198,6 +198,7 @@ impl WaveformDataset {
     }
 
     /// Get signal names
+    #[cfg(test)]
     pub fn signal_names(&self) -> Vec<&str> {
         self.signals.iter().map(|s| s.name.as_str()).collect()
     }

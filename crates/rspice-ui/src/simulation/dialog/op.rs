@@ -187,6 +187,7 @@ pub enum OpSaveDevice {
 
 impl OpSaveDevice {
     pub const ALL: [Self; 3] = [Self::Enabled, Self::Disabled, Self::FinalPointOnly];
+    #[cfg(test)]
     pub const fn display_name(self) -> &'static str {
         match self {
             Self::Enabled => "Enabled",

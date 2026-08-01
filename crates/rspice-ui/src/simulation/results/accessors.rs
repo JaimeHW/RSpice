@@ -41,6 +41,7 @@ impl SimulationResult {
     }
 
     /// Get a specific waveform by name
+    #[cfg(test)]
     pub fn get_waveform(&self, name: &str) -> Option<&WaveformData> {
         match self {
             SimulationResult::DcSweep { waveforms, .. } => waveforms.get(name),

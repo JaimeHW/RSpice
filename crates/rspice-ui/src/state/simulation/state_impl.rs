@@ -466,6 +466,7 @@ impl SimulationState {
     }
 
     /// Get count of runs in history
+    #[cfg(test)]
     pub fn run_count(&self) -> usize {
         self.runs.len()
     }

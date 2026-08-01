@@ -83,6 +83,7 @@ pub struct VisualizationRasterPalette {
 }
 
 impl VisualizationRasterPalette {
+    #[cfg(test)]
     pub fn new(
         plot_background: Rgb8,
         grid: Rgb8,

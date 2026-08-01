@@ -1013,6 +1013,7 @@ impl ResultsState {
 
     /// Reset every pane and plot owned by one viewer (the viewer-wide FIT/F
     /// action). This deliberately does not assume a single plot at slot zero.
+    #[cfg(test)]
     pub(crate) fn reset_viewer_plot_views(&mut self, viewer: ResultViewer) {
         self.views
             .retain(|(key_viewer, _, _), _| *key_viewer != viewer);

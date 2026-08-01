@@ -247,6 +247,7 @@ impl ProjectFile {
         }
     }
 
+    #[cfg(test)]
     pub fn new_with_simulation_results(
         workspace: ProjectWorkspace,
         libraries: LibraryManager,

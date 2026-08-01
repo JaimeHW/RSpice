@@ -199,6 +199,7 @@ impl RSpiceApp {
     }
 }
 
+#[cfg(test)]
 fn load_persisted_pdk_sources_with_persistence(
     state: &mut AppState,
     mut persist: impl FnMut(&crate::state::pdk_config::PdkConfig) -> Result<(), String>,

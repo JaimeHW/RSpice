@@ -62,6 +62,7 @@ impl CheckEvidence {
         &self.id
     }
 
+    #[cfg(test)]
     pub const fn outcome(&self) -> CheckOutcome {
         self.outcome
     }
@@ -166,6 +167,7 @@ impl ComparisonEvidence {
         })
     }
 
+    #[cfg(test)]
     pub const fn waveform_count(&self) -> u64 {
         self.waveform_count
     }

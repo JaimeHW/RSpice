@@ -36,6 +36,7 @@ impl PoleZeroState {
     }
 
     /// Is empty?
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.datasets.is_empty()
     }

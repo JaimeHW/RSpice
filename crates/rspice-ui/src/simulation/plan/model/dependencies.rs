@@ -209,6 +209,7 @@ impl SimulationPlan {
     /// The complete repair commits as one revision and one lifecycle receipt.
     /// Any identity, lifecycle, revision, or graph failure leaves the original
     /// plan unchanged.
+    #[cfg(test)]
     pub fn repair_dependencies(
         &mut self,
         dependent: AnalysisInstanceId,

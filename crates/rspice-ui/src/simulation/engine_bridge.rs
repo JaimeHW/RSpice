@@ -80,6 +80,7 @@ impl EngineBridge {
     /// This compatibility convenience API is intended for direct synchronous
     /// callers. Production queued execution must use [`Self::run_with_abort`]
     /// or [`Self::run_with_abort_and_source_path`].
+    #[cfg(test)]
     pub fn run(
         &self,
         config: &AnalysisConfig,

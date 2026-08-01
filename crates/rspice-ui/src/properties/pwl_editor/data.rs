@@ -247,6 +247,7 @@ impl PwlData {
     }
 
     /// Check if empty.
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.points.is_empty()
     }

@@ -168,6 +168,7 @@ macro_rules! define_surface_catalog {
             }
 
             #[must_use]
+            #[cfg(test)]
             pub const fn canonical_tier(self) -> CanonicalTier {
                 self.metadata().canonical_tier
             }

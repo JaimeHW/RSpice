@@ -361,6 +361,7 @@ impl SimulationRun {
     }
 
     /// Find analysis by type (returns first match)
+    #[cfg(test)]
     pub fn find_analysis(&self, analysis_type: AnalysisType) -> Option<&AnalysisResult> {
         self.analyses
             .iter()

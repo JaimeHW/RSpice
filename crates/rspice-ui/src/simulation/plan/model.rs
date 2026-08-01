@@ -106,6 +106,7 @@ impl AnalysisDependencyRepair {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub fn changed(&self) -> bool {
         !self.inserted.is_empty()
             || !self.enabled.is_empty()
@@ -1258,6 +1259,7 @@ impl SimulationPlan {
     /// numerical-contract failure. Used by selectors as well as mutations so
     /// the UI cannot offer a binding that the plan will reject.
     #[must_use]
+    #[cfg(test)]
     pub fn dependency_candidate_is_compatible(
         &self,
         dependent: AnalysisInstanceId,

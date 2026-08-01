@@ -361,6 +361,7 @@ impl Toasts {
         self.observed_log_revision
     }
 
+    #[cfg(test)]
     pub fn mark_read(&mut self, id: u64) -> bool {
         let Some(item) = self.activity.iter_mut().find(|item| item.id == id) else {
             return false;

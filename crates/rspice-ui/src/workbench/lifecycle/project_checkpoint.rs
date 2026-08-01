@@ -105,6 +105,7 @@ impl ProjectCheckpointQuarantine {
         &self.label
     }
 
+    #[cfg(test)]
     pub(crate) fn reason(&self) -> &str {
         &self.reason
     }

@@ -62,6 +62,7 @@ impl AnalysisResultProvenance {
         )
     }
 
+    #[cfg(test)]
     pub fn new_with_source_domain(
         source_domain: AnalysisResultSourceDomain,
         source_instance_id: AnalysisInstanceId,

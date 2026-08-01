@@ -59,6 +59,7 @@ macro_rules! define_capability_workflows {
             }
 
             #[must_use]
+            #[cfg(test)]
             pub const fn label(self) -> &'static str {
                 self.metadata().label
             }

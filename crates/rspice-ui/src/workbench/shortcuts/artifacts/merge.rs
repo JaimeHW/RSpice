@@ -134,6 +134,7 @@ impl ShortcutImportConflict {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn platform(&self) -> Option<CommandPlatform> {
         self.platform
     }
@@ -198,6 +199,7 @@ impl ShortcutImportPlan {
         &self.summaries
     }
     #[must_use]
+    #[cfg(test)]
     pub fn conflicts(&self) -> &[ShortcutImportConflict] {
         &self.conflicts
     }

@@ -142,6 +142,7 @@ impl FftData {
     }
 
     /// Create from magnitude/phase arrays with explicit normalization metadata.
+    #[cfg(test)]
     pub fn from_spectrum_with_normalization(
         name: &str,
         frequencies: &[f64],

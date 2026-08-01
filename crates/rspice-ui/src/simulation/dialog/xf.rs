@@ -21,6 +21,7 @@ pub enum XfNormalization {
 impl XfNormalization {
     pub const ALL: [Self; 3] = [Self::None, Self::RelativeToNominal, Self::PerSourceUnit];
 
+    #[cfg(test)]
     pub const fn display_name(self) -> &'static str {
         match self {
             Self::None => "Disabled",

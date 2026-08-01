@@ -525,6 +525,7 @@ impl PersonalPrintMappingPresetStorage {
         }
     }
 
+    #[cfg(test)]
     fn current_mut(&mut self) -> Result<&mut PrintMappingPresetCatalog, &'static str> {
         match self {
             Self::Current(catalog) if catalog.owner() == PrintMappingCatalogOwner::Personal => {
@@ -1004,6 +1005,7 @@ impl UserPreferences {
     /// this build. An incompatible future root is retained and resolves to
     /// safe current defaults instead of invalidating the session.
     #[must_use]
+    #[cfg(test)]
     pub fn results(&self) -> Option<&ResultsPreferences> {
         self.results.current()
     }
@@ -1043,6 +1045,7 @@ impl UserPreferences {
         self.personal_print_mapping_presets.current()
     }
 
+    #[cfg(test)]
     pub fn save_personal_print_mapping_preset(
         &mut self,
         table: PrintMappingTable,
@@ -1080,6 +1083,7 @@ impl UserPreferences {
         self.shortcuts.active()
     }
 
+    #[cfg(test)]
     pub fn shortcuts_mut(
         &mut self,
     ) -> Result<&mut ShortcutPreferences, ShortcutProfileLibraryError> {

@@ -66,6 +66,7 @@ impl YieldSpec {
     }
 
     /// Create an upper limit spec
+    #[cfg(test)]
     pub fn upper(target: impl Into<String>, max: f64, unit: impl Into<String>) -> Self {
         Self {
             target: target.into(),

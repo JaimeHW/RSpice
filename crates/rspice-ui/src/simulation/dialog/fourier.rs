@@ -51,6 +51,7 @@ impl FourierConfig {
         }
     }
 
+    #[cfg(test)]
     pub fn with_window(mut self, start: f64, stop: f64) -> Self {
         self.start_time = start;
         self.stop_time = stop;

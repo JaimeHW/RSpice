@@ -50,6 +50,7 @@ impl SensConfig {
         }
     }
 
+    #[cfg(test)]
     pub fn with_type(mut self, t: SensType) -> Self {
         self.sens_type = t;
         self

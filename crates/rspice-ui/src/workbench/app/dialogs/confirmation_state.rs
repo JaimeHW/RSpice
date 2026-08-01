@@ -198,6 +198,7 @@ impl ConfirmationDialogState {
     }
 
     /// Check if dialog is open for a specific action
+    #[cfg(test)]
     pub fn is_showing(&self, action: ConfirmationAction) -> bool {
         self.visible && self.pending_action == Some(action)
     }

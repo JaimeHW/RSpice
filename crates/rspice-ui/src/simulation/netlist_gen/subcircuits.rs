@@ -170,6 +170,7 @@ impl<'a> HierarchySource<'a> {
     }
 
     /// Register a master directly (tests, ad-hoc callers).
+    #[cfg(test)]
     pub fn insert(&mut self, library: &str, cell: &str, schematic: &'a SchematicState) {
         self.masters
             .insert(Self::view_key(library, cell, "schematic"), schematic);

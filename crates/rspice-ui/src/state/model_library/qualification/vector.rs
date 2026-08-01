@@ -23,12 +23,14 @@ impl QualificationPlatform {
 /// Expected tolerance for one named reference quantity in a golden vector.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[cfg(test)]
 pub struct ReferenceTolerance {
     pub quantity: String,
     pub absolute: NonNegativeFinite,
     pub relative: NonNegativeFinite,
 }
 
+#[cfg(test)]
 impl ReferenceTolerance {
     #[cfg(test)]
     pub fn try_new(

@@ -328,6 +328,7 @@ const MODEL_BINDING: ProductObjectContract = ProductObjectContract {
 /// keeps its producer identity and is never relabeled as native.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[cfg(test)]
 pub enum Availability {
     Production,
     Preview,
@@ -337,6 +338,7 @@ pub enum Availability {
     Roadmap,
 }
 
+#[cfg(test)]
 impl Availability {
     #[must_use]
     #[cfg(test)]
@@ -351,6 +353,7 @@ impl Availability {
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[cfg(test)]
 pub enum ReadinessStage {
     Registered,
     Specified,
@@ -361,6 +364,7 @@ pub enum ReadinessStage {
     SignOffEligible,
 }
 
+#[cfg(test)]
 impl ReadinessStage {
     #[cfg(test)]
     pub const ALL: [Self; 7] = [
@@ -374,6 +378,7 @@ impl ReadinessStage {
     ];
 
     #[must_use]
+    #[cfg(test)]
     pub const fn requires(self, prerequisite: Self) -> bool {
         self as u8 >= prerequisite as u8
     }

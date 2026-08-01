@@ -46,6 +46,7 @@ impl SchematicSelectionFilter {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn enabled_count(self) -> usize {
         self.instances as usize
             + self.wires as usize

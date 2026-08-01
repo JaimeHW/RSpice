@@ -268,6 +268,7 @@ impl ShortcutProfileLibrary {
     /// Revision advances on mutable borrow, even when the caller performs no
     /// edit; this conservative rule ensures no direct mutation can bypass CAS
     /// invalidation. Incompatible raw libraries always fail closed.
+    #[cfg(test)]
     pub fn active_mut(&mut self) -> Result<&mut ShortcutPreferences, ShortcutProfileLibraryError> {
         self.ensure_compatible()?;
         self.bump_revision()?;

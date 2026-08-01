@@ -486,6 +486,7 @@ impl SymbolLibrary {
     }
 
     /// Get a parsed embedded asset by filename.
+    #[cfg(test)]
     pub fn get_asset(&self, filename: &str) -> Option<&Symbol> {
         self.embedded_assets.get(filename)
     }

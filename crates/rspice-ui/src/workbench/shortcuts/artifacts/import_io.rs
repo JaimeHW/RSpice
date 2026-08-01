@@ -102,6 +102,7 @@ impl ShortcutArtifactImportError {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub fn source_name(&self) -> Option<&str> {
         self.source_name.as_deref()
     }
@@ -144,6 +145,7 @@ impl ReadyShortcutArtifactSource {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn detected(&self) -> &DetectedShortcutArtifact {
         &self.detected
     }

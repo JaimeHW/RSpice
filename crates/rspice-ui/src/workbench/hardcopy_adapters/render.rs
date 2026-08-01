@@ -718,6 +718,7 @@ impl HardcopyScene {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub fn primitives(&self) -> &[ScenePrimitive] {
         &self.primitives
     }

@@ -1506,6 +1506,7 @@ impl SimulationController {
     }
 
     /// Abort current simulation
+    #[cfg(test)]
     pub fn abort(&self) {
         self.runner.abort();
     }

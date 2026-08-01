@@ -104,6 +104,7 @@ impl SimulationPlanLineage {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn cloned_from(
         source_plan_id: SimulationPlanId,
         source_revision: ObjectRevision,
