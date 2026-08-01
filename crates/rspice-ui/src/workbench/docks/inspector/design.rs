@@ -8,6 +8,8 @@
 
 mod component;
 
+pub(crate) use component::apply_bound_model_choice;
+
 use component::*;
 
 use std::collections::{HashMap, HashSet};

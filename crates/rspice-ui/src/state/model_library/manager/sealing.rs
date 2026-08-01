@@ -75,12 +75,12 @@ impl ModelLibraryManager {
     where
         F: FnMut(&Path) -> Result<Vec<u8>, String>,
     {
-        let library_order = self.definition_resolution_order()?;
-        let libraries = library_order
-            .iter()
-            .filter_map(|name| self.libraries.get(name))
+        let mut libraries: Vec<&ModelLibrary> = self
+            .libraries
+            .values()
             .filter(|library| library.source_authority.has_execution_source())
-            .collect::<Vec<_>>();
+            .collect();
+        libraries.sort_by(|left, right| left.name.cmp(&right.name));
 
         // The final flag selects retained project bytes (`true`) or a live,
         // re-authenticated external read (`false`). A path can never mix the
@@ -97,7 +97,7 @@ impl ModelLibraryManager {
                     library.name
                 )
             })?;
-            let retained = library.source_authority.uses_retained_bytes();
+            let project_owned = library.source_authority.is_project_owned();
             if library.source_closure.is_empty() {
                 return Err(format!(
                     "Model library '{}' is not content-pinned; refresh or re-import '{}' before simulation",
@@ -125,7 +125,7 @@ impl ModelLibraryManager {
 
             for source in &library.source_closure {
                 #[cfg(not(target_arch = "wasm32"))]
-                if !retained && is_foreign_platform_absolute_path(&source.path) {
+                if !project_owned && is_foreign_platform_absolute_path(&source.path) {
                     return Err(format!(
                         "Model library '{}' retains foreign-platform dependency '{}', which is unavailable on this host; re-import or repair the binding before simulation",
                         library.name,
@@ -141,7 +141,7 @@ impl ModelLibraryManager {
                 }
                 match expected_sources.entry(source.path.clone()) {
                     std::collections::btree_map::Entry::Vacant(entry) => {
-                        entry.insert((source.digest, vec![library.name.clone()], retained));
+                        entry.insert((source.digest, vec![library.name.clone()], project_owned));
                     }
                     std::collections::btree_map::Entry::Occupied(mut entry) => {
                         if entry.get().0 != source.digest {
@@ -150,7 +150,7 @@ impl ModelLibraryManager {
                                 source.path.display()
                             ));
                         }
-                        if entry.get().2 != retained {
+                        if entry.get().2 != project_owned {
                             return Err(format!(
                                 "Model libraries disagree on source authority for shared dependency '{}'",
                                 source.path.display()
@@ -257,14 +257,14 @@ impl ModelLibraryManager {
                     }
                 }
             }
-            if retained {
-                let digest = library
-                    .source_authority
-                    .retained_root_digest()
-                    .expect("retained authority owns a root digest");
+            if project_owned {
+                let ModelSourceAuthority::ProjectOwned { digest, .. } = library.source_authority
+                else {
+                    unreachable!("project-owned authority was checked above")
+                };
                 if library.source_contents.len() != library.source_closure.len() {
                     return Err(format!(
-                        "Retained model library '{}' must retain exact bytes for every authenticated source member",
+                        "Project-owned model library '{}' must retain exact bytes for every authenticated source member",
                         library.name
                     ));
                 }
@@ -275,45 +275,24 @@ impl ModelLibraryManager {
                     .is_none_or(|source| source.digest != digest)
                 {
                     return Err(format!(
-                        "Retained model library '{}' root source digest does not match its authority",
+                        "Project-owned model library '{}' root source digest does not match its revision authority",
                         library.name
                     ));
                 }
             }
 
-            let mut corners = library
+            let mut sections = library
                 .corners
                 .values()
                 .filter(|corner| corner.file_path.is_some())
-                .cloned()
+                .map(|corner| corner.name.clone())
                 .collect::<Vec<_>>();
-            corners.sort_by_key(|corner| corner.name.to_ascii_lowercase());
-            if let Some(pair) = corners
-                .windows(2)
-                .find(|pair| pair[0].name.eq_ignore_ascii_case(&pair[1].name))
-            {
-                return Err(format!(
-                    "Model library '{}' defines case-insensitive duplicate corners '{}' and '{}'",
-                    library.name, pair[0].name, pair[1].name
-                ));
-            }
-            for corner in &corners {
-                let Some(source_path) = corner.file_path.as_ref() else {
-                    continue;
-                };
-                if !source_paths.contains(source_path) {
-                    return Err(format!(
-                        "Model library '{}' corner '{}' binds source '{}' outside its authenticated closure",
-                        library.name,
-                        corner.name,
-                        source_path.display()
-                    ));
-                }
-            }
+            sections.sort_by_key(|section| section.to_ascii_lowercase());
+            sections.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
             sealed_libraries.push(SealedExecutionLibrary {
                 name: library.name.clone(),
                 root_path: root_path.clone(),
-                corners,
+                sections,
             });
         }
 
@@ -329,11 +308,11 @@ impl ModelLibraryManager {
         }
 
         let mut authenticated_sources = Vec::with_capacity(expected_sources.len());
-        for (path, (expected_digest, owners, retained)) in expected_sources {
-            let bytes = if retained {
+        for (path, (expected_digest, owners, project_owned)) in expected_sources {
+            let bytes = if project_owned {
                 retained_sources.remove(&path).ok_or_else(|| {
                     format!(
-                        "Retained model dependency '{}' (used by {}) has no retained source bytes",
+                        "Project-owned model dependency '{}' (used by {}) has no retained source bytes",
                         path.display(),
                         owners.join(", ")
                     )
@@ -350,9 +329,9 @@ impl ModelLibraryManager {
             let actual_digest =
                 crate::product::ContentDigest::from_bytes(Sha256::digest(&bytes).into());
             if actual_digest != expected_digest {
-                return Err(if retained {
+                return Err(if project_owned {
                     format!(
-                        "Retained model dependency changed at '{}'; the retained bytes no longer match the accepted SHA-256 identity",
+                        "Project-owned model dependency changed at '{}'; the retained bytes no longer match the accepted SHA-256 identity",
                         path.display()
                     )
                 } else {
@@ -391,6 +370,9 @@ impl ModelLibraryManager {
             sources: authenticated_sources,
             edges,
             libraries: sealed_libraries,
+            // A signed PDK contributes its bindings through
+            // `with_pdk_model_sources` after sealing; a project with no PDK pin
+            // seals with none.
             pdk_process_bindings: Vec::new(),
             pdk_veriloga_artifacts: Vec::new(),
             pdk_veriloga_bindings: Vec::new(),

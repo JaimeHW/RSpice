@@ -21,6 +21,103 @@ use super::super::design_system::{
 };
 use super::super::state::{ModelsPage, ProjectPage, VerificationPage, Workspace};
 
+
+/// Bind one selected schematic instance from the Models & PDKs workbench
+/// through the same guarded schematic transaction used by the inspector.
+/// Library-cell instances retain their exact library identity; primitive
+/// instances can bind only when the requested model name is unique across the
+/// loaded catalog, because their persisted SPICE contract has no library slot.
+pub(crate) fn bind_component_model_from_catalog(
+    app: &mut RSpiceApp,
+    component_id: u64,
+    library_name: &str,
+    model_name: &str,
+) -> Result<(), String> {
+    let component = app
+        .state
+        .schematic
+        .components
+        .iter()
+        .find(|component| component.id == component_id)
+        .cloned()
+        .ok_or_else(|| "The selected instance no longer exists.".to_owned())?;
+    let library = app
+        .state
+        .model_library_manager
+        .get_library(library_name)
+        .ok_or_else(|| format!("Model library '{library_name}' is no longer loaded."))?;
+    if !library
+        .models
+        .values()
+        .any(|model| model.name.eq_ignore_ascii_case(model_name))
+    {
+        return Err(format!(
+            "Model '{model_name}' is no longer present in library '{library_name}'."
+        ));
+    }
+
+    if let Some(binding) = component.library_cell.as_ref() {
+        if !binding.library.eq_ignore_ascii_case(library_name) {
+            return Err(format!(
+                "The selected cell instance is bound to library '{}'; cross-library rebinding requires the Library/Cellview Manager.",
+                binding.library
+            ));
+        }
+        let before = app.state.schematic.topology_version();
+        design::apply_bound_model_choice(app, component_id, model_name);
+        if app.state.schematic.topology_version() == before {
+            return Err(
+                "The requested model is incompatible with the selected cell's model family."
+                    .to_owned(),
+            );
+        }
+        return Ok(());
+    }
+
+    let duplicate_count = app
+        .state
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .filter(|library| {
+            library
+                .models
+                .values()
+                .any(|model| model.name.eq_ignore_ascii_case(model_name))
+        })
+        .count();
+    if duplicate_count != 1 {
+        return Err(format!(
+            "Primitive SPICE instances store only a model name, and '{model_name}' resolves in {duplicate_count} loaded libraries. Resolve the definition conflict before binding."
+        ));
+    }
+
+    let mut params = crate::state::parse_params_string(&component.params);
+    if params
+        .get("model")
+        .is_some_and(|current| current.eq_ignore_ascii_case(model_name))
+    {
+        return Ok(());
+    }
+    let before = crate::state::SchematicSnapshot::capture(&app.state.schematic);
+    let target = app
+        .state
+        .schematic
+        .components
+        .iter_mut()
+        .find(|candidate| candidate.id == component_id)
+        .expect("the selected component was resolved above");
+    params.insert("model".to_owned(), model_name.to_owned());
+    target.params = crate::state::format_params_string(&params);
+    app.state.schematic.is_dirty = true;
+    app.state.schematic.bump_topology_version();
+    app.state
+        .schematic
+        .commit_undo_from(before, "bind instance model");
+    app.invalidate_simulation_preflight();
+    Ok(())
+}
+
 const INSPECTOR_PROPERTY_LIST_PADDING_TOP: f32 = 7.0;
 const INSPECTOR_PROPERTY_LIST_PADDING_BOTTOM: f32 = 10.0;
 const INSPECTOR_TREE_PADDING_TOP: f32 = 4.0;

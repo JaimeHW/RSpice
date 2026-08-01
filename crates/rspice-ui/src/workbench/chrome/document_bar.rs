@@ -551,6 +551,12 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
                 false
             }
         }
+        WorkspaceDocumentId::VisualizationDocument(document_id) => {
+            crate::workbench::documents::result_document::activate_persistent_document(
+                state,
+                *document_id,
+            )
+        }
         WorkspaceDocumentId::AnalysisSetup(id) => {
             let Some(position) = state
                 .sim_setup

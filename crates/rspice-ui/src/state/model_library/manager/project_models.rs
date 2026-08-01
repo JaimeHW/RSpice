@@ -27,7 +27,12 @@ impl ModelLibraryManager {
             .cloned()
             .ok_or_else(|| format!("Model library '{source_library_name}' does not exist"))?;
         match source_library.source_authority {
-            ModelSourceAuthority::BuiltIn | ModelSourceAuthority::External => {}
+            // A retained import is pinned bytes the project kept, not a
+            // project-owned definition, so copying one into the project is
+            // the same operation as copying an external or built-in card.
+            ModelSourceAuthority::BuiltIn
+            | ModelSourceAuthority::External
+            | ModelSourceAuthority::RetainedImport { .. } => {}
             ModelSourceAuthority::ProjectOwned { .. } => {
                 return Err(format!(
                     "Model '{source_model_name}' in library '{source_library_name}' is already project-owned"

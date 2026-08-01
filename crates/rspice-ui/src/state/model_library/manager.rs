@@ -601,6 +601,48 @@ pub struct PackModelHit {
 
 impl ModelLibraryManager {
 
+    /// Convert a parsed card that a `.lib` section owns, recording the section
+    /// as execution provenance. Cards at file scope use
+    /// [`Self::convert_parsed_model`], which leaves the section unset.
+    pub(crate) fn convert_parsed_model_in_section(
+        model: &rspice_core::library::ParsedModel,
+        file_path: &Path,
+        section: Option<&str>,
+    ) -> DeviceModel {
+        let mut converted = Self::convert_parsed_model(model, file_path);
+        converted.section = section.map(str::to_owned);
+        converted
+    }
+
+    /// Project one parsed subcircuit onto its callable interface. A subcircuit
+    /// carries its own source file when it was reached through an include, so
+    /// that path wins over the root being scanned.
+    pub(crate) fn convert_parsed_subcircuit(
+        subcircuit: &rspice_core::library::ParsedSubcircuit,
+        file_path: &Path,
+        section: Option<&str>,
+    ) -> super::ModelSubcircuitInterface {
+        super::ModelSubcircuitInterface {
+            name: subcircuit.name.clone(),
+            ports: subcircuit.pins.clone(),
+            parameter_defaults: subcircuit
+                .parameter_defaults
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect(),
+            description: subcircuit.description.clone(),
+            file_path: Some(
+                subcircuit
+                    .source_file
+                    .as_deref()
+                    .unwrap_or(file_path)
+                    .to_path_buf(),
+            ),
+            source_line: subcircuit.source_line,
+            section: section.map(str::to_owned),
+        }
+    }
+
     /// Stable identity of the persisted model catalogue relevant to source
     /// preparation. Browser filters, selection, shipped-pack indexes, and
     /// audit ledgers are deliberately excluded.
@@ -1474,6 +1516,9 @@ impl ModelLibraryManager {
             for model in models {
                 let device_model = DeviceModel {
                     name: model.name.clone(),
+                    // Built-in cards are compiled in at file scope; no `.lib`
+                    // section owns them.
+                    section: None,
                     model_type: Self::convert_core_model_type(model.model_type),
                     spice_type: Some(Self::core_model_type_token(model.model_type).to_owned()),
                     level: ModelLevel::Unknown,
@@ -1507,6 +1552,9 @@ impl ModelLibraryManager {
 
         DeviceModel {
             name: model.name.clone(),
+            // This conversion has no section context; a card parsed inside a
+            // `.lib` is attributed by the caller that knows the section.
+            section: None,
             model_type,
             spice_type: Some(model.spice_type.clone()),
             level: Self::convert_model_level(model.level, &model.spice_type),

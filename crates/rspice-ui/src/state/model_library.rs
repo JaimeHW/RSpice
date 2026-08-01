@@ -50,11 +50,7 @@ pub(crate) use library::{
     subcircuit_interface_key,
 };
 pub use manager::{
-    ActivatedPackSubcircuit, CornerBindingInspection, CornerBindingInspectionRow,
-    CornerSectionInspection, ModelBinAuditAxisRange, ModelBinAuditDraft, ModelBinAuditFinding,
-    ModelBinAuditFindingKind, ModelBinAuditReceipt, ModelDefinitionConflict,
-    ModelDefinitionProvider, ModelDefinitionResolution, ModelLibraryManager, PackCatalogPage,
-    PackModelHit, ProjectModelCommit, SealedModelExecutionSources,
+    ModelLibraryManager, PackModelHit, ProjectModelCommit, SealedModelExecutionSources,
 };
 pub use model::DeviceModel;
 pub use project_revision::ProjectModelRevisionDefinition;

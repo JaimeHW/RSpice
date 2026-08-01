@@ -1724,7 +1724,6 @@ fn model_snapshot(app: &RSpiceApp) -> ModelSnapshot {
     let binding = app.state.workspace.project.technology_binding();
     let contract_error =
         binding.and_then(|_| app.state.validate_project_technology_contract().err());
-    let resolution_error = manager.validate_definition_resolution().err();
     let source_contract_error = manager.libraries_sorted().into_iter().find_map(|library| {
         if !library.source_authority.has_execution_source() {
             return None;
@@ -1763,7 +1762,7 @@ fn model_snapshot(app: &RSpiceApp) -> ModelSnapshot {
             detail: error,
             tone: Tone::Error,
         }
-    } else if let Some(error) = resolution_error.or(source_contract_error) {
+    } else if let Some(error) = source_contract_error {
         HealthCopy {
             state: "Closure blocked".to_owned(),
             detail: error,

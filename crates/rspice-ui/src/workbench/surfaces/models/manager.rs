@@ -446,6 +446,7 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 .unwrap_or_else(|| match library.source_authority {
                     ModelSourceAuthority::BuiltIn => "RSpice built-in".to_owned(),
                     ModelSourceAuthority::External => "external source".to_owned(),
+                    ModelSourceAuthority::RetainedImport { .. } => "retained import".to_owned(),
                     ModelSourceAuthority::ProjectOwned { .. } => "project source".to_owned(),
                 });
             let haystack = format!(
@@ -1817,6 +1818,7 @@ fn open_model_source(
                 content.path.display(),
                 match library.source_authority {
                     ModelSourceAuthority::ProjectOwned { .. } => "project revision",
+                    ModelSourceAuthority::RetainedImport { .. } => "retained import bytes",
                     ModelSourceAuthority::External => "pinned external bytes",
                     ModelSourceAuthority::BuiltIn => "built-in",
                 }
@@ -2107,6 +2109,7 @@ fn build_include_manifest(app: &ManagerRenderContext<'_>) -> String {
                 "authority": match library.source_authority {
                     ModelSourceAuthority::BuiltIn => "built-in",
                     ModelSourceAuthority::External => "external",
+                    ModelSourceAuthority::RetainedImport { .. } => "retained-import",
                     ModelSourceAuthority::ProjectOwned { .. } => "project-owned",
                 },
                 "root": library.root_path.as_ref().map(|path| path.to_string_lossy()),

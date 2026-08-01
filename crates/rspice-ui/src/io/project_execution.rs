@@ -15,8 +15,8 @@ use crate::product::{ContentDigest, ProjectId};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::model_library::is_foreign_platform_absolute_path;
 use crate::state::model_library::{
-    DeviceModel, ModelBinAuditReceipt, ModelCorrelationState, ModelDefinitionMetadata,
-    ModelDefinitionResolution, ModelLibrary, ModelLibraryManager, ModelQualificationState,
+    DeviceModel, ModelCorrelationState, ModelDefinitionMetadata,
+    ModelLibrary, ModelLibraryManager, ModelQualificationState,
     ModelSectionQualification, ModelSourceAuthority, ModelSourceContent, ModelSourceEdge,
     ModelSourceEvidenceBinding, ModelSourcePin, ModelSubcircuitInterface, ParameterDataType,
     ParameterValue, ProcessCorner as LibraryProcessCorner, ProjectModelDefinition,
@@ -82,10 +82,6 @@ pub struct ProjectExecutionContext {
     pub schema_version: u32,
     pub simulation_plan: SimSetupState,
     pub model_libraries: Vec<ProjectModelLibrary>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub model_bin_audit_receipts: Vec<ModelBinAuditReceipt>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub model_definition_resolutions: Vec<ModelDefinitionResolution>,
 }
 
 impl<'de> Deserialize<'de> for ProjectExecutionContext {
@@ -100,10 +96,17 @@ impl<'de> Deserialize<'de> for ProjectExecutionContext {
             schema_version: u32,
             simulation_plan: serde_json::Value,
             model_libraries: Vec<ProjectModelLibrary>,
+            /// Retired with the local Models workspace. The field is still
+            /// accepted, and discarded, so a project written by a build that
+            /// carried the ledger still loads under `deny_unknown_fields`.
+            /// Nothing writes it back.
             #[serde(default)]
-            model_bin_audit_receipts: Vec<ModelBinAuditReceipt>,
+            #[allow(dead_code)]
+            model_bin_audit_receipts: serde::de::IgnoredAny,
+            /// Retired alongside `model_bin_audit_receipts`.
             #[serde(default)]
-            model_definition_resolutions: Vec<ModelDefinitionResolution>,
+            #[allow(dead_code)]
+            model_definition_resolutions: serde::de::IgnoredAny,
         }
 
         let persisted = PersistedExecutionContext::deserialize(deserializer)?;
@@ -132,8 +135,6 @@ impl<'de> Deserialize<'de> for ProjectExecutionContext {
             schema_version: persisted.schema_version,
             simulation_plan,
             model_libraries: persisted.model_libraries,
-            model_bin_audit_receipts: persisted.model_bin_audit_receipts,
-            model_definition_resolutions: persisted.model_definition_resolutions,
         })
     }
 }
@@ -184,7 +185,6 @@ impl ProjectExecutionContext {
         simulation_plan: &SimSetupState,
         model_libraries: &ModelLibraryManager,
     ) -> Result<Self, String> {
-        model_libraries.validate_model_bin_audit_receipts(project_id)?;
         let mut simulation_plan = simulation_plan.clone();
         simulation_plan.analysis_plan.as_ref().ok_or_else(|| {
             "current simulation state has no stable analysis plan; legacy singleton migration is load-only"
@@ -199,12 +199,6 @@ impl ProjectExecutionContext {
                 .libraries_sorted()
                 .into_iter()
                 .map(ProjectModelLibrary::from)
-                .collect(),
-            model_bin_audit_receipts: model_libraries.model_bin_audit_receipts().to_vec(),
-            model_definition_resolutions: model_libraries
-                .definition_resolutions()
-                .into_iter()
-                .cloned()
                 .collect(),
         };
         context.validate()?;
@@ -312,7 +306,6 @@ impl ProjectExecutionContext {
                 // predated durable geometry-bin audit receipts. The empty
                 // serde default is the only honest migration; no audit is
                 // inferred from model cards or prior execution artifacts.
-                self.model_bin_audit_receipts.clear();
                 self.schema_version = MODEL_BIN_AUDIT_SCHEMA_VERSION;
                 self.migrate_to_current(project_id)
             }
@@ -337,7 +330,6 @@ impl ProjectExecutionContext {
                 // predated explicit contested-definition provider contracts.
                 // An empty migration is the only safe choice: any overlap
                 // remains blocked until a user selects an exact provider.
-                self.model_definition_resolutions.clear();
                 self.schema_version = EXPLICIT_MODEL_DEFINITION_RESOLUTION_SCHEMA_VERSION;
                 self.migrate_to_current(project_id)
             }
@@ -392,15 +384,7 @@ impl ProjectExecutionContext {
             ));
         }
         validate_simulation_plan(&self.simulation_plan)?;
-        validate_model_libraries(&self.model_libraries)?;
-        validate_model_definition_resolutions(
-            &self.model_libraries,
-            &self.model_definition_resolutions,
-        )?;
-        ModelLibraryManager::validate_model_bin_audit_receipt_ledger(
-            &self.model_bin_audit_receipts,
-            None,
-        )
+        validate_model_libraries(&self.model_libraries)
     }
 
     /// Bind project technology metadata to the exact execution library it
@@ -445,8 +429,6 @@ impl ProjectExecutionContext {
         for library in self.model_libraries {
             manager.add_library(library.into_model_library());
         }
-        manager.restore_definition_resolutions(self.model_definition_resolutions)?;
-        manager.restore_model_bin_audit_receipts(self.model_bin_audit_receipts, project_id)?;
         self.simulation_plan.prepare_after_restore();
         Ok((self.simulation_plan, manager, warnings))
     }
@@ -1379,16 +1361,6 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
     Ok(())
 }
 
-fn validate_model_definition_resolutions(
-    libraries: &[ProjectModelLibrary],
-    resolutions: &[ModelDefinitionResolution],
-) -> Result<(), String> {
-    let mut manager = ModelLibraryManager::new();
-    for library in libraries {
-        manager.add_library(library.clone().into_model_library());
-    }
-    manager.restore_definition_resolutions(resolutions.to_vec())
-}
 
 fn source_path_is_authorized(library: &ProjectModelLibrary, source_path: Option<&PathBuf>) -> bool {
     if library.source_closure.is_empty() {
