@@ -8,6 +8,14 @@
 //! explicitly qualified generated-oracle contract can be reproduced without
 //! the removed platform harness.
 
+// The replay helpers below take one parameter per independent input a deck's
+// contract can vary: the plan, the print request, the step runs and their
+// references, the abort signal, whether the time grid is locked, and which
+// comparison mode applies. Bundling them into a struct would hide at the call
+// site which knob a given deck is exercising, which is the one thing these
+// helpers exist to make legible.
+#![allow(clippy::too_many_arguments)]
+
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::ac::ac_sweep_frequencies;
 use rspice_core::analysis::{AcResult, AcSensitivityOutput};
@@ -114,6 +122,10 @@ const XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_CAPACITANCE: f64 = 2.0e-6;
 const XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_SOURCE_OFFSET: f64 = 0.0;
 const XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_SOURCE_AMPLITUDE: f64 = 1.0;
 const XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_FREQUENCY: f64 = 1.0e5;
+// Not `std::f64::consts::PI`: this reproduces the Perl oracle's own 8-digit
+// literal, and substituting a full-precision value moves the reference the
+// suite is comparing against.
+#[allow(clippy::approx_constant)]
 const XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_PI: f64 = 3.1415927;
 const XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_PRINT_OFFSET: f64 = 2.0e-3;
 const XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_STOP: f64 = 2.0e-4;

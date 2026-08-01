@@ -284,7 +284,7 @@ impl XyceTestRunner {
                 "{label} xyce_verify comparison requires at least two DC points"
             ));
         }
-        for row_index in 0..good.rows.len() {
+        for (row_index, good_result) in good_results.iter().enumerate().take(good.rows.len()) {
             if good.rows[row_index].len() != good.columns.len()
                 || test.rows[row_index].len() != test.columns.len()
             {
@@ -293,7 +293,7 @@ impl XyceTestRunner {
                 ));
             }
             let requested_sweep = Self::xyce_prn_scientific_roundtrip(
-                good_results[row_index].sweep_value,
+                good_result.sweep_value,
                 XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
             )?;
             let raw_good_axis = Self::xyce_prn_scientific_roundtrip(
@@ -3127,17 +3127,16 @@ impl XyceTestRunner {
         }
         let index_column = usize::from(has_stepnum);
         let data_offset = index_column + usize::from(!no_index);
-        if !no_index {
-            if reference
+        if !no_index
+            && reference
                 .columns
                 .get(index_column)
                 .is_none_or(|column| !column.eq_ignore_ascii_case("Index"))
-            {
-                return Err(format!(
-                    "DC sensitivity oracle {} must contain Index before data columns",
-                    reference_path.display()
-                ));
-            }
+        {
+            return Err(format!(
+                "DC sensitivity oracle {} must contain Index before data columns",
+                reference_path.display()
+            ));
         }
         if no_index && has_stepnum && reference.columns.len() <= data_offset {
             return Err(format!(
@@ -3676,7 +3675,7 @@ impl XyceTestRunner {
                 }
             }
             let sensitivity = engine
-                .run_sensitivity_ac_complete(&netlist, output, &frequencies, &plan.parameters)
+                .run_sensitivity_ac_complete(netlist, output, &frequencies, &plan.parameters)
                 .map_err(|error| error.to_string())?;
             if sensitivity.frequencies.len() != frequencies.len()
                 || sensitivity.output_values.len() != frequencies.len()
@@ -5218,10 +5217,11 @@ impl XyceTestRunner {
             return Some(f64::INFINITY);
         }
         let abs_error = (expected - actual).abs();
-        if let Some(zero_tolerance) = tolerance.zero {
-            if expected.abs() <= zero_tolerance && actual.abs() <= zero_tolerance {
-                return None;
-            }
+        if let Some(zero_tolerance) = tolerance.zero
+            && expected.abs() <= zero_tolerance
+            && actual.abs() <= zero_tolerance
+        {
+            return None;
         }
         if abs_error <= tolerance.absolute {
             return None;

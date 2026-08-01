@@ -641,17 +641,17 @@ impl XyceTestRunner {
                         expected.mixed.name, declaration.name
                     ));
                 }
-                if let Some(record) = actual.records.get(record_index) {
-                    if let Some(expected_event_axis) = expected.event_axis {
-                        Self::compare_continuous_measurement_value(
-                            &mut mismatches,
-                            gs_index,
-                            &format!("{}:event", declaration.name),
-                            expected_event_axis,
-                            record.event_axis,
-                            XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
-                        )?;
-                    }
+                if let Some(record) = actual.records.get(record_index)
+                    && let Some(expected_event_axis) = expected.event_axis
+                {
+                    Self::compare_continuous_measurement_value(
+                        &mut mismatches,
+                        gs_index,
+                        &format!("{}:event", declaration.name),
+                        expected_event_axis,
+                        record.event_axis,
+                        XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+                    )?;
                 }
                 gs_index += 1;
             }
@@ -4566,12 +4566,11 @@ impl XyceTestRunner {
             .static_output_reference_path(&repeated.0, "artifact")?
             .parent()?
             .to_path_buf();
-        if artifact_dir.try_exists().ok()? {
-            if !fs::metadata(&artifact_dir).ok()?.is_dir()
-                || fs::read_dir(&artifact_dir).ok()?.next().is_some()
-            {
-                return None;
-            }
+        if artifact_dir.try_exists().ok()?
+            && (!fs::metadata(&artifact_dir).ok()?.is_dir()
+                || fs::read_dir(&artifact_dir).ok()?.next().is_some())
+        {
+            return None;
         }
 
         let role = if Self::same_path(&deck.path, &anchor) {

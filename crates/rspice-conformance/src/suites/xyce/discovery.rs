@@ -699,13 +699,13 @@ impl XyceTestRunner {
         let netlist = Self::parse_xyce_netlist(&source, &deck.path)
             .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
         #[cfg(not(feature = "veriloga-builtins-base"))]
-        if let Some(print) = print.as_ref() {
-            if Self::noise_print_requires_generated_vbic_mechanisms(print, &netlist)? {
-                return Err(
+        if let Some(print) = print.as_ref()
+            && Self::noise_print_requires_generated_vbic_mechanisms(print, &netlist)?
+        {
+            return Err(
                     "NOISE output requests a named VBIC mechanism supplied by the canonical generated Verilog-A device; rebuild with the 'veriloga-builtins' feature"
                         .to_string(),
                 );
-            }
         }
         let noise_analysis = Self::noise_analysis_for_netlist(&netlist)?;
         let output_node = noise_analysis.output_node.clone();
