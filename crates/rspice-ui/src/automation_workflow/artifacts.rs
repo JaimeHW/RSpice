@@ -57,6 +57,7 @@ impl CheckEvidence {
         })
     }
 
+    #[cfg(test)]
     pub fn id(&self) -> &str {
         &self.id
     }
@@ -84,6 +85,7 @@ pub struct ComparisonEvidence {
 }
 
 impl ComparisonEvidence {
+    #[cfg(test)]
     pub fn try_new(
         baseline: impl Into<String>,
         waveform_count: u64,

@@ -79,6 +79,7 @@ pub struct SymbolConstructionReceipt {
 impl SymbolConstructionReceipt {
     /// Guarded inverse suitable for app-level undo/history. It refuses to
     /// overwrite a cell that has changed since this receipt was committed.
+    #[cfg(test)]
     pub fn undo(self, library: &mut Library) -> Result<(), SymbolDefinitionError> {
         if library.name != self.library {
             return Err(SymbolDefinitionError::LibraryIdentityMismatch {

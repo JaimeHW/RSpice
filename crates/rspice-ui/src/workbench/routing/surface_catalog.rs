@@ -132,6 +132,7 @@ macro_rules! define_surface_catalog {
 
         impl SurfaceId {
             /// Every canonical surface in exact registry order.
+            #[cfg(test)]
             pub const ALL: [Self; 64] = [$(Self::$variant),+];
 
             #[must_use]

@@ -49,6 +49,7 @@ fn on_segment(p: Point, a: Point, b: Point) -> bool {
 
 impl CrossProbeMapping {
     /// Create a new empty mapping
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
     }

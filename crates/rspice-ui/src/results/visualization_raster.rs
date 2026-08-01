@@ -142,6 +142,7 @@ pub struct VisualizationRasterProfile {
 }
 
 impl VisualizationRasterProfile {
+    #[cfg(test)]
     pub fn new(
         pixel_width: u32,
         pixel_height: u32,
@@ -330,6 +331,7 @@ pub struct VisualizationRasterArtifact {
 
 impl VisualizationRasterArtifact {
     #[must_use]
+    #[cfg(test)]
     pub const fn metadata(&self) -> &VisualizationRasterMetadata {
         &self.metadata
     }

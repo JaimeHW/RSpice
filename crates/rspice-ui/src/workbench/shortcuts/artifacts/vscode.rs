@@ -379,6 +379,7 @@ pub fn detect_shortcut_artifact(
 }
 
 /// Explicit VS Code adapter for callers that already know the source type.
+#[cfg(test)]
 pub fn adapt_vscode_keybindings(
     source_name: impl Into<String>,
     source_bytes: &[u8],

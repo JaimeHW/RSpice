@@ -156,6 +156,7 @@ impl PreparedVerilogARuntime {
         )
     }
 
+    #[cfg(test)]
     pub fn install(&self) -> Result<(), String> {
         rspice_core::register_project_veriloga_runtimes_for_session([self.registration()?])
     }
@@ -336,6 +337,7 @@ impl PreparedVerilogARuntimeSet {
         self.runtimes.is_empty()
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.runtimes.len()
     }

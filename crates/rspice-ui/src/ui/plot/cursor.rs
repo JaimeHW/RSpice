@@ -37,6 +37,7 @@ impl CursorPair {
     }
 
     /// B − A when both cursors are placed.
+    #[cfg(test)]
     pub fn delta(&self) -> Option<f64> {
         Some(self.b? - self.a?)
     }

@@ -355,6 +355,7 @@ impl SimulationRun {
     }
 
     /// Set the total elapsed time for this run
+    #[cfg(test)]
     pub fn set_elapsed_time(&mut self, elapsed: f64) {
         self.elapsed_time = elapsed;
     }

@@ -75,6 +75,7 @@ impl AnalysisDependencyRepair {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn dependent(&self) -> AnalysisInstanceId {
         self.dependent
     }
@@ -245,6 +246,7 @@ impl AnalysisLifecycleReceipt {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn kind(&self) -> AnalysisKind {
         self.kind
     }
@@ -1179,6 +1181,7 @@ impl SimulationPlan {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub fn configuration_receipts(&self) -> &[SimulationPlanConfigurationReceipt] {
         &self.configuration_receipts
     }

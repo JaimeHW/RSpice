@@ -50,6 +50,7 @@ pub enum ModelEditorSection {
 }
 
 impl ModelEditorSection {
+    #[cfg(test)]
     pub const ALL: [Self; 6] = [
         Self::Parameters,
         Self::Sections,

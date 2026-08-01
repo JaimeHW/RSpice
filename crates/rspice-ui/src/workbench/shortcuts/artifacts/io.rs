@@ -139,6 +139,7 @@ impl ShortcutArtifactIoError {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn code(&self) -> &'static str {
         self.code
     }

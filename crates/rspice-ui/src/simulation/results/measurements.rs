@@ -103,6 +103,7 @@ impl SimulationResult {
     }
 
     /// Get all measurements associated with this result
+    #[cfg(test)]
     pub fn measurements(&self) -> HashMap<String, f64> {
         match self {
             SimulationResult::DcOp(op) => {

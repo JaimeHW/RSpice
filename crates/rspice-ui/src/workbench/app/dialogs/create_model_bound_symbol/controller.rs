@@ -141,6 +141,7 @@ pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
     };
 }
 
+#[cfg(test)]
 pub(crate) fn open_create_subcircuit_bound_symbol_dialog(
     state: &mut AppState,
     source_library: String,
@@ -637,6 +638,7 @@ pub(super) fn build_create_symbol_definition(
     Ok(definition)
 }
 
+#[cfg(test)]
 fn subcircuit_instance_parameters(
     defaults: std::collections::BTreeMap<String, String>,
 ) -> Vec<CreateSymbolParameterDraft> {

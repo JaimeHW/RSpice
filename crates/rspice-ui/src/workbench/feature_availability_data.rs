@@ -1220,6 +1220,7 @@ pub enum ContractTone {
 
 impl ContractTone {
     #[must_use]
+    #[cfg(test)]
     pub const fn source_class(self) -> Option<&'static str> {
         match self {
             Self::Plain => None,

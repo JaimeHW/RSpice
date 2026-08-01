@@ -46,6 +46,7 @@ impl AnalysisResultProvenance {
     /// Build a complete, internally consistent prepared-task provenance
     /// record. Dependency order is retained exactly as it appeared in the
     /// frozen prepared snapshot.
+    #[cfg(test)]
     pub fn new(
         source_instance_id: AnalysisInstanceId,
         source_revision: ObjectRevision,
@@ -1515,6 +1516,7 @@ impl AnalysisResult {
     }
 
     /// Check if this analysis has any viewable data
+    #[cfg(test)]
     pub fn has_data(&self) -> bool {
         !self.waveforms.is_empty()
             || self.dc_op.is_some()

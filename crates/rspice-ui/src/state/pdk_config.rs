@@ -186,6 +186,7 @@ impl Default for PdkConfig {
 
 impl PdkConfig {
     /// Create a new empty configuration
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
     }

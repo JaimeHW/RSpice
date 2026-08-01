@@ -128,6 +128,7 @@ pub struct ShortcutImportConflict {
 
 impl ShortcutImportConflict {
     #[must_use]
+    #[cfg(test)]
     pub const fn kind(&self) -> ShortcutImportConflictKind {
         self.kind
     }
@@ -188,6 +189,7 @@ impl ShortcutImportPlan {
         self.base_digest
     }
     #[must_use]
+    #[cfg(test)]
     pub const fn candidate_library(&self) -> &ShortcutProfileLibrary {
         &self.candidate_library
     }
@@ -1378,6 +1380,7 @@ impl ShortcutImportReceipt {
         &self.source_name
     }
     #[must_use]
+    #[cfg(test)]
     pub fn omitted_envelope_fields(&self) -> &BTreeSet<String> {
         &self.omitted_envelope_fields
     }

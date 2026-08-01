@@ -10,6 +10,7 @@ use super::super::pipeline::{
 use super::*;
 impl FftState {
     /// Load FFT data and analyze
+    #[cfg(test)]
     pub fn load_data(&mut self, mut data: FftData) {
         data.convert_normalization(self.normalization);
         let analysis = SpectrumAnalysis::analyze(&data, self.num_harmonics);

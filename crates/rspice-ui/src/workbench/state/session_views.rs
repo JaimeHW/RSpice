@@ -390,6 +390,7 @@ pub enum ModelsOperationalState {
 }
 
 impl ModelsOperationalState {
+    #[cfg(test)]
     pub const ALL: [Self; 16] = [
         Self::Ready,
         Self::Empty,

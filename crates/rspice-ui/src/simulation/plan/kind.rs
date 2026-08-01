@@ -626,6 +626,7 @@ impl AnalysisKind {
     }
 
     /// Resolve an exact canonical stable ID.
+    #[cfg(test)]
     pub fn from_stable_id(id: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|kind| kind.stable_id() == id)
     }

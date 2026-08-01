@@ -130,6 +130,7 @@ impl ConfirmationDialogState {
     }
 
     /// Open the confirmation dialog for an action that targets a bundled example.
+    #[cfg(test)]
     pub fn show_with_example(&mut self, action: ConfirmationAction, name: String) {
         self.visible = true;
         self.pending_action = Some(action);

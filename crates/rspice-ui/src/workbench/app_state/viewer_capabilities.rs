@@ -303,6 +303,7 @@ impl AppState {
     }
 
     /// Whether a viewer is currently available for activation.
+    #[cfg(test)]
     pub fn viewer_is_available(&self, viewer: ActiveViewer) -> bool {
         self.viewer_capability(viewer).available
     }

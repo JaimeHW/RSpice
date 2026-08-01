@@ -986,6 +986,7 @@ impl UserPreferences {
     /// Typed Units preferences when the stored domain is compatible with this
     /// build. An incompatible future root remains preserved on the wire.
     #[must_use]
+    #[cfg(test)]
     pub fn units(&self) -> Option<&UnitsPreferences> {
         self.units.current()
     }

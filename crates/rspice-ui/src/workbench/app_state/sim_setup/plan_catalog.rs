@@ -94,6 +94,7 @@ pub struct SimulationPlanLineage {
 
 impl SimulationPlanLineage {
     #[must_use]
+    #[cfg(test)]
     pub const fn root() -> Self {
         Self {
             source_plan_id: None,

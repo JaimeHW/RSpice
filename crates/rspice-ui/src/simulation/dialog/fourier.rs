@@ -42,6 +42,7 @@ impl Default for FourierConfig {
 }
 
 impl FourierConfig {
+    #[cfg(test)]
     pub fn new(fundamental: f64, harmonics: u32) -> Self {
         Self {
             fundamental_freq: fundamental,

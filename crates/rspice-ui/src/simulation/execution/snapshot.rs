@@ -1203,6 +1203,7 @@ impl PreparedRunSnapshot {
         self.digest
     }
 
+    #[cfg(test)]
     pub(in crate::simulation) fn executable_netlist(&self) -> &str {
         &self.executable_netlist
     }

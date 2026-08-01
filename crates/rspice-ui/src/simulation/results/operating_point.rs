@@ -43,6 +43,7 @@ pub struct DcOpResult {
 
 impl DcOpResult {
     /// Get voltage at a node
+    #[cfg(test)]
     pub fn voltage(&self, node: &str) -> Option<f64> {
         self.node_voltages.get(node).copied().or_else(|| {
             self.node_voltages

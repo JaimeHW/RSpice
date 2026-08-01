@@ -371,6 +371,7 @@ impl EngineeringProfile {
         Self::All,
     ];
 
+    #[cfg(test)]
     pub const fn id(self) -> &'static str {
         match self {
             Self::AnalogIc => "analog-ic",
@@ -715,6 +716,7 @@ impl VerificationPage {
     /// Persisted route catalog. Physical DRC remains decodable for backward
     /// compatibility but is absent from navigation until layout/rule-deck
     /// evidence has a production executor.
+    #[cfg(test)]
     pub const ALL: [Self; 7] = [
         Self::Yield,
         Self::Corners,

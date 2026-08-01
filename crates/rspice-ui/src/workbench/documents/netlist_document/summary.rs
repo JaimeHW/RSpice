@@ -30,12 +30,14 @@ pub(super) struct BodeDelta {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg(test)]
 pub(super) struct NetlistRunSummary {
     pub stability: AcBodeMetrics,
     pub bode: Option<AcBodeSummary>,
     pub measurements: HashMap<String, (String, f64)>,
 }
 
+#[cfg(test)]
 pub(super) fn active_run_summary(state: &AppState) -> Option<NetlistRunSummary> {
     state.simulation.active_run().map(run_summary)
 }
@@ -117,6 +119,7 @@ fn latest_two_runs(runs: &[SimulationRun]) -> Option<(&SimulationRun, &Simulatio
     Some((*by_id.first()?, *by_id.get(1)?))
 }
 
+#[cfg(test)]
 fn run_summary(run: &SimulationRun) -> NetlistRunSummary {
     let bode = ac_bode_summary_for_run(run);
     let stability = bode
@@ -130,6 +133,7 @@ fn run_summary(run: &SimulationRun) -> NetlistRunSummary {
     }
 }
 
+#[cfg(test)]
 fn run_measurements(run: &SimulationRun) -> HashMap<String, (String, f64)> {
     let mut out = HashMap::new();
     for analysis in &run.analyses {

@@ -58,6 +58,7 @@ impl ComplexRoot {
     }
 
     /// Is this a zero?
+    #[cfg(test)]
     pub fn is_zero(&self) -> bool {
         self.root_type == RootType::Zero
     }
@@ -124,6 +125,7 @@ impl PoleZeroData {
     }
 
     /// Add a real pole
+    #[cfg(test)]
     pub fn add_real_pole(&mut self, sigma: f64) {
         self.roots.push(ComplexRoot::pole(sigma, 0.0));
     }

@@ -66,6 +66,7 @@ impl EngineBridge {
     ///
     /// Prefer this constructor at service and job-queue boundaries so invalid
     /// configuration is rejected before parsing or simulation work begins.
+    #[cfg(test)]
     pub fn try_with_config(
         config: rspice_core::SimulationConfig,
     ) -> Result<Self, rspice_core::SimulationConfigError> {

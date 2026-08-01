@@ -85,6 +85,7 @@ impl PreparedSourceCheckReceipt {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn is_manual_source_check(self) -> bool {
         matches!(self, Self::ManualSourceCheck(_))
     }

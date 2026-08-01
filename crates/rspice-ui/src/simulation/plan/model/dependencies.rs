@@ -106,6 +106,7 @@ impl SimulationPlan {
     /// Deterministically bind every required role to the latest matching,
     /// enabled instance that appears earlier. Unresolved roles remain explicit
     /// validation issues rather than making this convenience command partial.
+    #[cfg(test)]
     pub fn auto_bind_dependencies(
         &mut self,
         dependent: AnalysisInstanceId,

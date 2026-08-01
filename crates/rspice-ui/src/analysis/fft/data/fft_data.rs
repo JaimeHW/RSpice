@@ -123,6 +123,7 @@ impl FftData {
     }
 
     /// Create from magnitude/phase arrays
+    #[cfg(test)]
     pub fn from_spectrum(
         name: &str,
         frequencies: &[f64],

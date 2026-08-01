@@ -75,6 +75,7 @@ impl<T> PersistedField<T> {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub fn as_mut(&mut self) -> Option<&mut T> {
         match self {
             Self::Value(value) => Some(value),
@@ -234,6 +235,7 @@ pub struct ProjectFile {
 }
 
 impl ProjectFile {
+    #[cfg(test)]
     pub fn new(workspace: ProjectWorkspace, libraries: LibraryManager) -> Self {
         Self {
             version: ProjectVersion::current(),
@@ -1463,6 +1465,7 @@ pub fn show_save_project_dialog(default_name: Option<&str>) -> Result<PathBuf, P
     since = "0.1.0",
     note = "use the project lifecycle persistence API; this compatibility function is create-only"
 )]
+#[cfg(test)]
 pub fn save_project_file(project: &ProjectFile, path: &Path) -> Result<(), ProjectIoError> {
     let contents = serialize_project_file(project)?;
 

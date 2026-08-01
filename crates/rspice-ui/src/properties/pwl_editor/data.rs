@@ -118,6 +118,7 @@ pub struct PwlData {
 
 impl PwlData {
     /// Create PWL data with initial points.
+    #[cfg(test)]
     pub fn with_points(points: Vec<PwlPoint>) -> Self {
         let mut data = Self {
             points,

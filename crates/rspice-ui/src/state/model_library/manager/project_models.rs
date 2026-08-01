@@ -85,6 +85,7 @@ impl ModelLibraryManager {
     /// Create a new single-card model whose exact source is owned by the
     /// project. The candidate is rendered, parsed, and checked completely
     /// before the manager is mutated.
+    #[cfg(test)]
     pub fn create_project_model(
         &mut self,
         library_name: &str,

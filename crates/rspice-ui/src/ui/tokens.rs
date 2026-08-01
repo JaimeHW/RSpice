@@ -140,6 +140,7 @@ pub enum Density {
 
 impl Density {
     /// All densities, in presentation order.
+    #[cfg(test)]
     pub const ALL: [Density; 2] = [Density::Compact, Density::Relaxed];
 
     /// Human-readable name.

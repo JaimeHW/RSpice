@@ -100,6 +100,7 @@ pub(crate) struct ProjectCheckpointQuarantine {
 }
 
 impl ProjectCheckpointQuarantine {
+    #[cfg(test)]
     pub(crate) fn label(&self) -> &str {
         &self.label
     }

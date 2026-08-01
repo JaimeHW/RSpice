@@ -454,6 +454,7 @@ impl PropertySheet {
     }
 
     /// Get property names in order
+    #[cfg(test)]
     pub fn names(&self) -> &[String] {
         &self.order
     }

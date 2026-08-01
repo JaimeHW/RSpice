@@ -200,6 +200,7 @@ impl Toasts {
     }
 
     /// Queue a warning toast.
+    #[cfg(test)]
     pub fn warn(&mut self, ctx: &Context, message: impl Into<String>) {
         self.notify(ctx, NotificationCategory::System, ToastKind::Warn, message);
     }

@@ -89,7 +89,9 @@ pub const PLOT_HEIGHT_UM: i64 = 142_875;
 pub const REPORT_PAGE_WIDTH_UM: i64 = 215_900;
 pub const REPORT_PAGE_HEIGHT_UM: i64 = 279_400;
 pub const REPORT_PAGE_GAP_UM: i64 = 5_000;
+#[cfg(test)]
 pub const BLANK_SCHEMATIC_SHEET_WIDTH_UM: i64 = 279_400;
+#[cfg(test)]
 pub const BLANK_SCHEMATIC_SHEET_HEIGHT_UM: i64 = 215_900;
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub(crate) const MAX_WORKER_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;

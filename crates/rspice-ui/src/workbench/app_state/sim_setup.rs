@@ -702,6 +702,7 @@ impl SimSetupState {
 
     /// Fill defaults into any analysis state still at its blank
     /// `Default` (each guards on its own `initialized` flag).
+    #[cfg(test)]
     pub fn ensure_initialized(&mut self) {
         self.op.ensure_initialized();
         self.pz.ensure_initialized();

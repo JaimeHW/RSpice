@@ -43,6 +43,7 @@ pub enum XfAccuracy {
 impl XfAccuracy {
     pub const ALL: [Self; 4] = [Self::Fast, Self::Balanced, Self::Accurate, Self::Robust];
 
+    #[cfg(test)]
     pub const fn display_name(self) -> &'static str {
         match self {
             Self::Fast => "Fast",
@@ -89,6 +90,7 @@ impl XfConfig {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn to_spice(&self) -> String {
         format!(
             ".tf {} {}",

@@ -65,6 +65,7 @@ pub enum ViewerArt {
 
 impl ViewerArt {
     #[must_use]
+    #[cfg(test)]
     pub const fn id(self) -> &'static str {
         match self {
             Self::Wave => "wave",

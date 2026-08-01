@@ -255,6 +255,7 @@ impl LogBuffer {
     }
 
     /// Convenience: Log a warning
+    #[cfg(test)]
     pub fn warning(&mut self, source: LogSource, message: impl Into<String>) {
         self.log(LogSeverity::Warning, source, message, None);
     }

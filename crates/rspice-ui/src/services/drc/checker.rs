@@ -117,6 +117,7 @@ impl DrcChecker {
     /// Pure interior/interior crossings are disconnected in this compatibility
     /// API. Schematic callers must use [`Self::check_connectivity_with_junctions`]
     /// with the junction-aware extraction bridge.
+    #[cfg(test)]
     pub fn check_connectivity(
         &mut self,
         components: &[ComponentInfo],

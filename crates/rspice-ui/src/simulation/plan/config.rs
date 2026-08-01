@@ -608,6 +608,7 @@ impl AnalysisDraft {
     }
 
     /// Construct a semantic draft from a current singleton-model index.
+    #[cfg(test)]
     pub fn from_legacy_index(index: usize) -> Option<Self> {
         AnalysisKind::from_legacy_index(index).map(Self::for_kind)
     }

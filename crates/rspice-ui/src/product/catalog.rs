@@ -339,6 +339,7 @@ pub enum Availability {
 
 impl Availability {
     #[must_use]
+    #[cfg(test)]
     pub const fn can_contribute_native_signoff(self) -> bool {
         matches!(self, Self::Production)
     }
@@ -361,6 +362,7 @@ pub enum ReadinessStage {
 }
 
 impl ReadinessStage {
+    #[cfg(test)]
     pub const ALL: [Self; 7] = [
         Self::Registered,
         Self::Specified,

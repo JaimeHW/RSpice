@@ -242,6 +242,7 @@ impl HardcopySceneMetadata {
     /// Build the required title and revision provenance directly from the
     /// authenticated source. Callers may then add authors and a publication
     /// timestamp without recreating source-identity formatting.
+    #[cfg(test)]
     pub fn for_resolved_source(
         source: &ResolvedHardcopyDocument,
         creator: impl Into<String>,
@@ -580,6 +581,7 @@ pub struct HardcopyScene {
 }
 
 impl HardcopyScene {
+    #[cfg(test)]
     pub fn try_new(
         extent: ContentExtent,
         metadata: HardcopySceneMetadata,

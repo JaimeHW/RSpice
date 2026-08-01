@@ -88,6 +88,7 @@ impl<'a> HierarchySource<'a> {
 
     /// An empty source — netlisting behaves exactly as before hierarchy
     /// support (every project-cell instance is an unresolved master).
+    #[cfg(test)]
     pub fn empty() -> Self {
         Self {
             masters: HashMap::new(),

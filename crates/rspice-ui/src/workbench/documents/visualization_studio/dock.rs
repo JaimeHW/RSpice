@@ -2266,6 +2266,7 @@ pub(super) fn execute_comparison_draft_with_differences(
     })
 }
 
+#[cfg(test)]
 pub(super) fn execute_comparison_draft(app: &RSpiceApp) -> Result<ComparisonReceipt, String> {
     execute_comparison_draft_with_differences(app).map(|execution| execution.receipt)
 }

@@ -78,6 +78,7 @@ pub struct ShortcutLibraryPersistenceToken {
 
 impl ShortcutLibraryPersistenceToken {
     #[must_use]
+    #[cfg(test)]
     pub const fn generation(self) -> u64 {
         self.generation
     }
@@ -96,6 +97,7 @@ impl PersistedShortcutProfileLibrary {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn token(&self) -> ShortcutLibraryPersistenceToken {
         self.token
     }
@@ -127,6 +129,7 @@ pub struct RetainedShortcutLibraryBytes {
 
 impl RetainedShortcutLibraryBytes {
     #[must_use]
+    #[cfg(test)]
     pub fn raw_bytes(&self) -> &[u8] {
         &self.raw_bytes
     }

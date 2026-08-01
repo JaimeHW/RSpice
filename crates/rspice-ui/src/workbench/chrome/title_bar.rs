@@ -1768,6 +1768,7 @@ fn paint_title_context(
     });
 }
 
+#[cfg(test)]
 fn title_context_text(app: &RSpiceApp, compact: bool) -> String {
     if !app.state.project_lifecycle.project_open {
         return if compact {

@@ -301,6 +301,7 @@ impl OpRunPointContext {
 
 impl OpAccuracy {
     pub const ALL: [Self; 4] = [Self::Fast, Self::Balanced, Self::Accurate, Self::Robust];
+    #[cfg(test)]
     pub const fn display_name(self) -> &'static str {
         match self {
             Self::Fast => "Fast",
@@ -596,6 +597,7 @@ impl OpDialogState {
         }
     }
 
+    #[cfg(test)]
     pub fn prepare_after_restore(&mut self) {
         // Plans written before temperature-source selection existed carried
         // an authored scalar temperature. Preserve that value as explicit;
@@ -672,6 +674,7 @@ fn index_of<T: PartialEq>(values: &[T], value: T) -> usize {
         .unwrap_or(0)
 }
 
+#[cfg(test)]
 fn clamp_index(index: &mut usize, len: usize) {
     *index = (*index).min(len.saturating_sub(1));
 }

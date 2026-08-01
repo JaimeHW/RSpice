@@ -57,6 +57,7 @@ impl ServiceRunError {
 
     /// Add context to ordinary failures while preserving cancellation and
     /// structured resource-limit errors.
+    #[cfg(test)]
     pub fn with_context(self, context: &str) -> Self {
         match self {
             Self::Failure(message) => Self::Failure(format!("{context}: {message}")),

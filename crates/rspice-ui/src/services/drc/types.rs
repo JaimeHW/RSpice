@@ -241,6 +241,7 @@ impl DrcViolation {
     }
 
     /// Override severity
+    #[cfg(test)]
     pub fn with_severity(mut self, severity: DrcSeverity) -> Self {
         self.severity = severity;
         self

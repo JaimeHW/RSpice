@@ -385,6 +385,7 @@ pub enum MarkerKind {
 
 impl MarkerKind {
     /// Every kind, in cycle order.
+    #[cfg(test)]
     pub const ALL: [MarkerKind; 3] = [MarkerKind::Note, MarkerKind::Peak, MarkerKind::Spec];
 
     /// Short label used on the chip and in the marker list.
@@ -921,6 +922,7 @@ impl ResultsState {
     ///
     /// Y is per pane because each pane carries its own unit — one zoom
     /// factor across volts and amps would mean nothing.
+    #[cfg(test)]
     pub fn plot_view_pane(&self, viewer: ResultViewer, index: usize, pane: usize) -> PlotView {
         self.plot_view_pane_for(viewer, PlotPresentationKey::Global(index), pane)
     }

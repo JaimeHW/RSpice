@@ -52,6 +52,7 @@ impl<'a> TreeRow<'a> {
     }
 
     /// Show a twist (expand/collapse) arrow; `expanded` selects ▾ vs ▸.
+    #[cfg(test)]
     pub fn twist(mut self, expanded: bool) -> Self {
         self.twist = Some(expanded);
         self

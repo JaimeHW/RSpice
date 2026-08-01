@@ -1494,6 +1494,7 @@ impl SimulationController {
     }
 
     /// Check if a simulation is currently running
+    #[cfg(test)]
     pub fn is_running(&self) -> bool {
         self.runner.is_running()
     }

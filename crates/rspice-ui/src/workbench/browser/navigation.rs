@@ -260,11 +260,13 @@ impl FromStr for LocationSearch {
 }
 
 /// Parse only the canonical route while still validating the entire query.
+#[cfg(test)]
 pub fn route_from_search(search: &str) -> Result<Option<SurfaceRoute>, BrowserNavigationError> {
     Ok(LocationSearch::parse(search)?.route())
 }
 
 /// Replace or add the canonical route without losing host-owned parameters.
+#[cfg(test)]
 pub fn search_with_route(
     search: &str,
     route: SurfaceRoute,
@@ -273,6 +275,7 @@ pub fn search_with_route(
 }
 
 /// Remove the canonical route without losing host-owned parameters.
+#[cfg(test)]
 pub fn search_without_route(search: &str) -> Result<String, BrowserNavigationError> {
     Ok(LocationSearch::parse(search)?.without_route().to_string())
 }

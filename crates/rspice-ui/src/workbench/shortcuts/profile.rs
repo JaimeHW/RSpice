@@ -195,6 +195,7 @@ impl ShortcutPreferences {
 
     /// Reset every command understood by this build. Unknown future commands
     /// stay byte-semantically intact when an older build edits the profile.
+    #[cfg(test)]
     pub fn reset_all(&mut self) {
         self.malformed_root = None;
         self.validation_cache.set(None);
@@ -797,6 +798,7 @@ impl ShortcutProfileAudit {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn binding_count(&self) -> usize {
         self.binding_count
     }

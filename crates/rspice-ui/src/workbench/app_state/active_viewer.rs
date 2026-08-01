@@ -26,6 +26,7 @@ pub enum ActiveViewer {
 
 impl ActiveViewer {
     /// Display name.
+    #[cfg(test)]
     pub fn name(&self) -> &'static str {
         match self {
             Self::Waveform => "Waveform",

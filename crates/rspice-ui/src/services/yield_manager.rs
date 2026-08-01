@@ -52,6 +52,7 @@ pub struct YieldSpec {
 
 impl YieldSpec {
     /// Create a lower limit spec
+    #[cfg(test)]
     pub fn lower(target: impl Into<String>, min: f64, unit: impl Into<String>) -> Self {
         Self {
             target: target.into(),
@@ -227,6 +228,7 @@ impl YieldAnalysisManager {
     }
 
     /// Add a yield specification
+    #[cfg(test)]
     pub fn add_spec(&mut self, spec: YieldSpec) {
         self.specs.insert(spec.target.clone(), spec);
     }

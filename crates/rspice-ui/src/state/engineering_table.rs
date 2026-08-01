@@ -898,6 +898,7 @@ fn compare_number(value: f64, operator: &str, target: f64) -> bool {
     }
 }
 
+#[cfg(test)]
 pub fn delimited_text(
     dataset: &EngineeringDataset,
     view: &EngineeringTableView,

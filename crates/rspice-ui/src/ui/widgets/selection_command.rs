@@ -49,6 +49,7 @@ const COMPACT_COLUMNS_BREAKPOINT: f32 = 980.0;
 const RIGHT_MIN_WIDTH: f32 = 270.0;
 const COMPACT_RIGHT_MIN_WIDTH: f32 = 240.0;
 const PANE_PADDING: i8 = 14;
+#[cfg(test)]
 const OPTIONS_SCROLLBAR_RESERVE: f32 = 12.0;
 const CANVAS_HEIGHT: f32 = 250.0;
 const COMPACT_CANVAS_HEIGHT: f32 = 220.0;
@@ -226,6 +227,7 @@ fn selection_workflow_right_track(viewport_width: f32) -> (f32, f32) {
 
 /// Exact usable width of the mockup's minimum command-options track after its
 /// pane padding and vertical-scroll interaction strip are removed.
+#[cfg(test)]
 pub(crate) fn selection_command_options_paint_width(viewport_width: f32) -> f32 {
     let (_, minimum) = selection_workflow_right_track(viewport_width);
     minimum - 2.0 * f32::from(PANE_PADDING) - OPTIONS_SCROLLBAR_RESERVE

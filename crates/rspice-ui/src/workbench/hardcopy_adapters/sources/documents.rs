@@ -12,6 +12,7 @@ use crate::state::DrawingSheetTitleFieldId;
 
 use super::*;
 
+#[cfg(test)]
 pub(super) fn resolve_blank_schematic_sheet(
     identity: HardcopySourceIdentity,
     scope: HardcopyScope,
@@ -19,6 +20,7 @@ pub(super) fn resolve_blank_schematic_sheet(
     resolve_blank_schematic_sheet_with_format(identity, scope, None)
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_blank_schematic_sheet_with_format(
     identity: HardcopySourceIdentity,
     scope: HardcopyScope,
@@ -32,6 +34,7 @@ pub(crate) fn resolve_blank_schematic_sheet_with_format(
     )
 }
 
+#[cfg(test)]
 pub(super) fn resolve_blank_schematic_sheet_with_format_and_project_values(
     identity: HardcopySourceIdentity,
     scope: HardcopyScope,

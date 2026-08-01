@@ -154,6 +154,7 @@ impl SimulationRunner {
     }
 
     /// Check if aborted
+    #[cfg(test)]
     pub fn is_aborted(&self) -> bool {
         self.abort_flag.load(Ordering::SeqCst)
     }

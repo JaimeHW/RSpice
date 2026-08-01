@@ -42,6 +42,7 @@ impl Default for SensConfig {
 }
 
 impl SensConfig {
+    #[cfg(test)]
     pub fn new(output: &str) -> Self {
         Self {
             output_expr: output.to_string(),

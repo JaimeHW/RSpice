@@ -91,6 +91,7 @@ impl ShortcutArtifactImportError {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn kind(&self) -> ShortcutArtifactImportErrorKind {
         self.kind
     }
@@ -137,6 +138,7 @@ pub struct ReadyShortcutArtifactSource {
 
 impl ReadyShortcutArtifactSource {
     #[must_use]
+    #[cfg(test)]
     pub fn source_name(&self) -> &str {
         &self.source_name
     }

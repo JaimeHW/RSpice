@@ -30,6 +30,7 @@ pub struct ReferenceTolerance {
 }
 
 impl ReferenceTolerance {
+    #[cfg(test)]
     pub fn try_new(
         quantity: impl Into<String>,
         absolute: f64,

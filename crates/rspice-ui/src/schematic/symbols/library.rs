@@ -480,6 +480,7 @@ impl SymbolLibrary {
     }
 
     /// Get a symbol by component type (O(1) lookup)
+    #[cfg(test)]
     pub fn get(&self, component_type: ComponentType) -> Option<&Symbol> {
         self.symbols.get(&component_type)
     }

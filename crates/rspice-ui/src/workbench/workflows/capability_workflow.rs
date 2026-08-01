@@ -37,6 +37,7 @@ macro_rules! define_capability_workflows {
             /// Every workflow in exact mockup order: eleven planned capability
             /// designs followed by the interoperability, touch-editing, and
             /// platform-lifecycle inspection documents.
+            #[cfg(test)]
             pub const ALL: [Self; 14] = [$(Self::$variant),+];
 
             #[must_use]

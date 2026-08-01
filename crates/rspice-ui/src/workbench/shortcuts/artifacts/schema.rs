@@ -132,6 +132,7 @@ impl DecodedShortcutArtifact {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn source_digest(&self) -> [u8; 32] {
         self.source_digest
     }
@@ -190,6 +191,7 @@ impl fmt::Display for ShortcutArtifactSchemaError {
 
 impl std::error::Error for ShortcutArtifactSchemaError {}
 
+#[cfg(test)]
 pub fn decode_shortcut_artifact_json(
     source_name: impl Into<String>,
     contents: &str,

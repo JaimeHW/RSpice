@@ -400,6 +400,7 @@ impl SimulationState {
     }
 
     /// Remove every overlay toggle in one action.
+    #[cfg(test)]
     pub fn clear_dataset_overlays(&mut self) {
         if !self.overlay_dataset_ids.is_empty() {
             self.overlay_dataset_ids.clear();

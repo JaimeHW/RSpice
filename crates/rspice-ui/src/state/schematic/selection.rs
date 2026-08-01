@@ -40,6 +40,7 @@ impl Default for SchematicSelectionFilter {
 
 impl SchematicSelectionFilter {
     #[must_use]
+    #[cfg(test)]
     pub const fn all_enabled(self) -> bool {
         self.instances && self.wires && self.labels && self.annotations
     }

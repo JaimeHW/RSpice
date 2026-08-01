@@ -109,6 +109,7 @@ pub use transient::{TransientData, run_transient_analysis_with_source_path_and_a
 
 /// Get current time in milliseconds (for performance measurement)
 #[cfg(not(target_arch = "wasm32"))]
+#[cfg(test)]
 fn now_ms() -> f64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()

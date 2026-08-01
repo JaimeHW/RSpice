@@ -94,6 +94,7 @@ impl QualificationExecutionSession {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }

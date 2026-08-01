@@ -134,6 +134,7 @@ impl LicenseError {
 const CROCKFORD: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 /// Encode bytes as uppercase Crockford base32, no padding.
+#[cfg(test)]
 pub fn crockford_encode(data: &[u8]) -> String {
     let mut out = String::with_capacity(data.len().div_ceil(5) * 8);
     let mut acc: u64 = 0;
@@ -183,6 +184,7 @@ pub fn crockford_decode(text: &str) -> Option<Vec<u8>> {
 
 /// Render a base32 string in groups of 5 separated by dashes (cosmetic,
 /// for human transcription).
+#[cfg(test)]
 pub fn group5(text: &str) -> String {
     text.as_bytes()
         .chunks(5)
@@ -216,6 +218,7 @@ const PAYLOAD_HEADER: usize = 1 + 1 + 8 + 1 + 2 + 4 + 4 + 4;
 impl LicensePayload {
     /// Serialize to the wire layout (used when issuing; kept next to `parse`
     /// so the two can never drift).
+    #[cfg(test)]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(PAYLOAD_HEADER + 64);
         out.push(self.version);

@@ -6,6 +6,7 @@ use super::*;
 
 impl SimulationResult {
     /// Get all waveform names
+    #[cfg(test)]
     pub fn waveform_names(&self) -> Vec<&str> {
         match self {
             SimulationResult::DcSweep { waveforms, .. } => {

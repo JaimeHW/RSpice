@@ -96,6 +96,7 @@ impl WaveformData {
 
     /// Build an extrema-preserving f32 cache without modifying source data.
     #[must_use]
+    #[cfg(test)]
     pub fn with_display_cache(mut self, maximum_samples: usize) -> Self {
         self.rebuild_display_cache(maximum_samples);
         self

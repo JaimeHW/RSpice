@@ -262,6 +262,7 @@ impl ModelBoundSymbolDefinition {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn to_json_pretty(&self) -> Result<String, SymbolDefinitionError> {
         self.validate()?;
         serde_json::to_string_pretty(self)
