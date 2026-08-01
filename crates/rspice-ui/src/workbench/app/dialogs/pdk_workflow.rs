@@ -224,29 +224,6 @@ fn load_persisted_pdk_sources_with_persistence(
     Ok(loaded)
 }
 
-pub(in crate::workbench) fn load_persisted_pdk_sources_at_startup(state: &mut AppState) {
-    let result = load_persisted_pdk_sources_with_persistence(state, |config| {
-        config.save().map_err(|error| error.to_string())
-    });
-    match result {
-        Ok(count) if count > 0 => {
-            state.push_user_message(ConsoleMessage::info(format!(
-                "Loaded {count} persisted configured model libraries"
-            )));
-        }
-        Ok(_) => {}
-        Err(errors) => {
-            state.push_user_message(ConsoleMessage::warning(
-                "Persisted PDK model sources were not loaded; the previous model-library state was retained."
-                    .to_owned(),
-            ));
-            for error in errors {
-                state.push_user_message(ConsoleMessage::error(error));
-            }
-        }
-    }
-}
-
 #[cfg(target_arch = "wasm32")]
 fn start_browser_model_import(ctx: &Context) {
     let repaint = ctx.clone();

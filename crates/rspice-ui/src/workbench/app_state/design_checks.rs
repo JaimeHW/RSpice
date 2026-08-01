@@ -17,21 +17,12 @@ use super::AppState;
 
 const DESIGN_CHECK_DIGEST_DOMAIN: &[u8] = b"rspice-interactive-design-check/v1\0";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DesignCheckOrigin {
-    Manual,
-    Incremental,
-    ConnectivityCommit,
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct CellViewCheckReceipt {
     pub(crate) project_id: ProjectId,
     pub(crate) subject: CellViewRef,
     pub(crate) checked_project_revision: ObjectRevision,
     pub(crate) input_digest: ContentDigest,
-    pub(crate) checked_unix_ms: u64,
-    pub(crate) origin: DesignCheckOrigin,
     pub(crate) result: DrcResult,
 }
 
@@ -87,10 +78,7 @@ impl DesignCheckRuntime {
 }
 
 impl AppState {
-    pub(crate) fn run_active_design_checks(
-        &mut self,
-        origin: DesignCheckOrigin,
-    ) -> Result<DrcResult, String> {
+    pub(crate) fn run_active_design_checks(&mut self) -> Result<DrcResult, String> {
         let subject = self.workspace.active_schematic_reference();
         let config = design_check_config(self, &subject);
         let mut live_buffers = self.workspace.schematic_buffers.clone();
@@ -106,18 +94,17 @@ impl AppState {
             &hierarchy,
             config.clone(),
         );
-        self.publish_design_check_result(subject, config, result.clone(), origin)?;
+        self.publish_design_check_result(subject, config, result.clone())?;
         Ok(result)
     }
 
     pub(crate) fn publish_active_design_check_result(
         &mut self,
         result: DrcResult,
-        origin: DesignCheckOrigin,
     ) -> Result<(), String> {
         let subject = self.workspace.active_schematic_reference();
         let config = design_check_config(self, &subject);
-        self.publish_design_check_result(subject, config, result, origin)
+        self.publish_design_check_result(subject, config, result)
     }
 
     fn publish_design_check_result(
@@ -125,7 +112,6 @@ impl AppState {
         subject: CellViewRef,
         config: DrcConfig,
         result: DrcResult,
-        origin: DesignCheckOrigin,
     ) -> Result<(), String> {
         let input_digest = design_check_input_digest(self, &subject, &config)?;
         self.design_checks.insert(CellViewCheckReceipt {
@@ -133,8 +119,6 @@ impl AppState {
             subject,
             checked_project_revision: self.workspace.project.revision(),
             input_digest,
-            checked_unix_ms: crate::time_compat::unix_epoch().as_millis() as u64,
-            origin,
             result,
         });
         Ok(())
@@ -286,7 +270,7 @@ mod tests {
             .schematic_buffers
             .insert(other.key(), crate::state::SchematicState::default());
         state
-            .publish_active_design_check_result(DrcResult::new(), DesignCheckOrigin::Manual)
+            .publish_active_design_check_result(DrcResult::new())
             .expect("publish root receipt");
 
         state
@@ -310,7 +294,7 @@ mod tests {
     fn connectivity_changes_stale_previously_current_receipts() {
         let mut state = AppState::default();
         state
-            .publish_active_design_check_result(DrcResult::new(), DesignCheckOrigin::Manual)
+            .publish_active_design_check_result(DrcResult::new())
             .expect("publish current receipt");
         assert!(matches!(
             state.active_design_check_status(),

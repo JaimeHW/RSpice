@@ -437,11 +437,6 @@ impl StripModel {
         panes
     }
 
-    /// Total trace count, including overlay runs.
-    pub(super) fn trace_count(&self) -> usize {
-        self.traces.len()
-    }
-
     /// Indices of the visible active-run signal traces, in legend order.
     pub(super) fn visible_signal_indices(&self) -> impl Iterator<Item = usize> + '_ {
         self.traces

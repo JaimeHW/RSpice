@@ -190,7 +190,6 @@ fn sanitize_db(value: Value) -> Value {
 #[derive(Debug, Clone)]
 struct ResolvedPstbProbe {
     canonical_name: String,
-    branch_ordinal: usize,
     state_index: usize,
 }
 
@@ -250,25 +249,8 @@ fn resolve_pstb_probe_with_abort(
 
     Ok(ResolvedPstbProbe {
         canonical_name: probe.canonical_name,
-        branch_ordinal: probe.branch_ordinal,
         state_index: probe.state_index,
     })
-}
-
-fn finite_l2_norm_with_abort(
-    values: impl Iterator<Item = Value>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<Value> {
-    let mut sum_sq = 0.0;
-    for (index, value) in values.enumerate() {
-        poll_periodically(abort, index)?;
-        if !value.is_finite() {
-            return Ok(f64::INFINITY);
-        }
-        sum_sq += value * value;
-    }
-    ensure_not_aborted(abort)?;
-    Ok(sum_sq.sqrt())
 }
 
 fn sanitize_nonnegative(value: Value) -> Value {

@@ -429,50 +429,7 @@ pub struct PlannedWorkflowSpecification {
     pub outputs_provenance: &'static str,
 }
 
-impl PlannedWorkflowSpecification {
-    fn matches_query(self, query: &str) -> bool {
-        if matches_query(
-            query,
-            &[
-                self.id,
-                self.purpose,
-                self.content_section_title,
-                self.property_section_title.unwrap_or_default(),
-                self.validation_recovery,
-                self.outputs_provenance,
-            ],
-        ) {
-            return true;
-        }
-        if self.tables.iter().any(|table| {
-            table
-                .headers
-                .iter()
-                .any(|header| matches_query(query, &[header]))
-                || table
-                    .rows
-                    .iter()
-                    .flat_map(|row| (*row).iter())
-                    .any(|cell| matches_query(query, &[cell.text]))
-        }) {
-            return true;
-        }
-        if self
-            .properties
-            .iter()
-            .any(|property| matches_query(query, &[property.label, property.value]))
-        {
-            return true;
-        }
-        self.chip_section.is_some_and(|section| {
-            matches_query(query, &[section.title])
-                || section
-                    .chips
-                    .iter()
-                    .any(|chip| matches_query(query, &[chip]))
-        })
-    }
-}
+impl PlannedWorkflowSpecification {}
 
 macro_rules! planned_row {
     ($($cell:literal),+ $(,)?) => {
@@ -1910,13 +1867,6 @@ pub const CAPABILITY_CLAIM_PROJECTIONS: [CapabilityClaimProjection; 12] = [
         boundary: CAPABILITY_FIXTURE_BOUNDARY,
     },
 ];
-
-fn matches_query(query: &str, values: &[&str]) -> bool {
-    query.is_empty()
-        || values
-            .iter()
-            .any(|value| value.to_lowercase().contains(query))
-}
 
 #[cfg(test)]
 mod tests;

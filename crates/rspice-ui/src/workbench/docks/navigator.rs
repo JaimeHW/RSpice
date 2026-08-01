@@ -10,7 +10,7 @@ use netlist::*;
 use egui::{Align, Layout, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::product::DatasetId;
-use crate::state::{CellViewRef, ViewType};
+use crate::state::ViewType;
 use crate::state::{NetlistOutline, OutlineEntry, OutlineEntryKind};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -691,84 +691,6 @@ fn project_recovery_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
             .to_string(),
     );
     nav_property(ui, "Integrity", "payloads verified on load");
-}
-
-fn library_tree(ui: &mut Ui, app: &mut RSpiceApp, open_documents: bool) {
-    let query = app.state.workbench.navigator_query.trim().to_lowercase();
-    let libraries: Vec<_> = app
-        .state
-        .library_manager
-        .libraries_sorted()
-        .into_iter()
-        .map(|library| {
-            let mut cells: Vec<_> = library
-                .cells_sorted()
-                .into_iter()
-                .map(|cell| {
-                    let views = cell
-                        .views_sorted()
-                        .into_iter()
-                        .map(|view| (view.name.clone(), view.view_type))
-                        .collect::<Vec<_>>();
-                    (cell.name.clone(), views)
-                })
-                .collect();
-            cells.sort_by(|a, b| a.0.cmp(&b.0));
-            (library.name.clone(), library.read_only, cells)
-        })
-        .collect();
-
-    let mut requested = None;
-    for (library, read_only, cells) in libraries {
-        if !query.is_empty()
-            && !library.to_lowercase().contains(&query)
-            && !cells.iter().any(|(cell, views)| {
-                cell.to_lowercase().contains(&query)
-                    || views
-                        .iter()
-                        .any(|(view, _)| view.to_lowercase().contains(&query))
-            })
-        {
-            continue;
-        }
-        let _ = nav_row_indented(
-            ui,
-            WorkbenchIcon::Folder,
-            &library,
-            library == app.state.workspace.active_view.library,
-            read_only.then_some("read-only"),
-            0,
-        );
-        for (cell, views) in cells {
-            let _ = nav_row_indented(
-                ui,
-                WorkbenchIcon::Project,
-                &cell,
-                library == app.state.workspace.active_view.library
-                    && cell == app.state.workspace.active_view.cell,
-                Some(&views.len().to_string()),
-                1,
-            );
-            for (view, view_type) in views {
-                let reference = CellViewRef::new(&library, &cell, &view);
-                let active = reference == app.state.workspace.active_view;
-                if nav_row_indented(
-                    ui,
-                    view_icon(view_type),
-                    &view,
-                    active,
-                    Some(view_type.display_name()),
-                    2,
-                ) && open_documents
-                {
-                    requested = Some(reference);
-                }
-            }
-        }
-    }
-    if let Some(reference) = requested {
-        app.state.open_workspace_view(reference);
-    }
 }
 
 fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -2500,15 +2422,6 @@ fn muted(ui: &mut Ui, text: &str) {
                 .halign(Align::Center),
             );
         });
-}
-
-const fn view_icon(view_type: ViewType) -> WorkbenchIcon {
-    match view_type {
-        ViewType::Schematic | ViewType::Testbench => WorkbenchIcon::Design,
-        ViewType::Symbol => WorkbenchIcon::Models,
-        ViewType::Spice | ViewType::Verilog | ViewType::VerilogA => WorkbenchIcon::Netlist,
-        _ => WorkbenchIcon::File,
-    }
 }
 
 #[cfg(test)]

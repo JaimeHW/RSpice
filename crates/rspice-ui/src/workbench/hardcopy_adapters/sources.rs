@@ -1076,33 +1076,6 @@ fn quick_result_availability(
     }
 }
 
-fn schematic_has_objects_on_sheet(
-    schematic: &SchematicState,
-    catalog: &SheetCatalog,
-    sheet_id: SheetId,
-) -> bool {
-    let belongs = |object_id| {
-        catalog
-            .sheet_for_object(object_id)
-            .or(catalog.active_sheet_id())
-            == Some(sheet_id)
-    };
-    schematic.components.iter().any(|object| belongs(object.id))
-        || schematic.wires.iter().any(|object| belongs(object.id))
-        || schematic.buses.iter().any(|object| belongs(object.id))
-        || schematic.bus_taps.iter().any(|object| belongs(object.id))
-        || schematic.junctions.iter().any(|object| belongs(object.id))
-        || schematic.net_labels.iter().any(|object| belongs(object.id))
-        || schematic
-            .design_notes
-            .iter()
-            .any(|object| belongs(object.id))
-        || schematic
-            .documentation_shapes
-            .iter()
-            .any(|object| belongs(object.id))
-}
-
 fn studio_pane_availability(
     state: &AppState,
     pane: &StudioPane,

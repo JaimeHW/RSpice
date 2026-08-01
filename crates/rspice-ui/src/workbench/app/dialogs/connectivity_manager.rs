@@ -1325,10 +1325,8 @@ impl RSpiceApp {
         let policy = self.state.workspace.connectivity.policy.clone();
         let report = build_report(&self.state, &policy);
         let authority = SchematicEditAuthority::capture(&self.state);
-        self.state.publish_active_design_check_result(
-            report.drc.clone(),
-            crate::workbench::app_state::DesignCheckOrigin::ConnectivityCommit,
-        )?;
+        self.state
+            .publish_active_design_check_result(report.drc.clone())?;
         self.state.dialogs.drc_results = Some(report.drc.clone());
         self.state.dialogs.drc_checked_version = self.state.schematic.topology_version();
         let dialog = &mut self.state.dialogs.connectivity_manager;

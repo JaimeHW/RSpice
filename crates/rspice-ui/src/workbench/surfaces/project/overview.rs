@@ -2146,10 +2146,7 @@ mod tests {
             .with_severity(DrcSeverity::Critical),
         );
         app.state
-            .publish_active_design_check_result(
-                result,
-                crate::workbench::app_state::DesignCheckOrigin::Manual,
-            )
+            .publish_active_design_check_result(result)
             .expect("publish project-root design-check receipt");
 
         let problem = problem_snapshot(&app);

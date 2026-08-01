@@ -70,9 +70,7 @@ struct SealedExecutionLibrary {
 /// needed to label it and the domains it covers.
 struct MaterializedCornerSection {
     source_label: String,
-    path: PathBuf,
     section: String,
-    domains: Vec<super::CornerSectionDomain>,
     materialized_model_cards: String,
 }
 
@@ -572,9 +570,7 @@ impl SealedModelExecutionSources {
                         .collect::<Vec<_>>()
                         .join(" + ")
                 ),
-                path,
                 section,
-                domains,
                 materialized_model_cards,
             });
         }

@@ -26,12 +26,6 @@ pub(super) struct PendingPreparedRun {
     permit: ExecutionPermit,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct PreparedModelBinInspection {
-    pub(crate) source_digest: crate::product::ContentDigest,
-    pub(crate) receipt: rspice_core::engine::ModelBinInspection,
-}
-
 impl SimulationController {
     /// Build the analysis-independent executable design deck used by
     /// inspection surfaces.
@@ -138,38 +132,6 @@ impl SimulationController {
             Some(&sealed_models),
         )?;
         Ok(source)
-    }
-
-    /// Produce the engine-owned geometry-bin receipt for the exact current
-    /// design projection.
-    pub(crate) fn inspect_current_model_bins(
-        state: &AppState,
-    ) -> Result<PreparedModelBinInspection, PreparationError> {
-        let source = Self::prepare_design_netlist_for_inspection(state)?;
-        let source_digest =
-            content_digest("rspice.generated-executable-source/v1", source.as_bytes());
-        let netlist = rspice_core::Netlist::parse(&source).map_err(|error| {
-            PreparationError::new(
-                PreparationStage::Netlist,
-                format!("Prepared inspection netlist is invalid: {error}"),
-            )
-        })?;
-        let mut config = rspice_core::SimulationConfig::default();
-        config.temperature = rspice_core::constants::celsius_to_kelvin(
-            state.sim_setup.reference_pvt.temperature_celsius,
-        );
-        let receipt = rspice_core::Engine::new(config)
-            .inspect_model_bins(&netlist)
-            .map_err(|error| {
-                PreparationError::new(
-                    PreparationStage::ModelBindings,
-                    format!("Prepared model-bin resolution is invalid: {error}"),
-                )
-            })?;
-        Ok(PreparedModelBinInspection {
-            source_digest,
-            receipt,
-        })
     }
 
     /// Validate the exact visible manual-deck document through the same

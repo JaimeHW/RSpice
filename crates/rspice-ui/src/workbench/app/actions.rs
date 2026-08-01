@@ -1242,10 +1242,7 @@ mod shortcut_ownership_tests {
         // through the canonical owner and let it refresh the legacy canvas
         // projection the violation cursor still reads.
         app.state
-            .publish_active_design_check_result(
-                result,
-                crate::workbench::app_state::DesignCheckOrigin::Manual,
-            )
+            .publish_active_design_check_result(result)
             .expect("publish the active design-check receipt");
         app.state.refresh_active_design_check_projection();
         app.state

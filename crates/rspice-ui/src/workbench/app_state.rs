@@ -28,7 +28,7 @@ use crate::state::{SchematicState, SimulationState};
 use crate::workbench::app::DialogState;
 
 pub use active_viewer::ActiveViewer;
-pub(crate) use design_checks::{DesignCheckOrigin, DesignCheckRuntime, DesignCheckStatus};
+pub(crate) use design_checks::{DesignCheckRuntime, DesignCheckStatus};
 pub(crate) use design_history::{
     DesignManagementHistoryEntry, SymbolDefinitionFixtureDelta,
     publish_symbol_definition_candidate, publish_symbol_definition_candidate_with_fixture,

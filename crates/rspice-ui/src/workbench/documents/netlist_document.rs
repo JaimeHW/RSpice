@@ -14,7 +14,6 @@ pub(crate) mod diagnostics;
 mod editor;
 mod highlight;
 mod param_scan;
-mod summary;
 
 pub use diagnostics::{Diagnostic, DiagnosticSeverity};
 pub use editor::show as show_editor;

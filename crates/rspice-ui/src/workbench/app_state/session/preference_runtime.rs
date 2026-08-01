@@ -7,7 +7,7 @@
 use crate::workbench::TogglePreference;
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::{DesignCheckOrigin, DesignCheckStatus};
+use crate::workbench::app_state::DesignCheckStatus;
 
 impl RSpiceApp {
     /// Refresh connectivity evidence once per authored topology version when
@@ -29,10 +29,7 @@ impl RSpiceApp {
         ) {
             return;
         }
-        if let Ok(result) = self
-            .state
-            .run_active_design_checks(DesignCheckOrigin::Incremental)
-        {
+        if let Ok(result) = self.state.run_active_design_checks() {
             self.state.dialogs.drc_results = Some(result);
             self.state.dialogs.drc_checked_version = self.state.schematic.topology_version();
         }

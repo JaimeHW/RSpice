@@ -1547,17 +1547,6 @@ pub fn dialog_tabs(ui: &mut Ui, tabs: &[&str], active: &mut usize) {
     dialog_tabs_impl(ui, tabs, active, None);
 }
 
-/// Render dialog tabs using compact symmetric padding when a known viewport
-/// width can contain every label without introducing a horizontal scroll.
-/// Larger registries retain the ordinary scrollable tab-strip behavior.
-pub fn dialog_tabs_in_width(ui: &mut Ui, tabs: &[&str], active: &mut usize, available_width: f32) {
-    // egui's horizontal ScrollArea keeps a narrow interaction/scroll track at
-    // the trailing edge. Fit to the actual paint viewport so the last label
-    // cannot disappear underneath that reserved strip.
-    let paint_width = (available_width - DIALOG_TAB_SCROLL_VIEWPORT_RESERVE).max(1.0);
-    dialog_tabs_impl(ui, tabs, active, Some(paint_width));
-}
-
 fn dialog_tabs_impl(ui: &mut Ui, tabs: &[&str], active: &mut usize, available_width: Option<f32>) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;

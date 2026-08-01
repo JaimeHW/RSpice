@@ -92,9 +92,9 @@ pub use property_types::{
 };
 pub use schematic::*;
 pub use simulation::{
-    AcBodeMetrics, AcBodeSummary, AnalysisResult, AnalysisResultFamilyMetadata,
-    AnalysisResultPayload, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType,
-    ComplexResultValue, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult, ExecutionTarget,
+    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
+    AnalysisResultSourceDomain, AnalysisType, ComplexResultValue,
+    DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult, ExecutionTarget,
     MonteCarloVariableMetadata, NoiseContributorRow, NoiseSummary, OperatingPointAccuracyEvidence,
     OperatingPointAnnotationEvidence, OperatingPointDeviceDetailEvidence,
     OperatingPointHomotopyEvidence, OperatingPointInitialGuessEvidence,
@@ -108,8 +108,7 @@ pub use simulation::{
     SimulationState, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
     SoaViolationEvidence, SoaViolationSeverityEvidence, TransferFunctionAccuracyEvidence,
     TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
-    TransferFunctionScalarEvidence, WaveformData, ac_bode_summary_for_run,
-    ac_bode_summary_for_selection,
+    TransferFunctionScalarEvidence, WaveformData, ac_bode_summary_for_selection,
 };
 pub use symbol::{
     MAX_SYMBOL_DOCUMENT_BYTES, MAX_SYMBOL_PIN_NAME_BYTES, MAX_SYMBOL_TEXT_BYTES, PinFindingKind,

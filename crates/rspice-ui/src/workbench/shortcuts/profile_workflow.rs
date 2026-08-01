@@ -245,15 +245,6 @@ fn limit_error(
     )
 }
 
-fn normalized_source_name(source_name: String) -> String {
-    let trimmed = source_name.trim();
-    if trimmed.is_empty() {
-        "shortcut profile".to_owned()
-    } else {
-        trimmed.to_owned()
-    }
-}
-
 fn json_path_key(key: &str) -> String {
     serde_json::to_string(key).unwrap_or_else(|_| "\"<invalid-key>\"".to_owned())
 }

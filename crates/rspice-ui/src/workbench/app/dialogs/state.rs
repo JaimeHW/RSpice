@@ -735,10 +735,6 @@ impl DrawingSheetLayersDialogState {
     pub(crate) fn close(&mut self) {
         *self = Self::default();
     }
-
-    pub(crate) fn dirty(&self) -> bool {
-        self.open && self.draft != self.original
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
