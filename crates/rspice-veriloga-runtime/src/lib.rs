@@ -1,7 +1,18 @@
 //! Stable, engine-neutral runtime ABI for precompiled Verilog-A models.
 //!
-//! Generated model crates call these concrete types directly. Keep this crate
-//! free of `rspice-core` so Cargo can cache and parallelize generated artifacts.
+//! Generated model crates call these concrete types directly.
+//!
+//! **This crate must not depend on `rspice-core`.** The dependency edges run
+//! `rspice-core` -> `rspice-veriloga-models` -> the 42 generated model crates,
+//! and each of those leaves depends on exactly this crate for its ABI. Moving
+//! these types into `rspice-core`, or adding a `rspice-core` dependency here,
+//! closes that path into a cycle.
+//!
+//! That is also what buys the build headroom: because the leaves stop at this
+//! crate, Cargo compiles and caches all 42 independently instead of folding
+//! them into one `rspice-core` translation unit. Measured 2026-08-01, the
+//! split cut peak single-`rustc` memory for the full corpus from 9.96 GB to
+//! 2.59 GB, back under the 3 GB build gate.
 
 // Fixed-arity stamp entry points deliberately keep small derivative sets in
 // scalar arguments so generated call sites inline without temporary arrays.
