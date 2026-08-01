@@ -1245,7 +1245,8 @@ impl ModelLibraryManager {
         if let Some(section_name) = selected_section.as_deref() {
             if let Some(lib_section) = result.get_section(section_name) {
                 for model in &lib_section.models {
-                    let device_model = Self::convert_parsed_model(model, &path);
+                    let device_model =
+                        Self::convert_parsed_model_in_section(model, &path, Some(&lib_section.name));
                     library
                         .models
                         .insert(device_model.name.clone(), device_model);
@@ -1365,7 +1366,8 @@ impl ModelLibraryManager {
                 )
             })?;
             for model in &lib_section.models {
-                let device_model = Self::convert_parsed_model(model, &root);
+                let device_model =
+                    Self::convert_parsed_model_in_section(model, &root, Some(&lib_section.name));
                 library
                     .models
                     .insert(device_model.name.clone(), device_model);
