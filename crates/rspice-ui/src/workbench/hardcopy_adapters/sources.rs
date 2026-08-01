@@ -842,10 +842,6 @@ pub(crate) fn active_app_hardcopy_source_available(state: &AppState) -> bool {
     }
 }
 
-/// Strict dialog selection resolver. The selected stable key and exact scope
-/// must both be advertised by the retained descriptor; no active/background
-/// fallback is attempted.
-
 /// Resolve a persisted source set against the currently retained application
 /// authorities. Members are processed in definition order and the operation
 /// returns no partial aggregate if any member is missing, stale, or invalid.

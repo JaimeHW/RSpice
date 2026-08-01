@@ -1812,9 +1812,9 @@ fn format_label(format: OutputFormat) -> &'static str {
         OutputFormat::PdfVector => "PDF · vector",
         OutputFormat::PdfA => "PDF/A · vector",
         OutputFormat::SvgVector => "SVG · vector",
-        OutputFormat::Png { dpi } if dpi == 600 => "PNG · 600 dpi",
+        OutputFormat::Png { dpi: 600 } => "PNG · 600 dpi",
         OutputFormat::Png { .. } => "PNG · raster",
-        OutputFormat::Tiff { dpi } if dpi == 600 => "TIFF · 600 dpi",
+        OutputFormat::Tiff { dpi: 600 } => "TIFF · 600 dpi",
         OutputFormat::Tiff { .. } => "TIFF · raster",
     }
 }

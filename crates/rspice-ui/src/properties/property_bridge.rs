@@ -101,11 +101,6 @@ pub fn get_primary_property_name(kind: ComponentType) -> &'static str {
 /// # Arguments
 /// * `params` - HashMap of parameter name to string value
 ///
-/// # Returns
-/// SPICE-format parameter string
-///
-/// # Example
-
 // =============================================================================
 // Property Collection (Component → PropertyValue HashMap)
 // =============================================================================

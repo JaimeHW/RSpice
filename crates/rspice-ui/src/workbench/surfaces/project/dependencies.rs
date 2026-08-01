@@ -455,10 +455,10 @@ fn dependency_rows(state: &AppState) -> Vec<DependencyRow> {
                 "Project writable".to_owned()
             },
             version: nonempty_or_dash(&library.technology),
-            source: library
-                .path
-                .as_ref()
-                .map_or_else(|| "Embedded project data".to_owned(), display_path),
+            source: library.path.as_ref().map_or_else(
+                || "Embedded project data".to_owned(),
+                |path| display_path(path),
+            ),
             digest: "—".to_owned(),
             status: if library.path.is_some() {
                 "available".to_owned()
@@ -497,10 +497,10 @@ fn dependency_rows(state: &AppState) -> Vec<DependencyRow> {
             resource_type: "Model library".to_owned(),
             authority: authority.to_owned(),
             version: nonempty_or_dash(&library.version),
-            source: library
-                .root_path
-                .as_ref()
-                .map_or_else(|| "No executable source".to_owned(), display_path),
+            source: library.root_path.as_ref().map_or_else(
+                || "No executable source".to_owned(),
+                |path| display_path(path),
+            ),
             digest,
             status: status.to_owned(),
         });
@@ -537,7 +537,7 @@ fn nonempty_or_dash(value: &str) -> String {
     }
 }
 
-fn display_path(path: &std::path::PathBuf) -> String {
+fn display_path(path: &std::path::Path) -> String {
     path.display().to_string()
 }
 
