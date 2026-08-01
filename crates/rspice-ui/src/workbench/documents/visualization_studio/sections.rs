@@ -1067,7 +1067,7 @@ pub(super) fn resolved_viewer_availability(
         ViewerCompatibility::MissingExternalCapability { capability_id } => {
             return Err(format!("Requires {capability_id} result capability"));
         }
-        ViewerCompatibility::UnknownDocument | ViewerCompatibility::UnknownQuickMode => {
+        ViewerCompatibility::UnknownDocument => {
             return Err("Viewer identity is not registered".to_owned());
         }
     }

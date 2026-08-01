@@ -580,9 +580,7 @@ fn viewer_status(
         ViewerCompatibility::MissingExternalCapability { .. } => {
             ("specialist dataset required", tokens.color.warn)
         }
-        ViewerCompatibility::UnknownDocument | ViewerCompatibility::UnknownQuickMode => {
-            ("unregistered", tokens.color.err)
-        }
+        ViewerCompatibility::UnknownDocument => ("unregistered", tokens.color.err),
     }
 }
 
@@ -817,7 +815,7 @@ fn resolve_draft<'a>(
                 viewer.title
             )));
         }
-        ViewerCompatibility::UnknownDocument | ViewerCompatibility::UnknownQuickMode => {
+        ViewerCompatibility::UnknownDocument => {
             return Err(CreateResultDocumentError::InvalidDraft(
                 "The selected viewer is not registered.".to_owned(),
             ));
