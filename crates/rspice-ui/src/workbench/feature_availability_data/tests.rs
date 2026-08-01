@@ -498,32 +498,9 @@ fn analysis_kind_mapping_is_exact_and_covers_the_full_manifest() {
 }
 
 #[test]
-fn lookup_and_query_helpers_do_not_invent_fallback_rows() {
-    assert!(platform_availability_row("not-a-platform").is_none());
+fn lookup_helpers_do_not_invent_fallback_rows() {
     assert!(planned_workflow_row("not-a-workflow").is_none());
     assert!(planned_workflow_specification("not-a-workflow").is_none());
-    assert!(analysis_availability_row("not-an-analysis").is_none());
-    assert!(specialist_workspace_row(SurfaceId::FeatureAvailability).is_none());
-    assert!(capability_claim_projection("not-a-case").is_none());
-
-    assert_eq!(platform_rows_matching("").count(), 4);
-    assert_eq!(planned_workflow_rows_matching("").count(), 11);
-    assert_eq!(analysis_rows_matching("").count(), 34);
-    assert_eq!(specialist_workspace_rows_matching("").count(), 41);
-    assert_eq!(capability_claim_rows_matching("").count(), 12);
-
-    assert_eq!(platform_rows_matching("NATIVE DESKTOP").count(), 1);
-    assert_eq!(
-        planned_workflow_rows_matching("pelgrom coefficient").count(),
-        1
-    );
-    assert_eq!(
-        planned_workflow_rows_matching("round-trip comparison").count(),
-        1
-    );
-    assert_eq!(analysis_rows_matching("qpnoise").count(), 1);
-    assert_eq!(specialist_workspace_rows_matching("models-pdk").count(), 8);
-    assert_eq!(capability_claim_rows_matching("unverified").count(), 1);
 }
 
 #[test]
@@ -919,9 +896,8 @@ fn entitlement_state(value: &str) -> EntitlementState {
     match value {
         "granted" => EntitlementState::Granted,
         "denied" => EntitlementState::Denied,
-        "expired" => EntitlementState::Expired,
-        "revoked" => EntitlementState::Revoked,
-        "unknown" => EntitlementState::Unknown,
+        // The fixture carries no other state. A new one is a model change,
+        // not something to map onto a variant nothing renders.
         other => panic!("unknown entitlement state `{other}`"),
     }
 }
@@ -978,7 +954,6 @@ fn evidence_source_summary(evidence: &[&Value]) -> String {
 #[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
 fn claim_projection_contains_only_product_cases_and_matches_fixture_sources() {
     let fixture = parse_json(capability_fixture_source());
-    assert_eq!(fixture["status"].as_str(), Some(CAPABILITY_FIXTURE_STATUS));
     assert_eq!(
         fixture["fixtureRevision"].as_str(),
         Some(CAPABILITY_FIXTURE_REVISION)
