@@ -3466,7 +3466,8 @@ impl Engine {
                 let xyce_level1_core_only = self.config.spice_dialect == SpiceDialect::Xyce
                     && circuit.has_only_xyce_core_inductors()
                     && !circuit.has_xyce_core_level2();
-                if !xyce_level1_core_only
+                if retry_count >= TRANSIENT_GMIN_RESCUE_MIN_RETRIES
+                    && !xyce_level1_core_only
                     && circuit.has_nonlinear_devices()
                     && let Some(rescued) = self.rescue_transient_step_with_gmin_continuation(
                         &mut circuit,
