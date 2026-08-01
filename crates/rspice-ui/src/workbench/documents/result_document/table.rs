@@ -186,7 +186,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     // Around-cursor mode follows cursor A only when it belongs to this
     // analysis; a cursor on another strip is not a window into this one.
     let cursor = (state.ui.results.cursor_strip == Some(model.analysis_index()))
-        .then(|| state.ui.results.cursors.a)
+        .then_some(state.ui.results.cursors.a)
         .flatten();
     let (rows, retained) = selected_rows(model, &view, cursor);
     if rows.is_empty() {

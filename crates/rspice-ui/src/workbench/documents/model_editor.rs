@@ -544,12 +544,12 @@ pub(crate) fn resolve_project_model_for_editor(
     let source_identity = definition
         .project_source_identity()
         .map_err(|error| format!("Project model source identity is invalid: {error}"))?;
-    if let Some(identity) = source_identity.as_ref() {
-        if identity.source_id != source_id || identity.content_digest != model_digest {
-            return Err(format!(
-                "Model '{model_name}' metadata is bound to a different retained source revision"
-            ));
-        }
+    if let Some(identity) = source_identity.as_ref()
+        && (identity.source_id != source_id || identity.content_digest != model_digest)
+    {
+        return Err(format!(
+            "Model '{model_name}' metadata is bound to a different retained source revision"
+        ));
     }
     let model_revision = source_identity.map_or(library_revision, |identity| identity.revision);
 

@@ -119,9 +119,8 @@ impl EnvelopeSourceCatalog {
                 "the exact elaborated periodic-source source is unavailable",
             );
         };
-        AnalysisDependencyRepairContext::exact_periodic_sources(source.clone()).unwrap_or_else(
-            |error| AnalysisDependencyRepairContext::periodic_sources_unavailable(error),
-        )
+        AnalysisDependencyRepairContext::exact_periodic_sources(source.clone())
+            .unwrap_or_else(AnalysisDependencyRepairContext::periodic_sources_unavailable)
     }
 
     fn selection_error(&self, requested: &[String]) -> Option<String> {

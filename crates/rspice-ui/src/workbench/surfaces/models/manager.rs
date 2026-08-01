@@ -1881,7 +1881,7 @@ fn refresh_library(app: &mut ManagerRenderContext<'_>, library: &ModelLibrary) {
                 ));
             }
             publish_model_library_candidate(
-                &mut app.state,
+                app.state,
                 candidate,
                 &library.name,
                 format!("refresh model library {}", library.name),
@@ -1901,7 +1901,7 @@ fn attach_pack(app: &mut ManagerRenderContext<'_>, pack_id: &str) {
     let mut candidate = app.state.model_library_manager.clone();
     let result = candidate.attach_spice_pack(pack_id).and_then(|library| {
         publish_model_library_candidate(
-            &mut app.state,
+            app.state,
             candidate,
             &library,
             format!("attach model pack {pack_id}"),
@@ -1927,7 +1927,7 @@ fn detach_pack(app: &mut ManagerRenderContext<'_>, pack_id: &str) {
     let mut candidate = app.state.model_library_manager.clone();
     candidate.remove_library(&library);
     let result = publish_model_library_candidate(
-        &mut app.state,
+        app.state,
         candidate,
         &library,
         format!("detach model pack {pack_id}"),
@@ -1957,7 +1957,7 @@ fn add_part(app: &mut ManagerRenderContext<'_>, pack_id: &str, part_name: &str) 
                 ));
             }
             publish_model_library_candidate(
-                &mut app.state,
+                app.state,
                 candidate,
                 &library,
                 format!("add shipped model part {part_name}"),
@@ -2051,7 +2051,7 @@ fn add_corner(
     corner.vdd_factor = supply;
     library.corners.insert(name.to_owned(), corner);
     let result = publish_model_library_candidate(
-        &mut app.state,
+        app.state,
         candidate,
         library_name,
         format!("add model corner {name}"),

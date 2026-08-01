@@ -284,13 +284,12 @@ impl PdkDisplayProfileRegistry {
             .revisions
             .iter()
             .find(|revision| revision.profile_id.eq_ignore_ascii_case(&draft.profile_id))
+            && existing.technology != draft.technology
         {
-            if existing.technology != draft.technology {
-                return Err(PdkDisplayProfileError::InvalidTransition(format!(
-                    "profile '{}' is permanently bound to technology {} {}",
-                    draft.profile_id, existing.technology.package_id, existing.technology.revision
-                )));
-            }
+            return Err(PdkDisplayProfileError::InvalidTransition(format!(
+                "profile '{}' is permanently bound to technology {} {}",
+                draft.profile_id, existing.technology.package_id, existing.technology.revision
+            )));
         }
         let revision_number = self
             .revisions

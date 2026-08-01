@@ -2068,15 +2068,13 @@ pub(super) fn validate_fill(fill: Option<SceneFill>) -> Result<(), HardcopyRende
         spacing,
         ..
     }) = fill
-    {
-        if line_width == Length::ZERO
+        && (line_width == Length::ZERO
             || spacing == Length::ZERO
             || line_width.micrometres() > 25_000
             || spacing.micrometres() > 25_000
-            || line_width > spacing
-        {
-            return Err(HardcopyRenderError::InvalidCrossHatch);
-        }
+            || line_width > spacing)
+    {
+        return Err(HardcopyRenderError::InvalidCrossHatch);
     }
     Ok(())
 }

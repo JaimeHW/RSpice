@@ -40,10 +40,10 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         view_type => unsupported_document(ui, app, view_type),
     }
     breadcrumb(ui.ctx(), app, content_rect);
-    if canvas_document {
-        if app.state.workbench.current_route().surface_id() == super::super::SurfaceId::Design {
-            crate::schematic::view::show_mobile_canvas_controls(ui.ctx(), app, content_rect);
-        }
+    if canvas_document
+        && app.state.workbench.current_route().surface_id() == super::super::SurfaceId::Design
+    {
+        crate::schematic::view::show_mobile_canvas_controls(ui.ctx(), app, content_rect);
     }
 }
 

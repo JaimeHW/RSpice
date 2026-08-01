@@ -359,13 +359,12 @@ impl RSpiceApp {
                     personal_stale,
                 );
             });
-        if matches!(action, Some(EditorBodyAction::RefreshPreview)) {
-            if let Some(draft) = self.state.dialogs.drawing_sheet_presets.editor.as_mut() {
-                if let Ok(candidate) = editor_candidate(draft, &visible) {
-                    draft.last_valid_preview = candidate.format;
-                    draft.error = None;
-                }
-            }
+        if matches!(action, Some(EditorBodyAction::RefreshPreview))
+            && let Some(draft) = self.state.dialogs.drawing_sheet_presets.editor.as_mut()
+            && let Ok(candidate) = editor_candidate(draft, &visible)
+        {
+            draft.last_valid_preview = candidate.format;
+            draft.error = None;
         }
         match choice {
             DialogChoice::Primary => match self.apply_preset_editor() {
@@ -570,7 +569,7 @@ impl RSpiceApp {
         let export_ids = visible
             .iter()
             .filter(|preset| !unavailable(preset))
-            .map(|preset| transfer_identity(preset))
+            .map(transfer_identity)
             .collect();
         let package_name = if mode == TransferMode::Import {
             String::new()
@@ -1263,12 +1262,12 @@ fn usage_counts(
         .values()
         .flat_map(|catalog| catalog.sheets())
     {
-        if let AuthoredDrawingSheetSize::Custom { snapshot } = &sheet.page_format().authored_size {
-            if let Some(id) = snapshot.preset_id.as_ref() {
-                *usage
-                    .entry(render::usage_key(DrawingSheetPresetScope::Project, id))
-                    .or_default() += 1;
-            }
+        if let AuthoredDrawingSheetSize::Custom { snapshot } = &sheet.page_format().authored_size
+            && let Some(id) = snapshot.preset_id.as_ref()
+        {
+            *usage
+                .entry(render::usage_key(DrawingSheetPresetScope::Project, id))
+                .or_default() += 1;
         }
     }
     let settings = project.drawing_sheet_settings();

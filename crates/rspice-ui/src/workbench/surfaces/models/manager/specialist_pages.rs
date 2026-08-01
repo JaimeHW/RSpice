@@ -25,13 +25,13 @@ pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 navigate_specialist(app, crate::workbench::SurfaceId::LibraryCellviewManager);
             }
             if ui.button("Import symbol").clicked() {
-                super::super::open_symbol_import_dialog(&mut app.state);
+                super::super::open_symbol_import_dialog(app.state);
             }
             if ui.button("Form designer").clicked() {
-                super::super::open_symbol_parameter_form_dialog(&mut app.state);
+                super::super::open_symbol_parameter_form_dialog(app.state);
             }
             if ui.button("Create symbol").clicked() {
-                super::super::open_create_model_bound_symbol_dialog(&mut app.state);
+                super::super::open_create_model_bound_symbol_dialog(app.state);
             }
         },
     );
@@ -401,7 +401,7 @@ fn symbol_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Symbol
                             .clicked()
                         {
                             if row.read_only {
-                                super::super::open_create_model_bound_symbol_dialog(&mut app.state);
+                                super::super::open_create_model_bound_symbol_dialog(app.state);
                             } else {
                                 app.state.open_workspace_view(row.reference.clone());
                                 app.state
@@ -421,7 +421,7 @@ fn symbol_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Symbol
                                 &row.reference.cell,
                                 &row.reference.view,
                             );
-                            super::super::open_symbol_parameter_form_dialog(&mut app.state);
+                            super::super::open_symbol_parameter_form_dialog(app.state);
                         }
                     });
                 });
@@ -763,10 +763,9 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
                 .model_library_manager
                 .get_library(&row.library)
                 .cloned()
+            && let Some(model) = library.models.values().next().cloned()
         {
-            if let Some(model) = library.models.values().next().cloned() {
-                open_model_source(app, &library, &model);
-            }
+            open_model_source(app, &library, &model);
         }
         if ui.button("View include graph").clicked() {
             app.state.workbench.models_page = ModelsPage::Include;
@@ -860,7 +859,7 @@ fn select_corner(app: &mut ManagerRenderContext<'_>, library_name: &str, corner_
                     ));
                 }
                 publish_model_library_candidate(
-                    &mut app.state,
+                    app.state,
                     candidate,
                     library_name,
                     format!("select model corner {corner_name}"),

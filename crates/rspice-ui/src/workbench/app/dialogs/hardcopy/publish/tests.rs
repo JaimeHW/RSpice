@@ -187,7 +187,7 @@ fn legacy_output_page_setup_does_not_rewrite_document_policy() {
             &app.state,
         )
         .expect("legacy schematic resolves");
-    let policy_before = app.state.schematic.document_policy.clone();
+    let policy_before = app.state.schematic.document_policy;
     let format = SchematicSheetFormat::try_custom(
         "Custom",
         300_123,

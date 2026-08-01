@@ -1665,7 +1665,7 @@ pub fn validate_archive(
         artifact_digests,
     };
     super::technology_callback::validate_signed_callbacks(archive, &package)
-        .map_err(|detail| PdkTechnologyError::CallbackValidation(detail))?;
+        .map_err(PdkTechnologyError::CallbackValidation)?;
     // Executable model contracts are part of package validation, not a
     // deferred simulation-time best effort. This proves section existence,
     // package-relative dependency closure, source encoding, and reachability

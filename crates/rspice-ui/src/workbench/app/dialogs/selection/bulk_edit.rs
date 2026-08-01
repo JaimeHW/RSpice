@@ -1778,7 +1778,7 @@ fn parameter_key_from_filter(
                 expression
                     .split_once('=')
                     .map(|(key, _)| key)
-                    .or_else(|| Some(expression))
+                    .or(Some(expression))
             })
         })
         .unwrap_or_default()

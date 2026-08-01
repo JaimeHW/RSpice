@@ -1700,13 +1700,13 @@ fn validate_retained_operating_point_contract(
                 .to_owned(),
         );
     }
-    if let Some(crate::simulation::AnalysisConfig::DcOp(config)) = task.config.as_ref() {
-        if config != &spec_config {
-            return Err(
-                "the operating-point spec and engine configuration carry different contracts"
-                    .to_owned(),
-            );
-        }
+    if let Some(crate::simulation::AnalysisConfig::DcOp(config)) = task.config.as_ref()
+        && config != &spec_config
+    {
+        return Err(
+            "the operating-point spec and engine configuration carry different contracts"
+                .to_owned(),
+        );
     }
     Ok(())
 }

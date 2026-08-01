@@ -1317,10 +1317,9 @@ fn engineering_grid_preview(
                                         }
                                         if modifiers.shift
                                             && ui.input(|input| input.key_pressed(egui::Key::Space))
+                                            && !selected_rows.insert(row.stable_id.clone())
                                         {
-                                            if !selected_rows.insert(row.stable_id.clone()) {
-                                                selected_rows.remove(&row.stable_id);
-                                            }
+                                            selected_rows.remove(&row.stable_id);
                                         }
                                         if ui.input(|input| input.key_pressed(egui::Key::Enter)) {
                                             action = Some(BodyAction::OpenDetails(

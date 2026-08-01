@@ -131,7 +131,7 @@ fn result_import_block_reason(state: &AppState) -> Option<String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn read_native_file_bounded(path: &Path) -> Result<Vec<u8>, String> {
-    let mut file = std::fs::File::open(path)
+    let file = std::fs::File::open(path)
         .map_err(|error| format!("could not open {}: {error}", path.display()))?;
     let size = file
         .metadata()
@@ -584,19 +584,19 @@ fn infer_analysis_type(header: &ColumnContract) -> Result<(AnalysisType, f64), S
         _ => (AnalysisType::DcSweep, None, 1.0),
     };
 
-    if let (Some(required), Some(unit)) = (required_dimension, header.unit) {
-        if unit.dimension != required {
-            return Err(format!(
-                "{} coordinate {:?} requires a {} unit",
-                analysis_domain_label(analysis_type),
-                header.name,
-                match required {
-                    UnitDimension::Time => "time",
-                    UnitDimension::Frequency => "frequency",
-                    _ => "compatible",
-                }
-            ));
-        }
+    if let (Some(required), Some(unit)) = (required_dimension, header.unit)
+        && unit.dimension != required
+    {
+        return Err(format!(
+            "{} coordinate {:?} requires a {} unit",
+            analysis_domain_label(analysis_type),
+            header.name,
+            match required {
+                UnitDimension::Time => "time",
+                UnitDimension::Frequency => "frequency",
+                _ => "compatible",
+            }
+        ));
     }
     if analysis_type == AnalysisType::DcSweep
         && header.unit.is_some_and(|unit| {

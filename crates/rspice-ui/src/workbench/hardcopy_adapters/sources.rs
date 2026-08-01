@@ -585,7 +585,7 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
             ViewType::Symbol => {
                 let document = state
                     .load_active_symbol_document()
-                    .map_err(|reason| HardcopySourceError::StaleActiveDocumentAuthority(reason))?;
+                    .map_err(HardcopySourceError::StaleActiveDocumentAuthority)?;
                 Ok(PreparedRetainedHardcopyResolution {
                     payload: PreparedRetainedHardcopyPayload::Symbol {
                         project_id,
@@ -2001,8 +2001,8 @@ pub(crate) fn resolve_retained_hardcopy_source(
                             "active sheet {sheet_id} is not retained"
                         ))
                     })?;
-                    let sheet_identity = schematic_sheet_identity(&identity, sheet)?;
-                    sheet_identity
+
+                    schematic_sheet_identity(&identity, sheet)?
                 } else {
                     identity
                 };
@@ -2037,7 +2037,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
             ViewType::Symbol => {
                 let document = state
                     .load_active_symbol_document()
-                    .map_err(|reason| HardcopySourceError::StaleActiveDocumentAuthority(reason))?;
+                    .map_err(HardcopySourceError::StaleActiveDocumentAuthority)?;
                 resolve_symbol_source(SymbolHardcopySource {
                     identity,
                     document: &document,

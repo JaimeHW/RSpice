@@ -3085,7 +3085,7 @@ fn add_report_element_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
                 }
             });
         }
-        if matches!(kind_index, 3 | 4 | 5) {
+        if matches!(kind_index, 3..=5) {
             ui.add_space(8.0);
             let status_labels: &[&str] = match kind_index {
                 3 => &["Not evaluated", "Passed", "Failed", "Waived"],

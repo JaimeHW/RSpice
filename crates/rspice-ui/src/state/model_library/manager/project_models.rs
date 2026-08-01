@@ -1216,13 +1216,14 @@ impl ModelLibraryManager {
             .model_definition_metadata
             .insert(bound.base.name.clone(), bound.metadata.clone());
         library.model_qualification.clear();
-        if let Some(previous_model_name) = previous_model_name.as_deref() {
-            if previous_model_name != bound.base.name && *qualification != Default::default() {
-                return Err(
-                    "A qualified model cannot be renamed without an explicit release-lineage migration"
-                        .to_owned(),
-                );
-            }
+        if let Some(previous_model_name) = previous_model_name.as_deref()
+            && previous_model_name != bound.base.name
+            && *qualification != Default::default()
+        {
+            return Err(
+                "A qualified model cannot be renamed without an explicit release-lineage migration"
+                    .to_owned(),
+            );
         }
         if retained_qualification != Default::default() {
             library

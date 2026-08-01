@@ -355,40 +355,38 @@ fn qualification_plan_actions(
             .max_rect(rect.shrink2(Vec2::new(0.0, 5.0)))
             .layout(Layout::left_to_right(Align::Min).with_main_wrap(true)),
     );
-    if qualification_plan_button(&mut actions, "Run suite", 104.0, run_enabled && suite_exact) {
-        if let Some(suite) = suite {
-            plan.action_error =
-                crate::workbench::documents::model_editor::start_qualification_suite_execution(
-                    app, &suite.id,
-                )
-                .err();
-        }
+    if qualification_plan_button(&mut actions, "Run suite", 104.0, run_enabled && suite_exact)
+        && let Some(suite) = suite
+    {
+        plan.action_error =
+            crate::workbench::documents::model_editor::start_qualification_suite_execution(
+                app, &suite.id,
+            )
+            .err();
     }
     if qualification_plan_button(
         &mut actions,
         "Run vector",
         104.0,
         run_enabled && source_exact,
-    ) {
-        if let (Some(suite), Some(vector)) = (suite, vector) {
-            plan.action_error =
-                crate::workbench::documents::model_editor::start_qualification_vector_execution(
-                    app, &suite.id, &vector.id,
-                )
-                .err();
-        }
+    ) && let (Some(suite), Some(vector)) = (suite, vector)
+    {
+        plan.action_error =
+            crate::workbench::documents::model_editor::start_qualification_vector_execution(
+                app, &suite.id, &vector.id,
+            )
+            .err();
     }
     if qualification_plan_button(
         &mut actions,
         "Edit vector…",
         112.0,
         edit_enabled && vector.is_some(),
-    ) {
-        if let Some(vector) = vector {
-            plan.edit_name.clone_from(&vector.name);
-            plan.edit_open = true;
-            plan.action_error = None;
-        }
+    ) && let Some(vector) = vector
+    {
+        plan.edit_name.clone_from(&vector.name);
+        plan.edit_open = true;
+        plan.action_error = None;
     }
     if qualification_plan_button(
         &mut actions,
@@ -422,23 +420,22 @@ fn qualification_plan_actions(
         "Review disposition…",
         154.0,
         !execution_active && disposition_available,
-    ) {
-        if let (Some(suite), Some(vector)) = (suite, vector) {
-            if let Some(cause) =
-                qualification_disposition_cause(app, qualification, Some(suite), vector)
-            {
-                plan.disposition_cause = cause;
-                plan.disposition_action = if cause == QualificationVectorDispositionCause::Stale {
-                    QualificationVectorRequiredAction::Replace
-                } else {
-                    QualificationVectorRequiredAction::Rerun
-                };
-            }
-            plan.disposition_id = format!("{}-{}-disposition", suite.id, vector.id);
-            plan.disposition_reason.clear();
-            plan.disposition_open = true;
-            plan.action_error = None;
+    ) && let (Some(suite), Some(vector)) = (suite, vector)
+    {
+        if let Some(cause) =
+            qualification_disposition_cause(app, qualification, Some(suite), vector)
+        {
+            plan.disposition_cause = cause;
+            plan.disposition_action = if cause == QualificationVectorDispositionCause::Stale {
+                QualificationVectorRequiredAction::Replace
+            } else {
+                QualificationVectorRequiredAction::Rerun
+            };
         }
+        plan.disposition_id = format!("{}-{}-disposition", suite.id, vector.id);
+        plan.disposition_reason.clear();
+        plan.disposition_open = true;
+        plan.action_error = None;
     }
     if let Some(error) = plan.action_error.as_deref() {
         blocker_note(ui, error);

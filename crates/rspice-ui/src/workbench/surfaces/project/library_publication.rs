@@ -353,14 +353,7 @@ fn show_rollback_dialog(ctx: &Context, app: &mut RSpiceApp) {
     let Some(mut draft) = ctx.data(|data| data.get_temp::<RollbackDraft>(id)) else {
         return;
     };
-    let receipts = app
-        .state
-        .workspace
-        .project
-        .library_publications()
-        .iter()
-        .cloned()
-        .collect::<Vec<_>>();
+    let receipts = app.state.workspace.project.library_publications().to_vec();
     if receipts.is_empty() {
         ctx.data_mut(|data| {
             data.remove::<RollbackDraft>(id);

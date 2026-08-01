@@ -105,7 +105,7 @@ impl AnalysisPresentationKey {
         self.dataset_id
     }
 
-    pub(crate) fn resolve<'a>(self, run: &'a SimulationRun) -> Option<(usize, &'a AnalysisResult)> {
+    pub(crate) fn resolve(self, run: &SimulationRun) -> Option<(usize, &AnalysisResult)> {
         (run.dataset_id == self.dataset_id)
             .then(|| {
                 run.analyses

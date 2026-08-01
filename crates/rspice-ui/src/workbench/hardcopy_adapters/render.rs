@@ -1364,8 +1364,8 @@ fn clip_polygon(points: &[ScenePoint], clip: ClipRect) -> Vec<ScenePoint> {
         let mut previous_inside = inside(previous);
         for current in input {
             let current_inside = inside(current);
-            if current_inside != previous_inside {
-                if let Some((a, b)) = if axis == 0 {
+            if current_inside != previous_inside
+                && let Some((a, b)) = if axis == 0 {
                     clip_line(
                         previous,
                         current,
@@ -1387,15 +1387,15 @@ fn clip_polygon(points: &[ScenePoint], clip: ClipRect) -> Vec<ScenePoint> {
                             height: 0,
                         },
                     )
-                } {
-                    output.push(if axis == 0 {
-                        if a.x.micrometres() == bound { a } else { b }
-                    } else if a.y.micrometres() == bound {
-                        a
-                    } else {
-                        b
-                    });
                 }
+            {
+                output.push(if axis == 0 {
+                    if a.x.micrometres() == bound { a } else { b }
+                } else if a.y.micrometres() == bound {
+                    a
+                } else {
+                    b
+                });
             }
             if current_inside {
                 output.push(current);

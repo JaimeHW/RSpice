@@ -277,8 +277,8 @@ impl PhysicalPageSetup {
                 validate_margins(width, height, self.margins)?;
             }
         }
-        if let Bleed::Uniform(bleed) = self.bleed {
-            if bleed == Length::ZERO
+        if let Bleed::Uniform(bleed) = self.bleed
+            && (bleed == Length::ZERO
                 || [
                     self.margins.top,
                     self.margins.right,
@@ -286,10 +286,9 @@ impl PhysicalPageSetup {
                     self.margins.left,
                 ]
                 .into_iter()
-                .any(|margin| bleed > margin)
-            {
-                return Err(HardcopyError::BleedExceedsMargins);
-            }
+                .any(|margin| bleed > margin))
+        {
+            return Err(HardcopyError::BleedExceedsMargins);
         }
         Ok(())
     }

@@ -314,10 +314,9 @@ fn show_toolbar(
                 if ui
                     .add_enabled(can_delete, egui::Button::new("Delete selected"))
                     .clicked()
+                    && let Some(id) = session.selected
                 {
-                    if let Some(id) = session.selected {
-                        *pending_edits = removal_edit(document, id).map(|edit| vec![edit]);
-                    }
+                    *pending_edits = removal_edit(document, id).map(|edit| vec![edit]);
                 }
                 ui.separator();
                 ui.label(format!(

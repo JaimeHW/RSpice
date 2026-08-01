@@ -1209,10 +1209,10 @@ struct ResultsComparisonSource {
     viewer: ResultViewer,
 }
 
-fn retained_document_analysis<'a>(
-    run: &'a SimulationRun,
+fn retained_document_analysis(
+    run: &SimulationRun,
     source_id: AnalysisInstanceId,
-) -> Option<&'a AnalysisResult> {
+) -> Option<&AnalysisResult> {
     run.analyses.iter().find(|analysis| {
         analysis.provenance().map_or_else(
             || {

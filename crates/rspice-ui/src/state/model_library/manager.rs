@@ -1668,14 +1668,14 @@ impl ModelLibraryManager {
         let removed = candidate
             .libraries
             .iter()
-            .filter_map(|(name, library)| {
+            .filter(|&(name, library)| {
                 (matches!(library.source_authority, ModelSourceAuthority::External)
                     && library
                         .root_path
                         .as_ref()
                         .is_some_and(|path| previously_managed.contains(&portable_path_key(path))))
-                .then(|| name.clone())
             })
+            .map(|(name, library)| name.clone())
             .collect::<Vec<_>>();
         for name in removed {
             candidate.libraries.remove(&name);

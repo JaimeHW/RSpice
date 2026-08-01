@@ -596,10 +596,10 @@ impl ResolvedHardcopyDocument {
 /// Deterministic aggregate layout after applying the selected per-sheet
 /// output policy.  Only an authored-sheet clip changes a child footprint;
 /// all other document kinds retain their immutable resolved bounds.
-fn aggregate_output_layout<'a>(
-    aggregate: &'a SemanticAggregate,
+fn aggregate_output_layout(
+    aggregate: &SemanticAggregate,
     setup: crate::hardcopy::SchematicHardcopySetup,
-) -> Result<Vec<(&'a SemanticAggregateChild, ContentExtent, SemanticPoint)>, HardcopySourceError> {
+) -> Result<Vec<(&SemanticAggregateChild, ContentExtent, SemanticPoint)>, HardcopySourceError> {
     let mut next_y_um = 0_i64;
     let mut layout = Vec::with_capacity(aggregate.children.len());
     for (index, child) in aggregate.children.iter().enumerate() {

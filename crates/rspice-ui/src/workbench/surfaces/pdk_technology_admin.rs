@@ -986,7 +986,7 @@ fn diff_entry_row(ui: &mut Ui, entry: &PdkTechnologyDiffEntry, index: usize) {
     let before = entry.before.as_deref().unwrap_or("—");
     let after = entry.after.as_deref().unwrap_or("—");
     let response = Frame::new()
-        .fill(if index % 2 == 0 {
+        .fill(if index.is_multiple_of(2) {
             Tokens::get(ui.ctx()).color.bg_inset
         } else {
             Tokens::get(ui.ctx()).color.bg_panel
@@ -1436,8 +1436,8 @@ fn display_section(
                 *action = Some(AdminAction::PublishDisplayProfile(draft.clone()));
             }
 
-            if let Some((profile_id, revision)) = &view.selected_display_profile {
-                if let Some(profile) = package_profiles.iter().find(|profile| {
+            if let Some((profile_id, revision)) = &view.selected_display_profile
+                && let Some(profile) = package_profiles.iter().find(|profile| {
                     profile.profile_id.eq_ignore_ascii_case(profile_id)
                         && profile.revision == *revision
                 }) {
@@ -1474,7 +1474,6 @@ fn display_section(
                         });
                     }
                 }
-            }
         });
             ui.small(
             "Actor and authority are operator-provided local audit fields. This surface does not claim connected organization authentication or remote authorization.",

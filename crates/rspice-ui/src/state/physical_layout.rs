@@ -930,7 +930,7 @@ fn validate_properties(
 
 fn validate_point(path: &str, point: LayoutPoint) -> Result<(), LayoutDocumentError> {
     for (axis, value) in [("x", point.x), ("y", point.y)] {
-        if value < -MAX_ABS_LAYOUT_COORDINATE_DBU || value > MAX_ABS_LAYOUT_COORDINATE_DBU {
+        if !(-MAX_ABS_LAYOUT_COORDINATE_DBU..=MAX_ABS_LAYOUT_COORDINATE_DBU).contains(&value) {
             return invalid(
                 format!("{path}.{axis}"),
                 format!(

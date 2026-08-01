@@ -2606,7 +2606,7 @@ pub fn validate_format_preset_reference(
     };
     let expected_unavailable = available
         .get(&case_fold(id))
-        .map_or(true, |(_, unavailable)| *unavailable);
+        .is_none_or(|(_, unavailable)| *unavailable);
     if let Some((name, _)) = available.get(&case_fold(id))
         && snapshot.name != *name
     {
