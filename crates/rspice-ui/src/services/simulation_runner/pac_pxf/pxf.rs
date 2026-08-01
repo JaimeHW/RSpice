@@ -160,8 +160,6 @@ pub struct PxfData {
     pub output_sideband: i32,
     /// Output label.
     pub output_label: String,
-    /// Optional 3 dB bandwidth.
-    pub bandwidth_3db: Option<Value>,
 }
 
 /// Run PXF standalone -- solving its own periodic solution rather than
@@ -360,7 +358,6 @@ fn run_pxf_analysis_for_netlist_with_operating_point_abort(
         input_sideband: pxf_result.input_sideband,
         output_sideband: pxf_result.output_sideband,
         output_label,
-        bandwidth_3db: pxf_result.bandwidth_3db,
     })
 }
 

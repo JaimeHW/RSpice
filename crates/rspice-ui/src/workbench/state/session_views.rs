@@ -230,8 +230,6 @@ pub enum ModelsCatalogScope {
 }
 
 impl ModelsCatalogScope {
-    pub const ALL: [Self; 3] = [Self::Project, Self::InstalledPacks, Self::RSpiceLibrary];
-
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
