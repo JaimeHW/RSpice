@@ -97,7 +97,10 @@ impl ModelLibraryManager {
                     library.name
                 )
             })?;
-            let project_owned = library.source_authority.is_project_owned();
+            // Both a project-owned library and a retained import carry their bytes in
+            // the project, so both are sealed from those bytes rather than re-read
+            // from a host path that may not exist here.
+            let retained = library.source_authority.uses_retained_bytes();
             if library.source_closure.is_empty() {
                 return Err(format!(
                     "Model library '{}' is not content-pinned; refresh or re-import '{}' before simulation",
@@ -125,7 +128,7 @@ impl ModelLibraryManager {
 
             for source in &library.source_closure {
                 #[cfg(not(target_arch = "wasm32"))]
-                if !project_owned && is_foreign_platform_absolute_path(&source.path) {
+                if !retained && is_foreign_platform_absolute_path(&source.path) {
                     return Err(format!(
                         "Model library '{}' retains foreign-platform dependency '{}', which is unavailable on this host; re-import or repair the binding before simulation",
                         library.name,
@@ -141,7 +144,7 @@ impl ModelLibraryManager {
                 }
                 match expected_sources.entry(source.path.clone()) {
                     std::collections::btree_map::Entry::Vacant(entry) => {
-                        entry.insert((source.digest, vec![library.name.clone()], project_owned));
+                        entry.insert((source.digest, vec![library.name.clone()], retained));
                     }
                     std::collections::btree_map::Entry::Occupied(mut entry) => {
                         if entry.get().0 != source.digest {
@@ -150,7 +153,7 @@ impl ModelLibraryManager {
                                 source.path.display()
                             ));
                         }
-                        if entry.get().2 != project_owned {
+                        if entry.get().2 != retained {
                             return Err(format!(
                                 "Model libraries disagree on source authority for shared dependency '{}'",
                                 source.path.display()
@@ -257,14 +260,13 @@ impl ModelLibraryManager {
                     }
                 }
             }
-            if project_owned {
-                let ModelSourceAuthority::ProjectOwned { digest, .. } = library.source_authority
-                else {
-                    unreachable!("project-owned authority was checked above")
+            if retained {
+                let Some(digest) = library.source_authority.retained_root_digest() else {
+                    unreachable!("retained authority was checked above")
                 };
                 if library.source_contents.len() != library.source_closure.len() {
                     return Err(format!(
-                        "Project-owned model library '{}' must retain exact bytes for every authenticated source member",
+                        "Model library '{}' retains its bytes and must hold exact content for every authenticated source member",
                         library.name
                     ));
                 }
@@ -308,8 +310,8 @@ impl ModelLibraryManager {
         }
 
         let mut authenticated_sources = Vec::with_capacity(expected_sources.len());
-        for (path, (expected_digest, owners, project_owned)) in expected_sources {
-            let bytes = if project_owned {
+        for (path, (expected_digest, owners, retained)) in expected_sources {
+            let bytes = if retained {
                 retained_sources.remove(&path).ok_or_else(|| {
                     format!(
                         "Project-owned model dependency '{}' (used by {}) has no retained source bytes",
@@ -329,7 +331,7 @@ impl ModelLibraryManager {
             let actual_digest =
                 crate::product::ContentDigest::from_bytes(Sha256::digest(&bytes).into());
             if actual_digest != expected_digest {
-                return Err(if project_owned {
+                return Err(if retained {
                     format!(
                         "Project-owned model dependency changed at '{}'; the retained bytes no longer match the accepted SHA-256 identity",
                         path.display()

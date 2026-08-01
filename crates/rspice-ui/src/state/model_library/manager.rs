@@ -1314,9 +1314,14 @@ impl ModelLibraryManager {
 
         let mut library = ModelLibrary::new(&lib_name);
         library.root_path = Some(root.clone());
-        library.source_authority = ModelSourceAuthority::ProjectOwned {
+        // Imported bytes the project retained, not a definition the project
+        // authored. The distinction is load-bearing: a project-owned library
+        // carries a revision and typed definition metadata, and
+        // `project_model_definition_identities` fails closed when a
+        // project-owned model has none. An import has neither, so recording it
+        // as project-owned makes that check demand metadata that cannot exist.
+        library.source_authority = ModelSourceAuthority::RetainedImport {
             source_id: crate::product::ModelSourceId::new(),
-            revision: crate::product::ObjectRevision::INITIAL,
             digest,
         };
         library.source_closure = vec![ModelSourcePin {
