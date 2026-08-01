@@ -25,5 +25,11 @@ models/spice/**/LICENSE -text
 # leaving binary fixtures untouched.
 tests/xyce/** text=auto eol=crlf
 
-# Regenerated built-in Rust must stay clean after generator rewrites.
+# Regenerated built-in Rust must stay clean after generator rewrites. The
+# manifest records a blake3 over each generated file's exact bytes and
+# `build.rs` re-derives it from the checkout, so an end-of-line translation
+# here does not merely churn the diff — it fails the build on the platform
+# that translated. The shard moved this tree out of rspice-core into its own
+# crate; the rule has to follow it, package markers and manifest included.
+crates/rspice-veriloga-models/** text eol=lf
 crates/rspice-core/src/device/veriloga_generated/** text eol=lf
