@@ -124,6 +124,10 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
             executor: "rspice-ui persistent Visualization Studio result-document executor",
             evidence_boundary: "Versioned pane composition, native waveform/Bode/spectrum/Smith/table/histogram/eye/pole-zero viewers, exact source-row inspection, cursor/marker/annotation entities, retained-run overlays, display LOD policy, and CSV/Touchstone/PNG export are executable. Catalog viewers without a compatible native renderer or qualified external producer remain explicitly unavailable and never receive fabricated fallback data.",
         },
+        SurfaceId::ReportAuthoring => SurfaceExecutionAvailability::Available {
+            executor: "rspice-ui project-owned report and datasheet document composer",
+            evidence_boundary: "Versioned project-owned report documents, template-seeded outlines, page creation/reordering/paper settings, typed prose and result blocks, live result references that re-resolve against current project evidence, frozen references that capture deterministic authenticated raster artifacts, publication settings, and hardcopy export are executable. Unresolved, stale, or unbound evidence references are disclosed and fail closed rather than rendering fabricated content. The composer discloses release-handoff readiness and routes to Release Closure; it never freezes, approves, promotes, or signs off a release candidate, and it exposes no external publication or distribution service.",
+        },
         SurfaceId::ModelEditor => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui governed project-owned device-model definition editor",
             evidence_boundary: "A selected coherent project-owned single-card model can be opened, edited through typed parameter, section, statistical, temperature, and executable qualification contracts, parser-validated, compared with retained releases, and committed as guarded source or evidence-only revisions. Qualification runs execute on the current real Desktop or WebAssembly runtime and assemble parity evidence only from an exact retained pair. Promotion remains fail-closed behind complete source-bound evidence, declarations, compatibility, and independent approvals. Built-in and external sources remain read-only.",
@@ -194,6 +198,7 @@ mod tests {
                 SurfaceId::Models,
                 SurfaceId::Netlist,
                 SurfaceId::VisualizationStudio,
+                SurfaceId::ReportAuthoring,
                 SurfaceId::ModelEditor,
                 SurfaceId::ModelCorrelation,
                 SurfaceId::PdkTechnologyAdmin,

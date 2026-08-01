@@ -4324,6 +4324,7 @@ mod tests {
     #[test]
     fn report_commands_open_for_review_and_gate_mutations_by_exact_authority() {
         let mut app = RSpiceApp::test_instance();
+        assert!(crate::workbench::surface_availability(SurfaceId::ReportAuthoring).can_open());
         assert!(
             crate::workbench::commands::vocabulary::command_catalog()
                 .any(|command| command == Command::ReportAuthoring)
@@ -4448,10 +4449,12 @@ mod tests {
     }
 
     #[test]
-    fn incomplete_publication_contract_keeps_surface_and_commands_unexposed() {
-        assert!(!crate::workbench::surface_availability(SurfaceId::ReportAuthoring).can_open());
+    fn contextual_report_commands_stay_out_of_the_searchable_registry() {
+        assert!(crate::workbench::commands::vocabulary::COMMAND_REGISTRY.contains(&Command::ReportAuthoring));
+        // The three mutating commands act on the active document and page, so
+        // they stay bound to the surface's own affordances rather than the
+        // palette, where they would have no exact subject to resolve against.
         for command in [
-            Command::ReportAuthoring,
             Command::SaveReportDocument,
             Command::AddReportPage,
             Command::ReportPageProperties,
