@@ -125,13 +125,13 @@ use std::collections::HashMap;
 fn worker_request_round_trips_through_json() {
     let request = WorkerRequest {
         id: 7,
-        request: WorkerSimulationRequest::Config(WorkerAnalysisConfig::Transient {
+        request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::Transient {
             stop_time: 1e-6,
             step_time: 1e-9,
             start_time: 0.0,
             max_timestep: Some(1e-9),
             uic: false,
-        }),
+        })),
         netlist: "V1 in 0 1\nR1 in 0 1k\n.tran 1n 1u\n.end\n".to_string(),
         source_path: None,
         project_veriloga_runtimes: Default::default(),
@@ -359,13 +359,13 @@ fn worker_request_round_trips_project_veriloga_runtime_artifacts() {
         .unwrap();
     let request = WorkerRequest {
         id: 8,
-        request: WorkerSimulationRequest::Config(WorkerAnalysisConfig::Transient {
+        request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::Transient {
             stop_time: 1e-6,
             step_time: 1e-9,
             start_time: 0.0,
             max_timestep: None,
             uic: false,
-        }),
+        })),
         netlist: format!(
             "{}\n.end\n",
             crate::simulation::veriloga::project_veriloga_directive(
@@ -398,7 +398,7 @@ fn worker_request_detaches_and_authenticates_op_previous_state() {
     let config = nondefault_op_config();
     let request = WorkerRequest {
         id: 10,
-        request: WorkerSimulationRequest::Config(WorkerAnalysisConfig::DcOp(config)),
+        request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::DcOp(config))),
         netlist: "V1 out 0 1\n.op\n.end\n".to_owned(),
         source_path: None,
         project_veriloga_runtimes: Default::default(),
@@ -435,9 +435,10 @@ fn worker_request_detaches_and_authenticates_op_previous_state() {
     assert!(oversized.into_request().unwrap_err().contains("exceeding"));
 
     let mut duplicate = transport;
-    let WorkerSimulationRequest::Config(WorkerAnalysisConfig::DcOp(config)) =
-        &mut duplicate.request.request.request
-    else {
+    let WorkerSimulationRequest::Config(config) = &mut duplicate.request.request.request else {
+        panic!("expected configured OP request")
+    };
+    let WorkerAnalysisConfig::DcOp(config) = config.as_mut() else {
         panic!("expected configured OP request")
     };
     config.previous_state = nondefault_op_config().previous_state;
@@ -2079,10 +2080,7 @@ fn worker_request_from_runner_parts_preserves_payload() {
     let worker = WorkerRequest::from_runner_parts(41, &request, &input).expect("request converts");
 
     assert_eq!(worker.id, 41);
-    assert!(matches!(
-        worker.request,
-        WorkerSimulationRequest::Config(WorkerAnalysisConfig::DcOp(_))
-    ));
+    assert!(matches!(worker.request, WorkerSimulationRequest::Config(_)));
     assert_eq!(worker.netlist, input.netlist);
     assert_eq!(worker.source_path.as_deref(), Some("deck.cir"));
 }
@@ -2117,9 +2115,9 @@ fn dc_op_worker_result_round_trip_preserves_exact_mna_state_and_contract() {
 fn worker_request_runs_dc_op() {
     let request = WorkerRequest {
         id: 12,
-        request: WorkerSimulationRequest::Config(WorkerAnalysisConfig::DcOp(
+        request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::DcOp(
             crate::simulation::dialog::OpConfig::default(),
-        )),
+        ))),
         netlist: "* worker op\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n".to_string(),
         source_path: None,
         project_veriloga_runtimes: Default::default(),

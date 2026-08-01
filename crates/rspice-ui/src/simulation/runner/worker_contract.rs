@@ -165,7 +165,10 @@ fn worker_request_op_config_mut(
     request: &mut WorkerRequest,
 ) -> Option<&mut crate::simulation::dialog::OpConfig> {
     match &mut request.request {
-        WorkerSimulationRequest::Config(WorkerAnalysisConfig::DcOp(config)) => Some(config),
+        WorkerSimulationRequest::Config(config) => match config.as_mut() {
+            WorkerAnalysisConfig::DcOp(config) => Some(config),
+            _ => None,
+        },
         WorkerSimulationRequest::Spec { spec, .. } => match spec.as_mut() {
             WorkerAnalysisSpec::DcOp(config) => Some(config),
             _ => None,
@@ -179,7 +182,10 @@ fn worker_request_op_config(
     request: &WorkerRequest,
 ) -> Option<&crate::simulation::dialog::OpConfig> {
     match &request.request {
-        WorkerSimulationRequest::Config(WorkerAnalysisConfig::DcOp(config)) => Some(config),
+        WorkerSimulationRequest::Config(config) => match config.as_ref() {
+            WorkerAnalysisConfig::DcOp(config) => Some(config),
+            _ => None,
+        },
         WorkerSimulationRequest::Spec { spec, .. } => match spec.as_ref() {
             WorkerAnalysisSpec::DcOp(config) => Some(config),
             _ => None,
@@ -281,7 +287,8 @@ impl WorkerRequest {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum WorkerSimulationRequest {
-    Config(WorkerAnalysisConfig),
+    /// Boxed to match `Spec`, whose two payloads already are.
+    Config(Box<WorkerAnalysisConfig>),
     Spec {
         spec: Box<WorkerAnalysisSpec>,
         options: Box<WorkerSpecExecutionOptions>,

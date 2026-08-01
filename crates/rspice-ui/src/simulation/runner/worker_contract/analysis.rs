@@ -20,9 +20,9 @@ impl TryFrom<&SimulationRequest> for WorkerSimulationRequest {
 
     fn try_from(value: &SimulationRequest) -> Result<Self, Self::Error> {
         match value {
-            SimulationRequest::Config(config) => {
-                Ok(Self::Config(WorkerAnalysisConfig::from(config.as_ref())))
-            }
+            SimulationRequest::Config(config) => Ok(Self::Config(Box::new(
+                WorkerAnalysisConfig::from(config.as_ref()),
+            ))),
             SimulationRequest::Spec { spec, options } => Ok(Self::Spec {
                 spec: Box::new(WorkerAnalysisSpec::try_from(spec.as_ref())?),
                 options: Box::new(WorkerSpecExecutionOptions::from(options.as_ref())),
@@ -35,7 +35,7 @@ impl From<WorkerSimulationRequest> for SimulationRequest {
     fn from(value: WorkerSimulationRequest) -> Self {
         match value {
             WorkerSimulationRequest::Config(config) => {
-                SimulationRequest::Config(Box::new(AnalysisConfig::from(config)))
+                SimulationRequest::Config(Box::new(AnalysisConfig::from(*config)))
             }
             WorkerSimulationRequest::Spec { spec, options } => SimulationRequest::Spec {
                 spec: Box::new(AnalysisSpec::from(*spec)),
