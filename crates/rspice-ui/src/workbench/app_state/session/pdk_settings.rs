@@ -221,8 +221,9 @@ pub enum PdkSettingsDialogResult {
     None,
     /// User cancelled without saving
     Cancelled,
-    /// User applied changes
-    Applied(PdkConfig),
+    /// User applied changes. Boxed: the configuration is the only large
+    /// thing this result can carry.
+    Applied(Box<PdkConfig>),
     /// User requested to load a specific file
     LoadFile(PathBuf),
     /// Browser user requested a byte-backed model source import.

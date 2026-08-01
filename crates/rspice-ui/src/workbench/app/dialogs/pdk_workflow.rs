@@ -141,6 +141,7 @@ impl RSpiceApp {
         );
         match result {
             PdkSettingsDialogResult::Applied(config) => {
+                let config = *config;
                 let load_result =
                     apply_pdk_configuration_with_persistence(&mut self.state, config, |config| {
                         config.save().map_err(|error| error.to_string())

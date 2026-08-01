@@ -39,7 +39,8 @@ struct NetLabelPlacementCommit {
 enum DraftValidation {
     Incomplete(&'static str),
     Invalid(String),
-    Valid(NetLabelPlacementCommit),
+    /// Boxed: the commit dwarfs the two message-only variants.
+    Valid(Box<NetLabelPlacementCommit>),
 }
 
 impl DraftValidation {
@@ -145,22 +146,25 @@ impl RSpiceApp {
                 // Revalidate after this frame's text edit so Enter can never
                 // publish a candidate that became invalid in the same pass.
                 match validate_draft(&self.state) {
-                    DraftValidation::Valid(commit) => match apply_commit(&mut self.state, commit) {
-                        Ok(id) => {
-                            self.state.dialogs.net_label_placement.close();
-                            self.state.push_user_message(ConsoleMessage::info(format!(
+                    DraftValidation::Valid(commit) => {
+                        match apply_commit(&mut self.state, *commit) {
+                            Ok(id) => {
+                                self.state.dialogs.net_label_placement.close();
+                                self.state.push_user_message(ConsoleMessage::info(format!(
                                 "Placed net label as one undoable transaction (stable ID NET-{id:03})."
                             )));
-                            self.state.ui.toasts.success(
-                                ctx,
-                                "Net label placed",
-                                "The typed name and snapped anchor were committed atomically.",
-                            );
+                                self.state.ui.toasts.success(
+                                    ctx,
+                                    "Net label placed",
+                                    "The typed name and snapped anchor were committed atomically.",
+                                );
+                            }
+                            Err(error) => {
+                                self.state.dialogs.net_label_placement.validation_error =
+                                    Some(error);
+                            }
                         }
-                        Err(error) => {
-                            self.state.dialogs.net_label_placement.validation_error = Some(error);
-                        }
-                    },
+                    }
                     DraftValidation::Incomplete(message) => {
                         self.state.dialogs.net_label_placement.validation_error =
                             Some(message.to_owned());
@@ -201,11 +205,11 @@ fn validate_draft(state: &AppState) -> DraftValidation {
     if let Err(reason) = NetLabel::validate_name(name, state.schematic.document_policy.net_naming) {
         return DraftValidation::Invalid(format!("Net name: {reason}."));
     }
-    DraftValidation::Valid(NetLabelPlacementCommit {
+    DraftValidation::Valid(Box::new(NetLabelPlacementCommit {
         authority: authority.clone(),
         anchor,
         name: name.to_owned(),
-    })
+    }))
 }
 
 fn apply_commit(state: &mut AppState, commit: NetLabelPlacementCommit) -> Result<u64, String> {
@@ -382,7 +386,7 @@ mod tests {
         let DraftValidation::Valid(commit) = validate_draft(&app.state) else {
             panic!("valid typed label draft");
         };
-        let id = apply_commit(&mut app.state, commit).expect("placement");
+        let id = apply_commit(&mut app.state, *commit).expect("placement");
         assert_eq!(
             app.state.schematic.net_labels,
             vec![NetLabel::new(id, Point::new(40, -20), "DATA[7]")]
@@ -449,7 +453,7 @@ mod tests {
             validate_draft(&app.state),
             DraftValidation::Invalid(_)
         ));
-        assert!(apply_commit(&mut app.state, commit).is_err());
+        assert!(apply_commit(&mut app.state, *commit).is_err());
         assert!(app.state.schematic.net_labels.is_empty());
         assert!(!app.state.schematic.can_undo());
     }
@@ -499,7 +503,7 @@ mod tests {
             panic!("valid label draft");
         };
 
-        apply_commit(&mut app.state, commit).expect("placement");
+        apply_commit(&mut app.state, *commit).expect("placement");
 
         let key = app.state.workspace.active_schematic_reference().key();
         let retained = app

@@ -108,7 +108,7 @@ pub fn render_pdk_settings_dialog(
         DialogChoice::Primary => {
             if state.has_changes() {
                 let config = state.apply();
-                result = PdkSettingsDialogResult::Applied(config);
+                result = PdkSettingsDialogResult::Applied(Box::new(config));
             }
             should_close = true;
         }
