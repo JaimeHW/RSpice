@@ -336,7 +336,7 @@ fn insert_scalar_waveform(
     x_values: Vec<f64>,
     y_values: Vec<f64>,
     y_unit: &str,
-    x_unit: &str,
+    _x_unit: &str,
 ) {
     waveforms.insert(
         name.clone(),

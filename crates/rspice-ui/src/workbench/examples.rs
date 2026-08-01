@@ -33,12 +33,7 @@
 //!   `(x+20, y∓10)`; netlists as `E out+ out− in+ in−`. `mirror_h` puts the
 //!   output on the right.
 
-use crate::state::workspace::{DEFAULT_PROJECT_LIBRARY, DEFAULT_SCHEMATIC_VIEW};
-use crate::state::{
-    Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, OpenCellView, Point,
-    PortDirection, PortSpec, Rotation, SchematicState, SymbolDocument, SymbolPin, SymbolShape,
-    View, ViewType, Wire,
-};
+use crate::state::{Component, ComponentType, Point, Rotation, SchematicState, Wire};
 
 // =============================================================================
 // Example Circuit Definitions
@@ -662,9 +657,7 @@ fn add_label(state: &mut SchematicState, pos: Point, name: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::netlist_gen::{HierarchySource, generate_netlist_hierarchical};
-    use crate::state::{SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument};
-    use crate::workbench::app_state::AppState;
+
     use std::collections::HashSet;
 
     /// The flat examples, which are the ones `load_example` builds. The

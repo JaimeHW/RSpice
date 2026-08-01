@@ -370,8 +370,6 @@ impl RSpicePartFacet {
 pub enum ModelsOperationalState {
     #[default]
     Ready,
-    Empty,
-    Loading,
     InvalidInput,
     ExecutionError,
     ReadOnly,
@@ -389,10 +387,8 @@ pub enum ModelsOperationalState {
 
 impl ModelsOperationalState {
     #[cfg(test)]
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 14] = [
         Self::Ready,
-        Self::Empty,
-        Self::Loading,
         Self::InvalidInput,
         Self::ExecutionError,
         Self::ReadOnly,
@@ -413,8 +409,6 @@ impl ModelsOperationalState {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Ready => "Ready",
-            Self::Empty => "Empty",
-            Self::Loading => "Loading",
             Self::InvalidInput => "Invalid input",
             Self::ExecutionError => "Execution error",
             Self::ReadOnly => "Read-only",
@@ -1273,8 +1267,6 @@ mod tests {
             ModelsOperationalState::ALL.map(ModelsOperationalState::label),
             [
                 "Ready",
-                "Empty",
-                "Loading",
                 "Invalid input",
                 "Execution error",
                 "Read-only",

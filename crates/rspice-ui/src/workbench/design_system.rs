@@ -48,9 +48,7 @@ pub enum WorkbenchIcon {
     BusTap,
     Junction,
     Label,
-    NetLabel,
     Pin,
-    SchematicProbe,
     Text,
     Probe,
     Rotate,
@@ -343,16 +341,6 @@ impl WorkbenchIcon {
                 line(&[(5.0, 5.0), (19.0, 5.0)]);
                 line(&[(12.0, 5.0), (12.0, 20.0)]);
             }
-            Self::NetLabel => {
-                closed(&[
-                    (4.0, 5.0),
-                    (14.0, 5.0),
-                    (20.0, 12.0),
-                    (14.0, 19.0),
-                    (4.0, 19.0),
-                ]);
-                painter.circle_stroke(p(8.0, 12.0), 1.0 * scale, stroke);
-            }
             Self::Pin => {
                 closed(&[(9.0, 4.0), (15.0, 4.0), (15.0, 10.0), (9.0, 10.0)]);
                 line(&[(12.0, 10.0), (12.0, 20.0)]);
@@ -362,18 +350,6 @@ impl WorkbenchIcon {
                 line(&[(5.0, 5.0), (19.0, 5.0)]);
                 line(&[(12.0, 5.0), (12.0, 20.0)]);
                 line(&[(9.0, 20.0), (15.0, 20.0)]);
-            }
-            Self::SchematicProbe => {
-                line(&[(5.0, 20.0), (16.0, 9.0)]);
-                line(&[
-                    (16.0, 9.0),
-                    (19.0, 6.0),
-                    (18.0, 4.0),
-                    (16.0, 3.0),
-                    (13.0, 6.0),
-                ]);
-                line(&[(16.0, 9.0), (18.0, 11.0)]);
-                line(&[(4.0, 20.0), (9.0, 20.0)]);
             }
             Self::Probe => {
                 painter.circle_stroke(p(10.0, 10.0), 5.5 * scale, stroke);

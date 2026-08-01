@@ -242,7 +242,7 @@ impl RSpiceApp {
         action: ConfirmationAction,
         path: Option<std::path::PathBuf>,
         recent_kind: Option<crate::workbench::app_state::RecentKind>,
-        example: Option<String>,
+        _example: Option<String>,
         open_project: impl FnOnce(&mut crate::workbench::app_state::AppState) -> bool,
     ) {
         match action {

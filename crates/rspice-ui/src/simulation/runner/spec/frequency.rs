@@ -228,16 +228,6 @@ fn quantity_unit(quantity: crate::simulation::results::TransferFunctionQuantity)
     }
 }
 
-fn gain_unit(unit: svc_runner::TfGainUnit) -> &'static str {
-    match unit {
-        svc_runner::TfGainUnit::Dimensionless => "1",
-        svc_runner::TfGainUnit::VoltsPerVolt => "V/V",
-        svc_runner::TfGainUnit::AmpsPerVolt => "A/V",
-        svc_runner::TfGainUnit::VoltsPerAmpere => "V/A",
-        svc_runner::TfGainUnit::AmpsPerAmpere => "A/A",
-    }
-}
-
 fn transfer_scalar(
     value: f64,
     label: &str,
@@ -634,7 +624,7 @@ fn insert_scalar_waveform(
     x_values: Vec<f64>,
     y_values: Vec<f64>,
     y_unit: &str,
-    x_unit: &str,
+    _x_unit: &str,
 ) {
     waveforms.insert(
         name.clone(),

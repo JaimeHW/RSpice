@@ -60,7 +60,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         .project_sources
         .get(crate::state::ProjectSourceLanguage::RSpiceAutomation)
     {
-        let plan = crate::automation_workflow::compile_workflow(document.content())
+        let _plan = crate::automation_workflow::compile_workflow(document.content())
             .expect("the canonical bootstrapped Automation source must compile");
         ui.code_workspace.automation.receipt = Some(
             crate::workbench::documents::code_workspace::AutomationValidationReceipt {

@@ -730,45 +730,24 @@ impl WorkerProgressSnapshot {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum WorkerProgressStatus {
     Idle,
-    Queued,
     Parsing,
     Building,
     DcOperatingPoint,
-    DcSweep {
-        source: String,
-        progress: f32,
-    },
-    Transient {
-        time: f64,
-        stop_time: f64,
-    },
-    AcAnalysis {
-        freq: f64,
-        stop_freq: f64,
-    },
-    NoiseAnalysis {
-        freq: f64,
-        stop_freq: f64,
-    },
+    DcSweep { source: String, progress: f32 },
+    Transient { time: f64, stop_time: f64 },
+    AcAnalysis { freq: f64, stop_freq: f64 },
+    NoiseAnalysis { freq: f64, stop_freq: f64 },
     PoleZero,
     Sensitivity,
     PostProcessing,
     Completed,
-    Failed {
-        message: String,
-    },
     Aborted,
-    ConvergenceFailed {
-        iteration: usize,
-        time_or_freq: Option<f64>,
-    },
 }
 
 impl From<&SimulationStatus> for WorkerProgressStatus {
     fn from(value: &SimulationStatus) -> Self {
         match value {
             SimulationStatus::Idle => Self::Idle,
-            SimulationStatus::Queued => Self::Queued,
             SimulationStatus::Parsing => Self::Parsing,
             SimulationStatus::Building => Self::Building,
             SimulationStatus::DcOperatingPoint => Self::DcOperatingPoint,
@@ -792,18 +771,7 @@ impl From<&SimulationStatus> for WorkerProgressStatus {
             SimulationStatus::Sensitivity => Self::Sensitivity,
             SimulationStatus::PostProcessing => Self::PostProcessing,
             SimulationStatus::Completed { .. } => Self::Completed,
-            SimulationStatus::Failed { message, .. } => Self::Failed {
-                message: message.clone(),
-            },
             SimulationStatus::Aborted { .. } => Self::Aborted,
-            SimulationStatus::ConvergenceFailed {
-                iteration,
-                time_or_freq,
-                ..
-            } => Self::ConvergenceFailed {
-                iteration: *iteration,
-                time_or_freq: *time_or_freq,
-            },
         }
     }
 }
@@ -812,7 +780,6 @@ impl From<WorkerProgressStatus> for SimulationStatus {
     fn from(value: WorkerProgressStatus) -> Self {
         match value {
             WorkerProgressStatus::Idle => Self::Idle,
-            WorkerProgressStatus::Queued => Self::Queued,
             WorkerProgressStatus::Parsing => Self::Parsing,
             WorkerProgressStatus::Building => Self::Building,
             WorkerProgressStatus::DcOperatingPoint => Self::DcOperatingPoint,
@@ -834,19 +801,7 @@ impl From<WorkerProgressStatus> for SimulationStatus {
             WorkerProgressStatus::Completed => Self::Completed {
                 elapsed: std::time::Duration::ZERO,
             },
-            WorkerProgressStatus::Failed { message } => Self::Failed {
-                message,
-                elapsed: std::time::Duration::ZERO,
-            },
             WorkerProgressStatus::Aborted => Self::Aborted {
-                elapsed: std::time::Duration::ZERO,
-            },
-            WorkerProgressStatus::ConvergenceFailed {
-                iteration,
-                time_or_freq,
-            } => Self::ConvergenceFailed {
-                iteration,
-                time_or_freq,
                 elapsed: std::time::Duration::ZERO,
             },
         }

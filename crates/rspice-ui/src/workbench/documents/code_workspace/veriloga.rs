@@ -762,7 +762,6 @@ const fn diagnostic_phase_label(phase: CompileDiagnosticPhase) -> &'static str {
         CompileDiagnosticPhase::BackendQualification => "backend qualification",
         CompileDiagnosticPhase::PerformanceBudget => "performance budget",
         CompileDiagnosticPhase::ModuleSelection => "module selection",
-        CompileDiagnosticPhase::PerformanceBudget => "performance budget",
     }
 }
 
