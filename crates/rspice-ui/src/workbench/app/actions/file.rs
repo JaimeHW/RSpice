@@ -7,11 +7,6 @@ use crate::diagnostics::ConsoleMessage;
 use crate::workbench::app::{ConfirmationAction, ConfirmationResponse, RSpiceApp};
 
 impl RSpiceApp {
-    /// Internal: Actually create a new schematic (after confirmation)
-    pub(in crate::workbench) fn do_file_new(&mut self) {
-        crate::workbench::workflows::file_actions::action_file_new(&mut self.state);
-    }
-
     /// Internal: Actually open a schematic (after confirmation)
     pub(in crate::workbench) fn do_file_open(&mut self) {
         let (state, io) = (&mut self.state, self.file_workflow_io.as_ref());
@@ -273,20 +268,10 @@ impl RSpiceApp {
                     &mut self.state,
                 );
             }
-            ConfirmationAction::FileNew => self.do_file_new(),
             ConfirmationAction::FileOpen => self.do_file_open(),
             ConfirmationAction::OpenRecent => {
                 if let (Some(path), Some(kind)) = (path, recent_kind) {
                     self.do_open_recent(path, kind);
-                }
-            }
-            ConfirmationAction::OpenExample => {
-                if let Some(name) = example
-                    && crate::workbench::menu_bar::load_named_example(&mut self.state, &name)
-                {
-                    self.state
-                        .workbench
-                        .activate(crate::workbench::state::Workspace::Design);
                 }
             }
             ConfirmationAction::ImportNetlist => {
@@ -602,46 +587,6 @@ mod tests {
         assert_eq!(app.state.schematic.components.len(), 1);
         assert_eq!(app.state.schematic.components[0].id, 42);
         assert!(app.state.schematic.is_dirty);
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn confirmation_yes_after_download_only_save_keeps_dirty_document_and_pending_action() {
-        let schematic_path = PathBuf::from("browser-copy.rsch");
-        let saved_paths = Rc::new(RefCell::new(Vec::new()));
-        let mut state = crate::workbench::app_state::AppState::default();
-        state.project_lifecycle.project_open = false;
-        state.schematic.current_file = Some(schematic_path.clone());
-        state.schematic.components.push(Component::new(
-            77,
-            ComponentType::Resistor,
-            Point::new(10, 20),
-        ));
-        state.schematic.is_dirty = true;
-        state
-            .dialogs
-            .confirmation_dialog
-            .show(ConfirmationAction::FileNew);
-
-        let mut app = test_app_with_file_io(
-            state,
-            TestFileWorkflowIo {
-                saved_paths: Rc::clone(&saved_paths),
-                saved_paths_are_reopenable: false,
-            },
-        );
-
-        app.handle_confirmation_response(ConfirmationResponse::Yes);
-
-        assert_eq!(saved_paths.borrow().as_slice(), [schematic_path.as_path()]);
-        assert_eq!(app.state.schematic.components.len(), 1);
-        assert_eq!(app.state.schematic.components[0].id, 77);
-        assert!(app.state.schematic.is_dirty);
-        assert!(app.state.dialogs.confirmation_dialog.visible);
-        assert_eq!(
-            app.state.dialogs.confirmation_dialog.pending_action,
-            Some(ConfirmationAction::FileNew)
-        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]

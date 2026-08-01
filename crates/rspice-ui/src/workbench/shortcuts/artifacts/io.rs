@@ -120,8 +120,14 @@ impl PreparedShortcutArtifact {
 /// cancellation. A browser handoff intentionally makes no completion claim.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShortcutArtifactExportOutcome {
-    Published { path: PathBuf },
-    DownloadStarted { suggested_filename: String },
+    Published {
+        path: PathBuf,
+    },
+    /// Browser handoff: the download began and claims no completion.
+    #[cfg(any(test, target_arch = "wasm32"))]
+    DownloadStarted {
+        suggested_filename: String,
+    },
     Cancelled,
 }
 

@@ -29,6 +29,7 @@ pub enum ShortcutArtifactImportErrorKind {
     InvalidUtf8,
     InvalidSourceName,
     UnsupportedPlatform,
+    #[cfg(any(test, target_arch = "wasm32"))]
     ImportBusy,
     Detection,
 }
@@ -43,6 +44,7 @@ impl ShortcutArtifactImportErrorKind {
             Self::InvalidUtf8 => "shortcut-artifact.import-invalid-utf8",
             Self::InvalidSourceName => "shortcut-artifact.import-source-name",
             Self::UnsupportedPlatform => "shortcut-artifact.import-platform",
+            #[cfg(any(test, target_arch = "wasm32"))]
             Self::ImportBusy => "shortcut-artifact.import-busy",
             Self::Detection => "shortcut-artifact.import-detection",
         }

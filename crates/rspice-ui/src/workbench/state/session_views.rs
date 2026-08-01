@@ -971,7 +971,6 @@ pub enum NotificationFilter {
     #[default]
     All,
     Jobs,
-    Approvals,
     System,
 }
 
@@ -1154,13 +1153,12 @@ impl Default for CapabilityMatrixState {
 }
 
 impl NotificationFilter {
-    pub const ALL: [Self; 4] = [Self::All, Self::Jobs, Self::Approvals, Self::System];
+    pub const ALL: [Self; 3] = [Self::All, Self::Jobs, Self::System];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::All => "All",
             Self::Jobs => "Jobs",
-            Self::Approvals => "Approvals",
             Self::System => "System",
         }
     }

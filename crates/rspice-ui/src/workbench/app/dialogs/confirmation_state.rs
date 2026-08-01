@@ -17,16 +17,11 @@ pub enum ConfirmationAction {
     OpenNetlistProject,
     /// Close the current project while leaving RSpice running.
     CloseProject,
-    /// Create new schematic (discard current)
-    FileNew,
     /// Open another schematic (discard current)
     FileOpen,
     /// Open a file from the recent-files list (path stored alongside the
     /// pending action in [`ConfirmationDialogState::pending_path`])
     OpenRecent,
-    /// Load a bundled example circuit (name stored alongside the pending
-    /// action in [`ConfirmationDialogState::pending_example`]).
-    OpenExample,
     /// Import a SPICE deck into the Netlist workspace.
     ImportNetlist,
     /// Close the application
@@ -41,10 +36,8 @@ impl ConfirmationAction {
             ConfirmationAction::ProjectOpen => "Open Project",
             ConfirmationAction::OpenNetlistProject => "Open Netlist Project",
             ConfirmationAction::CloseProject => "Close Project",
-            ConfirmationAction::FileNew => "Create New Schematic",
             ConfirmationAction::FileOpen => "Open Schematic",
             ConfirmationAction::OpenRecent => "Open Recent File",
-            ConfirmationAction::OpenExample => "Open Example",
             ConfirmationAction::ImportNetlist => "Import SPICE Deck",
             ConfirmationAction::Exit => "Exit RSpice",
         }
@@ -59,10 +52,8 @@ impl ConfirmationAction {
             | ConfirmationAction::CloseProject => {
                 "The current project has unsaved changes.\nDo you want to save before continuing?"
             }
-            ConfirmationAction::FileNew
-            | ConfirmationAction::FileOpen
+            ConfirmationAction::FileOpen
             | ConfirmationAction::OpenRecent
-            | ConfirmationAction::OpenExample
             | ConfirmationAction::Exit => {
                 "The current design has unsaved changes.\nDo you want to save before continuing?"
             }
@@ -89,7 +80,7 @@ pub struct ConfirmationDialogState {
     /// Project and schematic entries have different save scopes and must not
     /// be inferred later from a mutable recent-files list or extension.
     pub(crate) pending_recent_kind: Option<crate::workbench::app_state::RecentKind>,
-    /// Example name for [`ConfirmationAction::OpenExample`].
+    /// Example name captured with a pending example load.
     pub pending_example: Option<String>,
     /// Destructive action suspended until the exact browser save transaction
     /// reaches a verified canonical completion.

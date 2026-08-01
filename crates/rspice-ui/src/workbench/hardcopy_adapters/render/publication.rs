@@ -1086,12 +1086,16 @@ pub enum HardcopyRenderError {
     PreviewPageOutOfRange { index: usize, page_count: usize },
     #[error("preview requests must contain one or two distinct page indices")]
     InvalidPreviewPageBatch,
+    #[cfg(any(test, target_arch = "wasm32"))]
     #[error("hardcopy preview worker transfer exceeds its bounded transport budget")]
     WorkerSnapshotTooLarge,
+    #[cfg(any(test, target_arch = "wasm32"))]
     #[error("hardcopy preview worker transfer is invalid: {0}")]
     WorkerSnapshot(String),
+    #[cfg(any(test, target_arch = "wasm32"))]
     #[error("hardcopy publication worker manifest exceeds its bounded transport budget")]
     PublicationWorkerManifestTooLarge,
+    #[cfg(any(test, target_arch = "wasm32"))]
     #[error("hardcopy publication worker transfer is invalid: {0}")]
     PublicationWorkerTransfer(String),
     #[error("raster dimensions overflow the supported integer range")]

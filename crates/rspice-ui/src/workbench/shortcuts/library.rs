@@ -74,6 +74,8 @@ impl NamedShortcutPreset {
 pub enum ShortcutProfileLibraryError {
     InvalidName(String),
     DuplicateName(String),
+    /// Raised by `remove_named_preset`, which only the tests call.
+    #[cfg(test)]
     MissingPreset(String),
     IncompatibleLibrary,
     RevisionExhausted,
@@ -88,6 +90,7 @@ impl fmt::Display for ShortcutProfileLibraryError {
             Self::DuplicateName(name) => {
                 write!(formatter, "shortcut preset '{name}' already exists")
             }
+            #[cfg(test)]
             Self::MissingPreset(name) => {
                 write!(formatter, "shortcut preset '{name}' does not exist")
             }

@@ -30,7 +30,6 @@ pub enum ToastKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NotificationCategory {
     Job,
-    Approval,
     #[default]
     System,
 }
@@ -39,7 +38,6 @@ impl NotificationCategory {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Job => "Job",
-            Self::Approval => "Approval",
             Self::System => "System",
         }
     }
