@@ -960,8 +960,10 @@ fn the_public_module_surface_does_not_grow() {
             .filter(|line| line.trim_start().starts_with("pub mod "))
             .count();
     }
+    // `==` rather than `<=`: the ceiling has reached zero, and `count <= 0`
+    // is the always-true-or-always-false comparison clippy rejects.
     assert!(
-        count <= MAX_PUBLIC_MODULES,
+        count == MAX_PUBLIC_MODULES,
         "`pub mod` declarations rose to {count}, ceiling is {MAX_PUBLIC_MODULES}.\n\
          A public module cannot be refactored without checking the whole \
          world. Use `pub(crate) mod`, and re-export from the crate root if an \
