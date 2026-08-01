@@ -79,25 +79,14 @@ pub struct NetlistResult {
     pub errors: Vec<String>,
 }
 
-/// Generate a SPICE netlist from a schematic (convenience function)
+/// Generate a flat SPICE netlist from a schematic.
 ///
-/// This provides the same API as the legacy netlist generator for
-/// backward compatibility. For more control, use `NetlistGenerator` directly.
+/// Execution always goes through [`generate_netlist_hierarchical`], which
+/// resolves placed project cells into `.SUBCKT` definitions. This flat form
+/// exists for the tests that exercise the generator without a workspace.
+#[cfg(test)]
 pub fn generate_netlist(schematic: &SchematicState) -> NetlistResult {
-    generate_netlist_with_analysis(schematic, &[])
-}
-
-/// Generate a SPICE netlist from a schematic with explicit analysis directives.
-pub fn generate_netlist_with_analysis(
-    schematic: &SchematicState,
-    analysis_lines: &[String],
-) -> NetlistResult {
-    finish_generation(
-        NetlistGenerator::new(schematic),
-        schematic,
-        analysis_lines,
-        &[],
-    )
+    finish_generation(NetlistGenerator::new(schematic), schematic, &[], &[])
 }
 
 /// Generate a netlist with project-cell hierarchy: placed cells whose
@@ -618,11 +607,12 @@ impl<'a> NetlistGenerator<'a> {
         std::mem::take(&mut self.lines)
     }
 
-    /// Generate complete SPICE netlist
-    ///
-    /// Returns the netlist as a string.
+    /// Generate the netlist body with no analysis or parameter cards.
+    /// Production always goes through `finish_generation`, which supplies
+    /// both; the generator's own tests use this bare form.
+    #[cfg(test)]
     pub fn generate(&mut self) -> String {
-        self.generate_with_analysis(&[])
+        self.generate_with_analysis_and_parameters(&[], &[])
     }
 
     fn reset_generation_state(&mut self) {
@@ -644,11 +634,6 @@ impl<'a> NetlistGenerator<'a> {
     /// Read-only errors collected during generation.
     pub fn errors(&self) -> &[String] {
         &self.errors
-    }
-
-    /// Generate netlist with custom analysis commands
-    pub fn generate_with_analysis(&mut self, analysis_lines: &[String]) -> String {
-        self.generate_with_analysis_and_parameters(analysis_lines, &[])
     }
 
     fn generate_with_analysis_and_parameters(

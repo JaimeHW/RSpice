@@ -48,10 +48,6 @@ impl FftInputPolicy {
         }
     }
 
-    pub const fn capped(max_points: usize) -> Self {
-        Self::Interactive { max_points }
-    }
-
     fn point_cap(self) -> Option<usize> {
         match self {
             Self::Reference => None,
@@ -142,31 +138,6 @@ struct UniformSeries {
     samples: Vec<f64>,
     sample_rate: f64,
 }
-
-/// Prepare a waveform for FFT analysis.
-///
-/// Returns `None` when there is insufficient valid data.
-pub fn prepare_fft_input(
-    name: &str,
-    time: &[f64],
-    values: &[f64],
-    max_points: usize,
-) -> Option<PreparedFftInput> {
-    prepare_fft_input_with_policy(name, time, values, FftInputPolicy::capped(max_points))
-}
-
-/// Prepare a waveform for FFT analysis using an explicit policy.
-///
-/// Returns `None` when there is insufficient valid data.
-pub fn prepare_fft_input_with_policy(
-    name: &str,
-    time: &[f64],
-    values: &[f64],
-    policy: FftInputPolicy,
-) -> Option<PreparedFftInput> {
-    prepare_fft_input_with_options(name, time, values, FftInputOptions::with_policy(policy))
-}
-
 /// Prepare a waveform for FFT analysis using explicit options.
 ///
 /// Returns `None` when there is insufficient valid data.
