@@ -65,11 +65,11 @@ impl fmt::Display for ShortcutProfileWorkflowError {
 
 impl std::error::Error for ShortcutProfileWorkflowError {}
 
+/// A parsed import that has not been applied. The caller names its own
+/// source and reads the audit off the candidate, so neither is stored here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StagedShortcutProfile {
-    source_name: String,
     candidate: ShortcutPreferences,
-    audit: ShortcutProfileAudit,
 }
 
 impl StagedShortcutProfile {
@@ -83,9 +83,9 @@ impl StagedShortcutProfile {
         self.candidate
     }
 }
-/// Parse and audit an import without mutating live preferences or `AppState`.
+
+/// Parse an import without mutating live preferences or `AppState`.
 pub fn stage_shortcut_profile_json(
-    source_name: impl Into<String>,
     contents: &str,
 ) -> Result<StagedShortcutProfile, ShortcutProfileWorkflowError> {
     ensure_byte_limit(contents.len() as u64, "$", "selected profile")?;
@@ -141,8 +141,8 @@ pub fn stage_shortcut_profile_json(
     validate_profile_limits(&profile, "$.profile")?;
 
     // ShortcutPreferences intentionally retains unknown and malformed raw
-    // records. The resulting audit records anything this build cannot safely
-    // execute while preserving the source for a newer build.
+    // records, so `candidate.audit()` reports anything this build cannot
+    // safely execute while the source survives for a newer build.
     let candidate: ShortcutPreferences = serde_json::from_value(profile).map_err(|error| {
         ShortcutProfileWorkflowError::new(
             "shortcut-profile.invalid-profile",
@@ -150,12 +150,7 @@ pub fn stage_shortcut_profile_json(
             format!("could not decode shortcut profile payload: {error}"),
         )
     })?;
-    let audit = candidate.audit();
-    Ok(StagedShortcutProfile {
-        source_name: normalized_source_name(source_name.into()),
-        candidate,
-        audit,
-    })
+    Ok(StagedShortcutProfile { candidate })
 }
 
 /// Protected-override acknowledgement is a device-local security decision,
@@ -296,16 +291,14 @@ mod tests {
 
     #[test]
     fn stage_is_transactional_and_preserves_unknown_future_commands() {
-        let staged = stage_shortcut_profile_json("future.json", VALID_SOURCE).unwrap();
-        assert_eq!(staged.source_name(), "future.json");
-        assert!(staged.audit().issues().iter().any(|issue| {
+        let staged = stage_shortcut_profile_json(VALID_SOURCE).unwrap();
+        assert!(staged.candidate().audit().issues().iter().any(|issue| {
             issue
                 .command_id()
                 .is_some_and(|id| id.as_str() == "future-command")
         }));
 
-        let encoded = serialize_shortcut_profile(staged.candidate()).unwrap();
-        let reparsed: Value = serde_json::from_str(&encoded).unwrap();
+        let reparsed = serde_json::json!({ "profile": staged.candidate() });
         assert_eq!(
             reparsed["profile"]["commands"]["future-command"]["future-command-field"],
             73
@@ -324,7 +317,6 @@ mod tests {
     #[test]
     fn legacy_import_never_trusts_transferred_protected_acknowledgements() {
         let staged = stage_shortcut_profile_json(
-            "untrusted.json",
             r#"{
                 "format":"rspice.shortcuts/1",
                 "profile":{
@@ -338,21 +330,25 @@ mod tests {
         assert!(!staged.candidate().protected_override_acknowledged(
             crate::workbench::commands::vocabulary::Command::Save
         ));
-        let reencoded = serialize_shortcut_profile(staged.candidate()).unwrap();
-        assert!(!reencoded.contains("protected-override-acknowledgements"));
+        // The scrub happens before decoding, so the transferred entry cannot
+        // reappear through the candidate's own serialization either.
+        let reencoded = serde_json::to_value(staged.candidate()).unwrap();
+        assert_eq!(
+            reencoded["protected-override-acknowledgements"]
+                .as_array()
+                .map(Vec::len),
+            Some(0)
+        );
     }
 
     #[test]
     fn syntax_envelope_and_sequence_errors_have_stable_paths() {
-        let syntax = stage_shortcut_profile_json("bad.json", "{").unwrap_err();
+        let syntax = stage_shortcut_profile_json("{").unwrap_err();
         assert_eq!(syntax.json_path(), "$");
         assert_eq!(syntax.code(), "shortcut-profile.invalid-json");
 
-        let format = stage_shortcut_profile_json(
-            "bad.json",
-            r#"{"format":"rspice.shortcuts/2","profile":{}}"#,
-        )
-        .unwrap_err();
+        let format = stage_shortcut_profile_json(r#"{"format":"rspice.shortcuts/2","profile":{}}"#)
+            .unwrap_err();
         assert_eq!(format.json_path(), "$.format");
 
         let strokes = (0..=MAX_SHORTCUT_SEQUENCE_STROKES)
@@ -364,7 +360,7 @@ mod tests {
                 "slot": "primary", "platforms": ["desktop"], "sequence": strokes
             }]}}}
         });
-        let error = stage_shortcut_profile_json("too-long.json", &source.to_string()).unwrap_err();
+        let error = stage_shortcut_profile_json(&source.to_string()).unwrap_err();
         assert_eq!(
             error.json_path(),
             "$.profile.commands[\"save\"].bindings[0].sequence"

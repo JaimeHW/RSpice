@@ -285,7 +285,7 @@ pub(crate) fn decode_shortcut_artifact_json_with_provenance(
     })?;
     let legacy = String::from_utf8(legacy).expect("canonical JSON is UTF-8");
     let source_name = normalized_source_name(source_name.into());
-    let staged = stage_shortcut_profile_json(source_name.clone(), &legacy)
+    let staged = stage_shortcut_profile_json(&legacy)
         .map_err(|error| ShortcutArtifactSchemaError::new(error.code(), error.to_string()))?;
     let portable_profile = portable_profile_value(staged.candidate()).map_err(|error| {
         ShortcutArtifactSchemaError::new(
