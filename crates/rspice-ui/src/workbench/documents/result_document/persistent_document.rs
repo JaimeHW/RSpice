@@ -633,6 +633,15 @@ fn pane_header(
         },
     );
     theme::paint_focus_ring(ui, &response, rect);
+    let tab_label = format!("{display_title}, {viewer_title}");
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            is_active,
+            tab_label.clone(),
+        )
+    });
     let clicked = response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .clicked();

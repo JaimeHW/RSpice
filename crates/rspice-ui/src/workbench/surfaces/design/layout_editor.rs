@@ -354,6 +354,13 @@ fn show_canvas(
             "Interactive signed-technology layout canvas. Use Select or Rectangle from the toolbar.",
         );
     });
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Image,
+            ui.is_enabled(),
+            "Physical layout canvas",
+        )
+    });
     let painter = ui.painter_at(canvas);
     painter.rect_filled(canvas, 0.0, t.color.canvas_bg);
 
@@ -493,6 +500,8 @@ fn show_canvas(
         });
     }
 
+    // Painted last so the layout artwork does not cover the ring.
+    crate::ui::theme::paint_focus_ring(ui, &response, canvas);
     None
 }
 

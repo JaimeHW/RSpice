@@ -592,6 +592,16 @@ fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &Proj
     } else if response.hovered() {
         ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
     }
+    let row_label = format!("{} in {}", row.model.name, row.library);
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            row_label.clone(),
+        )
+    });
+    theme::paint_focus_ring(ui, &response, rect);
     if response.clicked() {
         app.state.model_library_manager.select_library(&row.library);
         app.state.workbench.selected_model = Some(row.model.name.clone());
@@ -2418,6 +2428,21 @@ fn selectable_data_row(
         ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
     }
     paint_columns(ui, rect, columns);
+    // The first column is the row's identifier in every caller, so it is the
+    // name a screen reader should announce for the selection.
+    let row_label = columns
+        .first()
+        .map(|(value, _, _)| (*value).to_owned())
+        .unwrap_or_default();
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            row_label.clone(),
+        )
+    });
+    theme::paint_focus_ring(ui, &response, rect);
     response
 }
 

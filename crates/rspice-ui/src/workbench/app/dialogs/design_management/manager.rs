@@ -94,6 +94,7 @@ pub(super) fn design_management_tabs(
                 t.color.text_dim
             },
         );
+        crate::ui::theme::paint_focus_ring(ui, &response, rect);
         first.get_or_insert(response);
         x += TAB_MIN_WIDTH;
     }

@@ -161,6 +161,16 @@ fn symbol_registry_row(ui: &mut Ui, selected: bool, row: &SymbolRow) -> egui::Re
         );
         x += width;
     }
+    let row_label = row.family.clone();
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            row_label.clone(),
+        )
+    });
+    crate::ui::theme::paint_focus_ring(ui, &response, rect);
     response
 }
 

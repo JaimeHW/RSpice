@@ -235,6 +235,7 @@ mod tests {
         let mut outcome = (false, false);
         let _ = ctx.run_ui(input, |root| {
             egui::CentralPanel::default().show(root, |ui| {
+                // accessibility-pointer-shim: test-only placement canvas harness.
                 let response =
                     ui.interact(ui.max_rect(), Id::new("placement-canvas"), Sense::click());
                 response.request_focus();

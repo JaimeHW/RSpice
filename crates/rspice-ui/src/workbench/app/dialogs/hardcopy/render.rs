@@ -1146,7 +1146,18 @@ fn preview_card(
             egui::StrokeKind::Outside,
         );
     }
-    card.response.interact(Sense::click()).clicked()
+    let response = card.response.interact(Sense::click());
+    let label = format!("Page {} · {}", preview.page_number(), preview.coordinate());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            selected,
+            label.clone(),
+        )
+    });
+    crate::ui::theme::paint_focus_ring(ui, &response, response.rect);
+    response.clicked()
 }
 
 fn preview_placeholder(ui: &mut Ui, selected: bool) {

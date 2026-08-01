@@ -537,6 +537,7 @@ fn family_card(ui: &mut Ui, family: ResultDocumentFamily, selected: bool) -> egu
             },
         );
     }
+    crate::ui::theme::paint_focus_ring(ui, &response, rect);
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .on_hover_text(family.description())

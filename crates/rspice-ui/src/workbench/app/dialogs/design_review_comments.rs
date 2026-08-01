@@ -694,6 +694,17 @@ fn review_thread_row(ui: &mut Ui, note: &DesignNote, selected: bool) -> egui::Re
             t.color.warn
         },
     );
+    // Every column is painted, so the announced label is assembled here.
+    let row_label = format!("{author}: {}", ellipsize(&note.text, 46));
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            row_label.clone(),
+        )
+    });
+    theme::paint_focus_ring(ui, &response, rect);
     response
 }
 

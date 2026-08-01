@@ -249,6 +249,20 @@ fn recovery_checkpoint_timeline(ui: &mut Ui, state: &mut AppState) {
                 }
             },
         );
+        let row_label = format!(
+            "{} checkpoint, revision {}",
+            checkpoint.reason().label(),
+            checkpoint.project_revision()
+        );
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::SelectableLabel,
+                ui.is_enabled(),
+                selected,
+                row_label.clone(),
+            )
+        });
+        theme::paint_focus_ring(ui, &response, rect);
         if response.clicked() {
             state.workbench.project_checkpoint_selection = Some(id);
         }

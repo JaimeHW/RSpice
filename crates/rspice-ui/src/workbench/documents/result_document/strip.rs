@@ -623,6 +623,9 @@ fn legend_chip(
     );
 
     theme::paint_focus_ring(ui, &response, rect);
+    // The swatch is a separate tab stop that toggles visibility, so it needs
+    // its own ring around the swatch rather than the whole chip.
+    theme::paint_focus_ring(ui, &visibility, swatch);
 
     (
         response.on_hover_cursor(egui::CursorIcon::PointingHand),

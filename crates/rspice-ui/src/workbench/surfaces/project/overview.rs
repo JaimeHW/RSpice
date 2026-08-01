@@ -1367,6 +1367,20 @@ fn design_summary_row(
         (width - name_width - kind_width - 10.0).max(1.0),
     );
     theme::paint_focus_ring_outset(ui, &response, rect);
+    // The row paints its three columns straight to the painter, so the label
+    // has to be assembled here or a screen reader announces nothing.
+    let row_label = format!("{name}, {kind}, {detail}");
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            if interactive {
+                egui::WidgetType::Button
+            } else {
+                egui::WidgetType::Label
+            },
+            ui.is_enabled(),
+            row_label.clone(),
+        )
+    });
     response.on_hover_text(format!("{name}\n{kind}\n{detail}"))
 }
 
@@ -1472,6 +1486,19 @@ fn activity_row(
         (width - time_width - 10.0).max(1.0),
     );
     theme::paint_focus_ring_outset(ui, &response, rect);
+    // Painted columns again, so the announced label is assembled here.
+    let row_label = format!("{time}, {event}, {detail}");
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            if interactive {
+                egui::WidgetType::Button
+            } else {
+                egui::WidgetType::Label
+            },
+            ui.is_enabled(),
+            row_label.clone(),
+        )
+    });
     response.on_hover_text(format!("{event}\n{detail}"))
 }
 

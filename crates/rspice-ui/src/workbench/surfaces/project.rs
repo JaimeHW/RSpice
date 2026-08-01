@@ -838,6 +838,8 @@ fn workspace_table_row<const N: usize>(
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), cells.join(", "))
     });
+    // No-ops for a header, which senses hover only and can never hold focus.
+    theme::paint_focus_ring(ui, &response, rect);
     (response, cell_rects)
 }
 
