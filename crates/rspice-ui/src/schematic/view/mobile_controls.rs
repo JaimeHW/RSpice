@@ -380,16 +380,31 @@ mod tests {
         ));
         app.state.schematic.zoom = 1.0;
 
+        // The touch route dispatches the same Command as every other surface,
+        // so it steps by COMMAND_ZOOM_FACTOR (1.2) rather than a rate of its
+        // own. Asserting the shared factor is the point: a mobile-only zoom
+        // step would mean the same command zoomed differently by input device.
         execute_action(&mut app, MobileCanvasAction::Command(Command::ZoomOut));
-        assert_eq!(app.state.schematic.zoom, 0.8);
+        assert!((app.state.schematic.zoom - (1.0 / 1.2)).abs() < f64::EPSILON);
         execute_action(&mut app, MobileCanvasAction::Command(Command::ZoomIn));
-        assert_eq!(app.state.schematic.zoom, 1.0);
+        assert!((app.state.schematic.zoom - 1.0).abs() < f64::EPSILON);
 
-        assert!(!app.state.schematic.needs_fit);
+        // ZoomFit frames the drawing sheet; FitSchematicContent frames the
+        // content. The touch route must not collapse that distinction, so
+        // assert each sets its own flag and clears the other.
+        assert!(!app.state.schematic.needs_drawing_sheet_fit);
         execute_action(&mut app, MobileCanvasAction::Command(Command::ZoomFit));
-        assert_eq!(app.state.schematic.zoom, 1.0);
+        assert!((app.state.schematic.zoom - 1.0).abs() < f64::EPSILON);
         assert_eq!(app.state.schematic.pan, (0.0, 0.0));
+        assert!(app.state.schematic.needs_drawing_sheet_fit);
+        assert!(!app.state.schematic.needs_fit);
+
+        execute_action(
+            &mut app,
+            MobileCanvasAction::Command(Command::FitSchematicContent),
+        );
         assert!(app.state.schematic.needs_fit);
+        assert!(!app.state.schematic.needs_drawing_sheet_fit);
 
         execute_action(&mut app, MobileCanvasAction::TouchEditGuide);
         assert_eq!(
