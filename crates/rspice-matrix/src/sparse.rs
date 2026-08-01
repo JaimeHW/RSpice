@@ -1718,10 +1718,13 @@ mod tests {
     use super::*;
     use num_complex::Complex64;
 
+    /// The triplet entries, the right-hand side, and the expected solution.
+    type ScaledTridiagonalSystem = (Vec<(usize, usize, Value)>, Vec<Value>, Vec<Value>);
+
     fn scaled_tridiagonal_system(
         row_factors: [Value; 5],
         col_factors: [Value; 5],
-    ) -> (Vec<(usize, usize, Value)>, Vec<Value>, Vec<Value>) {
+    ) -> ScaledTridiagonalSystem {
         let normalized = [
             [4.0, -1.0, 0.0, 0.0, 0.0],
             [-1.0, 4.0, -1.0, 0.0, 0.0],

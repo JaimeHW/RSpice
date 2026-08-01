@@ -72,12 +72,11 @@ fn declared_submodules(source: &str) -> BTreeSet<String> {
         let line = line.trim();
 
         // `include!("foo.rs")` — take the file stem.
-        if let Some(rest) = line.split_once("include!(").map(|(_, rest)| rest) {
-            if let Some(path) = rest.split('"').nth(1) {
-                if let Some(stem) = Path::new(path).file_stem().and_then(|stem| stem.to_str()) {
-                    names.insert(stem.to_owned());
-                }
-            }
+        if let Some(rest) = line.split_once("include!(").map(|(_, rest)| rest)
+            && let Some(path) = rest.split('"').nth(1)
+            && let Some(stem) = Path::new(path).file_stem().and_then(|stem| stem.to_str())
+        {
+            names.insert(stem.to_owned());
         }
 
         let rest = line
@@ -114,10 +113,10 @@ fn possible_parents(root: &Path, path: &Path) -> Vec<PathBuf> {
         return vec![root.join("lib.rs")];
     }
     let mut parents = vec![dir.join("mod.rs")];
-    if let Some(name) = dir.file_name() {
-        if let Some(grandparent) = dir.parent() {
-            parents.push(grandparent.join(format!("{}.rs", name.to_string_lossy())));
-        }
+    if let Some(name) = dir.file_name()
+        && let Some(grandparent) = dir.parent()
+    {
+        parents.push(grandparent.join(format!("{}.rs", name.to_string_lossy())));
     }
     parents
 }
