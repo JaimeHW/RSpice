@@ -841,9 +841,17 @@ impl ModelLibraryManager {
         let mut libraries = self.libraries.values().collect::<Vec<_>>();
         libraries.sort_by(|left, right| left.name.cmp(&right.name));
         let mut hasher = Sha256::new();
-        hasher.update(b"rspice.model-execution-catalog/v3\0");
+        hasher.update(b"rspice.model-execution-catalog/v4\0");
         for library in libraries {
-            let bytes = serde_json::to_vec(library)
+            // A library owns several `HashMap` fields, so serializing it
+            // directly emits their entries in per-instance iteration order and
+            // yields a different digest for identical content. Route through
+            // `serde_json::Value`, whose objects are key-sorted maps, so the
+            // catalogue identity depends only on the content itself. A prepared
+            // run compares this digest before dispatch; an order-dependent one
+            // expires authorized runs at random.
+            let bytes = serde_json::to_value(library)
+                .and_then(|canonical| serde_json::to_vec(&canonical))
                 .unwrap_or_else(|error| format!("serialization-error:{error}").into_bytes());
             hasher.update((bytes.len() as u64).to_le_bytes());
             hasher.update(bytes);
