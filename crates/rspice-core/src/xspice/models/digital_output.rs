@@ -1634,6 +1634,10 @@ impl CodeModel for XyceDAdd {
         let params = dig_params(ctx)?;
         let (inputs, last_input_transition_time) = Self::sample_inputs(ctx, params, 3);
         let desired = match inputs.as_slice() {
+            // The three symmetric product terms are the canonical full-adder
+            // carry. Clippy's factored rewrites are equivalent but hide that,
+            // so keep the textbook form.
+            #[allow(clippy::nonminimal_bool)]
             [Some(a), Some(b), Some(c)] => {
                 Some((a ^ b ^ c, (*a && *b) || (*a && *c) || (*b && *c)))
             }

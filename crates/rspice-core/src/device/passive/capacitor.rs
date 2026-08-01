@@ -220,7 +220,7 @@ impl SolutionDependentCapacitor {
         } else {
             0.0
         };
-        derivative.is_finite().then_some(derivative).unwrap_or(0.0)
+        if derivative.is_finite() { derivative } else { 0.0 }
     }
 
     fn estimate_branch_partial(&mut self, index: usize, f0: Value, time: Value) -> Value {
@@ -241,7 +241,7 @@ impl SolutionDependentCapacitor {
         } else {
             0.0
         };
-        derivative.is_finite().then_some(derivative).unwrap_or(0.0)
+        if derivative.is_finite() { derivative } else { 0.0 }
     }
 
     /// Evaluate and linearize the capacitance expression at a trial solution.

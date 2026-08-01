@@ -489,8 +489,7 @@ fn strip_artifact_inline_comment(line: &str) -> &str {
     let mut in_single_quote = false;
     let mut in_double_quote = false;
     let mut escaped = false;
-    let mut chars = line.char_indices().peekable();
-    while let Some((index, character)) = chars.next() {
+    for (index, character) in line.char_indices() {
         if escaped {
             escaped = false;
             continue;
