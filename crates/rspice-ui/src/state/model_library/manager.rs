@@ -1380,13 +1380,12 @@ impl ModelLibraryManager {
         library.selected_corner = None;
 
         for section_name in result.section_names() {
-            let corner = ProcessCorner {
-                name: section_name.to_string(),
-                description: format!("Process corner from {}", lib_name),
-                file_path: Some(path.clone()),
-                is_default: false,
-                ..ProcessCorner::default()
-            };
+            // Build the corner through its section contract rather than by
+            // field assignment: a corner with no section binding materializes
+            // to nothing, so a bare name would seal an empty corner.
+            let mut corner =
+                ProcessCorner::from_composite_section(section_name, path.clone(), false);
+            corner.description = format!("Process corner from {lib_name}");
             library.corners.insert(corner.name.clone(), corner);
         }
 
@@ -1500,14 +1499,16 @@ impl ModelLibraryManager {
             bytes,
         }];
         library.corners.clear();
+        // `ModelLibrary::new` seeds the standard corners and selects "tt".
+        // Clearing the catalogue without clearing the selection leaves a
+        // library pointing at a corner it no longer defines, which fails
+        // projection later with "selected corner does not exist". A section
+        // below re-selects when the source actually declares one.
+        library.selected_corner = None;
         for section_name in result.section_names() {
-            let corner = ProcessCorner {
-                name: section_name.to_owned(),
-                description: format!("Process corner from {lib_name}"),
-                file_path: Some(root.clone()),
-                is_default: false,
-                ..ProcessCorner::default()
-            };
+            let mut corner =
+                ProcessCorner::from_composite_section(section_name, root.clone(), false);
+            corner.description = format!("Process corner from {lib_name}");
             library.corners.insert(corner.name.clone(), corner);
         }
         let section_names = result.section_names();
