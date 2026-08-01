@@ -1071,3 +1071,65 @@ fn accepted_model_file_mutation_after_prepare_fails_closed() {
 
     fs::remove_dir_all(directory).expect("remove model fixture");
 }
+
+#[test]
+fn rebuilt_prepared_snapshots_are_deterministic() {
+    let state = runnable_state();
+    let controller = SimulationController::new();
+    let first = controller
+        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+        .expect("baseline snapshot");
+    let baseline_netlist = first.executable_netlist().to_owned();
+    let baseline = first.metadata();
+
+    // Dispatch rebuilds the snapshot and refuses to run when the digest moves,
+    // so unchanged state has to seal to one identity every time. Anything
+    // sampled from the clock or from a per-instance hash seed shows up here as
+    // drift between two builds that saw exactly the same inputs.
+    for attempt in 0..16 {
+        let snapshot = controller
+            .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("rebuilt snapshot");
+        assert_eq!(
+            snapshot.executable_netlist(),
+            baseline_netlist,
+            "attempt {attempt}: executable source drifted with no state change"
+        );
+        let rebuilt = snapshot.metadata();
+        assert_eq!(
+            rebuilt.source_digest, baseline.source_digest,
+            "attempt {attempt}: executable source digest drifted"
+        );
+        assert_eq!(
+            rebuilt.receipt_digest, baseline.receipt_digest,
+            "attempt {attempt}: source-check receipt drifted"
+        );
+        assert_eq!(
+            rebuilt.advisories, baseline.advisories,
+            "attempt {attempt}: advisories drifted"
+        );
+        assert_eq!(
+            rebuilt.snapshot_digest, baseline.snapshot_digest,
+            "attempt {attempt}: prepared snapshot digest drifted"
+        );
+    }
+}
+
+#[test]
+fn repeated_authorize_and_dispatch_cycles_never_expire_an_unchanged_run() {
+    for attempt in 0..16 {
+        let mut state = runnable_state();
+        let mut controller = SimulationController::new();
+        let snapshot = controller
+            .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("project run seals signed PDK model sources");
+        controller
+            .authorize_snapshot(snapshot)
+            .expect("authorize exact project snapshot");
+        controller
+            .consume_snapshot_for_dispatch(&mut state)
+            .unwrap_or_else(|error| {
+                panic!("attempt {attempt}: unchanged run was rejected: {error:?}")
+            });
+    }
+}

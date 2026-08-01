@@ -1203,6 +1203,10 @@ impl PreparedRunSnapshot {
         self.digest
     }
 
+    pub(in crate::simulation) fn executable_netlist(&self) -> &str {
+        &self.executable_netlist
+    }
+
     pub(in crate::simulation) const fn intent(&self) -> SimulationRunIntent {
         self.intent
     }

@@ -761,11 +761,6 @@ impl<'a> NetlistGenerator<'a> {
         self.ground_net
     }
 }
-fn chrono_lite_timestamp() -> String {
-    // Use system time for a basic timestamp
-    format!("{}", crate::time_compat::unix_epoch().as_secs())
-}
-
 //=============================================================================
 // Tests
 //=============================================================================
