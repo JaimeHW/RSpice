@@ -1048,9 +1048,12 @@ impl PreparedRunSnapshot {
                     format!("Prepared executable netlist is invalid: {error}"),
                 )
             })?;
-        let mut model_bin_config = rspice_core::SimulationConfig::default();
-        model_bin_config.temperature =
-            rspice_core::constants::celsius_to_kelvin(parts.reference_temperature_celsius);
+        let model_bin_config = rspice_core::SimulationConfig {
+            temperature: rspice_core::constants::celsius_to_kelvin(
+                parts.reference_temperature_celsius,
+            ),
+            ..Default::default()
+        };
         rspice_core::Engine::new(model_bin_config)
             .validate_model_bin_contracts(&parsed_netlist)
             .map_err(|error| {

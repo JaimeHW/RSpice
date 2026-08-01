@@ -396,10 +396,12 @@ pub(super) fn apply_analysis_action(
                 );
                 return;
             }
-            let mut pss = PssDialogState::default();
-            pss.osc_mode = true;
-            pss.osc_node.clear();
-            pss.tone_sources.clear();
+            let pss = PssDialogState {
+                osc_mode: true,
+                osc_node: String::new(),
+                tone_sources: String::new(),
+                ..Default::default()
+            };
             let repair_context = build_envelope_source_catalog(app).dependency_repair_context();
             let result = match app.state.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan

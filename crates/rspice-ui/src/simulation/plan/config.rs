@@ -1045,8 +1045,10 @@ pub(super) fn prerequisite_draft_for(
             periodic_state_requirement(dependent)?;
         }
         let sources = context.periodic_sources()?;
-        let mut draft = PssDialogState::default();
-        draft.tone_sources = sources.join(", ");
+        let draft = PssDialogState {
+            tone_sources: sources.join(", "),
+            ..Default::default()
+        };
         context.validate_pss_sources(&draft)?;
         let draft = AnalysisDraft::Pss(draft);
         if let Some(issue) = dependency_configuration_issue(dependent, &draft) {

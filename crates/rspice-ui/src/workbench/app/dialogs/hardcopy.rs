@@ -277,12 +277,13 @@ impl HardcopyDialogState {
             crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor,
         >,
     ) {
-        let mut draft = Self::default();
-        draft.open = true;
-        draft.workflow = workflow;
-        draft.source_candidates = source_candidates;
-        draft.busy = true;
-        *self = draft;
+        *self = Self {
+            open: true,
+            workflow,
+            source_candidates,
+            busy: true,
+            ..Default::default()
+        };
     }
 
     fn from_setup(setup: HardcopySetup) -> Self {

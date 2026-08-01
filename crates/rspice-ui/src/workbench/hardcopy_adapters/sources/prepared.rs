@@ -611,11 +611,13 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 presentation,
                 scope,
             } => {
-                let mut simulation = SimulationState::default();
-                simulation.next_run_id = run.id;
-                simulation.active_run_idx = Some(0);
-                simulation.active_analysis_idx = Some(0);
-                simulation.runs = vec![run];
+                let simulation = SimulationState {
+                    next_run_id: run.id,
+                    active_run_idx: Some(0),
+                    active_analysis_idx: Some(0),
+                    runs: vec![run],
+                    ..Default::default()
+                };
                 Self::Results {
                     source_key,
                     project_id,

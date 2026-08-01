@@ -765,19 +765,20 @@ fn prepared_simulation_for_panes(
         .iter()
         .map(|pane| (pane.dataset_id, pane.analysis_sequence))
         .collect::<std::collections::HashSet<_>>();
-    let mut prepared = SimulationState::default();
-    prepared.runs = simulation
-        .runs
-        .iter()
-        .filter(|run| dataset_ids.contains(&run.dataset_id))
-        .cloned()
-        .map(|mut run| {
-            run.analyses
-                .retain(|analysis| analysis_ids.contains(&(run.dataset_id, analysis.id)));
-            run
-        })
-        .collect();
-    prepared
+    SimulationState {
+        runs: simulation
+            .runs
+            .iter()
+            .filter(|run| dataset_ids.contains(&run.dataset_id))
+            .cloned()
+            .map(|mut run| {
+                run.analyses
+                    .retain(|analysis| analysis_ids.contains(&(run.dataset_id, analysis.id)));
+                run
+            })
+            .collect(),
+        ..Default::default()
+    }
 }
 
 /// Per-frame command predicate. This deliberately performs identity and

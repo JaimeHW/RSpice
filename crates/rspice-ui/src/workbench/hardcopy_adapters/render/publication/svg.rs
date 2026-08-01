@@ -558,7 +558,7 @@ pub(super) fn write_svg_trim_marks(output: &mut String, plan: &HardcopyPlan, pag
     let right = width.micrometres().saturating_sub(inset);
     let bottom = height.micrometres().saturating_sub(inset);
     let gap = (inset / 4).max(100);
-    let length = (inset.saturating_mul(3) / 4).min(5_000).max(500);
+    let length = (inset.saturating_mul(3) / 4).clamp(500, 5_000);
     let color = svg_color(resolve_color(plan, SemanticColor::Foreground));
     write!(
         output,

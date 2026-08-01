@@ -922,7 +922,7 @@ fn preview_surface(ui: &mut Ui, draft: &mut HardcopyDialogState) {
             ui.set_width((width - 28.0).max(0.0));
             if let Some(plan) = draft.preview_plan.as_ref() {
                 let mut selected_adjacent = None;
-                let card_count = plan.pagination().pages().len().min(2).max(1);
+                let card_count = plan.pagination().pages().len().clamp(1, 2);
                 let stacked = ui.ctx().content_rect().width() <= 460.0;
                 let height = if stacked {
                     card_count as f32 * 112.0 + card_count.saturating_sub(1) as f32 * 16.0
