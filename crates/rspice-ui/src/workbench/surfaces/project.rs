@@ -33,17 +33,10 @@ use technology::{open_technology_attachment_dialog, show_technology_attachment_d
 #[cfg(target_arch = "wasm32")]
 use technology::{poll_browser_recovery_completions, poll_browser_technology_checkpoint};
 
-const PROJECT_RESPONSIVE_BREAKPOINT: f32 = 820.0;
-const PROJECT_PHONE_BREAKPOINT: f32 = 560.0;
 const PROJECT_TAB_HEIGHT: f32 = 30.0;
 const WORKSPACE_TABLE_HEADER_HEIGHT: f32 = 37.0;
 const WORKSPACE_TABLE_COLUMN_HEADER_HEIGHT: f32 = 27.0;
 const WORKSPACE_TABLE_ROW_HEIGHT: f32 = 36.0;
-const RECOVERY_TABLE_MIN_WIDTH: f32 = 960.0;
-const TECHNOLOGY_TABLE_MIN_WIDTH: f32 = 760.0;
-const RECOVERY_STATUS_HEIGHT: f32 = 68.0;
-const TECHNOLOGY_METRIC_HEIGHT: f32 = 84.0;
-const TECHNOLOGY_METRIC_COMPACT_HEIGHT: f32 = 70.0;
 
 /// Width that is both allocated to this UI and actually visible through the
 /// current clip. Split-pane children can otherwise inherit the unconstrained
@@ -94,46 +87,6 @@ thread_local! {
         const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
     static BROWSER_RECOVERY_COPY_COMPLETIONS: std::cell::RefCell<std::collections::VecDeque<BrowserRecoveryCopyCompletion>> =
         const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct ProjectContractLayout {
-    status_columns: usize,
-    status_cell_width: f32,
-    operation_columns: usize,
-    operation_cell_width: f32,
-}
-
-impl ProjectContractLayout {
-    fn resolve(content_width: f32) -> Self {
-        let content_width = content_width.max(0.0);
-        let status_columns = if content_width <= PROJECT_PHONE_BREAKPOINT {
-            1
-        } else if content_width <= PROJECT_RESPONSIVE_BREAKPOINT {
-            2
-        } else {
-            4
-        };
-        let operation_columns = if content_width <= PROJECT_RESPONSIVE_BREAKPOINT {
-            1
-        } else {
-            3
-        };
-        Self {
-            status_columns,
-            status_cell_width: content_width / status_columns as f32,
-            operation_columns,
-            operation_cell_width: content_width / operation_columns as f32,
-        }
-    }
-
-    fn technology_metric_height(self) -> f32 {
-        if self.status_columns == 4 {
-            TECHNOLOGY_METRIC_HEIGHT
-        } else {
-            TECHNOLOGY_METRIC_COMPACT_HEIGHT
-        }
-    }
 }
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -562,158 +515,6 @@ fn project_page_actions(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-struct WorkspaceBandSpec {
-    label: &'static str,
-    value: String,
-    detail: String,
-    value_color: Color32,
-}
-
-fn workspace_status_band(
-    ui: &mut Ui,
-    id: &'static str,
-    specs: &[WorkspaceBandSpec; 4],
-    layout: ProjectContractLayout,
-    cell_height: f32,
-    metric: bool,
-) {
-    let tokens = Tokens::get(ui.ctx());
-    let shown = egui::Grid::new(id)
-        .num_columns(layout.status_columns)
-        .spacing(vec2(0.0, 0.0))
-        .show(ui, |ui| {
-            for (index, spec) in specs.iter().enumerate() {
-                ui.allocate_ui_with_layout(
-                    vec2(layout.status_cell_width, 0.0),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        ui.set_width(layout.status_cell_width);
-                        workspace_status_cell(
-                            ui,
-                            spec,
-                            cell_height,
-                            metric,
-                            (index + 1) % layout.status_columns != 0,
-                            index + layout.status_columns < specs.len(),
-                        );
-                    },
-                );
-                if (index + 1) % layout.status_columns == 0 {
-                    ui.end_row();
-                }
-            }
-        });
-    ui.painter().hline(
-        shown.response.rect.x_range(),
-        shown.response.rect.bottom(),
-        Stroke::new(1.0, tokens.color.border_strong),
-    );
-}
-
-fn workspace_status_cell(
-    ui: &mut Ui,
-    spec: &WorkspaceBandSpec,
-    height: f32,
-    metric: bool,
-    right_divider: bool,
-    bottom_divider: bool,
-) {
-    let tokens = Tokens::get(ui.ctx());
-    let width = ui.available_width().max(1.0);
-    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, tokens.color.bg_panel);
-    if right_divider {
-        ui.painter().vline(
-            rect.right(),
-            rect.y_range(),
-            Stroke::new(1.0, tokens.color.border),
-        );
-    }
-    if bottom_divider {
-        ui.painter().hline(
-            rect.x_range(),
-            rect.bottom(),
-            Stroke::new(1.0, tokens.color.border),
-        );
-    }
-    let content = rect.shrink2(vec2(12.0, 0.0));
-    let painter = ui
-        .painter()
-        .with_clip_rect(content.intersect(ui.clip_rect()));
-    let compact_metric = metric && height <= TECHNOLOGY_METRIC_COMPACT_HEIGHT;
-    let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
-    let value_font = theme::mono(
-        if metric { 19.0 } else { 13.0 },
-        if metric {
-            FontWeight::Medium
-        } else {
-            FontWeight::SemiBold
-        },
-    );
-    let detail_font = theme::sans(tokens::FS_0, FontWeight::Regular);
-    let label = elide_text(ui, spec.label, &label_font, content.width());
-    let value = elide_text(ui, &spec.value, &value_font, content.width());
-    let detail = elide_text(ui, &spec.detail, &detail_font, content.width());
-    painter.text(
-        pos2(
-            content.left(),
-            rect.top()
-                + if compact_metric {
-                    7.0
-                } else if metric {
-                    11.0
-                } else {
-                    9.0
-                },
-        ),
-        Align2::LEFT_TOP,
-        label,
-        label_font,
-        tokens.color.text_dim,
-    );
-    painter.text(
-        pos2(
-            content.left(),
-            rect.top()
-                + if compact_metric {
-                    25.0
-                } else if metric {
-                    32.0
-                } else {
-                    26.0
-                },
-        ),
-        Align2::LEFT_TOP,
-        value,
-        value_font,
-        spec.value_color,
-    );
-    painter.text(
-        pos2(
-            content.left(),
-            rect.top()
-                + if compact_metric {
-                    51.0
-                } else if metric {
-                    60.0
-                } else {
-                    47.0
-                },
-        ),
-        Align2::LEFT_TOP,
-        detail,
-        detail_font,
-        tokens.color.text_faint,
-    );
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Label,
-            ui.is_enabled(),
-            format!("{}: {}. {}", spec.label, spec.value, spec.detail),
-        )
-    });
-}
-
 fn workspace_table_panel_header(ui: &mut Ui, title: &str, meta: &str, meta_color: Color32) {
     let tokens = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
@@ -866,89 +667,6 @@ fn workspace_empty_table_row(ui: &mut Ui, width: f32, text: &str) {
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
 }
 
-fn header_with_actions(
-    ui: &mut Ui,
-    eyebrow: &str,
-    title: &str,
-    description: &str,
-    actions: impl FnOnce(&mut Ui),
-) {
-    let tokens = Tokens::get(ui.ctx());
-    let shown = egui::Frame::new()
-        .inner_margin(Margin {
-            left: 16,
-            right: 16,
-            top: 14,
-            bottom: 12,
-        })
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width().max(1.0));
-            if project_header_stacks(ui.available_width()) {
-                ui.vertical(|ui| {
-                    project_heading(ui, eyebrow, title, description);
-                    ui.add_space(8.0);
-                    ui.horizontal_wrapped(|ui| {
-                        ui.spacing_mut().item_spacing.x = 6.0;
-                        actions(ui);
-                    });
-                });
-            } else {
-                ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-                    ui.spacing_mut().item_spacing.x = 16.0;
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 6.0;
-                        actions(ui);
-                    });
-                    ui.allocate_ui_with_layout(
-                        vec2(ui.available_width().max(1.0), 0.0),
-                        Layout::top_down(Align::Min),
-                        |ui| project_heading(ui, eyebrow, title, description),
-                    );
-                });
-            }
-        });
-    ui.painter().hline(
-        shown.response.rect.x_range(),
-        shown.response.rect.bottom(),
-        Stroke::new(1.0, tokens.color.border),
-    );
-}
-
-fn project_heading(ui: &mut Ui, eyebrow: &str, title: &str, description: &str) {
-    let tokens = Tokens::get(ui.ctx());
-    ui.spacing_mut().item_spacing.y = 0.0;
-    ui.add(
-        egui::Label::new(
-            egui::RichText::new(eyebrow.to_uppercase())
-                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                .color(tokens.color.text_faint),
-        )
-        .wrap(),
-    );
-    ui.add_space(2.0);
-    ui.add(
-        egui::Label::new(
-            egui::RichText::new(title)
-                .font(theme::sans(21.0, FontWeight::SemiBold))
-                .color(tokens.color.text),
-        )
-        .wrap(),
-    );
-    ui.add_space(5.0);
-    ui.add(
-        egui::Label::new(
-            egui::RichText::new(description)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(tokens.color.text_dim),
-        )
-        .wrap(),
-    );
-}
-
-fn project_header_stacks(viewport_width: f32) -> bool {
-    viewport_width <= PROJECT_RESPONSIVE_BREAKPOINT
-}
-
 fn short_identity(identity: &str) -> String {
     identity.chars().take(8).collect()
 }
@@ -1012,21 +730,6 @@ mod tests {
 
     fn assert_close(actual: f32, expected: f32) {
         assert!((actual - expected).abs() <= 0.001, "{actual} != {expected}");
-    }
-
-    #[test]
-    fn contract_layout_changes_only_at_declared_breakpoints() {
-        let wide = ProjectContractLayout::resolve(PROJECT_RESPONSIVE_BREAKPOINT + 180.0);
-        assert_eq!(wide.status_columns, 4);
-        assert_eq!(wide.operation_columns, 3);
-        assert_close(wide.status_cell_width, 250.0);
-
-        let compact = ProjectContractLayout::resolve(PROJECT_RESPONSIVE_BREAKPOINT);
-        assert_eq!(compact.status_columns, 2);
-        assert_eq!(compact.operation_columns, 1);
-
-        let phone = ProjectContractLayout::resolve(PROJECT_PHONE_BREAKPOINT);
-        assert_eq!(phone.status_columns, 1);
     }
 
     #[test]

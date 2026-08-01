@@ -1187,7 +1187,7 @@ pub(super) fn qualification_domain_table(
         selected.map(|selected| (selected.gate.label(), selected.gate.color(&t))),
         size,
         |ui, table_size| {
-            let _ = data_table(
+            data_table(
                 ui,
                 "models.qualification.domains",
                 470.0,

@@ -34,13 +34,8 @@ use crate::workbench::documents::model_editor::{self, ModelEditorSection};
 
 const TABLE_HEAD_H: f32 = 27.0;
 const TABLE_CARD_HEAD_H: f32 = 37.0;
-const MODEL_TABLE_MIN_W: f32 = 780.0;
-const MODEL_PHONE_TABLE_MIN_W: f32 = 690.0;
 const MODEL_PHONE_BREAKPOINT: f32 = 560.0;
 const MODEL_SUMMARY_BREAKPOINT: f32 = 820.0;
-const MODEL_TABLE_MIN_H: f32 = 180.0;
-const MODEL_WIDE_SUMMARY_H: f32 = 150.0;
-const MODEL_STACKED_SUMMARY_H: f32 = 300.0;
 const MODEL_TITLE_MIN_CONTENT_H: f32 = 48.0;
 const QUALIFICATION_MIN_CONTENT_H: f32 = 680.0;
 const QUALIFICATION_STACKED_MIN_CONTENT_H: f32 = 1000.0;
@@ -48,17 +43,6 @@ const QUALIFICATION_GATE_COPY: &str = "Dispositions, reruns, replacement, and re
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     manager::show(ui, app);
-}
-
-fn surface_title(
-    ui: &mut Ui,
-    eyebrow: &str,
-    title: &str,
-    description: &str,
-    has_actions: bool,
-    actions: impl FnOnce(&mut Ui),
-) {
-    surface_title_with_action_reserve(ui, eyebrow, title, description, has_actions, 240.0, actions);
 }
 
 fn surface_title_with_action_reserve(
@@ -182,50 +166,8 @@ fn model_title_content_height(
     (eyebrow.size().y + 2.0 + title.size().y + description.size().y).max(MODEL_TITLE_MIN_CONTENT_H)
 }
 
-fn model_tab_strip_height(touch: bool, filter_visible: bool) -> f32 {
-    if touch && filter_visible {
-        54.0
-    } else if touch {
-        44.0
-    } else {
-        38.0
-    }
-}
-
-fn model_catalog_min_width(surface_width: f32) -> f32 {
-    if surface_width <= MODEL_PHONE_BREAKPOINT {
-        MODEL_PHONE_TABLE_MIN_W
-    } else {
-        MODEL_TABLE_MIN_W
-    }
-}
-
 fn model_title_actions_stack(surface_width: f32) -> bool {
     surface_width <= MODEL_PHONE_BREAKPOINT
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct ModelTableSummaryLayout {
-    narrow: bool,
-    table_height: f32,
-    summary_height: f32,
-    owns_vertical_scroll: bool,
-}
-
-fn model_table_summary_layout(available: Vec2, touch: bool) -> ModelTableSummaryLayout {
-    let narrow = available.x <= MODEL_SUMMARY_BREAKPOINT || touch;
-    let summary_height = if narrow {
-        MODEL_STACKED_SUMMARY_H
-    } else {
-        MODEL_WIDE_SUMMARY_H
-    };
-    let table_height = (available.y - summary_height).max(MODEL_TABLE_MIN_H);
-    ModelTableSummaryLayout {
-        narrow,
-        table_height,
-        summary_height,
-        owns_vertical_scroll: available.y < summary_height + MODEL_TABLE_MIN_H,
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -266,12 +208,6 @@ struct DataRow {
     key: String,
     selected: bool,
     cells: Vec<DataCell>,
-}
-
-#[derive(Debug, Clone)]
-struct TableEvent {
-    key: String,
-    activate: bool,
 }
 
 fn table_card(
@@ -340,7 +276,7 @@ fn data_table(
     rows: &[DataRow],
     desired_size: Vec2,
     empty_message: &str,
-) -> Option<TableEvent> {
+) {
     let t = Tokens::get(ui.ctx());
     let desired_size = egui::vec2(desired_size.x.max(1.0), desired_size.y.max(1.0));
     let (viewport, _) = ui.allocate_exact_size(desired_size, Sense::hover());
@@ -352,7 +288,6 @@ fn data_table(
     );
     child.spacing_mut().item_spacing = Vec2::ZERO;
     let table_width = viewport.width().max(min_width);
-    let mut event = None;
     let mut requested_focus = None;
     ScrollArea::both()
         .id_salt(("workbench.data-table", salt))
@@ -404,10 +339,6 @@ fn data_table(
 
                 if response.clicked() {
                     response.request_focus();
-                    event = Some(TableEvent {
-                        key: row.key.clone(),
-                        activate: response.double_clicked(),
-                    });
                 }
                 if response.has_focus() {
                     let move_to = ui.input(|input| {
@@ -452,14 +383,9 @@ fn data_table(
                 accessible_model_text(&empty, &response, empty_message);
             }
         });
-    if let Some((id, key)) = requested_focus {
+    if let Some((id, _)) = requested_focus {
         ui.memory_mut(|memory| memory.request_focus(id));
-        event = Some(TableEvent {
-            key,
-            activate: false,
-        });
     }
-    event
 }
 
 fn paint_table_cells(
@@ -546,118 +472,10 @@ fn elide(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> String {
     format!("{}…", chars[..low].iter().collect::<String>())
 }
 
-#[derive(Debug, Clone, Copy)]
-struct SummaryCardSpec<'a> {
-    title: &'a str,
-    rows: &'a [(&'a str, String)],
-}
-
-impl<'a> SummaryCardSpec<'a> {
-    const fn new(title: &'a str, rows: &'a [(&'a str, String)]) -> Self {
-        Self { title, rows }
-    }
-}
-
-fn summary_cards(
-    ui: &mut Ui,
-    narrow: bool,
-    summary_height: f32,
-    parent_owns_scroll: bool,
-    left: SummaryCardSpec<'_>,
-    right: SummaryCardSpec<'_>,
-) -> egui::Response {
-    let width = ui.available_width().max(1.0);
-    if parent_owns_scroll {
-        // The enclosing table/summary composition is already the vertical
-        // scroll owner. Render at natural height here so short workspaces do
-        // not create a second, partially hidden scroll viewport at the
-        // Console boundary.
-        return ui
-            .scope(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::ZERO;
-                ui.set_min_width(width);
-                let start = ui.cursor().top();
-                summary_cards_content(ui, width, narrow, left, right);
-                let consumed = ui.cursor().top() - start;
-                if consumed < summary_height {
-                    ui.add_space(summary_height - consumed);
-                }
-            })
-            .response;
-    }
-
-    let viewport_size = egui::vec2(ui.available_width().max(1.0), summary_height.max(1.0));
-    let (viewport, response) = ui.allocate_exact_size(viewport_size, Sense::hover());
-    let mut child = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(viewport)
-            .layout(Layout::top_down(Align::Min)),
-    );
-    child.spacing_mut().item_spacing = Vec2::ZERO;
-    ScrollArea::vertical()
-        .id_salt(("models.summary-cards", left.title, right.title))
-        .auto_shrink([false, false])
-        .show(&mut child, |ui| {
-            ui.set_min_width(viewport.width());
-            summary_cards_content(ui, viewport.width(), narrow, left, right);
-        });
-    response
-}
-
-fn summary_cards_content(
-    ui: &mut Ui,
-    width: f32,
-    narrow: bool,
-    left: SummaryCardSpec<'_>,
-    right: SummaryCardSpec<'_>,
-) {
-    if narrow {
-        property_card(ui, left.title, |ui| {
-            for (label, value) in left.rows {
-                property_row(ui, label, value);
-            }
-        });
-        property_card(ui, right.title, |ui| {
-            for (label, value) in right.rows {
-                property_row(ui, label, value);
-            }
-        });
-    } else {
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = 1.0;
-            let column_w = ((width - 1.0) * 0.5).max(1.0);
-            ui.allocate_ui_with_layout(
-                egui::vec2(column_w, 0.0),
-                Layout::top_down(Align::Min),
-                |ui| {
-                    property_card(ui, left.title, |ui| {
-                        for (label, value) in left.rows {
-                            property_row(ui, label, value);
-                        }
-                    });
-                },
-            );
-            ui.allocate_ui_with_layout(
-                egui::vec2(column_w, 0.0),
-                Layout::top_down(Align::Min),
-                |ui| {
-                    property_card(ui, right.title, |ui| {
-                        for (label, value) in right.rows {
-                            property_row(ui, label, value);
-                        }
-                    });
-                },
-            );
-        });
-    }
-}
-
 #[derive(Debug, Clone)]
 struct IncludeDiagnostics {
     files: usize,
-    definitions: usize,
     edges: usize,
-    duplicate_definitions: usize,
     cyclic_nodes: usize,
     unpinned_roots: usize,
 }
@@ -665,7 +483,6 @@ struct IncludeDiagnostics {
 fn include_diagnostics(app: &RSpiceApp) -> IncludeDiagnostics {
     let libraries = app.state.model_library_manager.libraries_sorted();
     let mut sources = HashSet::<PathBuf>::new();
-    let mut names = HashMap::<String, usize>::new();
     let mut edges = Vec::<(PathBuf, PathBuf)>::new();
     let mut unpinned_roots = 0usize;
     for library in &libraries {
@@ -678,16 +495,10 @@ fn include_diagnostics(app: &RSpiceApp) -> IncludeDiagnostics {
         for edge in &library.source_edges {
             edges.push((edge.owner.clone(), edge.target.clone()));
         }
-        for name in library.models.keys() {
-            *names.entry(name.to_ascii_lowercase()).or_default() += 1;
-        }
     }
-    let duplicate_definitions = names.values().map(|count| count.saturating_sub(1)).sum();
     IncludeDiagnostics {
         files: sources.len(),
-        definitions: names.values().sum(),
         edges: edges.len(),
-        duplicate_definitions,
         cyclic_nodes: cyclic_node_count(&edges),
         unpinned_roots,
     }
