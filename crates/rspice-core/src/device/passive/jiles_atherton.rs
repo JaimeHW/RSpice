@@ -101,6 +101,8 @@ pub struct JilesAthertonParams {
     pub beta_h: Value,
     /// Xyce CORE irreversible-domain modeling constant.
     pub beta_m: Value,
+    /// Xyce LEVEL=1 tolerance for the nonlinear zero-crossing regularizer.
+    pub p_zero_tol: Value,
 }
 
 /// Pure endpoint evaluation of Xyce's nonlinear Core constitutive state.
@@ -157,6 +159,7 @@ impl Default for JilesAthertonParams {
             delta_v_scaling: 1.0e3,
             beta_h: 0.0001,
             beta_m: 3.125e-5,
+            p_zero_tol: 0.1,
         }
     }
 }
@@ -185,6 +188,7 @@ impl JilesAthertonParams {
             delta_v_scaling: 1.0e3,
             beta_h: 0.0001,
             beta_m: 3.125e-5,
+            p_zero_tol: 0.1,
         }
     }
 
@@ -1029,7 +1033,26 @@ impl JilesAthertonInductor {
             (0.0, 0.0, 0.0)
         };
         let integration_scale = (if one_step_order2 { 0.5 } else { 1.0 }) * dt / self.params.length;
-        let g_m = 1.0 - integration_scale * trial.level1_rate * dp_dm;
+        // MutIndNonLin regularizes the hidden M row when the constitutive
+        // factor is near zero.  Native Xyce adds one unit diagonal in this
+        // region so the otherwise purely derivative-based row remains
+        // anchored during a nonlinear zero crossing.
+        // Xyce evaluates P from the accepted state vector during
+        // updateIntermediateVars, before updatePrimaryState copies the
+        // current Newton M iterate into that vector.  Use that same accepted
+        // magnetization for the PZEROTOL test; the native dFdx path adds a
+        // unit diagonal independently of the transient integration order.
+        let accepted_p = self.xyce_core_p(
+            trial.applied_field - (self.params.gap / self.params.length) * self.state.m,
+            self.state.m,
+            self.xyce_tanh_qv(voltage),
+        );
+        let p_zero_regularizer = if accepted_p.abs() <= self.params.p_zero_tol {
+            1.0
+        } else {
+            0.0
+        };
+        let g_m = 1.0 + p_zero_regularizer - integration_scale * trial.level1_rate * dp_dm;
         let g_happ = -integration_scale * trial.level1_rate * dp_dhapp;
         let g_voltage = -integration_scale * trial.level1_rate * dp_dvoltage;
         let g_rate = -integration_scale * trial.p;

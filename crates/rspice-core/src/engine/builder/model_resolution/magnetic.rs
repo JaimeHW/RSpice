@@ -141,6 +141,7 @@ pub(in crate::engine::builder) fn resolve_xyce_core_model_params(
         delta_v_scaling: 1.0e3,
         beta_h: 1.0e-4,
         beta_m: 3.125e-5,
+        p_zero_tol: 0.1,
     };
 
     if let Some(ms) = positive_model_param(model_def, &["MS"], "MS")? {
@@ -183,6 +184,9 @@ pub(in crate::engine::builder) fn resolve_xyce_core_model_params(
     }
     if let Some(beta_m) = positive_model_param(model_def, &["BETAM"], "BETAM")? {
         params.beta_m = beta_m;
+    }
+    if let Some(p_zero_tol) = nonnegative_model_param(model_def, &["PZEROTOL"], "PZEROTOL")? {
+        params.p_zero_tol = p_zero_tol;
     }
     // Xyce has two distinct nonlinear mutual-inductor device contracts.  A
     // CORE model with LEVEL=1 (or with no LEVEL, whose K-device default is
