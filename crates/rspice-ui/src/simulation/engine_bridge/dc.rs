@@ -130,7 +130,7 @@ impl EngineBridge {
         if !device_report.is_empty() {
             result.device_report = Some(device_report);
         }
-        Ok(SimulationResult::DcOp(result))
+        Ok(SimulationResult::DcOp(Box::new(result)))
     }
 
     /// Run DC sweep analysis.

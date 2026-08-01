@@ -56,8 +56,9 @@ impl TransferFunctionScalar {
 /// Container for all simulation results
 #[derive(Debug, Clone)]
 pub enum SimulationResult {
-    /// DC operating point
-    DcOp(DcOpResult),
+    /// DC operating point. Boxed: the operating-point result is three
+    /// times the next largest variant, and every result value paid for it.
+    DcOp(Box<DcOpResult>),
 
     /// DC sweep results
     DcSweep {

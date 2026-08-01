@@ -134,7 +134,7 @@ fn synthetic_sparameter_result() -> crate::simulation::SimulationResult {
 fn synthetic_dc_op_result() -> crate::simulation::SimulationResult {
     let mut result = crate::simulation::results::DcOpResult::default();
     result.node_voltages.insert("out".to_string(), 1.25);
-    crate::simulation::SimulationResult::DcOp(result)
+    crate::simulation::SimulationResult::DcOp(Box::new(result))
 }
 
 fn synthetic_result_provenance() -> AnalysisResultProvenance {

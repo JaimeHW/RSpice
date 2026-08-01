@@ -1713,7 +1713,7 @@ fn worker_spec_request_preserves_corner_execution_options() {
 
 #[test]
 fn worker_result_round_trip() {
-    let dc_op = SimulationResult::DcOp(DcOpResult {
+    let dc_op = SimulationResult::DcOp(Box::new(DcOpResult {
         configuration: crate::simulation::dialog::OpConfig::default(),
         validated_startup_directives: 0,
         mna_node_names: vec!["out".to_owned()],
@@ -1723,7 +1723,7 @@ fn worker_result_round_trip() {
         branch_currents: HashMap::from([("V1".to_string(), -0.01)]),
         device_ops: HashMap::new(),
         device_report: None,
-    });
+    }));
     let dc_op = round_trip_result(dc_op);
     match dc_op {
         SimulationResult::DcOp(result) => {
@@ -2090,7 +2090,7 @@ fn worker_request_from_runner_parts_preserves_payload() {
 #[test]
 fn dc_op_worker_result_round_trip_preserves_exact_mna_state_and_contract() {
     let expected_config = nondefault_op_config();
-    let result = SimulationResult::DcOp(DcOpResult {
+    let result = SimulationResult::DcOp(Box::new(DcOpResult {
         configuration: expected_config.clone(),
         validated_startup_directives: 2,
         mna_node_names: vec!["out".to_owned()],
@@ -2100,7 +2100,7 @@ fn dc_op_worker_result_round_trip_preserves_exact_mna_state_and_contract() {
         branch_currents: HashMap::from([("V1".to_owned(), -1.0e-3)]),
         device_ops: HashMap::new(),
         device_report: None,
-    });
+    }));
 
     let restored = round_trip_result(result);
     let SimulationResult::DcOp(restored) = restored else {

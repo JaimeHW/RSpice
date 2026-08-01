@@ -1909,13 +1909,13 @@ mod tests {
         configuration.temperature_celsius = 125.0;
         configuration.run_point.supply_voltage = Some(1.2);
         configuration.run_point.nominal_supply_voltage = Some(1.0);
-        SimulationResult::DcOp(crate::simulation::results::DcOpResult {
+        SimulationResult::DcOp(Box::new(crate::simulation::results::DcOpResult {
             configuration,
             mna_node_names: vec!["in".to_owned(), "out".to_owned()],
             mna_branch_names: vec!["V1".to_owned()],
             mna_solution: vec![1.2, 0.8, -0.001],
             ..Default::default()
-        })
+        }))
     }
 
     #[test]

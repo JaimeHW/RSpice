@@ -973,12 +973,13 @@ mod operating_point_conversion_tests {
 
     #[test]
     fn branch_current_is_wrapped_exactly_once_in_retained_results() {
-        let sim_result =
-            crate::simulation::SimulationResult::DcOp(crate::simulation::results::DcOpResult {
+        let sim_result = crate::simulation::SimulationResult::DcOp(Box::new(
+            crate::simulation::results::DcOpResult {
                 configuration: crate::simulation::dialog::OpConfig::default(),
                 branch_currents: HashMap::from([("V1".to_owned(), -1.0e-3)]),
                 ..Default::default()
-            });
+            },
+        ));
         let result = SimulationController::new()
             .convert_to_analysis_result_owned(sim_result, &AnalysisConfig::dc_op());
         let currents = &result.dc_op.as_ref().unwrap().branch_currents;

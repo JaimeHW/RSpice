@@ -1338,7 +1338,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 branch_currents,
                 device_ops,
                 device_report,
-            } => Self::DcOp(DcOpResult {
+            } => Self::DcOp(Box::new(DcOpResult {
                 configuration,
                 validated_startup_directives,
                 mna_node_names,
@@ -1351,7 +1351,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                     .map(|device| (device.name.clone(), DeviceOpPoint::from(device)))
                     .collect(),
                 device_report: device_report.map(rspice_core::circuit::DeviceOpReport::from),
-            }),
+            })),
             WorkerSimulationResult::DcSweep {
                 sweep_var,
                 sweep_values,
