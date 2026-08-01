@@ -345,10 +345,6 @@ impl LibraryManager {
             .find(|m| m.name.to_uppercase() == upper)
     }
 
-
-
-
-
     /// Get the library file content by name
     pub fn get_library_content(&self, library_name: &str) -> Option<&'static str> {
         match library_name.to_lowercase().as_str() {
@@ -453,7 +449,6 @@ impl LibraryManager {
 
         Ok(count)
     }
-
 }
 
 fn format_lib_parse_errors(errors: &[super::lib_parser::ParseError]) -> String {

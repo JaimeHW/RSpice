@@ -162,8 +162,6 @@ impl Default for GanHemtParams {
 }
 
 impl GanHemtParams {
-
-
     /// Get temperature-adjusted threshold voltage
     pub fn vth_at_temp(&self, temp: Value) -> Value {
         self.vth0 + self.vth_temp_coeff * (temp - TREF)
@@ -211,8 +209,7 @@ impl Default for GanHemtState {
     }
 }
 
-impl GanHemtState {
-}
+impl GanHemtState {}
 
 //=============================================================================
 // GaN HEMT Model
@@ -347,8 +344,6 @@ impl GanHemt {
 
         ft / (2.0 * (rg * gds + 2.0 * std::f64::consts::PI * ft * rg * cgd).sqrt())
     }
-
-
 }
 
 impl Default for GanHemt {
@@ -378,7 +373,6 @@ pub enum ProcessCorner {
 }
 
 impl ProcessCorner {
-
     /// Get corner description
     pub fn name(&self) -> &'static str {
         match self {
@@ -423,7 +417,6 @@ impl ProcessCorner {
         }
     }
 }
-
 
 //=============================================================================
 // Statistical Variability
@@ -474,7 +467,6 @@ impl StatisticalVariation {
 
         result
     }
-
 }
 
 //=============================================================================

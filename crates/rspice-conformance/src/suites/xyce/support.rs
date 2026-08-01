@@ -3152,7 +3152,8 @@ impl XyceTestRunner {
     ) -> Engine {
         let mut config = self.xyce_engine_config(locked_time_grid);
         config.transient_initial_timestep = initial_timestep;
-        config.integration_method = rspice_core::numerics::integration::IntegrationMethod::Trapezoidal;
+        config.integration_method =
+            rspice_core::numerics::integration::IntegrationMethod::Trapezoidal;
         Engine::new(config)
     }
 

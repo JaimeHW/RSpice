@@ -177,7 +177,6 @@ pub struct PstbData {
     pub stability_margin_db: Vec<Value>,
 }
 
-
 fn sanitize_db(value: Value) -> Value {
     if value.is_finite() {
         value

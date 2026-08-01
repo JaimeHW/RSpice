@@ -272,7 +272,6 @@ impl Inductors {
         self.stamp_transient_companion_where(matrix, rhs, dt, coeff, num_nodes, |_| false);
     }
 
-
     /// Stamp transient companions with a zero-allocation branch-selection
     /// predicate.  Circuit-level device families use this form to leave
     /// nonlinear branches to their canonical constitutive stamp without

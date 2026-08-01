@@ -548,7 +548,6 @@ impl ParamSpec {
         self
     }
 
-
     /// Set value range
     pub fn with_range(mut self, min: Value, max: Value) -> Self {
         self.min = Some(min);
@@ -557,9 +556,6 @@ impl ParamSpec {
         self.max_is_soft = false;
         self
     }
-
-
-
 
     /// Set minimum vector length
     pub fn with_vector_min_len(mut self, min_len: usize) -> Self {

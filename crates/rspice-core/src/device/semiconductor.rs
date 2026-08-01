@@ -10,5 +10,5 @@ pub(crate) use bjt::{
     BjtChargeSnapshot, BjtCurrentBranch, VBIC_TRANSIENT_CONVERGENCE_BRANCH_COUNT,
 };
 pub use bjt::{Bjt, BjtType};
-pub use diode::{Diode, DiodeLevel};
 pub(crate) use diode::DiodeNonlinearState;
+pub use diode::{Diode, DiodeLevel};

@@ -146,10 +146,6 @@ impl FloquetAnalyzer {
         self
     }
 
-
-
-
-
     /// Compute Floquet analysis from Jacobian samples
     ///
     /// This performs:
@@ -544,14 +540,10 @@ impl FloquetAnalyzer {
         }
     }
 
-
     /// Get ISF RMS values for each node
     pub fn isf_rms(&self) -> &[Value] {
         &self.isf_rms
     }
-
-
-
 
     /// Get Floquet exponents
     pub fn floquet_exponents(&self) -> &[Complex64] {
@@ -637,7 +629,6 @@ impl FloquetAnalyzer {
         }
         10.0 * (phase_psd_rad2_hz / 2.0).log10()
     }
-
 }
 
 // ============================================================================
@@ -694,7 +685,6 @@ impl FloquetMode {
     pub fn damping(&self) -> Value {
         -self.exponent.re
     }
-
 }
 
 // ============================================================================

@@ -34,9 +34,7 @@
 //! ```
 
 use crate::Value;
-use crate::resource::{
-    ResourceKind, ResourceLimitError, ResourceLimits, ResourceReadError,
-};
+use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits, ResourceReadError};
 use std::fs::File;
 use std::io::{self, BufWriter, Seek, SeekFrom, Write};
 use std::path::Path;

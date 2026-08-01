@@ -70,7 +70,9 @@ impl TestRunner {
     }
 
     #[inline]
-    pub(super) fn simulation_result_contains_non_finite(result: &rspice_core::SimulationResult) -> bool {
+    pub(super) fn simulation_result_contains_non_finite(
+        result: &rspice_core::SimulationResult,
+    ) -> bool {
         result.node_voltages.iter().any(|value| !value.is_finite())
             || result
                 .branch_currents

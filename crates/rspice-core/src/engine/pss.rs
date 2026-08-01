@@ -22,15 +22,15 @@
 #![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 use super::{Engine, SimulationError, TransientCheckpoint, TransientResult};
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::numerics::integration::{
-    BreakpointManager, LteEstimator, TimestepController, TrapGearController,
-};
 use crate::analysis::{
     PeriodDetector, PeriodicWaveform, PssConfig, PssResult, ShootingNewtonSolver, ShootingState,
 };
 use crate::circuit::CircuitData;
 use crate::numerics::integration::CompanionCoefficients;
 use crate::numerics::integration::IntegrationMethod;
+use crate::numerics::integration::{
+    BreakpointManager, LteEstimator, TimestepController, TrapGearController,
+};
 use crate::solver::StaticMatrix;
 use crate::{Netlist, Value};
 

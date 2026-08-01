@@ -1,11 +1,11 @@
 //! SPICE single-quoted behavioral expression groups.
 
+use rspice_core::config::ExpressionDialect;
 use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::expr::{Expr, Function, parse_expression_strict};
 use rspice_core::netlist::expr::{
     ParamContext, eval_expression, parse_expression as parse_netlist_expression,
 };
-use rspice_core::config::ExpressionDialect;
 use rspice_core::netlist::{Netlist, NetlistParseOptions};
 
 fn parse_xyce(deck: &str) -> Netlist {

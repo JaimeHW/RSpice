@@ -123,7 +123,6 @@ impl AcAnalysis {
         self.frequencies = ac_sweep_frequencies(FreqVariation::Dec, points_per_decade, start, stop);
     }
 
-
     /// Get frequency points
     pub fn frequencies(&self) -> &[Value] {
         &self.frequencies

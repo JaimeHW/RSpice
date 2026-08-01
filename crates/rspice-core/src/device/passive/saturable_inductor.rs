@@ -130,7 +130,6 @@ impl SaturableInductor {
         self
     }
 
-
     /// Set initial current
     pub fn set_initial_current(&mut self, current: Value) {
         self.current_prev = current;
@@ -202,7 +201,6 @@ impl SaturableInductor {
     pub fn effective_inductance(&self) -> Value {
         self.l_eff
     }
-
 
     /// Stamp this inductor after verifying its MNA branch has been assigned.
     ///

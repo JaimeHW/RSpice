@@ -74,7 +74,6 @@ impl SidebandTransfer {
         self.transfer.arg() * 180.0 / std::f64::consts::PI
     }
 
-
     /// Get the absolute output frequency
     pub fn output_frequency(&self, fundamental: Value) -> Value {
         (self.output_sideband as Value) * fundamental + self.frequency_offset
@@ -140,7 +139,6 @@ impl ConversionMatrix {
     pub fn fundamental(&self) -> Value {
         self.fundamental
     }
-
 
     /// Get the number of sidebands
     pub fn num_sidebands(&self) -> usize {
@@ -238,7 +236,6 @@ impl ConversionMatrix {
             f64::INFINITY
         }
     }
-
 
     /// Get the diagonal elements (same-sideband transfer) across all frequencies
     pub fn diagonal(&self, sideband: i32) -> Vec<Complex64> {

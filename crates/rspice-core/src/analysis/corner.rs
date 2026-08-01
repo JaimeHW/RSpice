@@ -60,8 +60,6 @@ impl ProcessCorner {
         vec![Self::SS, Self::TT, Self::FF]
     }
 
-
-
     /// Get display name
     pub fn name(&self) -> &'static str {
         match self {
@@ -187,7 +185,6 @@ impl CornerConfig {
         }
     }
 
-
     /// Set process corners
     pub fn with_process_corners(mut self, corners: Vec<ProcessCorner>) -> Self {
         self.process_corners = corners;
@@ -205,9 +202,6 @@ impl CornerConfig {
         self.temperatures = temps;
         self
     }
-
-
-
 
     /// Generate all corner points based on configuration
     pub fn generate_corners(&self) -> Vec<CornerPoint> {
@@ -419,7 +413,6 @@ impl CornerResult {
             );
         }
     }
-
 
     /// Get worst-case (min or max based on direction) corner for an output
     pub fn worst_case(&self, name: &str, minimize: bool) -> Option<&CornerSimResult> {

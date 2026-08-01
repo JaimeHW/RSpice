@@ -161,7 +161,6 @@ impl HbSolverState {
             )
     }
 
-
     /// Total number of unknowns
     pub fn total_unknowns(&self) -> usize {
         self.x.len() * self.x.first().map(|v| v.len()).unwrap_or(0)
@@ -199,7 +198,6 @@ impl VoltageSourceBranch {
             ac_harmonics: Vec::new(),
         }
     }
-
 
     /// Set AC parameters for a specific harmonic.
     pub fn with_harmonic(mut self, harmonic: usize, magnitude: Value, phase: Value) -> Self {

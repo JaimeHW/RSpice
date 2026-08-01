@@ -119,7 +119,6 @@ impl Jfet {
         self
     }
 
-
     /// Set area factor
     pub fn with_area(mut self, area: Value) -> Self {
         self.area = area;

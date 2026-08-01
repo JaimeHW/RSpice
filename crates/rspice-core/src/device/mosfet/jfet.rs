@@ -34,8 +34,8 @@
 //! ```
 
 #![allow(clippy::too_many_arguments)]
-use crate::Value;
 use crate::NodeId;
+use crate::Value;
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::solver::{CscIndex, StaticMatrix};
 

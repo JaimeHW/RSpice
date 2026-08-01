@@ -21,18 +21,18 @@ use super::xspice_parser;
 use super::{
     AnalysisCommand, BjtType, DataTable, DeviceInitialConditionDirective,
     DeviceInitialConditionEntry, DeviceInitialConditionError, DeviceInitialConditionSource,
-    Element, ElementKind, FftAnalysis, FftFormat, FftOutput, FftWindow,
-    FreqVariation, InitialCondition, JfetType, LinAnalysis, MesfetType,
-    MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError, ModelDef, MonteCarloCommand,
-    MonteCarloDistribution, MosType, Netlist, NetlistSourceLocation, NodeSet, OutputAnalysisKind,
-    OutputDirectiveKind, OutputRequest, ParamContext, ParameterRedefinitionPolicy, ParametricValue,
-    ParseDiagnostic, ParseError, ParseWithAbortError, PoleZeroAnalysisType, PoleZeroTransferType,
-    PspiceUTiming, PspiceUTimingMode, RemoveUnusedDeviceType, RemoveUnusedPolicy, SaveSet,
-    SaveSignal, SensitivityAcSweep, SimulationOptions, SourceRfPort, SourceSpec,
-    StartupDiagnosticCode, StartupDirectiveDisposition, StartupDirectiveEntry,
-    StartupDirectiveKind, StartupDirectiveRecord, StartupDirectiveScope, StatisticalParamMode,
-    StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
-    XyceAddResistorMode, XyceAddResistorSpec, XyceAddResistorsPolicy, ensure_parse_not_aborted,
+    Element, ElementKind, FftAnalysis, FftFormat, FftOutput, FftWindow, FreqVariation,
+    InitialCondition, JfetType, LinAnalysis, MesfetType, MissingSubcircuitEndsBoundary,
+    MissingSubcircuitEndsError, ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType,
+    Netlist, NetlistSourceLocation, NodeSet, OutputAnalysisKind, OutputDirectiveKind,
+    OutputRequest, ParamContext, ParameterRedefinitionPolicy, ParametricValue, ParseDiagnostic,
+    ParseError, ParseWithAbortError, PoleZeroAnalysisType, PoleZeroTransferType, PspiceUTiming,
+    PspiceUTimingMode, RemoveUnusedDeviceType, RemoveUnusedPolicy, SaveSet, SaveSignal,
+    SensitivityAcSweep, SimulationOptions, SourceRfPort, SourceSpec, StartupDiagnosticCode,
+    StartupDirectiveDisposition, StartupDirectiveEntry, StartupDirectiveKind,
+    StartupDirectiveRecord, StartupDirectiveScope, StatisticalParamMode, StepCommand, StepSweep,
+    StepTarget, SubcircuitDef, SwitchState, VerilogAInclude, XyceAddResistorMode,
+    XyceAddResistorSpec, XyceAddResistorsPolicy, ensure_parse_not_aborted,
     finish_non_aborting_parse, poll_parse_abort, poll_parse_text,
     validate_startup_directives_with_abort,
 };
@@ -3847,21 +3847,29 @@ mod runtime_model_expression_tests {
             .find(|model| model.name.eq_ignore_ascii_case("copper"))
             .expect("copper model retained");
 
-        assert!(!model
-            .params
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("RESISTIVITY")));
-        assert!(!model
-            .params
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("HEATCAPACITY")));
-        assert!(model
-            .expr_params
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("RESISTIVITY")));
-        assert!(model
-            .expr_params
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("HEATCAPACITY")));
+        assert!(
+            !model
+                .params
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("RESISTIVITY"))
+        );
+        assert!(
+            !model
+                .params
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("HEATCAPACITY"))
+        );
+        assert!(
+            model
+                .expr_params
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("RESISTIVITY"))
+        );
+        assert!(
+            model
+                .expr_params
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("HEATCAPACITY"))
+        );
     }
 }

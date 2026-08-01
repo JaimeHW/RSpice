@@ -276,9 +276,6 @@ impl HbConfig {
         self.num_harmonics.checked_mul(2)?.checked_add(1)
     }
 
-
-
-
     /// Enable verbose logging
     pub fn with_verbose(mut self, verbose: bool) -> Self {
         self.verbose = verbose;

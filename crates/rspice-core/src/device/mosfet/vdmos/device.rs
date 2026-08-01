@@ -1696,7 +1696,6 @@ impl Vdmos {
         (id_plus - id_minus) / (2.0 * delta)
     }
 
-
     //=========================================================================
     // Voltage-Dependent Capacitance Calculations
     // Uses standard SPICE junction model: C = C0 / (1 - V/Pb)^M

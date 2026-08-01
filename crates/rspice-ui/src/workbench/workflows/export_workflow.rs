@@ -258,7 +258,6 @@ impl ExportWorkflowIo for NativeExportWorkflowIo {
     }
 }
 
-
 /// Publish a derived, read-only project manifest through the same observed
 /// destination contract as every other production export. Cancellation is not
 /// an error; successful publication returns a receipt for the activity log.

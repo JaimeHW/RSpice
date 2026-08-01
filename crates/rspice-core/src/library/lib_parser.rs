@@ -241,7 +241,6 @@ impl ParsedSubcircuit {
             source_line: None,
         }
     }
-
 }
 
 //=============================================================================
@@ -1548,8 +1547,6 @@ impl LibParseResult {
             .find(|s| s.name.eq_ignore_ascii_case(name))
     }
 
-
-
     /// Find a model by name (searches all sections)
     pub fn find_model(&self, name: &str) -> Option<&ParsedModel> {
         // First check top-level
@@ -1904,8 +1901,10 @@ mod tests {
         );
 
         let rejected_dir = unique_lib_parser_temp_dir("depth-rejected");
-        let rejected_root =
-            write_depth_fixture(&rejected_dir, crate::resource::DEFAULT_MAX_INCLUDE_DEPTH + 1);
+        let rejected_root = write_depth_fixture(
+            &rejected_dir,
+            crate::resource::DEFAULT_MAX_INCLUDE_DEPTH + 1,
+        );
         let mut rejected_parser = LibParser::new(&rejected_dir);
         let rejected = rejected_parser
             .parse_file(&rejected_root)

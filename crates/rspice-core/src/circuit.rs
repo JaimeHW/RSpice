@@ -6,12 +6,12 @@
 //! - Separation of topology (static) from values (mutable)
 
 #![allow(clippy::too_many_arguments)]
-use crate::{NodeId, Value};
-use crate::numerics::integration::CompanionCoefficients;
 use crate::device::behavioral::BehavioralSources;
 use crate::device::{Cccs, Ccvs, MatrixStamper, NonlinearConvergenceCriteria, Vccs, Vcvs};
+use crate::numerics::integration::CompanionCoefficients;
 use crate::solver::{CscIndex, StaticMatrix, TripletMatrix};
 use crate::xspice::{CodeModelRegistry, DigitalValue, EventQueue, XspiceInstance};
+use crate::{NodeId, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use thiserror::Error;
@@ -37,7 +37,6 @@ mod linear_stamping;
 mod magnetic;
 mod nonlinear;
 pub(crate) use nonlinear::NonlinearDeviceStateSnapshot;
-
 
 type XspiceDriverId = (String, String, usize);
 type XspiceDigitalDrivers = HashMap<NodeId, HashMap<XspiceDriverId, DigitalValue>>;
@@ -522,4 +521,3 @@ impl Default for CircuitData {
         Self::new()
     }
 }
-

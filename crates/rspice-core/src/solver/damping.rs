@@ -125,7 +125,6 @@ impl DampingController {
         }
     }
 
-
     /// Get current damping factor
     #[inline]
     pub fn alpha(&self) -> Value {
@@ -137,7 +136,6 @@ impl DampingController {
     pub fn strategy(&self) -> DampingStrategy {
         self.strategy
     }
-
 
     /// Reset for new Newton solve
     pub fn reset(&mut self) {
@@ -192,7 +190,6 @@ impl DampingController {
 
         dv
     }
-
 
     /// Compute damping factor using Bank-Rose algorithm
     ///
@@ -277,8 +274,6 @@ impl DampingController {
 
         self.alpha
     }
-
-
 
     /// Get statistics
     pub fn statistics(&self) -> DampingStatistics {

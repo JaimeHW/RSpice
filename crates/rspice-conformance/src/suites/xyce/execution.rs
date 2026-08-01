@@ -1033,7 +1033,8 @@ impl XyceTestRunner {
 
         let period = plan.frequency.recip();
         let mut startup_config = self.xyce_engine_config(None);
-        startup_config.integration_method = rspice_core::numerics::integration::IntegrationMethod::BackwardEuler;
+        startup_config.integration_method =
+            rspice_core::numerics::integration::IntegrationMethod::BackwardEuler;
         startup_config.transient_initial_timestep = Some(period / 1.0e6);
         let startup = match Engine::new(startup_config).run_tran(&netlist, period, period / 1000.0)
         {
@@ -3780,11 +3781,7 @@ impl XyceTestRunner {
         let reference_time_step_sizes = {
             let mut step_sizes = Vec::with_capacity(reference_time_grid.len());
             step_sizes.push(0.0);
-            step_sizes.extend(
-                reference_time_grid
-                    .windows(2)
-                    .map(|pair| pair[1] - pair[0]),
-            );
+            step_sizes.extend(reference_time_grid.windows(2).map(|pair| pair[1] - pair[0]));
             step_sizes
         };
         let tran = Self::tran_analysis_for_reference_stop(

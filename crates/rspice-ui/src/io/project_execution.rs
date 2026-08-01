@@ -15,13 +15,12 @@ use crate::product::{ContentDigest, ProjectId};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::model_library::is_foreign_platform_absolute_path;
 use crate::state::model_library::{
-    DeviceModel, ModelCorrelationState, ModelDefinitionMetadata,
-    ModelLibrary, ModelLibraryManager, ModelQualificationState,
-    ModelSectionQualification, ModelSourceAuthority, ModelSourceContent, ModelSourceEdge,
-    ModelSourceEvidenceBinding, ModelSourcePin, ModelSubcircuitInterface, ParameterDataType,
-    ParameterValue, ProcessCorner as LibraryProcessCorner, ProjectModelDefinition,
-    ProjectModelRevisionDefinition, first_unreachable_source, is_portable_absolute_path,
-    subcircuit_interface_key,
+    DeviceModel, ModelCorrelationState, ModelDefinitionMetadata, ModelLibrary, ModelLibraryManager,
+    ModelQualificationState, ModelSectionQualification, ModelSourceAuthority, ModelSourceContent,
+    ModelSourceEdge, ModelSourceEvidenceBinding, ModelSourcePin, ModelSubcircuitInterface,
+    ParameterDataType, ParameterValue, ProcessCorner as LibraryProcessCorner,
+    ProjectModelDefinition, ProjectModelRevisionDefinition, first_unreachable_source,
+    is_portable_absolute_path, subcircuit_interface_key,
 };
 use crate::workbench::app_state::SimSetupState;
 
@@ -1360,7 +1359,6 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
     }
     Ok(())
 }
-
 
 fn source_path_is_authorized(library: &ProjectModelLibrary, source_path: Option<&PathBuf>) -> bool {
     if library.source_closure.is_empty() {

@@ -86,10 +86,7 @@ pub struct XspiceCatalogCoverageReport {
     pub uncovered_models: Vec<String>,
 }
 
-impl XspiceCatalogCoverageReport {
-
-
-}
+impl XspiceCatalogCoverageReport {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct XspiceUnsupportedEventPort {

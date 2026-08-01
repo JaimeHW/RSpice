@@ -38,9 +38,7 @@ mod xspice_parser;
 pub use add_resistors::*;
 pub use ast::*;
 pub use data_table::{FrequencyDataPoint, FrequencyDataTableError};
-pub use expr::{
-    ParamContext, ParameterRedefinitionPolicy, RandomState, StatisticalParamMode,
-};
+pub use expr::{ParamContext, ParameterRedefinitionPolicy, RandomState, StatisticalParamMode};
 pub use flattener::{
     FlattenedNetlist, Flattener, FlattenerConfig, InstanceMetadata, XspiceAutoBridgeNodeHint,
     flatten_netlist, flatten_netlist_with_models,
@@ -51,8 +49,8 @@ pub(crate) use flattener::{
 pub use hierarchy_path::{HierarchyPath, HierarchyPathConfig};
 pub use include::source_path_literal_to_host_path;
 pub use include::{
-    IncludeProcessor, ResolvedIncludeDependency, SealedSourceBundle,
-    SealedSourceEdge, normalize_source_path_literal, parse_include_directive, parse_lib_directive,
+    IncludeProcessor, ResolvedIncludeDependency, SealedSourceBundle, SealedSourceEdge,
+    normalize_source_path_literal, parse_include_directive, parse_lib_directive,
 };
 pub use initcond::{
     DeviceInitialConditionSourceProvider, DeviceInitialConditionSourceText,
@@ -920,7 +918,6 @@ impl Netlist {
         finish_non_aborting_parse(Self::parse_with_path_and_abort(input, file_path, &NoAbort))
     }
 
-
     /// Parse with include resolution, validate output symbols, and observe
     /// cooperative cancellation.
     pub fn parse_validated_with_path_and_abort(
@@ -1224,7 +1221,6 @@ impl Netlist {
         ))
     }
 
-
     /// Parse a netlist file with explicit options and cooperative cancellation.
     pub fn parse_file_with_options_and_abort(
         path: &std::path::Path,
@@ -1305,7 +1301,6 @@ impl Netlist {
         ))
     }
 
-
     /// Parse a file with search paths, explicit options, and cancellation.
     pub fn parse_file_with_search_paths_and_options_and_abort(
         path: &std::path::Path,
@@ -1329,7 +1324,6 @@ impl Netlist {
         )
     }
 
-
     /// Parse source text with search paths and explicit parsing options.
     pub fn parse_with_search_paths_and_options(
         input: &str,
@@ -1345,7 +1339,6 @@ impl Netlist {
             &NoAbort,
         ))
     }
-
 
     /// Parse source text with search paths, explicit options, and cancellation.
     pub fn parse_with_search_paths_and_options_and_abort(
@@ -2034,7 +2027,6 @@ impl Netlist {
         }
         ensure_parse_not_aborted(abort)
     }
-
 
     /// Check if a node is global
     pub fn is_global(&self, node: &str) -> bool {

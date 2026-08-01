@@ -38,8 +38,8 @@
 //! where `[L]` is the inductance matrix with Lij = k*sqrt(Li*Lj) for i≠j.
 
 #![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
-use crate::numerics::integration::CompanionCoefficients;
 use crate::device::traits::{DynamicDevice, MatrixStamper};
+use crate::numerics::integration::CompanionCoefficients;
 use crate::{NodeId, Value};
 
 //=============================================================================
@@ -168,8 +168,6 @@ impl CoupledInductorPair {
     pub fn turns_ratio(&self) -> Value {
         (self.l1 / self.l2).sqrt()
     }
-
-
 
     /// DC stamp for the coupling: intentionally nothing.
     ///

@@ -9,15 +9,15 @@
 #![allow(clippy::too_many_arguments)]
 use super::{Engine, SimulationError, SpiceDialect, TransientResult};
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::numerics::integration::{
-    BreakpointManager, BreakpointStepPolicy, LteEstimator, TimestepController, TrapGearController,
-};
 use crate::device::semiconductor::{
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeBranch,
     BjtChargeSnapshot,
 };
 use crate::engine::waveform::{CompressionConfig, TransientResultCompressed};
 use crate::netlist::{AnalysisCommand, SaveSignal};
+use crate::numerics::integration::{
+    BreakpointManager, BreakpointStepPolicy, LteEstimator, TimestepController, TrapGearController,
+};
 use crate::numerics::integration::{CompanionCoefficients, IntegrationMethod};
 use crate::{Netlist, Value};
 use std::collections::HashMap;
@@ -3466,7 +3466,8 @@ impl Engine {
                 let xyce_level1_core_only = self.config.spice_dialect == SpiceDialect::Xyce
                     && circuit.has_only_xyce_core_inductors()
                     && !circuit.has_xyce_core_level2();
-                if !xyce_level1_core_only
+                if retry_count >= TRANSIENT_GMIN_RESCUE_MIN_RETRIES
+                    && !xyce_level1_core_only
                     && circuit.has_nonlinear_devices()
                     && let Some(rescued) = self.rescue_transient_step_with_gmin_continuation(
                         &mut circuit,

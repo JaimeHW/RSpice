@@ -292,9 +292,7 @@ pub struct ImdResult {
     pub gain_db: Value,
 }
 
-impl ImdResult {
-
-}
+impl ImdResult {}
 
 //=============================================================================
 // Group Delay
@@ -450,7 +448,6 @@ impl SnrResult {
             noise_bandwidth: 0.0,
         }
     }
-
 }
 
 //=============================================================================
@@ -465,11 +462,6 @@ pub fn rms(samples: &[Value]) -> Value {
     let sum_sq: Value = samples.iter().map(|s| s * s).sum();
     (sum_sq / samples.len() as Value).sqrt()
 }
-
-
-
-
-
 
 //=============================================================================
 // Tests

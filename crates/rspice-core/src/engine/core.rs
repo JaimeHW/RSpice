@@ -175,7 +175,6 @@ impl Engine {
         self.config_error.as_ref()
     }
 
-
     pub(crate) fn ensure_valid_configuration(&self) -> Result<(), SimulationError> {
         match &self.config_error {
             Some(error) => Err(error.clone().into()),

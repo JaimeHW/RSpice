@@ -224,7 +224,6 @@ impl CurrentSource {
             transient_fn: None,
         }
     }
-
 }
 
 impl LinearDevice for CurrentSource {

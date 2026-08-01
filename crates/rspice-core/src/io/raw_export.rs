@@ -120,7 +120,6 @@ impl RawExporter {
         }
     }
 
-
     /// Add a voltage variable
     pub fn add_voltage(&mut self, node: &str) {
         self.variables.push(RawVariable::voltage(node));
@@ -226,7 +225,6 @@ impl RawExporter {
         }
         Ok(())
     }
-
 }
 
 fn invalid_data(message: impl Into<String>) -> io::Error {

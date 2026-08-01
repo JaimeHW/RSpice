@@ -40,7 +40,6 @@ impl SourceImpedance {
         Self::resistive(50.0)
     }
 
-
     /// Convert to Complex type
     pub fn as_complex(&self) -> Complex {
         Complex::new(self.r, self.x)

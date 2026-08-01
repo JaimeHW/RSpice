@@ -132,8 +132,6 @@ impl TrigSpec {
             td: None,
         }
     }
-
-
 }
 
 /// Type of measurement to perform

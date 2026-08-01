@@ -218,6 +218,4 @@ impl FrequencyMap {
     pub fn find(&self, freq_index: &FrequencyIndex) -> Option<usize> {
         self.indices.iter().position(|i| i == freq_index)
     }
-
-
 }

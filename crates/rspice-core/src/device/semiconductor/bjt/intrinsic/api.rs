@@ -21,8 +21,6 @@ impl Bjt {
         cj + cd
     }
 
-
-
     /// Return cached collector, base, and emitter currents at the operating point.
     pub fn operating_point_currents(&self) -> (Value, Value, Value) {
         (self.ic, self.ib, self.ie)

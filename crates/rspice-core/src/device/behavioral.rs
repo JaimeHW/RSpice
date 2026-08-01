@@ -5,12 +5,12 @@
 //! evaluation in the Newton-Raphson loop.
 
 use crate::Value;
+use crate::config::ExpressionDialect;
 use crate::expr::{
     BinaryOp, CompiledExpr, Context, Expr, Function, UnaryOp, Vm, compile,
     normalize_expression_boundary, parse_expression_strict, real_pow_with_derivative,
     resolve_file_lookup_functions_with_limits,
 };
-use crate::config::ExpressionDialect;
 use crate::solver::StaticMatrix;
 use std::path::Path;
 

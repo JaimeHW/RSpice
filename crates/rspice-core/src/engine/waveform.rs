@@ -76,7 +76,6 @@ impl CompressionConfig {
             min_interval: 0.0,
         }
     }
-
 }
 
 //=============================================================================
@@ -315,7 +314,6 @@ impl WaveformRecorder {
         &self.times
     }
 
-
     /// Get all stored values, indexed `[channel][point]`.
     pub fn all_values(&self) -> &[Vec<Value>] {
         &self.values
@@ -335,7 +333,6 @@ impl WaveformRecorder {
     pub fn compression_ratio(&self) -> Value {
         self.input_count as Value / self.stored_count() as Value
     }
-
 }
 
 //=============================================================================

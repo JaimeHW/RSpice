@@ -343,7 +343,6 @@ impl CircuitData {
         pairs
     }
 
-
     /// Nodal-prefix unknowns that must not receive generic voltage clamps.
     ///
     /// This includes nodes driven by ideal voltage-output elements, where a

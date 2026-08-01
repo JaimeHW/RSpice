@@ -53,9 +53,6 @@ impl TransferFunction {
         }
     }
 
-
-
-
     /// Create integrator: H(s) = k / s
     pub fn integrator(k: Value) -> Self {
         Self {
@@ -140,8 +137,6 @@ pub struct DiscreteFilter {
 }
 
 impl DiscreteFilter {
-
-
     /// Process a single input sample and return the output
     pub fn process(&mut self, x: Value) -> Value {
         // Shift in new input

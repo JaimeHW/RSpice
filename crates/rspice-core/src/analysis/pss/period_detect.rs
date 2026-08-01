@@ -74,7 +74,6 @@ impl PeriodDetector {
         }
     }
 
-
     fn has_valid_input_shape(time: &[Value], values: &[Value], min_len: usize) -> bool {
         values.len() == time.len() && time.len() >= min_len
     }
@@ -594,7 +593,6 @@ impl PeriodDetector {
             method: EstimationMethod::Autocorrelation,
         })
     }
-
 }
 
 impl Default for PeriodDetector {

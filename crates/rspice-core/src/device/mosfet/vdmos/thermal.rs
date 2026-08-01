@@ -96,7 +96,6 @@ impl ThermalNetwork {
         self.last_update_time = time;
     }
 
-
     /// Reset thermal state to ambient
     pub fn reset(&mut self) {
         self.t_junction = self.t_ambient;

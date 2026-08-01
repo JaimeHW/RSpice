@@ -21,7 +21,6 @@ use super::super::design_system::{
 };
 use super::super::state::{ModelsPage, ProjectPage, VerificationPage, Workspace};
 
-
 /// Bind one selected schematic instance from the Models & PDKs workbench
 /// through the same guarded schematic transaction used by the inspector.
 /// Library-cell instances retain their exact library identity; primitive

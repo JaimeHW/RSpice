@@ -202,9 +202,6 @@ impl HbFft {
         spectrum
     }
 
-
-
-
     /// Compute total signal power via Parseval's theorem
     pub fn total_power(&self, spectrum: &[Complex64]) -> Value {
         // For real signal: P = |X₀|² + 2*Σ|Xₖ|² for k > 0

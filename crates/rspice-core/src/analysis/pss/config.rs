@@ -283,7 +283,6 @@ impl PssConfig {
         self
     }
 
-
     /// Set points per period for waveform storage.
     pub fn with_points_per_period(mut self, points: usize) -> Self {
         self.points_per_period = points.max(16);

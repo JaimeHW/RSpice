@@ -255,7 +255,6 @@ impl StabilityType {
     pub fn is_stable(&self) -> bool {
         matches!(self, StabilityType::Stable)
     }
-
 }
 
 //=============================================================================
@@ -300,15 +299,10 @@ pub struct PstbResult {
 }
 
 impl PstbResult {
-
-
-
     /// Check if the periodic orbit is stable
     pub fn is_stable(&self) -> bool {
         self.stability.is_stable()
     }
-
-
 }
 
 //=============================================================================
@@ -335,7 +329,6 @@ impl PstbAnalyzer {
             dimension: 0,
         }
     }
-
 
     /// Analyze stability from a pre-computed Monodromy matrix, cooperatively
     /// returning [`SimulationError::Aborted`] when cancellation is requested.

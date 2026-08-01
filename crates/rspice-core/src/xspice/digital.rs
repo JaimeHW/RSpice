@@ -144,8 +144,6 @@ impl DigitalState {
             DigitalState::Unknown
         }
     }
-
-
 }
 
 impl fmt::Display for DigitalState {

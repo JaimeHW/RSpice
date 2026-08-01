@@ -7,8 +7,8 @@
 //! Other EKV3 cards and analyses fail closed in the builder/engine.
 
 use super::mosfet::MosType;
-use crate::Value;
 use crate::NodeId;
+use crate::Value;
 use crate::device::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use std::collections::HashMap;
 

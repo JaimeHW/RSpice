@@ -259,8 +259,6 @@ impl Mosfet {
         self.gate_charges().2
     }
 
-
-
     /// Calculate W/L ratio
     pub fn wl_ratio(&self) -> Value {
         self.w / self.l

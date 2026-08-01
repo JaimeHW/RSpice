@@ -401,10 +401,6 @@ impl OutputValue {
     pub fn real() -> Self {
         OutputValue::Real(0.0)
     }
-
-
-
-
 }
 
 //=============================================================================
@@ -851,14 +847,12 @@ impl CmContext {
             .and_then(|transitions| transitions.get(index).copied().flatten())
     }
 
-
     /// Borrow a digital input vector without allocating.
     pub fn input_digital_vector_values(&self, name: &str) -> Option<&[DigitalValue]> {
         self.inputs
             .get(name)
             .and_then(InputValue::try_digital_vector)
     }
-
 
     /// Borrow a real input vector without allocating.
     pub fn input_real_vector_values(&self, name: &str) -> Option<&[Value]> {

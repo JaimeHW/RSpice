@@ -2467,7 +2467,6 @@ impl XspiceInstance {
         probes
     }
 
-
     /// Branch ordinal for one element of an analog vector control port.
     pub fn branch_vector_control_ordinal(&self, port_name: &str, index: usize) -> Option<usize> {
         let port_index = *self.port_indices.get(port_name)?;

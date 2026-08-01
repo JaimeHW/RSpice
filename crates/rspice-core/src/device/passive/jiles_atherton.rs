@@ -165,8 +165,6 @@ impl Default for JilesAthertonParams {
 }
 
 impl JilesAthertonParams {
-
-
     /// Create parameters for nickel-iron (permalloy-like)
     pub fn permalloy() -> Self {
         Self {
@@ -191,7 +189,6 @@ impl JilesAthertonParams {
             p_zero_tol: 0.1,
         }
     }
-
 
     /// Calculate base inductance (at Ms = 0)
     /// L = μ₀ * N² * A / l
@@ -665,7 +662,6 @@ impl JilesAthertonInductor {
         }
     }
 
-
     /// Evaluate one source-ordered MutIndNonLin update using an explicit
     /// `MagVarUpdate` value.  Keeping the carried update as an argument makes
     /// trial assembly pure while allowing the transient assembler to commit
@@ -820,9 +816,7 @@ impl JilesAthertonInductor {
         let predictor_only = carried.abs() > 1.0e-12;
         let mut converged = false;
         for _ in 0..(if predictor_only { 0 } else { 40 }) {
-            let Some((f, df)) = residual(latest_m) else {
-                return None;
-            };
+            let (f, df) = residual(latest_m)?;
             if !f.is_finite() || !df.is_finite() || df.abs() <= 1.0e-18 {
                 break;
             }
@@ -855,9 +849,7 @@ impl JilesAthertonInductor {
             }
         }
         if !converged {
-            let Some((f, _)) = residual(latest_m) else {
-                return None;
-            };
+            let (f, _) = residual(latest_m)?;
             converged = f.is_finite() && f.abs() <= 1.0e-9 * scale;
         }
         if !converged {
@@ -868,9 +860,7 @@ impl JilesAthertonInductor {
             // path.  Bracket the root around the accepted magnetization and
             // finish with a safeguarded bisection so the hidden Xyce state is
             // solved rather than silently approximated.
-            let Some((f_center, _)) = residual(old_m) else {
-                return None;
-            };
+            let (f_center, _) = residual(old_m)?;
             if !predictor_only && f_center.is_finite() && f_center.abs() > tolerance {
                 let mut bracket = None;
                 // Continue from the accepted magnetization branch.  A
@@ -1972,7 +1962,6 @@ impl JilesAthertonInductor {
             hidden_state,
         );
     }
-
 
     /// Calculate equivalent resistance for trapezoidal integration
     fn req(&self, dt: Value) -> Value {

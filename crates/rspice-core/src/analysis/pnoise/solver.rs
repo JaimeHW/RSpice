@@ -57,7 +57,6 @@ impl PnoiseState {
         }
     }
 
-
     /// Number of time samples
     pub fn num_samples(&self) -> usize {
         self.time_points.len()
@@ -260,7 +259,6 @@ impl PnoiseSolver {
     pub fn state_mut(&mut self) -> &mut PnoiseState {
         &mut self.state
     }
-
 
     /// Compute phase noise at all offset frequencies
     pub fn compute(&mut self) -> Result<PnoiseResult, PnoiseError> {

@@ -137,8 +137,6 @@ impl SimulationResult {
         self.try_voltage(node)
     }
 
-
-
     /// Get branch current by index
     ///
     /// Branch currents are stored for voltage sources and inductors
