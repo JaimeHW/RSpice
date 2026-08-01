@@ -23,7 +23,6 @@ pub use button::{Button, IconButton};
 pub use chip::chip;
 pub use dialog::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, dialog_tabs,
-    dialog_tabs_in_width,
 };
 pub use docbar::docbar_at_height;
 pub use form::{check_row, choice_row, input_row, kv_row, mono_input};
@@ -37,7 +36,7 @@ pub use select::select;
 pub(crate) use select::{select_mono_with_response, select_with_disabled, select_with_response};
 pub(crate) use selection_command::{
     NotePreviewStyle, PreviewPoint, SelectionImpact, SelectionPreview, ShapePreviewStroke,
-    selection_command_options_paint_width, selection_command_workflow, workflow_preview_status,
+    selection_command_workflow, workflow_preview_status,
 };
 pub use table::measurement_table;
 pub use toast::{NotificationCategory, NotificationRecord, ToastKind, Toasts};

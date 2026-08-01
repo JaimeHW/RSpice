@@ -64,10 +64,9 @@ pub use netlist_document::{
 };
 pub use params_string::{format_params_string, parse_params_string};
 pub use physical_layout::{
-    LayoutArray, LayoutDocumentError, LayoutEdit, LayoutGeometry, LayoutInstance,
-    LayoutLayerPurpose, LayoutNet, LayoutNetId, LayoutObjectId, LayoutOrientation, LayoutPoint,
-    LayoutShape, LayoutTechnologyBinding, LayoutTerminal, LayoutText, LayoutTransform,
-    PHYSICAL_LAYOUT_DOCUMENT_SCHEMA_VERSION, PhysicalLayoutDocument,
+    LayoutDocumentError, LayoutEdit, LayoutGeometry, LayoutInstance, LayoutLayerPurpose,
+    LayoutObjectId, LayoutOrientation, LayoutPoint, LayoutShape, LayoutTechnologyBinding,
+    LayoutTransform, PhysicalLayoutDocument,
 };
 pub(crate) use project_sources::{CanonicalCellViewOwnerKey, canonical_cell_view_owner_key};
 pub use project_sources::{

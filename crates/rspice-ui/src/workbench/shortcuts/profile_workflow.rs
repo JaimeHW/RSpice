@@ -1,20 +1,16 @@
-//! Portable shortcut-profile import and export.
+//! Staging a legacy `rspice.shortcuts/1` document for import.
 //!
 //! Parsing is deliberately separated from application state mutation. An
-//! import produces a staged candidate and its complete audit; the caller owns
-//! the explicit decision to apply that candidate.
+//! import produces a staged candidate; the caller owns the explicit decision
+//! to apply it, and reads the audit off the candidate. Export and the
+//! pickers live in [`crate::workbench::shortcuts::artifacts`].
 
-use std::collections::BTreeMap;
 use std::fmt;
-#[cfg(any(test, not(target_arch = "wasm32")))]
-use std::path::Path;
-use std::path::PathBuf;
 
 use serde_json::Value;
 
+use crate::workbench::ShortcutPreferences;
 use crate::workbench::shortcuts::MAX_SHORTCUT_SEQUENCE_STROKES;
-use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
-use crate::workbench::{ShortcutPreferences, ShortcutProfileAudit};
 
 pub const SHORTCUT_PROFILE_FORMAT: &str = "rspice.shortcuts/1";
 pub const MAX_SHORTCUT_PROFILE_BYTES: u64 = 512 * 1024;
@@ -264,12 +260,7 @@ fn json_path_key(key: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-
     use super::*;
-    use crate::workbench::workflows::export_workflow::{
-        ObservedExportDestination, SaveDialogConfig,
-    };
 
     const VALID_SOURCE: &str = r#"{
         "format": "rspice.shortcuts/1",

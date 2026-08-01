@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use egui::{Color32, Context, Id};
+use egui::{Context, Id};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::palette::{self, Palette};
