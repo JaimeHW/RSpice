@@ -440,15 +440,12 @@ impl ModelBoundSymbolDefinition {
             after.add_view(view);
         }
 
-        let expected_cell_json = before.as_ref().map(serialize_cell).transpose()?;
-        let after_cell_json = serialize_cell(&after)?;
+        let expected_cell_json = before.map(|cell| serialize_cell(&cell)).transpose()?;
         Ok(SymbolConstructionPlan {
             library: library.name.clone(),
             cell: self.identity.cell.clone(),
             expected_cell_json,
-            before,
             after,
-            after_cell_json,
         })
     }
 

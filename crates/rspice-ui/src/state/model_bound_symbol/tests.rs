@@ -155,7 +155,7 @@ fn malformed_or_extended_import_is_rejected_without_coercion() {
 }
 
 #[test]
-fn construction_plan_is_atomic_stale_guarded_and_reversible() {
+fn construction_plan_is_atomic_and_stale_guarded() {
     let mut library = Library::new("analog_blocks");
     let before = serde_json::to_string(&library).unwrap();
     let plan = definition(1).build_plan(&library).unwrap();
@@ -173,7 +173,7 @@ fn construction_plan_is_atomic_stale_guarded_and_reversible() {
     assert_eq!(library.get_cell("precision_opamp").unwrap().view_count(), 0);
 
     library.remove_cell("precision_opamp");
-    let receipt = definition(1)
+    definition(1)
         .build_plan(&library)
         .unwrap()
         .commit(&mut library)
@@ -185,8 +185,6 @@ fn construction_plan_is_atomic_stale_guarded_and_reversible() {
             .get_view("symbol")
             .is_some()
     );
-    receipt.undo(&mut library).unwrap();
-    assert!(library.get_cell("precision_opamp").is_none());
 }
 
 #[test]

@@ -720,7 +720,6 @@ impl SchematicVisibilityDialogState {
 pub(crate) struct DrawingSheetLayersDialogState {
     pub(crate) open: bool,
     pub(crate) draft: crate::state::DrawingSheetLayerVisibility,
-    pub(crate) original: crate::state::DrawingSheetLayerVisibility,
 }
 
 impl DrawingSheetLayersDialogState {
@@ -728,7 +727,6 @@ impl DrawingSheetLayersDialogState {
         *self = Self {
             open: true,
             draft: layers,
-            original: layers,
         };
     }
 

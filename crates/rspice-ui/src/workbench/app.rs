@@ -196,7 +196,7 @@ pub(crate) use dialogs::selection::stretch::{
     armed_stretch_selection_authority, cancel_armed_stretch_selection,
     open_stretch_selection_dialog, stretch_delta_for_policy,
 };
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
 pub(crate) use dialogs::symbol_definition::MAX_SYMBOL_DEFINITION_IMPORT_BYTES;
 pub(crate) use dialogs::symbol_definition::{
     SymbolImportDialogState, SymbolParameterFormDialogState, open_symbol_import_dialog,

@@ -399,15 +399,6 @@ impl SimulationState {
         }
     }
 
-    /// Remove every overlay toggle in one action.
-    #[cfg(test)]
-    pub fn clear_dataset_overlays(&mut self) {
-        if !self.overlay_dataset_ids.is_empty() {
-            self.overlay_dataset_ids.clear();
-            self.data_version = self.data_version.wrapping_add(1);
-        }
-    }
-
     /// The runs to draw: the active run first (full weight), then every
     /// overlaid run in history order (reduced weight). The active run never
     /// repeats even when its ID is also in the overlay set.

@@ -120,16 +120,6 @@ impl ConfirmationDialogState {
         self.pending_example = None;
     }
 
-    /// Open the confirmation dialog for an action that targets a bundled example.
-    #[cfg(test)]
-    pub fn show_with_example(&mut self, action: ConfirmationAction, name: String) {
-        self.visible = true;
-        self.pending_action = Some(action);
-        self.pending_path = None;
-        self.pending_recent_kind = None;
-        self.pending_example = Some(name);
-    }
-
     /// Close the dialog and clear pending action
     pub fn close(&mut self) {
         self.visible = false;
@@ -186,12 +176,6 @@ impl ConfirmationDialogState {
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub(crate) fn cancel_awaiting_canonical_save(&mut self) -> bool {
         self.awaiting_canonical_save.take().is_some()
-    }
-
-    /// Check if dialog is open for a specific action
-    #[cfg(test)]
-    pub fn is_showing(&self, action: ConfirmationAction) -> bool {
-        self.visible && self.pending_action == Some(action)
     }
 }
 

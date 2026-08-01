@@ -33,9 +33,7 @@
 //!   `(x+20, y∓10)`; netlists as `E out+ out− in+ in−`. `mirror_h` puts the
 //!   output on the right.
 
-use crate::state::SchematicState;
-#[cfg(test)]
-use crate::state::{Component, ComponentType, Point, Rotation, Wire};
+use crate::state::{Component, ComponentType, Point, Rotation, SchematicState, Wire};
 
 // =============================================================================
 // Example Circuit Definitions
@@ -46,7 +44,6 @@ use crate::state::{Component, ComponentType, Point, Rotation, Wire};
 // =============================================================================
 
 /// Load an example circuit by name
-#[cfg(test)]
 pub fn load_example(name: &str, state: &mut SchematicState) {
     // Clear existing circuit
     state.components.clear();
@@ -81,7 +78,6 @@ pub fn load_example(name: &str, state: &mut SchematicState) {
 ///         └────┬────┘
 ///             GND
 /// ```
-#[cfg(test)]
 fn build_rc_lowpass(state: &mut SchematicState) {
     let mut id = 1u64;
 
@@ -149,7 +145,6 @@ fn build_rc_lowpass(state: &mut SchematicState) {
 ///   └──────────┘
 ///        GND
 /// ```
-#[cfg(test)]
 fn build_voltage_divider(state: &mut SchematicState) {
     let mut id = 1u64;
 
@@ -213,7 +208,6 @@ fn build_voltage_divider(state: &mut SchematicState) {
 ///        (VIN)   RE
 ///           └─────┴──────GND
 /// ```
-#[cfg(test)]
 fn build_common_emitter(state: &mut SchematicState) {
     let mut id = 1u64;
 
@@ -308,7 +302,6 @@ fn build_common_emitter(state: &mut SchematicState) {
 ///         S│
 ///        GND rail
 /// ```
-#[cfg(test)]
 fn build_cmos_inverter(state: &mut SchematicState) {
     let mut id = 1u64;
 
@@ -417,7 +410,6 @@ fn build_cmos_inverter(state: &mut SchematicState) {
 ///      │
 ///     GND
 /// ```
-#[cfg(test)]
 fn build_differential_pair(state: &mut SchematicState) {
     let mut id = 1u64;
 
@@ -535,7 +527,6 @@ fn build_differential_pair(state: &mut SchematicState) {
 ///         1k    │        >──┬──o Vout
 ///              [in+]─⏚ ────/
 /// ```
-#[cfg(test)]
 fn build_opamp_inverter(state: &mut SchematicState) {
     let mut id = 1u64;
 
@@ -629,19 +620,11 @@ fn build_opamp_inverter(state: &mut SchematicState) {
     add_label(state, Point::new(380, 160), "vout");
 }
 
-fn finish_loaded_example(state: &mut SchematicState) {
-    state.update_wire_junctions();
-    state.needs_fit = true;
-    state.needs_history_reset = true;
-    state.is_dirty = true;
-}
-
 // =============================================================================
 // Helper Functions
 // =============================================================================
 
 /// Add a wire with the given points to the schematic
-#[cfg(test)]
 fn add_wire(state: &mut SchematicState, points: Vec<Point>) {
     if points.len() < 2 {
         return;
@@ -653,7 +636,6 @@ fn add_wire(state: &mut SchematicState, points: Vec<Point>) {
 
 /// Name a net at a point on a wire (also names the node in the netlist and
 /// the resulting waveforms).
-#[cfg(test)]
 fn add_label(state: &mut SchematicState, pos: Point, name: &str) {
     let label_id = state.net_labels.len() as u64 + 1;
     state
@@ -665,7 +647,6 @@ fn add_label(state: &mut SchematicState, pos: Point, name: &str) {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
 mod tests {
     use super::*;
 

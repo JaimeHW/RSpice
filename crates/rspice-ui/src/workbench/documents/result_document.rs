@@ -1011,14 +1011,6 @@ impl ResultsState {
             .remove(&(viewer, PlotPresentationKey::Analysis(analysis), pane));
     }
 
-    /// Reset every pane and plot owned by one viewer (the viewer-wide FIT/F
-    /// action). This deliberately does not assume a single plot at slot zero.
-    #[cfg(test)]
-    pub(crate) fn reset_viewer_plot_views(&mut self, viewer: ResultViewer) {
-        self.views
-            .retain(|(key_viewer, _, _), _| *key_viewer != viewer);
-    }
-
     /// Whether any pane of one plot is zoomed away from the automatic view.
     #[cfg(test)]
     pub fn strip_is_zoomed(&self, viewer: ResultViewer, index: usize) -> bool {

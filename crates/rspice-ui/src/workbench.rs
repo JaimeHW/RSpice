@@ -41,6 +41,9 @@ mod cross_probe;
 pub(crate) mod design_system;
 mod docks;
 pub(crate) mod documents;
+// The bundled circuits are fixtures: every consumer is a test. The
+// application builds schematics from projects and from the library.
+#[cfg(test)]
 pub(crate) mod examples;
 mod feature_availability;
 pub(crate) mod feature_availability_data;

@@ -50,7 +50,7 @@ impl ShortcutLibraryPersistenceError {
     /// it verbatim; the native path matches on the variant instead, so this
     /// looks unused on a native-only build.
     #[must_use]
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(target_arch = "wasm32")]
     pub fn message(&self) -> &str {
         &self.message
     }

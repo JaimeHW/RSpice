@@ -174,10 +174,10 @@ pub struct ShortcutImportPlan {
     base_digest: [u8; 32],
     candidate_library: ShortcutProfileLibrary,
     summaries: Vec<ImportClassSummary>,
+    #[cfg(test)]
     conflicts: Vec<ShortcutImportConflict>,
     audit: ShortcutProfileAudit,
     required_protected_confirmations: BTreeSet<String>,
-    omitted_envelope_fields: BTreeSet<String>,
     unresolved_internal_conflict: bool,
 }
 
@@ -207,13 +207,6 @@ impl ShortcutImportPlan {
     #[must_use]
     pub fn required_protected_confirmations(&self) -> &BTreeSet<String> {
         &self.required_protected_confirmations
-    }
-    /// Forward envelope metadata is intentionally not persisted into the
-    /// profile library. Exposing the exact omitted keys keeps that lossy
-    /// boundary visible to import review surfaces and receipts.
-    #[must_use]
-    pub fn omitted_envelope_fields(&self) -> &BTreeSet<String> {
-        &self.omitted_envelope_fields
     }
     #[must_use]
     pub fn can_apply(&self) -> bool {
@@ -694,10 +687,10 @@ pub fn plan_shortcut_import(
         base_digest: shortcut_library_digest(base)?,
         candidate_library,
         summaries: summaries.into_values().collect(),
+        #[cfg(test)]
         conflicts,
         audit,
         required_protected_confirmations,
-        omitted_envelope_fields,
         unresolved_internal_conflict,
     })
 }
@@ -1369,7 +1362,6 @@ pub struct ShortcutImportReceipt {
     source_name: String,
     applied_revision: u64,
     applied_digest: [u8; 32],
-    omitted_envelope_fields: BTreeSet<String>,
     predecessor: ShortcutProfileLibrary,
 }
 
@@ -1381,11 +1373,6 @@ impl ShortcutImportReceipt {
     #[must_use]
     pub fn source_name(&self) -> &str {
         &self.source_name
-    }
-    #[must_use]
-    #[cfg(test)]
-    pub fn omitted_envelope_fields(&self) -> &BTreeSet<String> {
-        &self.omitted_envelope_fields
     }
 }
 
@@ -1447,7 +1434,6 @@ pub fn apply_shortcut_import(
         source_name: plan.source_name.clone(),
         applied_revision,
         applied_digest,
-        omitted_envelope_fields: plan.omitted_envelope_fields.clone(),
         predecessor,
     })
 }

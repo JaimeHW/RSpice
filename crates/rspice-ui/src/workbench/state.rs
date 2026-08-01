@@ -1501,7 +1501,7 @@ impl WorkbenchState {
     /// Only the browser build reads this: `app::apply_browser_history_delta`
     /// refuses a forward jump that would leave the in-app task stack.
     #[must_use]
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(target_arch = "wasm32")]
     pub fn forward_route_count(&self) -> usize {
         self.navigation.forward_entries().len()
     }

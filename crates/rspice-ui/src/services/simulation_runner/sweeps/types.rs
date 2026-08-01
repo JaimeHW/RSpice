@@ -409,7 +409,6 @@ pub struct CornerData {
     pub corner_labels: Vec<String>,
     /// Per-node values for each corner point.
     pub voltages: Vec<(String, Vec<Value>)>,
-    pub num_points: usize,
     pub num_failures: usize,
 }
 

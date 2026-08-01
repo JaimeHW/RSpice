@@ -41,14 +41,6 @@ pub enum Icon {
     Pin,
     /// Net probe tool.
     Probe,
-    /// Symbol circle body tool.
-    SymbolCircle,
-    /// Symbol arc body tool.
-    SymbolArc,
-    /// Symbol arrow body tool.
-    SymbolArrow,
-    /// Symbol dot body tool.
-    SymbolDot,
     /// Zoom in.
     ZoomIn,
     /// Zoom out.
@@ -57,10 +49,6 @@ pub enum Icon {
     ZoomFit,
     /// Grid toggle (line grid / generic grid).
     Grid,
-    /// Undo.
-    Undo,
-    /// Redo.
-    Redo,
     /// Refresh or replace the current identity.
     Refresh,
     /// Design-check (ERC) checkmark.
@@ -85,10 +73,6 @@ pub enum Icon {
     Simulate,
     /// Results workspace (bars).
     Results,
-    /// Ground symbol.
-    Ground,
-    /// Supply flag symbol.
-    Supply,
     /// Trash / clear.
     Trash,
     /// Rotate the selection 90° clockwise.
@@ -120,16 +104,10 @@ impl Icon {
             Self::NetLabel => "Place net label",
             Self::Pin => "Place pin",
             Self::Probe => "Probe",
-            Self::SymbolCircle => "Draw circle",
-            Self::SymbolArc => "Draw arc",
-            Self::SymbolArrow => "Place arrow",
-            Self::SymbolDot => "Place dot",
             Self::ZoomIn => "Zoom in",
             Self::ZoomOut => "Zoom out",
             Self::ZoomFit => "Zoom to fit",
             Self::Grid => "Grid",
-            Self::Undo => "Undo",
-            Self::Redo => "Redo",
             Self::Refresh => "Refresh",
             Self::Check => "Run checks",
             Self::File => "Document",
@@ -144,8 +122,6 @@ impl Icon {
             Self::Schematic => "Schematic workspace",
             Self::Simulate => "Simulation workspace",
             Self::Results => "Results workspace",
-            Self::Ground => "Ground",
-            Self::Supply => "Supply",
             Self::Trash => "Delete",
             Self::ChevronUp => "Move up",
             Self::ChevronDown => "Move down",
@@ -186,17 +162,6 @@ impl Icon {
                 Circle([10.0, 10.0], 5.5),
                 Line(&[[14.5, 14.5], [20.0, 20.0]]),
             ],
-            Icon::SymbolCircle => &[Circle([12.0, 12.0], 6.0)],
-            Icon::SymbolArc => &[
-                Arc([12.0, 12.0], 7.0, -35.0, 250.0),
-                Dot([18.0, 8.0], 1.2),
-                Dot([8.0, 18.0], 1.2),
-            ],
-            Icon::SymbolArrow => &[
-                Line(&[[5.0, 18.0], [16.0, 7.0]]),
-                Fill(&[[14.0, 3.0], [21.0, 5.0], [19.0, 12.0]]),
-            ],
-            Icon::SymbolDot => &[Dot([12.0, 12.0], 4.2)],
             Icon::ZoomIn => &[
                 Circle([11.0, 11.0], 7.0),
                 Line(&[[11.0, 8.0], [11.0, 14.0]]),
@@ -219,19 +184,6 @@ impl Icon {
                 Line(&[[4.0, 15.0], [20.0, 15.0]]),
                 Line(&[[9.0, 4.0], [9.0, 20.0]]),
                 Line(&[[15.0, 4.0], [15.0, 20.0]]),
-            ],
-            Icon::Undo => &[
-                Line(&[[8.0, 5.0], [3.0, 10.0], [8.0, 15.0]]),
-                // M3 10 H14 then arc right half-circle down to (14,22), end H11.
-                Line(&[[3.0, 10.0], [14.0, 10.0]]),
-                Arc([14.0, 16.0], 6.0, -90.0, 180.0),
-                Line(&[[14.0, 22.0], [11.0, 22.0]]),
-            ],
-            Icon::Redo => &[
-                Line(&[[16.0, 5.0], [21.0, 10.0], [16.0, 15.0]]),
-                Line(&[[21.0, 10.0], [10.0, 10.0]]),
-                Arc([10.0, 16.0], 6.0, -90.0, -180.0),
-                Line(&[[10.0, 22.0], [13.0, 22.0]]),
             ],
             Icon::Refresh => &[
                 Arc([12.0, 12.0], 7.0, -50.0, 205.0),
@@ -306,16 +258,6 @@ impl Icon {
                 Line(&[[10.0, 20.0], [10.0, 4.0]]),
                 Line(&[[16.0, 20.0], [16.0, 11.0]]),
                 Line(&[[21.0, 20.0], [3.0, 20.0]]),
-            ],
-            Icon::Ground => &[
-                Line(&[[12.0, 4.0], [12.0, 11.0]]),
-                Line(&[[5.0, 11.0], [19.0, 11.0]]),
-                Line(&[[8.0, 15.0], [16.0, 15.0]]),
-                Line(&[[10.0, 19.0], [14.0, 19.0]]),
-            ],
-            Icon::Supply => &[
-                Line(&[[12.0, 20.0], [12.0, 7.0]]),
-                Line(&[[6.0, 7.0], [18.0, 7.0]]),
             ],
             Icon::Trash => &[
                 Line(&[[5.0, 7.0], [19.0, 7.0]]),
@@ -410,16 +352,10 @@ mod tests {
             Icon::NetLabel,
             Icon::Pin,
             Icon::Probe,
-            Icon::SymbolCircle,
-            Icon::SymbolArc,
-            Icon::SymbolArrow,
-            Icon::SymbolDot,
             Icon::ZoomIn,
             Icon::ZoomOut,
             Icon::ZoomFit,
             Icon::Grid,
-            Icon::Undo,
-            Icon::Redo,
             Icon::Refresh,
             Icon::Check,
             Icon::File,
@@ -432,8 +368,6 @@ mod tests {
             Icon::Schematic,
             Icon::Simulate,
             Icon::Results,
-            Icon::Ground,
-            Icon::Supply,
             Icon::Trash,
             Icon::ChevronUp,
             Icon::ChevronDown,
