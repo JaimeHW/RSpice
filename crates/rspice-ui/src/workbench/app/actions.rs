@@ -1238,8 +1238,16 @@ mod shortcut_ownership_tests {
             ));
         }
         result.completed = true;
-        app.state.dialogs.drc_results = Some(result);
-        app.state.dialogs.drc_checked_version = app.state.schematic.topology_version();
+        // Availability resolves against the design-check receipt, so publish
+        // through the canonical owner and let it refresh the legacy canvas
+        // projection the violation cursor still reads.
+        app.state
+            .publish_active_design_check_result(
+                result,
+                crate::workbench::app_state::DesignCheckOrigin::Manual,
+            )
+            .expect("publish the active design-check receipt");
+        app.state.refresh_active_design_check_projection();
         app.state
             .workbench
             .activate(crate::workbench::state::Workspace::Verify);
