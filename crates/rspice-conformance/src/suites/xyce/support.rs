@@ -3163,11 +3163,25 @@ impl XyceTestRunner {
         locked_time_step_sizes: Option<Vec<Value>>,
         initial_timestep: Option<Value>,
     ) -> Engine {
+        self.create_xyce_static_tran_engine_with_step_sizes_and_integration_method(
+            locked_time_grid,
+            locked_time_step_sizes,
+            initial_timestep,
+            rspice_core::numerics::integration::IntegrationMethod::Trapezoidal,
+        )
+    }
+
+    pub(super) fn create_xyce_static_tran_engine_with_step_sizes_and_integration_method(
+        &self,
+        locked_time_grid: Option<Vec<Value>>,
+        locked_time_step_sizes: Option<Vec<Value>>,
+        initial_timestep: Option<Value>,
+        integration_method: rspice_core::numerics::integration::IntegrationMethod,
+    ) -> Engine {
         let mut config = self.xyce_engine_config(locked_time_grid);
         config.locked_time_step_sizes = locked_time_step_sizes.map(Arc::new);
         config.transient_initial_timestep = initial_timestep;
-        config.integration_method =
-            rspice_core::numerics::integration::IntegrationMethod::Trapezoidal;
+        config.integration_method = integration_method;
         Engine::new(config)
     }
 

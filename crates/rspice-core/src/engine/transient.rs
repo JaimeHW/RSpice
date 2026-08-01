@@ -2469,7 +2469,7 @@ impl Engine {
             let mut dt = dt.min(tstop - t); // Don't overshoot tstop
             let mut locked_replay_hidden_attempt = false;
             if locked_grid.is_some()
-                && retry_count < 8
+                && retry_count > 0
                 && let (Some(grid), Some(steps)) =
                     (locked_grid.as_ref(), locked_step_sizes.as_ref())
                 && let (Some(&target), Some(&scheduled_dt)) =

@@ -3230,6 +3230,16 @@ fn resolve_static_model_expression_params_with_abort(
             let mut progressed = false;
 
             for (name, expression) in deferred {
+                // Analysis/runtime quantities (TEMP, TIME, VT, GMIN, and
+                // circuit probes) must remain deferred.  Evaluating them
+                // against the parser's nominal context would silently freeze
+                // a model parameter before the active operating point exists.
+                if crate::netlist::expr::behavioral_expression_references_runtime_quantity(
+                    &expression,
+                ) {
+                    unresolved.push((name, expression));
+                    continue;
+                }
                 match crate::netlist::expr::eval_expression(&expression, &context) {
                     Ok(value) if value.is_finite() => {
                         context.set(&name, value);
@@ -3820,5 +3830,38 @@ mod logical_line_origin_tests {
             }
             other => panic!("expected syntax error, got {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod runtime_model_expression_tests {
+    use super::*;
+
+    #[test]
+    fn temperature_dependent_model_parameters_remain_deferred() {
+        let source = "dynamic model\n.model copper r (level=2 resistivity={table(temp+273.15, 0, 0.5e-9, 100, 3e-9, 1000, 6.6e-8)} heatcapacity={8.92e3*table(temp+273.15, 0, 1, 1000, 1500)})\n.end\n";
+        let netlist = parse_netlist(source).expect("temperature-dependent model parses");
+        let model = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("copper"))
+            .expect("copper model retained");
+
+        assert!(!model
+            .params
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("RESISTIVITY")));
+        assert!(!model
+            .params
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("HEATCAPACITY")));
+        assert!(model
+            .expr_params
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("RESISTIVITY")));
+        assert!(model
+            .expr_params
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("HEATCAPACITY")));
     }
 }
