@@ -23,6 +23,7 @@ const SHORTCUT_SOURCE_FILTER_EXTENSIONS: &[&str] = &["json", "jsonc"];
 /// Stable, machine-readable category for a source-selection failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShortcutArtifactImportErrorKind {
+    #[cfg(not(target_arch = "wasm32"))]
     Picker,
     Read,
     ByteLimit,
@@ -38,6 +39,7 @@ impl ShortcutArtifactImportErrorKind {
     #[must_use]
     pub const fn code(self) -> &'static str {
         match self {
+            #[cfg(not(target_arch = "wasm32"))]
             Self::Picker => "shortcut-artifact.import-picker",
             Self::Read => "shortcut-artifact.import-read",
             Self::ByteLimit => "shortcut-artifact.import-byte-limit",

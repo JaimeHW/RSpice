@@ -139,28 +139,17 @@ impl PdkConfig {
     }
 
     /// Load configuration from a specific path
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load_from(path: &Path) -> Result<Self, ConfigError> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let _ = path;
-            Err(ConfigError::Io(
-                "browser PDK configuration loading is asynchronous; use the application persistence workflow"
-                    .to_owned(),
-            ))
+        crate::io::durable_file::reconcile_publication(path)
+            .map_err(|e| ConfigError::Io(e.to_string()))?;
+        if !path.exists() {
+            return Ok(Self::default());
         }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            crate::io::durable_file::reconcile_publication(path)
-                .map_err(|e| ConfigError::Io(e.to_string()))?;
-            if !path.exists() {
-                return Ok(Self::default());
-            }
 
-            let content =
-                std::fs::read_to_string(path).map_err(|e| ConfigError::Io(e.to_string()))?;
+        let content = std::fs::read_to_string(path).map_err(|e| ConfigError::Io(e.to_string()))?;
 
-            serde_json::from_str(&content).map_err(|e| ConfigError::Parse(e.to_string()))
-        }
+        serde_json::from_str(&content).map_err(|e| ConfigError::Parse(e.to_string()))
     }
 
     /// Save configuration to the default path

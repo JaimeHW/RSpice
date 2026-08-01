@@ -105,7 +105,7 @@ impl LocationSearch {
     }
 
     /// Raw host-owned parameters in their original order.
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(test)]
     pub fn unrelated_parameters(&self) -> impl ExactSizeIterator<Item = &str> {
         self.unrelated_parameters.iter().map(String::as_str)
     }
@@ -122,7 +122,7 @@ impl LocationSearch {
 
     /// Return the host-owned portion of this query with no workbench route.
     #[must_use]
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(test)]
     pub fn without_route(&self) -> Self {
         Self {
             route: None,

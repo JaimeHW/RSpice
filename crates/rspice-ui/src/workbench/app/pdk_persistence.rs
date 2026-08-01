@@ -46,11 +46,15 @@ impl Default for BrowserPdkOwner {
     }
 }
 
+/// Work the caller wants run once the commit has actually landed, in the
+/// frame that observes it.
+type AfterBrowserPdkCommit = Option<Box<dyn FnOnce(&Context)>>;
+
 enum BrowserPdkPublicationIntent {
     Administration {
         title: String,
         message: String,
-        after_commit: Option<Box<dyn FnOnce(&Context)>>,
+        after_commit: AfterBrowserPdkCommit,
     },
 }
 

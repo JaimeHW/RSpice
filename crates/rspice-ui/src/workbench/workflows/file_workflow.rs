@@ -247,6 +247,7 @@ pub(crate) fn open_schematic_from_dialog_with_io(
         Ok(path) => {
             let _ = load_schematic_from_path_with_io(state, &path, io);
         }
+        #[cfg(not(target_arch = "wasm32"))]
         Err(SchematicIoError::Cancelled) => {
             // User cancelled - no message needed
         }
@@ -422,6 +423,7 @@ pub(crate) fn save_schematic_as_with_io(
 
     match io.show_save_dialog(default_name.as_deref()) {
         Ok(path) => save_schematic_to_path_with_io(state, &path, true, io),
+        #[cfg(not(target_arch = "wasm32"))]
         Err(SchematicIoError::Cancelled) => {
             // User cancelled - no message needed
             false

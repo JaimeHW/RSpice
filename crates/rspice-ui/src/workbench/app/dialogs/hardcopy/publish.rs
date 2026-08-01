@@ -1762,7 +1762,7 @@ fn publish_print(
                 destination: BrowserPublicationDestination::Print { reservation },
             },
         )?;
-        return Ok(PublicationCompletion::Pending);
+        Ok(PublicationCompletion::Pending)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -1863,7 +1863,7 @@ fn publish_export(app: &mut RSpiceApp) -> Result<PublicationCompletion, String> 
                 },
             },
         )?;
-        return Ok(PublicationCompletion::Pending);
+        Ok(PublicationCompletion::Pending)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -1934,7 +1934,7 @@ pub(super) fn poll_publication(app: &mut RSpiceApp) {
         let mut active = active.borrow_mut();
         let result = active
             .as_ref()
-            .and_then(|publication| super::worker::poll(publication.ticket).map(|result| result));
+            .and_then(|publication| super::worker::poll(publication.ticket));
         result.map(|result| {
             (
                 active

@@ -1366,6 +1366,7 @@ fn known_static_label(value: &str) -> Option<&'static str> {
 
 #[derive(Debug, Clone)]
 pub enum ProjectIoError {
+    #[cfg(not(target_arch = "wasm32"))]
     Cancelled,
     NotFound(PathBuf),
     IncompatibleVersion {
@@ -1381,6 +1382,7 @@ pub enum ProjectIoError {
 impl std::fmt::Display for ProjectIoError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            #[cfg(not(target_arch = "wasm32"))]
             Self::Cancelled => f.write_str("Operation cancelled"),
             Self::NotFound(path) => write!(f, "Project file not found: {}", path.display()),
             Self::IncompatibleVersion {
@@ -1443,18 +1445,6 @@ pub fn show_save_project_dialog(default_name: Option<&str>) -> Result<PathBuf, P
     Ok(path)
 }
 
-#[cfg(target_arch = "wasm32")]
-pub fn show_open_project_dialog() -> Result<PathBuf, ProjectIoError> {
-    Err(ProjectIoError::Io(
-        "Use the browser project import workflow for web file selection".to_string(),
-    ))
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn show_save_project_dialog(default_name: Option<&str>) -> Result<PathBuf, ProjectIoError> {
-    Ok(suggested_project_save_path(default_name))
-}
-
 /// Legacy create-only project export.
 ///
 /// Canonical Save/Save As operations must use the project lifecycle so they
@@ -1493,7 +1483,7 @@ pub fn save_project_file(project: &ProjectFile, path: &Path) -> Result<(), Proje
     }
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(test)]
 pub(crate) fn suggested_project_save_path(default_name: Option<&str>) -> PathBuf {
     let mut path = PathBuf::from(
         default_name

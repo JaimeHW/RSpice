@@ -168,19 +168,19 @@ impl SurfaceNavigation {
     }
 
     #[must_use]
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(test)]
     pub fn recent_entries(&self) -> &[SurfaceRoute] {
         &self.recent
     }
 
     #[must_use]
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(test)]
     pub const fn can_go_back(&self) -> bool {
         !self.back.is_empty()
     }
 
     #[must_use]
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(test)]
     pub const fn can_go_forward(&self) -> bool {
         !self.forward.is_empty()
     }

@@ -1545,7 +1545,7 @@ impl WorkbenchState {
         Some(transition)
     }
 
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(test)]
     pub fn navigate_forward(&mut self, source: RouteTransitionSource) -> Option<RouteTransition> {
         self.navigate_forward_steps(1, source)
     }

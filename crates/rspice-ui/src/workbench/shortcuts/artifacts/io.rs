@@ -68,6 +68,7 @@ impl ShortcutArtifactFormat {
     }
 
     #[must_use]
+    #[cfg(not(target_arch = "wasm32"))]
     pub const fn filter_name(self) -> &'static str {
         match self {
             Self::Json => "RSpice Shortcut Artifact",
@@ -120,6 +121,7 @@ impl PreparedShortcutArtifact {
 /// cancellation. A browser handoff intentionally makes no completion claim.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShortcutArtifactExportOutcome {
+    #[cfg(any(test, not(target_arch = "wasm32")))]
     Published {
         path: PathBuf,
     },

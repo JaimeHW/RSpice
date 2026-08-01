@@ -423,6 +423,7 @@ impl ShortcutExportDialogState {
         self.pending = false;
         match result {
             Ok(ShortcutArtifactExportOutcome::Cancelled) => self.error = None,
+            #[cfg(any(test, not(target_arch = "wasm32")))]
             Ok(ShortcutArtifactExportOutcome::Published { .. }) => self.close(),
             #[cfg(any(test, target_arch = "wasm32"))]
             Ok(ShortcutArtifactExportOutcome::DownloadStarted { .. }) => self.close(),

@@ -117,14 +117,6 @@ fn now_ms() -> f64 {
         .unwrap_or(0.0)
 }
 
-#[cfg(target_arch = "wasm32")]
-fn now_ms() -> f64 {
-    web_sys::window()
-        .and_then(|w| w.performance())
-        .map(|p| p.now())
-        .unwrap_or(0.0)
-}
-
 const DEFAULT_MONTE_CARLO_SEED: u64 = 0x5EED_5EED;
 
 fn build_engine_config(

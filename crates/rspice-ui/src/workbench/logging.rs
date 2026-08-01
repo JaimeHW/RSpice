@@ -4,6 +4,7 @@
 ///
 /// Routine startup is quiet; warnings and errors remain visible, while noisy
 /// graphics-backend probe warnings stay out of normal desktop stderr.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn native_default_filter() -> &'static str {
     "warn,rspice_ui=warn,rspice_core=warn,rspice_veriloga=warn,wgpu_core=error,wgpu_hal=error,naga=error"
 }

@@ -128,7 +128,7 @@ impl HardcopyPreviewPage {
     }
 
     #[must_use]
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(test)]
     pub const fn dpi(&self) -> u16 {
         self.dpi
     }
@@ -510,7 +510,7 @@ impl RenderedHardcopyPart {
     }
 
     #[must_use]
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(test)]
     pub const fn filename_extension(&self) -> &'static str {
         self.filename_extension
     }
@@ -521,13 +521,13 @@ impl RenderedHardcopyPart {
     }
 
     #[must_use]
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(test)]
     pub const fn first_page(&self) -> u32 {
         self.first_page
     }
 
     #[must_use]
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(test)]
     pub const fn page_count(&self) -> u32 {
         self.page_count
     }
@@ -630,7 +630,7 @@ impl RenderedHardcopyPublication {
     }
 
     #[must_use]
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(test)]
     pub const fn pdf_conformance(&self) -> Option<PdfConformance> {
         self.pdf_conformance
     }
@@ -1070,14 +1070,19 @@ pub enum HardcopyRenderError {
     BrowserTextRequiresEmbeddedFonts,
     #[error("native printer output must use an opaque page background")]
     TransparentPrinterPage,
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("printer raster pages require a NativePrinter plan targeted at a system printer")]
     PrinterRasterRequiresNativePlan,
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("printer device resolution {0} DPI is outside the supported 72–9600 DPI range")]
     InvalidPrinterDpi(u16),
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("printer render DPI differs from the immutable native job resolution")]
     PrinterRasterDpiMismatch,
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("planned printable area lies outside the sealed native driver printable geometry")]
     PrinterPrintableGeometryMismatch,
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("the selected native printer job cannot mix portrait and landscape page geometry")]
     PrinterMixedPageGeometryUnsupported,
     #[error("preview resolution {0} DPI is outside the supported 36–1200 DPI range")]
@@ -1154,7 +1159,7 @@ impl HardcopyRenderer {
     /// Resolve and rasterize a single planned page for the hardcopy dialog.
     /// The selected export/print format is intentionally ignored: preview is
     /// a non-authoritative view of the same sealed semantic plan.
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(test)]
     pub fn render_preview_page_resolved(
         plan: &HardcopyPlan,
         source: &ResolvedHardcopyDocument,
@@ -1277,6 +1282,7 @@ impl HardcopyRenderer {
     /// Render exact native-printer pages directly from the authenticated
     /// semantic source, closing the adapter gap without exposing a mutable
     /// intermediate scene.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn render_printer_pages_resolved(
         plan: &HardcopyPlan,
         source: &ResolvedHardcopyDocument,
@@ -1468,6 +1474,7 @@ impl HardcopyRenderer {
         Self::render_printer_scene(plan, scene, device_dpi)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn render_printer_scene(
         plan: &HardcopyPlan,
         scene: &HardcopyScene,
@@ -1576,6 +1583,7 @@ impl HardcopyRenderer {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn validate_driver_printable_geometry(
     page: &PreviewPage,
     raster_width: u32,
@@ -2368,6 +2376,7 @@ fn validate_raster_working_set(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn validate_printer_raster_working_set(
     pixels_per_page: u64,
     page_count: u64,

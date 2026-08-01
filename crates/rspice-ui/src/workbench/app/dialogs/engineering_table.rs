@@ -38,12 +38,18 @@ enum BodyAction {
     DuplicateSaved(String, EngineeringViewScope, String),
 }
 
+/// The file the browser picker returned for one import, keyed to the token
+/// the dialog issued so a stale pick cannot be applied to a later import.
+#[cfg(target_arch = "wasm32")]
+type BrowserSavedViewImport = Option<(
+    crate::workbench::browser::file_import::TextImportToken,
+    Result<Option<crate::workbench::browser::file_import::PickedTextFile>, String>,
+)>;
+
 #[cfg(target_arch = "wasm32")]
 thread_local! {
-    static BROWSER_SAVED_VIEW_IMPORT: std::cell::RefCell<Option<(
-        crate::workbench::browser::file_import::TextImportToken,
-        Result<Option<crate::workbench::browser::file_import::PickedTextFile>, String>,
-    )>> = const { std::cell::RefCell::new(None) };
+    static BROWSER_SAVED_VIEW_IMPORT: std::cell::RefCell<BrowserSavedViewImport> =
+        const { std::cell::RefCell::new(None) };
 }
 
 pub(crate) fn open_engineering_table_dialog(state: &mut AppState) -> bool {

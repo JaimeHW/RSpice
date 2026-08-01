@@ -1288,9 +1288,9 @@ fn expand_generated_dependencies_with_sealed_sources(
                 "Configured external SPICE sources have no authenticated browser source bundle",
             )
         })?;
-        return sealed_sources
+        sealed_sources
             .expand_root_dependencies(&origin, source, &rspice_core::abort_signal::NoAbort)
-            .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error));
+            .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))
     }
 
     #[cfg(not(target_arch = "wasm32"))]

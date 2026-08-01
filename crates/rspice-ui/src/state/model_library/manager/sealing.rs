@@ -12,6 +12,7 @@ impl ModelLibraryManager {
     /// Compute the canonical SHA-256 identity used to pin an external model
     /// source. Callers compare this value with the digest stored by the last
     /// explicit load/refresh; computing it never accepts new content.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn calculate_source_digest(
         path: impl AsRef<std::path::Path>,
     ) -> Result<crate::product::ContentDigest, String> {
