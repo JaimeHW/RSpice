@@ -149,6 +149,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         changed |=
             handle_canvas_interaction(state, &mut document, &mut editor, viewport, &response);
         draw_canvas(ui, viewport, &document, &editor, &ports, state);
+        // The canvas takes keyboard focus for tool and nudge shortcuts, so it
+        // owes the same visible focus ring as every other custom click target.
+        // Painted after the artwork so the ring is not drawn over.
+        theme::paint_focus_ring(ui, &response, rect);
         let shortcut_platform = crate::workbench::app_state::runtime_command_platform(ui.ctx());
         let operating_system = ui.ctx().os();
         response.widget_info(|| {
