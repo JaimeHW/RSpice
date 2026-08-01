@@ -304,7 +304,7 @@ class CiConfigurationTests(unittest.TestCase):
             r"--iterations 100000\s+"
             r"--samples 9\s+"
             r"--min-dense-speedup 2\.00\s+"
-            r"--min-speedup 1\.10\s+"
+            r"--min-speedup 3\.00\s+"
             r"--min-full-stamp-speedup 2\.00\s+"
             r"--max-native-setup-ms 10\s+"
             r"--max-native-p95-ns-per-sweep 5000\s+"
@@ -318,10 +318,28 @@ class CiConfigurationTests(unittest.TestCase):
             3,
             "Linux fast CI should clean between heavy test groups to stay within runner disk",
         )
-        self.assertRegex(
-            workflow,
-            r"- name: Format\s+run: cargo fmt --all -- --check",
-        )
+        # The generated Verilog-A model crates are validated against a content
+        # digest of their own bytes, so rustfmt must not touch them. `cargo fmt`
+        # has no --exclude, so the gate names the hand-written members instead.
+        # Assert every one of them is covered, or a new crate could silently
+        # drop out of the format gate.
+        self.assertRegex(workflow, r"- name: Format\s+run: >\s+cargo fmt")
+        format_step = workflow.split("- name: Format", 1)[1].split("- name:", 1)[0]
+        for package in (
+            "rspice-matrix",
+            "rspice-veriloga-runtime",
+            "rspice-core",
+            "rspice-cli",
+            "rspice-ui",
+            "rspice-veriloga",
+            "rspice-python",
+            "rspice-wasm",
+            "rspice-bench",
+            "rspice-conformance",
+        ):
+            self.assertIn(f"-p {package}", format_step)
+        self.assertNotIn("-p rspice-veriloga-models", format_step)
+        self.assertIn("-- --check", format_step)
 
     def test_core_lib_tests_are_explicitly_gated(self) -> None:
         ci_workflow = read_text(".github/workflows/ci.yml")
@@ -423,7 +441,7 @@ class CiConfigurationTests(unittest.TestCase):
             r"--iterations 100000\s+"
             r"--samples 9\s+"
             r"--min-dense-speedup 2\.00\s+"
-            r"--min-speedup 1\.10\s+"
+            r"--min-speedup 3\.00\s+"
             r"--min-full-stamp-speedup 2\.00\s+"
             r"--max-native-setup-ms 10\s+"
             r"--max-native-p95-ns-per-sweep 5000\s+"
