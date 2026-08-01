@@ -673,6 +673,32 @@ impl CircuitData {
         );
     }
 
+    /// Evaluate XSPICE for an accepted transient timepoint without advancing
+    /// committed model state.  The accepted-phase evaluation queues the
+    /// static output stamps consumed by Xyce's OneStep history snapshot; the
+    /// caller must invoke [`Self::accept_xspice_timestep`] after that snapshot
+    /// has been captured.
+    pub(crate) fn evaluate_xspice_transient_timestep_with_coefficients(
+        &mut self,
+        time: Value,
+        timestep: Value,
+        voltages: &[Value],
+        coefficients: &crate::numerics::integration::CompanionCoefficients,
+        xyce_one_step_order2: bool,
+    ) {
+        if let Err(e) = self.try_evaluate_xspice_with_analysis_phase_and_coefficients(
+            time,
+            timestep,
+            voltages,
+            crate::xspice::AnalysisType::Transient,
+            crate::xspice::EvaluationPhase::AcceptedStep,
+            *coefficients,
+            xyce_one_step_order2,
+        ) {
+            log::warn!("XSPICE evaluation error: {e}");
+        }
+    }
+
     /// Commit XSPICE state for an accepted transient timepoint using the
     /// integrator's selected companion coefficients.
     pub(crate) fn accept_xspice_transient_timestep_with_coefficients(
