@@ -21,6 +21,7 @@ pub(crate) mod pipeline;
 pub(crate) mod state;
 pub(crate) mod window;
 
+#[cfg(test)]
 pub use data::FftData;
 pub use pipeline::{
     FftInputOptions, MIN_FFT_SAMPLES, PreparedFftInput, prepare_fft_input_with_options,

@@ -20,7 +20,9 @@ mod mos_symbols;
 mod passive_symbols;
 mod source_symbols;
 
-pub use self::config::{SvgColor, SvgExportConfig};
+#[cfg(test)]
+pub use self::config::SvgColor;
+pub use self::config::SvgExportConfig;
 
 use self::bjt_diode_symbols::{write_diode_symbol, write_npn_symbol, write_pnp_symbol};
 use self::block_symbols::{write_cell_instance_symbol, write_port_symbol, write_xspice_symbol};

@@ -10,7 +10,6 @@ use std::collections::VecDeque;
 use egui::Context;
 
 use crate::diagnostics::ConsoleMessage;
-use crate::state::ModelLibraryManager;
 use crate::state::pdk_config::{
     BrowserPdkConfigReceipt, BrowserPdkConfigRestore, BrowserPdkStorageDurability,
     BrowserPdkStorageStatus, PdkConfig, start_browser_pdk_config_load,

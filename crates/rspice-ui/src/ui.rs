@@ -26,4 +26,6 @@ pub(crate) mod viewport;
 pub(crate) mod widgets;
 
 pub use theme::{EngineeringCanvasTheme, Theme};
-pub use tokens::{Density, Direction, Mode};
+#[cfg(test)]
+pub use tokens::Direction;
+pub use tokens::{Density, Mode};

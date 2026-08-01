@@ -1125,10 +1125,9 @@ mod browser {
 
 #[cfg(target_arch = "wasm32")]
 pub use browser::{
-    BrowserPopEvent, active_browser_route, current_location, ensure_popstate_listener,
-    history_session_ready, install_popstate_listener, poll_popstate, push_route, replace_route,
-    restart_history_session, traversal_in_flight, traversal_watchdog_expired, traverse_history,
-    uninstall_popstate_listener,
+    active_browser_route, current_location, ensure_popstate_listener, history_session_ready,
+    install_popstate_listener, poll_popstate, push_route, replace_route, restart_history_session,
+    traversal_in_flight, traversal_watchdog_expired, traverse_history, uninstall_popstate_listener,
 };
 
 #[cfg(test)]

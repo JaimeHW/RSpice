@@ -14,7 +14,10 @@ mod operating_point;
 mod waveform;
 
 pub use monte_carlo::MonteCarloVariableResult;
-pub use operating_point::{DcOpResult, DeviceOpPoint};
+pub use operating_point::DcOpResult;
+// The browser worker contract names this through the flattened path.
+#[cfg(any(test, target_arch = "wasm32"))]
+pub use operating_point::DeviceOpPoint;
 pub use waveform::WaveformData;
 
 /// Electrical quantity represented by a transfer-function input or output.

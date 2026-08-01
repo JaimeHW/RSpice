@@ -3,7 +3,9 @@
 use super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use super::{DEFAULT_MONTE_CARLO_SEED, build_engine_config, parse_runner_netlist_with_abort};
 use rspice_core::Value;
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
+#[cfg(test)]
+use rspice_core::abort_signal::NoAbort;
 use rspice_core::analysis::monte_carlo::Distribution;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{AnalysisCommand, MonteCarloDistribution};

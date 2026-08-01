@@ -23,17 +23,23 @@ pub(crate) mod symbol_resolver;
 pub(crate) mod workspace;
 
 pub use configuration_set::{
-    ALLOWED_EXECUTABLE_VIEW_TYPES, ConfigurationBlackBoxPolicy, ConfigurationCloneScope,
-    ConfigurationModelProfile, ConfigurationPlatform, ConfigurationSet, ConfigurationSetCatalog,
-    ConfigurationSetDefinition, ConfigurationSetError, ConfigurationSetId,
-    ConfigurationSetOverride, UnresolvedBindingPolicy,
+    ConfigurationBlackBoxPolicy, ConfigurationCloneScope, ConfigurationModelProfile,
+    ConfigurationPlatform, ConfigurationSet, ConfigurationSetCatalog, ConfigurationSetDefinition,
+    ConfigurationSetError, ConfigurationSetId, ConfigurationSetOverride, UnresolvedBindingPolicy,
 };
 pub use connectivity_contract::{
     BundleDirection, BundleDiscipline, BundleExpansionPolicy, BundleIndexOrderPolicy,
-    BundleWidthMismatchPolicy, ConnectivityAliasGroup, ConnectivityContract, ConnectivityPolicy,
-    DialectAliasCatalog, GlobalAliasComparisonPolicy, GlobalNetPromotionPolicy,
-    LocalGlobalShadowingPolicy, MAX_NAMED_BUNDLE_MEMBERS, NamedSignalBundleMember,
-    QualifiedNetReference, TechnologyGlobalNetCatalog,
+    BundleWidthMismatchPolicy, ConnectivityContract, ConnectivityPolicy,
+    GlobalAliasComparisonPolicy, GlobalNetPromotionPolicy, LocalGlobalShadowingPolicy,
+    MAX_NAMED_BUNDLE_MEMBERS, NamedSignalBundleMember, QualifiedNetReference,
+};
+// Test-only aliases: the submodule is private, so this path is the only
+// way the tests can name these.
+#[cfg(test)]
+pub use configuration_set::ALLOWED_EXECUTABLE_VIEW_TYPES;
+#[cfg(test)]
+pub use connectivity_contract::{
+    ConnectivityAliasGroup, DialectAliasCatalog, TechnologyGlobalNetCatalog,
 };
 pub use design_management::*;
 pub use engineering_table::{
@@ -64,17 +70,20 @@ pub use netlist_document::{
 };
 pub use params_string::{format_params_string, parse_params_string};
 pub use physical_layout::{
-    LayoutDocumentError, LayoutEdit, LayoutGeometry, LayoutInstance, LayoutLayerPurpose,
-    LayoutObjectId, LayoutOrientation, LayoutPoint, LayoutShape, LayoutTechnologyBinding,
-    LayoutTransform, PhysicalLayoutDocument,
+    LayoutDocumentError, LayoutEdit, LayoutGeometry, LayoutLayerPurpose, LayoutObjectId,
+    LayoutPoint, LayoutShape, LayoutTechnologyBinding, PhysicalLayoutDocument,
 };
+#[cfg(test)]
+pub use physical_layout::{LayoutInstance, LayoutOrientation, LayoutTransform};
+#[cfg(test)]
+pub use project_sources::ProjectSourceDependency;
 pub(crate) use project_sources::{CanonicalCellViewOwnerKey, canonical_cell_view_owner_key};
 pub use project_sources::{
     MAX_PROJECT_CODE_SOURCE_BYTES, MAX_PROJECT_SOURCE_BUNDLE_BYTES,
     MAX_PROJECT_SOURCE_DEPENDENCY_DEPTH, MAX_PROJECT_SOURCE_FILES,
     MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES, PROJECT_SOURCE_REGISTRY_SCHEMA_VERSION,
-    ProjectSourceBundle, ProjectSourceDependency, ProjectSourceDocument, ProjectSourceFile,
-    ProjectSourceId, ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry,
+    ProjectSourceBundle, ProjectSourceDocument, ProjectSourceFile, ProjectSourceId,
+    ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry,
     project_veriloga_bundle_alias, project_veriloga_bundle_source_key,
 };
 pub use property_types::{
