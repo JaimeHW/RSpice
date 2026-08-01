@@ -23,6 +23,7 @@ use super::{
     ModelLevel, ModelLibrary, ModelQualificationState, ModelSectionQualification,
     ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourceEvidenceBinding,
     ModelSourcePin, ModelType, ParameterDataType, ParameterDefinition, ParameterSource,
+    subcircuit_interface_key,
     ParameterValue, ProcessCorner, ProjectModelDefinition, ProjectModelRevisionDefinition,
     first_unreachable_source,
 };
@@ -783,6 +784,30 @@ impl ModelLibraryManager {
     /// Project one parsed subcircuit onto its callable interface. A subcircuit
     /// carries its own source file when it was reached through an include, so
     /// that path wins over the root being scanned.
+    fn insert_parsed_subcircuits(
+        library: &mut ModelLibrary,
+        parsed: &[rspice_core::library::ParsedSubcircuit],
+        file_path: &Path,
+        section: Option<&str>,
+    ) -> Result<(), String> {
+        for subcircuit in parsed {
+            let interface = Self::convert_parsed_subcircuit(subcircuit, file_path, section);
+            let key = subcircuit_interface_key(interface.section.as_deref(), &interface.name);
+            if let Some(existing) = library
+                .subcircuits
+                .keys()
+                .find(|existing| existing.eq_ignore_ascii_case(&key))
+            {
+                return Err(format!(
+                    "Subcircuit '{}' is defined more than once in the same library section (first identity '{}')",
+                    interface.name, existing
+                ));
+            }
+            library.subcircuits.insert(key, interface);
+        }
+        Ok(())
+    }
+
     pub(crate) fn convert_parsed_subcircuit(
         subcircuit: &rspice_core::library::ParsedSubcircuit,
         file_path: &Path,
@@ -1406,6 +1431,18 @@ impl ModelLibraryManager {
                 .models
                 .insert(device_model.name.clone(), device_model);
         }
+        // Every section's interfaces are retained, not just the selected one:
+        // a subcircuit is addressable by section-qualified identity, and a
+        // library that declares only `.subckt` definitions is still a library.
+        Self::insert_parsed_subcircuits(&mut library, &result.top_level_subcircuits, &path, None)?;
+        for lib_section in &result.sections {
+            Self::insert_parsed_subcircuits(
+                &mut library,
+                &lib_section.subcircuits,
+                &path,
+                Some(&lib_section.name),
+            )?;
+        }
 
         if let Some(section_name) = selected_section.as_deref() {
             if let Some(lib_section) = result.get_section(section_name) {
@@ -1525,6 +1562,15 @@ impl ModelLibraryManager {
                 .models
                 .insert(device_model.name.clone(), device_model);
         }
+        Self::insert_parsed_subcircuits(&mut library, &result.top_level_subcircuits, &root, None)?;
+        for lib_section in &result.sections {
+            Self::insert_parsed_subcircuits(
+                &mut library,
+                &lib_section.subcircuits,
+                &root,
+                Some(&lib_section.name),
+            )?;
+        }
         if let Some(section_name) = selected_section.as_deref() {
             let lib_section = result.get_section(section_name).ok_or_else(|| {
                 format!(
@@ -1544,8 +1590,12 @@ impl ModelLibraryManager {
                 corner.is_default = true;
             }
         }
-        if library.models.is_empty() {
-            return Err("Uploaded model library contains no supported device models".to_owned());
+        // A macromodel library legitimately declares only `.subckt`
+        // definitions, so an empty model map alone is not an empty library.
+        if library.models.is_empty() && library.subcircuits.is_empty() {
+            return Err(format!(
+                "Model library '{lib_name}' contains no supported device models or addressable subcircuits"
+            ));
         }
         if self.libraries.contains_key(&lib_name) {
             return Err(format!(
