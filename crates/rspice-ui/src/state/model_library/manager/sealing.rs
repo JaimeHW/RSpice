@@ -283,18 +283,43 @@ impl ModelLibraryManager {
                 }
             }
 
-            let mut sections = library
+            // Seal the corner definitions themselves, not just their names: a
+            // corner carries the section bindings and source path that
+            // materializing a process card needs, and re-deriving them from a
+            // name after sealing would reopen the very state the seal fixes.
+            let mut corners = library
                 .corners
                 .values()
                 .filter(|corner| corner.file_path.is_some())
-                .map(|corner| corner.name.clone())
+                .cloned()
                 .collect::<Vec<_>>();
-            sections.sort_by_key(|section| section.to_ascii_lowercase());
-            sections.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+            corners.sort_by_key(|corner| corner.name.to_ascii_lowercase());
+            if let Some(pair) = corners
+                .windows(2)
+                .find(|pair| pair[0].name.eq_ignore_ascii_case(&pair[1].name))
+            {
+                return Err(format!(
+                    "Model library '{}' defines case-insensitive duplicate corners '{}' and '{}'",
+                    library.name, pair[0].name, pair[1].name
+                ));
+            }
+            for corner in &corners {
+                let Some(source_path) = corner.file_path.as_ref() else {
+                    continue;
+                };
+                if !source_paths.contains(source_path) {
+                    return Err(format!(
+                        "Model library '{}' corner '{}' binds source '{}' outside its authenticated closure",
+                        library.name,
+                        corner.name,
+                        source_path.display()
+                    ));
+                }
+            }
             sealed_libraries.push(SealedExecutionLibrary {
                 name: library.name.clone(),
                 root_path: root_path.clone(),
-                sections,
+                corners,
             });
         }
 

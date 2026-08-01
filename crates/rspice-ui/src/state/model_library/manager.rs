@@ -63,7 +63,27 @@ pub struct SealedModelExecutionSources {
 struct SealedExecutionLibrary {
     name: String,
     root_path: PathBuf,
-    sections: Vec<String>,
+    corners: Vec<ProcessCorner>,
+}
+
+/// One corner section materialized out of the sealed bundle, with the identity
+/// needed to label it and the domains it covers.
+struct MaterializedCornerSection {
+    source_label: String,
+    path: PathBuf,
+    section: String,
+    domains: Vec<super::CornerSectionDomain>,
+    materialized_model_cards: String,
+}
+
+const fn pdk_model_process(process: CornerProcess) -> crate::state::pdk_config::PdkModelProcess {
+    match process {
+        CornerProcess::TT => crate::state::pdk_config::PdkModelProcess::Tt,
+        CornerProcess::SS => crate::state::pdk_config::PdkModelProcess::Ss,
+        CornerProcess::FF => crate::state::pdk_config::PdkModelProcess::Ff,
+        CornerProcess::SF => crate::state::pdk_config::PdkModelProcess::Sf,
+        CornerProcess::FS => crate::state::pdk_config::PdkModelProcess::Fs,
+    }
 }
 
 impl SealedModelExecutionSources {
@@ -354,7 +374,7 @@ impl SealedModelExecutionSources {
         &self,
         processes: &[CornerProcess],
     ) -> Result<Vec<CornerModelBinding>, String> {
-        if self.libraries.is_empty() {
+        if self.libraries.is_empty() && self.pdk_process_bindings.is_empty() {
             if let Some(process) = processes
                 .iter()
                 .find(|process| **process != CornerProcess::TT)
@@ -371,48 +391,194 @@ impl SealedModelExecutionSources {
         for process in processes {
             for library in &self.libraries {
                 let keyword = process.as_keyword();
-                let section = library
-                    .sections
+                let corner = library
+                    .corners
                     .iter()
-                    .find(|section| section.eq_ignore_ascii_case(keyword))
+                    .find(|corner| corner.name.eq_ignore_ascii_case(keyword))
                     .cloned();
-                if section.is_none()
-                    && (*process != CornerProcess::TT || !library.sections.is_empty())
+                if corner.is_none()
+                    && (*process != CornerProcess::TT || !library.corners.is_empty())
                 {
                     return Err(format!(
                         "Model library '{}' does not define the {} process section",
                         library.name, keyword
                     ));
                 }
+                match corner.as_ref() {
+                    Some(corner) => {
+                        for section in self.materialize_library_corner(library, corner)? {
+                            let binding = CornerModelBinding {
+                                process: *process,
+                                source_label: section.source_label,
+                                section: Some(section.section),
+                                materialized_model_cards: section.materialized_model_cards,
+                            };
+                            binding.validate()?;
+                            bindings.push(binding);
+                        }
+                    }
+                    None => {
+                        let mut processor = rspice_core::netlist::IncludeProcessor::new_sealed(
+                            &library.root_path,
+                            self.bundle.clone(),
+                        );
+                        let materialized_model_cards = processor
+                            .process_sealed_root(&library.root_path, None)
+                            .map_err(|error| {
+                                format!(
+                                    "Failed to materialize sealed model library '{}' from '{}': {error}",
+                                    library.name,
+                                    library.root_path.display()
+                                )
+                            })?;
+                        let binding = CornerModelBinding {
+                            process: *process,
+                            source_label: library.root_path.display().to_string(),
+                            section: None,
+                            materialized_model_cards,
+                        };
+                        binding.validate()?;
+                        bindings.push(binding);
+                    }
+                }
+            }
 
-                let mut processor = rspice_core::netlist::IncludeProcessor::new_sealed(
-                    &library.root_path,
-                    self.bundle.clone(),
-                );
-                let materialized_model_cards = processor
-                    .process_sealed_root(&library.root_path, section.as_deref())
-                    .map_err(|error| {
-                        format!(
-                            "Failed to materialize sealed model library '{}' from '{}': {error}",
-                            library.name,
-                            library.root_path.display()
-                        )
-                    })?;
-                let source_label = match section.as_deref() {
-                    Some(section) => format!("{} [{}]", library.root_path.display(), section),
-                    None => library.root_path.display().to_string(),
-                };
-                let binding = CornerModelBinding {
-                    process: *process,
-                    source_label,
-                    section,
-                    materialized_model_cards,
-                };
-                binding.validate()?;
-                bindings.push(binding);
+            if !self.pdk_process_bindings.is_empty() {
+                let pdk_process = pdk_model_process(*process);
+                let selected = self
+                    .pdk_process_bindings
+                    .iter()
+                    .filter(|binding| binding.process == pdk_process)
+                    .collect::<Vec<_>>();
+                if selected.is_empty() {
+                    let package = self
+                        .pdk_identity
+                        .as_ref()
+                        .map(|(binding, _)| format!("{} {}", binding.package_id, binding.revision))
+                        .unwrap_or_else(|| "signed PDK".to_owned());
+                    return Err(format!(
+                        "{package} does not supply an explicit {} model-source contract",
+                        process.as_keyword()
+                    ));
+                }
+                for source in selected {
+                    let mut processor = rspice_core::netlist::IncludeProcessor::new_sealed(
+                        &source.root_path,
+                        self.bundle.clone(),
+                    );
+                    let materialized_model_cards = processor
+                        .process_sealed_root(&source.root_path, source.section.as_deref())
+                        .map_err(|error| {
+                            format!(
+                                "Failed to materialize signed PDK {} source '{}' from '{}': {error}",
+                                process.as_keyword(),
+                                source.source_id,
+                                source.artifact_path
+                            )
+                        })?;
+                    let package = self
+                        .pdk_identity
+                        .as_ref()
+                        .map(|(binding, digest)| {
+                            format!(
+                                "{} {} / {} / {} / artifact {} / archive {}",
+                                binding.package_id,
+                                binding.revision,
+                                source.domain.label(),
+                                source.source_id,
+                                source.artifact_digest,
+                                digest
+                            )
+                        })
+                        .unwrap_or_else(|| source.source_id.clone());
+                    let binding = CornerModelBinding {
+                        process: *process,
+                        source_label: package,
+                        section: source.section.clone(),
+                        materialized_model_cards,
+                    };
+                    binding.validate()?;
+                    bindings.push(binding);
+                }
             }
         }
         Ok(bindings)
+    }
+
+    fn materialize_library_corner(
+        &self,
+        library: &SealedExecutionLibrary,
+        corner: &ProcessCorner,
+    ) -> Result<Vec<MaterializedCornerSection>, String> {
+        if let Err(errors) = corner.validate_contract() {
+            return Err(format!(
+                "Model library '{}' corner '{}' has an invalid section contract: {}",
+                library.name,
+                corner.name,
+                errors.join("; ")
+            ));
+        }
+        let source_path = corner
+            .file_path
+            .as_deref()
+            .unwrap_or(library.root_path.as_path());
+        let bindings = corner.effective_section_bindings();
+        if bindings.is_empty() {
+            return Err(format!(
+                "Model library '{}' corner '{}' has no executable section binding",
+                library.name, corner.name
+            ));
+        }
+
+        let mut domains_by_section =
+            BTreeMap::<(PathBuf, String), Vec<super::CornerSectionDomain>>::new();
+        for binding in bindings {
+            domains_by_section
+                .entry((source_path.to_path_buf(), binding.section))
+                .or_default()
+                .push(binding.domain);
+        }
+
+        let mut sections = Vec::with_capacity(domains_by_section.len());
+        for ((path, section), mut domains) in domains_by_section {
+            domains.sort();
+            domains.dedup();
+            let mut processor =
+                rspice_core::netlist::IncludeProcessor::new_sealed(&path, self.bundle.clone());
+            let materialized_model_cards = processor
+                .process_sealed_root(&path, Some(&section))
+                .map_err(|error| {
+                    format!(
+                        "Failed to materialize {} section '{}' for model library '{}' corner '{}' from '{}': {error}",
+                        domains
+                            .iter()
+                            .map(|domain| domain.label())
+                            .collect::<Vec<_>>()
+                            .join(" + "),
+                        section,
+                        library.name,
+                        corner.name,
+                        path.display()
+                    )
+                })?;
+            sections.push(MaterializedCornerSection {
+                source_label: format!(
+                    "{} [{}] ({})",
+                    path.display(),
+                    section,
+                    domains
+                        .iter()
+                        .map(|domain| domain.label())
+                        .collect::<Vec<_>>()
+                        .join(" + ")
+                ),
+                path,
+                section,
+                domains,
+                materialized_model_cards,
+            });
+        }
+        Ok(sections)
     }
 }
 
