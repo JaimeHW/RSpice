@@ -37,8 +37,8 @@ use crate::simulation::multi_run::{
 };
 use crate::simulation::reliability_engine::{ParamShift, ReliabilityResult, StressMetrics};
 use crate::simulation::results::{
-    DcOpResult, DeviceOpPoint, MonteCarloVariableResult, SimulationResult,
-    TransferFunctionQuantity, TransferFunctionScalar, WaveformData,
+    DcOpResult, MonteCarloVariableResult, SimulationResult, TransferFunctionQuantity,
+    TransferFunctionScalar, WaveformData,
 };
 use crate::simulation::status::{SimulationProgress, SimulationStatus};
 use crate::state::{NoiseContributorRow, NoiseSummary};
@@ -711,7 +711,6 @@ pub(crate) struct WorkerProgressSnapshot {
     pub id: u64,
     pub status: WorkerProgressStatus,
     pub progress: Option<f32>,
-    pub message: Option<String>,
     pub elapsed_ms: u64,
 }
 
@@ -722,7 +721,6 @@ impl WorkerProgressSnapshot {
             id,
             status: WorkerProgressStatus::from(&progress.status),
             progress: progress.status.progress(),
-            message: progress.message.clone(),
             elapsed_ms,
         }
     }
@@ -730,7 +728,6 @@ impl WorkerProgressSnapshot {
     pub(crate) fn apply_to(self, progress: &mut SimulationProgress) {
         progress.elapsed = std::time::Duration::from_millis(self.elapsed_ms);
         progress.update_status(SimulationStatus::from(self.status));
-        progress.message = self.message;
     }
 }
 
@@ -828,7 +825,6 @@ pub(crate) enum WorkerSimulationResult {
         mna_solution: Vec<f64>,
         node_voltages: HashMap<String, f64>,
         branch_currents: HashMap<String, f64>,
-        device_ops: Vec<WorkerDeviceOpPoint>,
         device_report: Option<WorkerDeviceOpReport>,
     },
     DcSweep {
@@ -947,13 +943,11 @@ impl WorkerSimulationResult {
                 mna_solution,
                 node_voltages,
                 branch_currents,
-                device_ops,
                 device_report,
             } => sum_payload_bytes([
                 f64_payload_bytes(node_voltages.len()),
                 f64_payload_bytes(branch_currents.len()),
                 f64_payload_bytes(mna_solution.len()),
-                device_ops_payload_bytes(device_ops),
                 device_report
                     .as_ref()
                     .map_or(0, WorkerDeviceOpReport::estimated_numeric_payload_bytes),
@@ -1126,11 +1120,6 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 mna_solution: result.mna_solution,
                 node_voltages: result.node_voltages,
                 branch_currents: result.branch_currents,
-                device_ops: result
-                    .device_ops
-                    .into_iter()
-                    .map(WorkerDeviceOpPoint::from)
-                    .collect(),
                 device_report: result.device_report.map(WorkerDeviceOpReport::from),
             }),
             SimulationResult::DcSweep {
@@ -1343,7 +1332,6 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 mna_solution,
                 node_voltages,
                 branch_currents,
-                device_ops,
                 device_report,
             } => Self::DcOp(Box::new(DcOpResult {
                 configuration,
@@ -1353,10 +1341,6 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 mna_solution,
                 node_voltages,
                 branch_currents,
-                device_ops: device_ops
-                    .into_iter()
-                    .map(|device| (device.name.clone(), DeviceOpPoint::from(device)))
-                    .collect(),
                 device_report: device_report.map(rspice_core::circuit::DeviceOpReport::from),
             })),
             WorkerSimulationResult::DcSweep {

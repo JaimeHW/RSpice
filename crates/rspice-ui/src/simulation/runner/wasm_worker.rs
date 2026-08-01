@@ -575,7 +575,6 @@ mod browser {
             Err(poisoned) => poisoned.into_inner(),
         };
         progress.update_status(SimulationStatus::Parsing);
-        progress.message = Some("Running simulation in browser worker".to_string());
     }
 
     fn request_repaint() {

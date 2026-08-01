@@ -32,9 +32,6 @@ pub struct DcOpResult {
     /// Branch currents
     pub branch_currents: HashMap<String, f64>,
 
-    /// Device operating points
-    pub device_ops: HashMap<String, DeviceOpPoint>,
-
     /// Per-device operating-point report from the engine (bias and
     /// small-signal parameters with regions, in netlist order) — the data
     /// behind the OP inspector.
@@ -51,14 +48,4 @@ impl DcOpResult {
                 .find_map(|(name, value)| name.eq_ignore_ascii_case(node).then_some(*value))
         })
     }
-}
-
-/// Operating point data for a device
-#[derive(Debug, Clone)]
-pub struct DeviceOpPoint {
-    /// Device type (R, C, M, Q, etc.)
-    pub device_type: String,
-
-    /// Operating point parameters
-    pub parameters: HashMap<String, f64>,
 }

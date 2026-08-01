@@ -454,7 +454,6 @@ pub(super) fn worker_transport_extracts_and_authenticates_dc_op_mna_solution() {
             mna_solution: vec![1.25, -0.001],
             node_voltages: HashMap::from([("out".to_owned(), 1.25)]),
             branch_currents: HashMap::from([("V1".to_owned(), -0.001)]),
-            device_ops: Vec::new(),
             device_report: None,
         })),
     };
@@ -709,7 +708,6 @@ pub(crate) enum WorkerSimulationResultTransport {
         mna_solution_digest: crate::product::ContentDigest,
         node_voltages: HashMap<String, f64>,
         branch_currents: HashMap<String, f64>,
-        device_ops: Vec<WorkerDeviceOpPoint>,
         device_report: Option<WorkerDeviceOpReport>,
     },
     DcSweep {
@@ -828,7 +826,6 @@ impl WorkerSimulationResultTransport {
                 mna_solution,
                 node_voltages,
                 branch_currents,
-                device_ops,
                 device_report,
             } => Self::DcOp {
                 configuration: WorkerOpConfigTransport::from_config(configuration, buffers),
@@ -842,7 +839,6 @@ impl WorkerSimulationResultTransport {
                 mna_solution: WorkerF64Series::from_vec(mna_solution, buffers),
                 node_voltages,
                 branch_currents,
-                device_ops,
                 device_report,
             },
             WorkerSimulationResult::DcSweep {
@@ -980,7 +976,6 @@ impl WorkerSimulationResultTransport {
                 mna_solution_digest,
                 node_voltages,
                 branch_currents,
-                device_ops,
                 device_report,
             } => {
                 let configuration = configuration.into_config(buffers)?;
@@ -1008,7 +1003,6 @@ impl WorkerSimulationResultTransport {
                     mna_solution,
                     node_voltages,
                     branch_currents,
-                    device_ops,
                     device_report,
                 })
             }

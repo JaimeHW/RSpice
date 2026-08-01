@@ -129,9 +129,6 @@ pub struct SimulationProgress {
 
     /// Estimated time remaining (if calculable)
     pub estimated_remaining: Option<Duration>,
-
-    /// Last message from the solver
-    pub message: Option<String>,
 }
 
 impl Default for SimulationProgress {
@@ -141,7 +138,6 @@ impl Default for SimulationProgress {
             start_time: None,
             elapsed: Duration::ZERO,
             estimated_remaining: None,
-            message: None,
         }
     }
 }

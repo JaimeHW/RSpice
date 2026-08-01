@@ -616,39 +616,6 @@ impl From<WorkerMeasurement> for rspice_core::MeasureResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct WorkerDeviceOpPoint {
-    pub name: String,
-    pub device_type: String,
-    pub parameters: HashMap<String, f64>,
-}
-
-#[cfg(test)]
-impl WorkerDeviceOpPoint {
-    pub(super) fn estimated_numeric_payload_bytes(&self) -> usize {
-        f64_payload_bytes(self.parameters.len())
-    }
-}
-
-impl From<(String, DeviceOpPoint)> for WorkerDeviceOpPoint {
-    fn from((name, value): (String, DeviceOpPoint)) -> Self {
-        Self {
-            name,
-            device_type: value.device_type,
-            parameters: value.parameters,
-        }
-    }
-}
-
-impl From<WorkerDeviceOpPoint> for DeviceOpPoint {
-    fn from(value: WorkerDeviceOpPoint) -> Self {
-        Self {
-            device_type: value.device_type,
-            parameters: value.parameters,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerDeviceOpReport {
     pub entries: Vec<WorkerDeviceOpEntry>,
 }
@@ -1107,14 +1074,6 @@ pub(super) fn vec_map_payload_bytes(values_by_name: &HashMap<String, Vec<f64>>) 
     values_by_name
         .values()
         .map(|values| f64_payload_bytes(values.len()))
-        .fold(0usize, |total, bytes| total.saturating_add(bytes))
-}
-
-#[cfg(test)]
-pub(super) fn device_ops_payload_bytes(device_ops: &[WorkerDeviceOpPoint]) -> usize {
-    device_ops
-        .iter()
-        .map(WorkerDeviceOpPoint::estimated_numeric_payload_bytes)
         .fold(0usize, |total, bytes| total.saturating_add(bytes))
 }
 

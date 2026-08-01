@@ -998,7 +998,6 @@ fn worker_progress_snapshot_applies_to_progress_state() {
         time: 5.0e-7,
         stop_time: 1.0e-6,
     });
-    progress.message = Some("Halfway through transient".to_string());
 
     let snapshot = WorkerProgressSnapshot::from_progress(22, &progress);
     let encoded = serde_json::to_string(&snapshot).expect("progress snapshot serializes");
@@ -1017,10 +1016,6 @@ fn worker_progress_snapshot_applies_to_progress_state() {
             stop_time
         } if (time - 5.0e-7).abs() < 1e-15 && (stop_time - 1.0e-6).abs() < 1e-15
     ));
-    assert_eq!(
-        applied.message.as_deref(),
-        Some("Halfway through transient")
-    );
 }
 
 #[test]
@@ -1722,7 +1717,6 @@ fn worker_result_round_trip() {
         mna_solution: vec![1.2, -0.01],
         node_voltages: HashMap::from([("out".to_string(), 1.2)]),
         branch_currents: HashMap::from([("V1".to_string(), -0.01)]),
-        device_ops: HashMap::new(),
         device_report: None,
     }));
     let dc_op = round_trip_result(dc_op);
@@ -2096,7 +2090,6 @@ fn dc_op_worker_result_round_trip_preserves_exact_mna_state_and_contract() {
         mna_solution: vec![1.25, -1.0e-3],
         node_voltages: HashMap::from([("out".to_owned(), 1.25)]),
         branch_currents: HashMap::from([("V1".to_owned(), -1.0e-3)]),
-        device_ops: HashMap::new(),
         device_report: None,
     }));
 
