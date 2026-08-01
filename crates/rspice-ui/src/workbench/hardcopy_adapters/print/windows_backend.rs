@@ -155,7 +155,7 @@ pub(super) fn show_native_printer_properties(
     }
     let suggestion = suggestion_from_devmode(&printer.devmode, &printer.capabilities);
     Ok(PrinterDriverPropertiesOutcome::Accepted {
-        capabilities: printer.capabilities,
+        capabilities: Box::new(printer.capabilities),
         suggestion,
     })
 }

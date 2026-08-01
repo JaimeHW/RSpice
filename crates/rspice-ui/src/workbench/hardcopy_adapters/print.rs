@@ -554,7 +554,9 @@ pub struct PrinterDriverSettingsSuggestion {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrinterDriverPropertiesOutcome {
     Accepted {
-        capabilities: PrinterCapabilitySnapshot,
+        /// Boxed: the accepted case carries a full capability snapshot beside
+        /// a `Cancelled` that carries nothing.
+        capabilities: Box<PrinterCapabilitySnapshot>,
         suggestion: PrinterDriverSettingsSuggestion,
     },
     Cancelled,

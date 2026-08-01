@@ -319,7 +319,7 @@ impl RSpiceApp {
                             );
                             publish::select_printer_capabilities(
                                 self,
-                                capabilities,
+                                *capabilities,
                                 Some(suggestion),
                             );
                         }
