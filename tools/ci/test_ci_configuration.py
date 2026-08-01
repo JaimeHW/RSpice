@@ -799,17 +799,17 @@ class CiConfigurationTests(unittest.TestCase):
         source_like_paths = [
             "crates/rspice-core/src/netlist/source_map.rs",
             "crates/rspice-core/tests/common/mod.rs",
-            # These seven moved out of `common/` and `workbench/netlist_document/`
+            # These moved out of `common/` and `workbench/netlist_document/`
             # during the module reorganization. The paths are updated rather than
             # dropped: each one was added here because it was once written but
-            # never committed, and that is still worth guarding.
+            # never committed, and that is still worth guarding. `summary.rs`
+            # left the list when the module was deleted as test-only.
             "crates/rspice-ui/src/workbench/browser/download.rs",
             "crates/rspice-ui/src/workbench/browser/file_import.rs",
             "crates/rspice-ui/src/workbench/logging.rs",
             "crates/rspice-ui/src/workbench/workflows/netlist_workflow.rs",
             "crates/rspice-ui/src/workbench/documents/netlist_document/baseline.rs",
             "crates/rspice-ui/src/workbench/documents/netlist_document/diagnostics.rs",
-            "crates/rspice-ui/src/workbench/documents/netlist_document/summary.rs",
             "crates/rspice-ui/src/simulation/controller/manual_deck.rs",
             "crates/rspice-ui/src/simulation/runner/wasm_worker.rs",
             "crates/rspice-ui/src/simulation/runner/worker_contract.rs",
