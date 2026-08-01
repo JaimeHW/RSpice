@@ -443,6 +443,11 @@ macro_rules! op_evidence_enum {
         #[serde(rename_all = "snake_case")]
         pub enum $name { $($variant),+ }
     };
+    ($name:ident { default $first:ident, $($variant:ident),+ $(,)? }) => {
+        #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        pub enum $name { #[default] $first, $($variant),+ }
+    };
 }
 
 op_evidence_enum!(OperatingPointTemperatureEvidence {
@@ -493,13 +498,13 @@ op_evidence_enum!(OperatingPointAccuracyEvidence {
     Accurate,
     Robust
 });
-op_evidence_enum!(OperatingPointProcessEvidence { TT, SS, FF, SF, FS });
-
-impl Default for OperatingPointProcessEvidence {
-    fn default() -> Self {
-        Self::TT
-    }
-}
+op_evidence_enum!(OperatingPointProcessEvidence {
+    default TT,
+    SS,
+    FF,
+    SF,
+    FS
+});
 
 const fn default_op_run_point_count() -> u64 {
     1

@@ -216,6 +216,5 @@ pub(super) fn render_tiff(
                 message: error.to_string(),
             })?;
     }
-    drop(encoder);
     Ok(bytes)
 }

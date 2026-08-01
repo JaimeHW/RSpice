@@ -1942,20 +1942,17 @@ fn resources_section(
                 for callback in &package.manifest().callbacks {
                     ui.label(
                         RichText::new(format!(
-                            "{} · {} · {}",
+                            "{} · {} · ABI {} / {}() -> i32 / {}",
                             callback.callback_id,
                             callback.artifact_path,
-                            format!(
-                                "ABI {} / {}() -> i32 / {}",
-                                callback.abi_version,
-                                callback.entrypoint,
-                                callback
-                                    .capabilities
-                                    .iter()
-                                    .map(|capability| format!("{capability:?}"))
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            )
+                            callback.abi_version,
+                            callback.entrypoint,
+                            callback
+                                .capabilities
+                                .iter()
+                                .map(|capability| format!("{capability:?}"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
                         ))
                         .monospace(),
                     );
