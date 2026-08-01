@@ -8,7 +8,7 @@ use super::*;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind, AnalysisLifecycleState};
 use crate::state::model_library::{
     CornerSectionBinding, CornerSectionDomain, CorrelationDatasetClass, CorrelationDatasetRevision,
-    CorrelationSuite, ModelBinAuditDraft,
+    CorrelationSuite,
 };
 
 fn project_id() -> ProjectId {
@@ -84,61 +84,6 @@ fn transient_runtime_state_is_not_serialized() {
         );
     }
     assert!(plan.get("analysis_plan").is_some());
-}
-
-#[test]
-fn explicit_model_provider_resolution_round_trips_and_rejects_tampering() {
-    let mut manager = ModelLibraryManager::new();
-    manager
-        .load_library_bytes(
-            "provider-a.lib",
-            b".model shared NMOS (LEVEL=1 KP=1e-3)\n".to_vec(),
-            None,
-        )
-        .expect("first provider imports");
-    manager
-        .load_library_bytes(
-            "provider-b.lib",
-            b".model SHARED NMOS (LEVEL=1 KP=2e-3)\n".to_vec(),
-            None,
-        )
-        .expect("second provider imports");
-    manager
-        .resolve_definition_conflict("shared", "provider-b", "SHARED")
-        .expect("exact provider selected");
-
-    let context =
-        context_from_state(&SimSetupState::new(), &manager).expect("resolved context saves");
-    let value = serde_json::to_value(&context).expect("context serializes");
-    assert_eq!(
-        value["model_definition_resolutions"][0]["provider_library"],
-        "provider-b"
-    );
-
-    let restored: ProjectExecutionContext =
-        serde_json::from_value(value.clone()).expect("context deserializes");
-    let (_, restored_manager, _) = restored
-        .into_state(project_id())
-        .expect("exact provider resolution restores");
-    assert_eq!(
-        restored_manager
-            .definition_resolution("SHARED")
-            .map(|resolution| resolution.provider_library.as_str()),
-        Some("provider-b")
-    );
-    restored_manager
-        .seal_execution_sources()
-        .expect("restored explicit precedence seals");
-
-    let mut tampered = value.clone();
-    tampered["model_definition_resolutions"][0]["provider_library"] =
-        serde_json::json!("invented-provider");
-    let tampered: ProjectExecutionContext =
-        serde_json::from_value(tampered).expect("tampered shape deserializes");
-    let error = tampered
-        .validate()
-        .expect_err("stale provider identity must fail");
-    assert!(error.contains("selects stale provider"));
 }
 
 #[test]
@@ -296,52 +241,6 @@ fn active_model_section_provenance_round_trips_migrates_and_rejects_tampering() 
         error.contains("case-insensitive duplicate names"),
         "{error}"
     );
-}
-
-#[test]
-fn model_bin_audit_ledger_round_trips_and_rejects_tampering() {
-    let mut manager = ModelLibraryManager::new();
-    let receipt = manager
-        .record_model_bin_audit(ModelBinAuditDraft::blocked(
-            ContentDigest::from_bytes([0x31; 32]),
-            project_id(),
-            1,
-            crate::state::CellViewRef::default_top(),
-            crate::simulation::dialog::corner::ProcessCorner::TT,
-            27.0,
-            "authoritative inspection blocked for test",
-        ))
-        .expect("audit receipt records");
-    let context =
-        context_from_state(&SimSetupState::new(), &manager).expect("valid execution context");
-    let value = serde_json::to_value(&context).expect("context serializes");
-    assert_eq!(
-        value["model_bin_audit_receipts"].as_array().map(Vec::len),
-        Some(1)
-    );
-
-    let restored: ProjectExecutionContext =
-        serde_json::from_value(value.clone()).expect("context deserializes");
-    let (_, restored_manager, _) = restored
-        .into_state(project_id())
-        .expect("valid audit ledger restores");
-    assert_eq!(
-        restored_manager
-            .latest_model_bin_audit_receipt()
-            .expect("receipt retained")
-            .semantic_digest(),
-        receipt.semantic_digest()
-    );
-
-    let mut tampered = value;
-    tampered["model_bin_audit_receipts"][0]["findings"][0]["detail"] =
-        serde_json::json!("tampered after publication");
-    let tampered: ProjectExecutionContext =
-        serde_json::from_value(tampered).expect("receipt shape still deserializes");
-    let error = tampered
-        .into_state(project_id())
-        .expect_err("tampered receipt must fail context restore");
-    assert!(error.contains("digest mismatch"), "{error}");
 }
 
 #[test]
@@ -876,9 +775,6 @@ fn project_model_identity_is_bound_to_its_member_digest_and_independent_revision
         corner.file_path = Some(member.clone());
     }
     let _ = library;
-    manager
-        .rebuild_active_model_projection("sectioned-model")
-        .expect("synthetic member rewrite rebuilds its exact active-card projection");
     let library = manager
         .get_library_mut("sectioned-model")
         .expect("sectioned library still exists");
@@ -1193,8 +1089,6 @@ fn legacy_context_migrates_to_sorted_execution_order() {
         schema_version: LEGACY_EXECUTION_CONTEXT_SCHEMA_VERSION,
         simulation_plan: plan,
         model_libraries: Vec::new(),
-        model_bin_audit_receipts: Vec::new(),
-        model_definition_resolutions: Vec::new(),
     };
 
     context
@@ -1538,8 +1432,6 @@ fn foreign_platform_source_binding_is_retained_without_filesystem_probe() {
             selected_corner: None,
             version: String::new(),
         }],
-        model_bin_audit_receipts: Vec::new(),
-        model_definition_resolutions: Vec::new(),
     };
 
     context
@@ -1616,8 +1508,6 @@ fn disconnected_source_subgraph_is_rejected_even_when_every_member_has_an_edge()
             selected_corner: None,
             version: String::new(),
         }],
-        model_bin_audit_receipts: Vec::new(),
-        model_definition_resolutions: Vec::new(),
     };
 
     let error = context
