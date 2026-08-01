@@ -3847,21 +3847,29 @@ mod runtime_model_expression_tests {
             .find(|model| model.name.eq_ignore_ascii_case("copper"))
             .expect("copper model retained");
 
-        assert!(!model
-            .params
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("RESISTIVITY")));
-        assert!(!model
-            .params
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("HEATCAPACITY")));
-        assert!(model
-            .expr_params
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("RESISTIVITY")));
-        assert!(model
-            .expr_params
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("HEATCAPACITY")));
+        assert!(
+            !model
+                .params
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("RESISTIVITY"))
+        );
+        assert!(
+            !model
+                .params
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("HEATCAPACITY"))
+        );
+        assert!(
+            model
+                .expr_params
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("RESISTIVITY"))
+        );
+        assert!(
+            model
+                .expr_params
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("HEATCAPACITY"))
+        );
     }
 }

@@ -3781,11 +3781,7 @@ impl XyceTestRunner {
         let reference_time_step_sizes = {
             let mut step_sizes = Vec::with_capacity(reference_time_grid.len());
             step_sizes.push(0.0);
-            step_sizes.extend(
-                reference_time_grid
-                    .windows(2)
-                    .map(|pair| pair[1] - pair[0]),
-            );
+            step_sizes.extend(reference_time_grid.windows(2).map(|pair| pair[1] - pair[0]));
             step_sizes
         };
         let tran = Self::tran_analysis_for_reference_stop(
