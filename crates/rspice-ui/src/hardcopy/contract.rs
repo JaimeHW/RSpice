@@ -620,7 +620,6 @@ pub struct SchematicHardcopySetup {
 }
 
 impl SchematicHardcopySetup {
-    #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub const fn new(
         extent: SchematicHardcopyExtent,

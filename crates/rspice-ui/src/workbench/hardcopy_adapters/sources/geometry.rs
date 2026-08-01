@@ -24,7 +24,6 @@ pub(super) fn layer_mapping(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn mapping_entry(
     kind: PrintObjectKind,
     stable_id: impl Into<String>,
@@ -601,7 +600,6 @@ pub(super) fn semantic_position_in_scene(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn map_plot_point(
     x: f64,
     y: f64,

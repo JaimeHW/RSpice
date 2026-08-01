@@ -856,7 +856,6 @@ fn validate_new_conductor_conflicts(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn validate_against_obstacle(
     object_id: u64,
     other_id: u64,

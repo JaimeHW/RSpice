@@ -283,7 +283,6 @@ struct ReplacementBodyResponse {
     changed: bool,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn replacement_body(
     ui: &mut Ui,
     current: &str,
@@ -366,7 +365,6 @@ const fn replacement_uses_stacked_layout(viewport_width: f32) -> bool {
     viewport_width <= 760.0
 }
 
-#[allow(clippy::too_many_arguments)]
 fn replacement_form(
     ui: &mut Ui,
     current: &str,

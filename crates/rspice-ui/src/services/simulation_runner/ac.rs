@@ -114,7 +114,6 @@ pub fn run_ac_analysis_with_abort(
 
 /// Run AC small-signal analysis with source-path resolution and cooperative
 /// cancellation through parsing, sweep generation, solving, and conversion.
-#[allow(clippy::too_many_arguments)]
 pub fn run_ac_analysis_with_source_path_and_abort(
     netlist_text: &str,
     start_freq: Value,

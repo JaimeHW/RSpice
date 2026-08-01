@@ -406,7 +406,6 @@ impl QualificationVector {
     /// Legacy compatibility entry point. A caller that supplies no separate
     /// candidate-source snapshot cannot create current qualification evidence.
     /// Use [`Self::try_new_source_bound`] for all new authoring paths.
-    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         id: impl Into<String>,
         name: impl Into<String>,
@@ -432,7 +431,6 @@ impl QualificationVector {
     /// bytes and the complete testbench bytes. Validation proves that the
     /// canonical bytes match the exact project source identity, occur in the
     /// testbench, parse as the named model, and are actually instantiated.
-    #[allow(clippy::too_many_arguments)]
     pub fn try_new_source_bound(
         id: impl Into<String>,
         name: impl Into<String>,
@@ -460,7 +458,6 @@ impl QualificationVector {
 
     /// Construct a vector that proves and executes one exact base or named
     /// section from the retained canonical model source.
-    #[allow(clippy::too_many_arguments)]
     pub fn try_new_source_section_bound(
         id: impl Into<String>,
         name: impl Into<String>,

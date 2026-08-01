@@ -1543,7 +1543,6 @@ mod tests {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn native_plan_with_layout(
         capabilities: &PrinterCapabilitySnapshot,
         media: PrinterMediaSource,

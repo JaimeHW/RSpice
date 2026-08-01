@@ -111,7 +111,6 @@ impl ComparisonEvidence {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn try_new_complete(
         baseline: impl Into<String>,
         waveform_count: u64,

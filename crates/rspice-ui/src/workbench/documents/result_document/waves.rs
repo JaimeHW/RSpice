@@ -688,7 +688,6 @@ fn apply_family_trace_style<'a>(
     trace
 }
 
-#[allow(clippy::too_many_arguments)]
 fn append_projected_traces(
     traces: &mut Vec<StripTrace>,
     derived: &mut DerivedSeries,

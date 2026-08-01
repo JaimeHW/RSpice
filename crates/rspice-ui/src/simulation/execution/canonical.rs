@@ -325,7 +325,6 @@ fn encode_op_config(writer: &mut CanonicalWriter, config: &OpConfig) {
     );
 }
 
-#[allow(clippy::too_many_arguments)]
 fn encode_op_fields(
     writer: &mut CanonicalWriter,
     temperature_mode: OpTemperatureMode,

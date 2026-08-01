@@ -699,7 +699,6 @@ fn model_instance_parameters(
     // Keeping the complete numeric contract in one constructor prevents a
     // caller from accidentally dropping bounds or requiredness while adding
     // a model-family field.
-    #[allow(clippy::too_many_arguments)]
     fn numeric(
         key: &str,
         label: &str,

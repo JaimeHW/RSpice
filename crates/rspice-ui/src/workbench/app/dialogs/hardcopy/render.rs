@@ -2027,7 +2027,6 @@ fn media_label(value: &crate::hardcopy::PrinterMediaSource) -> String {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 #[cfg(target_os = "windows")]
 fn apply_printer_job(
     draft: &mut HardcopyDialogState,

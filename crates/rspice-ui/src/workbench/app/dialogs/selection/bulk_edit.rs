@@ -1383,7 +1383,6 @@ fn build_rows(
     rows
 }
 
-#[allow(clippy::too_many_arguments)]
 fn append_buffer_rows(
     rows: &mut Vec<SelectionBulkRow>,
     view_key: &str,

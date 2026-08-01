@@ -1957,7 +1957,6 @@ fn process_to_corner_runner(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn snapshot_digest(
     intent: SimulationRunIntent,
     simulation_plan_id: Option<SimulationPlanId>,

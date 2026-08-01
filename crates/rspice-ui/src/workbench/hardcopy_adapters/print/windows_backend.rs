@@ -398,7 +398,6 @@ fn default_devmode(
     Ok(buffer)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn resolve_capabilities(
     device_id: &str,
     display_name: &str,

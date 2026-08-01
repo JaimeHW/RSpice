@@ -2256,7 +2256,6 @@ fn nav_row_indented_styled(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn nav_row_indented_styled_with_metrics(
     ui: &mut Ui,
     icon: WorkbenchIcon,

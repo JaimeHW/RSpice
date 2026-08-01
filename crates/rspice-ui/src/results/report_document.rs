@@ -2399,7 +2399,6 @@ fn migrated_report_revision_id(identity_material: &[u8]) -> Result<ReportRevisio
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn report_revision_record_digest(
     revision_identity: ReportRevisionId,
     document_id: ResultDocumentId,

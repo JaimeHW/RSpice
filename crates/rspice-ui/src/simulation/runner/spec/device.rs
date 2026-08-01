@@ -182,7 +182,6 @@ fn run_reliability(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_optimization(
     netlist: &str,
     variables: Vec<crate::simulation::multi_run::OptimizationVariable>,
@@ -277,7 +276,6 @@ fn run_optimization(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_soa(
     netlist: &str,
     stop_time: f64,

@@ -1474,7 +1474,6 @@ impl PdkTechnologyRegistry {
         Ok(receipt)
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn next_receipt(
         &self,
         action: PdkTechnologyAuditAction,

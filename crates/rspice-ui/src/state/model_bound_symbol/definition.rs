@@ -175,7 +175,6 @@ pub struct ModelBoundSymbolDefinition {
 }
 
 impl ModelBoundSymbolDefinition {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         identity: SymbolIdentity,
         source: SymbolSourceContract,

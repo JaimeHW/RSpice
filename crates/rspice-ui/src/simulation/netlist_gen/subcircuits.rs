@@ -448,7 +448,6 @@ fn emit_configured_definition(
 
 /// Emit one cell's `.SUBCKT` block (children first), guarding against
 /// recursive hierarchies and reporting every defect with cell context.
-#[allow(clippy::too_many_arguments)]
 fn emit_cell_definition(
     hierarchy: &HierarchySource<'_>,
     library: &str,

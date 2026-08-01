@@ -260,7 +260,6 @@ pub struct CorrelationDatasetRevision {
 }
 
 impl CorrelationDatasetRevision {
-    #[allow(clippy::too_many_arguments)]
     pub fn try_from_csv(
         id: impl Into<String>,
         revision: ObjectRevision,
@@ -290,7 +289,6 @@ impl CorrelationDatasetRevision {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn try_from_csv_with_provenance(
         id: impl Into<String>,
         revision: ObjectRevision,
@@ -570,7 +568,6 @@ pub struct CorrelationMetricDefinition {
 }
 
 impl CorrelationMetricDefinition {
-    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         id: impl Into<String>,
         name: impl Into<String>,

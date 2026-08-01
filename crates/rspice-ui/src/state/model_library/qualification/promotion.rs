@@ -483,7 +483,6 @@ pub struct ModelReleaseCandidate {
 }
 
 impl ModelReleaseCandidate {
-    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         identity: ReleaseCandidateIdentity,
         source: ModelSourceEvidenceBinding,

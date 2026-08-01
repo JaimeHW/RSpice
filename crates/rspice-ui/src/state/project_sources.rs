@@ -555,7 +555,6 @@ impl ProjectSourceBundle {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn try_new_with_id(
         id: ProjectSourceId,
         owner: ProjectSourceOwner,

@@ -559,7 +559,6 @@ pub(super) fn draw_pdf_primitive(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn draw_pdf_text(
     surface: &mut krilla::surface::Surface<'_>,
     font: &Font,

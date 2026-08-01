@@ -1186,7 +1186,9 @@ fn visualization_document_reference(
 /// preview. Every branch verifies the stable open-document selection before
 /// borrowing engineering content; background buffers and most-recent results
 /// are never substituted for an absent or stale active authority.
-#[allow(dead_code)] // Retained as the fail-closed single-route compatibility boundary.
+// The fail-closed single-route compatibility boundary. Nothing in the
+// application reaches it; the hardcopy tests do.
+#[cfg(test)]
 pub(crate) fn resolve_active_app_hardcopy_source(
     state: &AppState,
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {

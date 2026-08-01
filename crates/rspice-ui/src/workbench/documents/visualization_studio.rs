@@ -2157,7 +2157,6 @@ fn add_viewer_pane(app: &mut RSpiceApp, document_id: &str, viewer: ResultViewer)
     );
 }
 
-#[allow(clippy::too_many_arguments)]
 fn add_viewer_pane_bound(
     app: &mut RSpiceApp,
     document_id: &str,

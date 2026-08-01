@@ -1386,7 +1386,6 @@ pub(super) fn pointer_target(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn pointer_target_with_filter(
     state: &AppState,
     hit: PointerHit,

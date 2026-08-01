@@ -1064,7 +1064,11 @@ fn source_files_have_no_byte_order_mark() {
 /// build detaches from its console. The allows are per-function rather than
 /// `print_stdout` being added to the crate-wide `cfg(test)` exemption, so the
 /// rule keeps holding for every other test.
-const MAX_LINT_SUPPRESSIONS: usize = 75;
+/// 75 -> 31 when the fifty per-site `clippy::too_many_arguments` allows were
+/// replaced by one crate-level allow that states the reason once, and the
+/// `resolve_active_app_hardcopy_source` `allow(dead_code)` became `cfg(test)`
+/// — which is what it always meant.
+const MAX_LINT_SUPPRESSIONS: usize = 31;
 
 /// The crate does not accumulate lint suppressions.
 #[test]

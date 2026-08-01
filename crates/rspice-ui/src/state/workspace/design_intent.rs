@@ -183,7 +183,6 @@ pub struct DesignVariable {
 }
 
 impl DesignVariable {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: impl Into<String>,
         expression: impl Into<String>,

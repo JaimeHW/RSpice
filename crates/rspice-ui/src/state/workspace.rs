@@ -1325,7 +1325,6 @@ impl ProjectWorkspace {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn commit_pdk_callback_execution(
         &mut self,
         plan_id: SimulationPlanId,

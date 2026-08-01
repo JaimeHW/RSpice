@@ -563,7 +563,6 @@ impl<'a> HierarchyResolver<'a> {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn binding_row_with_master(
         &self,
         reference: CellViewRef,

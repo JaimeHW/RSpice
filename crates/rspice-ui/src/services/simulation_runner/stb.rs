@@ -52,7 +52,6 @@ pub fn run_stb_analysis_with_abort(
 ///
 /// Test-only; see [`run_stb_analysis_with_abort`].
 #[cfg(test)]
-#[allow(clippy::too_many_arguments)]
 pub fn run_stb_analysis_with_source_path_and_abort(
     netlist_text: &str,
     probe: &str,
@@ -82,7 +81,6 @@ pub fn run_stb_analysis_with_source_path_and_abort(
 /// feedback loop; the engine measures the true loop gain at that break via
 /// Tian's double-injection method. An unknown probe is a hard error — there is
 /// no meaningful fallback quantity.
-#[allow(clippy::too_many_arguments)]
 pub fn run_stb_analysis_with_sweep_and_source_path_and_abort(
     netlist_text: &str,
     probe: &str,
