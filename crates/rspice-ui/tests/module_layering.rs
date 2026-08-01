@@ -1068,7 +1068,13 @@ fn source_files_have_no_byte_order_mark() {
 /// replaced by one crate-level allow that states the reason once, and the
 /// `resolve_active_app_hardcopy_source` `allow(dead_code)` became `cfg(test)`
 /// — which is what it always meant.
-const MAX_LINT_SUPPRESSIONS: usize = 31;
+/// 31 -> 33 for the two `large_enum_variant` modules. The worker transport's
+/// result enums have one variant per analysis kind and the analyses really do
+/// differ in payload size; a prepared hardcopy source is a whole sealed
+/// document beside a symbol. Each value is built once, consumed once, and
+/// never collected, and the struct variants' shape is the wire format. Both
+/// allows name the reason at the module they sit on.
+const MAX_LINT_SUPPRESSIONS: usize = 33;
 
 /// The crate does not accumulate lint suppressions.
 #[test]

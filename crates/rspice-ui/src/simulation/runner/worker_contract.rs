@@ -541,7 +541,7 @@ impl WorkerResponse {
 
     pub(crate) fn into_result(self) -> Result<SimulationResult, SimulationError> {
         match self.outcome {
-            WorkerOutcome::Success(result) => Ok(SimulationResult::from(result)),
+            WorkerOutcome::Success(result) => Ok(SimulationResult::from(*result)),
             WorkerOutcome::Failure(error) => Err(SimulationError::from(error)),
         }
     }
@@ -563,7 +563,9 @@ pub(crate) fn validate_worker_response_id(
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum WorkerOutcome {
-    Success(WorkerSimulationResult),
+    /// Boxed: a result is an order of magnitude larger than an error, and
+    /// every outcome value carried the difference.
+    Success(Box<WorkerSimulationResult>),
     Failure(WorkerSimulationError),
 }
 
@@ -582,7 +584,7 @@ fn worker_outcome_from_result(
                         payload_limit_bytes,
                     ))
                 } else {
-                    WorkerOutcome::Success(result)
+                    WorkerOutcome::Success(Box::new(result))
                 }
             }
             Err(error) => WorkerOutcome::Failure(WorkerSimulationError::from(error)),
@@ -596,7 +598,7 @@ fn worker_transfer_outcome_from_result(
 ) -> WorkerOutcome {
     match result {
         Ok(result) => match WorkerSimulationResult::try_from(result) {
-            Ok(result) => WorkerOutcome::Success(result),
+            Ok(result) => WorkerOutcome::Success(Box::new(result)),
             Err(error) => WorkerOutcome::Failure(WorkerSimulationError::from(error)),
         },
         Err(error) => WorkerOutcome::Failure(WorkerSimulationError::from(error)),

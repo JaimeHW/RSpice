@@ -764,7 +764,7 @@ fn worker_transfer_response_does_not_apply_legacy_clone_budget() {
 fn worker_transport_extracts_transient_waveform_buffers() {
     let response = WorkerResponse {
         id: 77,
-        outcome: WorkerOutcome::Success(WorkerSimulationResult::Transient {
+        outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Transient {
             time: vec![0.0, 1.0],
             waveforms: vec![WorkerWaveform {
                 name: "V(out)".to_string(),
@@ -775,7 +775,7 @@ fn worker_transport_extracts_transient_waveform_buffers() {
                 y_imag: None,
             }],
             measurements: Vec::new(),
-        }),
+        })),
     };
 
     let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
@@ -815,7 +815,7 @@ fn worker_transport_extracts_transient_waveform_buffers() {
 fn worker_transport_retains_monte_carlo_seed_and_samples() {
     let response = WorkerResponse {
         id: 91,
-        outcome: WorkerOutcome::Success(WorkerSimulationResult::MonteCarlo {
+        outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::MonteCarlo {
             seed: 77,
             runs_requested: 3,
             runs_completed: 3,
@@ -831,7 +831,7 @@ fn worker_transport_retains_monte_carlo_seed_and_samples() {
                 histogram: vec![1, 1, 1],
                 bin_edges: vec![0.9, 0.95, 1.05, 1.1],
             }],
-        }),
+        })),
     };
 
     let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
@@ -846,7 +846,7 @@ fn worker_transport_retains_monte_carlo_seed_and_samples() {
 fn worker_transport_round_trips_ac_and_noise_buffers() {
     let ac = WorkerResponse {
         id: 10,
-        outcome: WorkerOutcome::Success(WorkerSimulationResult::Ac {
+        outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Ac {
             frequencies: vec![1.0, 10.0, 100.0],
             waveforms: vec![WorkerWaveform {
                 name: "V(out)".to_string(),
@@ -857,7 +857,7 @@ fn worker_transport_round_trips_ac_and_noise_buffers() {
                 y_imag: Some(vec![-0.1, -0.2, -0.3]),
             }],
             measurements: Vec::new(),
-        }),
+        })),
     };
     let ac_transport = WorkerResponseTransport::from_response(ac.clone()).unwrap();
     assert_eq!(ac_transport.buffers.len(), 4);
@@ -865,7 +865,7 @@ fn worker_transport_round_trips_ac_and_noise_buffers() {
 
     let noise = WorkerResponse {
         id: 11,
-        outcome: WorkerOutcome::Success(WorkerSimulationResult::Noise {
+        outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Noise {
             frequencies: vec![1.0, 10.0],
             output_noise: vec![1.0e-18, 2.0e-18],
             input_noise: Some(vec![3.0e-18, 4.0e-18]),
@@ -874,7 +874,7 @@ fn worker_transport_round_trips_ac_and_noise_buffers() {
                 ("M1".to_string(), vec![0.25e-18, 0.5e-18]),
             ]),
             summary: None,
-        }),
+        })),
     };
     let noise_transport = WorkerResponseTransport::from_response(noise.clone()).unwrap();
     assert_eq!(noise_transport.buffers.len(), 5);
@@ -888,7 +888,7 @@ fn worker_transport_round_trips_ac_and_noise_buffers() {
 fn worker_transport_rejects_missing_or_mismatched_buffers() {
     let response = WorkerResponse {
         id: 12,
-        outcome: WorkerOutcome::Success(WorkerSimulationResult::Transient {
+        outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Transient {
             time: vec![0.0, 1.0],
             waveforms: vec![WorkerWaveform {
                 name: "V(out)".to_string(),
@@ -899,7 +899,7 @@ fn worker_transport_rejects_missing_or_mismatched_buffers() {
                 y_imag: None,
             }],
             measurements: Vec::new(),
-        }),
+        })),
     };
 
     let mut missing = WorkerResponseTransport::from_response(response.clone()).unwrap();

@@ -11,6 +11,12 @@
 //! to be reproducible from what it says it came from, so a source set that
 //! drifted after preparation is an error, not a silent re-resolve.
 
+// A prepared source is the sealed form of a whole engineering document, so
+// the schematic variant is inherently far larger than the symbol or results
+// ones. Exactly one exists per publication, built immediately before the run
+// that consumes it, so the size the lint measures is never multiplied.
+#![allow(clippy::large_enum_variant)]
+
 use super::*;
 
 /// Cheap, semantic-free descriptor used by command enablement and the
