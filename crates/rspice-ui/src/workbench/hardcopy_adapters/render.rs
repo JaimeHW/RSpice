@@ -70,11 +70,17 @@ const MAX_METADATA_LINES: usize = 4_096;
 const MAX_PREVIEW_BATCH_PAGES: usize = 2;
 // Browser-worker transport is a cross-target contract. Desktop builds retain
 // it for shared-source parity even though they use the in-process worker.
+#[cfg(any(test, target_arch = "wasm32"))]
 const PREVIEW_WORKER_MANIFEST_SCHEMA_VERSION: u32 = 1;
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) const MAX_PREVIEW_WORKER_MANIFEST_BYTES: usize = 16 * 1_024;
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) const MAX_PREVIEW_WORKER_RGBA_BYTES: usize = 48 * 1_048_576;
+#[cfg(any(test, target_arch = "wasm32"))]
 const MAX_PREVIEW_WORKER_TRANSFER_BYTES: usize = 48 * 1_048_576 + 16 * 1_024;
+#[cfg(any(test, target_arch = "wasm32"))]
 const PUBLICATION_WORKER_MANIFEST_SCHEMA_VERSION: u32 = 1;
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) const MAX_PUBLICATION_WORKER_MANIFEST_BYTES: usize = 4 * 1_048_576;
 const MAX_RASTER_PIXELS_PER_PAGE: u64 = 150_000_000;
 const MAX_RASTER_PIXELS_TOTAL: u64 = 300_000_000;
