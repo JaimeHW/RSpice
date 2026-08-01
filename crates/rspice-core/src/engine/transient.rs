@@ -3952,10 +3952,19 @@ impl Engine {
                     if fixed_method.is_none() {
                         trapgear.update(&new_solution, dt);
                     }
-                    let xyce_static_history_candidate = if self.config.spice_dialect
+                    let capture_xyce_static_history = self.config.spice_dialect
                         == SpiceDialect::Xyce
-                        && (xyce_one_step_order2 || circuit.has_xyce_core_inductors())
-                    {
+                        && (xyce_one_step_order2 || circuit.has_xyce_core_inductors());
+                    if capture_xyce_static_history && circuit.has_xspice_devices() {
+                        circuit.evaluate_xspice_transient_timestep_with_coefficients(
+                            t,
+                            dt,
+                            &new_solution,
+                            &coeff,
+                            xyce_one_step_order2,
+                        );
+                    }
+                    let xyce_static_history_candidate = if capture_xyce_static_history {
                         Some(self.capture_xyce_static_residual(
                             &mut circuit,
                             &mut matrix,
@@ -3997,13 +4006,17 @@ impl Engine {
                         &mut warned_dynamic_tline_breakpoint_cap,
                     );
                     if circuit.has_xspice_devices() {
-                        circuit.accept_xspice_transient_timestep_with_coefficients(
-                            t,
-                            dt,
-                            &new_solution,
-                            &coeff,
-                            xyce_one_step_order2,
-                        );
+                        if capture_xyce_static_history {
+                            circuit.accept_xspice_timestep();
+                        } else {
+                            circuit.accept_xspice_transient_timestep_with_coefficients(
+                                t,
+                                dt,
+                                &new_solution,
+                                &coeff,
+                                xyce_one_step_order2,
+                            );
+                        }
                         circuit.project_xspice_voltage_outputs(&mut new_solution, num_nodes);
                         Self::collect_xspice_runtime_breakpoints(
                             &mut circuit,
@@ -4891,12 +4904,21 @@ impl Engine {
                     if fixed_method.is_none() {
                         trapgear.update(&new_solution, dt);
                     }
-                    let xyce_static_history_candidate = if self.config.spice_dialect
+                    let capture_xyce_static_history = self.config.spice_dialect
                         == SpiceDialect::Xyce
                         && (xyce_one_step_order2
                             || xyce_promotes_order_two
-                            || circuit.has_xyce_core_inductors())
-                    {
+                            || circuit.has_xyce_core_inductors());
+                    if capture_xyce_static_history && circuit.has_xspice_devices() {
+                        circuit.evaluate_xspice_transient_timestep_with_coefficients(
+                            t,
+                            dt,
+                            &new_solution,
+                            &coeff,
+                            xyce_one_step_order2,
+                        );
+                    }
+                    let xyce_static_history_candidate = if capture_xyce_static_history {
                         Some(self.capture_xyce_static_residual(
                             &mut circuit,
                             &mut matrix,
@@ -4938,13 +4960,17 @@ impl Engine {
                         &mut warned_dynamic_tline_breakpoint_cap,
                     );
                     if circuit.has_xspice_devices() {
-                        circuit.accept_xspice_transient_timestep_with_coefficients(
-                            t,
-                            dt,
-                            &new_solution,
-                            &coeff,
-                            xyce_one_step_order2,
-                        );
+                        if capture_xyce_static_history {
+                            circuit.accept_xspice_timestep();
+                        } else {
+                            circuit.accept_xspice_transient_timestep_with_coefficients(
+                                t,
+                                dt,
+                                &new_solution,
+                                &coeff,
+                                xyce_one_step_order2,
+                            );
+                        }
                         circuit.project_xspice_voltage_outputs(&mut new_solution, num_nodes);
                         Self::collect_xspice_runtime_breakpoints(
                             &mut circuit,
@@ -5156,11 +5182,20 @@ impl Engine {
             };
             total_trap_trial_nanos += trap_trial_phase_start.elapsed().as_nanos();
 
-            let xyce_static_history_candidate = if self.config.spice_dialect == SpiceDialect::Xyce
+            let capture_xyce_static_history = self.config.spice_dialect == SpiceDialect::Xyce
                 && (xyce_one_step_order2
                     || xyce_promotes_order_two
-                    || circuit.has_xyce_core_inductors())
-            {
+                    || circuit.has_xyce_core_inductors());
+            if capture_xyce_static_history && circuit.has_xspice_devices() {
+                circuit.evaluate_xspice_transient_timestep_with_coefficients(
+                    t,
+                    dt,
+                    &new_solution,
+                    &coeff,
+                    xyce_one_step_order2,
+                );
+            }
+            let xyce_static_history_candidate = if capture_xyce_static_history {
                 Some(self.capture_xyce_static_residual(
                     &mut circuit,
                     &mut matrix,
@@ -5206,13 +5241,17 @@ impl Engine {
             let tail_phase_start = crate::time_compat::Instant::now();
             // Accept XSPICE timestep (commit state changes)
             if circuit.has_xspice_devices() {
-                circuit.accept_xspice_transient_timestep_with_coefficients(
-                    t,
-                    dt,
-                    &new_solution,
-                    &coeff,
-                    xyce_one_step_order2,
-                );
+                if capture_xyce_static_history {
+                    circuit.accept_xspice_timestep();
+                } else {
+                    circuit.accept_xspice_transient_timestep_with_coefficients(
+                        t,
+                        dt,
+                        &new_solution,
+                        &coeff,
+                        xyce_one_step_order2,
+                    );
+                }
                 circuit.project_xspice_voltage_outputs(&mut new_solution, num_nodes);
                 Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop);
             }
