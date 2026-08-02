@@ -657,6 +657,7 @@ fn render_pane_viewer(
         );
         return;
     };
+    let viewer = bound_viewer_projection(&app.state, viewer);
     if !super::viewer_is_available(&app.state, viewer) {
         unavailable_surface(
             ui,
@@ -693,9 +694,22 @@ fn select_pane_context(state: &mut AppState, pane: &Pane) -> Result<(), String> 
         .visualization_studio
         .selected_viewer_document = pane.viewer_id.clone();
     if let Some(viewer) = renderer_for_viewer_document(&pane.viewer_id) {
-        state.ui.results.viewer = viewer;
+        state.ui.results.viewer = bound_viewer_projection(state, viewer);
     }
     Ok(())
+}
+
+fn bound_viewer_projection(state: &AppState, viewer: ResultViewer) -> ResultViewer {
+    if viewer == ResultViewer::Bode
+        && state
+            .simulation
+            .active_analysis()
+            .is_some_and(super::bode::ordinary_noise_spectrum_is_renderable)
+    {
+        ResultViewer::NoiseContrib
+    } else {
+        viewer
+    }
 }
 
 fn select_pane_binding(state: &mut AppState, pane: &Pane) -> Result<(), String> {
@@ -1052,6 +1066,28 @@ mod tests {
         assert_eq!(
             pane_viewer(false, Some(ResultViewer::Eye), "viewer-manifest"),
             None
+        );
+    }
+
+    #[test]
+    fn retained_frequency_document_restores_its_noise_projection() {
+        let noise = AnalysisResult::new(3, AnalysisType::Noise, "noise").with_waveforms(vec![
+            crate::state::WaveformData::new(
+                "inoise",
+                vec![1.0, 10.0],
+                vec![1.0e-9, 2.0e-9],
+                "#fff",
+            ),
+        ]);
+        let mut state = AppState::default();
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(noise);
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+
+        assert_eq!(
+            bound_viewer_projection(&state, ResultViewer::Bode),
+            ResultViewer::NoiseContrib
         );
     }
 

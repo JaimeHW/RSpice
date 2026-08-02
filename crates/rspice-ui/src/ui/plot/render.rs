@@ -314,6 +314,11 @@ fn plot_accessibility_label(spec: &PlotSpec<'_>, cursors: Option<&CursorPair>) -
         .iter()
         .filter(|trace| !trace.x.is_empty() && !trace.y.is_empty())
         .count();
+    let trace_summary = if trace_count == 0 && spec.accessible_detail.is_some() {
+        "custom-rendered engineering data".to_owned()
+    } else {
+        counted(trace_count, "visible trace", "visible traces")
+    };
     let right_axis = spec.y_right.as_ref().map_or_else(String::new, |(axis, _)| {
         format!(" Right Y axis {}.", axis_accessibility_range(axis))
     });
@@ -330,10 +335,14 @@ fn plot_accessibility_label(spec: &PlotSpec<'_>, cursors: Option<&CursorPair>) -
     let horizontal_cursor = spec.horizontal_cursor.map_or_else(String::new, |value| {
         format!(" Horizontal cursor {}.", spec.y.format_display_value(value))
     });
+    let custom_detail = spec
+        .accessible_detail
+        .map_or_else(String::new, |detail| format!(" {detail}."));
     format!(
-        "{}. {}. X axis {}. Left Y axis {}.{} {}. {}.{}{} Drag to pan, use the mouse wheel to zoom, Shift-drag or right-drag to zoom a region, and double-click to fit the data.",
+        "{}.{} {}. X axis {}. Left Y axis {}.{} {}. {}.{}{} Drag to pan, use the mouse wheel to zoom, Shift-drag or right-drag to zoom a region, and double-click to fit the data.",
         spec.accessible_name,
-        counted(trace_count, "visible trace", "visible traces"),
+        custom_detail,
+        trace_summary,
         axis_accessibility_range(&spec.x),
         axis_accessibility_range(&spec.y),
         right_axis,
@@ -1122,6 +1131,23 @@ mod tests {
         assert!(label.contains(&format!("Left Y axis {} to 5 dB.", tick_label(-5.0))));
         assert!(label.contains("1 marker."));
         assert!(label.contains("Cursor A 2, cursor B 5, delta 3."));
+    }
+
+    #[test]
+    fn accessibility_label_describes_custom_underlay_data_without_claiming_zero_data() {
+        let spec = PlotSpec::new(
+            Axis::linear(0.0, 2.0, "UI"),
+            XScale::Linear,
+            Axis::linear(-1.0, 1.0, "V"),
+        )
+        .accessible_name("Eye diagram")
+        .accessible_detail("34 folded acquisitions; compliance mask visible");
+
+        let label = plot_accessibility_label(&spec, None);
+
+        assert!(label.contains("34 folded acquisitions; compliance mask visible"));
+        assert!(label.contains("custom-rendered engineering data"));
+        assert!(!label.contains("0 visible traces"));
     }
 
     #[test]

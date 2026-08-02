@@ -52,18 +52,37 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     let ui_count = f64::from(data.ui_count.max(1));
     let swing = (data.v_high - data.v_low).abs().max(1e-9);
-    let y0 = data.v_low - swing * 0.18;
-    let y1 = data.v_high + swing * 0.18;
+    let auto_y0 = data.v_low - swing * 0.18;
+    let auto_y1 = data.v_high + swing * 0.18;
+    let view = state.ui.results.plot_view(super::ResultViewer::Eye, 0);
+    let (x0, x1) = view.x.unwrap_or((0.0, ui_count));
+    let (y0, y1) = view.y.unwrap_or((auto_y0, auto_y1));
 
     let half_ticks: Vec<f64> = (0..=(ui_count * 2.0) as i64)
         .map(|i| i as f64 * 0.5)
         .collect();
-    let mut spec = PlotSpec::new(
-        Axis::with_ticks(0.0, ui_count, "UI", &half_ticks),
-        XScale::Linear,
-        Axis::linear(y0, y1, "V"),
-    )
-    .accessible_name("Eye diagram");
+    let x_axis = if view.x.is_some() {
+        Axis::linear_with(x0, x1, "UI", 6)
+    } else {
+        Axis::with_ticks(x0, x1, "UI", &half_ticks)
+    };
+    let accessible_detail = if eye.mask.enabled {
+        format!(
+            "{} folded acquisitions; compliance mask {}; {} violations from {} tested samples",
+            data.traces.len(),
+            if eye.show_mask { "visible" } else { "hidden" },
+            eye.mask.violation_count,
+            eye.mask.total_samples
+        )
+    } else {
+        format!(
+            "{} folded acquisitions; no compliance mask",
+            data.traces.len()
+        )
+    };
+    let mut spec = PlotSpec::new(x_axis, XScale::Linear, Axis::linear(y0, y1, "V"))
+        .accessible_name("Eye diagram")
+        .accessible_detail(&accessible_detail);
 
     // Bake (or fetch) the density texture for the current plot size. The
     // bake walks every acquisition once; frames just draw the quad.
@@ -74,12 +93,20 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     ];
     let revision = eye.data_revision();
     let trace_color = c.traces[0];
+    let x_range_bits = [x0.to_bits(), x1.to_bits()];
+    let y_range_bits = [y0.to_bits(), y1.to_bits()];
     let needs_bake = match &state.ui.results.eye_texture {
-        Some(tex) => tex.revision != revision || tex.size != tex_size || tex.color != trace_color,
+        Some(tex) => {
+            tex.revision != revision
+                || tex.size != tex_size
+                || tex.color != trace_color
+                || tex.x_range_bits != x_range_bits
+                || tex.y_range_bits != y_range_bits
+        }
         None => true,
     };
     if needs_bake {
-        let image = rasterize_density(data, ui_count, y0, y1, tex_size, trace_color);
+        let image = rasterize_density(data, x0, x1, y0, y1, tex_size, trace_color);
         let handle =
             ui.ctx()
                 .load_texture("rspice.eye.density", image, egui::TextureOptions::LINEAR);
@@ -87,6 +114,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             revision,
             size: tex_size,
             color: trace_color,
+            x_range_bits,
+            y_range_bits,
             handle,
         });
     }
@@ -140,14 +169,22 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         }
     }));
 
-    plot::show(ui, &spec, &mut state.ui.results.cache, None, None);
+    let response = plot::show(ui, &spec, &mut state.ui.results.cache, None, None);
+    if response.view.any() {
+        state
+            .ui
+            .results
+            .plot_view_mut(super::ResultViewer::Eye, 0)
+            .apply(&response.view);
+    }
 }
 
 /// Rasterize every acquisition into an alpha-accumulated density image —
 /// the same visual as stroking each at ~18/255 alpha, computed once.
 fn rasterize_density(
     data: &EyeData,
-    ui_count: f64,
+    x0: f64,
+    x1: f64,
     y0: f64,
     y1: f64,
     size: [usize; 2],
@@ -155,18 +192,20 @@ fn rasterize_density(
 ) -> egui::ColorImage {
     let [width, height] = size;
     let mut coverage = vec![0.0f32; width * height];
-    let x_scale = width as f64 / ui_count.max(1e-12);
+    let x_scale = width as f64 / (x1 - x0).max(1e-12);
     let y_span = (y1 - y0).max(1e-12);
     let y_scale = height as f64 / y_span;
 
     for trace in &data.traces {
         let n = trace.time.len().min(trace.amplitude.len());
         for i in 1..n {
-            let ax = (trace.time[i - 1] * x_scale) as f32;
+            let ax = ((trace.time[i - 1] - x0) * x_scale) as f32;
             let ay = ((y1 - trace.amplitude[i - 1]) * y_scale) as f32;
-            let bx = (trace.time[i] * x_scale) as f32;
+            let bx = ((trace.time[i] - x0) * x_scale) as f32;
             let by = ((y1 - trace.amplitude[i]) * y_scale) as f32;
-            accumulate_line(&mut coverage, width, height, ax, ay, bx, by);
+            if let Some((ax, ay, bx, by)) = clip_line_to_raster(ax, ay, bx, by, width, height) {
+                accumulate_line(&mut coverage, width, height, ax, ay, bx, by);
+            }
         }
     }
 
@@ -179,6 +218,57 @@ fn rasterize_density(
         })
         .collect();
     egui::ColorImage::new([width, height], pixels)
+}
+
+fn clip_line_to_raster(
+    ax: f32,
+    ay: f32,
+    bx: f32,
+    by: f32,
+    width: usize,
+    height: usize,
+) -> Option<(f32, f32, f32, f32)> {
+    if width == 0 || height == 0 || ![ax, ay, bx, by].iter().all(|value| value.is_finite()) {
+        return None;
+    }
+    // Clip in f64 even though raster coordinates are f32. Deep plot zoom can
+    // place segment endpoints billions of pixels off-screen; f32 cannot then
+    // preserve the few-pixel difference between the two clipping parameters.
+    let (ax64, ay64, bx64, by64) = (ax as f64, ay as f64, bx as f64, by as f64);
+    let dx = bx64 - ax64;
+    let dy = by64 - ay64;
+    let max_x = width.saturating_sub(1) as f64;
+    let max_y = height.saturating_sub(1) as f64;
+    let mut enter = 0.0f64;
+    let mut leave = 1.0f64;
+    for (p, q) in [
+        (-dx, ax64),
+        (dx, max_x - ax64),
+        (-dy, ay64),
+        (dy, max_y - ay64),
+    ] {
+        if p.abs() <= f64::EPSILON {
+            if q < 0.0 {
+                return None;
+            }
+            continue;
+        }
+        let ratio = q / p;
+        if p < 0.0 {
+            enter = enter.max(ratio);
+        } else {
+            leave = leave.min(ratio);
+        }
+        if enter > leave {
+            return None;
+        }
+    }
+    Some((
+        (ax64 + enter * dx) as f32,
+        (ay64 + enter * dy) as f32,
+        (ax64 + leave * dx) as f32,
+        (ay64 + leave * dy) as f32,
+    ))
 }
 
 /// Anti-aliased DDA: walk the segment one pixel-step at a time, splitting
@@ -287,4 +377,31 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ui,
         "Acquisitions folded at the configured bit period; thresholds 20/50/80 %.",
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analysis::eye_diagram::EyeTrace;
+
+    #[test]
+    fn density_raster_respects_the_current_viewport() {
+        let mut data = EyeData::new(1.0e-9, 2);
+        data.add_trace(EyeTrace::new(vec![0.25, 0.75], vec![0.0, 1.0]));
+
+        let visible = rasterize_density(&data, 0.0, 1.0, -0.5, 1.5, [32, 32], egui::Color32::WHITE);
+        let outside = rasterize_density(&data, 1.1, 2.0, -0.5, 1.5, [32, 32], egui::Color32::WHITE);
+
+        assert!(visible.pixels.iter().any(|pixel| pixel.a() > 0));
+        assert!(outside.pixels.iter().all(|pixel| pixel.a() == 0));
+    }
+
+    #[test]
+    fn density_raster_clips_far_offscreen_segments_before_walking_pixels() {
+        let clipped = clip_line_to_raster(-1.0e9, 16.0, 1.0e9, 16.0, 32, 32)
+            .expect("crossing segment remains visible");
+
+        assert_eq!(clipped, (0.0, 16.0, 31.0, 16.0));
+        assert!(clip_line_to_raster(-100.0, -50.0, -10.0, -5.0, 32, 32).is_none());
+    }
 }

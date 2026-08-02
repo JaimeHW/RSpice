@@ -41,6 +41,42 @@ fn active_data(state: &AppState) -> Option<PoleZeroData> {
     Some(data)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PoleStabilityVerdict {
+    Stable,
+    Marginal,
+    Unstable,
+}
+
+impl PoleStabilityVerdict {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Stable => "stable",
+            Self::Marginal => "marginal",
+            Self::Unstable => "unstable",
+        }
+    }
+}
+
+fn pole_stability(data: &PoleZeroData) -> PoleStabilityVerdict {
+    let mut marginal = false;
+    for pole in data.roots.iter().filter(|root| root.is_pole()) {
+        let scale = pole.real.abs().max(pole.imag.abs()).max(1.0);
+        let imaginary_axis_tolerance = 64.0 * f64::EPSILON * scale;
+        if pole.real > imaginary_axis_tolerance {
+            return PoleStabilityVerdict::Unstable;
+        }
+        if pole.real.abs() <= imaginary_axis_tolerance {
+            marginal = true;
+        }
+    }
+    if marginal {
+        PoleStabilityVerdict::Marginal
+    } else {
+        PoleStabilityVerdict::Stable
+    }
+}
+
 // ---------------------------------------------------------------------------
 // center view
 // ---------------------------------------------------------------------------
@@ -83,13 +119,23 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         }
     }
     let extent = extent * 1.25;
+    let view = state.ui.results.plot_view(super::ResultViewer::PoleZero, 0);
+    let (x0, x1) = view.x.unwrap_or((-extent, extent));
+    let (y0, y1) = view.y.unwrap_or((-extent, extent));
 
+    let pole_count = data.roots.iter().filter(|root| root.is_pole()).count();
+    let zero_count = data.roots.len().saturating_sub(pole_count);
+    let accessible_detail = format!(
+        "{pole_count} poles and {zero_count} zeros; {} pole stability verdict; stable left half-plane shaded",
+        pole_stability(&data).label()
+    );
     let mut spec = PlotSpec::new(
-        Axis::linear(-extent, extent, "σ"),
+        Axis::linear(x0, x1, "σ"),
         XScale::Linear,
-        Axis::linear(-extent, extent, "jω"),
+        Axis::linear(y0, y1, "jω"),
     )
-    .accessible_name("Pole-zero plot");
+    .accessible_name("Pole-zero plot")
+    .accessible_detail(&accessible_detail);
     spec.ref_lines.push(plot::RefLine { y: 0.0 });
     // Stable left half-plane.
     spec.bands.push(plot::Band {
@@ -137,10 +183,18 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     );
 
     let response = plot::show(&mut plot_ui, &spec, &mut state.ui.results.cache, None, None);
+    if response.view.any() {
+        let change = super::square_xy_view_change((x0, x1), (y0, y1), response.view);
+        state
+            .ui
+            .results
+            .plot_view_mut(super::ResultViewer::PoleZero, 0)
+            .apply(&change);
+    }
 
     // Nearest root on hover, click to pin: σ, jω, natural frequency, and Q
     // turn the s-plane picture into numbers.
-    let ranges = ((-extent, extent), (-extent, extent));
+    let ranges = ((x0, x1), (y0, y1));
     let mut hovered: Option<(usize, usize)> = None;
     if let Some(pointer) = response.response.hover_pos()
         && response.plot_rect.contains(pointer)
@@ -237,16 +291,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     };
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
 
-    let unstable = data
-        .roots
-        .iter()
-        .any(|root| root.is_pole() && root.real > 0.0);
+    let verdict = pole_stability(&data);
     let mut rows: Vec<(String, String, bool)> = vec![
-        (
-            "Verdict".to_owned(),
-            if unstable { "unstable" } else { "stable" }.to_owned(),
-            true,
-        ),
+        ("Verdict".to_owned(), verdict.label().to_owned(), true),
         ("Gain".to_owned(), format!("{:.4}", data.gain), false),
     ];
     let mut pole_index = 0usize;
@@ -282,7 +329,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     super::stat_table(ui, &row_refs);
     super::panel_note(
         ui,
-        "Crosses are poles, circles are zeros; the shaded half-plane is stable.",
+        "Crosses are poles and circles are zeros. The shaded left half-plane is asymptotically stable; poles on the imaginary axis are marginal.",
     );
 }
 
@@ -337,5 +384,32 @@ mod tests {
         assert_eq!((data.roots[1].real, data.roots[1].imag), (-10.0, -20.0));
         assert!(data.roots[2].is_zero());
         assert_eq!((data.roots[2].real, data.roots[2].imag), (-3.0, 0.0));
+    }
+
+    #[test]
+    fn imaginary_axis_poles_are_marginal_not_stable() {
+        let mut data = PoleZeroData::new("axis pole");
+        data.roots.push(ComplexRoot::pole(0.0, 10.0));
+        data.roots.push(ComplexRoot::pole(0.0, -10.0));
+
+        assert_eq!(pole_stability(&data), PoleStabilityVerdict::Marginal);
+    }
+
+    #[test]
+    fn right_half_plane_pole_overrides_marginal_poles() {
+        let mut data = PoleZeroData::new("unstable");
+        data.roots.push(ComplexRoot::pole(0.0, 10.0));
+        data.roots.push(ComplexRoot::pole(0.5, 0.0));
+
+        assert_eq!(pole_stability(&data), PoleStabilityVerdict::Unstable);
+    }
+
+    #[test]
+    fn strictly_left_half_plane_poles_are_stable() {
+        let mut data = PoleZeroData::new("stable");
+        data.roots.push(ComplexRoot::pole(-0.5, 0.0));
+        data.roots.push(ComplexRoot::pole(-2.0, 10.0));
+
+        assert_eq!(pole_stability(&data), PoleStabilityVerdict::Stable);
     }
 }

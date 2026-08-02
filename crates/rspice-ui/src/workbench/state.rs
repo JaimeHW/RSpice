@@ -1852,8 +1852,10 @@ const fn result_viewer_document_id(viewer: super::ResultViewer) -> Option<&'stat
     Some(match viewer {
         super::ResultViewer::Manifest => return None,
         super::ResultViewer::Waves => "viewer-waveform",
-        super::ResultViewer::Bode | super::ResultViewer::Nyquist => "viewer-bode",
-        super::ResultViewer::Fft | super::ResultViewer::NoiseContrib => "viewer-spectrum",
+        super::ResultViewer::Bode
+        | super::ResultViewer::Nyquist
+        | super::ResultViewer::NoiseContrib => "viewer-bode",
+        super::ResultViewer::Fft => "viewer-spectrum",
         super::ResultViewer::Contribution => "viewer-contribution",
         super::ResultViewer::TransferFunction => "viewer-transfer-function",
         super::ResultViewer::Eye => "eye-viewer",

@@ -42,12 +42,12 @@ use crate::results::visualization_raster::{
     ResolvedCartesianLineScene, VisualizationRasterError, resolve_cartesian_line_scene,
 };
 use crate::state::{
-    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, Bus, BusTap, Component,
-    ComponentType, DesignNote, DesignSheet, DocumentationShape, DrawingSheetBorderTemplate,
-    DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, Junction, NetLabel, Point,
-    ResolvedSymbolIssueKind, ResolvedSymbolSource, SchematicSheetFormat, SchematicState, Selection,
-    SheetCatalog, SheetId, SimulationRun, SimulationState, SymbolDocument, SymbolResolver,
-    SymbolShape, ViewType, WaveformData, Wire,
+    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType, Bus, BusTap,
+    Component, ComponentType, DesignNote, DesignSheet, DocumentationShape,
+    DrawingSheetBorderTemplate, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, Junction,
+    NetLabel, Point, ResolvedSymbolIssueKind, ResolvedSymbolSource, SchematicSheetFormat,
+    SchematicState, Selection, SheetCatalog, SheetId, SimulationRun, SimulationState,
+    SymbolDocument, SymbolResolver, SymbolShape, ViewType, WaveformData, Wire,
 };
 use crate::workbench::AppState;
 
@@ -632,11 +632,14 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
         );
         if source_key == result_key {
             require_active_result_document(state, run.dataset_id)?;
-            let analysis_index = state.simulation.active_analysis_idx.ok_or_else(|| {
-                HardcopySourceError::UnretainedResult(
-                    "no active analysis is selected in the active terminal dataset".to_owned(),
-                )
-            })?;
+            let viewer = state.ui.results.viewer;
+            let analysis_index =
+                quick_result_analysis_index(state, run, viewer).ok_or_else(|| {
+                    HardcopySourceError::UnretainedResult(format!(
+                        "no retained analysis can provide exact evidence for {}",
+                        viewer.label()
+                    ))
+                })?;
             let analysis = run.analyses.get(analysis_index).ok_or_else(|| {
                 HardcopySourceError::UnretainedResult(format!(
                     "active analysis index {analysis_index} is not retained"
@@ -985,8 +988,11 @@ fn quick_result_availability(
         // must not require an arbitrarily selected analysis.
         return RetainedHardcopySourceAvailability::Available;
     }
-    let Some(index) = state.simulation.active_analysis_idx else {
-        return unavailable("no active analysis is selected".to_owned());
+    let Some(index) = quick_result_analysis_index(state, run, viewer) else {
+        return unavailable(format!(
+            "no retained analysis can provide exact evidence for {}",
+            viewer.label()
+        ));
     };
     let Some(analysis) = run.analyses.get(index) else {
         return unavailable(format!("active analysis index {index} is not retained"));
@@ -1034,7 +1040,7 @@ fn quick_result_availability(
                     Some(AnalysisResultPayload::OperatingPoint { .. })
                 )
         }
-        ResultViewer::NoiseContrib => analysis.noise_summary.is_some(),
+        ResultViewer::NoiseContrib => ordinary_noise_spectrum_is_renderable(analysis),
         ResultViewer::Contribution => matches!(
             analysis.result_payload.as_ref(),
             Some(AnalysisResultPayload::Sensitivity { .. })
@@ -1068,6 +1074,102 @@ fn quick_result_availability(
             viewer.label()
         ))
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RetainedNoiseReference {
+    Input,
+    Output,
+}
+
+fn retained_noise_reference(name: &str) -> Option<RetainedNoiseReference> {
+    let name = name
+        .trim()
+        .to_ascii_lowercase()
+        .replace([' ', '-', '.'], "");
+    if matches!(
+        name.as_str(),
+        "inoise"
+            | "inoise_spectrum"
+            | "inoisespectrum"
+            | "v(inoise)"
+            | "v(inoise_spectrum)"
+            | "v(inoisespectrum)"
+    ) {
+        Some(RetainedNoiseReference::Input)
+    } else if matches!(
+        name.as_str(),
+        "onoise"
+            | "onoise_spectrum"
+            | "onoisespectrum"
+            | "v(onoise)"
+            | "v(onoise_spectrum)"
+            | "v(onoisespectrum)"
+    ) {
+        Some(RetainedNoiseReference::Output)
+    } else {
+        None
+    }
+}
+
+fn retained_noise_contributor(name: &str) -> bool {
+    let name = name.trim().to_ascii_lowercase();
+    name.starts_with("noise(") && name.ends_with(')')
+}
+
+fn retained_noise_waveform_is_renderable(waveform: &WaveformData) -> bool {
+    if waveform.x.len() != waveform.y.len() || waveform.x.len() < 2 {
+        return false;
+    }
+    if waveform
+        .y
+        .iter()
+        .any(|density| !density.is_finite() || *density <= 0.0)
+    {
+        return false;
+    }
+    let mut previous = None;
+    for frequency in waveform.x.iter().copied() {
+        if !frequency.is_finite()
+            || frequency <= 0.0
+            || previous.is_some_and(|previous| frequency <= previous)
+        {
+            return false;
+        }
+        previous = Some(frequency);
+    }
+    true
+}
+
+fn ordinary_noise_spectrum_is_renderable(analysis: &AnalysisResult) -> bool {
+    analysis.analysis_type == AnalysisType::Noise
+        && analysis.waveforms.iter().any(|waveform| {
+            retained_noise_reference(&waveform.name).is_some()
+                && retained_noise_waveform_is_renderable(waveform)
+        })
+}
+
+fn quick_result_analysis_index(
+    state: &AppState,
+    run: &SimulationRun,
+    viewer: ResultViewer,
+) -> Option<usize> {
+    if viewer != ResultViewer::NoiseContrib {
+        return state.simulation.active_analysis_idx;
+    }
+    state
+        .simulation
+        .active_analysis_idx
+        .filter(|&index| {
+            run.analyses
+                .get(index)
+                .is_some_and(ordinary_noise_spectrum_is_renderable)
+        })
+        .or_else(|| {
+            run.analyses
+                .iter()
+                .position(ordinary_noise_spectrum_is_renderable)
+        })
 }
 
 fn studio_pane_availability(

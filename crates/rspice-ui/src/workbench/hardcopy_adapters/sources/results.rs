@@ -526,7 +526,7 @@ pub(crate) fn resolve_results_quick_view_source(
             run,
         );
     }
-    let active = active_quick_result(source.state)?;
+    let active = active_quick_result(source.state, presentation.viewer)?;
     resolve_results_quick_view_parts(
         source.source_key,
         source.project_id,
@@ -566,8 +566,10 @@ pub(super) fn resolve_results_quick_view_parts(
         ResultViewer::Smith => {
             HardcopySemanticDocument::Plot(quick_complex_plot(active, ResultViewer::Smith)?)
         }
+        ResultViewer::NoiseContrib => {
+            HardcopySemanticDocument::Plot(quick_noise_spectrum_plot(active)?)
+        }
         ResultViewer::Op
-        | ResultViewer::NoiseContrib
         | ResultViewer::Contribution
         | ResultViewer::TransferFunction
         | ResultViewer::Specs
@@ -799,12 +801,14 @@ pub(super) struct ActiveQuickResult<'a> {
 #[cfg(test)]
 pub(super) fn active_quick_result(
     state: &AppState,
+    viewer: ResultViewer,
 ) -> Result<ActiveQuickResult<'_>, HardcopySourceError> {
     let run = active_terminal_run(state)?;
-    let analysis_index = state.simulation.active_analysis_idx.ok_or_else(|| {
-        HardcopySourceError::UnretainedResult(
-            "no active analysis is selected in the active terminal dataset".to_owned(),
-        )
+    let analysis_index = quick_result_analysis_index(state, run, viewer).ok_or_else(|| {
+        HardcopySourceError::UnretainedResult(format!(
+            "no retained analysis can provide exact evidence for {}",
+            viewer.label()
+        ))
     })?;
     let analysis = run.analyses.get(analysis_index).ok_or_else(|| {
         HardcopySourceError::UnretainedResult(format!(
@@ -848,6 +852,79 @@ pub(super) fn quick_waveform_plot(
         })
         .collect();
     quick_plot_from_series(viewer, "Results", 0, series)
+}
+
+fn quick_noise_spectrum_plot(
+    active: ActiveQuickResult<'_>,
+) -> Result<SemanticPlot, HardcopySourceError> {
+    if !ordinary_noise_spectrum_is_renderable(active.analysis) {
+        return Err(HardcopySourceError::MissingViewerEvidence(
+            "ordinary noise spectrum",
+        ));
+    }
+
+    let input = active
+        .analysis
+        .waveforms
+        .iter()
+        .enumerate()
+        .find(|(_, waveform)| {
+            retained_noise_reference(&waveform.name) == Some(RetainedNoiseReference::Input)
+                && retained_noise_waveform_is_renderable(waveform)
+        });
+    let (reference, anchor_index, anchor) = if let Some((index, waveform)) = input {
+        (RetainedNoiseReference::Input, index, waveform)
+    } else {
+        let (index, waveform) = active
+            .analysis
+            .waveforms
+            .iter()
+            .enumerate()
+            .find(|(_, waveform)| {
+                retained_noise_reference(&waveform.name) == Some(RetainedNoiseReference::Output)
+                    && retained_noise_waveform_is_renderable(waveform)
+            })
+            .ok_or(HardcopySourceError::MissingViewerEvidence(
+                "ordinary noise spectrum",
+            ))?;
+        (RetainedNoiseReference::Output, index, waveform)
+    };
+
+    let source_waveforms = if reference == RetainedNoiseReference::Input {
+        vec![(anchor_index, anchor)]
+    } else {
+        active
+            .analysis
+            .waveforms
+            .iter()
+            .enumerate()
+            .filter(|(_, waveform)| {
+                retained_noise_reference(&waveform.name) != Some(RetainedNoiseReference::Input)
+                    && (retained_noise_reference(&waveform.name)
+                        == Some(RetainedNoiseReference::Output)
+                        || retained_noise_contributor(&waveform.name))
+                    && retained_noise_waveform_is_renderable(waveform)
+                    && waveform.x.as_slice() == anchor.x.as_slice()
+            })
+            .collect()
+    };
+    let series = source_waveforms
+        .into_iter()
+        .map(|(waveform_index, waveform)| QuickResultSeries {
+            identity: format!(
+                "{}:{}:{}:{}:noise-amplitude-density:{waveform_index}",
+                active.run.dataset_id, active.run.run_id, active.analysis.id, waveform.name
+            ),
+            label: waveform.name.clone(),
+            points: waveform
+                .x
+                .iter()
+                .copied()
+                .zip(waveform.y.iter().map(|density| density.sqrt() * 1.0e9))
+                .collect(),
+        })
+        .collect();
+    quick_plot_from_series(ResultViewer::NoiseContrib, "Results", 0, series)
 }
 
 #[cfg(test)]
@@ -1328,6 +1405,7 @@ pub(super) const fn is_curve_viewer(viewer: ResultViewer) -> bool {
         viewer,
         ResultViewer::Waves
             | ResultViewer::Bode
+            | ResultViewer::NoiseContrib
             | ResultViewer::Fft
             | ResultViewer::Eye
             | ResultViewer::Hist

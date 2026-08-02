@@ -1191,6 +1191,7 @@ fn viewer_partition_covers_every_results_family() {
     let curve_viewers = [
         ResultViewer::Waves,
         ResultViewer::Bode,
+        ResultViewer::NoiseContrib,
         ResultViewer::Fft,
         ResultViewer::Eye,
         ResultViewer::Hist,
@@ -1199,7 +1200,6 @@ fn viewer_partition_covers_every_results_family() {
     ];
     let summary_viewers = [
         ResultViewer::Op,
-        ResultViewer::NoiseContrib,
         ResultViewer::Contribution,
         ResultViewer::TransferFunction,
         ResultViewer::Specs,
@@ -1264,6 +1264,119 @@ fn quick_view_reads_exact_active_retained_waveform_without_report_reference() {
             })
     );
     assert_eq!(resolved.authority().revision(), ObjectRevision::INITIAL);
+}
+
+#[test]
+fn noise_quick_view_exports_retained_psd_as_amplitude_density_without_summary() {
+    let analysis = AnalysisResult::new(9, AnalysisType::Noise, "Noise").with_waveforms(vec![
+        WaveformData::new(
+            "onoise",
+            vec![1.0, 10.0, 100.0],
+            vec![1.0e-18, 4.0e-18, 9.0e-18],
+            "#00ffff",
+        ),
+        WaveformData::new(
+            "noise(R1)",
+            vec![1.0, 10.0, 100.0],
+            vec![0.25e-18, 1.0e-18, 2.25e-18],
+            "#ff00ff",
+        ),
+    ]);
+    let state = quick_view_state(analysis, ResultViewer::NoiseContrib);
+    let run = state.simulation.active_run().unwrap();
+
+    assert_eq!(
+        quick_result_availability(&state, run),
+        RetainedHardcopySourceAvailability::Available
+    );
+    let resolved = resolve_quick_view(&state).unwrap();
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        panic!("expected semantic noise plot")
+    };
+    assert_eq!(plot.viewer, ResultViewer::NoiseContrib);
+    assert_eq!(plot.traces.len(), 2);
+    let samples = plot.traces[0]
+        .source_samples
+        .iter()
+        .map(|(x, y)| (f64::from_bits(*x), f64::from_bits(*y)))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        samples.iter().map(|sample| sample.0).collect::<Vec<_>>(),
+        [1.0, 10.0, 100.0]
+    );
+    for (actual, expected) in samples.iter().map(|sample| sample.1).zip([1.0, 2.0, 3.0]) {
+        assert!((actual - expected).abs() < 1.0e-12);
+    }
+}
+
+#[test]
+fn noise_quick_view_rejects_contributor_only_evidence() {
+    let analysis = AnalysisResult::new(10, AnalysisType::Noise, "Noise").with_waveforms(vec![
+        WaveformData::new(
+            "noise(R1)",
+            vec![1.0, 10.0],
+            vec![1.0e-18, 4.0e-18],
+            "#ff00ff",
+        ),
+    ]);
+    let state = quick_view_state(analysis, ResultViewer::NoiseContrib);
+    let run = state.simulation.active_run().unwrap();
+
+    assert!(!quick_result_availability(&state, run).is_available());
+    assert!(matches!(
+        resolve_quick_view(&state),
+        Err(HardcopySourceError::UnretainedResult(reason))
+            if reason.contains("no retained analysis can provide exact evidence")
+    ));
+}
+
+#[test]
+fn noise_quick_view_prefers_input_reference_exactly_like_the_results_instrument() {
+    let analysis = AnalysisResult::new(11, AnalysisType::Noise, "Noise").with_waveforms(vec![
+        WaveformData::new(
+            "onoise",
+            vec![1.0, 10.0],
+            vec![100.0e-18, 400.0e-18],
+            "#00ffff",
+        ),
+        WaveformData::new("inoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#ff00ff"),
+    ]);
+    let state = quick_view_state(analysis, ResultViewer::NoiseContrib);
+
+    let resolved = resolve_quick_view(&state).unwrap();
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        panic!("expected semantic noise plot")
+    };
+    assert_eq!(plot.traces.len(), 1);
+    assert_eq!(plot.traces[0].label, "inoise");
+    let density = f64::from_bits(plot.traces[0].source_samples[1].1);
+    assert!((density - 2.0).abs() < 1.0e-12);
+}
+
+#[test]
+fn noise_quick_view_falls_back_to_the_first_renderable_noise_analysis() {
+    let mut state = quick_view_state(
+        AnalysisResult::new(12, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#00ffff"),
+        ]),
+        ResultViewer::NoiseContrib,
+    );
+    state.simulation.active_run_mut().unwrap().analyses.push(
+        AnalysisResult::new(13, AnalysisType::Noise, "Noise").with_waveforms(vec![
+            WaveformData::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#ff00ff"),
+        ]),
+    );
+    let run = state.simulation.active_run().unwrap();
+
+    assert_eq!(
+        quick_result_availability(&state, run),
+        RetainedHardcopySourceAvailability::Available
+    );
+    let resolved = resolve_quick_view(&state).unwrap();
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        panic!("expected semantic noise plot")
+    };
+    assert_eq!(plot.traces[0].label, "onoise");
 }
 
 #[test]

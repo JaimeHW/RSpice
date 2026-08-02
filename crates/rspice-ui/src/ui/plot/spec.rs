@@ -355,6 +355,10 @@ pub type Underlay<'a> = Box<dyn Fn(&egui::Painter, &PlotMapper) + 'a>;
 pub struct PlotSpec<'a> {
     /// Concise screen-reader name for this engineering graphic.
     pub accessible_name: &'a str,
+    /// Optional viewer-owned description for data painted by a custom
+    /// underlay rather than by [`Trace`] entries (for example eye-density
+    /// acquisitions and a compliance mask).
+    pub accessible_detail: Option<&'a str>,
     /// X axis.
     pub x: Axis,
     /// X scale (linear or log decades).
@@ -402,6 +406,7 @@ impl<'a> PlotSpec<'a> {
     pub fn new(x: Axis, x_scale: XScale, y: Axis) -> Self {
         Self {
             accessible_name: "Simulation results plot",
+            accessible_detail: None,
             x,
             x_scale,
             y,
@@ -426,6 +431,13 @@ impl<'a> PlotSpec<'a> {
     /// Set the screen-reader name for this engineering graphic.
     pub fn accessible_name(mut self, name: &'a str) -> Self {
         self.accessible_name = name;
+        self
+    }
+
+    /// Describe meaningful engineering data rendered by a custom underlay.
+    #[must_use]
+    pub fn accessible_detail(mut self, detail: &'a str) -> Self {
+        self.accessible_detail = (!detail.trim().is_empty()).then_some(detail);
         self
     }
 

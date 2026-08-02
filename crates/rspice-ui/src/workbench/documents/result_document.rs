@@ -171,7 +171,7 @@ pub enum ResultViewer {
     Hist,
     /// Per-device operating-point inspector (Spectre-style OP info).
     Op,
-    /// Ranked band-integrated noise contributors.
+    /// Ordinary-noise root spectral density with contributor evidence.
     NoiseContrib,
     /// Ranked signed parameter-sensitivity contributions.
     Contribution,
@@ -1087,6 +1087,8 @@ pub struct EyeTexture {
     pub(crate) revision: u64,
     pub(crate) size: [usize; 2],
     pub(crate) color: egui::Color32,
+    pub(crate) x_range_bits: [u64; 2],
+    pub(crate) y_range_bits: [u64; 2],
     pub(crate) handle: egui::TextureHandle,
 }
 
@@ -1095,6 +1097,8 @@ impl std::fmt::Debug for EyeTexture {
         f.debug_struct("EyeTexture")
             .field("revision", &self.revision)
             .field("size", &self.size)
+            .field("x_range_bits", &self.x_range_bits)
+            .field("y_range_bits", &self.y_range_bits)
             .finish_non_exhaustive()
     }
 }
@@ -1206,33 +1210,6 @@ impl DerivedSeries {
         })
     }
 
-    /// Key-space bit separating power-density dB entries from ordinary
-    /// magnitude-dB entries. Noise spectra remain retained as exact power
-    /// densities; this cache is presentation-only.
-    const POWER_DB_KEY_BIT: u64 = 1 << 61;
-
-    /// Ten times log10 of a non-negative power-density series.
-    ///
-    /// Zero has no finite logarithm and is therefore a gap in the derived
-    /// curve. Cursor readouts continue to report the exact retained linear
-    /// value; no artificial display floor becomes result evidence.
-    pub fn db_power(&mut self, key: u64, power: &[f64]) -> SharedWaveformValues {
-        self.get_or(Self::POWER_DB_KEY_BIT | key, || {
-            std::sync::Arc::new(
-                power
-                    .iter()
-                    .map(|&value| {
-                        if value.is_finite() && value > 0.0 {
-                            10.0 * value.log10()
-                        } else {
-                            f64::NAN
-                        }
-                    })
-                    .collect::<Vec<_>>(),
-            )
-        })
-    }
-
     /// Key-space bit separating unwrapped-phase entries from the dB entries,
     /// which share the `(analysis << 32 | waveform)` key convention.
     const UNWRAP_KEY_BIT: u64 = 1 << 62;
@@ -1275,6 +1252,37 @@ pub(super) fn xy_screen_pos(
         plot_rect.left() + (fx as f32) * plot_rect.width(),
         plot_rect.bottom() - (fy as f32) * plot_rect.height(),
     )
+}
+
+/// Couple an equal-aspect XY viewer's navigation ranges so wheel zoom,
+/// axis-constrained pan, and zoom boxes cannot distort circles or root maps.
+pub(super) fn square_xy_view_change(
+    current_x: (f64, f64),
+    current_y: (f64, f64),
+    change: crate::ui::plot::ViewChange,
+) -> crate::ui::plot::ViewChange {
+    if change.reset || (change.x.is_none() && change.y.is_none()) {
+        return change;
+    }
+    let next_x = change.x.unwrap_or(current_x);
+    let next_y = change.y.unwrap_or(current_y);
+    let x_span = (next_x.1 - next_x.0).abs();
+    let y_span = (next_y.1 - next_y.0).abs();
+    let span = match (change.x, change.y) {
+        (Some(_), None) => x_span,
+        (None, Some(_)) => y_span,
+        (Some(_), Some(_)) => x_span.max(y_span),
+        (None, None) => unreachable!("empty view changes return above"),
+    }
+    .max(f64::EPSILON);
+    let x_center = (next_x.0 + next_x.1) * 0.5;
+    let y_center = (next_y.0 + next_y.1) * 0.5;
+    crate::ui::plot::ViewChange {
+        x: Some((x_center - span * 0.5, x_center + span * 0.5)),
+        y: Some((y_center - span * 0.5, y_center + span * 0.5)),
+        y_right: None,
+        reset: false,
+    }
 }
 
 /// One row of a point readout card.
@@ -2511,18 +2519,11 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
                     )
                 })
                 .is_some();
-            let has_noise_spectrum = active_run.is_some_and(|run| {
-                run.analyses
-                    .iter()
-                    .any(bode::ordinary_noise_spectrum_is_renderable)
-            });
-            if has_ac_response || has_noise_spectrum {
-                ViewerAvailability::available(
-                    "An AC response or ordinary noise spectrum is available",
-                )
+            if has_ac_response {
+                ViewerAvailability::available("An AC response is available")
             } else {
                 ViewerAvailability::unavailable(
-                    "Requires a usable AC response or ordinary noise spectrum in the active dataset",
+                    "Requires a usable AC response in the active dataset",
                 )
             }
         }
@@ -2545,16 +2546,15 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         }
         ResultViewer::NoiseContrib => {
             if active_run.is_some_and(|run| {
-                run.analyses.iter().any(|analysis| {
-                    analysis
-                        .noise_summary
-                        .as_ref()
-                        .is_some_and(|summary| !summary.rows.is_empty())
-                })
+                run.analyses
+                    .iter()
+                    .any(bode::ordinary_noise_spectrum_is_renderable)
             }) {
-                ViewerAvailability::available("Noise-contributor data is available")
+                ViewerAvailability::available("A retained ordinary-noise spectrum is available")
             } else {
-                ViewerAvailability::unavailable("Requires a noise analysis with contributor data")
+                ViewerAvailability::unavailable(
+                    "Requires a usable ordinary-noise spectrum in the active dataset",
+                )
             }
         }
         ResultViewer::Contribution => {
@@ -3003,6 +3003,18 @@ mod availability_tests {
         assert!(!viewer_availability(&state, ResultViewer::Hist).available);
         assert!(!viewer_availability(&state, ResultViewer::NoiseContrib).available);
         assert!(!viewer_availability(&state, ResultViewer::Contribution).available);
+    }
+
+    #[test]
+    fn ordinary_noise_enables_noise_but_never_substitutes_for_bode() {
+        let state = state_with_analysis(
+            AnalysisResult::new(1, AnalysisType::Noise, "NOISE").with_waveforms(vec![
+                WaveformData::new("inoise", vec![1.0, 10.0], vec![1.0e-9, 2.0e-9], "#00aaff"),
+            ]),
+        );
+
+        assert!(viewer_availability(&state, ResultViewer::NoiseContrib).available);
+        assert!(!viewer_availability(&state, ResultViewer::Bode).available);
     }
 
     #[test]

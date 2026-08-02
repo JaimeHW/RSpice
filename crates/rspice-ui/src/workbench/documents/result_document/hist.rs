@@ -4,6 +4,8 @@
 
 use egui::Ui;
 
+use crate::services::yield_manager::YieldResult;
+use crate::state::SimulationState;
 use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::section_header;
@@ -11,6 +13,46 @@ use crate::workbench::AppState;
 
 use super::strip::{self, LegendChip};
 use super::well_hint;
+
+/// Return the one yield result authorized by both the active immutable
+/// dataset and the selected Monte-Carlo measurement. Yield results are stored
+/// as a flat collection, so selecting the first entry can silently apply the
+/// limits and verdict for another variable. Duplicate target evidence is also
+/// rejected: the UI must not choose an arbitrary result when retained state is
+/// malformed or came from an older, less constrained schema.
+fn selected_yield_result<'a>(
+    simulation: &'a SimulationState,
+    histogram_name: &str,
+) -> Option<&'a YieldResult> {
+    let results = simulation.yield_results_for_active_dataset()?;
+    let mut matches = results
+        .iter()
+        .filter(|result| yield_target_measurement(&result.spec.target) == histogram_name);
+    let result = matches.next()?;
+    matches.next().is_none().then_some(result)
+}
+
+/// `mean(name)` is an accepted Monte-Carlo yield target spelling and refers
+/// to the complete retained sample population named `name`. Keep this
+/// canonicalization byte-for-byte compatible with the yield engine so display
+/// authority never broadens beyond evidence the engine actually evaluated.
+fn yield_target_measurement(target: &str) -> &str {
+    let target = target.trim();
+    const PREFIX: &str = "mean";
+    if target.len() > PREFIX.len() + 2
+        && target
+            .get(..PREFIX.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(PREFIX))
+        && target
+            .get(PREFIX.len()..)
+            .is_some_and(|tail| tail.starts_with('('))
+        && target.ends_with(')')
+    {
+        &target[PREFIX.len() + 1..target.len() - 1]
+    } else {
+        target
+    }
+}
 
 // ---------------------------------------------------------------------------
 // center view
@@ -31,6 +73,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     }
     let stats = hist_state.stats.get(hist_state.selected);
+    let spec_limits = selected_yield_result(&state.simulation, &histogram.name)
+        .map(|result| (result.spec.min, result.spec.max));
 
     let subtitle = format!("{} · {} samples", histogram.name, histogram.total_count);
     let legend = [LegendChip {
@@ -101,8 +145,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     }
 
     // Spec limits from the yield manager, when present.
-    if let Some(yield_result) = state.simulation.yield_results.first() {
-        if let Some(lsl) = yield_result.spec.min
+    if let Some((lsl, usl)) = spec_limits {
+        if let Some(lsl) = lsl
             && lsl > x0
             && lsl < x1
         {
@@ -117,7 +161,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 shape: plot::MarkerShape::Point,
             });
         }
-        if let Some(usl) = yield_result.spec.max
+        if let Some(usl) = usl
             && usl > x0
             && usl < x1
         {
@@ -140,11 +184,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let accent = c.accent;
     let accent_dim = c.accent_dim;
     let err = c.err;
-    let spec_limits = state
-        .simulation
-        .yield_results
-        .first()
-        .map(|y| (y.spec.min, y.spec.max));
     spec.underlay = Some(Box::new(move |painter, mapper| {
         if let Some((lsl, usl)) = spec_limits {
             let wash = err.gamma_multiply(0.09);
@@ -241,7 +280,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         super::panel_note(ui, &format!("{} samples", histogram.total_count));
     }
 
-    if let Some(yield_result) = state.simulation.yield_results.first() {
+    if let Some(yield_result) = selected_yield_result(&state.simulation, &histogram.name) {
         section_header(ui, "Spec", None);
         let cpk = yield_result
             .stats
@@ -263,4 +302,100 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         super::stat_table(ui, &rows);
     }
     super::panel_note(ui, "Normal fit overlaid; the shaded band spans ±1σ.");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::yield_manager::{
+        DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldSpec,
+    };
+    use crate::state::SimulationRun;
+
+    fn result(target: &str, yield_percent: f64) -> YieldResult {
+        let pass_count = (yield_percent / 10.0) as usize;
+        YieldResult {
+            spec: YieldSpec::lower(target, 0.9, "V"),
+            total_runs: 10,
+            pass_count,
+            fail_count: 10 - pass_count,
+            yield_percent,
+            stats: DistributionStats::default(),
+            trail: Vec::new(),
+            samples: Vec::new(),
+        }
+    }
+
+    fn provenance(run: &SimulationRun) -> YieldAnalysisProvenance {
+        YieldAnalysisProvenance {
+            source_run_id: run.run_id,
+            source_dataset_id: run.dataset_id,
+            seed: 7,
+            runs_requested: 10,
+            runs_completed: 10,
+            sampling_mode: MonteCarloSamplingMode::PseudoRandom,
+        }
+    }
+
+    #[test]
+    fn selected_measurement_never_uses_first_result_for_another_measurement() {
+        let run = SimulationRun::new(1);
+        let mut simulation = SimulationState::default();
+        simulation.runs.push(run.clone());
+        simulation.active_run_idx = Some(0);
+        simulation.replace_yield_evidence(
+            vec![result("gain", 12.0), result("V(out)", 97.0)],
+            Some(provenance(&run)),
+        );
+
+        let selected = selected_yield_result(&simulation, "V(out)")
+            .expect("the exact selected measurement is authoritative");
+        assert_eq!(selected.spec.target, "V(out)");
+        assert_eq!(selected.yield_percent, 97.0);
+    }
+
+    #[test]
+    fn stale_dataset_yield_evidence_is_rejected() {
+        let stale_run = SimulationRun::new(1);
+        let active_run = SimulationRun::new(2);
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![stale_run.clone(), active_run];
+        simulation.active_run_idx = Some(1);
+        simulation
+            .replace_yield_evidence(vec![result("V(out)", 23.0)], Some(provenance(&stale_run)));
+
+        assert!(selected_yield_result(&simulation, "V(out)").is_none());
+    }
+
+    #[test]
+    fn absent_or_ambiguous_measurement_evidence_fails_closed() {
+        let run = SimulationRun::new(1);
+        let mut simulation = SimulationState::default();
+        simulation.runs.push(run.clone());
+        simulation.active_run_idx = Some(0);
+        simulation.replace_yield_evidence(vec![result("gain", 90.0)], Some(provenance(&run)));
+        assert!(selected_yield_result(&simulation, "V(out)").is_none());
+
+        simulation.replace_yield_evidence(
+            vec![result("V(out)", 90.0), result("mean(V(out))", 10.0)],
+            Some(provenance(&run)),
+        );
+        assert!(selected_yield_result(&simulation, "V(out)").is_none());
+    }
+
+    #[test]
+    fn mean_wrapper_resolves_only_its_exact_sample_population() {
+        let run = SimulationRun::new(1);
+        let mut simulation = SimulationState::default();
+        simulation.runs.push(run.clone());
+        simulation.active_run_idx = Some(0);
+        simulation
+            .replace_yield_evidence(vec![result("mean(V(out))", 88.0)], Some(provenance(&run)));
+
+        assert_eq!(
+            selected_yield_result(&simulation, "V(out)").map(|result| result.yield_percent),
+            Some(88.0)
+        );
+        assert!(selected_yield_result(&simulation, "v(out)").is_none());
+    }
 }

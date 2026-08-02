@@ -35,23 +35,48 @@ struct BodeModel {
     margins: BodeDerived,
 }
 
-/// Exact retained ordinary-noise spectrum presented by the same frequency
-/// document as Bode data. PNOISE/QPNOISE are deliberately excluded until
-/// their phase/output/input reference and unit contract is retained.
+/// Exact retained ordinary-noise spectrum. The Noise result viewer owns this
+/// model; it lives beside the Bode renderer only because both instruments use
+/// the same frequency-domain plot machinery.
 struct NoiseSpectrumModel {
     analysis_index: usize,
     label: String,
     frequency: SharedWaveformValues,
     traces: Vec<NoiseSpectrumTrace>,
+    reference: NoiseReference,
     total_rms: Option<f64>,
     input_rms: Option<f64>,
     band: Option<(f64, f64)>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NoiseReference {
+    Input,
+    Output,
+}
+
+impl NoiseReference {
+    const fn title(self) -> &'static str {
+        match self {
+            Self::Input => "Input-referred noise",
+            Self::Output => "Output-referred noise",
+        }
+    }
+
+    const fn accessible_plot_name(self) -> &'static str {
+        match self {
+            Self::Input => "Input-referred noise spectrum plot",
+            Self::Output => "Output-referred noise spectrum plot",
+        }
+    }
+}
+
 struct NoiseSpectrumTrace {
+    waveform_index: usize,
     name: String,
-    linear: SharedWaveformValues,
-    db_power: SharedWaveformValues,
+    density_v2_per_hz: SharedWaveformValues,
+    density_v_per_sqrt_hz: SharedWaveformValues,
+    density_nv_per_sqrt_hz: SharedWaveformValues,
 }
 
 fn noise_waveform_is_renderable(waveform: &crate::state::WaveformData) -> bool {
@@ -61,18 +86,16 @@ fn noise_waveform_is_renderable(waveform: &crate::state::WaveformData) -> bool {
     if waveform
         .y
         .iter()
-        .any(|value| !value.is_finite() || *value < 0.0)
+        .any(|value| !value.is_finite() || *value <= 0.0)
     {
         return false;
     }
     let mut previous = None;
     let mut positive_count = 0_usize;
-    for frequency in waveform
-        .x
-        .iter()
-        .copied()
-        .filter(|frequency| frequency.is_finite() && *frequency > 0.0)
-    {
+    for frequency in waveform.x.iter().copied() {
+        if !frequency.is_finite() || frequency <= 0.0 {
+            return false;
+        }
         if previous.is_some_and(|previous| frequency <= previous) {
             return false;
         }
@@ -84,7 +107,10 @@ fn noise_waveform_is_renderable(waveform: &crate::state::WaveformData) -> bool {
 
 pub(super) fn ordinary_noise_spectrum_is_renderable(analysis: &AnalysisResult) -> bool {
     analysis.analysis_type == AnalysisType::Noise
-        && analysis.waveforms.iter().any(noise_waveform_is_renderable)
+        && analysis.waveforms.iter().any(|waveform| {
+            (is_input_noise_name(&waveform.name) || is_output_noise_name(&waveform.name))
+                && noise_waveform_is_renderable(waveform)
+        })
 }
 
 fn build_model(state: &mut AppState) -> Option<BodeModel> {
@@ -161,102 +187,128 @@ fn build_model(state: &mut AppState) -> Option<BodeModel> {
     })
 }
 
-fn build_noise_model(state: &mut AppState) -> Option<NoiseSpectrumModel> {
-    let (analysis_index, label, frequency, source_traces, total_rms, input_rms, band) = {
-        let simulation = &state.simulation;
-        let run = simulation.active_run()?;
-        let selected = simulation
-            .active_analysis_idx
-            .filter(|&index| {
-                run.analyses
-                    .get(index)
-                    .is_some_and(ordinary_noise_spectrum_is_renderable)
-            })
-            .or_else(|| {
-                run.analyses
-                    .iter()
-                    .position(ordinary_noise_spectrum_is_renderable)
-            })?;
-        let analysis = &run.analyses[selected];
-        let frequency = analysis
+fn normalized_noise_name(name: &str) -> String {
+    name.trim()
+        .to_ascii_lowercase()
+        .replace([' ', '-', '.'], "")
+}
+
+fn is_input_noise_name(name: &str) -> bool {
+    let name = normalized_noise_name(name);
+    name == "inoise"
+        || name == "inoise_spectrum"
+        || name == "inoisespectrum"
+        || name == "v(inoise)"
+        || name == "v(inoise_spectrum)"
+        || name == "v(inoisespectrum)"
+}
+
+fn is_output_noise_name(name: &str) -> bool {
+    let name = normalized_noise_name(name);
+    name == "onoise"
+        || name == "onoise_spectrum"
+        || name == "onoisespectrum"
+        || name == "v(onoise)"
+        || name == "v(onoise_spectrum)"
+        || name == "v(onoisespectrum)"
+}
+
+fn is_noise_contributor_name(name: &str) -> bool {
+    let name = name.trim().to_ascii_lowercase();
+    name.starts_with("noise(") && name.ends_with(')')
+}
+
+pub(super) fn selected_noise_analysis_index(state: &AppState) -> Option<usize> {
+    let run = state.simulation.active_run()?;
+    state
+        .simulation
+        .active_analysis_idx
+        .filter(|&index| {
+            run.analyses
+                .get(index)
+                .is_some_and(ordinary_noise_spectrum_is_renderable)
+        })
+        .or_else(|| {
+            run.analyses
+                .iter()
+                .position(ordinary_noise_spectrum_is_renderable)
+        })
+}
+
+fn selected_noise_analysis(state: &AppState) -> Option<(usize, &AnalysisResult)> {
+    let run = state.simulation.active_run()?;
+    let selected = selected_noise_analysis_index(state)?;
+    Some((selected, &run.analyses[selected]))
+}
+
+fn build_noise_model(state: &AppState) -> Option<NoiseSpectrumModel> {
+    let (analysis_index, analysis) = selected_noise_analysis(state)?;
+    let input = analysis.waveforms.iter().enumerate().find(|(_, waveform)| {
+        is_input_noise_name(&waveform.name) && noise_waveform_is_renderable(waveform)
+    });
+    let (reference, anchor_index, anchor) = if let Some((index, waveform)) = input {
+        (NoiseReference::Input, index, waveform)
+    } else {
+        let (index, waveform) = analysis
             .waveforms
             .iter()
-            .find(|waveform| noise_waveform_is_renderable(waveform))
-            .map(|waveform| Arc::clone(&waveform.x))?;
-        let source_traces = analysis
+            .enumerate()
+            .find(|(_, waveform)| {
+                is_output_noise_name(&waveform.name) && noise_waveform_is_renderable(waveform)
+            })?;
+        (NoiseReference::Output, index, waveform)
+    };
+
+    let frequency = Arc::clone(&anchor.x);
+    let source_traces = if reference == NoiseReference::Input {
+        vec![(anchor_index, anchor)]
+    } else {
+        analysis
             .waveforms
             .iter()
             .enumerate()
             .filter(|(_, waveform)| {
-                noise_waveform_is_renderable(waveform)
+                !is_input_noise_name(&waveform.name)
+                    && (is_output_noise_name(&waveform.name)
+                        || is_noise_contributor_name(&waveform.name))
+                    && noise_waveform_is_renderable(waveform)
                     && waveform.x.as_slice() == frequency.as_slice()
             })
-            .map(|(index, waveform)| (index, waveform.name.clone(), Arc::clone(&waveform.y)))
-            .collect::<Vec<_>>();
-        let (total_rms, input_rms, band) = analysis
-            .noise_summary
-            .as_ref()
-            .map_or((None, None, None), |summary| {
-                (summary.total_rms, summary.input_rms, Some(summary.band))
-            });
-        (
-            selected,
-            analysis.label.clone(),
-            frequency,
-            source_traces,
-            total_rms,
-            input_rms,
-            band,
-        )
+            .collect()
     };
-    if source_traces.is_empty() {
-        return None;
-    }
-
     let traces = source_traces
         .into_iter()
-        .map(|(waveform_index, name, linear)| {
-            let key = (analysis_index as u64) << 32 | waveform_index as u64;
-            let db_power = state.ui.results.derived.db_power(key, &linear);
-            NoiseSpectrumTrace {
-                name,
-                linear,
-                db_power,
-            }
+        .map(|(waveform_index, waveform)| NoiseSpectrumTrace {
+            waveform_index,
+            name: waveform.name.clone(),
+            density_v2_per_hz: Arc::clone(&waveform.y),
+            density_v_per_sqrt_hz: Arc::new(waveform.y.iter().map(|value| value.sqrt()).collect()),
+            density_nv_per_sqrt_hz: Arc::new(
+                waveform
+                    .y
+                    .iter()
+                    .map(|value| value.sqrt() * 1.0e9)
+                    .collect(),
+            ),
         })
-        .collect();
+        .collect::<Vec<_>>();
+    let (total_rms, input_rms, band) = analysis
+        .noise_summary
+        .as_ref()
+        .map_or((None, None, None), |summary| {
+            (summary.total_rms, summary.input_rms, Some(summary.band))
+        });
 
     Some(NoiseSpectrumModel {
         analysis_index,
-        label,
+        label: analysis.label.clone(),
         frequency,
         traces,
+        reference,
         total_rms,
         input_rms,
         band,
     })
-}
-
-fn active_analysis_is_noise(state: &AppState) -> bool {
-    state
-        .simulation
-        .active_analysis()
-        .is_some_and(|analysis| analysis.analysis_type == AnalysisType::Noise)
-}
-
-fn frequency_document_prefers_noise(state: &AppState) -> bool {
-    if active_analysis_is_noise(state) {
-        return true;
-    }
-    let Some(run) = state.simulation.active_run() else {
-        return false;
-    };
-    if ac_bode_summary_for_selection(run, state.simulation.active_analysis_idx).is_some() {
-        return false;
-    }
-    run.analyses
-        .iter()
-        .any(ordinary_noise_spectrum_is_renderable)
 }
 
 // ---------------------------------------------------------------------------
@@ -265,18 +317,11 @@ fn frequency_document_prefers_noise(state: &AppState) -> bool {
 
 /// Render the stability view.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
-    if frequency_document_prefers_noise(state) {
-        show_noise_spectrum(ui, state);
-        return;
-    }
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let Some(model) = build_model(state) else {
-        well_hint(
-            ui,
-            "No AC response or ordinary noise spectrum in the active run",
-        );
+        well_hint(ui, "No usable AC response in the active dataset");
         return;
     };
 
@@ -470,7 +515,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
-fn show_noise_spectrum(ui: &mut Ui, state: &mut AppState) {
+pub(super) fn show_noise_spectrum(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
@@ -489,10 +534,17 @@ fn show_noise_spectrum(ui: &mut Ui, state: &mut AppState) {
             on: true,
         })
         .collect::<Vec<_>>();
-    let view = state.ui.results.plot_view(super::ResultViewer::Bode, 0);
+    let view = state
+        .ui
+        .results
+        .plot_view(super::ResultViewer::NoiseContrib, 0);
     let header = strip::StripHeader::new(
         "NOISE",
-        &format!("{} · retained power spectral density", model.label),
+        &format!(
+            "{} · {} · amplitude density from retained PSD",
+            model.label,
+            model.reference.title()
+        ),
         &legend,
     )
     .zoomed(view.is_zoomed())
@@ -501,7 +553,7 @@ fn show_noise_spectrum(ui: &mut Ui, state: &mut AppState) {
         state
             .ui
             .results
-            .reset_plot_view(super::ResultViewer::Bode, 0);
+            .reset_plot_view(super::ResultViewer::NoiseContrib, 0);
     }
 
     let x0 = model
@@ -523,10 +575,10 @@ fn show_noise_spectrum(ui: &mut Ui, state: &mut AppState) {
     }
     let (x0, x1) = view.x.unwrap_or((x0, x1));
 
-    let Some((db_min, db_max)) = model
+    let Some((density_min, density_max)) = model
         .traces
         .iter()
-        .filter_map(|trace| super::finite_extremes(&trace.db_power))
+        .filter_map(|trace| super::finite_extremes(&trace.density_nv_per_sqrt_hz))
         .reduce(|(lo, hi), (trace_lo, trace_hi)| (lo.min(trace_lo), hi.max(trace_hi)))
     else {
         well_hint(
@@ -535,9 +587,14 @@ fn show_noise_spectrum(ui: &mut Ui, state: &mut AppState) {
         );
         return;
     };
-    let span = (db_max - db_min).max(1.0);
-    let pad = (span * 0.08).max(1.0);
-    let (y0, y1) = view.y.unwrap_or((db_min - pad, db_max + pad));
+    let automatic_y = (
+        (density_min / 1.2).max(f64::MIN_POSITIVE),
+        (density_max * 1.2).max(density_min * 1.01),
+    );
+    let (y0, y1) = view
+        .y
+        .filter(|(lo, hi)| lo.is_finite() && hi.is_finite() && *lo > 0.0 && *hi > *lo)
+        .unwrap_or(automatic_y);
     let (frequency_scale, frequency_offset, frequency_unit) =
         quantity_policy.frequency_axis_transform();
     let x_axis = Axis::log_decades(x0, x1, "Hz").with_display_transform(
@@ -545,18 +602,21 @@ fn show_noise_spectrum(ui: &mut Ui, state: &mut AppState) {
         frequency_offset,
         frequency_unit,
     );
-    let y_axis = Axis::linear(y0, y1, "dB(SI²/Hz)").with_label("Power spectral density");
-    let mut spec =
-        PlotSpec::new(x_axis, XScale::Log10, y_axis).accessible_name("Noise spectrum plot");
+    let y_axis = Axis::log_decades(y0, y1, "nV/√Hz").with_label(model.reference.title());
+    let mut spec = PlotSpec::new(x_axis, XScale::Log10, y_axis)
+        .with_log_y()
+        .accessible_name(model.reference.accessible_plot_name());
     for (index, trace) in model.traces.iter().enumerate() {
         spec.traces.push(
             Trace::new(
                 &model.frequency,
-                &trace.db_power,
+                &trace.density_nv_per_sqrt_hz,
                 c.traces[index % c.traces.len()],
             )
             .cache_key(
-                0xB0DE_1000_u64.saturating_add((model.analysis_index as u64) << 16 | index as u64),
+                0xA015_E000_u64.saturating_add(
+                    (model.analysis_index as u64) << 16 | trace.waveform_index as u64,
+                ),
             ),
         );
     }
@@ -564,14 +624,17 @@ fn show_noise_spectrum(ui: &mut Ui, state: &mut AppState) {
     let readout = |x: f64| -> Vec<(String, String)> {
         let mut rows = vec![("f".to_owned(), quantity_policy.format_frequency(x, 2))];
         for trace in &model.traces {
-            let linear = sample_at(&model.frequency, &trace.linear, x);
-            let db = sample_at(&model.frequency, &trace.db_power, x);
+            let density_psd = sample_at(&model.frequency, &trace.density_v2_per_hz, x);
+            let density_v = sample_at(&model.frequency, &trace.density_v_per_sqrt_hz, x);
+            let density_nv = sample_at(&model.frequency, &trace.density_nv_per_sqrt_hz, x);
             rows.push((
                 trace.name.clone(),
-                if db.is_finite() {
-                    format!("{linear:.6e} SI²/Hz · {db:.2} dB")
+                if density_nv.is_finite() {
+                    format!(
+                        "{density_nv:.6} nV/√Hz ({density_v:.9e} V/√Hz; {density_psd:.9e} V²/Hz retained)"
+                    )
                 } else {
-                    format!("{linear:.6e} SI²/Hz")
+                    "unavailable".to_owned()
                 },
             ));
         }
@@ -582,7 +645,7 @@ fn show_noise_spectrum(ui: &mut Ui, state: &mut AppState) {
         state
             .ui
             .results
-            .plot_view_mut(super::ResultViewer::Bode, 0)
+            .plot_view_mut(super::ResultViewer::NoiseContrib, 0)
             .apply(&response.view);
     }
 }
@@ -593,10 +656,6 @@ fn show_noise_spectrum(ui: &mut Ui, state: &mut AppState) {
 
 /// The stability readout.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    if frequency_document_prefers_noise(state) {
-        noise_right_panel(ui, state);
-        return;
-    }
     section_header(ui, "Stability", None);
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let Some(model) = build_model(state) else {
@@ -652,7 +711,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
-fn noise_right_panel(ui: &mut Ui, state: &mut AppState) {
+pub(super) fn noise_spectrum_right_panel(ui: &mut Ui, state: &mut AppState) {
     section_header(ui, "Noise spectrum", None);
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let Some(model) = build_noise_model(state) else {
@@ -694,7 +753,7 @@ fn noise_right_panel(ui: &mut Ui, state: &mut AppState) {
     super::stat_table(ui, &rows);
     super::panel_note(
         ui,
-        "The plot is a presentation-only 10·log₁₀ transform. Cursor readouts retain the exact linear power density.",
+        "The retained source vectors are power spectral density (V²/Hz). The plot applies the exact square-root amplitude-density conversion and displays nV/√Hz without altering source samples.",
     );
 }
 
@@ -754,7 +813,7 @@ mod tests {
     }
 
     #[test]
-    fn frequency_document_renders_only_exact_ordinary_noise_as_power_density() {
+    fn noise_model_excludes_phase_noise_and_converts_retained_psd_units() {
         let mut run = SimulationRun::new(1);
         run.add_analysis(
             AnalysisResult::new(1, AnalysisType::Pnoise, "PNOISE").with_waveforms(vec![
@@ -772,20 +831,89 @@ mod tests {
         assert!(state.simulation.select_run(0));
 
         assert!(state.simulation.select_analysis(0));
-        assert!(!active_analysis_is_noise(&state));
-        assert!(frequency_document_prefers_noise(&state));
         let fallback = build_noise_model(&mut state).expect("ordinary noise fallback");
         assert_eq!(fallback.analysis_index, 1);
-        assert_eq!(fallback.traces[0].linear.as_slice(), &[1.0e-18, 1.0e-16]);
-        assert_eq!(fallback.traces[0].db_power.as_slice(), &[-180.0, -160.0]);
-
-        assert!(state.simulation.select_analysis(1));
-        assert!(active_analysis_is_noise(&state));
+        assert_eq!(fallback.reference, NoiseReference::Output);
         assert_eq!(
-            build_noise_model(&mut state)
-                .expect("selected ordinary noise")
-                .label,
-            "NOISE"
+            fallback.traces[0].density_v2_per_hz.as_slice(),
+            &[1.0e-18, 1.0e-16]
         );
+        assert!(
+            fallback.traces[0]
+                .density_v_per_sqrt_hz
+                .iter()
+                .zip([1.0e-9, 1.0e-8])
+                .all(|(actual, expected)| (actual - expected).abs() <= expected * 1.0e-12)
+        );
+        assert!(
+            fallback.traces[0]
+                .density_nv_per_sqrt_hz
+                .iter()
+                .zip([1.0, 10.0])
+                .all(|(actual, expected)| (actual - expected).abs() <= expected * 1.0e-12)
+        );
+    }
+
+    #[test]
+    fn noise_model_prefers_retained_input_referred_spectrum_without_mixing_references() {
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(
+            AnalysisResult::new(2, AnalysisType::Noise, "NOISE").with_waveforms(vec![
+                WaveformData::new("onoise", vec![1.0, 10.0], vec![4.0e-18, 9.0e-18], "#fff"),
+                WaveformData::new(
+                    "inoise_spectrum",
+                    vec![1.0, 10.0],
+                    vec![16.0e-18, 25.0e-18],
+                    "#fff",
+                ),
+                WaveformData::new(
+                    "noise(R1:thermal)",
+                    vec![1.0, 10.0],
+                    vec![1.0e-18, 2.25e-18],
+                    "#fff",
+                ),
+            ]),
+        );
+
+        let mut state = AppState::default();
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+        let model = build_noise_model(&state).expect("input-referred noise model");
+        assert_eq!(model.reference, NoiseReference::Input);
+        assert_eq!(model.traces.len(), 1);
+        assert_eq!(model.traces[0].name, "inoise_spectrum");
+        assert!(
+            model.traces[0]
+                .density_nv_per_sqrt_hz
+                .iter()
+                .zip([4.0, 5.0])
+                .all(|(actual, expected)| (actual - expected).abs() <= expected * 1.0e-12)
+        );
+    }
+
+    #[test]
+    fn noise_spectrum_rejects_nonpositive_or_nonmonotonic_retained_samples() {
+        let invalid_value =
+            AnalysisResult::new(1, AnalysisType::Noise, "zero").with_waveforms(vec![
+                WaveformData::new("inoise", vec![1.0, 10.0], vec![1.0e-9, 0.0], "#fff"),
+            ]);
+        let invalid_axis =
+            AnalysisResult::new(2, AnalysisType::Noise, "axis").with_waveforms(vec![
+                WaveformData::new("inoise", vec![10.0, 1.0], vec![1.0e-9, 2.0e-9], "#fff"),
+            ]);
+        assert!(!ordinary_noise_spectrum_is_renderable(&invalid_value));
+        assert!(!ordinary_noise_spectrum_is_renderable(&invalid_axis));
+    }
+
+    #[test]
+    fn contributor_only_noise_data_never_impersonates_a_total_reference_spectrum() {
+        let contributor_only = AnalysisResult::new(1, AnalysisType::Noise, "contributors")
+            .with_waveforms(vec![WaveformData::new(
+                "noise(R1:thermal)",
+                vec![1.0, 10.0],
+                vec![1.0e-18, 2.0e-18],
+                "#fff",
+            )]);
+        assert!(!ordinary_noise_spectrum_is_renderable(&contributor_only));
     }
 }
