@@ -117,6 +117,19 @@ impl AnalysisPresentationKey {
     }
 }
 
+/// Whether retained evidence belongs to the stable analysis authored in the
+/// simulation plan. Deterministically expanded executions (for example PVT
+/// points) have distinct execution identities and must still match their
+/// common authored analysis.
+pub(crate) fn analysis_matches_authored_source(
+    analysis: &AnalysisResult,
+    authored_source_id: AnalysisInstanceId,
+) -> bool {
+    analysis
+        .provenance()
+        .is_some_and(|provenance| provenance.authored_source_instance_id() == authored_source_id)
+}
+
 /// Stable identity of one source waveform representation inside an analysis.
 ///
 /// `source_name` follows the retained waveform through reordering. `kind` and
@@ -497,6 +510,9 @@ pub struct ResultsState {
     next_marker_id: u32,
     /// Marker whose note is being edited in the readout strip, if any.
     pub editing_marker: Option<u32>,
+    /// Whether the stage-level cursor/marker dock is collapsed. Session-only
+    /// presentation state; retained result documents never serialize it.
+    pub readout_collapsed: bool,
     /// A/B cursors (data-space X of the strip they live on).
     pub cursors: CursorPair,
     /// Dataset-bound strip identity the cursors were placed on.
@@ -1526,7 +1542,7 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     match chrome {
         ResultChrome::Full => {
             show_docbar(ui, app);
-            if viewer_has_sheet_bar(app.state.ui.results.viewer) {
+            if result_stage_bar_visible(&app.state) {
                 show_sheet_bar(ui, &mut app.state);
             }
         }
@@ -1546,9 +1562,9 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         app.invalidate_simulation_preflight();
     }
 
-    // The stage bottom holds at most one thin, single-purpose readout strip.
-    // It is content-fit, so a stage with nothing to read out gives the whole
-    // area back to the document.
+    // The stage bottom holds one bounded cursor/marker dock. Its header and
+    // owning scroll body are content-fit, so a stage with nothing to report
+    // gives the whole area back to the document.
     let strip_height = match chrome {
         ResultChrome::Full => readout_strip_height(&app.state),
         ResultChrome::CompactSplit => 0.0,
@@ -1564,18 +1580,31 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     }
 }
 
-/// Structured result documents own their controls inside their content and
-/// therefore collapse the conditional 31 px sheet row completely. Plot and
-/// custom-canvas sheets retain that row for their instrument or purpose bar.
+/// Whether the active viewer owns a stage-local bar below the viewer tabs.
+///
+/// Plot and custom-canvas sheets use the 31 px instrument/purpose bar. OP,
+/// Specs, and Table use the mockup's 40 px structured-document strip. XF and
+/// Manifest own no controls there and therefore collapse the row completely.
 const fn viewer_has_sheet_bar(viewer: ResultViewer) -> bool {
     !matches!(
         viewer,
-        ResultViewer::Op
-            | ResultViewer::TransferFunction
-            | ResultViewer::Specs
-            | ResultViewer::Table
-            | ResultViewer::Manifest
+        ResultViewer::TransferFunction | ResultViewer::Manifest
     )
+}
+
+const fn viewer_has_structured_strip(viewer: ResultViewer) -> bool {
+    matches!(
+        viewer,
+        ResultViewer::Op | ResultViewer::Specs | ResultViewer::Table
+    )
+}
+
+fn result_stage_bar_visible(state: &AppState) -> bool {
+    state
+        .simulation
+        .active_run()
+        .is_some_and(|run| !run.analyses.is_empty())
+        && viewer_has_sheet_bar(state.ui.results.viewer)
 }
 
 /// Height of the stage's readout strip for the active viewer, or zero.
@@ -1626,7 +1655,7 @@ pub(super) fn show_persistent_pane_viewer(ui: &mut Ui, app: &mut RSpiceApp, view
     show_viewer_well(ui, app, ResultChrome::Full);
 }
 
-fn prepare_viewer_state(app: &mut RSpiceApp) {
+pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
     let data_version = app.state.simulation.data_version;
     let results = &mut app.state.ui.results;
     if results.seen_version != data_version {
@@ -1789,6 +1818,7 @@ fn show_docbar_for_family(ui: &mut Ui, app: &mut RSpiceApp, family_label: Option
 const RESULT_VIEWER_TABS_HEIGHT: f32 = 41.0;
 const RESULT_VIEWER_TAB_HEIGHT: f32 = 30.0;
 const RESULT_SHEET_BAR_HEIGHT: f32 = 31.0;
+const RESULT_STRUCTURED_STRIP_HEIGHT: f32 = 40.0;
 const RESULT_INSTRUMENT_CONTROL_HEIGHT: f32 = 23.0;
 
 fn viewer_picker(ui: &mut Ui, icon: WorkbenchIcon, label: &str, accessible_label: &str) -> bool {
@@ -1850,8 +1880,14 @@ fn viewer_picker_separator(ui: &mut Ui) {
 fn show_sheet_bar(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let viewer = state.ui.results.viewer;
+    let structured = viewer_has_structured_strip(viewer);
+    let height = if structured {
+        RESULT_STRUCTURED_STRIP_HEIGHT
+    } else {
+        RESULT_SHEET_BAR_HEIGHT
+    };
     let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), RESULT_SHEET_BAR_HEIGHT),
+        egui::vec2(ui.available_width(), height),
         egui::Sense::hover(),
     );
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
@@ -1860,7 +1896,9 @@ fn show_sheet_bar(ui: &mut Ui, state: &mut AppState) {
         rect.bottom() - 0.5,
         egui::Stroke::new(1.0, t.color.border),
     );
-    let accessible_label = if viewer == ResultViewer::Waves {
+    let accessible_label = if structured {
+        "Structured result controls"
+    } else if viewer == ResultViewer::Waves {
         "Plot instrument controls"
     } else {
         "Result sheet controls"
@@ -1872,14 +1910,16 @@ fn show_sheet_bar(ui: &mut Ui, state: &mut AppState) {
         node.set_label(accessible_label);
     });
 
-    let content = rect.shrink2(egui::vec2(8.0, 0.0));
+    let content = rect.shrink2(egui::vec2(if structured { 12.0 } else { 8.0 }, 0.0));
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(content)
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
     child.spacing_mut().item_spacing.x = 4.0;
-    if viewer == ResultViewer::Waves {
+    if structured {
+        show_structured_result_strip(&mut child, state);
+    } else if viewer == ResultViewer::Waves {
         show_wave_instrument(&mut child, state);
     } else {
         child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1898,6 +1938,42 @@ fn show_sheet_bar(ui: &mut Ui, state: &mut AppState) {
             );
         });
     }
+}
+
+fn show_structured_result_strip(ui: &mut Ui, state: &mut AppState) {
+    let t = Tokens::get(ui.ctx());
+    let title = match state.ui.results.viewer {
+        ResultViewer::Op => "Operating point · DC solution",
+        ResultViewer::Specs => "Specifications",
+        ResultViewer::Table => "Exact retained samples",
+        _ => return,
+    };
+
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        export_menu(ui, state);
+        let remaining = ui.available_size();
+        ui.allocate_ui_with_layout(
+            remaining,
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                egui::ScrollArea::horizontal()
+                    .id_salt(("rspice.results.structured-strip", state.ui.results.viewer))
+                    .auto_shrink([false, true])
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 10.0;
+                            ui.label(
+                                egui::RichText::new(title)
+                                    .font(theme::sans(tokens::FS_1, FontWeight::Medium))
+                                    .color(t.color.text),
+                            );
+                            result_viewer_actions(ui, state);
+                        });
+                    });
+            },
+        );
+    });
 }
 
 fn show_wave_instrument(ui: &mut Ui, state: &mut AppState) {
@@ -1920,118 +1996,169 @@ fn show_wave_instrument(ui: &mut Ui, state: &mut AppState) {
             remaining,
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
-                let cursor_active = state.ui.results.plot_tool == ResultPlotTool::Cursor
-                    && state.ui.results.cursor_tool.is_armed();
-                if instrument_control(ui, "A|B", cursor_active, "A/B cursor tool").clicked() {
-                    if cursor_active {
-                        state.ui.results.toggle_cursor_tool();
-                    } else {
-                        state.ui.results.plot_tool = ResultPlotTool::Cursor;
-                        if !state.ui.results.cursor_tool.is_armed() {
-                            state.ui.results.toggle_cursor_tool();
-                        }
-                    }
-                }
-                if instrument_control(
-                    ui,
-                    "H",
-                    state.ui.results.plot_tool == ResultPlotTool::HorizontalCursor,
-                    "Horizontal cursor - click or drag in the active pane",
-                )
-                .clicked()
-                {
-                    state.ui.results.plot_tool = ResultPlotTool::HorizontalCursor;
-                }
+                egui::ScrollArea::horizontal()
+                    .id_salt("rspice.results.wave-instrument")
+                    .auto_shrink([false, true])
+                    .scroll_bar_visibility(
+                        egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
+                    )
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            let cursor_active = state.ui.results.plot_tool
+                                == ResultPlotTool::Cursor
+                                && state.ui.results.cursor_tool.is_armed();
+                            if instrument_control(ui, "A|B", cursor_active, "A/B cursor tool")
+                                .clicked()
+                            {
+                                if cursor_active {
+                                    state.ui.results.toggle_cursor_tool();
+                                } else {
+                                    state.ui.results.plot_tool = ResultPlotTool::Cursor;
+                                    if !state.ui.results.cursor_tool.is_armed() {
+                                        state.ui.results.toggle_cursor_tool();
+                                    }
+                                }
+                            }
+                            if instrument_control(
+                                ui,
+                                "H",
+                                state.ui.results.plot_tool == ResultPlotTool::HorizontalCursor,
+                                "Horizontal cursor - click or drag in the active pane",
+                            )
+                            .clicked()
+                            {
+                                state.ui.results.plot_tool = ResultPlotTool::HorizontalCursor;
+                            }
 
-                instrument_separator(ui);
-                if instrument_control(
-                    ui,
-                    "BOX",
-                    state.ui.results.plot_tool == ResultPlotTool::BoxZoom,
-                    "Box zoom - drag a region",
-                )
-                .clicked()
-                {
-                    state.ui.results.plot_tool = ResultPlotTool::BoxZoom;
-                }
-                if instrument_control(
-                    ui,
-                    "PAN",
-                    state.ui.results.plot_tool == ResultPlotTool::Pan,
-                    "Pan viewport - drag the plot",
-                )
-                .clicked()
-                {
-                    state.ui.results.plot_tool = ResultPlotTool::Pan;
-                }
+                            instrument_separator(ui);
+                            if instrument_control(
+                                ui,
+                                "BOX",
+                                state.ui.results.plot_tool == ResultPlotTool::BoxZoom,
+                                "Box zoom - drag a region",
+                            )
+                            .clicked()
+                            {
+                                state.ui.results.plot_tool = ResultPlotTool::BoxZoom;
+                            }
+                            if instrument_control(
+                                ui,
+                                "PAN",
+                                state.ui.results.plot_tool == ResultPlotTool::Pan,
+                                "Pan viewport - drag the plot",
+                            )
+                            .clicked()
+                            {
+                                state.ui.results.plot_tool = ResultPlotTool::Pan;
+                            }
 
-                instrument_separator(ui);
-                if instrument_control(ui, "Z+", false, "Zoom active pane in 2x").clicked() {
-                    waves::zoom_active_pane(state, &t, 0.5);
-                }
-                if instrument_control(ui, "Z-", false, "Zoom active pane out 2x").clicked() {
-                    waves::zoom_active_pane(state, &t, 2.0);
-                }
-                if instrument_control(ui, "FIT", false, "Fit active waveform pane").clicked() {
-                    waves::fit_active_pane(state, &t);
-                }
+                            instrument_separator(ui);
+                            if instrument_control(ui, "Z+", false, "Zoom active pane in 2x")
+                                .clicked()
+                            {
+                                waves::zoom_active_pane(state, &t, 0.5);
+                            }
+                            if instrument_control(ui, "Z-", false, "Zoom active pane out 2x")
+                                .clicked()
+                            {
+                                waves::zoom_active_pane(state, &t, 2.0);
+                            }
+                            if instrument_control(ui, "FIT", false, "Fit active waveform pane")
+                                .clicked()
+                            {
+                                waves::fit_active_pane(state, &t);
+                            }
 
-                instrument_separator(ui);
-                if ui
-                    .add_enabled_ui(limits_available, |ui| {
-                        instrument_control(
-                            ui,
-                            "LIM",
-                            state.ui.results.show_spec_limits,
-                            "Show exact compatible project specification limits",
-                        )
-                    })
-                    .inner
-                    .clicked()
-                {
-                    state.ui.results.show_spec_limits = !state.ui.results.show_spec_limits;
-                }
-                if ui
-                    .add_enabled_ui(envelope_available, |ui| {
-                        instrument_control(
-                            ui,
-                            "ENV",
-                            state.ui.results.show_family_envelope,
-                            "Show min/max envelope from retained family samples",
-                        )
-                    })
-                    .inner
-                    .clicked()
-                {
-                    state.ui.results.show_family_envelope = !state.ui.results.show_family_envelope;
-                }
-                if instrument_control(
-                    ui,
-                    "GRID",
-                    state.ui.results.show_minor_grid,
-                    "Show minor waveform grid",
-                )
-                .clicked()
-                {
-                    state.ui.results.show_minor_grid = !state.ui.results.show_minor_grid;
-                }
-                if ui
-                    .add_enabled_ui(marker_available, |ui| {
-                        instrument_control(
-                            ui,
-                            "+M",
-                            false,
-                            "Drop marker at cursor A on selected or nearest visible trace",
-                        )
-                    })
-                    .inner
-                    .clicked()
-                {
-                    waves::drop_marker_at_cursor_a(state, &t);
-                }
+                            instrument_separator(ui);
+                            if ui
+                                .add_enabled_ui(limits_available, |ui| {
+                                    instrument_control(
+                                        ui,
+                                        "LIM",
+                                        state.ui.results.show_spec_limits,
+                                        "Show exact compatible project specification limits",
+                                    )
+                                })
+                                .inner
+                                .clicked()
+                            {
+                                state.ui.results.show_spec_limits =
+                                    !state.ui.results.show_spec_limits;
+                            }
+                            if ui
+                                .add_enabled_ui(envelope_available, |ui| {
+                                    instrument_control(
+                                        ui,
+                                        "ENV",
+                                        state.ui.results.show_family_envelope,
+                                        "Show min/max envelope from retained family samples",
+                                    )
+                                })
+                                .inner
+                                .clicked()
+                            {
+                                state.ui.results.show_family_envelope =
+                                    !state.ui.results.show_family_envelope;
+                            }
+                            if instrument_control(
+                                ui,
+                                "GRID",
+                                state.ui.results.show_minor_grid,
+                                "Show minor waveform grid",
+                            )
+                            .clicked()
+                            {
+                                state.ui.results.show_minor_grid =
+                                    !state.ui.results.show_minor_grid;
+                            }
+                            if ui
+                                .add_enabled_ui(marker_available, |ui| {
+                                    instrument_control(
+                                        ui,
+                                        "+M",
+                                        false,
+                                        "Drop marker at cursor A on selected or nearest visible trace",
+                                    )
+                                })
+                                .inner
+                                .clicked()
+                            {
+                                waves::drop_marker_at_cursor_a(state, &t);
+                            }
+
+                            let hidden = hidden_wave_strip_count(state);
+                            if hidden > 0 {
+                                instrument_separator(ui);
+                                if instrument_control(
+                                    ui,
+                                    &format!("{hidden} HIDDEN"),
+                                    true,
+                                    "Restore closed waveform strips",
+                                )
+                                .clicked()
+                                {
+                                    state.ui.results.hidden_strips.clear();
+                                }
+                            }
+                        });
+                    });
             },
         );
     });
+}
+
+fn hidden_wave_strip_count(state: &AppState) -> usize {
+    let Some(run) = state.simulation.active_run() else {
+        return 0;
+    };
+    state
+        .ui
+        .results
+        .hidden_strips
+        .iter()
+        .filter(|key| key.dataset_id() == run.dataset_id && key.resolve(run).is_some())
+        .count()
 }
 
 fn instrument_control<'a>(
@@ -2128,6 +2255,10 @@ fn export_menu(ui: &mut Ui, state: &mut AppState) {
 
 fn inline_result_actions(ui: &mut Ui, state: &mut AppState) {
     export_menu(ui, state);
+    result_viewer_actions(ui, state);
+}
+
+fn result_viewer_actions(ui: &mut Ui, state: &mut AppState) {
     match state.ui.results.viewer {
         ResultViewer::Waves => {
             let linked_shortcut = state.ui.preferences.shortcuts().resolved_label(
@@ -2136,15 +2267,6 @@ fn inline_result_actions(ui: &mut Ui, state: &mut AppState) {
                 ui.ctx().os(),
             );
             let results = &mut state.ui.results;
-            if !results.hidden_strips.is_empty() {
-                let n = results.hidden_strips.len();
-                if chip(ui, &format!("{n} hidden"), true)
-                    .on_hover_text("Restore closed strips")
-                    .clicked()
-                {
-                    results.hidden_strips.clear();
-                }
-            }
             // A│B is a tool, not a clear button: it arms plot clicks and
             // owns whether the readout strip is on screen at all.
             let armed = results.cursor_tool.is_armed();
@@ -2682,9 +2804,11 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
 #[cfg(test)]
 mod availability_tests {
     use super::*;
+    use crate::product::{ContentDigest, ObjectRevision};
     use crate::state::{
-        AnalysisResult, AnalysisResultPayload, AnalysisType, SensitivityResultMode,
-        SensitivityResultRow, SimulationRun, WaveformData,
+        AnalysisResult, AnalysisResultPayload, AnalysisResultProvenance,
+        AnalysisResultSourceDomain, AnalysisType, SensitivityResultMode, SensitivityResultRow,
+        SimulationRun, WaveformData,
     };
 
     fn state_with_analysis(analysis: AnalysisResult) -> AppState {
@@ -2694,6 +2818,36 @@ mod availability_tests {
         state.simulation.runs = vec![run];
         assert!(state.simulation.select_run(0));
         state
+    }
+
+    #[test]
+    fn authored_source_matching_accepts_a_distinct_expanded_execution_identity() {
+        let authored_source_id = AnalysisInstanceId::new();
+        let expanded_execution_id = AnalysisInstanceId::new();
+        let analysis = AnalysisResult::new(1, AnalysisType::Transient, "PVT-expanded TRAN")
+            .with_provenance(
+                AnalysisResultProvenance::new_with_authored_source_domain(
+                    AnalysisResultSourceDomain::SimulationPlan,
+                    expanded_execution_id,
+                    authored_source_id,
+                    ObjectRevision::INITIAL,
+                    ContentDigest::from_bytes([0x57; 32]),
+                    Vec::new(),
+                )
+                .expect("expanded provenance is valid"),
+            );
+
+        assert_ne!(
+            analysis
+                .provenance()
+                .expect("provenance")
+                .source_instance_id(),
+            authored_source_id
+        );
+        assert!(analysis_matches_authored_source(
+            &analysis,
+            authored_source_id
+        ));
     }
 
     #[test]
@@ -2927,18 +3081,18 @@ mod availability_tests {
         assert_eq!(RESULT_VIEWER_TABS_HEIGHT, 41.0);
         assert_eq!(RESULT_VIEWER_TAB_HEIGHT, 30.0);
         assert_eq!(RESULT_SHEET_BAR_HEIGHT, 31.0);
+        assert_eq!(RESULT_STRUCTURED_STRIP_HEIGHT, 40.0);
         assert_eq!(RESULT_INSTRUMENT_CONTROL_HEIGHT, 23.0);
     }
 
     #[test]
-    fn structured_result_documents_collapse_the_conditional_sheet_bar() {
-        for viewer in [
-            ResultViewer::Op,
-            ResultViewer::TransferFunction,
-            ResultViewer::Specs,
-            ResultViewer::Table,
-            ResultViewer::Manifest,
-        ] {
+    fn structured_result_controls_have_a_reachable_40_px_strip() {
+        for viewer in [ResultViewer::Op, ResultViewer::Specs, ResultViewer::Table] {
+            assert!(viewer_has_structured_strip(viewer), "{viewer:?}");
+            assert!(viewer_has_sheet_bar(viewer), "{viewer:?}");
+        }
+        for viewer in [ResultViewer::TransferFunction, ResultViewer::Manifest] {
+            assert!(!viewer_has_structured_strip(viewer), "{viewer:?}");
             assert!(!viewer_has_sheet_bar(viewer), "{viewer:?}");
         }
         for viewer in [
@@ -2953,8 +3107,47 @@ mod availability_tests {
             ResultViewer::Smith,
             ResultViewer::PoleZero,
         ] {
+            assert!(!viewer_has_structured_strip(viewer), "{viewer:?}");
             assert!(viewer_has_sheet_bar(viewer), "{viewer:?}");
         }
+    }
+
+    #[test]
+    fn stage_bar_stands_down_without_a_retained_dataset() {
+        let empty = AppState::default();
+        assert_eq!(empty.ui.results.viewer, ResultViewer::Waves);
+        assert!(!result_stage_bar_visible(&empty));
+
+        let mut allocated = AppState::default();
+        allocated.simulation.start_run();
+        assert!(!result_stage_bar_visible(&allocated));
+
+        let retained = state_with_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
+        assert!(result_stage_bar_visible(&retained));
+    }
+
+    #[test]
+    fn hidden_wave_strips_make_the_instrument_restore_control_reachable() {
+        let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
+        let mut state = state_with_analysis(analysis);
+        let run = state.simulation.active_run().expect("active retained run");
+        let key = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+        state.ui.results.hidden_strips.insert(key);
+
+        let mut other_run = SimulationRun::new(2);
+        other_run.add_analysis(AnalysisResult::new(
+            2,
+            AnalysisType::Transient,
+            "Other TRAN",
+        ));
+        let other_key = AnalysisPresentationKey::new(
+            other_run.dataset_id,
+            other_run.analyses.first().expect("other analysis"),
+        );
+        state.simulation.runs.push(other_run);
+        state.ui.results.hidden_strips.insert(other_key);
+
+        assert_eq!(hidden_wave_strip_count(&state), 1);
     }
 
     #[test]

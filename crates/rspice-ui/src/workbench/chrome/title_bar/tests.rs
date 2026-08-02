@@ -609,6 +609,7 @@ fn results_menu_exposes_only_truthful_completed_result_workflows() {
             "Dataset and manifest browser…",
             "Create result document…",
             "Add result comparison…",
+            "Report page and datasheet editor…",
             "Trace and family manager…",
             "Cursor groups and links…",
             "Review notes…",

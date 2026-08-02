@@ -210,6 +210,12 @@ pub(crate) fn apply_imported_result_dataset(
     state
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
+    let document = crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id);
+    if !crate::workbench::chrome::document_bar::activate_document_by_id(state, &document) {
+        return Err(format!(
+            "imported dataset {dataset_id} was retained but its Results document could not be activated"
+        ));
+    }
     state.ui.results.viewer = crate::workbench::ResultViewer::Waves;
     state.push_user_message(ConsoleMessage::info(format!(
         "Imported {source_name} as immutable dataset {dataset_id}: {signal_count} signals × {sample_count} samples ({})",
@@ -913,6 +919,13 @@ mod tests {
         assert_eq!(
             state.workbench.workspace,
             crate::workbench::state::Workspace::Results
+        );
+        assert_eq!(
+            state
+                .workbench
+                .documents
+                .active(crate::workbench::state::Workspace::Results),
+            Some(&crate::workbench::state::WorkspaceDocumentId::ResultDataset(run.dataset_id))
         );
         assert!(
             crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state),

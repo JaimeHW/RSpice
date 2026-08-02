@@ -7,9 +7,11 @@
 //! can only be created with a registered renderer; migrated or damaged
 //! documents carrying an unknown viewer identity fail closed.
 
-use egui::{Align, Layout, RichText, Sense, Ui, UiBuilder, vec2};
+use egui::{Align, Layout, Rect, RichText, Sense, Ui, UiBuilder, pos2, vec2};
 
-use crate::product::{AnalysisInstanceId, ResultDocumentId};
+use crate::product::{
+    AnalysisInstanceId, ContentDigest, ObjectRevision, ResultDocumentId, SimulationPlanId,
+};
 use crate::results::viewer_catalog::viewer_document;
 use crate::results::visualization_document::{
     Page, PageLayout, Pane, PaneDataBinding, PanePlacement,
@@ -216,6 +218,42 @@ fn select_global_viewer(state: &mut AppState, viewer: ResultViewer) {
     }
 }
 
+fn current_result_source_digest(state: &AppState) -> Option<ContentDigest> {
+    let netlist = &state.ui.netlist;
+    (netlist.generation_error.is_none()
+        && netlist.generated_input_digest.is_some()
+        && netlist.generated_input_digest == netlist.current_generation_input_digest
+        && !state.simulation.netlist_content.trim().is_empty())
+    .then(|| {
+        crate::workbench::documents::netlist_document::source_content_digest(
+            &state.simulation.netlist_content,
+        )
+    })
+}
+
+fn run_matches_current_authority(
+    run: &SimulationRun,
+    plan_id: SimulationPlanId,
+    project_revision: ObjectRevision,
+    source_digest: Option<ContentDigest>,
+) -> bool {
+    run.lifecycle == crate::state::SimulationRunLifecycle::Completed
+        && run.success
+        && run.prepared_receipt().is_some_and(|receipt| {
+            receipt.simulation_plan_id() == Some(plan_id)
+                && receipt.project_revision() == project_revision
+                && source_digest.is_some_and(|digest| receipt.source_content_digest() == digest)
+        })
+}
+
+fn latest_successful_authored_analysis(
+    run: &SimulationRun,
+    authored_analysis_id: AnalysisInstanceId,
+) -> Option<&AnalysisResult> {
+    run.find_analysis_by_source_instance(authored_analysis_id)
+        .filter(|analysis| analysis.success)
+}
+
 fn refresh_latest_binding(
     state: &mut AppState,
     document_id: ResultDocumentId,
@@ -243,28 +281,16 @@ fn refresh_latest_binding(
         .next()
         .ok_or_else(|| "The result document has no retained pane binding.".to_owned())?
         .dataset;
+    let project_revision = state.workspace.project.revision();
+    let source_digest = current_result_source_digest(state);
 
     let Some((run, analysis)) = state
         .simulation
         .runs
         .iter()
-        .filter(|run| {
-            run.lifecycle.is_terminal()
-                && run.success
-                && run
-                    .prepared_receipt()
-                    .and_then(|receipt| receipt.simulation_plan_id())
-                    == Some(plan_id)
-        })
+        .filter(|run| run_matches_current_authority(run, plan_id, project_revision, source_digest))
         .filter_map(|run| {
-            run.analyses
-                .iter()
-                .find(|analysis| {
-                    analysis.success
-                        && analysis.provenance().is_some_and(|provenance| {
-                            provenance.source_instance_id() == authored_analysis_id
-                        })
-                })
+            latest_successful_authored_analysis(run, authored_analysis_id)
                 .map(|analysis| (run, analysis))
         })
         .max_by(|(left, _), (right, _)| {
@@ -274,10 +300,11 @@ fn refresh_latest_binding(
                 .then_with(|| left.dataset_id.as_uuid().cmp(&right.dataset_id.as_uuid()))
         })
     else {
-        return Err(
-            "No terminal retained run matches this document's exact plan and authored analysis."
-                .to_owned(),
-        );
+        // Latest tracking is non-destructive. When no authenticated current
+        // producer exists, keep the last immutable binding readable; the
+        // Results toolbar marks it Historical until a matching completed run
+        // can advance it again.
+        return Ok(());
     };
     let next = crate::product::DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
     if next == previous {
@@ -297,7 +324,7 @@ fn refresh_latest_binding(
             vec![DocumentEdit::RetargetTrackedDataset {
                 previous,
                 next: next_source,
-                analysis_id: authored_analysis_id,
+                analysis_id: analysis_identity(run, analysis),
             }],
         )
         .map_err(|error| error.to_string())?;
@@ -386,142 +413,102 @@ fn render_page(
     active_pane_id: u64,
     active_viewer: Option<ResultViewer>,
 ) -> Option<u64> {
-    match page.page.layout {
-        PageLayout::SinglePane if page.panes.len() == 1 => {
-            render_single(ui, app, &page.panes[0], active_pane_id, active_viewer)
-        }
-        PageLayout::SinglePane => {
-            unavailable_surface(
-                ui,
-                &page.page.title,
-                "A single-pane page must resolve to exactly one retained pane.",
-            );
-            None
-        }
-        PageLayout::Rows => render_rows(ui, app, &page.panes, active_pane_id, active_viewer),
-        PageLayout::Columns => render_columns(ui, app, &page.panes, active_pane_id, active_viewer),
-        PageLayout::Grid { columns } => render_grid(
+    if page.page.layout == PageLayout::SinglePane && page.panes.len() != 1 {
+        unavailable_surface(
             ui,
-            app,
-            &page.panes,
-            usize::from(columns.max(1)),
-            active_pane_id,
-            active_viewer,
-        ),
+            &page.page.title,
+            "A single-pane page must resolve to exactly one retained pane.",
+        );
+        return None;
     }
-}
 
-fn render_single(
-    ui: &mut Ui,
-    app: &mut RSpiceApp,
-    pane: &Pane,
-    active_pane_id: u64,
-    active_viewer: Option<ResultViewer>,
-) -> Option<u64> {
-    let size = ui.available_size();
-    ui.allocate_ui_with_layout(size, Layout::top_down(Align::Min), |ui| {
-        render_pane(ui, app, pane, active_pane_id, active_viewer)
-    })
-    .inner
-}
-
-fn render_rows(
-    ui: &mut Ui,
-    app: &mut RSpiceApp,
-    panes: &[Pane],
-    active_pane_id: u64,
-    active_viewer: Option<ResultViewer>,
-) -> Option<u64> {
-    let count = panes.len().max(1) as f32;
-    let gap = 1.0;
-    let pane_height = ((ui.available_height() - gap * (count - 1.0)) / count).max(80.0);
-    let width = ui.available_width();
+    // Reserve the stage exactly once. Pane viewers render into clipped slots
+    // inside that fixed rectangle, so their own minimum sizes and scroll areas
+    // cannot enlarge the Results document or create recursive scroll growth.
+    let size = finite_stage_size(ui.available_size());
+    let (stage_rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let slots = bounded_pane_slots(stage_rect, page.page.layout, page.panes.len());
     let mut activated_pane_id = None;
-    for (index, pane) in panes.iter().enumerate() {
-        let activated = ui
-            .allocate_ui_with_layout(
-                vec2(width, pane_height),
-                Layout::top_down(Align::Min),
-                |ui| render_pane(ui, app, pane, active_pane_id, active_viewer),
-            )
-            .inner;
-        activated_pane_id = activated.or(activated_pane_id);
-        if index + 1 < panes.len() {
-            ui.allocate_space(vec2(width, gap));
-        }
-    }
-    activated_pane_id
-}
-
-fn render_columns(
-    ui: &mut Ui,
-    app: &mut RSpiceApp,
-    panes: &[Pane],
-    active_pane_id: u64,
-    active_viewer: Option<ResultViewer>,
-) -> Option<u64> {
-    let count = panes.len().max(1) as f32;
-    let gap = 1.0;
-    let pane_width = ((ui.available_width() - gap * (count - 1.0)) / count).max(120.0);
-    let height = ui.available_height();
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = gap;
-        let mut activated_pane_id = None;
-        for pane in panes {
-            let activated = ui
-                .allocate_ui_with_layout(
-                    vec2(pane_width, height),
-                    Layout::top_down(Align::Min),
-                    |ui| render_pane(ui, app, pane, active_pane_id, active_viewer),
-                )
-                .inner;
-            activated_pane_id = activated.or(activated_pane_id);
-        }
-        activated_pane_id
-    })
-    .inner
-}
-
-fn render_grid(
-    ui: &mut Ui,
-    app: &mut RSpiceApp,
-    panes: &[Pane],
-    columns: usize,
-    active_pane_id: u64,
-    active_viewer: Option<ResultViewer>,
-) -> Option<u64> {
-    let rows = panes.len().div_ceil(columns).max(1);
-    let horizontal_gap = 1.0;
-    let vertical_gap = 1.0;
-    let pane_width = ((ui.available_width() - horizontal_gap * (columns.saturating_sub(1) as f32))
-        / columns as f32)
-        .max(120.0);
-    let pane_height = ((ui.available_height() - vertical_gap * (rows.saturating_sub(1) as f32))
-        / rows as f32)
-        .max(80.0);
-    ui.spacing_mut().item_spacing.y = vertical_gap;
-    let mut activated_pane_id = None;
-    for row in panes.chunks(columns) {
-        let activated = ui
-            .horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = horizontal_gap;
-                let mut activated_pane_id = None;
-                for pane in row {
-                    let activated = ui
-                        .allocate_ui_with_layout(
-                            vec2(pane_width, pane_height),
-                            Layout::top_down(Align::Min),
-                            |ui| render_pane(ui, app, pane, active_pane_id, active_viewer),
-                        )
-                        .inner;
-                    activated_pane_id = activated.or(activated_pane_id);
-                }
-                activated_pane_id
-            })
-            .inner;
+    for (pane, rect) in page.panes.iter().zip(slots) {
+        let mut pane_ui = ui.new_child(
+            UiBuilder::new()
+                .id_salt(("persistent-result-pane-slot", pane.id.get()))
+                .max_rect(rect)
+                .layout(Layout::top_down(Align::Min)),
+        );
+        pane_ui.set_clip_rect(pane_ui.clip_rect().intersect(rect));
+        let activated = render_pane(&mut pane_ui, app, pane, active_pane_id, active_viewer);
         activated_pane_id = activated.or(activated_pane_id);
     }
     activated_pane_id
+}
+
+const PANE_GAP: f32 = 1.0;
+
+fn finite_stage_size(size: egui::Vec2) -> egui::Vec2 {
+    vec2(finite_extent(size.x), finite_extent(size.y))
+}
+
+fn finite_extent(value: f32) -> f32 {
+    if value.is_finite() {
+        value.max(0.0)
+    } else {
+        0.0
+    }
+}
+
+fn bounded_axis_cells(extent: f32, count: usize) -> (f32, f32) {
+    let count = count.max(1);
+    let total_gap = (PANE_GAP * count.saturating_sub(1) as f32).min(extent);
+    ((extent - total_gap) / count as f32, total_gap)
+}
+
+fn bounded_pane_slots(stage: Rect, layout: PageLayout, pane_count: usize) -> Vec<Rect> {
+    if pane_count == 0 {
+        return Vec::new();
+    }
+    let stage = Rect::from_min_size(stage.min, finite_stage_size(stage.size()));
+    let (columns, rows) = match layout {
+        PageLayout::SinglePane => (1, 1),
+        PageLayout::Rows => (1, pane_count),
+        PageLayout::Columns => (pane_count, 1),
+        PageLayout::Grid { columns } => {
+            let columns = usize::from(columns.max(1)).min(pane_count);
+            (columns, pane_count.div_ceil(columns))
+        }
+    };
+    let (pane_width, horizontal_gap_budget) = bounded_axis_cells(stage.width(), columns);
+    let (pane_height, vertical_gap_budget) = bounded_axis_cells(stage.height(), rows);
+    let horizontal_gap = if columns > 1 {
+        horizontal_gap_budget / (columns - 1) as f32
+    } else {
+        0.0
+    };
+    let vertical_gap = if rows > 1 {
+        vertical_gap_budget / (rows - 1) as f32
+    } else {
+        0.0
+    };
+
+    (0..pane_count)
+        .map(|index| {
+            let column = index % columns;
+            let row = index / columns;
+            let min = pos2(
+                stage.left() + column as f32 * (pane_width + horizontal_gap),
+                stage.top() + row as f32 * (pane_height + vertical_gap),
+            );
+            Rect::from_min_size(min, vec2(pane_width, pane_height)).intersect(stage)
+        })
+        .collect()
+}
+
+fn bounded_inset(rect: Rect, requested: f32) -> Rect {
+    let inset = requested
+        .max(0.0)
+        .min(rect.width() * 0.5)
+        .min(rect.height() * 0.5);
+    rect.shrink(inset)
 }
 
 fn render_pane(
@@ -552,7 +539,7 @@ fn render_pane(
     ui.scope_builder(
         UiBuilder::new()
             .id_salt(("persistent-result-pane", pane.id.get()))
-            .max_rect(rect.shrink(1.0))
+            .max_rect(bounded_inset(rect, 1.0))
             .layout(Layout::top_down(Align::Min)),
         |ui| {
             let activated_pane_id =
@@ -860,6 +847,173 @@ fn unavailable_surface(ui: &mut Ui, title: &str, reason: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::{
+        AnalysisResultProvenance, AnalysisResultSourceDomain, PreparedRunReceipt,
+        PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationRunLifecycle,
+        SimulationRunProvenance,
+    };
+
+    fn digest(byte: u8) -> ContentDigest {
+        ContentDigest::from_bytes([byte; 32])
+    }
+
+    fn completed_prepared_run(
+        plan_id: SimulationPlanId,
+        project_revision: ObjectRevision,
+        source_digest: ContentDigest,
+    ) -> SimulationRun {
+        let task = PreparedRunTaskReceipt::new(
+            AnalysisInstanceId::new(),
+            ObjectRevision::INITIAL,
+            Vec::new(),
+            5,
+            digest(0x44),
+        )
+        .expect("task receipt");
+        let receipt = PreparedRunReceipt::new(
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(plan_id),
+            project_revision,
+            digest(0x41),
+            source_digest,
+            PreparedSourceCheckReceipt::SchematicDrc(digest(0x43)),
+            vec![task],
+        )
+        .expect("run receipt");
+        let mut run = SimulationRun::new(1);
+        run.restore_provenance(SimulationRunProvenance::Prepared(receipt))
+            .expect("run provenance");
+        run.mark_running().expect("running lifecycle");
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .expect("completed lifecycle");
+        run
+    }
+
+    #[test]
+    fn latest_candidate_requires_completed_success_and_current_project_source_authority() {
+        let plan_id = SimulationPlanId::new();
+        let revision = ObjectRevision::INITIAL;
+        let source = digest(0x52);
+        let mut run = completed_prepared_run(plan_id, revision, source);
+
+        assert!(run_matches_current_authority(
+            &run,
+            plan_id,
+            revision,
+            Some(source)
+        ));
+        assert!(!run_matches_current_authority(
+            &run,
+            plan_id,
+            ObjectRevision::new(revision.get() + 1).expect("next revision"),
+            Some(source)
+        ));
+        assert!(!run_matches_current_authority(
+            &run,
+            plan_id,
+            revision,
+            Some(digest(0x53))
+        ));
+        assert!(!run_matches_current_authority(
+            &run, plan_id, revision, None
+        ));
+
+        run.success = false;
+        assert!(!run_matches_current_authority(
+            &run,
+            plan_id,
+            revision,
+            Some(source)
+        ));
+        run.success = true;
+        run.lifecycle = SimulationRunLifecycle::Running;
+        assert!(!run_matches_current_authority(
+            &run,
+            plan_id,
+            revision,
+            Some(source)
+        ));
+    }
+
+    #[test]
+    fn latest_authored_analysis_uses_the_final_expanded_execution_identity() {
+        let authored = AnalysisInstanceId::new();
+        let first_execution = AnalysisInstanceId::new();
+        let final_execution = AnalysisInstanceId::new();
+        let mut run = SimulationRun::new(1);
+        for (label, execution) in [
+            ("PVT point 1/2", first_execution),
+            ("PVT point 2/2", final_execution),
+        ] {
+            run.add_analysis(
+                AnalysisResult::new(1, AnalysisType::Transient, label).with_provenance(
+                    AnalysisResultProvenance::new_with_authored_source_domain(
+                        AnalysisResultSourceDomain::SimulationPlan,
+                        execution,
+                        authored,
+                        ObjectRevision::INITIAL,
+                        digest(0x61),
+                        Vec::new(),
+                    )
+                    .expect("expanded analysis provenance"),
+                ),
+            );
+        }
+
+        let selected = latest_successful_authored_analysis(&run, authored)
+            .expect("the authored analysis has expanded results");
+        assert_eq!(selected.label, "PVT point 2/2");
+        assert_eq!(analysis_identity(&run, selected), final_execution);
+    }
+
+    fn assert_slots_are_finite_and_bounded(stage: Rect, slots: &[Rect], expected: usize) {
+        assert_eq!(slots.len(), expected);
+        for slot in slots {
+            for value in [
+                slot.min.x,
+                slot.min.y,
+                slot.max.x,
+                slot.max.y,
+                slot.width(),
+                slot.height(),
+            ] {
+                assert!(value.is_finite(), "pane slot must remain finite: {slot:?}");
+            }
+            assert!(slot.width() >= 0.0 && slot.height() >= 0.0, "{slot:?}");
+            assert!(
+                slot.left() >= stage.left() && slot.top() >= stage.top(),
+                "{slot:?}"
+            );
+            assert!(
+                slot.right() <= stage.right() && slot.bottom() <= stage.bottom(),
+                "{slot:?} exceeds {stage:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn multi_pane_slots_never_exceed_narrow_or_short_result_stages() {
+        let short = Rect::from_min_size(pos2(17.0, 23.0), vec2(480.0, 19.0));
+        let rows = bounded_pane_slots(short, PageLayout::Rows, 7);
+        assert_slots_are_finite_and_bounded(short, &rows, 7);
+
+        let narrow = Rect::from_min_size(pos2(3.0, 5.0), vec2(13.0, 360.0));
+        let columns = bounded_pane_slots(narrow, PageLayout::Columns, 8);
+        assert_slots_are_finite_and_bounded(narrow, &columns, 8);
+
+        let compact = Rect::from_min_size(pos2(11.0, 13.0), vec2(29.0, 17.0));
+        let grid = bounded_pane_slots(compact, PageLayout::Grid { columns: 3 }, 11);
+        assert_slots_are_finite_and_bounded(compact, &grid, 11);
+    }
+
+    #[test]
+    fn pane_slot_geometry_sanitizes_nonfinite_available_extents() {
+        let size = finite_stage_size(vec2(f32::INFINITY, f32::NAN));
+        assert_eq!(size, vec2(0.0, 0.0));
+        let stage = Rect::from_min_size(pos2(0.0, 0.0), size);
+        let slots = bounded_pane_slots(stage, PageLayout::Grid { columns: 2 }, 4);
+        assert_slots_are_finite_and_bounded(stage, &slots, 4);
+    }
 
     #[test]
     fn exact_renderer_mapping_never_substitutes_unimplemented_catalog_viewers() {

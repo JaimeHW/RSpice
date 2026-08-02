@@ -43,11 +43,14 @@ fn disarming_the_cursor_tool_clears_the_pair_and_hides_the_strip() {
 }
 
 #[test]
-fn the_strip_never_grows_past_its_trace_limit() {
-    assert_eq!(READOUT_TRACE_LIMIT, 4);
-    // Height is header + rows, so the limit bounds the strip exactly.
-    let bounded = READOUT_HEADER_H + READOUT_TRACE_LIMIT as f32 * READOUT_ROW_H;
-    assert!(bounded < 120.0, "the readout is a strip, not a dock");
+fn deep_readouts_scroll_without_exceeding_the_212_px_body_cap() {
+    let state = deep_readout_fixture(16);
+
+    assert_eq!(readout_trace_count(&state), 16);
+    assert_eq!(READOUT_BODY_MAX_H, 212.0);
+    assert_eq!(READOUT_MAX_H, READOUT_HEADER_H + READOUT_BODY_MAX_H);
+    assert_eq!(readout_strip_height(&state), READOUT_MAX_H);
+    assert!(readout_strip_height(&state) <= 238.0);
 }
 use crate::product::{AnalysisInstanceId, ContentDigest, DatasetId, ObjectRevision};
 use crate::results::visualization_document::{
@@ -172,6 +175,48 @@ fn marker_fixture() -> AppState {
     state
 }
 
+fn deep_readout_fixture(trace_count: usize) -> AppState {
+    let waveforms = (0..trace_count)
+        .map(|index| {
+            WaveformData::new(
+                format!("V(out{index})"),
+                vec![0.0, 1.0],
+                vec![index as f64, index as f64 + 1.0],
+                "#fff",
+            )
+        })
+        .collect();
+    let mut state = AppState::default();
+    state.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(waveforms),
+    );
+    state.ui.results.cursors.place(0.5);
+    state.ui.results.cursor_strip = Some(0);
+    state
+}
+
+#[test]
+fn each_cursor_trace_reports_its_own_linear_slope() {
+    let mut state = marker_fixture();
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let complex_display = presentation.complex_number_display();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        complex_display,
+        &Tokens::default(),
+    );
+
+    let slopes = slope_values(&models[0], 0.0, 1.0, presentation);
+
+    assert_eq!(slopes.len(), 1);
+    assert!(
+        slopes[0].contains("5") && slopes[0].contains("V/s"),
+        "unexpected slope readout: {}",
+        slopes[0]
+    );
+}
+
 fn marker_identity(state: &AppState) -> (AnalysisPresentationKey, WaveformPresentationKey) {
     let run = state.simulation.active_run().expect("active marker run");
     let analysis = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
@@ -248,7 +293,7 @@ fn markers_alone_keep_a_compact_readout_strip_on_screen() {
     assert_eq!(
         readout_strip_height(&state),
         READOUT_HEADER_H + MARKER_ROW_H,
-        "markers-only strip: the marker header and its one row"
+        "markers-only dock: one shared header and its one row"
     );
 
     // A closed strip takes its markers off screen with it.
@@ -271,8 +316,51 @@ fn the_strip_carries_cursors_and_markers_together() {
         .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5);
     assert_eq!(
         readout_strip_height(&state),
-        cursors_only + READOUT_HEADER_H + MARKER_ROW_H
+        cursors_only,
+        "desktop columns share one body height instead of stacking sections"
     );
+}
+
+#[test]
+fn collapse_keeps_one_header_and_no_content_still_removes_the_strip() {
+    let mut state = marker_fixture();
+    let (analysis, waveform) = marker_identity(&state);
+    state
+        .ui
+        .results
+        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5);
+    state.ui.results.readout_collapsed = true;
+
+    assert_eq!(readout_strip_height(&state), READOUT_HEADER_H);
+
+    state.ui.results.hidden_strips.insert(analysis);
+    assert_eq!(readout_strip_height(&state), 0.0);
+}
+
+#[test]
+fn every_visible_marker_remains_in_the_scroll_owned_body() {
+    let mut state = marker_fixture();
+    let (analysis, waveform) = marker_identity(&state);
+    for index in 0..12 {
+        state.ui.results.add_marker(
+            analysis,
+            waveform.clone(),
+            "V(out)".to_owned(),
+            index as f64 / 12.0,
+        );
+    }
+
+    assert_eq!(visible_markers(&state).len(), 12);
+    assert_eq!(marker_body_height(&state), 12.0 * MARKER_ROW_H);
+    assert_eq!(readout_strip_height(&state), READOUT_MAX_H);
+}
+
+#[test]
+fn cursor_and_marker_columns_split_at_normal_desktop_widths() {
+    assert!(!readout_columns_side_by_side(679.0, true, true));
+    assert!(readout_columns_side_by_side(680.0, true, true));
+    assert!(!readout_columns_side_by_side(900.0, true, false));
+    assert!(!readout_columns_side_by_side(900.0, false, true));
 }
 
 #[test]

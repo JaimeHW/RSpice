@@ -4,6 +4,7 @@
 use egui::containers::menu::MenuButton;
 use egui::{Align, Context, Frame, Layout, Panel, Ui, Vec2};
 
+use crate::product::{ContentDigest, ObjectRevision};
 use crate::state::{ComponentType, Tool, ViewType};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -821,7 +822,20 @@ fn results_tracking_button(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Layou
         return false;
     };
     if results_document_is_historical(app) {
-        return false;
+        if take_projected_tool_slot(ui, layout) {
+            labeled_icon_button_sized(
+                ui,
+                WorkbenchIcon::History,
+                "Historical",
+                false,
+                explicit_label_width("Historical"),
+                layout.toolbar_control_height,
+            )
+            .on_hover_text(
+                "This document remains readable from its immutable binding, but no completed run matches the current project revision and generated source.",
+            );
+        }
+        return true;
     }
     let Some((tracking, revision)) = app
         .state
@@ -897,18 +911,46 @@ fn results_tracking_button(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Layou
     true
 }
 
+fn current_result_source_digest(app: &RSpiceApp) -> Option<ContentDigest> {
+    let netlist = &app.state.ui.netlist;
+    (netlist.generation_error.is_none()
+        && netlist.generated_input_digest.is_some()
+        && netlist.generated_input_digest == netlist.current_generation_input_digest
+        && !app.state.simulation.netlist_content.trim().is_empty())
+    .then(|| {
+        crate::workbench::documents::netlist_document::source_content_digest(
+            &app.state.simulation.netlist_content,
+        )
+    })
+}
+
+fn run_has_current_success_authority(
+    run: &crate::state::SimulationRun,
+    project_revision: ObjectRevision,
+    source_digest: Option<ContentDigest>,
+) -> bool {
+    run.lifecycle == crate::state::SimulationRunLifecycle::Completed
+        && run.success
+        && run.prepared_receipt().is_some_and(|receipt| {
+            receipt.project_revision() == project_revision
+                && source_digest.is_some_and(|digest| receipt.source_content_digest() == digest)
+        })
+}
+
 fn results_document_is_historical(app: &RSpiceApp) -> bool {
     use crate::workbench::state::WorkspaceDocumentId;
 
+    let project_revision = app.state.workspace.project.revision();
+    let source_digest = current_result_source_digest(app);
     match app.state.workbench.documents.active(Workspace::Results) {
         Some(WorkspaceDocumentId::ResultDataset(dataset_id)) => app
             .state
             .simulation
             .runs
             .iter()
-            .filter(|run| run.lifecycle.is_terminal())
+            .filter(|run| run_has_current_success_authority(run, project_revision, source_digest))
             .max_by_key(|run| run.id)
-            .is_some_and(|latest| latest.dataset_id != *dataset_id),
+            .is_none_or(|latest| latest.dataset_id != *dataset_id),
         Some(WorkspaceDocumentId::VisualizationDocument(document_id)) => {
             let Some(document) = app.state.workspace.visualization_document(*document_id) else {
                 return true;
@@ -932,15 +974,17 @@ fn results_document_is_historical(app: &RSpiceApp) -> bool {
                 .runs
                 .iter()
                 .filter(|run| {
-                    run.lifecycle.is_terminal()
+                    run_has_current_success_authority(run, project_revision, source_digest)
                         && run
                             .prepared_receipt()
                             .and_then(|receipt| receipt.simulation_plan_id())
                             == Some(plan_id)
                         && run.analyses.iter().any(|analysis| {
-                            analysis.provenance().is_some_and(|provenance| {
-                                provenance.source_instance_id() == analysis_id
-                            })
+                            analysis.success
+                                && crate::workbench::documents::result_document::analysis_matches_authored_source(
+                                    analysis,
+                                    analysis_id,
+                                )
                         })
                 })
                 .max_by_key(|run| run.id)
@@ -1899,7 +1943,124 @@ fn explicit_label_width(label: &str) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::product::{AnalysisInstanceId, SimulationPlanId};
+    use crate::state::{
+        AnalysisResultSourceDomain, PreparedRunReceipt, PreparedRunTaskReceipt,
+        PreparedSourceCheckReceipt, SimulationRun, SimulationRunLifecycle, SimulationRunProvenance,
+    };
     use crate::workbench::state::WorkbenchState;
+
+    fn digest(byte: u8) -> ContentDigest {
+        ContentDigest::from_bytes([byte; 32])
+    }
+
+    fn completed_prepared_run(
+        project_revision: ObjectRevision,
+        source_digest: ContentDigest,
+    ) -> SimulationRun {
+        let task = PreparedRunTaskReceipt::new(
+            AnalysisInstanceId::new(),
+            ObjectRevision::INITIAL,
+            Vec::new(),
+            5,
+            digest(0x64),
+        )
+        .expect("task receipt");
+        let receipt = PreparedRunReceipt::new(
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(SimulationPlanId::new()),
+            project_revision,
+            digest(0x61),
+            source_digest,
+            PreparedSourceCheckReceipt::SchematicDrc(digest(0x63)),
+            vec![task],
+        )
+        .expect("run receipt");
+        let mut run = SimulationRun::new(1);
+        run.restore_provenance(SimulationRunProvenance::Prepared(receipt))
+            .expect("run provenance");
+        run.mark_running().expect("running lifecycle");
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .expect("completed lifecycle");
+        run
+    }
+
+    #[test]
+    fn toolbar_currentness_rejects_stale_failed_and_nonterminal_runs() {
+        let revision = ObjectRevision::INITIAL;
+        let source = digest(0x72);
+        let mut run = completed_prepared_run(revision, source);
+
+        assert!(run_has_current_success_authority(
+            &run,
+            revision,
+            Some(source)
+        ));
+        assert!(!run_has_current_success_authority(
+            &run,
+            ObjectRevision::new(revision.get() + 1).expect("next revision"),
+            Some(source)
+        ));
+        assert!(!run_has_current_success_authority(
+            &run,
+            revision,
+            Some(digest(0x73))
+        ));
+        assert!(!run_has_current_success_authority(&run, revision, None));
+
+        run.success = false;
+        assert!(!run_has_current_success_authority(
+            &run,
+            revision,
+            Some(source)
+        ));
+        run.success = true;
+        run.lifecycle = SimulationRunLifecycle::Running;
+        assert!(!run_has_current_success_authority(
+            &run,
+            revision,
+            Some(source)
+        ));
+    }
+
+    #[test]
+    fn running_dataset_is_never_presented_as_current() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Results;
+        let source = "R1 1 0 1k\n";
+        let source_digest =
+            crate::workbench::documents::netlist_document::source_content_digest(source);
+        let generation_input = digest(0x81);
+        app.state.simulation.netlist_content = source.to_owned();
+        app.state.ui.netlist.generated_input_digest = Some(generation_input);
+        app.state.ui.netlist.current_generation_input_digest = Some(generation_input);
+        let revision = app.state.workspace.project.revision();
+        let run = completed_prepared_run(revision, source_digest);
+        let dataset_id = run.dataset_id;
+        app.state.simulation.runs = vec![run];
+        app.state.workbench.documents.activate(
+            crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id),
+        );
+
+        assert!(!results_document_is_historical(&app));
+        app.state.simulation.runs[0].lifecycle = SimulationRunLifecycle::Running;
+        assert!(results_document_is_historical(&app));
+    }
+
+    #[test]
+    fn missing_current_generated_source_never_authenticates_a_retained_dataset() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Results;
+        let revision = app.state.workspace.project.revision();
+        let run = completed_prepared_run(revision, digest(0x83));
+        let dataset_id = run.dataset_id;
+        app.state.simulation.runs = vec![run];
+        app.state.workbench.documents.activate(
+            crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id),
+        );
+
+        assert!(results_document_is_historical(&app));
+    }
 
     #[test]
     fn long_toolbar_labels_remain_bounded() {

@@ -1527,6 +1527,7 @@ fn results_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item(ui, app, Command::DatasetManifestBrowser);
     command_item(ui, app, Command::CreateResultDocument);
     command_item(ui, app, Command::CompareResultDatasets);
+    command_item(ui, app, Command::ReportAuthoring);
     menu_separator(ui);
     command_item(ui, app, Command::VisualizationTraceManager);
     command_item(ui, app, Command::VisualizationCursorManager);
