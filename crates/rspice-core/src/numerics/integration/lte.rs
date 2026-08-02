@@ -91,6 +91,19 @@ pub struct LteEstimator {
     history_count: usize,
     /// Current integration method (for order-aware scaling)
     method_order: u32,
+    /// Xyce OneStep's accepted first-difference history (`xHistory[2]`).
+    /// OneStep promotes this only on an accepted order-two step, so it must
+    /// not be reconstructed from absolute accepted points after an order-one
+    /// interval.
+    xyce_order_two_difference: Vec<Value>,
+    xyce_order_two_difference_dt: Value,
+    /// Xyce OneStep's attempted coefficient history (`psi_[0..2]`). This
+    /// advances when a candidate reaches the predictor and is restored with
+    /// the one-sided shift used by `OneStep::restoreHistory` on rejection.
+    xyce_attempt_dt: Value,
+    xyce_attempt_prev_dt: Value,
+    xyce_attempt_prev_prev_dt: Value,
+    xyce_attempt_checkpoint: Option<(Value, Value, Value, u8)>,
 }
 
 impl LteEstimator {
@@ -137,6 +150,12 @@ impl LteEstimator {
             signal_local_reference: Vec::new(),
             history_count: 0,
             method_order: 2, // Default to trapezoidal order
+            xyce_order_two_difference: Vec::new(),
+            xyce_order_two_difference_dt: 0.0,
+            xyce_attempt_dt: 0.0,
+            xyce_attempt_prev_dt: 0.0,
+            xyce_attempt_prev_prev_dt: 0.0,
+            xyce_attempt_checkpoint: None,
         }
     }
 
@@ -338,8 +357,16 @@ impl LteEstimator {
 
     #[inline]
     fn predict_trapezoidal_order1_value(&self, prev: Value, prev_prev: Value, dt: Value) -> Value {
-        if self.history_count >= 2 && self.prev_dt > 0.0 {
-            prev + dt * (prev - prev_prev) / self.prev_dt
+        let predictor_dt = if self.uses_accepted_solution_reference()
+            && self.xyce_attempt_prev_dt.is_finite()
+            && self.xyce_attempt_prev_dt > 0.0
+        {
+            self.xyce_attempt_prev_dt
+        } else {
+            self.prev_dt
+        };
+        if self.history_count >= 2 && predictor_dt > 0.0 {
+            prev + dt * (prev - prev_prev) / predictor_dt
         } else {
             prev
         }
@@ -348,15 +375,43 @@ impl LteEstimator {
     #[inline]
     fn predict_trapezoidal_order2_value(
         &self,
+        index: usize,
         prev: Value,
         prev_prev: Value,
         prev_prev_prev: Value,
         dt: Value,
     ) -> Value {
-        if self.history_count >= 3 && self.prev_dt > 0.0 && self.prev_prev_dt > 0.0 {
-            let dd0 = (prev - prev_prev) / self.prev_dt;
-            let dd1 = (prev_prev - prev_prev_prev) / self.prev_prev_dt;
-            let b = -dt / (2.0 * self.prev_dt);
+        let predictor_dt = if self.uses_accepted_solution_reference()
+            && self.xyce_attempt_prev_dt.is_finite()
+            && self.xyce_attempt_prev_dt > 0.0
+        {
+            self.xyce_attempt_prev_dt
+        } else {
+            self.prev_dt
+        };
+        let predictor_prev_dt = if self.uses_accepted_solution_reference()
+            && self.xyce_attempt_prev_prev_dt.is_finite()
+            && self.xyce_attempt_prev_prev_dt > 0.0
+        {
+            self.xyce_attempt_prev_prev_dt
+        } else {
+            self.xyce_order_two_difference_dt
+        };
+        if self.history_count >= 3 && predictor_dt > 0.0 && predictor_prev_dt > 0.0 {
+            let dd0 = (prev - prev_prev) / predictor_dt;
+            let dd1 = self
+                .xyce_order_two_difference
+                .get(index)
+                .copied()
+                .map(|difference| difference / predictor_prev_dt)
+                .unwrap_or_else(|| {
+                    if self.prev_prev_dt > 0.0 {
+                        (prev_prev - prev_prev_prev) / self.prev_prev_dt
+                    } else {
+                        0.0
+                    }
+                });
+            let b = -dt / (2.0 * predictor_dt);
             let a = 1.0 - b;
             prev + (b * dd1 + a * dd0) * dt
         } else {
@@ -399,7 +454,13 @@ impl LteEstimator {
                 }
                 IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear => {
                     if trap_order >= 2 {
-                        self.predict_trapezoidal_order2_value(prev, prev_prev, prev_prev_prev, dt)
+                        self.predict_trapezoidal_order2_value(
+                            idx,
+                            prev,
+                            prev_prev,
+                            prev_prev_prev,
+                            dt,
+                        )
                     } else {
                         self.predict_trapezoidal_order1_value(prev, prev_prev, dt)
                     }
@@ -453,6 +514,34 @@ impl LteEstimator {
         self.reference != TransientLteReference::PredictorLocal
     }
 
+    /// Advance Xyce OneStep's attempted coefficient history for a candidate
+    /// that reaches the predictor. A rejected candidate is rolled back with
+    /// the matching one-sided `restoreHistory` shift.
+    pub(crate) fn begin_xyce_attempt(&mut self, dt: Value, order: u8) {
+        if !self.uses_accepted_solution_reference() || !dt.is_finite() || dt <= 0.0 {
+            return;
+        }
+        self.xyce_attempt_checkpoint = Some((
+            self.xyce_attempt_dt,
+            self.xyce_attempt_prev_dt,
+            self.xyce_attempt_prev_prev_dt,
+            order,
+        ));
+        if order >= 2 {
+            self.xyce_attempt_prev_prev_dt = self.xyce_attempt_prev_dt;
+        }
+        self.xyce_attempt_prev_dt = self.xyce_attempt_dt;
+        self.xyce_attempt_dt = dt;
+    }
+
+    pub(crate) fn rollback_xyce_attempt(&mut self) {
+        if let Some((dt, prev_dt, prev_prev_dt, order)) = self.xyce_attempt_checkpoint.take() {
+            self.xyce_attempt_dt = dt;
+            self.xyce_attempt_prev_dt = if order >= 2 { prev_dt } else { dt };
+            self.xyce_attempt_prev_prev_dt = if order >= 2 { prev_dt } else { prev_prev_dt };
+        }
+    }
+
     pub(crate) fn requires_signal_reference_history(&self) -> bool {
         matches!(
             self.reference,
@@ -467,6 +556,33 @@ impl LteEstimator {
     /// Record a solution point for history and reference weighting.
     pub fn record(&mut self, solution: &[Value], dt: Value) {
         self.record_prefix(solution, solution.len(), dt);
+    }
+
+    /// Record an accepted point together with the OneStep order that produced
+    /// it. Xyce promotes the first-difference history only on order two.
+    pub(crate) fn record_with_order(
+        &mut self,
+        solution: &[Value],
+        prefix_len: usize,
+        dt: Value,
+        order: u8,
+    ) {
+        self.method_order = u32::from(order.max(1));
+        if order >= 2
+            && self.history_count >= 2
+            && self.prev_dt.is_finite()
+            && self.prev_dt > 0.0
+            && self.prev_solution.len() == self.prev_prev_solution.len()
+        {
+            self.xyce_order_two_difference = self
+                .prev_solution
+                .iter()
+                .zip(&self.prev_prev_solution)
+                .map(|(current, previous)| current - previous)
+                .collect();
+            self.xyce_order_two_difference_dt = self.prev_dt;
+        }
+        self.record_prefix(solution, prefix_len, dt);
     }
 
     /// Record a solution while limiting LTE reference state to a vector prefix.
@@ -872,6 +988,12 @@ impl LteEstimator {
         self.prev_dt = 0.0;
         self.prev_prev_dt = 0.0;
         self.history_count = 0;
+        self.xyce_order_two_difference.clear();
+        self.xyce_order_two_difference_dt = 0.0;
+        self.xyce_attempt_dt = 0.0;
+        self.xyce_attempt_prev_dt = 0.0;
+        self.xyce_attempt_prev_prev_dt = 0.0;
+        self.xyce_attempt_checkpoint = None;
     }
 
     /// Restart predictor history at an accepted breakpoint while retaining
@@ -892,6 +1014,9 @@ impl LteEstimator {
     pub(crate) fn seed_restart_timestep(&mut self, dt: Value) {
         if self.history_count == 1 && self.prev_dt == 0.0 && dt.is_finite() && dt > 0.0 {
             self.prev_dt = dt;
+            if self.uses_accepted_solution_reference() {
+                self.xyce_attempt_dt = dt;
+            }
         }
     }
 
