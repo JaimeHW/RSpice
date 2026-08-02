@@ -2638,7 +2638,7 @@ impl Engine {
                 () => {{
                     lte_estimator.rollback_xyce_attempt();
                     if let Some(snapshot) = rejected_attempt_nonlinear_state.take() {
-                        circuit.restore_nonlinear_state_preserving_xyce_core_level2_carry(snapshot);
+                        circuit.restore_nonlinear_state(snapshot);
                     }
                 }};
             }
