@@ -223,7 +223,7 @@ impl Engine {
             &companion_coeff,
             ctx.xyce_one_step_order2,
             evaluation_mode
-                == crate::device::veriloga_generated::GeneratedEvaluationMode::NewtonLimited
+                == crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited
                 && refresh_nonlinear,
         );
         circuit.stamp_coupled_inductor_pairs_transient(matrix, rhs, dt, &companion_coeff);
