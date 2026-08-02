@@ -117,7 +117,7 @@ impl Engine {
             vbic_reuse,
             refresh_nonlinear,
             extra_diag_gmin,
-            crate::device::veriloga_generated::GeneratedEvaluationMode::NewtonLimited,
+            crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
         )
     }
 
@@ -135,7 +135,7 @@ impl Engine {
         vbic_reuse: VbicCachedSnapshotReuse,
         refresh_nonlinear: bool,
         extra_diag_gmin: Value,
-        evaluation_mode: crate::device::veriloga_generated::GeneratedEvaluationMode,
+        evaluation_mode: crate::device::veriloga_builtins::GeneratedEvaluationMode,
     ) -> Result<(), SimulationError> {
         let num_nodes = circuit.num_nodes();
         matrix.clear_values();
@@ -181,7 +181,7 @@ impl Engine {
         if refresh_nonlinear && circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(solution);
             if evaluation_mode
-                == crate::device::veriloga_generated::GeneratedEvaluationMode::StaticProbe
+                == crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe
             {
                 // Native semiconductor Newton stamps apply local voltage
                 // limiting and retain the corresponding linearization cache.
@@ -371,7 +371,7 @@ impl Engine {
                 .xyce_one_step_order2
                 .then(|| (matrix.values_mut().to_vec(), rhs.to_vec()));
             if evaluation_mode
-                == crate::device::veriloga_generated::GeneratedEvaluationMode::StaticProbe
+                == crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe
             {
                 circuit
                     .try_stamp_static_probe_nonlinear(matrix, rhs, solution)
@@ -528,7 +528,7 @@ impl Engine {
             VbicCachedSnapshotReuse::SeedOnly,
             true,
             0.0,
-            crate::device::veriloga_generated::GeneratedEvaluationMode::StaticProbe,
+            crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
         )?;
         Ok(self.transient_residual_convergence_met(circuit, matrix, solution, rhs))
     }

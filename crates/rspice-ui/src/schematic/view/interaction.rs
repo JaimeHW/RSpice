@@ -1386,7 +1386,6 @@ pub(super) fn pointer_target(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn pointer_target_with_filter(
     state: &AppState,
     hit: PointerHit,
@@ -2048,22 +2047,20 @@ fn handle_probe_click(
                 );
                 state.push_user_message(ConsoleMessage::warning(reason));
             }
-            if net_name != "0" {
-                if state
+            if net_name != "0"
+                && state
                     .ui
                     .preferences
                     .toggle(crate::workbench::TogglePreference::CrossProbeBehavior)
-                {
-                    let wires =
-                        objects_on_active_sheet(state, &state.schematic.wires, |item| item.id);
-                    let junctions =
-                        objects_on_active_sheet(state, &state.schematic.junctions, |item| item.id);
-                    let net_graph = NetGraph::build(wires.as_ref(), junctions.as_ref());
-                    state
-                        .schematic
-                        .net_highlight
-                        .highlight_net(&net_graph, grid_pos);
-                }
+            {
+                let wires = objects_on_active_sheet(state, &state.schematic.wires, |item| item.id);
+                let junctions =
+                    objects_on_active_sheet(state, &state.schematic.junctions, |item| item.id);
+                let net_graph = NetGraph::build(wires.as_ref(), junctions.as_ref());
+                state
+                    .schematic
+                    .net_highlight
+                    .highlight_net(&net_graph, grid_pos);
             }
         } else {
             log::info!(

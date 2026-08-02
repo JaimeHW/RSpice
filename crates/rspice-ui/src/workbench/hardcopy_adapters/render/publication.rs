@@ -50,10 +50,12 @@ pub struct HardcopyPreviewPage {
 /// remain a distinct byte buffer so the WASM boundary can transfer the
 /// backing `ArrayBuffer` without base64 expansion or a JSON pixel copy.
 #[derive(Debug)]
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) struct PreviewWorkerTransfer {
     manifest_json: Vec<u8>,
     rgba: Vec<u8>,
 }
+#[cfg(any(test, target_arch = "wasm32"))]
 impl PreviewWorkerTransfer {
     pub(crate) fn into_parts(self) -> (Vec<u8>, Vec<u8>) {
         (self.manifest_json, self.rgba)
@@ -62,6 +64,7 @@ impl PreviewWorkerTransfer {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(super) struct PreviewWorkerManifest {
     pub(super) schema_version: u32,
     pub(super) plan_id: HardcopyPlanId,
@@ -83,6 +86,7 @@ pub(super) struct PreviewWorkerManifest {
 }
 
 #[derive(Serialize)]
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(super) struct PreviewWorkerManifestMaterial<'a> {
     pub(super) schema_version: u32,
     pub(super) plan_id: HardcopyPlanId,
@@ -124,6 +128,7 @@ impl HardcopyPreviewPage {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn dpi(&self) -> u16 {
         self.dpi
     }
@@ -144,6 +149,7 @@ impl HardcopyPreviewPage {
     /// The immutable plan, authenticated source, planned page, exact physical
     /// dimensions, DPI, pixel bytes, and renderer preview digest are all
     /// checked before either buffer crosses the worker boundary.
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub(crate) fn into_worker_transfer(
         self,
         plan: &HardcopyPlan,
@@ -207,6 +213,7 @@ impl HardcopyPreviewPage {
     /// Reconstruct a renderer-owned preview only after validating the
     /// metadata-only manifest and independently transferred RGBA bytes against
     /// caller-retained plan, source, page, and DPI authority.
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub(crate) fn from_worker_transfer(
         plan: &HardcopyPlan,
         source: &ResolvedHardcopyDocument,
@@ -314,6 +321,7 @@ impl HardcopyPreviewPage {
         Ok(preview)
     }
 }
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(super) fn validate_preview_worker_transfer_budget(
     manifest_bytes: usize,
     rgba_bytes: usize,
@@ -329,6 +337,7 @@ pub(super) fn validate_preview_worker_transfer_budget(
     }
     Ok(())
 }
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(super) fn preview_worker_material_digest(
     material: &PreviewWorkerManifestMaterial<'_>,
 ) -> Result<ContentDigest, HardcopyRenderError> {
@@ -340,6 +349,7 @@ pub(super) fn preview_worker_material_digest(
     digest.update(payload);
     Ok(ContentDigest::from_bytes(digest.finalize().into()))
 }
+#[cfg(any(test, target_arch = "wasm32"))]
 fn validate_preview_worker_contract(
     preview: &HardcopyPreviewPage,
     plan: &HardcopyPlan,
@@ -494,11 +504,13 @@ impl RenderedHardcopyPart {
     }
 
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub const fn media_type(&self) -> &'static str {
         self.media_type
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn filename_extension(&self) -> &'static str {
         self.filename_extension
     }
@@ -509,11 +521,13 @@ impl RenderedHardcopyPart {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn first_page(&self) -> u32 {
         self.first_page
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn page_count(&self) -> u32 {
         self.page_count
     }
@@ -534,11 +548,14 @@ pub struct RenderedHardcopyPublication {
 /// byte buffers so the WASM boundary can transfer their backing ArrayBuffers
 /// without JSON/base64 expansion or a second aggregate artifact allocation.
 #[derive(Debug)]
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) struct PublicationWorkerTransfer {
     manifest_json: Vec<u8>,
     payloads: Vec<Vec<u8>>,
 }
+#[cfg(any(test, target_arch = "wasm32"))]
 impl PublicationWorkerTransfer {
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub(crate) fn into_parts(self) -> (Vec<u8>, Vec<Vec<u8>>) {
         (self.manifest_json, self.payloads)
     }
@@ -546,6 +563,7 @@ impl PublicationWorkerTransfer {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(super) struct PublicationWorkerManifest {
     pub(super) schema_version: u32,
     pub(super) plan_digest: ContentDigest,
@@ -560,6 +578,7 @@ pub(super) struct PublicationWorkerManifest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(super) struct PublicationWorkerPartManifest {
     pub(super) ordinal: u32,
     pub(super) byte_length: u64,
@@ -572,6 +591,7 @@ pub(super) struct PublicationWorkerPartManifest {
 }
 
 #[derive(Serialize)]
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(super) struct PublicationWorkerManifestMaterial<'a> {
     pub(super) schema_version: u32,
     pub(super) plan_digest: ContentDigest,
@@ -610,6 +630,7 @@ impl RenderedHardcopyPublication {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn pdf_conformance(&self) -> Option<PdfConformance> {
         self.pdf_conformance
     }
@@ -628,6 +649,7 @@ impl RenderedHardcopyPublication {
 
     /// Consume a validated publication into a small digest-bound manifest and
     /// independent payload buffers suitable for transferable ArrayBuffers.
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub(crate) fn into_worker_transfer(
         self,
         plan: &HardcopyPlan,
@@ -686,6 +708,7 @@ impl RenderedHardcopyPublication {
     /// Reconstruct a renderer-owned publication only after validating the
     /// complete manifest and every independently transferred payload against
     /// the immutable plan and authenticated source.
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub(crate) fn from_worker_transfer(
         plan: &HardcopyPlan,
         source: &ResolvedHardcopyDocument,
@@ -804,6 +827,7 @@ impl RenderedHardcopyPublication {
     }
 }
 
+#[cfg(any(test, target_arch = "wasm32"))]
 struct ExpectedWorkerPart {
     media_type: &'static str,
     filename_extension: &'static str,
@@ -812,6 +836,7 @@ struct ExpectedWorkerPart {
     page_count: u32,
 }
 
+#[cfg(any(test, target_arch = "wasm32"))]
 fn validate_worker_authority(
     plan: &HardcopyPlan,
     source: &ResolvedHardcopyDocument,
@@ -829,6 +854,7 @@ fn validate_worker_authority(
     Ok(())
 }
 
+#[cfg(any(test, target_arch = "wasm32"))]
 fn expected_pdf_conformance(format: OutputFormat) -> Option<PdfConformance> {
     match format {
         OutputFormat::PdfA => Some(PdfConformance::PdfA2bValidated),
@@ -840,6 +866,7 @@ fn expected_pdf_conformance(format: OutputFormat) -> Option<PdfConformance> {
     }
 }
 
+#[cfg(any(test, target_arch = "wasm32"))]
 fn publication_worker_part_count(plan: &HardcopyPlan) -> usize {
     match plan.setup().render().format() {
         OutputFormat::SvgVector | OutputFormat::Png { .. } => plan.pagination().pages().len(),
@@ -847,6 +874,7 @@ fn publication_worker_part_count(plan: &HardcopyPlan) -> usize {
     }
 }
 
+#[cfg(any(test, target_arch = "wasm32"))]
 fn expected_worker_part(
     plan: &HardcopyPlan,
     index: usize,
@@ -907,6 +935,7 @@ fn expected_worker_part(
     }
 }
 
+#[cfg(any(test, target_arch = "wasm32"))]
 fn validate_publication_worker_contract(
     publication: &RenderedHardcopyPublication,
     plan: &HardcopyPlan,
@@ -961,6 +990,7 @@ fn validate_publication_worker_contract(
     Ok(())
 }
 
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(super) fn publication_worker_manifest_digest(
     material: &PublicationWorkerManifestMaterial<'_>,
 ) -> Result<ContentDigest, HardcopyRenderError> {
@@ -1040,14 +1070,19 @@ pub enum HardcopyRenderError {
     BrowserTextRequiresEmbeddedFonts,
     #[error("native printer output must use an opaque page background")]
     TransparentPrinterPage,
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("printer raster pages require a NativePrinter plan targeted at a system printer")]
     PrinterRasterRequiresNativePlan,
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("printer device resolution {0} DPI is outside the supported 72–9600 DPI range")]
     InvalidPrinterDpi(u16),
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("printer render DPI differs from the immutable native job resolution")]
     PrinterRasterDpiMismatch,
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("planned printable area lies outside the sealed native driver printable geometry")]
     PrinterPrintableGeometryMismatch,
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("the selected native printer job cannot mix portrait and landscape page geometry")]
     PrinterMixedPageGeometryUnsupported,
     #[error("preview resolution {0} DPI is outside the supported 36–1200 DPI range")]
@@ -1056,12 +1091,16 @@ pub enum HardcopyRenderError {
     PreviewPageOutOfRange { index: usize, page_count: usize },
     #[error("preview requests must contain one or two distinct page indices")]
     InvalidPreviewPageBatch,
+    #[cfg(any(test, target_arch = "wasm32"))]
     #[error("hardcopy preview worker transfer exceeds its bounded transport budget")]
     WorkerSnapshotTooLarge,
+    #[cfg(any(test, target_arch = "wasm32"))]
     #[error("hardcopy preview worker transfer is invalid: {0}")]
     WorkerSnapshot(String),
+    #[cfg(any(test, target_arch = "wasm32"))]
     #[error("hardcopy publication worker manifest exceeds its bounded transport budget")]
     PublicationWorkerManifestTooLarge,
+    #[cfg(any(test, target_arch = "wasm32"))]
     #[error("hardcopy publication worker transfer is invalid: {0}")]
     PublicationWorkerTransfer(String),
     #[error("raster dimensions overflow the supported integer range")]
@@ -1120,6 +1159,7 @@ impl HardcopyRenderer {
     /// Resolve and rasterize a single planned page for the hardcopy dialog.
     /// The selected export/print format is intentionally ignored: preview is
     /// a non-authoritative view of the same sealed semantic plan.
+    #[cfg(test)]
     pub fn render_preview_page_resolved(
         plan: &HardcopyPlan,
         source: &ResolvedHardcopyDocument,
@@ -1242,6 +1282,7 @@ impl HardcopyRenderer {
     /// Render exact native-printer pages directly from the authenticated
     /// semantic source, closing the adapter gap without exposing a mutable
     /// intermediate scene.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn render_printer_pages_resolved(
         plan: &HardcopyPlan,
         source: &ResolvedHardcopyDocument,
@@ -1433,6 +1474,7 @@ impl HardcopyRenderer {
         Self::render_printer_scene(plan, scene, device_dpi)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn render_printer_scene(
         plan: &HardcopyPlan,
         scene: &HardcopyScene,
@@ -1541,6 +1583,7 @@ impl HardcopyRenderer {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn validate_driver_printable_geometry(
     page: &PreviewPage,
     raster_width: u32,
@@ -2068,15 +2111,13 @@ pub(super) fn validate_fill(fill: Option<SceneFill>) -> Result<(), HardcopyRende
         spacing,
         ..
     }) = fill
-    {
-        if line_width == Length::ZERO
+        && (line_width == Length::ZERO
             || spacing == Length::ZERO
             || line_width.micrometres() > 25_000
             || spacing.micrometres() > 25_000
-            || line_width > spacing
-        {
-            return Err(HardcopyRenderError::InvalidCrossHatch);
-        }
+            || line_width > spacing)
+    {
+        return Err(HardcopyRenderError::InvalidCrossHatch);
     }
     Ok(())
 }
@@ -2335,6 +2376,7 @@ fn validate_raster_working_set(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn validate_printer_raster_working_set(
     pixels_per_page: u64,
     page_count: u64,

@@ -267,10 +267,10 @@ fn dependency_root_path(path: &std::path::Path) -> Result<std::path::PathBuf, St
         if crate::state::model_library::is_portable_absolute_path(path) {
             return Ok(path.to_path_buf());
         }
-        return Err(format!(
+        Err(format!(
             "Browser dependency origin must retain an absolute portable identity: {}",
             path.display()
-        ));
+        ))
     }
 
     #[cfg(not(target_arch = "wasm32"))]

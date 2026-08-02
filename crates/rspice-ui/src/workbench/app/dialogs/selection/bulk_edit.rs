@@ -1383,7 +1383,6 @@ fn build_rows(
     rows
 }
 
-#[allow(clippy::too_many_arguments)]
 fn append_buffer_rows(
     rows: &mut Vec<SelectionBulkRow>,
     view_key: &str,
@@ -1580,9 +1579,9 @@ fn component_row(
     };
     let lock = if !active_owner {
         Some("other owner".to_owned())
-    } else if kind == SelectionBulkRowKind::Port && property != SelectionBulkProperty::Display {
-        Some("property not applicable".to_owned())
-    } else if property == SelectionBulkProperty::ModelSection && component.library_cell.is_none() {
+    } else if (kind == SelectionBulkRowKind::Port && property != SelectionBulkProperty::Display)
+        || (property == SelectionBulkProperty::ModelSection && component.library_cell.is_none())
+    {
         Some("property not applicable".to_owned())
     } else if parse_replacement_parameters_strict(&component.params).is_err()
         && matches!(
@@ -1778,7 +1777,7 @@ fn parameter_key_from_filter(
                 expression
                     .split_once('=')
                     .map(|(key, _)| key)
-                    .or_else(|| Some(expression))
+                    .or(Some(expression))
             })
         })
         .unwrap_or_default()

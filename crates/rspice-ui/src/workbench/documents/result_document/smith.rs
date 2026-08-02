@@ -63,12 +63,22 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .collect();
     strip::StripHeader::new("SMITH", &format!("Z₀ = {} Ω", smith.z0), &legend).show(ui);
 
+    let view = state.ui.results.plot_view(super::ResultViewer::Smith, 0);
+    let (x0, x1) = view.x.unwrap_or((-1.12, 1.12));
+    let (y0, y1) = view.y.unwrap_or((-1.12, 1.12));
+    let accessible_detail = format!(
+        "{} visible loci with {} retained samples; reference impedance {} ohms",
+        visible.len(),
+        arrays.iter().map(|(_, re, _)| re.len()).sum::<usize>(),
+        smith.z0
+    );
     let mut spec = PlotSpec::new(
-        Axis::linear(-1.12, 1.12, "Re Γ"),
+        Axis::linear(x0, x1, "Re Γ"),
         XScale::Linear,
-        Axis::linear(-1.12, 1.12, "Im Γ"),
+        Axis::linear(y0, y1, "Im Γ"),
     )
-    .accessible_name("Smith chart");
+    .accessible_name("Smith chart")
+    .accessible_detail(&accessible_detail);
     for (slot, (index, re, im)) in arrays.iter().enumerate() {
         spec.traces.push(
             Trace::new(re, im, c.traces[slot % c.traces.len()])
@@ -141,11 +151,19 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     );
 
     let response = plot::show(&mut plot_ui, &spec, &mut state.ui.results.cache, None, None);
+    if response.view.any() {
+        let change = super::square_xy_view_change((x0, x1), (y0, y1), response.view);
+        state
+            .ui
+            .results
+            .plot_view_mut(super::ResultViewer::Smith, 0)
+            .apply(&change);
+    }
 
     // Interactive readout: nearest locus point on hover, click to pin.
     // The chart space IS the Γ plane, so the conversion to impedance is
     // z = z0 (1+Γ)/(1−Γ).
-    let ranges = ((-1.12, 1.12), (-1.12, 1.12));
+    let ranges = ((x0, x1), (y0, y1));
     let mut hovered: Option<(usize, usize)> = None;
     if let Some(pointer) = response.response.hover_pos()
         && response.plot_rect.contains(pointer)
@@ -258,22 +276,65 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     section_header(ui, "S-parameters", None);
     let smith = &state.analysis.smith_chart_state;
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
-    let Some(trace) = smith
+    let visible_traces = smith
         .traces
         .iter()
-        .find(|tr| tr.visible && !tr.points.is_empty())
-    else {
+        .filter(|tr| tr.visible && !tr.points.is_empty())
+        .collect::<Vec<_>>();
+    let Some(trace) = visible_traces.first().copied() else {
         super::panel_note(ui, "Trace metrics appear once S-parameter data is loaded.");
         return;
     };
 
     let first = trace.points.first();
     let last = trace.points.last();
+    let maximum_gamma = trace
+        .points
+        .iter()
+        .map(|point| point.s.norm())
+        .filter(|value| value.is_finite())
+        .max_by(f64::total_cmp);
+    let maximum_vswr = maximum_gamma.map(|gamma| {
+        if gamma < 1.0 {
+            format!("{:.2} : 1", (1.0 + gamma) / (1.0 - gamma))
+        } else {
+            "∞".to_owned()
+        }
+    });
+    let marker = state
+        .ui
+        .results
+        .rf_pin
+        .get(&super::ResultViewer::Smith)
+        .and_then(|(slot, point)| {
+            let trace = visible_traces.get(*slot)?;
+            let sample = trace.points.get(*point)?;
+            let gamma = sample.s;
+            let denominator = (1.0 - gamma.re).powi(2) + gamma.im.powi(2);
+            let impedance = if denominator > 1e-12 {
+                let resistance = smith.z0 * (1.0 - gamma.norm_sqr()) / denominator;
+                let reactance = smith.z0 * (2.0 * gamma.im) / denominator;
+                format!(
+                    "{} · {} {} j{}",
+                    quantity_policy.format_frequency(sample.frequency, 2),
+                    fmt_si(resistance, "Ω", 2),
+                    if reactance >= 0.0 { "+" } else { "−" },
+                    fmt_si(reactance.abs(), "Ω", 2)
+                )
+            } else {
+                format!(
+                    "{} · open",
+                    quantity_policy.format_frequency(sample.frequency, 2)
+                )
+            };
+            Some(format!("{} · {impedance}", trace.name))
+        })
+        .unwrap_or_else(|| "No marker pinned".to_owned());
     let rows = [
-        ("Trace", trace.name.clone(), true),
+        ("Network", trace.name.clone(), true),
         ("Points", trace.points.len().to_string(), false),
         (
-            "f range",
+            "Sweep",
             match (first, last) {
                 (Some(a), Some(b)) => format!(
                     "{} – {}",
@@ -285,10 +346,76 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             false,
         ),
         ("Z₀", format!("{} Ω", smith.z0), false),
+        ("Marker", marker, false),
+        (
+            "|Γ| max",
+            maximum_gamma.map_or_else(|| "Not retained".to_owned(), |value| format!("{value:.3}")),
+            true,
+        ),
+        (
+            "Max VSWR",
+            maximum_vswr.unwrap_or_else(|| "Not retained".to_owned()),
+            false,
+        ),
+        ("Reference plane", "Not retained".to_owned(), false),
     ];
     super::stat_table(ui, &rows);
     super::panel_note(
         ui,
-        "Loci on the reflection-coefficient plane; grid circles are constant R and X.",
+        "Loci are plotted on the reflection-coefficient plane. De-embedding is not asserted without retained reference-plane provenance.",
     );
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn wheel_zoom_keeps_smith_axes_at_equal_scale() {
+        let change = super::super::square_xy_view_change(
+            (-1.12, 1.12),
+            (-1.12, 1.12),
+            crate::ui::plot::ViewChange {
+                x: Some((-0.5, 0.5)),
+                ..Default::default()
+            },
+        );
+        let x = change.x.expect("coupled x range");
+        let y = change.y.expect("coupled y range");
+
+        assert!(((x.1 - x.0) - (y.1 - y.0)).abs() < 1.0e-12);
+        assert!((x.1 - x.0 - 1.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn box_zoom_expands_shorter_axis_instead_of_distorting_chart() {
+        let change = super::super::square_xy_view_change(
+            (-1.12, 1.12),
+            (-1.12, 1.12),
+            crate::ui::plot::ViewChange {
+                x: Some((-0.75, 0.75)),
+                y: Some((-0.25, 0.25)),
+                ..Default::default()
+            },
+        );
+        let x = change.x.expect("square x range");
+        let y = change.y.expect("square y range");
+
+        assert!(((x.1 - x.0) - (y.1 - y.0)).abs() < 1.0e-12);
+        assert!((y.1 - y.0 - 1.5).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn fit_request_remains_a_reset() {
+        let change = super::super::square_xy_view_change(
+            (-0.5, 0.5),
+            (-0.5, 0.5),
+            crate::ui::plot::ViewChange {
+                reset: true,
+                ..Default::default()
+            },
+        );
+
+        assert!(change.reset);
+        assert!(change.x.is_none());
+        assert!(change.y.is_none());
+    }
 }

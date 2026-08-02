@@ -28,6 +28,9 @@ impl OpTemperatureMode {
         Self::Explicit,
         Self::ActiveRunSetAxis,
     ];
+    /// Exact mockup choice label. No picker renders these yet; the mockup-contract
+    /// test asserts them so the wording cannot drift before one does.
+    #[cfg(test)]
     pub const fn display_name(self) -> &'static str {
         match self {
             Self::PvtRunSet => "PVT run set",
@@ -111,6 +114,9 @@ impl OpHomotopy {
         Self::PseudoTransient,
         Self::None,
     ];
+    /// Exact mockup choice label. No picker renders these yet; the mockup-contract
+    /// test asserts them so the wording cannot drift before one does.
+    #[cfg(test)]
     pub const fn display_name(self) -> &'static str {
         match self {
             Self::Adaptive => "Adaptive",
@@ -139,6 +145,9 @@ impl OpAnnotation {
         Self::VoltagesAndDeviceOp,
         Self::None,
     ];
+    /// Exact mockup choice label. No picker renders these yet; the mockup-contract
+    /// test asserts them so the wording cannot drift before one does.
+    #[cfg(test)]
     pub const fn display_name(self) -> &'static str {
         match self {
             Self::VoltagesAndCurrents => "Voltages + currents",
@@ -166,6 +175,7 @@ impl OpDeviceDetail {
         Self::ViolationsOnly,
         Self::None,
     ];
+    #[cfg(test)]
     pub const fn display_name(self) -> &'static str {
         match self {
             Self::SelectedAndViolations => "Selected + violations",
@@ -187,6 +197,7 @@ pub enum OpSaveDevice {
 
 impl OpSaveDevice {
     pub const ALL: [Self; 3] = [Self::Enabled, Self::Disabled, Self::FinalPointOnly];
+    #[cfg(test)]
     pub const fn display_name(self) -> &'static str {
         match self {
             Self::Enabled => "Enabled",
@@ -301,6 +312,7 @@ impl OpRunPointContext {
 
 impl OpAccuracy {
     pub const ALL: [Self; 4] = [Self::Fast, Self::Balanced, Self::Accurate, Self::Robust];
+    #[cfg(test)]
     pub const fn display_name(self) -> &'static str {
         match self {
             Self::Fast => "Fast",

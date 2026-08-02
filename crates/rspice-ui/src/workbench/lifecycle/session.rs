@@ -601,18 +601,6 @@ fn bounds_intersect(
 }
 
 impl GridStyle {
-    /// All styles in toolbar presentation order.
-    pub const ALL: [GridStyle; 3] = [GridStyle::Dots, GridStyle::Lines, GridStyle::Off];
-
-    /// Menu / preferences label.
-    pub fn label(self) -> &'static str {
-        match self {
-            GridStyle::Dots => "Dots",
-            GridStyle::Lines => "Lines",
-            GridStyle::Off => "Off",
-        }
-    }
-
     /// Whether any grid renders.
     pub fn visible(self) -> bool {
         self != GridStyle::Off

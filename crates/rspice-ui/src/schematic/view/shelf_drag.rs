@@ -16,7 +16,9 @@ use crate::workbench::app_state::AppState;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SchematicShelfDragPayload {
     Primitive(ComponentType),
-    LibraryCell(LibraryCellInstance),
+    /// Boxed: a bound cell instance dwarfs a primitive's component type, and
+    /// this payload rides in drag state alongside the primitive case.
+    LibraryCell(Box<LibraryCellInstance>),
 }
 
 impl SchematicShelfDragPayload {
@@ -31,7 +33,7 @@ impl SchematicShelfDragPayload {
     }
 
     pub(crate) fn library_cell(binding: LibraryCellInstance) -> Self {
-        Self::LibraryCell(binding)
+        Self::LibraryCell(Box::new(binding))
     }
 
     pub(crate) fn component_type(&self) -> ComponentType {
@@ -102,7 +104,7 @@ pub(super) fn commit_shelf_drop(
                 })
         }
         SchematicShelfDragPayload::LibraryCell(binding) => {
-            let binding = binding.clone();
+            let binding = (**binding).clone();
             state.schematic.with_undo("drop library cell", |schematic| {
                 schematic.add_library_cell_component(grid_pos, binding);
             })
@@ -235,6 +237,7 @@ mod tests {
         let mut outcome = (false, false);
         let _ = ctx.run_ui(input, |root| {
             egui::CentralPanel::default().show(root, |ui| {
+                // accessibility-pointer-shim: test-only placement canvas harness.
                 let response =
                     ui.interact(ui.max_rect(), Id::new("placement-canvas"), Sense::click());
                 response.request_focus();

@@ -68,7 +68,6 @@ pub fn parse_svg(svg_data: &str) -> Result<Symbol, SymbolError> {
             name: String::new(),
             paths,
             bounds: vb,
-            view_box: vb,
             // Default target dimensions - overridden by load_embedded.
             target_width: 30.0,
             target_height: 30.0,
@@ -174,7 +173,6 @@ pub fn parse_svg(svg_data: &str) -> Result<Symbol, SymbolError> {
         name: String::new(),
         paths,
         bounds: final_bounds,
-        view_box: vb,
         // Default target dimensions - will be overridden by load_embedded for known components
         target_width: 30.0,
         target_height: 30.0,

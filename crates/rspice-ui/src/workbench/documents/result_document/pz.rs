@@ -41,6 +41,143 @@ fn active_data(state: &AppState) -> Option<PoleZeroData> {
     Some(data)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PoleStabilityVerdict {
+    Stable,
+    Marginal,
+    Unstable,
+}
+
+impl PoleStabilityVerdict {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Stable => "stable",
+            Self::Marginal => "marginal",
+            Self::Unstable => "unstable",
+        }
+    }
+}
+
+fn pole_stability(data: &PoleZeroData) -> PoleStabilityVerdict {
+    let mut marginal = false;
+    for pole in data.roots.iter().filter(|root| root.is_pole()) {
+        let tolerance = imaginary_axis_tolerance(pole);
+        if pole.real > tolerance {
+            return PoleStabilityVerdict::Unstable;
+        }
+        if pole.real.abs() <= tolerance {
+            marginal = true;
+        }
+    }
+    if marginal {
+        PoleStabilityVerdict::Marginal
+    } else {
+        PoleStabilityVerdict::Stable
+    }
+}
+
+#[derive(Debug)]
+struct PoleZeroSummary<'a> {
+    pole_count: usize,
+    zero_count: usize,
+    dominant_pole: Option<&'a ComplexRoot>,
+    worst_q: Option<f64>,
+    right_half_plane_poles: usize,
+    imaginary_axis_poles: usize,
+}
+
+fn imaginary_axis_tolerance(root: &ComplexRoot) -> f64 {
+    64.0 * f64::EPSILON * root.real.abs().max(root.imag.abs()).max(1.0)
+}
+
+fn summarize_roots(data: &PoleZeroData) -> PoleZeroSummary<'_> {
+    let poles = data
+        .roots
+        .iter()
+        .filter(|root| root.is_pole())
+        .collect::<Vec<_>>();
+    let dominant_pole = poles.iter().copied().max_by(|left, right| {
+        left.real
+            .total_cmp(&right.real)
+            .then_with(|| left.imag.total_cmp(&right.imag))
+    });
+    let mut worst_q: Option<f64> = None;
+    let mut right_half_plane_poles = 0;
+    let mut imaginary_axis_poles = 0;
+    for pole in &poles {
+        let tolerance = imaginary_axis_tolerance(pole);
+        if pole.real > tolerance {
+            right_half_plane_poles += 1;
+        } else if pole.real.abs() <= tolerance {
+            imaginary_axis_poles += 1;
+        }
+        let q = if pole.imag.abs() <= tolerance {
+            None
+        } else if pole.real.abs() <= tolerance {
+            Some(f64::INFINITY)
+        } else {
+            let q = pole.natural_frequency() / (2.0 * pole.real.abs());
+            (q.is_finite() && q >= 0.0).then_some(q)
+        };
+        if let Some(q) = q
+            && worst_q.is_none_or(|current| q > current)
+        {
+            worst_q = Some(q);
+        }
+    }
+
+    PoleZeroSummary {
+        pole_count: poles.len(),
+        zero_count: data.roots.len().saturating_sub(poles.len()),
+        dominant_pole,
+        worst_q,
+        right_half_plane_poles,
+        imaginary_axis_poles,
+    }
+}
+
+fn accessible_root_inventory(data: &PoleZeroData) -> String {
+    data.roots
+        .iter()
+        .enumerate()
+        .map(|(index, root)| {
+            format!(
+                "{} {} sigma {:.9e}, omega {:.9e}",
+                if root.is_pole() { "pole" } else { "zero" },
+                index + 1,
+                root.real,
+                root.imag
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn retained_root_representatives(data: &PoleZeroData, limit: usize) -> (Vec<&ComplexRoot>, usize) {
+    let representatives = data
+        .roots
+        .iter()
+        .filter(|root| root.imag >= 0.0)
+        .collect::<Vec<_>>();
+    let omitted = representatives.len().saturating_sub(limit);
+    (representatives.into_iter().take(limit).collect(), omitted)
+}
+
+fn format_dominant_pole(
+    root: &ComplexRoot,
+    quantity_policy: &crate::quantity::QuantityPresentationPolicy,
+) -> String {
+    if root.is_real() {
+        let sign = if root.real < 0.0 { "−" } else { "+" };
+        format!(
+            "{sign}{}",
+            quantity_policy.format_frequency(root.real.abs() / std::f64::consts::TAU, 3)
+        )
+    } else {
+        format!("σ {:.6e} · jω {:+.6e} rad/s", root.real, root.imag)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // center view
 // ---------------------------------------------------------------------------
@@ -68,12 +205,20 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             on: true,
         },
     ];
-    strip::StripHeader::new(
+    let view = state.ui.results.plot_view(super::ResultViewer::PoleZero, 0);
+    let header = strip::StripHeader::new(
         "PZ",
         &format!("{} · {} roots", data.name, data.roots.len()),
         &legend,
     )
+    .zoomed(view.is_zoomed())
     .show(ui);
+    if header.fit_clicked {
+        state
+            .ui
+            .results
+            .reset_plot_view(super::ResultViewer::PoleZero, 0);
+    }
 
     // Symmetric ranges around the roots.
     let mut extent = 1.0f64;
@@ -83,18 +228,29 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         }
     }
     let extent = extent * 1.25;
+    let (x0, x1) = view.x.unwrap_or((-extent, extent));
+    let (y0, y1) = view.y.unwrap_or((-extent, extent));
 
+    let summary = summarize_roots(&data);
+    let inventory = accessible_root_inventory(&data);
+    let accessible_detail = format!(
+        "{} poles and {} zeros; {} pole stability verdict; stable left half-plane shaded; exact retained roots: {inventory}",
+        summary.pole_count,
+        summary.zero_count,
+        pole_stability(&data).label()
+    );
     let mut spec = PlotSpec::new(
-        Axis::linear(-extent, extent, "σ"),
+        Axis::linear(x0, x1, "σ"),
         XScale::Linear,
-        Axis::linear(-extent, extent, "jω"),
+        Axis::linear(y0, y1, "jω"),
     )
-    .accessible_name("Pole-zero plot");
+    .accessible_name("Pole-zero plot")
+    .accessible_detail(&accessible_detail);
     spec.ref_lines.push(plot::RefLine { y: 0.0 });
     // Stable left half-plane.
     spec.bands.push(plot::Band {
-        x0: -extent,
-        x1: 0.0,
+        x0,
+        x1: 0.0_f64.clamp(x0, x1),
     });
 
     // Root glyphs as an underlay: ✕ for poles, ○ for zeros.
@@ -137,10 +293,18 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     );
 
     let response = plot::show(&mut plot_ui, &spec, &mut state.ui.results.cache, None, None);
+    if response.view.any() {
+        let change = super::square_xy_view_change((x0, x1), (y0, y1), response.view);
+        state
+            .ui
+            .results
+            .plot_view_mut(super::ResultViewer::PoleZero, 0)
+            .apply(&change);
+    }
 
     // Nearest root on hover, click to pin: σ, jω, natural frequency, and Q
     // turn the s-plane picture into numbers.
-    let ranges = ((-extent, extent), (-extent, extent));
+    let ranges = ((x0, x1), (y0, y1));
     let mut hovered: Option<(usize, usize)> = None;
     if let Some(pointer) = response.response.hover_pos()
         && response.plot_rect.contains(pointer)
@@ -237,25 +401,63 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     };
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
 
-    let unstable = data
-        .roots
-        .iter()
-        .any(|root| root.is_pole() && root.real > 0.0);
-    let mut rows: Vec<(String, String, bool)> = vec![
+    let verdict = pole_stability(&data);
+    let summary = summarize_roots(&data);
+    let dominant = summary.dominant_pole.map_or_else(
+        || "Unavailable — no retained poles".to_owned(),
+        |root| format_dominant_pole(root, &quantity_policy),
+    );
+    let worst_q = summary.worst_q.map_or_else(
+        || "Unavailable — no retained pole Q".to_owned(),
+        |q| {
+            if q.is_infinite() {
+                "∞ · imaginary-axis pole".to_owned()
+            } else {
+                format!("{q:.4}")
+            }
+        },
+    );
+    let rhp = if summary.right_half_plane_poles == 0 {
+        "none".to_owned()
+    } else {
+        format!("{} poles", summary.right_half_plane_poles)
+    };
+    let axis = if summary.imaginary_axis_poles == 0 {
+        "none".to_owned()
+    } else {
+        format!("{} poles", summary.imaginary_axis_poles)
+    };
+    let summary_rows = [
+        ("Verdict".to_owned(), verdict.label().to_owned(), true),
         (
-            "Verdict".to_owned(),
-            if unstable { "unstable" } else { "stable" }.to_owned(),
-            true,
+            "Poles / zeros".to_owned(),
+            format!("{} / {} · retained", summary.pole_count, summary.zero_count),
+            false,
         ),
+        ("Dominant pole".to_owned(), dominant, false),
+        ("Worst Q".to_owned(), worst_q, false),
+        ("RHP content".to_owned(), rhp, false),
+        ("Imaginary axis".to_owned(), axis, false),
         ("Gain".to_owned(), format!("{:.4}", data.gain), false),
+        (
+            "Reduction".to_owned(),
+            "Unavailable — matrix reduction not retained".to_owned(),
+            false,
+        ),
     ];
+    let summary_refs: Vec<(&str, String, bool)> = summary_rows
+        .iter()
+        .map(|(key, value, highlight)| (key.as_str(), value.clone(), *highlight))
+        .collect();
+    super::stat_table(ui, &summary_refs);
+
+    ui.add_space(8.0);
+    section_header(ui, "Retained roots", None);
+    let mut rows: Vec<(String, String, bool)> = Vec::new();
     let mut pole_index = 0usize;
     let mut zero_index = 0usize;
-    for root in data.roots.iter().take(12) {
-        // Conjugates are listed once via the +jω member.
-        if root.imag < 0.0 {
-            continue;
-        }
+    let (representatives, omitted) = retained_root_representatives(&data, 12);
+    for root in representatives {
         let name = if root.is_pole() {
             pole_index += 1;
             format!("p{pole_index}")
@@ -280,9 +482,17 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         .map(|(k, v, h)| (k.as_str(), v.clone(), *h))
         .collect();
     super::stat_table(ui, &row_refs);
+    if omitted > 0 {
+        super::panel_note(
+            ui,
+            &format!(
+                "{omitted} additional retained root representatives are omitted from this compact table."
+            ),
+        );
+    }
     super::panel_note(
         ui,
-        "Crosses are poles, circles are zeros; the shaded half-plane is stable.",
+        "Conjugate pairs are listed once using the +jω member. Crosses are poles and circles are zeros. The shaded left half-plane is asymptotically stable; poles on the imaginary axis are marginal.",
     );
 }
 
@@ -337,5 +547,90 @@ mod tests {
         assert_eq!((data.roots[1].real, data.roots[1].imag), (-10.0, -20.0));
         assert!(data.roots[2].is_zero());
         assert_eq!((data.roots[2].real, data.roots[2].imag), (-3.0, 0.0));
+    }
+
+    #[test]
+    fn imaginary_axis_poles_are_marginal_not_stable() {
+        let mut data = PoleZeroData::new("axis pole");
+        data.roots.push(ComplexRoot::pole(0.0, 10.0));
+        data.roots.push(ComplexRoot::pole(0.0, -10.0));
+
+        assert_eq!(pole_stability(&data), PoleStabilityVerdict::Marginal);
+    }
+
+    #[test]
+    fn right_half_plane_pole_overrides_marginal_poles() {
+        let mut data = PoleZeroData::new("unstable");
+        data.roots.push(ComplexRoot::pole(0.0, 10.0));
+        data.roots.push(ComplexRoot::pole(0.5, 0.0));
+
+        assert_eq!(pole_stability(&data), PoleStabilityVerdict::Unstable);
+    }
+
+    #[test]
+    fn strictly_left_half_plane_poles_are_stable() {
+        let mut data = PoleZeroData::new("stable");
+        data.roots.push(ComplexRoot::pole(-0.5, 0.0));
+        data.roots.push(ComplexRoot::pole(-2.0, 10.0));
+
+        assert_eq!(pole_stability(&data), PoleStabilityVerdict::Stable);
+    }
+
+    #[test]
+    fn root_summary_derives_mockup_metrics_only_from_retained_roots() {
+        let mut data = PoleZeroData::new("summary");
+        data.roots.push(ComplexRoot::pole(-100.0, 0.0));
+        data.roots.push(ComplexRoot::pole(-10.0, 40.0));
+        data.roots.push(ComplexRoot::pole(-10.0, -40.0));
+        data.roots.push(ComplexRoot::zero(-3.0, 0.0));
+
+        let summary = summarize_roots(&data);
+        assert_eq!(summary.pole_count, 3);
+        assert_eq!(summary.zero_count, 1);
+        assert_eq!(summary.dominant_pole.map(|pole| pole.real), Some(-10.0));
+        assert_eq!(summary.right_half_plane_poles, 0);
+        assert_eq!(summary.imaginary_axis_poles, 0);
+        assert!((summary.worst_q.unwrap() - 1700.0_f64.sqrt() / 20.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn root_summary_reports_rhp_and_axis_content_without_inventing_reduction() {
+        let mut data = PoleZeroData::new("mixed");
+        data.roots.push(ComplexRoot::pole(1.0, 0.0));
+        data.roots.push(ComplexRoot::pole(0.0, 2.0));
+
+        let summary = summarize_roots(&data);
+        assert_eq!(summary.right_half_plane_poles, 1);
+        assert_eq!(summary.imaginary_axis_poles, 1);
+        assert_eq!(summary.worst_q, Some(f64::INFINITY));
+        assert!(accessible_root_inventory(&data).contains("pole 2"));
+    }
+
+    #[test]
+    fn real_poles_do_not_invent_quality_factor() {
+        let mut data = PoleZeroData::new("real poles");
+        data.roots.push(ComplexRoot::pole(-1.0, 0.0));
+        data.roots.push(ComplexRoot::pole(-10.0, 0.0));
+
+        assert_eq!(summarize_roots(&data).worst_q, None);
+    }
+
+    #[test]
+    fn root_table_filters_conjugates_before_applying_its_limit() {
+        let mut data = PoleZeroData::new("ordered roots");
+        for index in 1..=12 {
+            data.roots
+                .push(ComplexRoot::pole(-(index as f64), -(index as f64)));
+        }
+        for index in 1..=14 {
+            data.roots
+                .push(ComplexRoot::pole(-(index as f64), index as f64));
+        }
+
+        let (rows, omitted) = retained_root_representatives(&data, 12);
+
+        assert_eq!(rows.len(), 12);
+        assert!(rows.iter().all(|root| root.imag > 0.0));
+        assert_eq!(omitted, 2);
     }
 }

@@ -411,7 +411,7 @@ fn execute_request(
             }
             vec![
                 resolved
-                    .to_worker_snapshot_json()
+                    .worker_snapshot_json()
                     .map_err(|error| error.to_string())?,
             ]
         }
@@ -735,10 +735,14 @@ mod browser {
         expected_buffer_count: Option<usize>,
     }
 
+    /// Where a render lands: empty until the worker answers, then either the
+    /// page buffers or the failure text, written exactly once.
+    type RenderSlot = RefCell<Option<Result<Vec<Vec<u8>>, String>>>;
+
     struct ActiveHardcopyWorker {
         ticket: HardcopyWorkerTicket,
         worker: web_sys::Worker,
-        result: Rc<RefCell<Option<Result<Vec<Vec<u8>>, String>>>>,
+        result: Rc<RenderSlot>,
         _onmessage: Closure<dyn FnMut(web_sys::MessageEvent)>,
         _onerror: Closure<dyn FnMut(web_sys::ErrorEvent)>,
         _onmessageerror: Closure<dyn FnMut(web_sys::MessageEvent)>,
@@ -768,7 +772,7 @@ mod browser {
         repaint: egui::Context,
     ) -> Result<HardcopyWorkerTicket, String> {
         let snapshot = prepared
-            .to_worker_snapshot_json()
+            .into_worker_snapshot_json()
             .map_err(|error| error.to_string())?;
         start(
             epoch,
@@ -790,7 +794,7 @@ mod browser {
         repaint: egui::Context,
     ) -> Result<HardcopyWorkerTicket, String> {
         let snapshot = source
-            .to_worker_snapshot_json()
+            .worker_snapshot_json()
             .map_err(|error| error.to_string())?;
         start(
             epoch,
@@ -818,7 +822,7 @@ mod browser {
         repaint: egui::Context,
     ) -> Result<HardcopyWorkerTicket, String> {
         let snapshot = source
-            .to_worker_snapshot_json()
+            .worker_snapshot_json()
             .map_err(|error| error.to_string())?;
         start(
             epoch,
@@ -1096,7 +1100,7 @@ mod browser {
     }
 
     fn complete_once(
-        slot: &RefCell<Option<Result<Vec<Vec<u8>>, String>>>,
+        slot: &RenderSlot,
         repaint: &egui::Context,
         result: Result<Vec<Vec<u8>>, String>,
     ) {
@@ -1577,7 +1581,7 @@ mod tests {
             vec![
                 fixture
                     .prepared
-                    .to_worker_snapshot_json()
+                    .into_worker_snapshot_json()
                     .expect("prepared snapshot encodes"),
             ],
         )
@@ -1611,7 +1615,7 @@ mod tests {
                 vec![
                     wrong_key
                         .prepared
-                        .to_worker_snapshot_json()
+                        .into_worker_snapshot_json()
                         .expect("prepared snapshot encodes"),
                 ],
             ),
@@ -1634,7 +1638,7 @@ mod tests {
                 vec![
                     wrong_scope
                         .prepared
-                        .to_worker_snapshot_json()
+                        .into_worker_snapshot_json()
                         .expect("prepared snapshot encodes"),
                 ],
             ),
@@ -1666,7 +1670,7 @@ mod tests {
             vec![
                 fixture
                     .source
-                    .to_worker_snapshot_json()
+                    .worker_snapshot_json()
                     .expect("source snapshot encodes"),
             ],
         )
@@ -1708,7 +1712,7 @@ mod tests {
                 vec![
                     fixture
                         .source
-                        .to_worker_snapshot_json()
+                        .worker_snapshot_json()
                         .expect("source snapshot encodes"),
                 ],
             ),
@@ -1745,7 +1749,7 @@ mod tests {
             vec![
                 fixture
                     .source
-                    .to_worker_snapshot_json()
+                    .worker_snapshot_json()
                     .expect("source snapshot encodes"),
             ],
         )
@@ -1802,7 +1806,7 @@ mod tests {
             vec![
                 fixture
                     .source
-                    .to_worker_snapshot_json()
+                    .worker_snapshot_json()
                     .expect("source snapshot encodes"),
             ],
         )
@@ -1844,7 +1848,7 @@ mod tests {
                 vec![
                     fixture
                         .source
-                        .to_worker_snapshot_json()
+                        .worker_snapshot_json()
                         .expect("source snapshot encodes"),
                 ],
             ),
@@ -1884,7 +1888,7 @@ mod tests {
             vec![
                 fixture
                     .source
-                    .to_worker_snapshot_json()
+                    .worker_snapshot_json()
                     .expect("source snapshot encodes"),
             ],
         )

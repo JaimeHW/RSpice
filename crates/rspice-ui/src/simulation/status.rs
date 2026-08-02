@@ -20,9 +20,6 @@ pub enum SimulationStatus {
     #[default]
     Idle,
 
-    /// Simulation queued but not started
-    Queued,
-
     /// Parsing netlist
     Parsing,
 
@@ -56,18 +53,8 @@ pub enum SimulationStatus {
     /// Simulation completed successfully
     Completed { elapsed: Duration },
 
-    /// Simulation failed with error
-    Failed { message: String, elapsed: Duration },
-
     /// Simulation was aborted by user
     Aborted { elapsed: Duration },
-
-    /// Convergence failure at specific point
-    ConvergenceFailed {
-        iteration: usize,
-        time_or_freq: Option<f64>,
-        elapsed: Duration,
-    },
 }
 
 impl SimulationStatus {
@@ -75,7 +62,6 @@ impl SimulationStatus {
     pub fn display_name(&self) -> &'static str {
         match self {
             SimulationStatus::Idle => "Idle",
-            SimulationStatus::Queued => "Queued",
             SimulationStatus::Parsing => "Parsing Netlist",
             SimulationStatus::Building => "Building Circuit",
             SimulationStatus::DcOperatingPoint => "DC Operating Point",
@@ -87,9 +73,7 @@ impl SimulationStatus {
             SimulationStatus::Sensitivity => "Sensitivity Analysis",
             SimulationStatus::PostProcessing => "Post-Processing",
             SimulationStatus::Completed { .. } => "Completed",
-            SimulationStatus::Failed { .. } => "Failed",
             SimulationStatus::Aborted { .. } => "Aborted",
-            SimulationStatus::ConvergenceFailed { .. } => "Convergence Failed",
         }
     }
 
@@ -145,9 +129,6 @@ pub struct SimulationProgress {
 
     /// Estimated time remaining (if calculable)
     pub estimated_remaining: Option<Duration>,
-
-    /// Last message from the solver
-    pub message: Option<String>,
 }
 
 impl Default for SimulationProgress {
@@ -157,7 +138,6 @@ impl Default for SimulationProgress {
             start_time: None,
             elapsed: Duration::ZERO,
             estimated_remaining: None,
-            message: None,
         }
     }
 }

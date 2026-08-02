@@ -414,6 +414,7 @@ impl ModelCorrelationWorkspaceState {
         self.dialog.is_some()
     }
 
+    #[cfg(test)]
     pub fn reset_for_navigation(&mut self) {
         self.section = ModelCorrelationSection::Datasets;
         self.dialog = None;

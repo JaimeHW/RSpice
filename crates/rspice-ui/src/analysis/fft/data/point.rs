@@ -17,6 +17,7 @@ pub struct FftPoint {
 
 impl FftPoint {
     /// Create new point
+    #[cfg(test)]
     pub fn new(frequency: f64, magnitude: f64, phase: f64) -> Self {
         Self {
             frequency,

@@ -75,6 +75,7 @@ impl AnalysisDependencyRepair {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn dependent(&self) -> AnalysisInstanceId {
         self.dependent
     }
@@ -105,6 +106,7 @@ impl AnalysisDependencyRepair {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub fn changed(&self) -> bool {
         !self.inserted.is_empty()
             || !self.enabled.is_empty()
@@ -245,6 +247,7 @@ impl AnalysisLifecycleReceipt {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn kind(&self) -> AnalysisKind {
         self.kind
     }
@@ -1179,6 +1182,7 @@ impl SimulationPlan {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub fn configuration_receipts(&self) -> &[SimulationPlanConfigurationReceipt] {
         &self.configuration_receipts
     }
@@ -1255,6 +1259,7 @@ impl SimulationPlan {
     /// numerical-contract failure. Used by selectors as well as mutations so
     /// the UI cannot offer a binding that the plan will reject.
     #[must_use]
+    #[cfg(test)]
     pub fn dependency_candidate_is_compatible(
         &self,
         dependent: AnalysisInstanceId,
@@ -1291,6 +1296,7 @@ impl SimulationPlan {
     /// Whether quick repair can synthesize a valid draft for this role from
     /// the dependent's current configuration.
     #[must_use]
+    #[cfg(test)]
     pub fn dependency_prerequisite_is_repairable(
         &self,
         dependent: AnalysisInstanceId,

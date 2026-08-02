@@ -42,12 +42,12 @@ use crate::results::visualization_raster::{
     ResolvedCartesianLineScene, VisualizationRasterError, resolve_cartesian_line_scene,
 };
 use crate::state::{
-    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, Bus, BusTap, Component,
-    ComponentType, DesignNote, DesignSheet, DocumentationShape, DrawingSheetBorderTemplate,
-    DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, Junction, NetLabel, Point,
-    ResolvedSymbolIssueKind, ResolvedSymbolSource, SchematicSheetFormat, SchematicState, Selection,
-    SheetCatalog, SheetId, SimulationRun, SimulationState, SymbolDocument, SymbolResolver,
-    SymbolShape, ViewType, WaveformData, Wire,
+    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType, Bus, BusTap,
+    Component, ComponentType, DesignNote, DesignSheet, DocumentationShape,
+    DrawingSheetBorderTemplate, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, Junction,
+    NetLabel, Point, ResolvedSymbolIssueKind, ResolvedSymbolSource, SchematicSheetFormat,
+    SchematicState, Selection, SheetCatalog, SheetId, SimulationRun, SimulationState,
+    SymbolDocument, SymbolResolver, SymbolShape, ViewType, WaveformData, Wire,
 };
 use crate::workbench::AppState;
 
@@ -89,7 +89,9 @@ pub const PLOT_HEIGHT_UM: i64 = 142_875;
 pub const REPORT_PAGE_WIDTH_UM: i64 = 215_900;
 pub const REPORT_PAGE_HEIGHT_UM: i64 = 279_400;
 pub const REPORT_PAGE_GAP_UM: i64 = 5_000;
+#[cfg(test)]
 pub const BLANK_SCHEMATIC_SHEET_WIDTH_UM: i64 = 279_400;
+#[cfg(test)]
 pub const BLANK_SCHEMATIC_SHEET_HEIGHT_UM: i64 = 215_900;
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub(crate) const MAX_WORKER_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
@@ -173,6 +175,7 @@ pub(crate) struct ActiveStudioPaneHardcopySource<'a> {
 /// The document shown by the Results workspace quick-view. The adapter reads
 /// the selected retained dataset and the exact active specialized result
 /// state; it never samples the screen or depends on the viewer's paint cache.
+#[cfg(test)]
 pub(crate) struct ResultsQuickViewHardcopySource<'a> {
     pub source_key: String,
     pub project_id: ProjectId,
@@ -585,7 +588,7 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
             ViewType::Symbol => {
                 let document = state
                     .load_active_symbol_document()
-                    .map_err(|reason| HardcopySourceError::StaleActiveDocumentAuthority(reason))?;
+                    .map_err(HardcopySourceError::StaleActiveDocumentAuthority)?;
                 Ok(PreparedRetainedHardcopyResolution {
                     payload: PreparedRetainedHardcopyPayload::Symbol {
                         project_id,
@@ -629,11 +632,14 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
         );
         if source_key == result_key {
             require_active_result_document(state, run.dataset_id)?;
-            let analysis_index = state.simulation.active_analysis_idx.ok_or_else(|| {
-                HardcopySourceError::UnretainedResult(
-                    "no active analysis is selected in the active terminal dataset".to_owned(),
-                )
-            })?;
+            let viewer = state.ui.results.viewer;
+            let analysis_index =
+                quick_result_analysis_index(state, run, viewer).ok_or_else(|| {
+                    HardcopySourceError::UnretainedResult(format!(
+                        "no retained analysis can provide exact evidence for {}",
+                        viewer.label()
+                    ))
+                })?;
             let analysis = run.analyses.get(analysis_index).ok_or_else(|| {
                 HardcopySourceError::UnretainedResult(format!(
                     "active analysis index {analysis_index} is not retained"
@@ -763,19 +769,20 @@ fn prepared_simulation_for_panes(
         .iter()
         .map(|pane| (pane.dataset_id, pane.analysis_sequence))
         .collect::<std::collections::HashSet<_>>();
-    let mut prepared = SimulationState::default();
-    prepared.runs = simulation
-        .runs
-        .iter()
-        .filter(|run| dataset_ids.contains(&run.dataset_id))
-        .cloned()
-        .map(|mut run| {
-            run.analyses
-                .retain(|analysis| analysis_ids.contains(&(run.dataset_id, analysis.id)));
-            run
-        })
-        .collect();
-    prepared
+    SimulationState {
+        runs: simulation
+            .runs
+            .iter()
+            .filter(|run| dataset_ids.contains(&run.dataset_id))
+            .cloned()
+            .map(|mut run| {
+                run.analyses
+                    .retain(|analysis| analysis_ids.contains(&(run.dataset_id, analysis.id)));
+                run
+            })
+            .collect(),
+        ..Default::default()
+    }
 }
 
 /// Per-frame command predicate. This deliberately performs identity and
@@ -838,14 +845,6 @@ pub(crate) fn active_app_hardcopy_source_available(state: &AppState) -> bool {
         _ => false,
     }
 }
-
-/// Strict dialog selection resolver. The selected stable key and exact scope
-/// must both be advertised by the retained descriptor; no active/background
-/// fallback is attempted.
-
-/// Resolve a persisted source set against the currently retained application
-/// authorities. Members are processed in definition order and the operation
-/// returns no partial aggregate if any member is missing, stale, or invalid.
 
 /// Resolve an exact ordered source set with a caller-provided retained-source
 /// lookup. This is the state-facing boundary used both by project persistence
@@ -989,8 +988,11 @@ fn quick_result_availability(
         // must not require an arbitrarily selected analysis.
         return RetainedHardcopySourceAvailability::Available;
     }
-    let Some(index) = state.simulation.active_analysis_idx else {
-        return unavailable("no active analysis is selected".to_owned());
+    let Some(index) = quick_result_analysis_index(state, run, viewer) else {
+        return unavailable(format!(
+            "no retained analysis can provide exact evidence for {}",
+            viewer.label()
+        ));
     };
     let Some(analysis) = run.analyses.get(index) else {
         return unavailable(format!("active analysis index {index} is not retained"));
@@ -1012,11 +1014,21 @@ fn quick_result_availability(
             .any(|waveform| !waveform.x.is_empty() && waveform.x.len() == waveform.y.len())
     };
     let available = match viewer {
-        ResultViewer::Waves | ResultViewer::Bode => has_waveform(),
+        ResultViewer::Waves | ResultViewer::DcSweep | ResultViewer::Bode => has_waveform(),
         ResultViewer::Fft => visible_waveforms().any(|waveform| {
             waveform.x.len() >= crate::analysis::fft::MIN_FFT_SAMPLES
                 && waveform.x.len() == waveform.y.len()
         }),
+        ResultViewer::HarmonicBalance => {
+            crate::workbench::documents::result_document::harmonic_balance_analysis_is_renderable(
+                analysis,
+            )
+        }
+        ResultViewer::PhaseNoise => {
+            crate::workbench::documents::result_document::phase_noise_analysis_is_renderable(
+                analysis,
+            )
+        }
         ResultViewer::Eye => visible_waveforms()
             .any(|waveform| waveform.x.len() >= 8 && waveform.x.len() == waveform.y.len()),
         ResultViewer::Hist => matches!(
@@ -1038,7 +1050,7 @@ fn quick_result_availability(
                     Some(AnalysisResultPayload::OperatingPoint { .. })
                 )
         }
-        ResultViewer::NoiseContrib => analysis.noise_summary.is_some(),
+        ResultViewer::NoiseContrib => ordinary_noise_spectrum_is_renderable(analysis),
         ResultViewer::Contribution => matches!(
             analysis.result_payload.as_ref(),
             Some(AnalysisResultPayload::Sensitivity { .. })
@@ -1074,31 +1086,168 @@ fn quick_result_availability(
     }
 }
 
-fn schematic_has_objects_on_sheet(
-    schematic: &SchematicState,
-    catalog: &SheetCatalog,
-    sheet_id: SheetId,
-) -> bool {
-    let belongs = |object_id| {
-        catalog
-            .sheet_for_object(object_id)
-            .or(catalog.active_sheet_id())
-            == Some(sheet_id)
-    };
-    schematic.components.iter().any(|object| belongs(object.id))
-        || schematic.wires.iter().any(|object| belongs(object.id))
-        || schematic.buses.iter().any(|object| belongs(object.id))
-        || schematic.bus_taps.iter().any(|object| belongs(object.id))
-        || schematic.junctions.iter().any(|object| belongs(object.id))
-        || schematic.net_labels.iter().any(|object| belongs(object.id))
-        || schematic
-            .design_notes
-            .iter()
-            .any(|object| belongs(object.id))
-        || schematic
-            .documentation_shapes
-            .iter()
-            .any(|object| belongs(object.id))
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RetainedNoiseReference {
+    Input,
+    Output,
+}
+
+fn retained_noise_reference(name: &str) -> Option<RetainedNoiseReference> {
+    let name = name
+        .trim()
+        .to_ascii_lowercase()
+        .replace([' ', '-', '.'], "");
+    if matches!(
+        name.as_str(),
+        "inoise"
+            | "inoise_spectrum"
+            | "inoisespectrum"
+            | "v(inoise)"
+            | "v(inoise_spectrum)"
+            | "v(inoisespectrum)"
+    ) {
+        Some(RetainedNoiseReference::Input)
+    } else if matches!(
+        name.as_str(),
+        "onoise"
+            | "onoise_spectrum"
+            | "onoisespectrum"
+            | "v(onoise)"
+            | "v(onoise_spectrum)"
+            | "v(onoisespectrum)"
+    ) {
+        Some(RetainedNoiseReference::Output)
+    } else {
+        None
+    }
+}
+
+fn retained_noise_contributor(name: &str) -> bool {
+    let name = name.trim().to_ascii_lowercase();
+    name.starts_with("noise(") && name.ends_with(')')
+}
+
+fn retained_noise_waveform_is_renderable(waveform: &WaveformData) -> bool {
+    if waveform.x.len() != waveform.y.len() || waveform.x.len() < 2 {
+        return false;
+    }
+    if waveform
+        .y
+        .iter()
+        .any(|density| !density.is_finite() || *density <= 0.0)
+    {
+        return false;
+    }
+    let mut previous = None;
+    for frequency in waveform.x.iter().copied() {
+        if !frequency.is_finite()
+            || frequency <= 0.0
+            || previous.is_some_and(|previous| frequency <= previous)
+        {
+            return false;
+        }
+        previous = Some(frequency);
+    }
+    true
+}
+
+fn ordinary_noise_spectrum_is_renderable(analysis: &AnalysisResult) -> bool {
+    analysis.analysis_type == AnalysisType::Noise
+        && analysis.waveforms.iter().any(|waveform| {
+            retained_noise_reference(&waveform.name).is_some()
+                && retained_noise_waveform_is_renderable(waveform)
+        })
+}
+
+fn transient_waveform_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
+    analysis.success
+        && analysis.analysis_type == AnalysisType::Transient
+        && analysis.waveforms.iter().any(|waveform| {
+            waveform.visible && !waveform.x.is_empty() && waveform.x.len() == waveform.y.len()
+        })
+}
+
+fn quick_result_analysis_index(
+    state: &AppState,
+    run: &SimulationRun,
+    viewer: ResultViewer,
+) -> Option<usize> {
+    match viewer {
+        ResultViewer::Waves => state
+            .simulation
+            .active_analysis_idx
+            .filter(|&index| {
+                run.analyses
+                    .get(index)
+                    .is_some_and(transient_waveform_analysis_is_renderable)
+            })
+            .or_else(|| {
+                run.analyses
+                    .iter()
+                    .position(transient_waveform_analysis_is_renderable)
+            }),
+        ResultViewer::NoiseContrib => state
+            .simulation
+            .active_analysis_idx
+            .filter(|&index| {
+                run.analyses
+                    .get(index)
+                    .is_some_and(ordinary_noise_spectrum_is_renderable)
+            })
+            .or_else(|| {
+                run.analyses
+                    .iter()
+                    .position(ordinary_noise_spectrum_is_renderable)
+            }),
+        ResultViewer::DcSweep => state
+            .simulation
+            .active_analysis_idx
+            .filter(|&index| {
+                run.analyses
+                    .get(index)
+                    .is_some_and(|analysis| analysis.analysis_type == AnalysisType::DcSweep)
+            })
+            .or_else(|| {
+                run.analyses
+                    .iter()
+                    .position(|analysis| analysis.analysis_type == AnalysisType::DcSweep)
+            }),
+        ResultViewer::PhaseNoise => state
+            .simulation
+            .active_analysis_idx
+            .filter(|&index| {
+                run.analyses.get(index).is_some_and(|analysis| {
+                    crate::workbench::documents::result_document::phase_noise_analysis_is_renderable(
+                        analysis,
+                    )
+                })
+            })
+            .or_else(|| {
+                run.analyses.iter().position(|analysis| {
+                    crate::workbench::documents::result_document::phase_noise_analysis_is_renderable(
+                        analysis,
+                    )
+                })
+            }),
+        ResultViewer::HarmonicBalance => state
+            .simulation
+            .active_analysis_idx
+            .filter(|&index| {
+                run.analyses.get(index).is_some_and(|analysis| {
+                    crate::workbench::documents::result_document::harmonic_balance_analysis_is_renderable(
+                        analysis,
+                    )
+                })
+            })
+            .or_else(|| {
+                run.analyses.iter().position(|analysis| {
+                    crate::workbench::documents::result_document::harmonic_balance_analysis_is_renderable(
+                        analysis,
+                    )
+                })
+            }),
+        _ => state.simulation.active_analysis_idx,
+    }
 }
 
 fn studio_pane_availability(
@@ -1126,6 +1275,36 @@ fn studio_pane_availability(
         return unavailable(format!(
             "analysis {} is unsuccessful",
             pane.analysis_sequence
+        ));
+    }
+    let specialist_evidence_available = match pane.viewer {
+        ResultViewer::HarmonicBalance => {
+            crate::workbench::documents::result_document::harmonic_balance_analysis_is_renderable(
+                analysis,
+            ) && analysis.waveforms.iter().any(|waveform| {
+                waveform.visible
+                    && crate::workbench::documents::result_document::harmonic_balance_waveform_is_renderable(
+                        waveform,
+                    )
+            })
+        }
+        ResultViewer::PhaseNoise => {
+            crate::workbench::documents::result_document::phase_noise_analysis_is_renderable(
+                analysis,
+            ) && analysis.waveforms.iter().any(|waveform| {
+                waveform.visible
+                    && crate::workbench::documents::result_document::phase_noise_waveform_is_renderable(
+                        waveform,
+                    )
+            })
+        }
+        _ => true,
+    };
+    if !specialist_evidence_available {
+        return unavailable(format!(
+            "analysis {} does not retain visible exact evidence for {}",
+            pane.analysis_sequence,
+            pane.viewer.label()
         ));
     }
     RetainedHardcopySourceAvailability::Available
@@ -1214,7 +1393,9 @@ fn visualization_document_reference(
 /// preview. Every branch verifies the stable open-document selection before
 /// borrowing engineering content; background buffers and most-recent results
 /// are never substituted for an absent or stale active authority.
-#[allow(dead_code)] // Retained as the fail-closed single-route compatibility boundary.
+// The fail-closed single-route compatibility boundary. Nothing in the
+// application reaches it; the hardcopy tests do.
+#[cfg(test)]
 pub(crate) fn resolve_active_app_hardcopy_source(
     state: &AppState,
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
@@ -2001,8 +2182,8 @@ pub(crate) fn resolve_retained_hardcopy_source(
                             "active sheet {sheet_id} is not retained"
                         ))
                     })?;
-                    let sheet_identity = schematic_sheet_identity(&identity, sheet)?;
-                    sheet_identity
+
+                    schematic_sheet_identity(&identity, sheet)?
                 } else {
                     identity
                 };
@@ -2037,7 +2218,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
             ViewType::Symbol => {
                 let document = state
                     .load_active_symbol_document()
-                    .map_err(|reason| HardcopySourceError::StaleActiveDocumentAuthority(reason))?;
+                    .map_err(HardcopySourceError::StaleActiveDocumentAuthority)?;
                 resolve_symbol_source(SymbolHardcopySource {
                     identity,
                     document: &document,

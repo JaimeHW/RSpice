@@ -249,20 +249,6 @@ pub const ANALYSIS_AVAILABILITY_ROWS: [AnalysisAvailabilityRow; 34] = [
     },
 ];
 
-#[must_use]
-pub fn analysis_availability_row(id: &str) -> Option<&'static AnalysisAvailabilityRow> {
-    ANALYSIS_AVAILABILITY_ROWS.iter().find(|row| row.id == id)
-}
-
-pub fn analysis_rows_matching(
-    query: &str,
-) -> impl Iterator<Item = &'static AnalysisAvailabilityRow> {
-    let query = normalized_query(query);
-    ANALYSIS_AVAILABILITY_ROWS
-        .iter()
-        .filter(move |row| matches_query(&query, &[row.id, row.code, row.title]))
-}
-
 /// Commercial module disposition from the governed surface registry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CommercialModuleAvailability {
@@ -814,30 +800,3 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 41] = [
         module_availability: CommercialModuleAvailability::Included,
     },
 ];
-
-#[must_use]
-pub fn specialist_workspace_row(surface_id: SurfaceId) -> Option<&'static SpecialistWorkspaceRow> {
-    SPECIALIST_WORKSPACE_ROWS
-        .iter()
-        .find(|row| row.surface_id == surface_id)
-}
-
-pub fn specialist_workspace_rows_matching(
-    query: &str,
-) -> impl Iterator<Item = &'static SpecialistWorkspaceRow> {
-    let query = normalized_query(query);
-    SPECIALIST_WORKSPACE_ROWS.iter().filter(move |row| {
-        matches_query(
-            &query,
-            &[
-                row.surface_id.as_str(),
-                row.label(),
-                row.owner.label(),
-                row.purpose,
-                row.primary_module_id,
-                row.module_availability.as_str(),
-                row.evidence_role,
-            ],
-        )
-    })
-}

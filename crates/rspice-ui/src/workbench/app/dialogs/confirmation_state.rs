@@ -17,16 +17,11 @@ pub enum ConfirmationAction {
     OpenNetlistProject,
     /// Close the current project while leaving RSpice running.
     CloseProject,
-    /// Create new schematic (discard current)
-    FileNew,
     /// Open another schematic (discard current)
     FileOpen,
     /// Open a file from the recent-files list (path stored alongside the
     /// pending action in [`ConfirmationDialogState::pending_path`])
     OpenRecent,
-    /// Load a bundled example circuit (name stored alongside the pending
-    /// action in [`ConfirmationDialogState::pending_example`]).
-    OpenExample,
     /// Import a SPICE deck into the Netlist workspace.
     ImportNetlist,
     /// Close the application
@@ -41,10 +36,8 @@ impl ConfirmationAction {
             ConfirmationAction::ProjectOpen => "Open Project",
             ConfirmationAction::OpenNetlistProject => "Open Netlist Project",
             ConfirmationAction::CloseProject => "Close Project",
-            ConfirmationAction::FileNew => "Create New Schematic",
             ConfirmationAction::FileOpen => "Open Schematic",
             ConfirmationAction::OpenRecent => "Open Recent File",
-            ConfirmationAction::OpenExample => "Open Example",
             ConfirmationAction::ImportNetlist => "Import SPICE Deck",
             ConfirmationAction::Exit => "Exit RSpice",
         }
@@ -59,10 +52,8 @@ impl ConfirmationAction {
             | ConfirmationAction::CloseProject => {
                 "The current project has unsaved changes.\nDo you want to save before continuing?"
             }
-            ConfirmationAction::FileNew
-            | ConfirmationAction::FileOpen
+            ConfirmationAction::FileOpen
             | ConfirmationAction::OpenRecent
-            | ConfirmationAction::OpenExample
             | ConfirmationAction::Exit => {
                 "The current design has unsaved changes.\nDo you want to save before continuing?"
             }
@@ -89,7 +80,7 @@ pub struct ConfirmationDialogState {
     /// Project and schematic entries have different save scopes and must not
     /// be inferred later from a mutable recent-files list or extension.
     pub(crate) pending_recent_kind: Option<crate::workbench::app_state::RecentKind>,
-    /// Example name for [`ConfirmationAction::OpenExample`].
+    /// Example name captured with a pending example load.
     pub pending_example: Option<String>,
     /// Destructive action suspended until the exact browser save transaction
     /// reaches a verified canonical completion.
@@ -127,15 +118,6 @@ impl ConfirmationDialogState {
         self.pending_path = Some(path);
         self.pending_recent_kind = Some(kind);
         self.pending_example = None;
-    }
-
-    /// Open the confirmation dialog for an action that targets a bundled example.
-    pub fn show_with_example(&mut self, action: ConfirmationAction, name: String) {
-        self.visible = true;
-        self.pending_action = Some(action);
-        self.pending_path = None;
-        self.pending_recent_kind = None;
-        self.pending_example = Some(name);
     }
 
     /// Close the dialog and clear pending action
@@ -194,11 +176,6 @@ impl ConfirmationDialogState {
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub(crate) fn cancel_awaiting_canonical_save(&mut self) -> bool {
         self.awaiting_canonical_save.take().is_some()
-    }
-
-    /// Check if dialog is open for a specific action
-    pub fn is_showing(&self, action: ConfirmationAction) -> bool {
-        self.visible && self.pending_action == Some(action)
     }
 }
 

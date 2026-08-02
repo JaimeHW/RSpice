@@ -120,7 +120,6 @@ impl DecimationCache {
 
     /// Fetch or compute a bounded display series for one trace at the given
     /// view. Full-resolution rendering deliberately bypasses this cache.
-    #[allow(clippy::too_many_arguments)]
     pub fn series(
         &mut self,
         mode: DisplayDecimation,

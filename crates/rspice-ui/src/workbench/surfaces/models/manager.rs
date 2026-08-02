@@ -83,7 +83,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let include_diagnostics =
         (page == ModelsPage::Include).then(|| super::include_diagnostics(app));
     if page == ModelsPage::Qualification {
-        super::qualification(ui, app);
+        qualification_page(ui, app);
     } else {
         let mut render = ManagerRenderContext {
             state: &mut app.state,
@@ -130,6 +130,504 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 apply_receipt(&mut app.state, result);
             }
         }
+    }
+}
+
+fn qualification_page(ui: &mut Ui, app: &mut RSpiceApp) {
+    let summaries = super::qualification_summaries(app);
+    if super::selected_qualification_summary(app, &summaries).is_none()
+        && let Some(first) = summaries.first()
+    {
+        app.state
+            .model_library_manager
+            .select_library(&first.library);
+        app.state.workbench.selected_model = Some(first.model.clone());
+    }
+    let selected = super::selected_qualification_summary(app, &summaries).cloned();
+    let total_vectors = summaries
+        .iter()
+        .map(|summary| summary.vectors)
+        .sum::<usize>();
+    let subtitle = format!(
+        "{} model families · {} vectors · source-owned release evidence",
+        summaries.len(),
+        total_vectors
+    );
+    let mut requested_action = None;
+    let compare_blocker = super::qualification_action_block_reason(
+        app,
+        selected.as_ref(),
+        super::QualificationPageAction::CompareRelease,
+    );
+    let release_blocker = super::qualification_action_block_reason(
+        app,
+        selected.as_ref(),
+        super::QualificationPageAction::ReviewReleaseBinding,
+    );
+    let run_blocker = super::qualification_action_block_reason(
+        app,
+        selected.as_ref(),
+        super::QualificationPageAction::RunSuite,
+    );
+
+    section_title(ui, "Model qualification", &subtitle, |ui| {
+        let compare = ui.add_enabled(
+            compare_blocker.is_none(),
+            egui::Button::new("Compare approved"),
+        );
+        if let Some(reason) = compare_blocker.as_deref() {
+            compare.on_disabled_hover_text(reason);
+        } else if compare.clicked() {
+            requested_action = Some(super::QualificationPageAction::CompareRelease);
+        }
+
+        let release = ui.add_enabled(
+            release_blocker.is_none(),
+            egui::Button::new("Release closure"),
+        );
+        if let Some(reason) = release_blocker.as_deref() {
+            release.on_disabled_hover_text(reason);
+        } else if release.clicked() {
+            requested_action = Some(super::QualificationPageAction::ReviewReleaseBinding);
+        }
+
+        let run = ui.add_enabled(run_blocker.is_none(), egui::Button::new("Run suite"));
+        if let Some(reason) = run_blocker.as_deref() {
+            run.on_disabled_hover_text(reason);
+        } else if run.clicked() {
+            requested_action = Some(super::QualificationPageAction::RunSuite);
+        }
+    });
+
+    qualification_metric_strip(ui, &summaries);
+    qualification_gate_banner(ui, selected.as_ref());
+    if summaries.is_empty() {
+        page_empty_state(
+            ui,
+            "No qualification suites are loaded",
+            "Attach a project-owned model source and retain versioned vectors before making release claims.",
+        );
+    } else {
+        let available = ui.available_size();
+        let left_width = (available.x * 0.34).clamp(220.0, 310.0);
+        let right_width = (available.x - left_width - 1.0).max(260.0);
+        ui.horizontal(|ui| {
+            ui.allocate_ui_with_layout(
+                egui::vec2(left_width, available.y),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    qualification_suite_rail(
+                        ui,
+                        app,
+                        &summaries,
+                        selected.as_ref(),
+                        &mut requested_action,
+                    );
+                },
+            );
+            ui.separator();
+            ui.allocate_ui_with_layout(
+                egui::vec2(right_width, available.y),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    qualification_selected_contract(
+                        ui,
+                        app,
+                        selected.as_ref(),
+                        &mut requested_action,
+                    )
+                },
+            );
+        });
+    }
+
+    if let Some(action) = requested_action {
+        super::execute_qualification_action(app, action);
+    }
+}
+
+fn qualification_metric_strip(ui: &mut Ui, summaries: &[super::QualificationModelSummary]) {
+    let t = Tokens::get(ui.ctx());
+    let total_vectors = summaries
+        .iter()
+        .map(|summary| summary.vectors)
+        .sum::<usize>();
+    let passing_vectors = summaries
+        .iter()
+        .map(|summary| summary.passing_vectors)
+        .sum::<usize>();
+    let evidenced_vectors = summaries
+        .iter()
+        .map(|summary| summary.evidenced_vectors)
+        .sum::<usize>();
+    let open_dispositions = summaries
+        .iter()
+        .map(|summary| summary.open_dispositions)
+        .sum::<usize>();
+    let qualified = summaries
+        .iter()
+        .filter(|summary| summary.gate == super::QualificationGate::Qualified)
+        .count();
+    let parity = summaries
+        .iter()
+        .filter(|summary| summary.suites > 0 && summary.parity_suites == summary.suites)
+        .count();
+    let metrics = [
+        (
+            "VECTORS PASSING",
+            format!("{passing_vectors} / {total_vectors}"),
+            format!("{open_dispositions} open dispositions"),
+            if total_vectors > 0 && passing_vectors == total_vectors {
+                t.color.ok
+            } else {
+                t.color.warn
+            },
+        ),
+        (
+            "REFERENCE COVERAGE",
+            format!("{evidenced_vectors} / {total_vectors}"),
+            "exact retained evidence".to_owned(),
+            if total_vectors > 0 && evidenced_vectors == total_vectors {
+                t.color.ok
+            } else {
+                t.color.warn
+            },
+        ),
+        (
+            "QUALIFIED MODELS",
+            format!("{qualified} / {}", summaries.len()),
+            "source-owned release gates".to_owned(),
+            if !summaries.is_empty() && qualified == summaries.len() {
+                t.color.ok
+            } else {
+                t.color.warn
+            },
+        ),
+        (
+            "RUNTIME PARITY",
+            format!("{parity} / {}", summaries.len()),
+            "desktop · WebAssembly".to_owned(),
+            if !summaries.is_empty() && parity == summaries.len() {
+                t.color.ok
+            } else {
+                t.color.warn
+            },
+        ),
+    ];
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 62.0), Sense::hover());
+    let width = rect.width() / metrics.len() as f32;
+    for (index, (label, value, detail, color)) in metrics.iter().enumerate() {
+        let cell = egui::Rect::from_min_max(
+            egui::pos2(rect.left() + width * index as f32, rect.top()),
+            egui::pos2(rect.left() + width * (index + 1) as f32, rect.bottom()),
+        );
+        ui.painter().rect(
+            cell,
+            0.0,
+            t.color.bg_panel,
+            Stroke::new(1.0, t.color.border),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter().text(
+            egui::pos2(cell.left() + 9.0, cell.top() + 12.0),
+            egui::Align2::LEFT_CENTER,
+            label,
+            theme::sans(tokens::FS_0, FontWeight::SemiBold),
+            t.color.text_faint,
+        );
+        ui.painter().text(
+            egui::pos2(cell.left() + 9.0, cell.top() + 33.0),
+            egui::Align2::LEFT_CENTER,
+            value,
+            theme::mono(tokens::FS_1, FontWeight::SemiBold),
+            *color,
+        );
+        ui.painter().text(
+            egui::pos2(cell.left() + 9.0, cell.bottom() - 9.0),
+            egui::Align2::LEFT_CENTER,
+            elide(ui, detail, (cell.width() - 18.0).max(1.0), false),
+            theme::sans(tokens::FS_0, FontWeight::Regular),
+            t.color.text_faint,
+        );
+    }
+}
+
+fn qualification_gate_banner(ui: &mut Ui, selected: Option<&super::QualificationModelSummary>) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 54.0), Sense::hover());
+    ui.painter().rect(
+        rect,
+        0.0,
+        t.color.bg_inset,
+        Stroke::new(1.0, t.color.border_strong),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + 12.0, rect.top() + 16.0),
+        egui::Align2::LEFT_CENTER,
+        "Gate ownership",
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text,
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + 12.0, rect.bottom() - 13.0),
+        egui::Align2::LEFT_CENTER,
+        elide(
+            ui,
+            "Release closure consumes exact source revisions, retained references, runtime parity, and governed dispositions.",
+            (rect.width() - 150.0).max(1.0),
+            false,
+        ),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+    );
+    let gate = selected.map(|summary| summary.gate);
+    let color = gate.map_or(t.color.text_faint, |gate| {
+        qualification_gate_color(gate, &t)
+    });
+    let label = gate.map_or("NO SELECTION", qualification_gate_label);
+    ui.painter().text(
+        egui::pos2(rect.right() - 12.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        label.to_uppercase(),
+        theme::mono(tokens::FS_0, FontWeight::SemiBold),
+        color,
+    );
+}
+
+fn qualification_suite_rail(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    summaries: &[super::QualificationModelSummary],
+    selected: Option<&super::QualificationModelSummary>,
+    requested_action: &mut Option<super::QualificationPageAction>,
+) {
+    let selected_key = selected.map(|summary| summary.key.as_str());
+    detail_pane(
+        ui,
+        "MODEL SUITES",
+        Some(&format!("{} source revisions", summaries.len())),
+        |ui| {
+            let list_height = (ui.available_height() - 154.0).max(130.0);
+            ScrollArea::vertical()
+                .id_salt("models-qualification-suite-rail")
+                .max_height(list_height)
+                .show(ui, |ui| {
+                    for summary in summaries {
+                        let t = Tokens::get(ui.ctx());
+                        let selected = selected_key == Some(summary.key.as_str());
+                        let (rect, response) = ui.allocate_exact_size(
+                            egui::vec2(ui.available_width(), 38.0),
+                            Sense::click(),
+                        );
+                        if selected {
+                            ui.painter().rect_filled(
+                                rect,
+                                0.0,
+                                t.color.accent.linear_multiply(0.14),
+                            );
+                            ui.painter().vline(
+                                rect.left(),
+                                rect.y_range(),
+                                Stroke::new(2.0, t.color.accent),
+                            );
+                        } else if response.hovered() {
+                            ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+                        }
+                        ui.painter().text(
+                            egui::pos2(rect.left() + 8.0, rect.top() + 12.0),
+                            egui::Align2::LEFT_CENTER,
+                            elide(ui, &summary.model, rect.width() - 92.0, true),
+                            theme::mono(tokens::FS_0, FontWeight::SemiBold),
+                            t.color.text,
+                        );
+                        ui.painter().text(
+                            egui::pos2(rect.left() + 8.0, rect.bottom() - 9.0),
+                            egui::Align2::LEFT_CENTER,
+                            elide(
+                                ui,
+                                &format!("{} · {} vectors", summary.library, summary.vectors),
+                                rect.width() - 92.0,
+                                false,
+                            ),
+                            theme::sans(tokens::FS_0, FontWeight::Regular),
+                            t.color.text_faint,
+                        );
+                        ui.painter().text(
+                            egui::pos2(rect.right() - 8.0, rect.center().y),
+                            egui::Align2::RIGHT_CENTER,
+                            qualification_gate_label(summary.gate),
+                            theme::mono(tokens::FS_0, FontWeight::SemiBold),
+                            qualification_gate_color(summary.gate, &t),
+                        );
+                        if response.clicked() {
+                            app.state
+                                .model_library_manager
+                                .select_library(&summary.library);
+                            app.state.workbench.selected_model = Some(summary.model.clone());
+                        }
+                    }
+                });
+            ui.separator();
+            if let Some(selected) = selected {
+                property(ui, "Selected", &selected.model, &selected.library);
+                property(
+                    ui,
+                    "Source",
+                    &selected.source_revision,
+                    if selected.source_error.is_none() {
+                        "retained"
+                    } else {
+                        "review"
+                    },
+                );
+                if ui.button("Review qualification").clicked() {
+                    *requested_action = Some(super::QualificationPageAction::ReviewVectors);
+                }
+                if ui.button("Measurement correlation").clicked() {
+                    *requested_action = Some(super::QualificationPageAction::OpenCorrelation);
+                }
+            }
+        },
+    );
+}
+
+fn qualification_selected_contract(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    selected: Option<&super::QualificationModelSummary>,
+    requested_action: &mut Option<super::QualificationPageAction>,
+) {
+    let Some(selected) = selected else {
+        page_empty_state(
+            ui,
+            "Select a qualification suite",
+            "Choose a model family to inspect its dispositions, tolerance policy, and retained evidence.",
+        );
+        return;
+    };
+    ScrollArea::vertical()
+        .id_salt("models-qualification-selected-contract")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            detail_pane(
+                ui,
+                "OPEN DISPOSITIONS",
+                Some(&format!("{} pending", selected.open_dispositions)),
+                |ui| {
+                    if selected.domains.is_empty() {
+                        property(ui, "Domains", "not configured", "suite contract");
+                    } else {
+                        for domain in &selected.domains {
+                            property(
+                                ui,
+                                domain.domain.label(),
+                                &domain.disposition,
+                                &domain.reference_coverage,
+                            );
+                        }
+                        let blocker = super::qualification_action_block_reason(
+                            app,
+                            Some(selected),
+                            super::QualificationPageAction::ReviewVectors,
+                        );
+                        let review = ui.add_enabled(
+                            blocker.is_none(),
+                            egui::Button::new("Review dispositions"),
+                        );
+                        if let Some(reason) = blocker.as_deref() {
+                            review.on_disabled_hover_text(reason);
+                        } else if review.clicked() {
+                            *requested_action = Some(super::QualificationPageAction::ReviewVectors);
+                        }
+                    }
+                },
+            );
+            detail_pane(
+                ui,
+                "TOLERANCE POLICY",
+                Some("domain-owned contracts"),
+                |ui| {
+                    if selected.domains.is_empty() {
+                        property(ui, "Policy", "not declared", "fail closed");
+                    } else {
+                        for domain in &selected.domains {
+                            property(
+                                ui,
+                                domain.domain.label(),
+                                &domain.tolerance,
+                                &format!("{} vectors", domain.vectors),
+                            );
+                        }
+                    }
+                },
+            );
+            detail_pane(
+                ui,
+                "QUALIFICATION CONTRACT",
+                Some(qualification_gate_label(selected.gate)),
+                |ui| {
+                    property(
+                        ui,
+                        "Model revision",
+                        &selected.source_revision,
+                        "exact source",
+                    );
+                    property(
+                        ui,
+                        "Runtime parity",
+                        &format!(
+                            "desktop {}/{} · WASM {}/{}",
+                            selected.desktop_passing,
+                            selected.vectors,
+                            selected.wasm_passing,
+                            selected.vectors
+                        ),
+                        &format!("{} suites", selected.parity_suites),
+                    );
+                    property(
+                        ui,
+                        "Evidence set",
+                        selected
+                            .evidence_digest
+                            .as_deref()
+                            .unwrap_or("not retained"),
+                        &format!("{} references", selected.references),
+                    );
+                    property(
+                        ui,
+                        "Correlation",
+                        &selected.correlation_status,
+                        selected
+                            .correlation_evidence_digest
+                            .as_deref()
+                            .unwrap_or("not retained"),
+                    );
+                    property(
+                        ui,
+                        "Approved releases",
+                        &selected.releases.to_string(),
+                        "source-owned",
+                    );
+                },
+            );
+        });
+}
+
+fn qualification_gate_label(gate: super::QualificationGate) -> &'static str {
+    match gate {
+        super::QualificationGate::Qualified => "qualified",
+        super::QualificationGate::Review => "review",
+        super::QualificationGate::Unqualified => "unqualified",
+        super::QualificationGate::Blocked => "blocked",
+    }
+}
+
+fn qualification_gate_color(gate: super::QualificationGate, t: &Tokens) -> Color32 {
+    match gate {
+        super::QualificationGate::Qualified => t.color.ok,
+        super::QualificationGate::Review | super::QualificationGate::Unqualified => t.color.warn,
+        super::QualificationGate::Blocked => t.color.err,
     }
 }
 
@@ -592,6 +1090,16 @@ fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &Proj
     } else if response.hovered() {
         ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
     }
+    let row_label = format!("{} in {}", row.model.name, row.library);
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            row_label.clone(),
+        )
+    });
+    theme::paint_focus_ring(ui, &response, rect);
     if response.clicked() {
         app.state.model_library_manager.select_library(&row.library);
         app.state.workbench.selected_model = Some(row.model.name.clone());
@@ -1014,6 +1522,14 @@ fn pack_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         .spice_packs()
         .map(|index| index.packs().to_vec())
         .unwrap_or_default();
+    if packs.is_empty() {
+        page_empty_state(
+            ui,
+            "No shipped model corpus is installed",
+            "Set RSPICE_MODELS_DIR or install the versioned model-pack tree, then rescan.",
+        );
+        return;
+    }
     let facet = app.state.workbench.models_view.pack_facet;
     let query = app
         .state
@@ -1253,6 +1769,14 @@ fn pack_detail(
 }
 
 fn parts_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
+    if app.state.model_library_manager.pack_definition_count() == 0 {
+        page_empty_state(
+            ui,
+            "No addressable parts are installed",
+            "Install the versioned model-pack corpus to browse licensed models and macromodel definitions.",
+        );
+        return;
+    }
     let facet = app.state.workbench.models_view.part_facet;
     let mut hits = app
         .state
@@ -1871,7 +2395,7 @@ fn refresh_library(app: &mut ManagerRenderContext<'_>, library: &ModelLibrary) {
                 ));
             }
             publish_model_library_candidate(
-                &mut app.state,
+                app.state,
                 candidate,
                 &library.name,
                 format!("refresh model library {}", library.name),
@@ -1891,7 +2415,7 @@ fn attach_pack(app: &mut ManagerRenderContext<'_>, pack_id: &str) {
     let mut candidate = app.state.model_library_manager.clone();
     let result = candidate.attach_spice_pack(pack_id).and_then(|library| {
         publish_model_library_candidate(
-            &mut app.state,
+            app.state,
             candidate,
             &library,
             format!("attach model pack {pack_id}"),
@@ -1917,7 +2441,7 @@ fn detach_pack(app: &mut ManagerRenderContext<'_>, pack_id: &str) {
     let mut candidate = app.state.model_library_manager.clone();
     candidate.remove_library(&library);
     let result = publish_model_library_candidate(
-        &mut app.state,
+        app.state,
         candidate,
         &library,
         format!("detach model pack {pack_id}"),
@@ -1947,7 +2471,7 @@ fn add_part(app: &mut ManagerRenderContext<'_>, pack_id: &str, part_name: &str) 
                 ));
             }
             publish_model_library_candidate(
-                &mut app.state,
+                app.state,
                 candidate,
                 &library,
                 format!("add shipped model part {part_name}"),
@@ -2041,7 +2565,7 @@ fn add_corner(
     corner.vdd_factor = supply;
     library.corners.insert(name.to_owned(), corner);
     let result = publish_model_library_candidate(
-        &mut app.state,
+        app.state,
         candidate,
         library_name,
         format!("add model corner {name}"),
@@ -2317,7 +2841,11 @@ fn card(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
         .fill(t.color.bg_panel)
         .stroke(Stroke::new(1.0, t.color.border))
         .inner_margin(egui::Margin::same(7))
-        .show(ui, content);
+        .show(ui, |ui| {
+            // Cards are structural panes, not shrink-to-fit labels.
+            ui.set_min_width(ui.available_width().max(1.0));
+            content(ui);
+        });
 }
 
 fn detail_pane(ui: &mut Ui, title: &str, meta: Option<&str>, content: impl FnOnce(&mut Ui)) {
@@ -2360,13 +2888,36 @@ fn card_title(ui: &mut Ui, title: &str, meta: Option<&str>) {
 
 fn property(ui: &mut Ui, name: &str, value: &str, origin: &str) {
     let t = Tokens::get(ui.ctx());
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(name).small().color(t.color.text_dim));
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.label(RichText::new(origin).small().color(t.color.text_faint));
-            ui.label(RichText::new(value).small().monospace().color(t.color.text));
-        });
-    });
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 22.0), Sense::hover());
+    let name_width = rect.width() * 0.30;
+    let value_width = rect.width() * 0.34;
+    let origin_width = (rect.width() - name_width - value_width).max(1.0);
+    let inset = 3.0;
+
+    let name = elide(ui, name, (name_width - inset * 2.0).max(1.0), false);
+    let value = elide(ui, value, (value_width - inset * 2.0).max(1.0), true);
+    let origin = elide(ui, origin, (origin_width - inset * 2.0).max(1.0), false);
+    ui.painter().text(
+        egui::pos2(rect.left() + inset, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        name,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + name_width + inset, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        value,
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.text,
+    );
+    ui.painter().text(
+        egui::pos2(rect.right() - inset, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        origin,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_faint,
+    );
 }
 
 fn empty_state(ui: &mut Ui, title: &str, detail: &str) {
@@ -2377,6 +2928,42 @@ fn empty_state(ui: &mut Ui, title: &str, detail: &str) {
         ui.label(RichText::new(detail).small().color(t.color.text_faint));
     });
     ui.add_space(10.0);
+}
+
+fn page_empty_state(ui: &mut Ui, title: &str, detail: &str) {
+    let t = Tokens::get(ui.ctx());
+    let size = egui::vec2(
+        ui.available_width().max(1.0),
+        ui.available_height().max(180.0),
+    );
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let panel = rect.shrink2(egui::vec2(12.0, 12.0));
+    ui.painter().rect(
+        panel,
+        3.0,
+        t.color.bg_inset,
+        Stroke::new(1.0, t.color.border),
+        egui::StrokeKind::Inside,
+    );
+    let accent = egui::Rect::from_center_size(
+        egui::pos2(panel.center().x, panel.center().y - 34.0),
+        egui::vec2(34.0, 3.0),
+    );
+    ui.painter().rect_filled(accent, 2.0, t.color.accent);
+    ui.painter().text(
+        egui::pos2(panel.center().x, panel.center().y - 12.0),
+        egui::Align2::CENTER_CENTER,
+        title,
+        theme::sans(tokens::FS_1, FontWeight::SemiBold),
+        t.color.text_dim,
+    );
+    ui.painter().text(
+        egui::pos2(panel.center().x, panel.center().y + 14.0),
+        egui::Align2::CENTER_CENTER,
+        elide(ui, detail, (panel.width() - 48.0).max(1.0), false),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_faint,
+    );
 }
 
 fn table_header(ui: &mut Ui, columns: &[(&str, f32)]) {
@@ -2418,6 +3005,21 @@ fn selectable_data_row(
         ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
     }
     paint_columns(ui, rect, columns);
+    // The first column is the row's identifier in every caller, so it is the
+    // name a screen reader should announce for the selection.
+    let row_label = columns
+        .first()
+        .map(|(value, _, _)| (*value).to_owned())
+        .unwrap_or_default();
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            row_label.clone(),
+        )
+    });
+    theme::paint_focus_ring(ui, &response, rect);
     response
 }
 

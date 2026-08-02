@@ -320,6 +320,7 @@ impl TabbedPropertyDialogState {
     }
 
     /// Revert all changes to original values
+    #[cfg(test)]
     pub fn revert(&mut self) {
         self.values = self.original_values.clone();
         self.numeric_text_drafts = self.original_numeric_text_drafts.clone();

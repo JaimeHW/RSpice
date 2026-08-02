@@ -6,6 +6,7 @@ use super::*;
 
 impl SimulationResult {
     /// Get all waveform names
+    #[cfg(test)]
     pub fn waveform_names(&self) -> Vec<&str> {
         match self {
             SimulationResult::DcSweep { waveforms, .. } => {
@@ -40,6 +41,7 @@ impl SimulationResult {
     }
 
     /// Get a specific waveform by name
+    #[cfg(test)]
     pub fn get_waveform(&self, name: &str) -> Option<&WaveformData> {
         match self {
             SimulationResult::DcSweep { waveforms, .. } => waveforms.get(name),
@@ -55,6 +57,7 @@ impl SimulationResult {
     }
 
     /// Check if this is a valid result with data
+    #[cfg(test)]
     pub fn has_data(&self) -> bool {
         match self {
             SimulationResult::DcOp(op) => !op.node_voltages.is_empty(),
@@ -110,6 +113,7 @@ impl SimulationResult {
     }
 
     /// Get display name for the result type
+    #[cfg(test)]
     pub fn type_name(&self) -> &'static str {
         match self {
             SimulationResult::DcOp(_) => "DC Operating Point",
@@ -148,7 +152,6 @@ mod transfer_function_tests {
             output_quantity: TransferFunctionQuantity::Voltage,
             input_unit: "V".to_owned(),
             output_unit: "V".to_owned(),
-            gain_unit: "V/V".to_owned(),
             normalization: TfNormalization::None,
             accuracy: TfAccuracy::Balanced,
             gain,

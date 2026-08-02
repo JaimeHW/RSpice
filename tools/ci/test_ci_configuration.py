@@ -304,7 +304,7 @@ class CiConfigurationTests(unittest.TestCase):
             r"--iterations 100000\s+"
             r"--samples 9\s+"
             r"--min-dense-speedup 2\.00\s+"
-            r"--min-speedup 1\.10\s+"
+            r"--min-speedup 3\.00\s+"
             r"--min-full-stamp-speedup 2\.00\s+"
             r"--max-native-setup-ms 10\s+"
             r"--max-native-p95-ns-per-sweep 5000\s+"
@@ -318,10 +318,28 @@ class CiConfigurationTests(unittest.TestCase):
             3,
             "Linux fast CI should clean between heavy test groups to stay within runner disk",
         )
-        self.assertRegex(
-            workflow,
-            r"- name: Format\s+run: cargo fmt --all -- --check",
-        )
+        # The generated Verilog-A model crates are validated against a content
+        # digest of their own bytes, so rustfmt must not touch them. `cargo fmt`
+        # has no --exclude, so the gate names the hand-written members instead.
+        # Assert every one of them is covered, or a new crate could silently
+        # drop out of the format gate.
+        self.assertRegex(workflow, r"- name: Format\s+run: >\s+cargo fmt")
+        format_step = workflow.split("- name: Format", 1)[1].split("- name:", 1)[0]
+        for package in (
+            "rspice-matrix",
+            "rspice-veriloga-runtime",
+            "rspice-core",
+            "rspice-cli",
+            "rspice-ui",
+            "rspice-veriloga",
+            "rspice-python",
+            "rspice-wasm",
+            "rspice-bench",
+            "rspice-conformance",
+        ):
+            self.assertIn(f"-p {package}", format_step)
+        self.assertNotIn("-p rspice-veriloga-models", format_step)
+        self.assertIn("-- --check", format_step)
 
     def test_core_lib_tests_are_explicitly_gated(self) -> None:
         ci_workflow = read_text(".github/workflows/ci.yml")
@@ -423,7 +441,7 @@ class CiConfigurationTests(unittest.TestCase):
             r"--iterations 100000\s+"
             r"--samples 9\s+"
             r"--min-dense-speedup 2\.00\s+"
-            r"--min-speedup 1\.10\s+"
+            r"--min-speedup 3\.00\s+"
             r"--min-full-stamp-speedup 2\.00\s+"
             r"--max-native-setup-ms 10\s+"
             r"--max-native-p95-ns-per-sweep 5000\s+"
@@ -734,9 +752,9 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("web_screen_reader", wasm_features)
         self.assertNotIn("accesskit", wasm_features)
 
-        app = read_text("crates/rspice-ui/src/common/app/mod.rs")
+        app = read_text("crates/rspice-ui/src/workbench/app.rs")
         preferences = read_text(
-            "crates/rspice-ui/src/common/app/app_preferences_dialog/preference_pages.rs"
+            "crates/rspice-ui/src/workbench/app/dialogs/preferences/preference_pages.rs"
         )
         self.assertIn(
             "options.screen_reader = self.state.ui.browser_spoken_feedback",
@@ -781,13 +799,17 @@ class CiConfigurationTests(unittest.TestCase):
         source_like_paths = [
             "crates/rspice-core/src/netlist/source_map.rs",
             "crates/rspice-core/tests/common/mod.rs",
-            "crates/rspice-ui/src/common/browser_download.rs",
-            "crates/rspice-ui/src/common/browser_file_import.rs",
-            "crates/rspice-ui/src/common/logging.rs",
-            "crates/rspice-ui/src/common/netlist_workflow.rs",
-            "crates/rspice-ui/src/workbench/netlist_document/baseline.rs",
-            "crates/rspice-ui/src/workbench/netlist_document/diagnostics.rs",
-            "crates/rspice-ui/src/workbench/netlist_document/summary.rs",
+            # These moved out of `common/` and `workbench/netlist_document/`
+            # during the module reorganization. The paths are updated rather than
+            # dropped: each one was added here because it was once written but
+            # never committed, and that is still worth guarding. `summary.rs`
+            # left the list when the module was deleted as test-only.
+            "crates/rspice-ui/src/workbench/browser/download.rs",
+            "crates/rspice-ui/src/workbench/browser/file_import.rs",
+            "crates/rspice-ui/src/workbench/logging.rs",
+            "crates/rspice-ui/src/workbench/workflows/netlist_workflow.rs",
+            "crates/rspice-ui/src/workbench/documents/netlist_document/baseline.rs",
+            "crates/rspice-ui/src/workbench/documents/netlist_document/diagnostics.rs",
             "crates/rspice-ui/src/simulation/controller/manual_deck.rs",
             "crates/rspice-ui/src/simulation/runner/wasm_worker.rs",
             "crates/rspice-ui/src/simulation/runner/worker_contract.rs",

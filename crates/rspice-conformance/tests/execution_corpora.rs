@@ -109,7 +109,6 @@ fn config() -> ExecutionConfig {
             .ok()
             .and_then(|raw| raw.parse().ok())
             .unwrap_or(defaults.max_time_per_deck_ms),
-        ..defaults
     }
 }
 

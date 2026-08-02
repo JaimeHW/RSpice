@@ -28,19 +28,6 @@ impl ViewerGroup {
     ];
 
     #[must_use]
-    pub const fn id(self) -> &'static str {
-        match self {
-            Self::TimeAndFrequency => "time-frequency",
-            Self::Photonics => "photonics",
-            Self::RfAndNetwork => "rf-network",
-            Self::StatisticalAndTabular => "statistical-tabular",
-            Self::SerialLink => "serial-link",
-            Self::Specialized => "specialized",
-            Self::FieldsAndPhysical => "fields-physical",
-        }
-    }
-
-    #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
             Self::TimeAndFrequency => "Time & frequency",
@@ -78,6 +65,7 @@ pub enum ViewerArt {
 
 impl ViewerArt {
     #[must_use]
+    #[cfg(test)]
     pub const fn id(self) -> &'static str {
         match self {
             Self::Wave => "wave",
@@ -102,28 +90,6 @@ impl ViewerArt {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum QuickModeIcon {
-    Waveform,
-    Chart,
-    Target,
-    Cells,
-    Verify,
-}
-
-impl QuickModeIcon {
-    #[must_use]
-    pub const fn id(self) -> &'static str {
-        match self {
-            Self::Waveform => "waveform",
-            Self::Chart => "chart",
-            Self::Target => "target",
-            Self::Cells => "cells",
-            Self::Verify => "verify",
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ViewerDocumentDefinition {
     pub id: &'static str,
@@ -137,16 +103,6 @@ pub struct ViewerDocumentDefinition {
     pub analysis_ids: &'static [&'static str],
     /// Qualified producer capability required by externally owned viewers.
     pub external_capability: Option<&'static str>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ViewerQuickModeDefinition {
-    pub id: &'static str,
-    pub document_id: &'static str,
-    pub icon: QuickModeIcon,
-    pub label: &'static str,
-    /// Analysis kinds accepted by this mode. A non-empty list is any-of.
-    pub analysis_ids: &'static [&'static str],
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -171,7 +127,6 @@ impl ViewerCapabilities<'_> {
 pub enum ViewerCompatibility {
     Compatible,
     UnknownDocument,
-    UnknownQuickMode,
     MissingAnalysis {
         accepted_analysis_ids: &'static [&'static str],
     },
@@ -623,152 +578,9 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
     },
 ];
 
-pub const VIEWER_QUICK_MODES: &[ViewerQuickModeDefinition] = &[
-    ViewerQuickModeDefinition {
-        id: "waves",
-        document_id: "viewer-waveform",
-        icon: QuickModeIcon::Waveform,
-        label: "Waves",
-        analysis_ids: &["tran"],
-    },
-    ViewerQuickModeDefinition {
-        id: "dc",
-        document_id: "viewer-waveform",
-        icon: QuickModeIcon::Chart,
-        label: "DC Sweep",
-        analysis_ids: &["dc"],
-    },
-    ViewerQuickModeDefinition {
-        id: "bode",
-        document_id: "viewer-bode",
-        icon: QuickModeIcon::Chart,
-        label: "Bode",
-        analysis_ids: &["ac"],
-    },
-    ViewerQuickModeDefinition {
-        id: "noise",
-        document_id: "viewer-bode",
-        icon: QuickModeIcon::Waveform,
-        label: "Noise",
-        analysis_ids: &["noise"],
-    },
-    ViewerQuickModeDefinition {
-        id: "nyquist",
-        document_id: "viewer-bode",
-        icon: QuickModeIcon::Target,
-        label: "Nyquist",
-        analysis_ids: &["stb"],
-    },
-    ViewerQuickModeDefinition {
-        id: "fft",
-        document_id: "viewer-spectrum",
-        icon: QuickModeIcon::Chart,
-        label: "FFT",
-        analysis_ids: &["fourier", "tran"],
-    },
-    ViewerQuickModeDefinition {
-        id: "hb",
-        document_id: "viewer-spectrum",
-        icon: QuickModeIcon::Chart,
-        label: "HB Tones",
-        analysis_ids: &["hb"],
-    },
-    ViewerQuickModeDefinition {
-        id: "phase-noise",
-        document_id: "viewer-phase-noise",
-        icon: QuickModeIcon::Waveform,
-        label: "Phase Noise",
-        analysis_ids: PNOISE_QPNOISE,
-    },
-    ViewerQuickModeDefinition {
-        id: "smith",
-        document_id: "viewer-smith",
-        icon: QuickModeIcon::Target,
-        label: "Smith",
-        analysis_ids: &["sp"],
-    },
-    ViewerQuickModeDefinition {
-        id: "xf",
-        document_id: "viewer-transfer-function",
-        icon: QuickModeIcon::Cells,
-        label: "XF",
-        analysis_ids: &["xf"],
-    },
-    ViewerQuickModeDefinition {
-        id: "sens",
-        document_id: "viewer-table",
-        icon: QuickModeIcon::Chart,
-        label: "Sensitivity",
-        analysis_ids: &["sens"],
-    },
-    ViewerQuickModeDefinition {
-        id: "op",
-        document_id: "viewer-table",
-        icon: QuickModeIcon::Cells,
-        label: "OP",
-        analysis_ids: &["op"],
-    },
-    ViewerQuickModeDefinition {
-        id: "specs",
-        document_id: "viewer-table",
-        icon: QuickModeIcon::Verify,
-        label: "Specs",
-        analysis_ids: &[],
-    },
-    ViewerQuickModeDefinition {
-        id: "table",
-        document_id: "viewer-table",
-        icon: QuickModeIcon::Cells,
-        label: "Table",
-        analysis_ids: &[],
-    },
-    ViewerQuickModeDefinition {
-        id: "hist",
-        document_id: "viewer-histogram",
-        icon: QuickModeIcon::Chart,
-        label: "Histogram",
-        analysis_ids: MC_CORNER,
-    },
-    ViewerQuickModeDefinition {
-        id: "eye",
-        document_id: "eye-viewer",
-        icon: QuickModeIcon::Target,
-        label: "Eye",
-        analysis_ids: &["tran"],
-    },
-    ViewerQuickModeDefinition {
-        id: "pz",
-        document_id: "viewer-pz",
-        icon: QuickModeIcon::Target,
-        label: "PZ",
-        analysis_ids: &["pz"],
-    },
-];
-
 #[must_use]
 pub fn viewer_document(id: &str) -> Option<&'static ViewerDocumentDefinition> {
     VIEWER_DOCUMENTS.iter().find(|document| document.id == id)
-}
-
-#[must_use]
-pub fn viewer_quick_mode(id: &str) -> Option<&'static ViewerQuickModeDefinition> {
-    VIEWER_QUICK_MODES.iter().find(|mode| mode.id == id)
-}
-
-pub fn documents_in_group(
-    group: ViewerGroup,
-) -> impl Iterator<Item = &'static ViewerDocumentDefinition> {
-    VIEWER_DOCUMENTS
-        .iter()
-        .filter(move |document| document.group == group)
-}
-
-pub fn quick_modes_for_document(
-    document_id: &str,
-) -> impl Iterator<Item = &'static ViewerQuickModeDefinition> + '_ {
-    VIEWER_QUICK_MODES
-        .iter()
-        .filter(move |mode| mode.document_id == document_id)
 }
 
 #[must_use]
@@ -789,18 +601,6 @@ pub fn viewer_compatibility(
     }
 
     analysis_compatibility(document.analysis_ids, capabilities)
-}
-
-#[must_use]
-pub fn quick_mode_compatibility(
-    mode_id: &str,
-    capabilities: ViewerCapabilities<'_>,
-) -> ViewerCompatibility {
-    let Some(mode) = viewer_quick_mode(mode_id) else {
-        return ViewerCompatibility::UnknownQuickMode;
-    };
-
-    analysis_compatibility(mode.analysis_ids, capabilities)
 }
 
 fn analysis_compatibility(
@@ -867,26 +667,6 @@ mod tests {
         "field-viewer-probe",
     ];
 
-    const QUICK_MODE_IDS: &[(&str, &str)] = &[
-        ("waves", "viewer-waveform"),
-        ("dc", "viewer-waveform"),
-        ("bode", "viewer-bode"),
-        ("noise", "viewer-bode"),
-        ("nyquist", "viewer-bode"),
-        ("fft", "viewer-spectrum"),
-        ("hb", "viewer-spectrum"),
-        ("phase-noise", "viewer-phase-noise"),
-        ("smith", "viewer-smith"),
-        ("xf", "viewer-transfer-function"),
-        ("sens", "viewer-table"),
-        ("op", "viewer-table"),
-        ("specs", "viewer-table"),
-        ("table", "viewer-table"),
-        ("hist", "viewer-histogram"),
-        ("eye", "eye-viewer"),
-        ("pz", "viewer-pz"),
-    ];
-
     #[test]
     fn catalog_has_exact_manifest_document_ids_and_order() {
         assert_eq!(VIEWER_DOCUMENTS.len(), 38);
@@ -900,30 +680,11 @@ mod tests {
     }
 
     #[test]
-    fn catalog_has_exact_manifest_quick_mode_ids_and_owners() {
-        assert_eq!(VIEWER_QUICK_MODES.len(), 17);
-        assert_eq!(
-            VIEWER_QUICK_MODES
-                .iter()
-                .map(|mode| (mode.id, mode.document_id))
-                .collect::<Vec<_>>(),
-            QUICK_MODE_IDS
-        );
-    }
-
-    #[test]
     fn stable_ids_are_unique_and_lookups_are_total_for_catalog_entries() {
         let mut document_ids = HashSet::new();
         for document in VIEWER_DOCUMENTS {
             assert!(document_ids.insert(document.id), "{}", document.id);
             assert_eq!(viewer_document(document.id), Some(document));
-        }
-
-        let mut mode_ids = HashSet::new();
-        for mode in VIEWER_QUICK_MODES {
-            assert!(mode_ids.insert(mode.id), "{}", mode.id);
-            assert_eq!(viewer_quick_mode(mode.id), Some(mode));
-            assert!(viewer_document(mode.document_id).is_some(), "{}", mode.id);
         }
     }
 
@@ -942,7 +703,10 @@ mod tests {
             ]
         );
         assert_eq!(
-            ViewerGroup::ALL.map(|group| documents_in_group(group).count()),
+            ViewerGroup::ALL.map(|group| VIEWER_DOCUMENTS
+                .iter()
+                .filter(|document| document.group == group)
+                .count()),
             [5, 3, 9, 10, 4, 1, 6]
         );
     }
@@ -955,34 +719,13 @@ mod tests {
             assert!(!document.domain.is_empty());
             assert!(!document.x_axis.is_empty());
             assert!(!document.y_axis.is_empty());
-            assert!(!document.group.id().is_empty());
+            assert!(!document.group.label().is_empty());
             assert!(!document.art.id().is_empty());
             assert!(
                 document.analysis_ids.is_empty() || document.external_capability.is_none(),
                 "{} mixes internal and external requirements",
                 document.id
             );
-        }
-
-        for mode in VIEWER_QUICK_MODES {
-            assert!(!mode.id.is_empty());
-            assert!(!mode.label.is_empty());
-            assert!(!mode.icon.id().is_empty());
-        }
-    }
-
-    #[test]
-    fn quick_mode_analysis_kinds_are_supported_by_their_document() {
-        for mode in VIEWER_QUICK_MODES {
-            let document = viewer_document(mode.document_id).expect("mode owner must exist");
-            for analysis_id in mode.analysis_ids {
-                assert!(
-                    document.analysis_ids.contains(analysis_id) || document.analysis_ids.is_empty(),
-                    "{} is outside {} compatibility",
-                    mode.id,
-                    document.id
-                );
-            }
         }
     }
 
@@ -1030,22 +773,6 @@ mod tests {
     fn requirement_free_structured_views_remain_available() {
         let empty = ViewerCapabilities::default();
         assert!(viewer_compatibility("viewer-table", empty).is_compatible());
-        assert!(quick_mode_compatibility("specs", empty).is_compatible());
-    }
-
-    #[test]
-    fn quick_modes_are_checked_independently_from_their_parent_family() {
-        let dc_only = ViewerCapabilities {
-            analysis_ids: &["dc"],
-            external_capabilities: &[],
-        };
-        assert!(quick_mode_compatibility("dc", dc_only).is_compatible());
-        assert_eq!(
-            quick_mode_compatibility("waves", dc_only),
-            ViewerCompatibility::MissingAnalysis {
-                accepted_analysis_ids: &["tran"],
-            }
-        );
     }
 
     #[test]
@@ -1062,16 +789,14 @@ mod tests {
             viewer_compatibility("viewer-does-not-exist", all_plausible_capabilities),
             ViewerCompatibility::UnknownDocument
         );
-        assert_eq!(
-            quick_mode_compatibility("mode-does-not-exist", all_plausible_capabilities),
-            ViewerCompatibility::UnknownQuickMode
-        );
     }
 
     #[test]
-    fn document_and_mode_group_iterators_preserve_manifest_order() {
+    fn document_group_iteration_preserves_manifest_order() {
         assert_eq!(
-            documents_in_group(ViewerGroup::Photonics)
+            VIEWER_DOCUMENTS
+                .iter()
+                .filter(|document| document.group == ViewerGroup::Photonics)
                 .map(|document| document.id)
                 .collect::<Vec<_>>(),
             [
@@ -1079,12 +804,6 @@ mod tests {
                 "viewer-optical-transfer",
                 "viewer-optical-mode",
             ]
-        );
-        assert_eq!(
-            quick_modes_for_document("viewer-bode")
-                .map(|mode| mode.id)
-                .collect::<Vec<_>>(),
-            ["bode", "noise", "nyquist"]
         );
     }
 }

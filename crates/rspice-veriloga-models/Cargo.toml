@@ -99,6 +99,7 @@ veriloga-builtins-noise = [
 ]
 
 [dependencies]
+rspice-veriloga-runtime.workspace = true
 rspice-veriloga-model-diode-cmc = { path = "models/diode-cmc", version = "0.1.0", optional = true }
 rspice-veriloga-model-epfl-hemt-10a = { path = "models/epfl-hemt-10a", version = "0.1.0", optional = true }
 rspice-veriloga-model-juncap200 = { path = "models/juncap200", version = "0.1.0", optional = true }

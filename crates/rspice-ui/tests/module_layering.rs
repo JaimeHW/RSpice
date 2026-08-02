@@ -960,8 +960,10 @@ fn the_public_module_surface_does_not_grow() {
             .filter(|line| line.trim_start().starts_with("pub mod "))
             .count();
     }
+    // `==` rather than `<=`: the ceiling has reached zero, and `count <= 0`
+    // is the always-true-or-always-false comparison clippy rejects.
     assert!(
-        count <= MAX_PUBLIC_MODULES,
+        count == MAX_PUBLIC_MODULES,
         "`pub mod` declarations rose to {count}, ceiling is {MAX_PUBLIC_MODULES}.\n\
          A public module cannot be refactored without checking the whole \
          world. Use `pub(crate) mod`, and re-export from the crate root if an \
@@ -1062,7 +1064,23 @@ fn source_files_have_no_byte_order_mark() {
 /// build detaches from its console. The allows are per-function rather than
 /// `print_stdout` being added to the crate-wide `cfg(test)` exemption, so the
 /// rule keeps holding for every other test.
-const MAX_LINT_SUPPRESSIONS: usize = 75;
+/// 75 -> 31 when the fifty per-site `clippy::too_many_arguments` allows were
+/// replaced by one crate-level allow that states the reason once, and the
+/// `resolve_active_app_hardcopy_source` `allow(dead_code)` became `cfg(test)`
+/// — which is what it always meant.
+/// 31 -> 33 for the two `large_enum_variant` modules. The worker transport's
+/// result enums have one variant per analysis kind and the analyses really do
+/// differ in payload size; a prepared hardcopy source is a whole sealed
+/// document beside a symbol. Each value is built once, consumed once, and
+/// never collected, and the struct variants' shape is the wire format. Both
+/// allows name the reason at the module they sit on.
+/// 33 -> 38 for five naming lints that are wrong about this domain: four
+/// enums whose variants share a word because the product does (`By sheet`,
+/// `operating point`, the Command Palette), and the aging mechanisms HCI and
+/// NBTI, which nobody spells `Hci` and `Nbti`. The fifth candidate,
+/// `VariantDifferenceKind`, was renamed instead — every difference between
+/// variants is a difference between overrides, so the postfix carried nothing.
+const MAX_LINT_SUPPRESSIONS: usize = 38;
 
 /// The crate does not accumulate lint suppressions.
 #[test]

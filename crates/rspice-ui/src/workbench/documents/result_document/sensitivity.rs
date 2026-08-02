@@ -1,4 +1,4 @@
-//! SENS - retained, ranked parameter-sensitivity contributions.
+//! SENS - retained, ranked normalized parameter sensitivities.
 //!
 //! This viewer is intentionally dataset-bound. It reads the exact
 //! [`AnalysisResultPayload::Sensitivity`] attached to the selected analysis
@@ -20,12 +20,13 @@ use super::{panel_note, well_hint};
 
 const RANK_WIDTH: f32 = 44.0;
 const PARAMETER_WIDTH: f32 = 230.0;
-const CONTRIBUTION_WIDTH: f32 = 360.0;
+const SENSITIVITY_WIDTH: f32 = 360.0;
 const VALUE_WIDTH: f32 = 118.0;
-const TABLE_MIN_WIDTH: f32 = RANK_WIDTH + PARAMETER_WIDTH + CONTRIBUTION_WIDTH + VALUE_WIDTH;
+const TABLE_MIN_WIDTH: f32 = RANK_WIDTH + PARAMETER_WIDTH + SENSITIVITY_WIDTH + VALUE_WIDTH;
 const ROW_HEIGHT: f32 = 30.0;
 const HEADER_HEIGHT: f32 = 34.0;
 const CELL_INSET: f32 = 10.0;
+const NOT_RETAINED: &str = "Not retained by sensitivity result";
 
 #[derive(Debug, Clone, Copy)]
 struct SensitivityView<'a> {
@@ -77,7 +78,7 @@ pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
     matches!(active_sensitivity(state), ActiveSensitivity::Ready(_))
 }
 
-/// Rank by contribution magnitude. Equal magnitudes are ordered by the
+/// Rank by normalized-sensitivity magnitude. Equal magnitudes are ordered by the
 /// retained parameter identity, giving identical results across platforms.
 fn ranked_rows(rows: &[SensitivityResultRow]) -> Vec<&SensitivityResultRow> {
     let mut ranked: Vec<_> = rows.iter().collect();
@@ -124,6 +125,19 @@ fn chart_value(value: f64) -> String {
     }
 }
 
+fn highest_magnitude_sensitivity_label(rows: &[SensitivityResultRow]) -> String {
+    ranked_rows(rows).first().map_or_else(
+        || "Not retained".to_owned(),
+        |row| {
+            format!(
+                "{} · {} normalized sensitivity",
+                row.parameter,
+                exact_value(row.normalized)
+            )
+        },
+    )
+}
+
 fn column_rect(row: egui::Rect, offset: f32, width: f32) -> egui::Rect {
     egui::Rect::from_min_size(
         egui::pos2(row.left() + offset, row.top()),
@@ -149,7 +163,7 @@ fn paint_cell(
         .text(egui::pos2(x, cell.center().y), align, text, font, color);
 }
 
-/// Render the retained sensitivity contribution chart.
+/// Render the retained normalized-sensitivity chart.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let view = match active_sensitivity(state) {
         ActiveSensitivity::Ready(view) => view,
@@ -168,7 +182,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     if view.rows.is_empty() {
         well_hint(
             ui,
-            "The retained sensitivity result has no parameter contributions",
+            "The retained sensitivity result has no parameter sensitivities",
         );
         return;
     }
@@ -204,9 +218,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             let width = viewport_width.max(TABLE_MIN_WIDTH);
             ui.set_min_width(width);
 
-            let contribution_width = width - RANK_WIDTH - PARAMETER_WIDTH - VALUE_WIDTH;
-            let contribution_offset = RANK_WIDTH + PARAMETER_WIDTH;
-            let value_offset = contribution_offset + contribution_width;
+            let sensitivity_width = width - RANK_WIDTH - PARAMETER_WIDTH - VALUE_WIDTH;
+            let sensitivity_offset = RANK_WIDTH + PARAMETER_WIDTH;
+            let value_offset = sensitivity_offset + sensitivity_width;
             let (header, _) =
                 ui.allocate_exact_size(egui::vec2(width, HEADER_HEIGHT), Sense::hover());
             ui.painter().hline(
@@ -234,8 +248,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             );
             paint_cell(
                 ui,
-                column_rect(header, contribution_offset, contribution_width),
-                "NORMALIZED CONTRIBUTION",
+                column_rect(header, sensitivity_offset, sensitivity_width),
+                "NORMALIZED SENSITIVITY",
                 egui::Align2::LEFT_CENTER,
                 header_font.clone(),
                 c.text_faint,
@@ -249,7 +263,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 c.text_faint,
             );
 
-            let chart_cell = column_rect(header, contribution_offset, contribution_width)
+            let chart_cell = column_rect(header, sensitivity_offset, sensitivity_width)
                 .shrink2(egui::vec2(CELL_INSET, 0.0));
             let zero_x = chart_cell.center().x;
             let scale_text = format!("{max_magnitude:.6e}");
@@ -279,7 +293,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 let (rect, response) =
                     ui.allocate_exact_size(egui::vec2(width, ROW_HEIGHT), Sense::hover());
                 let accessible_label = format!(
-                    "Rank {}, parameter {}, normalized contribution {}, raw sensitivity {}",
+                    "Rank {}, parameter {}, normalized sensitivity {}, raw sensitivity {}",
                     rank + 1,
                     row.parameter,
                     exact_value(row.normalized),
@@ -301,7 +315,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         egui::RichText::new(row.parameter.as_str())
                             .font(theme::mono(tokens::FS_1, FontWeight::Medium)),
                     );
-                    ui.label(format!("Normalized: {}", exact_value(row.normalized)));
+                    ui.label(format!(
+                        "Normalized sensitivity: {}",
+                        exact_value(row.normalized)
+                    ));
                     ui.label(format!("Raw: {}", exact_value(row.raw)));
                     ui.label(format!("Output: {}", view.output));
                     ui.label(format!("Basis: {}", exact_basis_label(view.result_mode)));
@@ -336,8 +353,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     c.text,
                 );
 
-                let contribution_cell = column_rect(rect, contribution_offset, contribution_width);
-                let bar_area = contribution_cell.shrink2(egui::vec2(CELL_INSET, 7.0));
+                let sensitivity_cell = column_rect(rect, sensitivity_offset, sensitivity_width);
+                let bar_area = sensitivity_cell.shrink2(egui::vec2(CELL_INSET, 7.0));
                 let center_x = bar_area.center().x;
                 let half_width = bar_area.width() * 0.5;
                 let ratio = if max_magnitude > 0.0 {
@@ -356,13 +373,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 } else {
                     c.accent
                 };
-                let contribution_painter = ui.painter().with_clip_rect(contribution_cell);
-                contribution_painter.vline(
+                let sensitivity_painter = ui.painter().with_clip_rect(sensitivity_cell);
+                sensitivity_painter.vline(
                     center_x,
                     rect.y_range(),
                     egui::Stroke::new(1.0, c.border_strong),
                 );
-                contribution_painter.rect_filled(
+                sensitivity_painter.rect_filled(
                     egui::Rect::from_min_max(
                         egui::pos2(left, bar_area.top()),
                         egui::pos2(right, bar_area.bottom()),
@@ -384,7 +401,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         });
 }
 
-/// Render output/basis context and the exact ranked contribution table.
+/// Render output/basis context and the exact ranked sensitivity table.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let view = match active_sensitivity(state) {
         ActiveSensitivity::Ready(view) => view,
@@ -403,19 +420,24 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     section_header(ui, "Sensitivity", None);
     let basis = exact_basis_label(view.result_mode);
     let count = view.rows.len().to_string();
+    let highest_magnitude = highest_magnitude_sensitivity_label(view.rows);
     measurement_table(
         ui,
         &[
             ("Analysis", view.analysis_label),
-            ("Output", view.output),
+            ("Reference metric", view.output),
             ("Basis", basis.as_str()),
-            ("Parameters", count.as_str()),
+            ("Method", NOT_RETAINED),
+            ("Normalization", "Retained per parameter"),
+            ("Parameters ranked", count.as_str()),
+            ("Highest magnitude", highest_magnitude.as_str()),
+            ("Cross-terms", NOT_RETAINED),
         ],
     );
 
-    section_header(ui, "Ranked contribution", None);
+    section_header(ui, "Ranked sensitivity", None);
     if view.rows.is_empty() {
-        panel_note(ui, "No parameter contributions were retained.");
+        panel_note(ui, "No parameter sensitivities were retained.");
         return;
     }
 
@@ -573,5 +595,32 @@ mod tests {
             frequency_hz: 2.5e6,
         });
         assert!(basis.contains(&exact_value(2.5e6)));
+    }
+
+    #[test]
+    fn highest_magnitude_label_uses_retained_normalized_ranking() {
+        let rows = vec![
+            SensitivityResultRow {
+                parameter: "small".to_owned(),
+                raw: 100.0,
+                normalized: 0.25,
+            },
+            SensitivityResultRow {
+                parameter: "largest".to_owned(),
+                raw: 1.0,
+                normalized: -0.75,
+            },
+        ];
+
+        let label = highest_magnitude_sensitivity_label(&rows);
+
+        assert!(label.starts_with("largest · "));
+        assert!(label.contains(&exact_value(-0.75)));
+        assert_eq!(highest_magnitude_sensitivity_label(&[]), "Not retained");
+    }
+
+    #[test]
+    fn unavailable_solver_contracts_are_explicit() {
+        assert_eq!(NOT_RETAINED, "Not retained by sensitivity result");
     }
 }

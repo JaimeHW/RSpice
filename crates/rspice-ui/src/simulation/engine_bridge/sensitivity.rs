@@ -269,8 +269,7 @@ mod tests {
 
     #[test]
     fn finite_difference_rejects_a_non_finite_parameter() {
-        let result =
-            finite_difference_derivative_with_abort(Value::NAN, &NoAbort, |value| Ok(value));
+        let result = finite_difference_derivative_with_abort(Value::NAN, &NoAbort, Ok);
         assert!(matches!(result, Err(SimulationError::InvalidConfig(_))));
     }
 

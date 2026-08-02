@@ -10,7 +10,6 @@ use std::collections::VecDeque;
 use egui::Context;
 
 use crate::diagnostics::ConsoleMessage;
-use crate::state::ModelLibraryManager;
 use crate::state::pdk_config::{
     BrowserPdkConfigReceipt, BrowserPdkConfigRestore, BrowserPdkStorageDurability,
     BrowserPdkStorageStatus, PdkConfig, start_browser_pdk_config_load,
@@ -47,17 +46,16 @@ impl Default for BrowserPdkOwner {
     }
 }
 
+/// Work the caller wants run once the commit has actually landed, in the
+/// frame that observes it.
+type AfterBrowserPdkCommit = Option<Box<dyn FnOnce(&Context)>>;
+
 enum BrowserPdkPublicationIntent {
     Administration {
         title: String,
         message: String,
-        after_commit: Option<Box<dyn FnOnce(&Context)>>,
+        after_commit: AfterBrowserPdkCommit,
     },
-    Settings {
-        model_library: Option<ModelLibraryManager>,
-        load_result: Result<usize, Vec<String>>,
-    },
-    RecentFile,
 }
 
 enum BrowserPdkCompletion {
@@ -176,31 +174,6 @@ impl RSpiceApp {
         Ok(())
     }
 
-    pub(in crate::workbench) fn start_browser_pdk_settings_publication(
-        &mut self,
-        ctx: &Context,
-        candidate: PdkConfig,
-        model_library: Option<ModelLibraryManager>,
-        load_result: Result<usize, Vec<String>>,
-    ) -> Result<(), String> {
-        start_publication(
-            ctx,
-            candidate,
-            BrowserPdkPublicationIntent::Settings {
-                model_library,
-                load_result,
-            },
-        )
-    }
-
-    pub(in crate::workbench) fn start_browser_pdk_recent_file_publication(
-        &mut self,
-        ctx: &Context,
-        candidate: PdkConfig,
-    ) -> Result<(), String> {
-        start_publication(ctx, candidate, BrowserPdkPublicationIntent::RecentFile)
-    }
-
     pub(super) fn poll_browser_pdk_persistence(&mut self, ctx: &Context) {
         let completions =
             BROWSER_PDK_COMPLETIONS.with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
@@ -250,7 +223,8 @@ impl RSpiceApp {
                     .technology_registry
                     .revalidate_installed(&trust_store);
                 let mut model_library = self.state.model_library_manager.clone();
-                let model_load = model_library.load_from_pdk_config(&restored.config);
+                let model_load = model_library
+                    .replace_from_pdk_config(Some(&self.state.pdk_config), &mut restored.config);
                 self.state.pdk_config = restored.config;
                 if model_load.is_ok() {
                     self.state.model_library_manager = model_library;
@@ -350,59 +324,17 @@ impl RSpiceApp {
                         warning,
                     );
                 }
-                match intent {
-                    BrowserPdkPublicationIntent::Administration {
-                        title,
-                        message,
-                        after_commit,
-                    } => {
-                        if let Some(after_commit) = after_commit {
-                            after_commit(ctx);
-                        }
-                        self.state
-                            .push_user_message(ConsoleMessage::info(message.clone()));
-                        self.state.ui.toasts.success(ctx, title, message);
-                    }
-                    BrowserPdkPublicationIntent::Settings {
-                        model_library,
-                        load_result,
-                    } => {
-                        let publication_error = model_library.and_then(|model_library| {
-                            self.publish_model_library_candidate(model_library).err()
-                        });
-                        if let Some(error) = publication_error.as_ref() {
-                            let message = format!(
-                                "PDK settings were persisted, but the model catalogue could not be published: {error}"
-                            );
-                            self.state
-                                .push_user_message(ConsoleMessage::error(message.clone()));
-                            self.state.ui.toasts.error_with_title(
-                                ctx,
-                                "PDK model publication blocked",
-                                message,
-                            );
-                        }
-                        match load_result {
-                            Ok(loaded_libraries) if publication_error.is_none() => {
-                                self.state.push_user_message(ConsoleMessage::info(format!(
-                                    "PDK settings applied: {loaded_libraries} libraries loaded"
-                                )));
-                            }
-                            Ok(_) => {}
-                            Err(errors) => {
-                                self.state
-                                    .push_user_message(ConsoleMessage::warning(format!(
-                                        "PDK settings were persisted with {} model-library errors",
-                                        errors.len()
-                                    )));
-                                for error in errors {
-                                    self.state.push_user_message(ConsoleMessage::error(error));
-                                }
-                            }
-                        }
-                    }
-                    BrowserPdkPublicationIntent::RecentFile => {}
+                let BrowserPdkPublicationIntent::Administration {
+                    title,
+                    message,
+                    after_commit,
+                } = intent;
+                if let Some(after_commit) = after_commit {
+                    after_commit(ctx);
                 }
+                self.state
+                    .push_user_message(ConsoleMessage::info(message.clone()));
+                self.state.ui.toasts.success(ctx, title, message);
             }
             Err(error) => {
                 BROWSER_PDK_OWNER.with(|owner| {
@@ -410,15 +342,9 @@ impl RSpiceApp {
                     owner.phase = BrowserPdkPhase::Failed;
                     owner.last_error = Some(error.clone());
                 });
-                let operation = match intent {
-                    BrowserPdkPublicationIntent::Administration { .. } => {
-                        "PDK technology operation"
-                    }
-                    BrowserPdkPublicationIntent::Settings { .. } => "PDK settings",
-                    BrowserPdkPublicationIntent::RecentFile => "PDK recent-file update",
-                };
+                let BrowserPdkPublicationIntent::Administration { .. } = intent;
                 let message = format!(
-                    "{operation} was not applied because durable browser publication failed: {error}"
+                    "PDK technology operation was not applied because durable browser publication failed: {error}"
                 );
                 self.state
                     .push_user_message(ConsoleMessage::error(message.clone()));

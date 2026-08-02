@@ -6819,7 +6819,7 @@ impl Engine {
                     #[cfg(feature = "veriloga-builtins-base")]
                     {
                         if let Some(mut device) =
-                            crate::device::veriloga_generated::instantiate_builtin(
+                            crate::device::veriloga_builtins::instantiate_builtin(
                                 subckt_name,
                                 &element.name,
                                 &element.nodes,

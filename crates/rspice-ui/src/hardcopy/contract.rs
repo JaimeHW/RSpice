@@ -620,7 +620,6 @@ pub struct SchematicHardcopySetup {
 }
 
 impl SchematicHardcopySetup {
-    #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub const fn new(
         extent: SchematicHardcopyExtent,
@@ -983,10 +982,6 @@ pub struct ValidatedPageGeometry {
 }
 
 impl ValidatedPageGeometry {
-    fn resolve(setup: &HardcopySetup, content: ContentExtent) -> Result<Self, HardcopyError> {
-        Self::resolve_for_section(setup, content, 0)
-    }
-
     fn resolve_for_section(
         setup: &HardcopySetup,
         content: ContentExtent,

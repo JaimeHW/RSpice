@@ -1,24 +1,33 @@
-//! Runtime ABI for build-time generated Verilog-A devices.
+//! Engine-side adapter for the precompiled Verilog-A model catalog.
 //!
-//! Generated device modules call this small surface directly from their
-//! hand-emitted Rust stamps. Keep it narrow, deterministic, and free of
-//! interpreter concepts.
+//! Nothing here is generated. The generated devices are 42 independent crates
+//! under `rspice-veriloga-models`, each depending only on the engine-neutral
+//! `rspice-veriloga-runtime` ABI; this module is what teaches `rspice-core` to
+//! drive them. It resolves netlist parameters into an instance, owns the
+//! per-instance state the engine checkpoints and rolls back, and stamps the
+//! result into the solver's matrices.
+//!
+//! That direction is the reason the adapter lives here and not in a Verilog-A
+//! crate: it speaks `crate::netlist`, `crate::solver`, `crate::CircuitData` and
+//! `crate::engine::SimulationError`. Moving it across would make a generated
+//! crate depend on `rspice-core`, closing the cycle
+//! `rspice-core -> rspice-veriloga-models -> rspice-core`.
+//!
+//! The directory was called `veriloga_generated` while it actually held the
+//! generated tree.
 
 #[cfg(feature = "veriloga-builtins-base")]
 use crate::solver::{ComplexMatrix, StaticMatrix};
 #[cfg(feature = "veriloga-builtins-base")]
 use std::sync::Arc;
 
-pub(crate) mod limiting;
-
+// The registry compiles inside the catalog crate rather than being pulled
+// through the crate boundary by `include!`. The old form hard-coded a sibling
+// directory layout and made rspice-core's build depend on another crate's
+// source path; the catalog's own feature set already gates the same models,
+// because every `veriloga-model-*` here forwards to it.
 #[cfg(feature = "veriloga-builtins-base")]
-#[allow(clippy::all)]
-pub mod builtins {
-    include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../rspice-veriloga-models/registry.rs"
-    ));
-}
+pub use rspice_veriloga_models::registry as builtins;
 
 pub use rspice_veriloga_runtime::*;
 

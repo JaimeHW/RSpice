@@ -12,7 +12,9 @@ use super::{
     parse_runner_netlist_with_abort,
 };
 use rspice_core::Value;
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
+#[cfg(test)]
+use rspice_core::abort_signal::NoAbort;
 use rspice_core::engine::Engine;
 use std::path::Path;
 /// Harmonic Balance analysis data

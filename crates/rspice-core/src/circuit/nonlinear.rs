@@ -44,7 +44,7 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     #[cfg(feature = "veriloga")]
     veriloga_devices: crate::device::veriloga::VerilogADevices,
     #[cfg(feature = "veriloga-builtins-base")]
-    generated_veriloga_devices: crate::device::veriloga_generated::BuiltinVerilogADevicesRollback,
+    generated_veriloga_devices: crate::device::veriloga_builtins::BuiltinVerilogADevicesRollback,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1041,7 +1041,7 @@ impl CircuitData {
             solution,
             time,
             analysis,
-            crate::device::veriloga_generated::GeneratedEvaluationMode::NewtonLimited,
+            crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
         )
     }
 
@@ -1061,7 +1061,7 @@ impl CircuitData {
             solution,
             time,
             analysis,
-            crate::device::veriloga_generated::GeneratedEvaluationMode::StaticProbe,
+            crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
         )
     }
 
@@ -1072,22 +1072,22 @@ impl CircuitData {
         solution: &[Value],
         time: Value,
         _analysis: crate::xspice::AnalysisType,
-        _evaluation_mode: crate::device::veriloga_generated::GeneratedEvaluationMode,
+        _evaluation_mode: crate::device::veriloga_builtins::GeneratedEvaluationMode,
     ) -> Result<(), String> {
         self.stamp_behavioral_sources(matrix, rhs, solution, time);
         #[cfg(feature = "veriloga-builtins-base")]
         {
             let generated_analysis = match _analysis {
                 crate::xspice::AnalysisType::Ac => {
-                    crate::device::veriloga_generated::GeneratedAnalysisKind::Ac
+                    crate::device::veriloga_builtins::GeneratedAnalysisKind::Ac
                 }
                 crate::xspice::AnalysisType::Transient => {
-                    crate::device::veriloga_generated::GeneratedAnalysisKind::Tran
+                    crate::device::veriloga_builtins::GeneratedAnalysisKind::Tran
                 }
                 crate::xspice::AnalysisType::Noise => {
-                    crate::device::veriloga_generated::GeneratedAnalysisKind::Noise
+                    crate::device::veriloga_builtins::GeneratedAnalysisKind::Noise
                 }
-                _ => crate::device::veriloga_generated::GeneratedAnalysisKind::Dc,
+                _ => crate::device::veriloga_builtins::GeneratedAnalysisKind::Dc,
             };
             let num_nodes = self.num_nodes;
             let simparams = self.generated_simulation_parameters;

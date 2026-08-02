@@ -6,6 +6,11 @@
 
 use super::*;
 
+/// `.OPTIONS OUTPUT` schedule: the initial print interval, then the
+/// `(until_time, interval)` pairs that supersede it. `None` when the deck
+/// declares no schedule at all.
+type OutputIntervalSchedule = Result<Option<(Value, Vec<(Value, Value)>)>, String>;
+
 impl XyceTestRunner {
     pub fn print_summary(results: &[XyceTestResult]) {
         let stats = Self::statistics(results);
@@ -1487,9 +1492,7 @@ impl XyceTestRunner {
         Ok(interval)
     }
 
-    pub(super) fn output_interval_schedule(
-        source: &str,
-    ) -> Result<Option<(Value, Vec<(Value, Value)>)>, String> {
+    pub(super) fn output_interval_schedule(source: &str) -> OutputIntervalSchedule {
         let Some(initial_interval) = Self::output_initial_interval(source)? else {
             return Ok(None);
         };
@@ -1767,10 +1770,10 @@ impl XyceTestRunner {
     where
         F: FnMut(&str) -> Result<Value, String>,
     {
-        if let Some((override_name, override_value)) = override_probe {
-            if Self::normalize_probe(call) == override_name {
-                return Ok(override_value);
-            }
+        if let Some((override_name, override_value)) = override_probe
+            && Self::normalize_probe(call) == override_name
+        {
+            return Ok(override_value);
         }
         call_value(call)
     }
@@ -2254,20 +2257,20 @@ impl XyceTestRunner {
         Self::add_runtime_scalar_parameter_bindings(&mut context);
         Self::add_runtime_file_table_parameter_bindings(netlist, &mut context, time);
         for measurement in &netlist.measurements {
-            if measurement.analysis.eq_ignore_ascii_case("TRAN") {
-                if matches!(
+            if measurement.analysis.eq_ignore_ascii_case("TRAN")
+                && matches!(
                     measurement.measure_type,
                     rspice_core::analysis::MeasureType::Equation { .. }
-                ) {
-                    context.set(
-                        &measurement.name,
-                        netlist
-                            .options
-                            .measure_default_value
-                            .or(measurement.default_value)
-                            .unwrap_or(-1.0),
-                    );
-                }
+                )
+            {
+                context.set(
+                    &measurement.name,
+                    netlist
+                        .options
+                        .measure_default_value
+                        .or(measurement.default_value)
+                        .unwrap_or(-1.0),
+                );
             }
         }
         context

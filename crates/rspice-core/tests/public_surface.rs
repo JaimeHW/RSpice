@@ -88,7 +88,7 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
             if path.is_dir() {
                 if path
                     .file_name()
-                    .is_some_and(|name| name == "veriloga_generated")
+                    .is_some_and(|name| name == "veriloga_builtins")
                 {
                     continue;
                 }

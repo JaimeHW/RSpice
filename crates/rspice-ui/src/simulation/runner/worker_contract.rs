@@ -37,8 +37,8 @@ use crate::simulation::multi_run::{
 };
 use crate::simulation::reliability_engine::{ParamShift, ReliabilityResult, StressMetrics};
 use crate::simulation::results::{
-    DcOpResult, DeviceOpPoint, MonteCarloVariableResult, SimulationResult,
-    TransferFunctionQuantity, TransferFunctionScalar, WaveformData,
+    DcOpResult, MonteCarloVariableResult, SimulationResult, TransferFunctionQuantity,
+    TransferFunctionScalar, WaveformData,
 };
 use crate::simulation::status::{SimulationProgress, SimulationStatus};
 use crate::state::{NoiseContributorRow, NoiseSummary};
@@ -165,12 +165,14 @@ fn worker_request_op_config_mut(
     request: &mut WorkerRequest,
 ) -> Option<&mut crate::simulation::dialog::OpConfig> {
     match &mut request.request {
-        WorkerSimulationRequest::Config(WorkerAnalysisConfig::DcOp(config)) => Some(config),
+        WorkerSimulationRequest::Config(config) => match config.as_mut() {
+            WorkerAnalysisConfig::DcOp(config) => Some(config),
+            _ => None,
+        },
         WorkerSimulationRequest::Spec { spec, .. } => match spec.as_mut() {
             WorkerAnalysisSpec::DcOp(config) => Some(config),
             _ => None,
         },
-        _ => None,
     }
 }
 
@@ -179,12 +181,14 @@ fn worker_request_op_config(
     request: &WorkerRequest,
 ) -> Option<&crate::simulation::dialog::OpConfig> {
     match &request.request {
-        WorkerSimulationRequest::Config(WorkerAnalysisConfig::DcOp(config)) => Some(config),
+        WorkerSimulationRequest::Config(config) => match config.as_ref() {
+            WorkerAnalysisConfig::DcOp(config) => Some(config),
+            _ => None,
+        },
         WorkerSimulationRequest::Spec { spec, .. } => match spec.as_ref() {
             WorkerAnalysisSpec::DcOp(config) => Some(config),
             _ => None,
         },
-        _ => None,
     }
 }
 
@@ -281,7 +285,8 @@ impl WorkerRequest {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum WorkerSimulationRequest {
-    Config(WorkerAnalysisConfig),
+    /// Boxed to match `Spec`, whose two payloads already are.
+    Config(Box<WorkerAnalysisConfig>),
     Spec {
         spec: Box<WorkerAnalysisSpec>,
         options: Box<WorkerSpecExecutionOptions>,
@@ -534,7 +539,7 @@ impl WorkerResponse {
 
     pub(crate) fn into_result(self) -> Result<SimulationResult, SimulationError> {
         match self.outcome {
-            WorkerOutcome::Success(result) => Ok(SimulationResult::from(result)),
+            WorkerOutcome::Success(result) => Ok(SimulationResult::from(*result)),
             WorkerOutcome::Failure(error) => Err(SimulationError::from(error)),
         }
     }
@@ -556,7 +561,9 @@ pub(crate) fn validate_worker_response_id(
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum WorkerOutcome {
-    Success(WorkerSimulationResult),
+    /// Boxed: a result is an order of magnitude larger than an error, and
+    /// every outcome value carried the difference.
+    Success(Box<WorkerSimulationResult>),
     Failure(WorkerSimulationError),
 }
 
@@ -575,7 +582,7 @@ fn worker_outcome_from_result(
                         payload_limit_bytes,
                     ))
                 } else {
-                    WorkerOutcome::Success(result)
+                    WorkerOutcome::Success(Box::new(result))
                 }
             }
             Err(error) => WorkerOutcome::Failure(WorkerSimulationError::from(error)),
@@ -589,7 +596,7 @@ fn worker_transfer_outcome_from_result(
 ) -> WorkerOutcome {
     match result {
         Ok(result) => match WorkerSimulationResult::try_from(result) {
-            Ok(result) => WorkerOutcome::Success(result),
+            Ok(result) => WorkerOutcome::Success(Box::new(result)),
             Err(error) => WorkerOutcome::Failure(WorkerSimulationError::from(error)),
         },
         Err(error) => WorkerOutcome::Failure(WorkerSimulationError::from(error)),
@@ -704,7 +711,6 @@ pub(crate) struct WorkerProgressSnapshot {
     pub id: u64,
     pub status: WorkerProgressStatus,
     pub progress: Option<f32>,
-    pub message: Option<String>,
     pub elapsed_ms: u64,
 }
 
@@ -715,7 +721,6 @@ impl WorkerProgressSnapshot {
             id,
             status: WorkerProgressStatus::from(&progress.status),
             progress: progress.status.progress(),
-            message: progress.message.clone(),
             elapsed_ms,
         }
     }
@@ -723,52 +728,30 @@ impl WorkerProgressSnapshot {
     pub(crate) fn apply_to(self, progress: &mut SimulationProgress) {
         progress.elapsed = std::time::Duration::from_millis(self.elapsed_ms);
         progress.update_status(SimulationStatus::from(self.status));
-        progress.message = self.message;
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum WorkerProgressStatus {
     Idle,
-    Queued,
     Parsing,
     Building,
     DcOperatingPoint,
-    DcSweep {
-        source: String,
-        progress: f32,
-    },
-    Transient {
-        time: f64,
-        stop_time: f64,
-    },
-    AcAnalysis {
-        freq: f64,
-        stop_freq: f64,
-    },
-    NoiseAnalysis {
-        freq: f64,
-        stop_freq: f64,
-    },
+    DcSweep { source: String, progress: f32 },
+    Transient { time: f64, stop_time: f64 },
+    AcAnalysis { freq: f64, stop_freq: f64 },
+    NoiseAnalysis { freq: f64, stop_freq: f64 },
     PoleZero,
     Sensitivity,
     PostProcessing,
     Completed,
-    Failed {
-        message: String,
-    },
     Aborted,
-    ConvergenceFailed {
-        iteration: usize,
-        time_or_freq: Option<f64>,
-    },
 }
 
 impl From<&SimulationStatus> for WorkerProgressStatus {
     fn from(value: &SimulationStatus) -> Self {
         match value {
             SimulationStatus::Idle => Self::Idle,
-            SimulationStatus::Queued => Self::Queued,
             SimulationStatus::Parsing => Self::Parsing,
             SimulationStatus::Building => Self::Building,
             SimulationStatus::DcOperatingPoint => Self::DcOperatingPoint,
@@ -792,18 +775,7 @@ impl From<&SimulationStatus> for WorkerProgressStatus {
             SimulationStatus::Sensitivity => Self::Sensitivity,
             SimulationStatus::PostProcessing => Self::PostProcessing,
             SimulationStatus::Completed { .. } => Self::Completed,
-            SimulationStatus::Failed { message, .. } => Self::Failed {
-                message: message.clone(),
-            },
             SimulationStatus::Aborted { .. } => Self::Aborted,
-            SimulationStatus::ConvergenceFailed {
-                iteration,
-                time_or_freq,
-                ..
-            } => Self::ConvergenceFailed {
-                iteration: *iteration,
-                time_or_freq: *time_or_freq,
-            },
         }
     }
 }
@@ -812,7 +784,6 @@ impl From<WorkerProgressStatus> for SimulationStatus {
     fn from(value: WorkerProgressStatus) -> Self {
         match value {
             WorkerProgressStatus::Idle => Self::Idle,
-            WorkerProgressStatus::Queued => Self::Queued,
             WorkerProgressStatus::Parsing => Self::Parsing,
             WorkerProgressStatus::Building => Self::Building,
             WorkerProgressStatus::DcOperatingPoint => Self::DcOperatingPoint,
@@ -834,19 +805,7 @@ impl From<WorkerProgressStatus> for SimulationStatus {
             WorkerProgressStatus::Completed => Self::Completed {
                 elapsed: std::time::Duration::ZERO,
             },
-            WorkerProgressStatus::Failed { message } => Self::Failed {
-                message,
-                elapsed: std::time::Duration::ZERO,
-            },
             WorkerProgressStatus::Aborted => Self::Aborted {
-                elapsed: std::time::Duration::ZERO,
-            },
-            WorkerProgressStatus::ConvergenceFailed {
-                iteration,
-                time_or_freq,
-            } => Self::ConvergenceFailed {
-                iteration,
-                time_or_freq,
                 elapsed: std::time::Duration::ZERO,
             },
         }
@@ -866,7 +825,6 @@ pub(crate) enum WorkerSimulationResult {
         mna_solution: Vec<f64>,
         node_voltages: HashMap<String, f64>,
         branch_currents: HashMap<String, f64>,
-        device_ops: Vec<WorkerDeviceOpPoint>,
         device_report: Option<WorkerDeviceOpReport>,
     },
     DcSweep {
@@ -919,7 +877,6 @@ pub(crate) enum WorkerSimulationResult {
         output_quantity: WorkerTransferFunctionQuantity,
         input_unit: String,
         output_unit: String,
-        gain_unit: String,
         normalization: TfNormalization,
         accuracy: TfAccuracy,
         gain: Option<WorkerTransferFunctionScalar>,
@@ -986,13 +943,11 @@ impl WorkerSimulationResult {
                 mna_solution,
                 node_voltages,
                 branch_currents,
-                device_ops,
                 device_report,
             } => sum_payload_bytes([
                 f64_payload_bytes(node_voltages.len()),
                 f64_payload_bytes(branch_currents.len()),
                 f64_payload_bytes(mna_solution.len()),
-                device_ops_payload_bytes(device_ops),
                 device_report
                     .as_ref()
                     .map_or(0, WorkerDeviceOpReport::estimated_numeric_payload_bytes),
@@ -1165,11 +1120,6 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 mna_solution: result.mna_solution,
                 node_voltages: result.node_voltages,
                 branch_currents: result.branch_currents,
-                device_ops: result
-                    .device_ops
-                    .into_iter()
-                    .map(WorkerDeviceOpPoint::from)
-                    .collect(),
                 device_report: result.device_report.map(WorkerDeviceOpReport::from),
             }),
             SimulationResult::DcSweep {
@@ -1254,7 +1204,6 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 output_quantity,
                 input_unit,
                 output_unit,
-                gain_unit,
                 normalization,
                 accuracy,
                 gain,
@@ -1269,7 +1218,6 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 output_quantity: WorkerTransferFunctionQuantity::from(output_quantity),
                 input_unit,
                 output_unit,
-                gain_unit,
                 normalization,
                 accuracy,
                 gain: gain.map(WorkerTransferFunctionScalar::from),
@@ -1384,9 +1332,8 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 mna_solution,
                 node_voltages,
                 branch_currents,
-                device_ops,
                 device_report,
-            } => Self::DcOp(DcOpResult {
+            } => Self::DcOp(Box::new(DcOpResult {
                 configuration,
                 validated_startup_directives,
                 mna_node_names,
@@ -1394,12 +1341,8 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 mna_solution,
                 node_voltages,
                 branch_currents,
-                device_ops: device_ops
-                    .into_iter()
-                    .map(|device| (device.name.clone(), DeviceOpPoint::from(device)))
-                    .collect(),
                 device_report: device_report.map(rspice_core::circuit::DeviceOpReport::from),
-            }),
+            })),
             WorkerSimulationResult::DcSweep {
                 sweep_var,
                 sweep_values,
@@ -1472,7 +1415,6 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 output_quantity,
                 input_unit,
                 output_unit,
-                gain_unit,
                 normalization,
                 accuracy,
                 gain,
@@ -1487,7 +1429,6 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 output_quantity: TransferFunctionQuantity::from(output_quantity),
                 input_unit,
                 output_unit,
-                gain_unit,
                 normalization,
                 accuracy,
                 gain: gain.map(TransferFunctionScalar::from),

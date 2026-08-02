@@ -14,7 +14,7 @@ mod operating_point;
 mod waveform;
 
 pub use monte_carlo::MonteCarloVariableResult;
-pub use operating_point::{DcOpResult, DeviceOpPoint};
+pub use operating_point::DcOpResult;
 pub use waveform::WaveformData;
 
 /// Electrical quantity represented by a transfer-function input or output.
@@ -53,8 +53,9 @@ impl TransferFunctionScalar {
 /// Container for all simulation results
 #[derive(Debug, Clone)]
 pub enum SimulationResult {
-    /// DC operating point
-    DcOp(DcOpResult),
+    /// DC operating point. Boxed: the operating-point result is three
+    /// times the next largest variant, and every result value paid for it.
+    DcOp(Box<DcOpResult>),
 
     /// DC sweep results
     DcSweep {
@@ -145,7 +146,6 @@ pub enum SimulationResult {
         output_quantity: TransferFunctionQuantity,
         input_unit: String,
         output_unit: String,
-        gain_unit: String,
         normalization: crate::simulation::multi_run::TfNormalization,
         accuracy: crate::simulation::multi_run::TfAccuracy,
         gain: Option<TransferFunctionScalar>,

@@ -42,6 +42,7 @@ impl Default for SensConfig {
 }
 
 impl SensConfig {
+    #[cfg(test)]
     pub fn new(output: &str) -> Self {
         Self {
             output_expr: output.to_string(),
@@ -49,10 +50,12 @@ impl SensConfig {
         }
     }
 
+    #[cfg(test)]
     pub fn with_type(mut self, t: SensType) -> Self {
         self.sens_type = t;
         self
     }
+    #[cfg(test)]
     pub fn with_ac_freq(mut self, f: f64) -> Self {
         self.ac_freq = f;
         self

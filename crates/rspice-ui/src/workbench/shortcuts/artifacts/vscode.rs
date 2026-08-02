@@ -219,16 +219,19 @@ pub struct DetectedRspiceShortcutArtifact {
 
 impl DetectedRspiceShortcutArtifact {
     #[must_use]
+    #[cfg(test)]
     pub fn source_bytes(&self) -> &[u8] {
         &self.source_bytes
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn source_digest(&self) -> [u8; 32] {
         self.source_digest
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn artifact(&self) -> &DecodedShortcutArtifact {
         &self.artifact
     }
@@ -251,26 +254,31 @@ pub struct VscodeShortcutAdaptation {
 
 impl VscodeShortcutAdaptation {
     #[must_use]
+    #[cfg(test)]
     pub fn source_bytes(&self) -> &[u8] {
         &self.source_bytes
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn source_digest(&self) -> [u8; 32] {
         self.source_digest
     }
 
     #[must_use]
+    #[cfg(test)]
     pub fn canonical_artifact_json(&self) -> &str {
         &self.canonical_artifact_json
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn artifact(&self) -> &DecodedShortcutArtifact {
         &self.artifact
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn report(&self) -> &VscodeImportReport {
         &self.report
     }
@@ -379,6 +387,7 @@ pub fn detect_shortcut_artifact(
 }
 
 /// Explicit VS Code adapter for callers that already know the source type.
+#[cfg(test)]
 pub fn adapt_vscode_keybindings(
     source_name: impl Into<String>,
     source_bytes: &[u8],

@@ -1742,8 +1742,8 @@ impl XyceTestRunner {
                     .split(|ch: char| ch.is_ascii_whitespace() || ch == ',')
                     .filter(|token| !token.is_empty())
                     .collect::<Vec<_>>();
-                if option_tokens.iter().any(|token| *token == "loca")
-                    || (option_tokens.iter().any(|token| *token == "nonlin")
+                if option_tokens.contains(&"loca")
+                    || (option_tokens.contains(&"nonlin")
                         && option_tokens
                             .iter()
                             .any(|token| token.starts_with("continuation")))

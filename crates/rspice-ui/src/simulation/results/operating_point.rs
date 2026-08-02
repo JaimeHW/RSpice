@@ -32,9 +32,6 @@ pub struct DcOpResult {
     /// Branch currents
     pub branch_currents: HashMap<String, f64>,
 
-    /// Device operating points
-    pub device_ops: HashMap<String, DeviceOpPoint>,
-
     /// Per-device operating-point report from the engine (bias and
     /// small-signal parameters with regions, in netlist order) — the data
     /// behind the OP inspector.
@@ -43,6 +40,7 @@ pub struct DcOpResult {
 
 impl DcOpResult {
     /// Get voltage at a node
+    #[cfg(test)]
     pub fn voltage(&self, node: &str) -> Option<f64> {
         self.node_voltages.get(node).copied().or_else(|| {
             self.node_voltages
@@ -50,14 +48,4 @@ impl DcOpResult {
                 .find_map(|(name, value)| name.eq_ignore_ascii_case(node).then_some(*value))
         })
     }
-}
-
-/// Operating point data for a device
-#[derive(Debug, Clone)]
-pub struct DeviceOpPoint {
-    /// Device type (R, C, M, Q, etc.)
-    pub device_type: String,
-
-    /// Operating point parameters
-    pub parameters: HashMap<String, f64>,
 }

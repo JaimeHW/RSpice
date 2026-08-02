@@ -537,6 +537,7 @@ fn family_card(ui: &mut Ui, family: ResultDocumentFamily, selected: bool) -> egu
             },
         );
     }
+    crate::ui::theme::paint_focus_ring(ui, &response, rect);
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .on_hover_text(family.description())
@@ -579,9 +580,7 @@ fn viewer_status(
         ViewerCompatibility::MissingExternalCapability { .. } => {
             ("specialist dataset required", tokens.color.warn)
         }
-        ViewerCompatibility::UnknownDocument | ViewerCompatibility::UnknownQuickMode => {
-            ("unregistered", tokens.color.err)
-        }
+        ViewerCompatibility::UnknownDocument => ("unregistered", tokens.color.err),
     }
 }
 
@@ -816,7 +815,7 @@ fn resolve_draft<'a>(
                 viewer.title
             )));
         }
-        ViewerCompatibility::UnknownDocument | ViewerCompatibility::UnknownQuickMode => {
+        ViewerCompatibility::UnknownDocument => {
             return Err(CreateResultDocumentError::InvalidDraft(
                 "The selected viewer is not registered.".to_owned(),
             ));

@@ -174,10 +174,7 @@ pub fn start_automation_workflow(app: &mut RSpiceApp) {
         .iter()
         .map(|run| run.run_id)
         .collect();
-    app.state.ui.code_workspace.automation.receipt = Some(AutomationValidationReceipt {
-        token,
-        plan: plan.clone(),
-    });
+    app.state.ui.code_workspace.automation.receipt = Some(AutomationValidationReceipt { token });
     app.state.ui.code_workspace.automation.artifacts.clear();
     app.state.ui.code_workspace.automation.last_error = None;
     app.state.ui.code_workspace.automation.execution = AutomationExecutionState::AwaitingDispatch {
@@ -941,6 +938,7 @@ mod tests {
     fn spec(name: &str) -> SpecEntry {
         SpecEntry {
             measurement: name.to_owned(),
+            expression: String::new(),
             min: Some(0.5),
             max: Some(1.5),
             unit: "V".to_owned(),

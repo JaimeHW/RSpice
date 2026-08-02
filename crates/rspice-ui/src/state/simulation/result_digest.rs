@@ -747,6 +747,19 @@ fn encode_family_metadata(
             writer.u8(5);
             writer.f64_slice(time);
         }
+        AnalysisResultFamilyMetadata::PeriodicNoise {
+            output_quantity,
+            carrier_frequency_hz,
+        } => {
+            writer.u8(6);
+            writer.u8(match output_quantity {
+                PeriodicNoiseOutputQuantity::OutputNoisePowerSpectralDensity => 0,
+                PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz => 1,
+            });
+            writer.option(carrier_frequency_hz.as_ref(), |writer, frequency| {
+                writer.f64(*frequency)
+            });
+        }
     }
 }
 
@@ -1063,6 +1076,37 @@ mod tests {
         assert_ne!(digest, run.dataset_content_digest());
         run.analyses = vec![first, changed_family];
         assert_ne!(digest, run.dataset_content_digest());
+    }
+
+    #[test]
+    fn periodic_noise_quantity_and_carrier_are_content_identity() {
+        let output_psd = analysis(AnalysisType::Pnoise).with_family_metadata(
+            AnalysisResultFamilyMetadata::PeriodicNoise {
+                output_quantity: PeriodicNoiseOutputQuantity::OutputNoisePowerSpectralDensity,
+                carrier_frequency_hz: Some(2.4e9),
+            },
+        );
+        let phase_noise = analysis(AnalysisType::Pnoise).with_family_metadata(
+            AnalysisResultFamilyMetadata::PeriodicNoise {
+                output_quantity: PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz,
+                carrier_frequency_hz: Some(2.4e9),
+            },
+        );
+        let other_carrier = analysis(AnalysisType::Pnoise).with_family_metadata(
+            AnalysisResultFamilyMetadata::PeriodicNoise {
+                output_quantity: PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz,
+                carrier_frequency_hz: Some(5.0e9),
+            },
+        );
+
+        assert_ne!(
+            output_psd.result_data_digest(),
+            phase_noise.result_data_digest()
+        );
+        assert_ne!(
+            phase_noise.result_data_digest(),
+            other_carrier.result_data_digest()
+        );
     }
 
     #[test]

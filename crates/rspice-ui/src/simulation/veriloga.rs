@@ -156,6 +156,7 @@ impl PreparedVerilogARuntime {
         )
     }
 
+    #[cfg(test)]
     pub fn install(&self) -> Result<(), String> {
         rspice_core::register_project_veriloga_runtimes_for_session([self.registration()?])
     }
@@ -228,6 +229,7 @@ impl PreparedVerilogARuntime {
         &self.source_key
     }
 
+    #[cfg(test)]
     pub const fn source_digest(&self) -> crate::product::ContentDigest {
         self.source_digest
     }
@@ -236,6 +238,7 @@ impl PreparedVerilogARuntime {
         self.artifact_digest
     }
 
+    #[cfg(test)]
     pub fn module_name(&self) -> &str {
         &self.module_name
     }
@@ -336,6 +339,7 @@ impl PreparedVerilogARuntimeSet {
         self.runtimes.is_empty()
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.runtimes.len()
     }

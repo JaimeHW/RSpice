@@ -134,6 +134,7 @@ pub struct ShortcutBinding {
 }
 
 impl ShortcutBinding {
+    #[cfg(test)]
     pub const fn supports(self, platform: CommandPlatform) -> bool {
         let mut index = 0;
         while index < self.platforms.len() {
@@ -785,6 +786,7 @@ impl Command {
 
     /// Immutable factory binding label for registry contract tests and
     /// recovery diagnostics. Product UI must use `ShortcutPreferences`.
+    #[cfg(test)]
     pub fn default_shortcut_label(self, platform: CommandPlatform) -> &'static str {
         self.shortcut_bindings()
             .iter()

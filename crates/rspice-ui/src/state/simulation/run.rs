@@ -355,11 +355,13 @@ impl SimulationRun {
     }
 
     /// Set the total elapsed time for this run
+    #[cfg(test)]
     pub fn set_elapsed_time(&mut self, elapsed: f64) {
         self.elapsed_time = elapsed;
     }
 
     /// Find analysis by type (returns first match)
+    #[cfg(test)]
     pub fn find_analysis(&self, analysis_type: AnalysisType) -> Option<&AnalysisResult> {
         self.analyses
             .iter()

@@ -14,7 +14,7 @@ use crate::workbench::{AppState, RSpiceApp};
 use super::super::design_system::{WorkbenchIcon, empty_state};
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    if is_netlist_first_without_schematic(&app.state) {
+    if app.state.is_netlist_first_without_schematic() {
         netlist_first_empty_state(ui, app);
         return;
     }
@@ -40,49 +40,11 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         view_type => unsupported_document(ui, app, view_type),
     }
     breadcrumb(ui.ctx(), app, content_rect);
-    if canvas_document {
-        if app.state.workbench.current_route().surface_id() == super::super::SurfaceId::Design {
-            crate::schematic::view::show_mobile_canvas_controls(ui.ctx(), app, content_rect);
-        }
+    if canvas_document
+        && app.state.workbench.current_route().surface_id() == super::super::SurfaceId::Design
+    {
+        crate::schematic::view::show_mobile_canvas_controls(ui.ctx(), app, content_rect);
     }
-}
-
-fn is_netlist_first_without_schematic(state: &AppState) -> bool {
-    let imported_deck_owns_the_project = state
-        .workspace
-        .netlist_document
-        .as_ref()
-        .is_some_and(|document| document.provenance().imported().is_some());
-    if !imported_deck_owns_the_project || schematic_has_authored_content(&state.schematic) {
-        return false;
-    }
-
-    // ProjectWorkspace keeps one bootstrap buffer so all legacy editor and
-    // save invariants remain valid. An imported source project is still
-    // netlist-first while that sole buffer is pristine. Creating any
-    // schematic cell materializes a second buffer (or authored content) and
-    // therefore promotes the Design surface without discarding the source
-    // deck.
-    state.workspace.schematic_buffers.len() <= 1
-        && state
-            .workspace
-            .schematic_buffers
-            .values()
-            .all(|schematic| !schematic_has_authored_content(schematic))
-}
-
-fn schematic_has_authored_content(schematic: &crate::state::SchematicState) -> bool {
-    !schematic.components.is_empty()
-        || !schematic.wires.is_empty()
-        || !schematic.buses.is_empty()
-        || !schematic.bus_taps.is_empty()
-        || !schematic.design_notes.is_empty()
-        || !schematic.documentation_shapes.is_empty()
-        || !schematic.probes.is_empty()
-        || !schematic.net_labels.is_empty()
-        || !schematic.junctions.is_empty()
-        || !schematic.connections.is_empty()
-        || !schematic.validated_revisions.is_empty()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -469,13 +431,13 @@ mod tests {
             )
         );
 
-        assert!(is_netlist_first_without_schematic(&app.state));
+        assert!(app.state.is_netlist_first_without_schematic());
 
         app.state.schematic.add_component(
             crate::state::ComponentType::Resistor,
             crate::state::Point::new(0, 0),
         );
-        assert!(!is_netlist_first_without_schematic(&app.state));
+        assert!(!app.state.is_netlist_first_without_schematic());
     }
 
     #[test]

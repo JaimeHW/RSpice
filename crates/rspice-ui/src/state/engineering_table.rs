@@ -199,17 +199,12 @@ impl EngineeringTableView {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum EngineeringViewScope {
+    #[default]
     Personal,
     Project,
-}
-
-impl Default for EngineeringViewScope {
-    fn default() -> Self {
-        Self::Personal
-    }
 }
 
 impl EngineeringViewScope {
@@ -898,6 +893,7 @@ fn compare_number(value: f64, operator: &str, target: f64) -> bool {
     }
 }
 
+#[cfg(test)]
 pub fn delimited_text(
     dataset: &EngineeringDataset,
     view: &EngineeringTableView,

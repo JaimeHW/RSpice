@@ -39,7 +39,7 @@ impl BrowserTextImportKind {
         }
     }
 
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) const fn max_bytes(self) -> u64 {
         match self {
             Self::ShortcutProfile => {

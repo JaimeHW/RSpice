@@ -1630,7 +1630,7 @@ fn selected_result_trace(
 
         if is_schematic_cross_probe_candidate(selected.source_name()) {
             let signal = selected.source_name().to_owned();
-            let unavailable = schematic_cross_probe_unavailability(&app.state, &signal);
+            let unavailable = schematic_cross_probe_unavailability(&app.state, selected, &signal);
             let mut response =
                 ui.add_enabled(unavailable.is_none(), egui::Button::new("Cross-probe net"));
             if let Some(reason) = unavailable {
@@ -1817,7 +1817,11 @@ fn is_schematic_cross_probe_candidate(signal: &str) -> bool {
     (signal.starts_with("V(") || signal.starts_with("I(")) && signal.ends_with(')')
 }
 
-fn schematic_cross_probe_unavailability(state: &AppState, signal: &str) -> Option<String> {
+fn schematic_cross_probe_unavailability(
+    state: &AppState,
+    selected: &crate::workbench::documents::result_document::SelectedResultTrace,
+    signal: &str,
+) -> Option<String> {
     let Some(net) = crate::schematic::view::wrapped_signal_name(signal, 'V') else {
         return Some(format!(
             "{signal} is a device current or derived quantity; no single schematic net carries it."
@@ -1829,6 +1833,26 @@ fn schematic_cross_probe_unavailability(state: &AppState, signal: &str) -> Optio
     ) {
         return Some(
             "The schematic changed since this result was produced; run again to cross-probe it."
+                .to_owned(),
+        );
+    }
+    let Some(run) = state.simulation.active_run() else {
+        return Some("The selected result dataset is no longer retained.".to_owned());
+    };
+    if run.dataset_id != selected.dataset_id() || selected.resolve(run).is_none() {
+        return Some(
+            "The selected trace does not belong to the active immutable result dataset.".to_owned(),
+        );
+    }
+    let Some(receipt) = run.prepared_receipt() else {
+        return Some(
+            "This legacy result has no authenticated project revision and cannot be cross-probed."
+                .to_owned(),
+        );
+    };
+    if receipt.project_revision() != state.workspace.project.revision() {
+        return Some(
+            "The selected result was produced from a different project revision; run again before cross-probing it."
                 .to_owned(),
         );
     }
@@ -1849,6 +1873,15 @@ fn schematic_cross_probe_unavailability(state: &AppState, signal: &str) -> Optio
 /// explanation. On success, the Design surface opens; a remembered split
 /// remains active and projects Design + the same canonical Results document.
 fn cross_probe_trace_to_design(app: &mut RSpiceApp, signal: &str) -> Result<String, String> {
+    let selected = app
+        .state
+        .ui
+        .results
+        .valid_selected_trace(&app.state.simulation)
+        .ok_or_else(|| "No exact retained result trace is selected.".to_owned())?;
+    if let Some(reason) = schematic_cross_probe_unavailability(&app.state, &selected, signal) {
+        return Err(reason);
+    }
     let net = crate::schematic::view::select_signal_conductor(&mut app.state, signal)
         .map_err(|error| error.message(signal))?;
     if app.state.workbench.workspace != Workspace::Design {
@@ -2839,19 +2872,55 @@ mod tests {
         app.state.project_lifecycle.project_open = true;
         app.state.workbench.split_with_results = split;
         app.state.workbench.activate(Workspace::Results);
-        app.state.simulation.start_run().add_analysis(
-            crate::state::AnalysisResult::new(
-                1,
-                crate::state::AnalysisType::Transient,
-                "retained TRAN",
-            )
-            .with_waveforms(vec![crate::state::WaveformData::new(
-                "V(out)",
-                vec![0.0, 1.0],
-                vec![0.0, 1.0],
-                "#ffbd2e",
-            )]),
-        );
+        let project_revision = app.state.workspace.project.revision();
+        let analysis_id = crate::product::AnalysisInstanceId::new();
+        let receipt = crate::state::PreparedRunReceipt::new(
+            crate::state::AnalysisResultSourceDomain::SimulationPlan,
+            Some(crate::product::SimulationPlanId::new()),
+            project_revision,
+            crate::product::ContentDigest::from_bytes([0x11; 32]),
+            crate::product::ContentDigest::from_bytes([0x22; 32]),
+            crate::state::PreparedSourceCheckReceipt::SchematicDrc(
+                crate::product::ContentDigest::from_bytes([0x33; 32]),
+            ),
+            vec![
+                crate::state::PreparedRunTaskReceipt::new(
+                    analysis_id,
+                    project_revision,
+                    Vec::new(),
+                    1,
+                    crate::product::ContentDigest::from_bytes([0x44; 32]),
+                )
+                .expect("valid prepared task"),
+            ],
+        )
+        .expect("valid prepared run receipt");
+        app.state
+            .simulation
+            .start_prepared_run(receipt)
+            .add_analysis(
+                crate::state::AnalysisResult::new(
+                    1,
+                    crate::state::AnalysisType::Transient,
+                    "retained TRAN",
+                )
+                .with_provenance(
+                    crate::state::AnalysisResultProvenance::new_with_source_domain(
+                        crate::state::AnalysisResultSourceDomain::SimulationPlan,
+                        analysis_id,
+                        project_revision,
+                        crate::product::ContentDigest::from_bytes([0x44; 32]),
+                        Vec::new(),
+                    )
+                    .expect("valid prepared analysis provenance"),
+                )
+                .with_waveforms(vec![crate::state::WaveformData::new(
+                    "V(out)",
+                    vec![0.0, 1.0],
+                    vec![0.0, 1.0],
+                    "#ffbd2e",
+                )]),
+            );
         app.state.ui.results.selected_trace = Some(
             crate::workbench::documents::result_document::SelectedResultTrace::from_run_indices(
                 app.state.simulation.active_run().expect("retained run"),
@@ -2969,6 +3038,88 @@ mod tests {
             .expect_err("topology mismatch must fail closed");
 
         assert!(error.contains("changed since this result"));
+        assert_eq!(app.state.workbench.workspace, Workspace::Results);
+        assert!(app.state.schematic.selection.wires.is_empty());
+    }
+
+    #[test]
+    fn historical_result_revision_cannot_cross_probe_current_geometry() {
+        let mut app = result_app_with_current_out_map(false);
+        let stale_revision = app
+            .state
+            .workspace
+            .project
+            .revision()
+            .next()
+            .expect("next project revision");
+        let run = app
+            .state
+            .simulation
+            .active_run()
+            .expect("prepared retained run");
+        let analysis_id = run.analyses[0]
+            .provenance()
+            .expect("prepared analysis provenance")
+            .source_instance_id();
+        let receipt = crate::state::PreparedRunReceipt::new(
+            crate::state::AnalysisResultSourceDomain::SimulationPlan,
+            Some(crate::product::SimulationPlanId::new()),
+            stale_revision,
+            crate::product::ContentDigest::from_bytes([0x51; 32]),
+            crate::product::ContentDigest::from_bytes([0x52; 32]),
+            crate::state::PreparedSourceCheckReceipt::SchematicDrc(
+                crate::product::ContentDigest::from_bytes([0x53; 32]),
+            ),
+            vec![
+                crate::state::PreparedRunTaskReceipt::new(
+                    analysis_id,
+                    stale_revision,
+                    Vec::new(),
+                    1,
+                    crate::product::ContentDigest::from_bytes([0x54; 32]),
+                )
+                .expect("valid prepared task"),
+            ],
+        )
+        .expect("valid stale receipt");
+        let mut stale_run = crate::state::SimulationRun::new_prepared(1, receipt);
+        stale_run.add_analysis(
+            crate::state::AnalysisResult::new(
+                1,
+                crate::state::AnalysisType::Transient,
+                "historical TRAN",
+            )
+            .with_provenance(
+                crate::state::AnalysisResultProvenance::new_with_source_domain(
+                    crate::state::AnalysisResultSourceDomain::SimulationPlan,
+                    analysis_id,
+                    stale_revision,
+                    crate::product::ContentDigest::from_bytes([0x54; 32]),
+                    Vec::new(),
+                )
+                .expect("valid historical analysis provenance"),
+            )
+            .with_waveforms(vec![crate::state::WaveformData::new(
+                "V(out)",
+                vec![0.0, 1.0],
+                vec![0.0, 1.0],
+                "#ffbd2e",
+            )]),
+        );
+        app.state.simulation.runs[0] = stale_run;
+        app.state.ui.results.selected_trace = Some(
+            crate::workbench::documents::result_document::SelectedResultTrace::from_run_indices(
+                &app.state.simulation.runs[0],
+                0,
+                0,
+            )
+            .expect("selected historical trace"),
+        );
+
+        let error = cross_probe_trace_to_design(&mut app, "V(out)")
+            .expect_err("historical result must fail closed");
+
+        assert!(error.contains("different project revision"));
         assert_eq!(app.state.workbench.workspace, Workspace::Results);
         assert!(app.state.schematic.selection.wires.is_empty());
     }

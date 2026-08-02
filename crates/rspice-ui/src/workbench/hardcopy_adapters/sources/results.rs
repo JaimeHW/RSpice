@@ -7,6 +7,7 @@
 //! showed it has gone.
 
 use super::*;
+#[cfg(test)]
 use crate::workbench::documents::result_document::manifest::ManifestViewModel;
 
 /// Resolve an active Visualization Studio pane without depending on a window,
@@ -306,10 +307,47 @@ pub(crate) fn resolve_active_studio_pane_source(
     if !is_curve_viewer(pane.viewer) {
         return resolve_studio_result_summary(source, pane, run.run_id, analysis);
     }
+    let viewer_accepts_analysis = match pane.viewer {
+        ResultViewer::HarmonicBalance => {
+            crate::workbench::documents::result_document::harmonic_balance_analysis_is_renderable(
+                analysis,
+            )
+        }
+        ResultViewer::PhaseNoise => {
+            crate::workbench::documents::result_document::phase_noise_analysis_is_renderable(
+                analysis,
+            )
+        }
+        _ => true,
+    };
+    if !viewer_accepts_analysis {
+        return Err(HardcopySourceError::MissingViewerEvidence(
+            match pane.viewer {
+                ResultViewer::HarmonicBalance => "harmonic-balance spectrum",
+                ResultViewer::PhaseNoise => "phase-noise spectrum",
+                _ => unreachable!("only specialist curve viewers are validated here"),
+            },
+        ));
+    }
     let visible = analysis
         .waveforms
         .iter()
-        .filter(|waveform| waveform.visible)
+        .filter(|waveform| {
+            waveform.visible
+                && match pane.viewer {
+                    ResultViewer::HarmonicBalance => {
+                        crate::workbench::documents::result_document::harmonic_balance_waveform_is_renderable(
+                            waveform,
+                        )
+                    }
+                    ResultViewer::PhaseNoise => {
+                        crate::workbench::documents::result_document::phase_noise_waveform_is_renderable(
+                            waveform,
+                        )
+                    }
+                    _ => true,
+                }
+        })
         .collect::<Vec<_>>();
     if visible.is_empty() {
         return Err(HardcopySourceError::UnretainedResult(
@@ -407,6 +445,9 @@ pub(crate) fn resolve_active_studio_pane_source(
         .filter(|marker| {
             marker.dataset_id == pane.dataset_id
                 && marker.analysis_sequence == pane.analysis_sequence
+                && visible
+                    .iter()
+                    .any(|waveform| waveform.name == marker.waveform_name)
         })
         .map(|marker| {
             Ok(SemanticPlotMarker {
@@ -481,6 +522,9 @@ pub(crate) fn resolve_active_studio_pane_source(
             .filter(|marker| {
                 marker.dataset_id == pane.dataset_id
                     && marker.analysis_sequence == pane.analysis_sequence
+                    && visible
+                        .iter()
+                        .any(|waveform| waveform.name == marker.waveform_name)
             })
             .collect::<Vec<_>>(),
         &source
@@ -511,6 +555,7 @@ pub(crate) fn resolve_active_studio_pane_source(
 /// Resolve the exact result document currently selected in the ordinary
 /// Results workspace. Specialized viewers read their durable analysis model
 /// directly; table viewers read the selected immutable simulation result.
+#[cfg(test)]
 pub(crate) fn resolve_results_quick_view_source(
     source: ResultsQuickViewHardcopySource<'_>,
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
@@ -524,7 +569,7 @@ pub(crate) fn resolve_results_quick_view_source(
             run,
         );
     }
-    let active = active_quick_result(source.state)?;
+    let active = active_quick_result(source.state, presentation.viewer)?;
     resolve_results_quick_view_parts(
         source.source_key,
         source.project_id,
@@ -550,10 +595,14 @@ pub(super) fn resolve_results_quick_view_parts(
     }
     let viewer = presentation.viewer;
     let semantic_document = match viewer {
-        ResultViewer::Waves | ResultViewer::Bode => {
+        ResultViewer::Waves | ResultViewer::DcSweep | ResultViewer::Bode => {
             HardcopySemanticDocument::Plot(quick_waveform_plot(active, viewer)?)
         }
         ResultViewer::Fft => HardcopySemanticDocument::Plot(quick_fft_plot(presentation, active)?),
+        ResultViewer::HarmonicBalance => {
+            HardcopySemanticDocument::Plot(quick_harmonic_balance_plot(active)?)
+        }
+        ResultViewer::PhaseNoise => HardcopySemanticDocument::Plot(quick_phase_noise_plot(active)?),
         ResultViewer::Eye => HardcopySemanticDocument::Plot(quick_eye_plot(presentation, active)?),
         ResultViewer::Hist => {
             HardcopySemanticDocument::Plot(quick_histogram_plot(presentation, active)?)
@@ -564,8 +613,10 @@ pub(super) fn resolve_results_quick_view_parts(
         ResultViewer::Smith => {
             HardcopySemanticDocument::Plot(quick_complex_plot(active, ResultViewer::Smith)?)
         }
+        ResultViewer::NoiseContrib => {
+            HardcopySemanticDocument::Plot(quick_noise_spectrum_plot(active)?)
+        }
         ResultViewer::Op
-        | ResultViewer::NoiseContrib
         | ResultViewer::Contribution
         | ResultViewer::TransferFunction
         | ResultViewer::Specs
@@ -612,6 +663,7 @@ pub(super) fn resolve_results_quick_view_parts(
     )
 }
 
+#[cfg(test)]
 fn resolve_results_manifest_source(
     source_key: String,
     project_id: ProjectId,
@@ -665,6 +717,7 @@ fn resolve_results_manifest_source(
     )
 }
 
+#[cfg(test)]
 fn semantic_manifest_summary(manifest: &ManifestViewModel) -> SemanticResultSummary {
     let inventory = SemanticTable {
         title: format!("Frozen analysis inventory · {}", manifest.run_label),
@@ -792,14 +845,17 @@ pub(super) struct ActiveQuickResult<'a> {
     pub(super) analysis: &'a AnalysisResult,
 }
 
+#[cfg(test)]
 pub(super) fn active_quick_result(
     state: &AppState,
+    viewer: ResultViewer,
 ) -> Result<ActiveQuickResult<'_>, HardcopySourceError> {
     let run = active_terminal_run(state)?;
-    let analysis_index = state.simulation.active_analysis_idx.ok_or_else(|| {
-        HardcopySourceError::UnretainedResult(
-            "no active analysis is selected in the active terminal dataset".to_owned(),
-        )
+    let analysis_index = quick_result_analysis_index(state, run, viewer).ok_or_else(|| {
+        HardcopySourceError::UnretainedResult(format!(
+            "no retained analysis can provide exact evidence for {}",
+            viewer.label()
+        ))
     })?;
     let analysis = run.analyses.get(analysis_index).ok_or_else(|| {
         HardcopySourceError::UnretainedResult(format!(
@@ -845,6 +901,157 @@ pub(super) fn quick_waveform_plot(
     quick_plot_from_series(viewer, "Results", 0, series)
 }
 
+fn quick_noise_spectrum_plot(
+    active: ActiveQuickResult<'_>,
+) -> Result<SemanticPlot, HardcopySourceError> {
+    if !ordinary_noise_spectrum_is_renderable(active.analysis) {
+        return Err(HardcopySourceError::MissingViewerEvidence(
+            "ordinary noise spectrum",
+        ));
+    }
+
+    let input = active
+        .analysis
+        .waveforms
+        .iter()
+        .enumerate()
+        .find(|(_, waveform)| {
+            retained_noise_reference(&waveform.name) == Some(RetainedNoiseReference::Input)
+                && retained_noise_waveform_is_renderable(waveform)
+        });
+    let (reference, anchor_index, anchor) = if let Some((index, waveform)) = input {
+        (RetainedNoiseReference::Input, index, waveform)
+    } else {
+        let (index, waveform) = active
+            .analysis
+            .waveforms
+            .iter()
+            .enumerate()
+            .find(|(_, waveform)| {
+                retained_noise_reference(&waveform.name) == Some(RetainedNoiseReference::Output)
+                    && retained_noise_waveform_is_renderable(waveform)
+            })
+            .ok_or(HardcopySourceError::MissingViewerEvidence(
+                "ordinary noise spectrum",
+            ))?;
+        (RetainedNoiseReference::Output, index, waveform)
+    };
+
+    let source_waveforms = if reference == RetainedNoiseReference::Input {
+        vec![(anchor_index, anchor)]
+    } else {
+        active
+            .analysis
+            .waveforms
+            .iter()
+            .enumerate()
+            .filter(|(_, waveform)| {
+                retained_noise_reference(&waveform.name) != Some(RetainedNoiseReference::Input)
+                    && (retained_noise_reference(&waveform.name)
+                        == Some(RetainedNoiseReference::Output)
+                        || retained_noise_contributor(&waveform.name))
+                    && retained_noise_waveform_is_renderable(waveform)
+                    && waveform.x.as_slice() == anchor.x.as_slice()
+            })
+            .collect()
+    };
+    let series = source_waveforms
+        .into_iter()
+        .map(|(waveform_index, waveform)| QuickResultSeries {
+            identity: format!(
+                "{}:{}:{}:{}:noise-amplitude-density:{waveform_index}",
+                active.run.dataset_id, active.run.run_id, active.analysis.id, waveform.name
+            ),
+            label: waveform.name.clone(),
+            points: waveform
+                .x
+                .iter()
+                .copied()
+                .zip(waveform.y.iter().map(|density| density.sqrt() * 1.0e9))
+                .collect(),
+        })
+        .collect();
+    quick_plot_from_series(ResultViewer::NoiseContrib, "Results", 0, series)
+}
+
+fn quick_harmonic_balance_plot(
+    active: ActiveQuickResult<'_>,
+) -> Result<SemanticPlot, HardcopySourceError> {
+    if !crate::workbench::documents::result_document::harmonic_balance_analysis_is_renderable(
+        active.analysis,
+    ) {
+        return Err(HardcopySourceError::MissingViewerEvidence(
+            "harmonic-balance spectrum",
+        ));
+    }
+    let series = active
+        .analysis
+        .waveforms
+        .iter()
+        .filter(|waveform| {
+            waveform.visible
+                && crate::workbench::documents::result_document::harmonic_balance_waveform_is_renderable(
+                    waveform,
+                )
+        })
+        .map(|waveform| QuickResultSeries {
+            identity: format!(
+                "{}:{}:{}:{}:hb-coefficients",
+                active.run.dataset_id, active.run.run_id, active.analysis.id, waveform.name
+            ),
+            label: waveform
+                .complex
+                .as_ref()
+                .map_or_else(|| waveform.name.clone(), |complex| complex.source_name.clone()),
+            points: waveform
+                .x
+                .iter()
+                .copied()
+                .zip(waveform.y.iter().copied())
+                .collect(),
+        })
+        .collect();
+    quick_plot_from_series(ResultViewer::HarmonicBalance, "Results", 0, series)
+}
+
+fn quick_phase_noise_plot(
+    active: ActiveQuickResult<'_>,
+) -> Result<SemanticPlot, HardcopySourceError> {
+    if !crate::workbench::documents::result_document::phase_noise_analysis_is_renderable(
+        active.analysis,
+    ) {
+        return Err(HardcopySourceError::MissingViewerEvidence(
+            "phase-noise spectrum",
+        ));
+    }
+    let series = active
+        .analysis
+        .waveforms
+        .iter()
+        .filter(|waveform| {
+            waveform.visible
+                && crate::workbench::documents::result_document::phase_noise_waveform_is_renderable(
+                    waveform,
+                )
+        })
+        .map(|waveform| QuickResultSeries {
+            identity: format!(
+                "{}:{}:{}:{}:phase-noise",
+                active.run.dataset_id, active.run.run_id, active.analysis.id, waveform.name
+            ),
+            label: format!("{} - dBc/Hz", waveform.name),
+            points: waveform
+                .x
+                .iter()
+                .copied()
+                .zip(waveform.y.iter().copied())
+                .collect(),
+        })
+        .collect();
+    quick_plot_from_series(ResultViewer::PhaseNoise, "Results", 0, series)
+}
+
+#[cfg(test)]
 pub(super) fn active_terminal_run(state: &AppState) -> Result<&SimulationRun, HardcopySourceError> {
     let run = state.simulation.active_run().ok_or_else(|| {
         HardcopySourceError::UnretainedResult("no active result dataset is selected".to_owned())
@@ -1301,7 +1508,7 @@ pub(super) fn results_quick_view_identity(
         HardcopyDocumentId::try_from_uuid(Uuid::new_v5(&project_id.as_uuid(), &identity_name))
             .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?,
         ObjectRevision::INITIAL,
-        format!("Results · {}", viewer.label()),
+        format!("Results - {}", viewer.label()),
     )
 }
 
@@ -1321,8 +1528,12 @@ pub(super) const fn is_curve_viewer(viewer: ResultViewer) -> bool {
     matches!(
         viewer,
         ResultViewer::Waves
+            | ResultViewer::DcSweep
             | ResultViewer::Bode
+            | ResultViewer::NoiseContrib
             | ResultViewer::Fft
+            | ResultViewer::HarmonicBalance
+            | ResultViewer::PhaseNoise
             | ResultViewer::Eye
             | ResultViewer::Hist
             | ResultViewer::Nyquist

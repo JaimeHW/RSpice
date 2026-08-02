@@ -16,15 +16,17 @@ use std::sync::Arc;
 
 use rspice_core::library::SpiceLibraryIndex;
 
+#[cfg(test)]
+use super::ModelFileIdentity;
 #[cfg(not(target_arch = "wasm32"))]
 use super::is_foreign_platform_absolute_path;
 use super::{
-    DeviceModel, FiniteF64, ModelCorrelationState, ModelDefinitionMetadata, ModelFileIdentity,
-    ModelLevel, ModelLibrary, ModelQualificationState, ModelSectionQualification,
-    ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourceEvidenceBinding,
-    ModelSourcePin, ModelType, ParameterDataType, ParameterDefinition, ParameterSource,
-    ParameterValue, ProcessCorner, ProjectModelDefinition, ProjectModelRevisionDefinition,
-    first_unreachable_source, subcircuit_interface_key,
+    DeviceModel, FiniteF64, ModelCorrelationState, ModelDefinitionMetadata, ModelLevel,
+    ModelLibrary, ModelQualificationState, ModelSectionQualification, ModelSourceAuthority,
+    ModelSourceContent, ModelSourceEdge, ModelSourceEvidenceBinding, ModelSourcePin, ModelType,
+    ParameterDataType, ParameterDefinition, ParameterSource, ParameterValue, ProcessCorner,
+    ProjectModelDefinition, ProjectModelRevisionDefinition, first_unreachable_source,
+    subcircuit_interface_key,
 };
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
 use crate::services::simulation_runner::{CornerModelBinding, CornerProcess};
@@ -70,9 +72,7 @@ struct SealedExecutionLibrary {
 /// needed to label it and the domains it covers.
 struct MaterializedCornerSection {
     source_label: String,
-    path: PathBuf,
     section: String,
-    domains: Vec<super::CornerSectionDomain>,
     materialized_model_cards: String,
 }
 
@@ -572,9 +572,7 @@ impl SealedModelExecutionSources {
                         .collect::<Vec<_>>()
                         .join(" + ")
                 ),
-                path,
                 section,
-                domains,
                 materialized_model_cards,
             });
         }
@@ -1039,6 +1037,7 @@ impl ModelLibraryManager {
     /// rows; the catalogue view is a browser, not a dump. An empty query
     /// returns nothing rather than everything, so opening the tab does not
     /// stream a 16 MB index off disk.
+    #[cfg(test)]
     pub fn search_pack_models(&self, query: &str, limit: usize) -> Vec<PackModelHit> {
         let trimmed = query.trim();
         if trimmed.is_empty() {
@@ -1284,6 +1283,7 @@ impl ModelLibraryManager {
     }
 
     /// Clear all
+    #[cfg(test)]
     pub fn clear(&mut self) {
         self.libraries.clear();
         self.selected_library = None;
@@ -1485,6 +1485,7 @@ impl ModelLibraryManager {
     /// fail closed because a single-file picker cannot prove dependency bytes;
     /// multi-file libraries must arrive in a project whose complete retained
     /// source closure was captured by the desktop importer.
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub fn load_library_bytes(
         &mut self,
         file_name: &str,
@@ -1625,6 +1626,7 @@ impl ModelLibraryManager {
     }
 
     /// Resolve all process-specific sources required by a PVT run.
+    #[cfg(test)]
     pub fn corner_model_bindings(
         &self,
         processes: &[CornerProcess],
@@ -1668,14 +1670,14 @@ impl ModelLibraryManager {
         let removed = candidate
             .libraries
             .iter()
-            .filter_map(|(name, library)| {
+            .filter(|&(_name, library)| {
                 (matches!(library.source_authority, ModelSourceAuthority::External)
                     && library
                         .root_path
                         .as_ref()
                         .is_some_and(|path| previously_managed.contains(&portable_path_key(path))))
-                .then(|| name.clone())
             })
+            .map(|(name, _library)| name.clone())
             .collect::<Vec<_>>();
         for name in removed {
             candidate.libraries.remove(&name);
@@ -2081,6 +2083,7 @@ fn validate_section_qualification_evidence(
     Ok(())
 }
 
+#[cfg(test)]
 fn reconcile_project_model_metadata(
     definition: &ProjectModelDefinition,
     previous: Option<&ModelDefinitionMetadata>,
@@ -2170,6 +2173,7 @@ fn reconcile_project_model_revision_metadata(
     Ok(metadata)
 }
 
+#[cfg(test)]
 fn verify_project_model_round_trip(
     definition: &ProjectModelDefinition,
     parsed: &rspice_core::library::ParsedModel,

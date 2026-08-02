@@ -480,16 +480,19 @@ impl SymbolLibrary {
     }
 
     /// Get a symbol by component type (O(1) lookup)
+    #[cfg(test)]
     pub fn get(&self, component_type: ComponentType) -> Option<&Symbol> {
         self.symbols.get(&component_type)
     }
 
     /// Get a parsed embedded asset by filename.
+    #[cfg(test)]
     pub fn get_asset(&self, filename: &str) -> Option<&Symbol> {
         self.embedded_assets.get(filename)
     }
 
     /// Return all parsed embedded asset filenames.
+    #[cfg(test)]
     pub fn asset_names(&self) -> Vec<String> {
         let mut names: Vec<_> = self.embedded_assets.keys().cloned().collect();
         names.sort();
@@ -672,13 +675,6 @@ mod parse_sanity {
                     "{name}: path {index} has no commands"
                 );
             }
-            // New-style assets are authored inside their viewBox; their
-            // bounds must equal the viewBox (no legacy re-fit).
-            let vb = symbol.view_box;
-            assert_eq!(
-                symbol.bounds, vb,
-                "{name}: bounds were re-fit (art escapes the viewBox?)"
-            );
         }
     }
 }

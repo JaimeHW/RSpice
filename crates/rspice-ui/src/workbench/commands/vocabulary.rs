@@ -41,6 +41,10 @@ impl CommandPlatform {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// `CommandPalette` is the feature's name, the same one the shortcut
+// preferences show the user. Trimming it to `Palette` to stop repeating the
+// enum would rename a thing that exists.
+#[allow(clippy::enum_variant_names)]
 pub enum Command {
     OpenWorkspace(Workspace),
     ProjectLauncher,
@@ -629,11 +633,20 @@ impl Command {
             Self::ResultViewer(crate::workbench::ResultViewer::Waves) => {
                 spec("waveforms", "Open results workspace", "Results")
             }
+            Self::ResultViewer(crate::workbench::ResultViewer::DcSweep) => {
+                spec("result-dc-sweep", "Open DC sweep viewer", "Results")
+            }
             Self::ResultViewer(crate::workbench::ResultViewer::Bode) => {
                 spec("result-bode", "Open Bode viewer", "Results")
             }
             Self::ResultViewer(crate::workbench::ResultViewer::Fft) => {
                 spec("result-fft", "Open FFT viewer", "Results")
+            }
+            Self::ResultViewer(crate::workbench::ResultViewer::HarmonicBalance) => {
+                spec("result-harmonic-balance", "Open HB tones viewer", "Results")
+            }
+            Self::ResultViewer(crate::workbench::ResultViewer::PhaseNoise) => {
+                spec("result-phase-noise", "Open phase-noise viewer", "Results")
             }
             Self::ResultViewer(crate::workbench::ResultViewer::Eye) => {
                 spec("result-eye", "Open eye-diagram viewer", "Results")
@@ -1029,7 +1042,10 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::MeasurementLibrary,
     Command::FamilySlicing,
     Command::ResultViewer(crate::workbench::ResultViewer::Bode),
+    Command::ResultViewer(crate::workbench::ResultViewer::DcSweep),
     Command::ResultViewer(crate::workbench::ResultViewer::Fft),
+    Command::ResultViewer(crate::workbench::ResultViewer::HarmonicBalance),
+    Command::ResultViewer(crate::workbench::ResultViewer::PhaseNoise),
     Command::ResultViewer(crate::workbench::ResultViewer::Eye),
     Command::ResultViewer(crate::workbench::ResultViewer::Hist),
     Command::ResultViewer(crate::workbench::ResultViewer::Op),
@@ -1037,6 +1053,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ResultViewer(crate::workbench::ResultViewer::Contribution),
     Command::ResultViewer(crate::workbench::ResultViewer::TransferFunction),
     Command::ResultViewer(crate::workbench::ResultViewer::Specs),
+    Command::ResultViewer(crate::workbench::ResultViewer::Table),
     Command::ResultViewer(crate::workbench::ResultViewer::Nyquist),
     Command::ResultViewer(crate::workbench::ResultViewer::Smith),
     Command::ResultViewer(crate::workbench::ResultViewer::PoleZero),

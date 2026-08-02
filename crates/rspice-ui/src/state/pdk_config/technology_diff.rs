@@ -397,17 +397,17 @@ fn layer_impact(
     before: Option<&PdkTechnologyLayer>,
     after: Option<&PdkTechnologyLayer>,
 ) -> PdkTechnologyDiffImpact {
-    if kind == PdkTechnologyDiffKind::Changed {
-        if let (Some(before), Some(after)) = (before, after) {
-            let presentation_only = before.name == after.name
-                && before.order == after.order
-                && before.kind == after.kind
-                && before.purposes == after.purposes
-                && before.role == after.role
-                && before.display_rgba != after.display_rgba;
-            if presentation_only {
-                return PdkTechnologyDiffImpact::ReviewRequired;
-            }
+    if kind == PdkTechnologyDiffKind::Changed
+        && let (Some(before), Some(after)) = (before, after)
+    {
+        let presentation_only = before.name == after.name
+            && before.order == after.order
+            && before.kind == after.kind
+            && before.purposes == after.purposes
+            && before.role == after.role
+            && before.display_rgba != after.display_rgba;
+        if presentation_only {
+            return PdkTechnologyDiffImpact::ReviewRequired;
         }
     }
     PdkTechnologyDiffImpact::Breaking

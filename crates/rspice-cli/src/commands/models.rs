@@ -79,8 +79,8 @@ fn list_packs(
     };
 
     println!(
-        "{:<22} {:<10} {:<14} {:>9} {:>9}  {}",
-        "PACK", "CATEGORY", "LICENCE", "MODELS", "SUBCKTS", "NAME"
+        "{:<22} {:<10} {:<14} {:>9} {:>9}  NAME",
+        "PACK", "CATEGORY", "LICENCE", "MODELS", "SUBCKTS"
     );
     for pack in &packs {
         let licence = if pack.redistributable {

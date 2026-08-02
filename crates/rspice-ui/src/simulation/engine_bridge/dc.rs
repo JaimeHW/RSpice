@@ -130,7 +130,7 @@ impl EngineBridge {
         if !device_report.is_empty() {
             result.device_report = Some(device_report);
         }
-        Ok(SimulationResult::DcOp(result))
+        Ok(SimulationResult::DcOp(Box::new(result)))
     }
 
     /// Run DC sweep analysis.
@@ -364,17 +364,18 @@ fn convert_dc_result(
     core_result: &rspice_core::SimulationResult,
     abort: &dyn AbortSignal,
 ) -> Result<DcOpResult, SimulationError> {
-    let mut result = DcOpResult::default();
-
-    result.mna_node_names = core_result.node_names.iter().skip(1).cloned().collect();
-    result.mna_branch_names = core_result.branch_names.clone();
-    result.mna_solution = core_result
-        .node_voltages
-        .iter()
-        .skip(1)
-        .chain(&core_result.branch_currents)
-        .copied()
-        .collect();
+    let mut result = DcOpResult {
+        mna_node_names: core_result.node_names.iter().skip(1).cloned().collect(),
+        mna_branch_names: core_result.branch_names.clone(),
+        mna_solution: core_result
+            .node_voltages
+            .iter()
+            .skip(1)
+            .chain(&core_result.branch_currents)
+            .copied()
+            .collect(),
+        ..Default::default()
+    };
 
     for (i, &voltage) in core_result.node_voltages.iter().enumerate() {
         ensure_not_aborted(abort)?;

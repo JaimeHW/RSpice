@@ -60,6 +60,7 @@ impl FindMatch {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn wrapped(&self) -> bool {
         self.wrapped
     }
@@ -125,6 +126,7 @@ impl ReplaceOutcome {
 /// Find the next exact source range and wrap at the document boundary.
 /// Case-insensitive matching applies Unicode lowercase mappings while still
 /// returning byte offsets into the untouched original text.
+#[cfg(test)]
 pub fn find_in_source(
     source: &str,
     query: &str,

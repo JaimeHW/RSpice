@@ -83,6 +83,7 @@ pub struct VisualizationRasterPalette {
 }
 
 impl VisualizationRasterPalette {
+    #[cfg(test)]
     pub fn new(
         plot_background: Rgb8,
         grid: Rgb8,
@@ -142,6 +143,7 @@ pub struct VisualizationRasterProfile {
 }
 
 impl VisualizationRasterProfile {
+    #[cfg(test)]
     pub fn new(
         pixel_width: u32,
         pixel_height: u32,
@@ -330,6 +332,7 @@ pub struct VisualizationRasterArtifact {
 
 impl VisualizationRasterArtifact {
     #[must_use]
+    #[cfg(test)]
     pub const fn metadata(&self) -> &VisualizationRasterMetadata {
         &self.metadata
     }

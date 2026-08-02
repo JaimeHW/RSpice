@@ -1688,6 +1688,7 @@ mod tests {
         let measurement = rspice_core::MeasureResult::success("gain", 9.5);
         let spec = crate::state::SpecEntry {
             measurement: "GAIN".to_owned(),
+            expression: String::new(),
             min: Some(9.0),
             max: Some(10.0),
             unit: "dB".to_owned(),

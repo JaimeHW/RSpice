@@ -330,6 +330,18 @@ fn pin_row(
         Stroke::new(1.0, t.color.border),
     );
 
+    let selected = draft.selected_pin == Some(index);
+    let pin_label = format!("Pin {}", index + 1);
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            pin_label.clone(),
+        )
+    });
+    theme::paint_focus_ring(ui, &response, rect);
+
     let [order_rect, name_rect, type_rect, side_rect] = pin_column_rects(rect);
     let mut action = response.clicked().then_some(PinAction::Select(index));
     let mut order_ui = ui.new_child(

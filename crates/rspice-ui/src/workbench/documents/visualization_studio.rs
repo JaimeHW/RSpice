@@ -96,10 +96,13 @@ const EXACT_DATA_CARD_PADDING: f32 = 12.0;
 const EXACT_DATA_TABLE_HEIGHT: f32 = 102.0;
 const EXACT_DATA_DOCK_HEIGHT: f32 =
     EXACT_DATA_CARD_PADDING * 2.0 + PANEL_HEADING_HEIGHT + EXACT_DATA_TABLE_HEIGHT;
-const NATIVE_VIEWERS: [ResultViewer; 9] = [
+const NATIVE_VIEWERS: [ResultViewer; 12] = [
     ResultViewer::Waves,
+    ResultViewer::DcSweep,
     ResultViewer::Bode,
     ResultViewer::Fft,
+    ResultViewer::HarmonicBalance,
+    ResultViewer::PhaseNoise,
     ResultViewer::Eye,
     ResultViewer::Hist,
     ResultViewer::Contribution,
@@ -1209,10 +1212,10 @@ struct ResultsComparisonSource {
     viewer: ResultViewer,
 }
 
-fn retained_document_analysis<'a>(
-    run: &'a SimulationRun,
+fn retained_document_analysis(
+    run: &SimulationRun,
     source_id: AnalysisInstanceId,
-) -> Option<&'a AnalysisResult> {
+) -> Option<&AnalysisResult> {
     run.analyses.iter().find(|analysis| {
         analysis.provenance().map_or_else(
             || {
@@ -1226,6 +1229,20 @@ fn retained_document_analysis<'a>(
             },
         )
     })
+}
+
+fn project_catalog_viewer_for_analysis(
+    viewer: ResultViewer,
+    analysis: &AnalysisResult,
+) -> ResultViewer {
+    if viewer == ResultViewer::Waves && analysis.analysis_type == AnalysisType::DcSweep {
+        ResultViewer::DcSweep
+    } else if viewer == ResultViewer::Fft && analysis.analysis_type == AnalysisType::HarmonicBalance
+    {
+        ResultViewer::HarmonicBalance
+    } else {
+        viewer
+    }
 }
 
 fn active_results_comparison_source(state: &AppState) -> Result<ResultsComparisonSource, String> {
@@ -1307,6 +1324,7 @@ fn active_results_comparison_source(state: &AppState) -> Result<ResultsCompariso
             .first()
             .ok_or_else(|| "The active result dataset contains no analysis.".to_owned())?
     };
+    viewer = project_catalog_viewer_for_analysis(viewer, analysis);
     Ok(ResultsComparisonSource {
         dataset_id,
         analysis_sequence: analysis.id,
@@ -1991,12 +2009,13 @@ fn resolved_viewer_availability_for_binding(
         ViewerCompatibility::MissingExternalCapability { capability_id } => {
             return Err(format!("Requires {capability_id} result capability"));
         }
-        ViewerCompatibility::UnknownDocument | ViewerCompatibility::UnknownQuickMode => {
+        ViewerCompatibility::UnknownDocument => {
             return Err("Viewer identity is not registered".to_owned());
         }
     }
     let viewer = renderer_for_viewer_document(definition.id)
         .ok_or_else(|| "No exact Rust renderer is registered for this viewer".to_owned())?;
+    let viewer = project_catalog_viewer_for_analysis(viewer, analysis);
     let binding_is_active = state
         .simulation
         .active_run()
@@ -2006,7 +2025,7 @@ fn resolved_viewer_availability_for_binding(
             .active_analysis()
             .is_some_and(|active| active.id == analysis_sequence);
     let available = match viewer {
-        ResultViewer::Waves => !analysis.waveforms.is_empty(),
+        ResultViewer::Waves | ResultViewer::DcSweep => !analysis.waveforms.is_empty(),
         ResultViewer::Bode => {
             crate::state::ac_bode_summary_for_selection(run, Some(analysis_index)).is_some()
         }
@@ -2015,6 +2034,10 @@ fn resolved_viewer_availability_for_binding(
                 analysis.analysis_type,
             ) && !analysis.waveforms.is_empty()
         }
+        ResultViewer::HarmonicBalance => {
+            result_document::harmonic_balance_analysis_is_renderable(analysis)
+        }
+        ResultViewer::PhaseNoise => result_document::phase_noise_analysis_is_renderable(analysis),
         ResultViewer::Specs => {
             !analysis.measurements.is_empty() || !state.workspace.specs.is_empty()
         }
@@ -2054,6 +2077,7 @@ fn renderer_for_viewer_document(id: &str) -> Option<ResultViewer> {
         "viewer-waveform" => Some(ResultViewer::Waves),
         "viewer-bode" => Some(ResultViewer::Bode),
         "viewer-spectrum" => Some(ResultViewer::Fft),
+        "viewer-phase-noise" => Some(ResultViewer::PhaseNoise),
         "viewer-smith" => Some(ResultViewer::Smith),
         "viewer-table" => Some(ResultViewer::Specs),
         "viewer-histogram" => Some(ResultViewer::Hist),
@@ -2068,9 +2092,12 @@ fn renderer_for_viewer_document(id: &str) -> Option<ResultViewer> {
 fn viewer_document_id(viewer: ResultViewer) -> Option<&'static str> {
     Some(match viewer {
         ResultViewer::Manifest => return None,
-        ResultViewer::Waves => "viewer-waveform",
+        ResultViewer::Waves | ResultViewer::DcSweep => "viewer-waveform",
         ResultViewer::Bode | ResultViewer::Nyquist => "viewer-bode",
-        ResultViewer::Fft | ResultViewer::NoiseContrib => "viewer-spectrum",
+        ResultViewer::Fft | ResultViewer::HarmonicBalance | ResultViewer::NoiseContrib => {
+            "viewer-spectrum"
+        }
+        ResultViewer::PhaseNoise => "viewer-phase-noise",
         ResultViewer::Eye => "eye-viewer",
         ResultViewer::Hist => "viewer-histogram",
         ResultViewer::Op | ResultViewer::Specs | ResultViewer::Table => "viewer-table",
@@ -2157,7 +2184,6 @@ fn add_viewer_pane(app: &mut RSpiceApp, document_id: &str, viewer: ResultViewer)
     );
 }
 
-#[allow(clippy::too_many_arguments)]
 fn add_viewer_pane_bound(
     app: &mut RSpiceApp,
     document_id: &str,
@@ -2368,6 +2394,7 @@ mod integrity_scan_tests {
         let mut app = app_with_exact_source();
         app.state.workspace.specs.push(SpecEntry {
             measurement: "v(OUT)".to_owned(),
+            expression: String::new(),
             min: Some(-2.0),
             max: Some(5.0),
             unit: "V".to_owned(),
@@ -2387,6 +2414,7 @@ mod integrity_scan_tests {
         let mut app = app_with_exact_source();
         app.state.workspace.specs.push(SpecEntry {
             measurement: "V(out)".to_owned(),
+            expression: String::new(),
             min: Some(-2.0),
             max: Some(5.0),
             unit: "V".to_owned(),
@@ -2416,6 +2444,27 @@ mod integrity_scan_tests {
                 },
             ),
             ViewerCompatibility::Compatible
+        );
+    }
+
+    #[test]
+    fn comparison_source_projection_preserves_dc_and_hb_specialist_modes() {
+        let dc = AnalysisResult::new(1, AnalysisType::DcSweep, "DC");
+        assert_eq!(
+            project_catalog_viewer_for_analysis(ResultViewer::Waves, &dc),
+            ResultViewer::DcSweep
+        );
+
+        let hb = AnalysisResult::new(2, AnalysisType::HarmonicBalance, "HB");
+        assert_eq!(
+            project_catalog_viewer_for_analysis(ResultViewer::Fft, &hb),
+            ResultViewer::HarmonicBalance
+        );
+
+        let transient = AnalysisResult::new(3, AnalysisType::Transient, "TRAN");
+        assert_eq!(
+            project_catalog_viewer_for_analysis(ResultViewer::Waves, &transient),
+            ResultViewer::Waves
         );
     }
 

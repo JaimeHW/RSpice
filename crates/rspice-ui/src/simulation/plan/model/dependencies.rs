@@ -106,6 +106,7 @@ impl SimulationPlan {
     /// Deterministically bind every required role to the latest matching,
     /// enabled instance that appears earlier. Unresolved roles remain explicit
     /// validation issues rather than making this convenience command partial.
+    #[cfg(test)]
     pub fn auto_bind_dependencies(
         &mut self,
         dependent: AnalysisInstanceId,
@@ -208,6 +209,7 @@ impl SimulationPlan {
     /// The complete repair commits as one revision and one lifecycle receipt.
     /// Any identity, lifecycle, revision, or graph failure leaves the original
     /// plan unchanged.
+    #[cfg(test)]
     pub fn repair_dependencies(
         &mut self,
         dependent: AnalysisInstanceId,

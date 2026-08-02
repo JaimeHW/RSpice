@@ -30,11 +30,14 @@ pub use merge::{
     ShortcutImportReceipt, ShortcutMergePolicy, apply_shortcut_import, plan_shortcut_import,
     rollback_shortcut_import, shortcut_library_digest,
 };
-pub use projection::{
-    ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model,
-    serialize_shortcut_reference_json,
-};
-pub use schema::{DecodedShortcutArtifact, decode_shortcut_artifact_json};
+pub use projection::{ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model};
+pub use schema::DecodedShortcutArtifact;
+// Both serializers are reached through their own modules by the artifact
+// writers; only the tests name them from here, and the modules are private.
+#[cfg(test)]
+pub use projection::serialize_shortcut_reference_json;
+#[cfg(test)]
+pub use schema::decode_shortcut_artifact_json;
 pub use vscode::{
     DetectedShortcutArtifact, VscodeAdapterError, VscodeHostPlatform, VscodeImportReport,
     detect_shortcut_artifact,

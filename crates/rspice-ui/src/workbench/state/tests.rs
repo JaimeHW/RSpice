@@ -124,6 +124,18 @@ fn legacy_workbench_defaults_the_visualization_document() {
 }
 
 #[test]
+fn ordinary_noise_uses_the_frequency_document_identity() {
+    assert_eq!(
+        result_viewer_document_id(super::super::ResultViewer::NoiseContrib),
+        Some("viewer-bode")
+    );
+    assert_eq!(
+        result_viewer_document_id(super::super::ResultViewer::Fft),
+        Some("viewer-spectrum")
+    );
+}
+
+#[test]
 fn restored_visualization_document_repairs_bounds_and_identities() {
     use crate::product::DatasetId;
     use crate::workbench::documents::visualization_studio::{

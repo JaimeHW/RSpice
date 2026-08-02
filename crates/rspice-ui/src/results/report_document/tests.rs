@@ -1579,10 +1579,7 @@ fn schema_three_migration_rejects_mislabeled_schema_four_page_policies() {
     let mut mislabeled = serde_json::to_value(document).unwrap();
     mislabeled["schema_version"] = serde_json::json!(3);
 
-    assert!(matches!(
-        serde_json::from_value::<ReportDocument>(mislabeled),
-        Err(_)
-    ));
+    assert!(serde_json::from_value::<ReportDocument>(mislabeled).is_err());
 }
 
 #[test]

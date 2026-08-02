@@ -40,6 +40,12 @@
 
 // Temporary allowance for existing external/SPICE naming conventions.
 #![allow(non_snake_case)]
+// A rendering or transaction entry point takes one parameter per thing the
+// caller independently varies: the `Ui`, the state it may mutate, the layout
+// it must respect, the identity it acts on. Fifty call sites had already
+// reached that conclusion one `#[allow]` at a time; this states it once. It
+// is not licence to grow a signature that could take a struct.
+#![allow(clippy::too_many_arguments)]
 // NOTE: this crate previously carried a blanket `#![allow(deprecated)]`,
 // hiding the egui 0.34 migration entirely. It is left off on purpose.
 //

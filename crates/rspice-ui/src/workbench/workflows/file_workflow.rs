@@ -94,6 +94,7 @@ impl FileWorkflowIo for NativeFileWorkflowIo {
 }
 
 /// Reset the current schematic to a new empty document.
+#[cfg(test)]
 pub(crate) fn create_new_schematic(state: &mut AppState) {
     let schematic = state.new_schematic_document();
     replace_active_schematic_document(state, schematic);
@@ -246,6 +247,7 @@ pub(crate) fn open_schematic_from_dialog_with_io(
         Ok(path) => {
             let _ = load_schematic_from_path_with_io(state, &path, io);
         }
+        #[cfg(not(target_arch = "wasm32"))]
         Err(SchematicIoError::Cancelled) => {
             // User cancelled - no message needed
         }
@@ -421,6 +423,7 @@ pub(crate) fn save_schematic_as_with_io(
 
     match io.show_save_dialog(default_name.as_deref()) {
         Ok(path) => save_schematic_to_path_with_io(state, &path, true, io),
+        #[cfg(not(target_arch = "wasm32"))]
         Err(SchematicIoError::Cancelled) => {
             // User cancelled - no message needed
             false

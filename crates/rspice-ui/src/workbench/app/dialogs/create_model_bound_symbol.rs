@@ -7,9 +7,7 @@ mod controller;
 mod render;
 mod state;
 
-pub(crate) use controller::{
-    open_create_model_bound_symbol_dialog, open_create_subcircuit_bound_symbol_dialog,
-};
+pub(crate) use controller::open_create_model_bound_symbol_dialog;
 pub(crate) use state::CreateModelBoundSymbolDialogState;
 
 #[cfg(test)]

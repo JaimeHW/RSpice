@@ -26,7 +26,7 @@ const EYEBROW: &str = "NEW PROJECTS \u{00b7} NEW SHEETS \u{00b7} INHERITANCE";
 const TITLE: &str = "Drawing-sheet defaults";
 const DESCRIPTION: &str = "Choose what future projects and sheets start with. Existing authored sheets are never rewritten by changing a default.";
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub(crate) struct DrawingSheetDefaultsDialogState {
     pub(crate) open: bool,
     edit: Option<SchematicEditAuthority>,
@@ -36,21 +36,6 @@ pub(crate) struct DrawingSheetDefaultsDialogState {
     baseline_personal: DrawingSheetPersonalPreferences,
     draft_personal: DrawingSheetPersonalPreferences,
     error: Option<String>,
-}
-
-impl Default for DrawingSheetDefaultsDialogState {
-    fn default() -> Self {
-        Self {
-            open: false,
-            edit: None,
-            catalog_revision: 0,
-            baseline_project: DrawingSheetProjectSettings::default(),
-            draft_project: DrawingSheetProjectSettings::default(),
-            baseline_personal: DrawingSheetPersonalPreferences::default(),
-            draft_personal: DrawingSheetPersonalPreferences::default(),
-            error: None,
-        }
-    }
 }
 
 pub(crate) fn open_drawing_sheet_defaults(state: &mut AppState) -> bool {

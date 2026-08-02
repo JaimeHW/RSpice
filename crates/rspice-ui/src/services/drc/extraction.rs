@@ -13,77 +13,6 @@ use crate::state::{
     Component, ComponentType, Point, PropertyDefinition, PropertyRegistry, PropertyValue,
 };
 
-/// Extract legacy geometry-only DRC data from a `SchematicState`.
-///
-/// This compatibility projection intentionally omits explicit junctions. New
-/// schematic validation code must use [`extract_drc_data_with_junctions`] with
-/// [`DrcChecker::check_connectivity_with_junctions`]; otherwise marked
-/// interior/interior crossings are evaluated as disconnected.
-///
-/// # Performance
-/// - O(n) iteration over components
-/// - O(n) iteration over wires  
-/// - O(n) iteration over net labels
-///
-/// # Example
-/// ```ignore
-/// use rspice_ui::services::drc::{DrcChecker, extract_drc_data_with_junctions};
-///
-/// let (components, wires, net_labels, junctions) =
-///     extract_drc_data_with_junctions(&schematic);
-/// let result = DrcChecker::new().check_connectivity_with_junctions(
-///     &components, &wires, &net_labels, &junctions,
-/// );
-/// ```
-pub fn extract_drc_data(
-    schematic: &crate::state::SchematicState,
-) -> (Vec<ComponentInfo>, Vec<WireInfo>, Vec<NetLabelInfo>) {
-    let (components, wires, net_labels, _) = extract_drc_data_with_junctions(schematic);
-    (components, wires, net_labels)
-}
-
-/// Extract DRC data including persisted explicit-junction positions.
-pub fn extract_drc_data_with_junctions(
-    schematic: &crate::state::SchematicState,
-) -> (
-    Vec<ComponentInfo>,
-    Vec<WireInfo>,
-    Vec<NetLabelInfo>,
-    Vec<JunctionInfo>,
-) {
-    extract_drc_data_with_terminals_and_junctions(
-        schematic,
-        |comp| {
-            comp.terminal_positions()
-                .into_iter()
-                .map(|(name, pos)| (name.to_owned(), pos))
-                .collect()
-        },
-        |comp| {
-            if comp.kind != ComponentType::CellInstance {
-                return Some(true);
-            }
-            let Some(binding) = comp.library_cell.as_ref() else {
-                return Some(false);
-            };
-            (binding.source_path.is_some() || binding.netlist_template.is_some()).then_some(true)
-        },
-    )
-}
-
-/// Extract legacy junction-blind DRC data with project-cell symbol resolution.
-///
-/// Prefer [`extract_drc_data_with_hierarchy_and_junctions`] for schematic
-/// validation so persisted explicit crossings are retained.
-pub fn extract_drc_data_with_hierarchy(
-    schematic: &crate::state::SchematicState,
-    hierarchy: &HierarchySource<'_>,
-) -> (Vec<ComponentInfo>, Vec<WireInfo>, Vec<NetLabelInfo>) {
-    let (components, wires, net_labels, _) =
-        extract_drc_data_with_hierarchy_and_junctions(schematic, hierarchy);
-    (components, wires, net_labels)
-}
-
 /// Extract hierarchy-resolved DRC data including explicit junctions.
 pub fn extract_drc_data_with_hierarchy_and_junctions(
     schematic: &crate::state::SchematicState,
@@ -406,51 +335,6 @@ fn exact_numeric_constant(definition: &PropertyDefinition, value: &PropertyValue
     .filter(|value| value.is_finite())
 }
 
-/// Run a complete DRC check on a schematic.
-///
-/// This is a convenience function that extracts data and runs the check
-/// in a single call.
-///
-/// # Example
-/// ```ignore
-/// use rspice_ui::services::drc::run_drc_check;
-///
-/// let result = run_drc_check(&schematic);
-/// if result.passed() {
-///     println!("DRC passed!");
-/// }
-/// ```
-pub fn run_drc_check(schematic: &crate::state::SchematicState) -> DrcResult {
-    let start = crate::time_compat::Instant::now();
-    let (components, wires, net_labels, junctions) = extract_drc_data_with_junctions(schematic);
-    let mut checker = DrcChecker::new();
-    checker.set_net_naming_policy(schematic.document_policy.net_naming);
-    let mut result =
-        checker.check_connectivity_with_junctions(&components, &wires, &net_labels, &junctions);
-    append_bus_violations(schematic, &mut result, &Default::default());
-    result.completed = true;
-    result.duration_ms = start.elapsed().as_millis() as u64;
-    result
-}
-
-/// Run a complete DRC check with custom configuration.
-pub fn run_drc_check_with_config(
-    schematic: &crate::state::SchematicState,
-    config: DrcConfig,
-) -> DrcResult {
-    let start = crate::time_compat::Instant::now();
-    let (components, wires, net_labels, junctions) = extract_drc_data_with_junctions(schematic);
-    let severity_overrides = config.severity_overrides.clone();
-    let mut checker = DrcChecker::with_config(config);
-    checker.set_net_naming_policy(schematic.document_policy.net_naming);
-    let mut result =
-        checker.check_connectivity_with_junctions(&components, &wires, &net_labels, &junctions);
-    append_bus_violations(schematic, &mut result, &severity_overrides);
-    result.completed = true;
-    result.duration_ms = start.elapsed().as_millis() as u64;
-    result
-}
-
 /// Run a configured DRC check with project-cell symbol resolution enabled.
 pub fn run_drc_check_with_hierarchy_and_config(
     schematic: &crate::state::SchematicState,
@@ -578,7 +462,8 @@ mod tests {
         let mut schematic = SchematicState::default();
         schematic.components.push(authored_amp_instance());
 
-        let (components, _, _) = extract_drc_data_with_hierarchy(&schematic, &hierarchy);
+        let (components, _, _, _) =
+            extract_drc_data_with_hierarchy_and_junctions(&schematic, &hierarchy);
         let pins: HashMap<_, _> = components[0]
             .pins
             .iter()
@@ -636,7 +521,8 @@ mod tests {
         resistor.params = "m=0".to_owned();
         schematic.components.push(resistor);
 
-        let (components, _, _) = extract_drc_data(&schematic);
+        let (components, _, _, _) =
+            extract_drc_data_with_hierarchy_and_junctions(&schematic, &HierarchySource::empty());
         assert!(components[0].missing_parameters.is_empty());
         assert_eq!(
             components[0].out_of_range_parameters,
@@ -651,7 +537,11 @@ mod tests {
     }
 
     #[test]
-    fn unknown_project_cell_requires_hierarchy_resolution_authority() {
+    /// A cell the hierarchy cannot resolve is reported as definitively
+    /// unknown rather than left undetermined, so the rule that follows can
+    /// raise it. `component_known` is only ever `Some` because every caller
+    /// reaches extraction through a hierarchy-resolved entry point.
+    fn unresolvable_project_cell_is_reported_as_definitively_unknown() {
         let binding = LibraryCellInstance::new("work", "missing", "schematic");
         let mut instance = Component::new(30, ComponentType::CellInstance, Point::origin())
             .with_library_cell(binding);
@@ -659,11 +549,9 @@ mod tests {
         let mut schematic = SchematicState::default();
         schematic.components.push(instance);
 
-        let (flat, _, _) = extract_drc_data(&schematic);
-        assert_eq!(flat[0].component_known, None);
-
         let hierarchy = HierarchySource::empty();
-        let (resolved, _, _) = extract_drc_data_with_hierarchy(&schematic, &hierarchy);
+        let (resolved, _, _, _) =
+            extract_drc_data_with_hierarchy_and_junctions(&schematic, &hierarchy);
         assert_eq!(resolved[0].component_known, Some(false));
     }
 
@@ -673,7 +561,8 @@ mod tests {
         schematic.add_junction(Point::new(40, -20));
         schematic.add_junction(Point::new(0, 0));
 
-        let (_, _, _, junctions) = extract_drc_data_with_junctions(&schematic);
+        let (_, _, _, junctions) =
+            extract_drc_data_with_hierarchy_and_junctions(&schematic, &HierarchySource::empty());
 
         assert_eq!(
             junctions,
@@ -715,7 +604,8 @@ mod tests {
             .severity_overrides
             .insert(DrcViolationType::BusRangeConflict, DrcSeverity::Critical);
 
-        let result = run_drc_check_with_config(&schematic, config);
+        let result =
+            run_drc_check_with_hierarchy_and_config(&schematic, &HierarchySource::empty(), config);
         let conflict = result
             .violations()
             .iter()
@@ -795,8 +685,9 @@ mod tests {
         schematic
             .buses
             .push(Bus::segment(u64::MAX, Point::new(0, 0), Point::new(20, 0), None).unwrap());
-        let result = run_drc_check_with_config(
+        let result = run_drc_check_with_hierarchy_and_config(
             &schematic,
+            &HierarchySource::empty(),
             DrcConfig {
                 check_missing_ground: false,
                 check_floating_nodes: false,

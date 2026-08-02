@@ -12,9 +12,15 @@ use super::*;
 pub(super) const READOUT_HEADER_H: f32 = 26.0;
 /// Height of one per-trace row in the readout strip.
 pub(super) const READOUT_ROW_H: f32 = 20.0;
-/// Most trace rows the strip will show before it stops growing.
-pub(super) const READOUT_TRACE_LIMIT: usize = 4;
+/// Tallest scroll viewport owned by the dock body.
+pub(super) const READOUT_BODY_MAX_H: f32 = 212.0;
+/// Tallest complete dock: the fixed header plus its independently capped body.
+pub(super) const READOUT_MAX_H: f32 = READOUT_HEADER_H + READOUT_BODY_MAX_H;
 pub(super) const READOUT_PAD_X: f32 = 10.0;
+const READOUT_DESKTOP_SPLIT_MIN_W: f32 = 680.0;
+const READOUT_COLUMN_SEAM: f32 = 1.0;
+const CURSOR_TABLE_MIN_W: f32 = 660.0;
+const MARKER_EMPTY_H: f32 = 32.0;
 
 /// Traces the readout strip will report for the cursor's strip.
 pub(super) fn readout_trace_count(state: &AppState) -> usize {
@@ -31,14 +37,11 @@ pub(super) fn readout_trace_count(state: &AppState) -> usize {
                 .iter()
                 .filter(|waveform| waveform.visible)
                 .count()
-                .min(READOUT_TRACE_LIMIT)
         })
 }
 
 /// Height of one marker row.
 pub(super) const MARKER_ROW_H: f32 = 22.0;
-/// Most marker rows the strip will show before it stops growing.
-pub(super) const MARKER_ROW_LIMIT: usize = 4;
 
 /// Analysis indices whose strips are on screen right now.
 ///
@@ -75,20 +78,61 @@ pub(super) fn visible_markers(state: &AppState) -> Vec<&ResultMarker> {
 
 /// Exact height the readout strip needs, or zero when it stands down.
 ///
-/// The strip is content-fit by design: it is a readout, not a dock, so it
-/// never reserves space for rows it has nothing to put in. Three states are
-/// reachable — the full cursor readout, a markers-only strip when markers
-/// exist without cursors, and no strip at all.
-pub fn readout_strip_height(state: &AppState) -> f32 {
-    let mut height = 0.0;
-    if state.ui.results.cursor_readout_active() {
-        height += READOUT_HEADER_H + readout_trace_count(state) as f32 * READOUT_ROW_H;
+/// The dock is content-fit up to a 212 px body, then its one body viewport
+/// scrolls. Expanded cursor/marker content, marker-only, collapsed-header,
+/// and no-strip states remain distinct.
+fn cursor_target_available(state: &AppState) -> bool {
+    state.ui.results.cursor_readout_active()
+        && state
+            .ui
+            .results
+            .cursor_strip
+            .and_then(|index| {
+                state
+                    .simulation
+                    .active_run()
+                    .and_then(|run| run.analyses.get(index))
+            })
+            .is_some()
+}
+
+fn cursor_body_height(state: &AppState) -> f32 {
+    if !cursor_target_available(state) {
+        return 0.0;
     }
+    // One column-header row, one X-domain row, then every visible trace row.
+    (2 + readout_trace_count(state)) as f32 * READOUT_ROW_H
+}
+
+pub(super) fn marker_body_height(state: &AppState) -> f32 {
     let markers = visible_markers(state).len();
     if markers > 0 {
-        height += READOUT_HEADER_H + markers.min(MARKER_ROW_LIMIT) as f32 * MARKER_ROW_H;
+        markers as f32 * MARKER_ROW_H
+    } else if cursor_target_available(state) {
+        MARKER_EMPTY_H
+    } else {
+        0.0
     }
-    height
+}
+
+fn readout_body_content_height(state: &AppState) -> f32 {
+    cursor_body_height(state).max(marker_body_height(state))
+}
+
+pub(super) fn readout_columns_side_by_side(width: f32, cursor: bool, markers: bool) -> bool {
+    cursor && markers && width >= READOUT_DESKTOP_SPLIT_MIN_W
+}
+
+pub fn readout_strip_height(state: &AppState) -> f32 {
+    let cursor = state.ui.results.cursor_readout_active();
+    let markers = !visible_markers(state).is_empty();
+    if !cursor && !markers {
+        return 0.0;
+    }
+    if state.ui.results.readout_collapsed {
+        return READOUT_HEADER_H;
+    }
+    (READOUT_HEADER_H + readout_body_content_height(state)).min(READOUT_MAX_H)
 }
 
 /// The cursor readout: one X row naming A, B and Δ, then the value each
@@ -108,35 +152,179 @@ pub fn readout_strip(ui: &mut Ui, state: &mut AppState, height: f32) {
     ui.painter()
         .hline(rect.x_range(), rect.top(), egui::Stroke::new(1.0, c.border));
 
-    let cursor_bottom = cursor_readout_section(ui, state, rect);
-    let marker_rect = egui::Rect::from_min_max(
-        egui::pos2(rect.left(), cursor_bottom),
-        egui::pos2(rect.right(), rect.bottom()),
+    let header = egui::Rect::from_min_max(
+        rect.min,
+        egui::pos2(
+            rect.right(),
+            (rect.top() + READOUT_HEADER_H).min(rect.bottom()),
+        ),
     );
-    if marker_rect.height() > 1.0 {
-        if cursor_bottom > rect.top() {
-            ui.painter().hline(
-                rect.x_range(),
-                cursor_bottom,
-                egui::Stroke::new(1.0, c.border),
+    readout_header(ui, state, header);
+    if state.ui.results.readout_collapsed || rect.bottom() <= header.bottom() {
+        return;
+    }
+
+    let body = egui::Rect::from_min_max(header.left_bottom(), rect.right_bottom());
+    ui.painter()
+        .hline(body.x_range(), body.top(), egui::Stroke::new(1.0, c.border));
+    let mut body_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt("results-readout-body")
+            .max_rect(body)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    body_ui.set_clip_rect(body);
+    egui::ScrollArea::vertical()
+        .id_salt("rspice.results.readout")
+        .auto_shrink([false, false])
+        .show(&mut body_ui, |ui| readout_body(ui, state));
+}
+
+fn readout_header(ui: &mut Ui, state: &mut AppState, rect: egui::Rect) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let cursor = state.ui.results.cursor_readout_active();
+    let trace_count = if cursor {
+        readout_trace_count(state)
+    } else {
+        0
+    };
+    let marker_count = visible_markers(state).len();
+    let title = if cursor {
+        "Cursors & markers"
+    } else {
+        "Markers"
+    };
+    let count = if cursor {
+        format!(
+            "{trace_count} trace{} · {marker_count} marker{}",
+            if trace_count == 1 { "" } else { "s" },
+            if marker_count == 1 { "" } else { "s" }
+        )
+    } else {
+        format!(
+            "{marker_count} marker{}",
+            if marker_count == 1 { "" } else { "s" }
+        )
+    };
+    let mut header_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt("results-readout-header")
+            .max_rect(rect.shrink2(egui::vec2(8.0, 0.0)))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    header_ui.set_clip_rect(rect);
+    header_ui.spacing_mut().item_spacing.x = 6.0;
+    header_ui.label(
+        egui::RichText::new(title)
+            .font(theme::sans(tokens::FS_1, FontWeight::Medium))
+            .color(c.text),
+    );
+    header_ui.label(
+        egui::RichText::new(count)
+            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+            .color(c.text_faint)
+            .background_color(c.bg_inset),
+    );
+    header_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        let collapsed = state.ui.results.readout_collapsed;
+        let label = if collapsed {
+            "Expand readout"
+        } else {
+            "Collapse readout"
+        };
+        if ui
+            .add_sized(
+                egui::vec2(24.0, 22.0),
+                egui::Button::new(if collapsed { "▴" } else { "▾" }).frame(false),
+            )
+            .on_hover_text(label)
+            .clicked()
+        {
+            state.ui.results.readout_collapsed = !collapsed;
+        }
+    });
+}
+
+fn readout_body(ui: &mut Ui, state: &mut AppState) {
+    let cursor = cursor_target_available(state);
+    // Cursor mode keeps an explicit markers panel even when it is empty.
+    let markers = !visible_markers(state).is_empty() || cursor;
+    let width = ui.available_width();
+    if readout_columns_side_by_side(width, cursor, markers) {
+        let marker_width = (width * 0.42).clamp(240.0, 720.0).min(width);
+        let cursor_width = (width - marker_width - READOUT_COLUMN_SEAM).max(0.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.allocate_ui_with_layout(
+                egui::vec2(cursor_width, cursor_body_height(state)),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| cursor_readout_section(ui, state),
+            );
+            let (seam, _) = ui.allocate_exact_size(
+                egui::vec2(READOUT_COLUMN_SEAM, readout_body_content_height(state)),
+                egui::Sense::hover(),
+            );
+            ui.painter()
+                .rect_filled(seam, 0.0, Tokens::get(ui.ctx()).color.border);
+            ui.allocate_ui_with_layout(
+                egui::vec2(marker_width, marker_body_height(state)),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| marker_section(ui, state),
+            );
+        });
+    } else {
+        if cursor {
+            ui.allocate_ui_with_layout(
+                egui::vec2(width, cursor_body_height(state)),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| cursor_readout_section(ui, state),
             );
         }
-        marker_section(ui, state, marker_rect);
+        if markers {
+            if cursor {
+                let (seam, _) = ui.allocate_exact_size(
+                    egui::vec2(width, READOUT_COLUMN_SEAM),
+                    egui::Sense::hover(),
+                );
+                ui.painter()
+                    .rect_filled(seam, 0.0, Tokens::get(ui.ctx()).color.border);
+            }
+            ui.allocate_ui_with_layout(
+                egui::vec2(width, marker_body_height(state)),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| marker_section(ui, state),
+            );
+        }
     }
 }
 
-/// The A/B half of the strip. Returns the Y the marker section starts at,
-/// which equals the strip top when there is no cursor readout to draw.
-pub(super) fn cursor_readout_section(ui: &mut Ui, state: &mut AppState, rect: egui::Rect) -> f32 {
+/// The A/B table: one X row, then the value of every visible trace.
+pub(super) fn cursor_readout_section(ui: &mut Ui, state: &mut AppState) {
+    let table_width = ui.available_width().max(CURSOR_TABLE_MIN_W);
+    let table_height = cursor_body_height(state);
+    egui::ScrollArea::horizontal()
+        .id_salt("rspice.results.cursor-readout-horizontal")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.allocate_ui_with_layout(
+                egui::vec2(table_width, table_height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.set_min_height(table_height);
+                    cursor_readout_table(ui, state);
+                },
+            );
+        });
+}
+
+fn cursor_readout_table(ui: &mut Ui, state: &mut AppState) {
+    let rect = ui.available_rect_before_wrap();
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     if !state.ui.results.cursor_readout_active() {
-        return rect.top();
+        return;
     }
-    // Read the reserved height from the same source as `readout_strip_height`
-    // so the marker section can never start off the end of the strip.
-    let section_bottom =
-        rect.top() + READOUT_HEADER_H + readout_trace_count(state) as f32 * READOUT_ROW_H;
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let significant_digits = usize::from(presentation.displayed_significant_digits().get());
@@ -152,66 +340,66 @@ pub(super) fn cursor_readout_section(ui: &mut Ui, state: &mut AppState, rect: eg
         .cursor_strip
         .and_then(|index| models.iter().find(|model| model.analysis_index == index))
     else {
-        return rect.top();
+        return;
     };
     let cursors = state.ui.results.cursors;
     let Some(a) = cursors.a else {
-        return rect.top();
+        return;
     };
 
-    // Header: the X positions and their separation.
-    let header = egui::Rect::from_min_max(
-        rect.min,
-        egui::pos2(rect.right(), rect.top() + READOUT_HEADER_H),
-    );
-    let painter = ui.painter().with_clip_rect(header);
-    let mut x = header.left() + READOUT_PAD_X;
-    let mut chip = |text: String, color: egui::Color32, painter: &egui::Painter| {
-        let galley =
-            painter.layout_no_wrap(text, theme::mono(tokens::FS_0, FontWeight::Regular), color);
-        painter.galley(
-            egui::pos2(x, header.center().y - galley.size().y * 0.5),
-            galley.clone(),
-            color,
-        );
-        x += galley.size().x + 14.0;
-    };
-    chip("CURSORS".to_owned(), c.text_faint, &painter);
-    chip(
-        format!(
-            "A  {} = {}",
-            model.x_label(),
-            model.format_x(a, significant_digits, quantity_policy)
-        ),
-        c.accent,
-        &painter,
-    );
-    if let Some(b) = cursors.b {
-        chip(
-            format!(
-                "B  {} = {}",
-                model.x_label(),
-                model.format_x(b, significant_digits, quantity_policy)
-            ),
-            c.traces[4],
-            &painter,
-        );
-        chip(
-            format!(
-                "Δ  {}",
-                x_separation(model, a, b, significant_digits, quantity_policy)
-            ),
-            c.text,
-            &painter,
-        );
-        if let Some(slope) = slope_between(model, a, b, presentation) {
-            chip(format!("slope  {slope}"), c.text_dim, &painter);
-        }
-    } else {
-        chip("click again to place B".to_owned(), c.text_faint, &painter);
-    }
+    // Fixed columns keep focus/hover/value-length changes from shifting
+    // neighboring fields. At compact widths the table scrolls horizontally.
+    let name_column = (rect.width() * 0.24).clamp(150.0, 220.0);
+    let value_column = ((rect.width() - name_column - READOUT_PAD_X * 2.0) / 4.0).max(108.0);
+    let columns = [
+        rect.left() + READOUT_PAD_X,
+        rect.left() + READOUT_PAD_X + name_column,
+        rect.left() + READOUT_PAD_X + name_column + value_column,
+        rect.left() + READOUT_PAD_X + name_column + value_column * 2.0,
+        rect.left() + READOUT_PAD_X + name_column + value_column * 3.0,
+    ];
+    let draw_row =
+        |row_index: usize, values: [&str; 5], colors: [egui::Color32; 5], font: egui::FontId| {
+            let top = rect.top() + row_index as f32 * READOUT_ROW_H;
+            let row = egui::Rect::from_min_max(
+                egui::pos2(rect.left(), top),
+                egui::pos2(rect.right(), top + READOUT_ROW_H),
+            );
+            let painter = ui.painter().with_clip_rect(row);
+            for ((text, x), color) in values.into_iter().zip(columns).zip(colors) {
+                painter.text(
+                    egui::pos2(x, row.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    text,
+                    font.clone(),
+                    color,
+                );
+            }
+        };
 
-    // Per-trace values at A, at B, and their difference.
+    draw_row(
+        0,
+        ["TRACE", "A", "B", "\u{0394}", "SLOPE"],
+        [c.text_faint; 5],
+        theme::mono(tokens::FS_0, FontWeight::SemiBold),
+    );
+    let a_x = model.format_x(a, significant_digits, quantity_policy);
+    let b_x = cursors
+        .b
+        .map(|b| model.format_x(b, significant_digits, quantity_policy))
+        .unwrap_or_else(|| "Place cursor B".to_owned());
+    let delta_x = cursors
+        .b
+        .map(|b| x_separation(model, a, b, significant_digits, quantity_policy))
+        .unwrap_or_default();
+    draw_row(
+        1,
+        [model.x_label(), &a_x, &b_x, &delta_x, ""],
+        [c.text_dim, c.accent, c.traces[4], c.text, c.text_faint],
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+    );
+
+    // Per-trace values at A and B, their difference, and their own slope.
     let rows = value_rows(model, a, presentation, quantity_policy);
     let b_rows = cursors
         .b
@@ -219,45 +407,27 @@ pub(super) fn cursor_readout_section(ui: &mut Ui, state: &mut AppState, rect: eg
     let deltas = cursors
         .b
         .map(|b| delta_values(model, a, b, presentation, quantity_policy));
-    let name_column = (rect.width() * 0.28).clamp(80.0, 220.0);
-    let value_column = ((rect.width() - name_column - READOUT_PAD_X * 2.0) / 3.0).max(1.0);
-    for (index, (name, a_value)) in rows.iter().take(READOUT_TRACE_LIMIT).enumerate() {
-        let top = header.bottom() + index as f32 * READOUT_ROW_H;
-        let row = egui::Rect::from_min_max(
-            egui::pos2(rect.left(), top),
-            egui::pos2(rect.right(), top + READOUT_ROW_H),
-        );
-        let painter = ui.painter().with_clip_rect(row);
-        painter.text(
-            egui::pos2(row.left() + READOUT_PAD_X, row.center().y),
-            egui::Align2::LEFT_CENTER,
-            name,
+    let slopes = cursors.b.map(|b| slope_values(model, a, b, presentation));
+    for (index, (name, a_value)) in rows.iter().enumerate() {
+        let b_value = b_rows
+            .as_ref()
+            .and_then(|values| values.get(index))
+            .map_or("", |(_, value)| value.as_str());
+        let delta = deltas
+            .as_ref()
+            .and_then(|values| values.get(index))
+            .map_or("", String::as_str);
+        let slope = slopes
+            .as_ref()
+            .and_then(|values| values.get(index))
+            .map_or("", String::as_str);
+        draw_row(
+            index + 2,
+            [name, a_value, b_value, delta, slope],
+            [c.text_dim, c.text, c.text, c.text_dim, c.text_dim],
             theme::mono(tokens::FS_0, FontWeight::Regular),
-            c.text_dim,
         );
-        let mut column = row.left() + READOUT_PAD_X + name_column;
-        let mut cell = |text: &str, color: egui::Color32| {
-            painter.text(
-                egui::pos2(column, row.center().y),
-                egui::Align2::LEFT_CENTER,
-                text,
-                theme::mono(tokens::FS_0, FontWeight::Regular),
-                color,
-            );
-            column += value_column;
-        };
-        cell(a_value, c.text);
-        if let Some(b_rows) = b_rows.as_ref() {
-            cell(
-                b_rows.get(index).map_or("", |(_, value)| value.as_str()),
-                c.text,
-            );
-        }
-        if let Some(deltas) = deltas.as_ref() {
-            cell(deltas.get(index).map_or("", String::as_str), c.text_dim);
-        }
     }
-    section_bottom
 }
 
 /// The marker half of the strip: one editable row per marker.
@@ -265,7 +435,8 @@ pub(super) fn cursor_readout_section(ui: &mut Ui, state: &mut AppState, rect: eg
 /// Markers are document content, so their row is the place they are named,
 /// re-kinded and removed — there is no second marker list elsewhere to
 /// disagree with this one.
-pub(super) fn marker_section(ui: &mut Ui, state: &mut AppState, rect: egui::Rect) {
+pub(super) fn marker_section(ui: &mut Ui, state: &mut AppState) {
+    let rect = ui.available_rect_before_wrap();
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -281,39 +452,22 @@ pub(super) fn marker_section(ui: &mut Ui, state: &mut AppState, rect: egui::Rect
 
     let shown: Vec<u32> = visible_markers(state)
         .into_iter()
-        .take(MARKER_ROW_LIMIT)
         .map(|marker| marker.id)
         .collect();
-    let total = visible_markers(state).len();
     if shown.is_empty() {
-        return;
-    }
-
-    let header = egui::Rect::from_min_max(
-        rect.min,
-        egui::pos2(rect.right(), rect.top() + READOUT_HEADER_H),
-    );
-    let painter = ui.painter().with_clip_rect(header);
-    painter.text(
-        egui::pos2(header.left() + READOUT_PAD_X, header.center().y),
-        egui::Align2::LEFT_CENTER,
-        "MARKERS",
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        c.text_faint,
-    );
-    if total > shown.len() {
-        painter.text(
-            egui::pos2(header.right() - READOUT_PAD_X, header.center().y),
-            egui::Align2::RIGHT_CENTER,
-            format!("{} of {total}", shown.len()),
-            theme::mono(tokens::FS_0, FontWeight::Regular),
+        ui.painter().text(
+            egui::pos2(rect.left() + READOUT_PAD_X, rect.top() + 8.0),
+            egui::Align2::LEFT_TOP,
+            "No markers on this sheet. Drop one at cursor A with +M.",
+            theme::sans(tokens::FS_1, FontWeight::Regular),
             c.text_faint,
         );
+        return;
     }
 
     let mut remove: Option<u32> = None;
     for (index, id) in shown.iter().copied().enumerate() {
-        let top = header.bottom() + index as f32 * MARKER_ROW_H;
+        let top = rect.top() + index as f32 * MARKER_ROW_H;
         let row = egui::Rect::from_min_max(
             egui::pos2(rect.left() + READOUT_PAD_X, top),
             egui::pos2(rect.right() - READOUT_PAD_X, top + MARKER_ROW_H),
@@ -510,7 +664,6 @@ pub(super) fn value_rows(
         .traces
         .iter()
         .filter(|trace| trace.visible)
-        .take(6)
         .map(|trace| {
             let value = sample_at_with(&trace.x, &trace.y, x, interpolation);
             (
@@ -539,11 +692,60 @@ pub(super) fn delta_values(
         .traces
         .iter()
         .filter(|trace| trace.visible)
-        .take(READOUT_TRACE_LIMIT)
         .map(|trace| {
             let dv = sample_at_with(&trace.x, &trace.y, b, interpolation)
                 - sample_at_with(&trace.x, &trace.y, a, interpolation);
             model.format_trace_value(trace, dv, significant_digits, quantity_policy)
+        })
+        .collect()
+}
+
+/// Per-trace slope between the cursors. Logarithmic X domains report change
+/// per decade; linear domains report change per displayed X unit.
+pub(super) fn slope_values(
+    model: &StripModel,
+    a: f64,
+    b: f64,
+    presentation: ResultPresentationPolicy,
+) -> Vec<String> {
+    let significant_digits = usize::from(presentation.displayed_significant_digits().get());
+    let interpolation = cursor_interpolation(presentation.cursor_interpolation());
+    let denominator = match model.x_scale {
+        XScale::Log10 if a > 0.0 && b > 0.0 => b.log10() - a.log10(),
+        XScale::Log10 => f64::NAN,
+        XScale::Linear => b - a,
+    };
+    model
+        .traces
+        .iter()
+        .filter(|trace| trace.visible)
+        .map(|trace| {
+            if !denominator.is_finite() || denominator.abs() <= 1e-12 {
+                return "—".to_owned();
+            }
+            let delta = sample_at_with(&trace.x, &trace.y, b, interpolation)
+                - sample_at_with(&trace.x, &trace.y, a, interpolation);
+            let slope = delta / denominator;
+            if !slope.is_finite() {
+                return "—".to_owned();
+            }
+            let y_unit = match trace.kind {
+                TraceKind::MagnitudeDb => "dB",
+                TraceKind::PhaseDeg => "deg",
+                TraceKind::PhaseRad => "rad",
+                TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => model.y_unit,
+            };
+            let x_unit = match model.x_scale {
+                XScale::Log10 => "dec",
+                XScale::Linear if model.x_unit.is_empty() => "x",
+                XScale::Linear => model.x_unit.as_str(),
+            };
+            let suffix = if y_unit.is_empty() {
+                format!(" /{x_unit}")
+            } else {
+                format!(" {y_unit}/{x_unit}")
+            };
+            fmt_significant(slope, significant_digits, &suffix)
         })
         .collect()
 }
@@ -574,35 +776,6 @@ pub(super) fn x_separation(
         XScale::Log10 => quantity_policy.format_frequency(dx, significant_digits),
         _ => fmt_si_significant(dx, &model.x_unit, significant_digits),
     }
-}
-
-/// dB/decade slope of the magnitude trace between the cursors, on log-X
-/// strips that carry one.
-pub(super) fn slope_between(
-    model: &StripModel,
-    a: f64,
-    b: f64,
-    presentation: ResultPresentationPolicy,
-) -> Option<String> {
-    if model.x_scale != XScale::Log10 || a <= 0.0 || b <= 0.0 {
-        return None;
-    }
-    let dlog = (b.log10() - a.log10()).abs();
-    if dlog <= 1e-12 {
-        return None;
-    }
-    let magnitude = model
-        .traces
-        .iter()
-        .find(|trace| trace.kind == TraceKind::MagnitudeDb && trace.visible)?;
-    let interpolation = cursor_interpolation(presentation.cursor_interpolation());
-    let ddb = sample_at_with(&magnitude.x, &magnitude.y, b, interpolation)
-        - sample_at_with(&magnitude.x, &magnitude.y, a, interpolation);
-    Some(fmt_significant(
-        ddb / dlog,
-        usize::from(presentation.displayed_significant_digits().get()),
-        " dB/dec",
-    ))
 }
 
 /// min / max / rms rows per visible trace, optionally windowed to [a, b].

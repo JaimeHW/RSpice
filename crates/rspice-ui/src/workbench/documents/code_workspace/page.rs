@@ -164,7 +164,6 @@ pub struct AutomationWorkbenchState {
 #[derive(Debug, Clone)]
 pub struct AutomationValidationReceipt {
     pub token: SourceOperationToken,
-    pub plan: crate::automation_workflow::AutomationPlan,
 }
 
 /// Complete immutable authority captured immediately before an Automation run

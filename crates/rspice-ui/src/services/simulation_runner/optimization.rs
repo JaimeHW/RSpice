@@ -387,7 +387,6 @@ fn ensure_optimization_not_aborted(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn record_optimization_state(
     iteration: Value,
     vars: &HashMap<String, Value>,

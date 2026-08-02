@@ -36,11 +36,11 @@ use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
     AnalysisResultSourceDomain, AnalysisType, ComplexResultValue, DcOpResult,
-    MonteCarloVariableMetadata, OperatingPointValue, ReliabilityCheckpointEvidence,
-    ReliabilityDeviceEvidence, ReliabilityShiftEvidence, ReliabilityStressEvidence,
-    SensitivityResultMode, SensitivityResultRow, SimulationRunIntent, SimulationRunLifecycle,
-    SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
-    SoaViolationSeverityEvidence,
+    MonteCarloVariableMetadata, OperatingPointValue, PeriodicNoiseOutputQuantity,
+    ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence, ReliabilityShiftEvidence,
+    ReliabilityStressEvidence, SensitivityResultMode, SensitivityResultRow, SimulationRunIntent,
+    SimulationRunLifecycle, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
+    SoaViolationEvidence, SoaViolationSeverityEvidence,
 };
 use crate::workbench::app_state::{ActiveViewer, AppState, SpecializedViewerCacheProvenance};
 use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
@@ -88,6 +88,10 @@ pub struct SimulationController {
     current_config: Option<AnalysisConfig>,
     /// Current strongly-typed analysis spec (always set while running)
     current_spec: Option<AnalysisSpec>,
+    /// Exact typed execution options for the active spec-driven task. These
+    /// carry result semantics, such as whether PNOISE produced output PSD or
+    /// dBc/Hz phase noise, across the asynchronous runner boundary.
+    current_spec_options: Option<SpecExecutionOptions>,
     /// Frozen identity of the prepared task currently owned by the runner.
     /// Captured before the authorized dispatch token is moved into the runner.
     current_provenance: Option<AnalysisResultProvenance>,
@@ -151,6 +155,7 @@ impl SimulationController {
             yield_manager: YieldAnalysisManager::new(),
             current_config: None,
             current_spec: None,
+            current_spec_options: None,
             current_provenance: None,
             current_config_digest: None,
             current_effective_source_content_digest: None,
@@ -415,6 +420,7 @@ impl SimulationController {
         self.clear_prepared_run();
         self.current_config = None;
         self.current_spec = None;
+        self.current_spec_options = None;
         self.current_provenance = None;
         self.current_config_digest = None;
         self.current_effective_source_content_digest = None;
@@ -447,6 +453,7 @@ impl SimulationController {
         }
         self.current_config = None;
         self.current_spec = None;
+        self.current_spec_options = None;
         self.current_provenance = None;
         self.current_config_digest = None;
         self.current_effective_source_content_digest = None;
@@ -570,6 +577,7 @@ impl SimulationController {
         self.current_analysis_idx += 1;
         self.current_config = config.clone();
         self.current_spec = Some(spec.clone());
+        self.current_spec_options = Some(next_analysis.spec_options().clone());
         self.current_provenance = Some(provenance);
         self.current_config_digest = Some(next_analysis.config_digest());
         self.current_effective_source_content_digest = Some(
@@ -783,6 +791,7 @@ impl SimulationController {
         self.execution_artifacts.clear();
         self.current_config = None;
         self.current_spec = None;
+        self.current_spec_options = None;
         self.current_provenance = None;
         self.current_config_digest = None;
         self.current_effective_source_content_digest = None;
@@ -1303,6 +1312,7 @@ impl SimulationController {
                             &current_label,
                         )
                     };
+                    self.retain_periodic_noise_result_metadata(&mut analysis_result);
                     if let Some(AnalysisResultPayload::OperatingPoint {
                         effective_source_content_digest,
                         ..
@@ -1411,6 +1421,7 @@ impl SimulationController {
                     self.cached_netlist = None;
                     self.current_config = None;
                     self.current_spec = None;
+                    self.current_spec_options = None;
                     self.current_provenance = None;
                     self.current_config_digest = None;
                     self.current_effective_source_content_digest = None;
@@ -1494,6 +1505,7 @@ impl SimulationController {
     }
 
     /// Check if a simulation is currently running
+    #[cfg(test)]
     pub fn is_running(&self) -> bool {
         self.runner.is_running()
     }
@@ -1505,6 +1517,7 @@ impl SimulationController {
     }
 
     /// Abort current simulation
+    #[cfg(test)]
     pub fn abort(&self) {
         self.runner.abort();
     }

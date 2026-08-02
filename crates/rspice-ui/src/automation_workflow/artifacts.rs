@@ -57,14 +57,17 @@ impl CheckEvidence {
         })
     }
 
+    #[cfg(test)]
     pub fn id(&self) -> &str {
         &self.id
     }
 
+    #[cfg(test)]
     pub const fn outcome(&self) -> CheckOutcome {
         self.outcome
     }
 
+    #[cfg(test)]
     pub fn detail(&self) -> &str {
         &self.detail
     }
@@ -84,6 +87,7 @@ pub struct ComparisonEvidence {
 }
 
 impl ComparisonEvidence {
+    #[cfg(test)]
     pub fn try_new(
         baseline: impl Into<String>,
         waveform_count: u64,
@@ -107,7 +111,6 @@ impl ComparisonEvidence {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn try_new_complete(
         baseline: impl Into<String>,
         waveform_count: u64,
@@ -164,22 +167,27 @@ impl ComparisonEvidence {
         })
     }
 
+    #[cfg(test)]
     pub const fn waveform_count(&self) -> u64 {
         self.waveform_count
     }
 
+    #[cfg(test)]
     pub const fn evaluated_waveform_count(&self) -> u64 {
         self.evaluated_waveform_count
     }
 
+    #[cfg(test)]
     pub const fn differing_waveform_count(&self) -> u64 {
         self.differing_waveform_count
     }
 
+    #[cfg(test)]
     pub const fn missing_waveform_count(&self) -> u64 {
         self.missing_waveform_count
     }
 
+    #[cfg(test)]
     pub fn detail(&self) -> &str {
         &self.detail
     }

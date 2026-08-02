@@ -314,10 +314,9 @@ fn show_toolbar(
                 if ui
                     .add_enabled(can_delete, egui::Button::new("Delete selected"))
                     .clicked()
+                    && let Some(id) = session.selected
                 {
-                    if let Some(id) = session.selected {
-                        *pending_edits = removal_edit(document, id).map(|edit| vec![edit]);
-                    }
+                    *pending_edits = removal_edit(document, id).map(|edit| vec![edit]);
                 }
                 ui.separator();
                 ui.label(format!(
@@ -353,6 +352,13 @@ fn show_canvas(
         node.set_description(
             "Interactive signed-technology layout canvas. Use Select or Rectangle from the toolbar.",
         );
+    });
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Image,
+            ui.is_enabled(),
+            "Physical layout canvas",
+        )
     });
     let painter = ui.painter_at(canvas);
     painter.rect_filled(canvas, 0.0, t.color.canvas_bg);
@@ -493,6 +499,8 @@ fn show_canvas(
         });
     }
 
+    // Painted last so the layout artwork does not cover the ring.
+    crate::ui::theme::paint_focus_ring(ui, &response, canvas);
     None
 }
 

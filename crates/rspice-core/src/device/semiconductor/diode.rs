@@ -461,7 +461,7 @@ impl Diode {
                 if self.xyce_dialect {
                     Self::limit_xyce_pnjlim(candidate, previous, thermal, critical)
                 } else {
-                    crate::device::veriloga_generated::limiting::pnjlim_new(
+                    super::limiting::pnjlim_new(
                         candidate, previous, thermal, critical,
                     )
                 }
@@ -971,7 +971,7 @@ impl Diode {
                 if self.xyce_dialect {
                     Self::limit_xyce_pnjlim(candidate, previous, thermal, critical)
                 } else {
-                    crate::device::veriloga_generated::limiting::pnjlim_new(
+                    super::limiting::pnjlim_new(
                         candidate, previous, thermal, critical,
                     )
                 }

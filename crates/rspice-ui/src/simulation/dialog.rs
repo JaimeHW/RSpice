@@ -70,7 +70,9 @@ pub use op::{
 // own business, and execution takes `simulation::config` types instead, so
 // re-exporting both here only invited the two to be confused.
 pub use hb::HbDialogState;
-pub use pss::{PssConfig, PssDialogState, PssSolverMethod};
+#[cfg(test)]
+pub use pss::PssConfig;
+pub use pss::{PssDialogState, PssSolverMethod};
 
 // Re-exports - Periodic Small-Signal
 pub use pac::PacDialogState;
@@ -79,7 +81,9 @@ pub use pstb::PstbDialogState;
 pub use pxf::PxfDialogState;
 
 // Re-exports - RF/Microwave
-pub use sp::{SpConfig, SpDialogState};
+#[cfg(test)]
+pub use sp::SpConfig;
+pub use sp::SpDialogState;
 
 // Re-exports - Transfer Function
 pub use pz::PzDialogState;

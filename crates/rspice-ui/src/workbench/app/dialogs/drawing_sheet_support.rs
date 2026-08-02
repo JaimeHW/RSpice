@@ -939,18 +939,14 @@ fn apply_title_block_fields(app: &mut RSpiceApp) -> Result<String, String> {
     if transaction.format.as_ref().is_some_and(|format| {
         format.title_block.template
             == crate::state::DrawingSheetTitleBlockTemplate::OrganizationManaged
-    }) {
-        if transaction
-            .draft_project
+    }) && transaction
+        .draft_project
+        .get(&DrawingSheetTitleFieldId::Classification)
+        != transaction
+            .baseline_project
             .get(&DrawingSheetTitleFieldId::Classification)
-            != transaction
-                .baseline_project
-                .get(&DrawingSheetTitleFieldId::Classification)
-        {
-            return Err(
-                "The organization-managed classification value cannot be edited.".to_owned(),
-            );
-        }
+    {
+        return Err("The organization-managed classification value cannot be edited.".to_owned());
     }
     if transaction.staged_page_setup {
         let setup = &mut app.state.dialogs.drawing_sheet_setup;

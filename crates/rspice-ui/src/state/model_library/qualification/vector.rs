@@ -23,13 +23,16 @@ impl QualificationPlatform {
 /// Expected tolerance for one named reference quantity in a golden vector.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[cfg(test)]
 pub struct ReferenceTolerance {
     pub quantity: String,
     pub absolute: NonNegativeFinite,
     pub relative: NonNegativeFinite,
 }
 
+#[cfg(test)]
 impl ReferenceTolerance {
+    #[cfg(test)]
     pub fn try_new(
         quantity: impl Into<String>,
         absolute: f64,
@@ -290,6 +293,10 @@ impl QualificationProbe {
 /// Exact result point selected from the declared analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
+// A point is what these select: the operating point, a sweep point, a
+// frequency point, a time point. `Operating` and `Time` would name the axis
+// instead of the sample on it.
+#[allow(clippy::enum_variant_names)]
 pub enum QualificationSample {
     OperatingPoint,
     FirstSweepPoint,
@@ -403,7 +410,6 @@ impl QualificationVector {
     /// Legacy compatibility entry point. A caller that supplies no separate
     /// candidate-source snapshot cannot create current qualification evidence.
     /// Use [`Self::try_new_source_bound`] for all new authoring paths.
-    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         id: impl Into<String>,
         name: impl Into<String>,
@@ -429,7 +435,6 @@ impl QualificationVector {
     /// bytes and the complete testbench bytes. Validation proves that the
     /// canonical bytes match the exact project source identity, occur in the
     /// testbench, parse as the named model, and are actually instantiated.
-    #[allow(clippy::too_many_arguments)]
     pub fn try_new_source_bound(
         id: impl Into<String>,
         name: impl Into<String>,
@@ -457,7 +462,6 @@ impl QualificationVector {
 
     /// Construct a vector that proves and executes one exact base or named
     /// section from the retained canonical model source.
-    #[allow(clippy::too_many_arguments)]
     pub fn try_new_source_section_bound(
         id: impl Into<String>,
         name: impl Into<String>,

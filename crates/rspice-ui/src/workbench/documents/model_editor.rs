@@ -50,6 +50,7 @@ pub enum ModelEditorSection {
 }
 
 impl ModelEditorSection {
+    #[cfg(test)]
     pub const ALL: [Self; 6] = [
         Self::Parameters,
         Self::Sections,
@@ -115,6 +116,9 @@ pub enum QualificationAuthoringProbe {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+// The unparsed form of `QualificationSample`, which it has to spell the same
+// way to be recognisable as the same choice.
+#[allow(clippy::enum_variant_names)]
 pub enum QualificationAuthoringSample {
     #[default]
     OperatingPoint,
@@ -544,12 +548,12 @@ pub(crate) fn resolve_project_model_for_editor(
     let source_identity = definition
         .project_source_identity()
         .map_err(|error| format!("Project model source identity is invalid: {error}"))?;
-    if let Some(identity) = source_identity.as_ref() {
-        if identity.source_id != source_id || identity.content_digest != model_digest {
-            return Err(format!(
-                "Model '{model_name}' metadata is bound to a different retained source revision"
-            ));
-        }
+    if let Some(identity) = source_identity.as_ref()
+        && (identity.source_id != source_id || identity.content_digest != model_digest)
+    {
+        return Err(format!(
+            "Model '{model_name}' metadata is bound to a different retained source revision"
+        ));
     }
     let model_revision = source_identity.map_or(library_revision, |identity| identity.revision);
 

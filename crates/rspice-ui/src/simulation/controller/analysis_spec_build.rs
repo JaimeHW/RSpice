@@ -221,14 +221,12 @@ impl SimulationController {
                     config.device_detail,
                     crate::simulation::dialog::OpDeviceDetail::SelectedAndViolations
                         | crate::simulation::dialog::OpDeviceDetail::ViolationsOnly
-                ) {
-                    if let Some((source_digest, devices)) = state
-                        .simulation
-                        .active_soa_violation_context(state.workspace.project.revision())
-                    {
-                        config.violation_devices = devices;
-                        config.violation_source_content_digest = Some(source_digest);
-                    }
+                ) && let Some((source_digest, devices)) = state
+                    .simulation
+                    .active_soa_violation_context(state.workspace.project.revision())
+                {
+                    config.violation_devices = devices;
+                    config.violation_source_content_digest = Some(source_digest);
                 }
                 config.validate_for_execution()?;
                 Ok(AnalysisSpec::DcOp {
@@ -566,7 +564,7 @@ impl SimulationController {
             tolerance: pss_cfg.tolerance,
             oscillator_mode: pss_cfg.osc_mode,
             oscillator_node: pss_cfg.osc_mode.then(|| pss_cfg.osc_node.trim().to_owned()),
-            num_harmonics: pss_cfg.num_harmonics as usize,
+            num_harmonics: pss_cfg.num_harmonics,
         })
     }
 

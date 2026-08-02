@@ -180,7 +180,7 @@ pub struct ProjectModelLibrary {
 
 impl ProjectExecutionContext {
     pub fn from_state(
-        project_id: ProjectId,
+        _project_id: ProjectId,
         simulation_plan: &SimSetupState,
         model_libraries: &ModelLibraryManager,
     ) -> Result<Self, String> {

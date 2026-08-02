@@ -23,12 +23,14 @@ const SHORTCUT_SOURCE_FILTER_EXTENSIONS: &[&str] = &["json", "jsonc"];
 /// Stable, machine-readable category for a source-selection failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShortcutArtifactImportErrorKind {
+    #[cfg(not(target_arch = "wasm32"))]
     Picker,
     Read,
     ByteLimit,
     InvalidUtf8,
     InvalidSourceName,
     UnsupportedPlatform,
+    #[cfg(any(test, target_arch = "wasm32"))]
     ImportBusy,
     Detection,
 }
@@ -37,12 +39,14 @@ impl ShortcutArtifactImportErrorKind {
     #[must_use]
     pub const fn code(self) -> &'static str {
         match self {
+            #[cfg(not(target_arch = "wasm32"))]
             Self::Picker => "shortcut-artifact.import-picker",
             Self::Read => "shortcut-artifact.import-read",
             Self::ByteLimit => "shortcut-artifact.import-byte-limit",
             Self::InvalidUtf8 => "shortcut-artifact.import-invalid-utf8",
             Self::InvalidSourceName => "shortcut-artifact.import-source-name",
             Self::UnsupportedPlatform => "shortcut-artifact.import-platform",
+            #[cfg(any(test, target_arch = "wasm32"))]
             Self::ImportBusy => "shortcut-artifact.import-busy",
             Self::Detection => "shortcut-artifact.import-detection",
         }
@@ -91,6 +95,7 @@ impl ShortcutArtifactImportError {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn kind(&self) -> ShortcutArtifactImportErrorKind {
         self.kind
     }
@@ -101,11 +106,13 @@ impl ShortcutArtifactImportError {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub fn source_name(&self) -> Option<&str> {
         self.source_name.as_deref()
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn cause_code(&self) -> Option<&'static str> {
         self.cause_code
     }
@@ -137,16 +144,19 @@ pub struct ReadyShortcutArtifactSource {
 
 impl ReadyShortcutArtifactSource {
     #[must_use]
+    #[cfg(test)]
     pub fn source_name(&self) -> &str {
         &self.source_name
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn detected(&self) -> &DetectedShortcutArtifact {
         &self.detected
     }
 
     #[must_use]
+    #[cfg(test)]
     pub fn source_bytes(&self) -> &[u8] {
         match &self.detected {
             DetectedShortcutArtifact::RSpice(artifact) => artifact.source_bytes(),
@@ -155,6 +165,7 @@ impl ReadyShortcutArtifactSource {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn source_digest(&self) -> [u8; 32] {
         match &self.detected {
             DetectedShortcutArtifact::RSpice(artifact) => artifact.source_digest(),

@@ -1,5 +1,5 @@
 use super::*;
-use crate::device::veriloga_generated::{builtins, instantiate_builtin};
+use crate::device::veriloga_builtins::{builtins, instantiate_builtin};
 use crate::netlist::{Element, ModelDef, ParametricValue};
 
 #[derive(Clone, Copy)]

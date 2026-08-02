@@ -13,7 +13,57 @@ use crate::state::{
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Frequencies, output noise, optional input noise, and per-source
+/// contributors, all in the same stable order.
+type OrderedNoiseSeries = (
+    Vec<f64>,
+    Vec<f64>,
+    Option<Vec<f64>>,
+    HashMap<String, Vec<f64>>,
+);
+
 impl SimulationController {
+    /// Bind the periodic-noise output quantity from the exact typed execution
+    /// options to the immutable retained result. PNOISE uses the generic
+    /// engine noise transport, whose `onoise` vector alone cannot distinguish
+    /// V²/Hz or A²/Hz output PSD from dBc/Hz phase noise.
+    pub(super) fn retain_periodic_noise_result_metadata(&self, result: &mut AnalysisResult) {
+        if !matches!(
+            result.analysis_type,
+            AnalysisType::Pnoise | AnalysisType::Qpnoise
+        ) {
+            return;
+        }
+        let Some(config) = self
+            .current_spec_options
+            .as_ref()
+            .and_then(|options| options.pnoise.as_ref())
+        else {
+            return;
+        };
+        let output_quantity = match config.noise_ref {
+            crate::services::simulation_runner::PnoiseReference::Phase => {
+                PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz
+            }
+            crate::services::simulation_runner::PnoiseReference::Output
+            | crate::services::simulation_runner::PnoiseReference::Input => {
+                PeriodicNoiseOutputQuantity::OutputNoisePowerSpectralDensity
+            }
+        };
+        if output_quantity == PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz
+            && let Some(waveform) = result
+                .waveforms
+                .iter_mut()
+                .find(|waveform| waveform.name.eq_ignore_ascii_case("onoise"))
+        {
+            waveform.name = "phase_noise".to_owned();
+        }
+        result.family_metadata = Some(AnalysisResultFamilyMetadata::PeriodicNoise {
+            output_quantity,
+            carrier_frequency_hz: Some(config.pss_fundamental_freq),
+        });
+    }
+
     pub(super) fn convert_to_analysis_result_owned(
         &self,
         sim_result: crate::simulation::SimulationResult,
@@ -204,7 +254,6 @@ impl SimulationController {
                 output_quantity,
                 input_unit,
                 output_unit,
-                gain_unit: _,
                 normalization,
                 accuracy,
                 gain,
@@ -632,12 +681,7 @@ impl SimulationController {
         output_noise: Vec<f64>,
         input_noise: Option<Vec<f64>>,
         contributors: HashMap<String, Vec<f64>>,
-    ) -> (
-        Vec<f64>,
-        Vec<f64>,
-        Option<Vec<f64>>,
-        HashMap<String, Vec<f64>>,
-    ) {
+    ) -> OrderedNoiseSeries {
         if frequencies
             .windows(2)
             .all(|pair| pair[0].total_cmp(&pair[1]) != std::cmp::Ordering::Greater)
@@ -970,12 +1014,13 @@ mod operating_point_conversion_tests {
 
     #[test]
     fn branch_current_is_wrapped_exactly_once_in_retained_results() {
-        let sim_result =
-            crate::simulation::SimulationResult::DcOp(crate::simulation::results::DcOpResult {
+        let sim_result = crate::simulation::SimulationResult::DcOp(Box::new(
+            crate::simulation::results::DcOpResult {
                 configuration: crate::simulation::dialog::OpConfig::default(),
                 branch_currents: HashMap::from([("V1".to_owned(), -1.0e-3)]),
                 ..Default::default()
-            });
+            },
+        ));
         let result = SimulationController::new()
             .convert_to_analysis_result_owned(sim_result, &AnalysisConfig::dc_op());
         let currents = &result.dc_op.as_ref().unwrap().branch_currents;
@@ -1039,5 +1084,62 @@ mod noise_conversion_tests {
         );
 
         assert!(result.waveforms.is_empty());
+    }
+
+    fn periodic_noise_result(
+        reference: crate::services::simulation_runner::PnoiseReference,
+    ) -> AnalysisResult {
+        let mut controller = SimulationController::new();
+        let mut config = crate::services::simulation_runner::PnoiseRunConfig::default();
+        config.noise_ref = reference;
+        config.pss_fundamental_freq = 2.4e9;
+        controller.current_spec_options = Some(SpecExecutionOptions {
+            pnoise: Some(config),
+            ..SpecExecutionOptions::default()
+        });
+        let sim_result = crate::simulation::SimulationResult::Noise {
+            frequencies: vec![1.0e3, 1.0e6],
+            output_noise: vec![-90.0, -130.0],
+            input_noise: None,
+            contributors: HashMap::new(),
+            summary: None,
+        };
+        let mut result = controller.convert_to_analysis_result_with_metadata_owned(
+            sim_result,
+            AnalysisType::Pnoise,
+            "PNOISE",
+        );
+        controller.retain_periodic_noise_result_metadata(&mut result);
+        result
+    }
+
+    #[test]
+    fn phase_reference_retains_exact_dbc_per_hz_quantity_and_carrier() {
+        let result =
+            periodic_noise_result(crate::services::simulation_runner::PnoiseReference::Phase);
+        assert!(result.validate_retained_evidence().is_ok());
+        assert_eq!(result.waveforms[0].name, "phase_noise");
+        assert_eq!(
+            result.family_metadata,
+            Some(AnalysisResultFamilyMetadata::PeriodicNoise {
+                output_quantity: PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz,
+                carrier_frequency_hz: Some(2.4e9),
+            })
+        );
+    }
+
+    #[test]
+    fn output_reference_remains_psd_and_is_never_relabelled_as_phase_noise() {
+        let result =
+            periodic_noise_result(crate::services::simulation_runner::PnoiseReference::Output);
+        assert!(result.validate_retained_evidence().is_ok());
+        assert_eq!(result.waveforms[0].name, "onoise");
+        assert_eq!(
+            result.family_metadata,
+            Some(AnalysisResultFamilyMetadata::PeriodicNoise {
+                output_quantity: PeriodicNoiseOutputQuantity::OutputNoisePowerSpectralDensity,
+                carrier_frequency_hz: Some(2.4e9),
+            })
+        );
     }
 }

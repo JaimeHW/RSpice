@@ -40,8 +40,6 @@ pub struct Symbol {
     pub paths: Vec<SymbolPath>,
     /// Bounding box (min_x, min_y, max_x, max_y) in normalized coords
     pub bounds: (f32, f32, f32, f32),
-    /// Original SVG viewBox for scaling
-    pub view_box: (f32, f32, f32, f32),
     /// Target width for rendering (in grid units) - commercial-grade per-component sizing
     pub target_width: f32,
     /// Target height for rendering (in grid units) - commercial-grade per-component sizing

@@ -501,7 +501,6 @@ fn build_bus_property_candidates(
     Ok((candidate_buses, candidate_taps, impact))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn build_bus_tap_property_candidate(
     schematic: &SchematicState,
     expected: &BusTap,

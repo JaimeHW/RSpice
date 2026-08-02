@@ -1178,7 +1178,6 @@ impl ModelQualificationState {
     /// Record an explicit, auditable failed/stale disposition. Failed vectors
     /// require a retained failed platform outcome; stale vectors require an
     /// exact current source that differs from the vector source.
-    #[allow(clippy::too_many_arguments)]
     pub fn record_vector_disposition_atomically(
         &mut self,
         disposition_id: impl Into<String>,

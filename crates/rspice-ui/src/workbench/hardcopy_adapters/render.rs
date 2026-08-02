@@ -39,14 +39,19 @@ use super::sources::{
     SemanticPlot, SemanticPoint, SemanticReport, SemanticReportFigure, SemanticResultSummary,
     SemanticSchematic, SemanticTable,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use crate::hardcopy::RenderTarget;
 use crate::hardcopy::{
-    BackgroundMode, Bleed, ColorMapping, ContentExtent, HardcopyArtifactIdentity,
-    HardcopyDocumentId, HardcopyPlan, HardcopyPlanId, Length, OutputFormat,
-    OutsideSheetContentPolicy, PageRect, PreviewPage, PrintColor, PrintMappingTable,
-    PrintObjectKind, PrintRedundancy, RenderTarget, ResolvedOrientation, ScaleRatio,
+    BackgroundMode, Bleed, ColorMapping, ContentExtent, HardcopyArtifactIdentity, HardcopyPlan,
+    Length, OutputFormat, OutsideSheetContentPolicy, PageRect, PreviewPage, PrintColor,
+    PrintMappingTable, PrintObjectKind, PrintRedundancy, ResolvedOrientation, ScaleRatio,
     SchematicHardcopyExtent, SchematicHardcopySetup, Watermark,
 };
-use crate::product::{ContentDigest, ObjectRevision};
+#[cfg(any(test, target_arch = "wasm32"))]
+use crate::hardcopy::{HardcopyDocumentId, HardcopyPlanId};
+use crate::product::ContentDigest;
+#[cfg(any(test, target_arch = "wasm32"))]
+use crate::product::ObjectRevision;
 use crate::results::report_document::{FigureSizing, ReportBlockId, ReportBlockKind, TableCell};
 use crate::schematic::SymbolLibrary;
 use crate::schematic::symbols::PathCommand;
@@ -70,11 +75,17 @@ const MAX_METADATA_LINES: usize = 4_096;
 const MAX_PREVIEW_BATCH_PAGES: usize = 2;
 // Browser-worker transport is a cross-target contract. Desktop builds retain
 // it for shared-source parity even though they use the in-process worker.
+#[cfg(any(test, target_arch = "wasm32"))]
 const PREVIEW_WORKER_MANIFEST_SCHEMA_VERSION: u32 = 1;
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) const MAX_PREVIEW_WORKER_MANIFEST_BYTES: usize = 16 * 1_024;
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) const MAX_PREVIEW_WORKER_RGBA_BYTES: usize = 48 * 1_048_576;
+#[cfg(any(test, target_arch = "wasm32"))]
 const MAX_PREVIEW_WORKER_TRANSFER_BYTES: usize = 48 * 1_048_576 + 16 * 1_024;
+#[cfg(any(test, target_arch = "wasm32"))]
 const PUBLICATION_WORKER_MANIFEST_SCHEMA_VERSION: u32 = 1;
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) const MAX_PUBLICATION_WORKER_MANIFEST_BYTES: usize = 4 * 1_048_576;
 const MAX_RASTER_PIXELS_PER_PAGE: u64 = 150_000_000;
 const MAX_RASTER_PIXELS_TOTAL: u64 = 300_000_000;
@@ -242,6 +253,7 @@ impl HardcopySceneMetadata {
     /// Build the required title and revision provenance directly from the
     /// authenticated source. Callers may then add authors and a publication
     /// timestamp without recreating source-identity formatting.
+    #[cfg(test)]
     pub fn for_resolved_source(
         source: &ResolvedHardcopyDocument,
         creator: impl Into<String>,
@@ -580,6 +592,7 @@ pub struct HardcopyScene {
 }
 
 impl HardcopyScene {
+    #[cfg(test)]
     pub fn try_new(
         extent: ContentExtent,
         metadata: HardcopySceneMetadata,
@@ -716,6 +729,7 @@ impl HardcopyScene {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub fn primitives(&self) -> &[ScenePrimitive] {
         &self.primitives
     }
@@ -1364,8 +1378,8 @@ fn clip_polygon(points: &[ScenePoint], clip: ClipRect) -> Vec<ScenePoint> {
         let mut previous_inside = inside(previous);
         for current in input {
             let current_inside = inside(current);
-            if current_inside != previous_inside {
-                if let Some((a, b)) = if axis == 0 {
+            if current_inside != previous_inside
+                && let Some((a, b)) = if axis == 0 {
                     clip_line(
                         previous,
                         current,
@@ -1387,15 +1401,15 @@ fn clip_polygon(points: &[ScenePoint], clip: ClipRect) -> Vec<ScenePoint> {
                             height: 0,
                         },
                     )
-                } {
-                    output.push(if axis == 0 {
-                        if a.x.micrometres() == bound { a } else { b }
-                    } else if a.y.micrometres() == bound {
-                        a
-                    } else {
-                        b
-                    });
                 }
+            {
+                output.push(if axis == 0 {
+                    if a.x.micrometres() == bound { a } else { b }
+                } else if a.y.micrometres() == bound {
+                    a
+                } else {
+                    b
+                });
             }
             if current_inside {
                 output.push(current);

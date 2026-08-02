@@ -217,14 +217,10 @@ fn filter_buttons(ui: &mut Ui, app: &mut RSpiceApp, control_height: f32) {
                 tokens.color.text_dim
             },
         );
-        if response.has_focus() {
-            ui.painter().rect_stroke(
-                cell.shrink(2.0),
-                0.0,
-                Stroke::new(1.0, tokens.color.border_strong),
-                egui::StrokeKind::Inside,
-            );
-        }
+        // Shared ring rather than a local one: the accent stroke is the
+        // application-wide focus affordance and is more visible than the
+        // border tone this used to paint.
+        theme::paint_focus_ring(ui, &response, cell);
     }
 
     if let Some(index) = focused {
@@ -306,10 +302,6 @@ const fn filter_includes(filter: NotificationFilter, category: NotificationCateg
         || matches!(
             (filter, category),
             (NotificationFilter::Jobs, NotificationCategory::Job)
-                | (
-                    NotificationFilter::Approvals,
-                    NotificationCategory::Approval
-                )
                 | (NotificationFilter::System, NotificationCategory::System)
         )
 }
@@ -489,7 +481,6 @@ fn heading_column_widths(
 fn notification_icon(category: NotificationCategory) -> WorkbenchIcon {
     match category {
         NotificationCategory::Job => WorkbenchIcon::Run,
-        NotificationCategory::Approval => WorkbenchIcon::Check,
         NotificationCategory::System => WorkbenchIcon::Info,
     }
 }
@@ -674,10 +665,6 @@ mod tests {
 
     #[test]
     fn filters_project_mockup_domains_without_mutating_activity() {
-        assert!(filter_includes(
-            NotificationFilter::All,
-            NotificationCategory::Approval
-        ));
         assert!(filter_includes(
             NotificationFilter::Jobs,
             NotificationCategory::Job

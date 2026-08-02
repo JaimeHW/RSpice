@@ -134,7 +134,7 @@ fn synthetic_sparameter_result() -> crate::simulation::SimulationResult {
 fn synthetic_dc_op_result() -> crate::simulation::SimulationResult {
     let mut result = crate::simulation::results::DcOpResult::default();
     result.node_voltages.insert("out".to_string(), 1.25);
-    crate::simulation::SimulationResult::DcOp(result)
+    crate::simulation::SimulationResult::DcOp(Box::new(result))
 }
 
 fn synthetic_result_provenance() -> AnalysisResultProvenance {
@@ -536,7 +536,6 @@ fn completed_transient_result_reuses_owned_waveform_buffers_in_run_history() {
             x_values: Vec::new(),
             y_values: values,
             y_unit: "V".to_string(),
-            x_unit: "s".to_string(),
             is_complex: false,
             y_imag: None,
         },
@@ -610,7 +609,6 @@ fn completed_dc_sweep_result_reuses_owned_shared_axis_buffers_in_run_history() {
             x_values: Vec::new(),
             y_values: values,
             y_unit: "V".to_string(),
-            x_unit: "V".to_string(),
             is_complex: false,
             y_imag: None,
         },

@@ -21,9 +21,7 @@ mod waveform;
 
 pub const MAX_RUN_HISTORY: usize = 20;
 
-pub use ac_bode::{
-    AcBodeMetrics, AcBodeSummary, ac_bode_summary_for_run, ac_bode_summary_for_selection,
-};
+pub use ac_bode::ac_bode_summary_for_selection;
 pub use analysis_result::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
     AnalysisResultSourceDomain, ComplexResultValue, DcOpResult, MonteCarloVariableMetadata,
@@ -32,10 +30,10 @@ pub use analysis_result::{
     OperatingPointHomotopyEvidence, OperatingPointInitialGuessEvidence,
     OperatingPointNodeInitializationEvidence, OperatingPointProcessEvidence,
     OperatingPointSaveDeviceEvidence, OperatingPointTemperatureEvidence, OperatingPointValue,
-    ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence, ReliabilityShiftEvidence,
-    ReliabilityStressEvidence, SensitivityResultMode, SensitivityResultRow, SoaEvaluationEvidence,
-    SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
-    SoaViolationSeverityEvidence, TransferFunctionAccuracyEvidence,
+    PeriodicNoiseOutputQuantity, ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence,
+    ReliabilityShiftEvidence, ReliabilityStressEvidence, SensitivityResultMode,
+    SensitivityResultRow, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
+    SoaViolationEvidence, SoaViolationSeverityEvidence, TransferFunctionAccuracyEvidence,
     TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
     TransferFunctionScalarEvidence,
 };

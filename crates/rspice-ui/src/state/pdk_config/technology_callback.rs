@@ -224,7 +224,6 @@ struct ProjectPdkCallbackReceiptPayload<'a> {
 }
 
 impl ProjectPdkCallbackReceipt {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn issue(
         sequence: u64,
         project_id: ProjectId,

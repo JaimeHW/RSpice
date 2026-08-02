@@ -33,70 +33,11 @@
 //!   `(x+20, y∓10)`; netlists as `E out+ out− in+ in−`. `mirror_h` puts the
 //!   output on the right.
 
-use crate::state::workspace::{DEFAULT_PROJECT_LIBRARY, DEFAULT_SCHEMATIC_VIEW};
-use crate::state::{
-    Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, OpenCellView, Point,
-    PortDirection, PortSpec, Rotation, SchematicState, SymbolDocument, SymbolPin, SymbolShape,
-    View, ViewType, Wire,
-};
-
-const HIERARCHICAL_RC_FILTER: &str = "Hierarchical RC Filter";
-const HIERARCHICAL_RC_TOP_CELL: &str = "hierarchical_rc_filter_tb";
-const HIERARCHICAL_RC_CORE_CELL: &str = "rc_filter_core";
+use crate::state::{Component, ComponentType, Point, Rotation, SchematicState, Wire};
 
 // =============================================================================
 // Example Circuit Definitions
 // =============================================================================
-
-/// Example circuit metadata
-#[derive(Debug, Clone)]
-pub struct ExampleCircuit {
-    /// Display name
-    pub name: &'static str,
-    /// Category (Analog, Digital, RF, etc.)
-    pub category: &'static str,
-    /// Whether this example needs the full project workspace to load.
-    pub requires_workspace: bool,
-}
-
-/// All available example circuits
-pub const EXAMPLES: &[ExampleCircuit] = &[
-    ExampleCircuit {
-        name: "RC Lowpass Filter",
-        category: "Analog",
-        requires_workspace: false,
-    },
-    ExampleCircuit {
-        name: "Voltage Divider",
-        category: "Basics",
-        requires_workspace: false,
-    },
-    ExampleCircuit {
-        name: "Common Emitter Amplifier",
-        category: "Analog",
-        requires_workspace: false,
-    },
-    ExampleCircuit {
-        name: "CMOS Inverter",
-        category: "Digital",
-        requires_workspace: false,
-    },
-    ExampleCircuit {
-        name: "Differential Pair",
-        category: "Analog",
-        requires_workspace: false,
-    },
-    ExampleCircuit {
-        name: "Opamp Inverting Amplifier",
-        category: "Analog",
-        requires_workspace: false,
-    },
-    ExampleCircuit {
-        name: HIERARCHICAL_RC_FILTER,
-        category: "Hierarchy",
-        requires_workspace: true,
-    },
-];
 
 // =============================================================================
 // Circuit Builders
@@ -126,38 +67,6 @@ pub fn load_example(name: &str, state: &mut SchematicState) {
     state.needs_fit = true;
     state.needs_history_reset = true;
     state.is_dirty = true;
-}
-
-/// Load an example into the full application workspace. Flat examples retain
-/// the legacy schematic-only behavior; hierarchy examples also populate the
-/// project library, open views, and schematic buffers that their cell
-/// instances resolve through.
-pub(crate) fn load_example_into_app(
-    name: &str,
-    app: &mut crate::workbench::app_state::AppState,
-) -> bool {
-    if name == HIERARCHICAL_RC_FILTER {
-        build_hierarchical_rc_project(app);
-        reset_example_runtime_context(app);
-        return true;
-    }
-
-    if !EXAMPLES.iter().any(|example| example.name == name) {
-        return false;
-    }
-
-    let mut schematic = SchematicState::default();
-    load_example(name, &mut schematic);
-    app.schematic = schematic;
-    app.sync_active_schematic_to_workspace();
-    reset_example_runtime_context(app);
-    true
-}
-
-fn reset_example_runtime_context(app: &mut crate::workbench::app_state::AppState) {
-    app.schematic.current_file = None;
-    app.schematic.read_only = false;
-    app.clear_design_execution_context();
 }
 
 /// RC Lowpass Filter
@@ -711,246 +620,6 @@ fn build_opamp_inverter(state: &mut SchematicState) {
     add_label(state, Point::new(380, 160), "vout");
 }
 
-fn build_hierarchical_rc_project(app: &mut crate::workbench::app_state::AppState) {
-    let mut core_schematic = build_hierarchical_rc_core();
-    let core_symbol = hierarchical_rc_symbol();
-    let mut top = SchematicState::default();
-    build_hierarchical_rc_top(&mut top);
-
-    finish_loaded_example(&mut core_schematic);
-    finish_loaded_example(&mut top);
-
-    if app
-        .library_manager
-        .get_library(DEFAULT_PROJECT_LIBRARY)
-        .is_none()
-    {
-        app.library_manager
-            .add_library(Library::new(DEFAULT_PROJECT_LIBRARY));
-    }
-
-    let mut core_symbol_view = View::new("symbol", ViewType::Symbol);
-    core_symbol
-        .store_in_view(&mut core_symbol_view)
-        .expect("hierarchical example symbol metadata serializes");
-
-    let library = app
-        .library_manager
-        .get_library_mut(DEFAULT_PROJECT_LIBRARY)
-        .expect("project library exists");
-    replace_example_cell(
-        library,
-        HIERARCHICAL_RC_TOP_CELL,
-        "Top-level testbench for the hierarchical RC filter example.",
-        vec![View::new(DEFAULT_SCHEMATIC_VIEW, ViewType::Schematic)],
-    );
-    replace_example_cell(
-        library,
-        HIERARCHICAL_RC_CORE_CELL,
-        "Reusable RC lowpass core with an authored symbol view.",
-        vec![
-            View::new(DEFAULT_SCHEMATIC_VIEW, ViewType::Schematic),
-            core_symbol_view,
-        ],
-    );
-
-    let top_ref = CellViewRef::new(
-        DEFAULT_PROJECT_LIBRARY,
-        HIERARCHICAL_RC_TOP_CELL,
-        DEFAULT_SCHEMATIC_VIEW,
-    );
-    let core_ref = CellViewRef::new(
-        DEFAULT_PROJECT_LIBRARY,
-        HIERARCHICAL_RC_CORE_CELL,
-        DEFAULT_SCHEMATIC_VIEW,
-    );
-
-    app.workspace
-        .project
-        .rename(HIERARCHICAL_RC_FILTER)
-        .expect("built-in example project name is valid");
-    app.workspace.project.root_library = DEFAULT_PROJECT_LIBRARY.to_owned();
-    app.workspace.project.top_cell = HIERARCHICAL_RC_TOP_CELL.to_owned();
-    app.workspace.active_view = top_ref.clone();
-    app.workspace.open_views = vec![OpenCellView::new(top_ref.clone(), ViewType::Schematic)];
-    app.workspace.hierarchy_stack = vec![top_ref.clone()];
-    app.workspace.hierarchy_instances.clear();
-    app.workspace.netlist_source = None;
-    app.workspace.netlist_source_path = None;
-    app.workspace
-        .schematic_buffers
-        .insert(top_ref.key(), top.clone());
-    app.workspace
-        .schematic_buffers
-        .insert(core_ref.key(), core_schematic);
-    app.schematic = top;
-    app.library_manager.select_view(
-        DEFAULT_PROJECT_LIBRARY,
-        HIERARCHICAL_RC_TOP_CELL,
-        DEFAULT_SCHEMATIC_VIEW,
-    );
-    app.workbench
-        .activate(crate::workbench::state::Workspace::Design);
-}
-
-fn replace_example_cell(library: &mut Library, name: &str, description: &str, views: Vec<View>) {
-    let mut cell = Cell::new(name);
-    cell.description = description.to_owned();
-    cell.category = "Examples".to_owned();
-    for view in views {
-        cell.add_view(view);
-    }
-    library.add_cell(cell);
-}
-
-fn finish_loaded_example(state: &mut SchematicState) {
-    state.update_wire_junctions();
-    state.needs_fit = true;
-    state.needs_history_reset = true;
-    state.is_dirty = true;
-}
-
-fn hierarchical_rc_ports() -> Vec<PortSpec> {
-    vec![
-        PortSpec {
-            name: "in".to_owned(),
-            direction: PortDirection::In,
-        },
-        PortSpec {
-            name: "out".to_owned(),
-            direction: PortDirection::Out,
-        },
-        PortSpec {
-            name: "vss".to_owned(),
-            direction: PortDirection::Supply,
-        },
-    ]
-}
-
-fn build_hierarchical_rc_core() -> SchematicState {
-    let mut state = SchematicState::default();
-    place_port(&mut state, 1, "in", PortDirection::In, Point::new(10, 100));
-    place_port(
-        &mut state,
-        2,
-        "out",
-        PortDirection::Out,
-        Point::new(110, 100),
-    );
-    place_port(
-        &mut state,
-        3,
-        "vss",
-        PortDirection::Supply,
-        Point::new(110, 180),
-    );
-
-    state.components.push(
-        Component::new(4, ComponentType::Resistor, Point::new(50, 100)).with_name_value("R1", "1k"),
-    );
-    state.components.push(
-        Component::new(5, ComponentType::Capacitor, Point::new(100, 140))
-            .with_rotation(Rotation::R90)
-            .with_name_value("C1", "159n"),
-    );
-
-    add_wire(&mut state, vec![Point::new(0, 100), Point::new(30, 100)]);
-    add_wire(&mut state, vec![Point::new(70, 100), Point::new(100, 100)]);
-    add_wire(&mut state, vec![Point::new(100, 100), Point::new(100, 120)]);
-    add_wire(&mut state, vec![Point::new(100, 160), Point::new(100, 180)]);
-    state
-}
-
-fn place_port(
-    state: &mut SchematicState,
-    id: u64,
-    name: &str,
-    direction: PortDirection,
-    pos: Point,
-) {
-    let mut port = Component::new(id, ComponentType::Port, pos).with_name_value("", name);
-    port.params = format!("dir={}", direction.keyword());
-    state.components.push(port);
-}
-
-fn hierarchical_rc_symbol() -> SymbolDocument {
-    SymbolDocument {
-        pins: vec![
-            SymbolPin::new("in", PortDirection::In, Some(Point::new(-40, 0))),
-            SymbolPin::new("out", PortDirection::Out, Some(Point::new(40, 0))),
-            SymbolPin::new("vss", PortDirection::Supply, Some(Point::new(0, 40))),
-        ],
-        body: vec![
-            SymbolShape::Polyline {
-                points: vec![
-                    Point::new(-20, -20),
-                    Point::new(20, -20),
-                    Point::new(20, 20),
-                    Point::new(-20, 20),
-                ],
-                closed: true,
-            },
-            SymbolShape::Polyline {
-                points: vec![Point::new(-8, 0), Point::new(8, 0)],
-                closed: false,
-            },
-            SymbolShape::Polyline {
-                points: vec![Point::new(0, 20), Point::new(0, 40)],
-                closed: false,
-            },
-        ],
-        origin: Point::origin(),
-        name_anchor: Point::new(-24, -36),
-        value_anchor: Point::new(-24, 36),
-    }
-}
-
-fn build_hierarchical_rc_top(state: &mut SchematicState) {
-    let mut binding = LibraryCellInstance::new(
-        DEFAULT_PROJECT_LIBRARY,
-        HIERARCHICAL_RC_CORE_CELL,
-        DEFAULT_SCHEMATIC_VIEW,
-    );
-    binding.bind_interface(&hierarchical_rc_ports());
-
-    let mut instance = Component::new(1, ComponentType::CellInstance, Point::new(240, 140))
-        .with_library_cell(binding);
-    instance.name = "XU1".to_owned();
-    instance.value = HIERARCHICAL_RC_CORE_CELL.to_owned();
-    state.components.push(instance);
-
-    state.components.push(
-        Component::new(2, ComponentType::VoltageSourceAc, Point::new(100, 160))
-            .with_name_value("VIN", "1"),
-    );
-    state.components.push(
-        Component::new(3, ComponentType::Resistor, Point::new(360, 170))
-            .with_rotation(Rotation::R90)
-            .with_name_value("RLOAD", "10k"),
-    );
-    state.components.push(Component::new(
-        4,
-        ComponentType::Ground,
-        Point::new(170, 220),
-    ));
-
-    add_wire(state, vec![Point::new(100, 140), Point::new(200, 140)]);
-    add_wire(
-        state,
-        vec![
-            Point::new(280, 140),
-            Point::new(360, 140),
-            Point::new(360, 150),
-        ],
-    );
-    add_wire(state, vec![Point::new(360, 190), Point::new(360, 210)]);
-    add_wire(state, vec![Point::new(100, 180), Point::new(100, 210)]);
-    add_wire(state, vec![Point::new(240, 180), Point::new(240, 210)]);
-    add_wire(state, vec![Point::new(100, 210), Point::new(360, 210)]);
-    add_label(state, Point::new(150, 140), "vin");
-    add_label(state, Point::new(320, 140), "out");
-}
-
 // =============================================================================
 // Helper Functions
 // =============================================================================
@@ -978,28 +647,34 @@ fn add_label(state: &mut SchematicState, pos: Point, name: &str) {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::netlist_gen::{HierarchySource, generate_netlist_hierarchical};
-    use crate::state::{SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument};
-    use crate::workbench::app_state::AppState;
+
     use std::collections::HashSet;
+
+    /// The flat examples, which are the ones `load_example` builds. The
+    /// catalog that used to hold them was the examples *menu*'s data, and
+    /// that menu had no entry point.
+    const FLAT_EXAMPLES: &[&str] = &[
+        "RC Lowpass Filter",
+        "Voltage Divider",
+        "Common Emitter Amplifier",
+        "CMOS Inverter",
+        "Differential Pair",
+        "Opamp Inverting Amplifier",
+    ];
 
     /// Every wire endpoint must coincide with a component terminal or lie on
     /// (the interior of) another wire's segment — no dangling ends.
     #[test]
     fn example_wires_land_on_terminals() {
-        for example in EXAMPLES {
-            if example.requires_workspace {
-                continue;
-            }
+        for name in FLAT_EXAMPLES {
             let mut state = SchematicState::default();
-            load_example(example.name, &mut state);
+            load_example(name, &mut state);
             assert!(
                 !state.components.is_empty(),
                 "{}: example did not build",
-                example.name
+                name
             );
 
             let terminals: HashSet<Point> = state
@@ -1038,7 +713,7 @@ mod tests {
                             || on_some_wire(endpoint, wire.id)
                             || labels.contains(&endpoint),
                         "{}: wire {} endpoint ({}, {}) dangles",
-                        example.name,
+                        name,
                         wire.id,
                         endpoint.x,
                         endpoint.y
@@ -1051,18 +726,15 @@ mod tests {
     /// Wire segments must be axis-aligned and on the 10-unit grid.
     #[test]
     fn example_wires_are_manhattan_and_on_grid() {
-        for example in EXAMPLES {
-            if example.requires_workspace {
-                continue;
-            }
+        for name in FLAT_EXAMPLES {
             let mut state = SchematicState::default();
-            load_example(example.name, &mut state);
+            load_example(name, &mut state);
             for wire in &state.wires {
                 for seg in wire.points.windows(2) {
                     assert!(
                         seg[0].x == seg[1].x || seg[0].y == seg[1].y,
                         "{}: wire {} has a diagonal segment",
-                        example.name,
+                        name,
                         wire.id
                     );
                 }
@@ -1070,7 +742,7 @@ mod tests {
                     assert!(
                         p.x % 10 == 0 && p.y % 10 == 0,
                         "{}: wire {} point off-grid ({}, {})",
-                        example.name,
+                        name,
                         wire.id,
                         p.x,
                         p.y
@@ -1078,96 +750,5 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn hierarchical_example_loads_project_cells_and_symbol() {
-        let example = EXAMPLES
-            .iter()
-            .find(|example| example.name == "Hierarchical RC Filter")
-            .expect("hierarchical example is registered");
-        assert!(example.requires_workspace);
-
-        let mut app = AppState::default();
-        assert!(load_example_into_app(example.name, &mut app));
-        assert_eq!(app.workspace.active_view.cell, "hierarchical_rc_filter_tb");
-
-        let library = app
-            .library_manager
-            .get_library("user")
-            .expect("user library exists");
-        let core = library
-            .get_cell("rc_filter_core")
-            .expect("child cell is created");
-        assert!(core.get_view("schematic").is_some());
-        let symbol_view = core.get_view("symbol").expect("child symbol view exists");
-        assert!(
-            symbol_view
-                .metadata
-                .contains_key(SYMBOL_DOCUMENT_METADATA_KEY),
-            "symbol view stores authored symbol metadata"
-        );
-
-        let symbol = SymbolDocument::load_from_view(symbol_view).expect("symbol metadata decodes");
-        let pin_names: Vec<&str> = symbol.pins.iter().map(|pin| pin.name.as_str()).collect();
-        assert_eq!(pin_names, ["in", "out", "vss"]);
-        assert!(
-            symbol.pins.iter().all(|pin| pin.position.is_some()),
-            "every child symbol pin is placed"
-        );
-
-        let top = app
-            .workspace
-            .schematic_buffers
-            .get("user/hierarchical_rc_filter_tb/schematic")
-            .expect("top testbench buffer exists");
-        let instance = top
-            .components
-            .iter()
-            .find(|component| component.kind == ComponentType::CellInstance)
-            .expect("top schematic places the child cell");
-        let binding = instance
-            .library_cell
-            .as_ref()
-            .expect("cell instance has library binding");
-        assert_eq!(instance.name, "XU1");
-        assert_eq!(binding.library, "user");
-        assert_eq!(binding.cell, "rc_filter_core");
-        assert_eq!(binding.view, "schematic");
-        assert_eq!(
-            binding.terminal_order,
-            vec!["in".to_owned(), "out".to_owned(), "vss".to_owned()]
-        );
-    }
-
-    #[test]
-    fn hierarchical_example_generates_project_subcircuit_netlist() {
-        let mut app = AppState::default();
-        assert!(load_example_into_app("Hierarchical RC Filter", &mut app));
-
-        let hierarchy =
-            HierarchySource::from_workspace(&app.library_manager, &app.workspace.schematic_buffers);
-        let result = generate_netlist_hierarchical(&app.schematic, &[], &hierarchy);
-
-        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
-        let lower = result.netlist.to_ascii_lowercase();
-        assert!(
-            lower.contains(".subckt rc_filter_core in out vss"),
-            "netlist:\n{}",
-            result.netlist
-        );
-        assert!(lower.contains(".ends rc_filter_core"));
-        let x_line = result
-            .netlist
-            .lines()
-            .find(|line| line.to_ascii_lowercase().starts_with("xu1 "))
-            .expect("XU1 instance line is present");
-        assert!(
-            x_line
-                .split_whitespace()
-                .eq(["XU1", "vin", "out", "0", "rc_filter_core"]),
-            "unexpected instance line: {x_line}\n{}",
-            result.netlist
-        );
     }
 }

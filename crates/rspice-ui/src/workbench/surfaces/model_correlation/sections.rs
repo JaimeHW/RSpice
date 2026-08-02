@@ -1298,8 +1298,10 @@ pub(super) fn correlation_action_blocker(
 }
 
 pub(super) fn initial_metric_draft(projection: &CorrelationProjection) -> CorrelationMetricDraft {
-    let mut draft = CorrelationMetricDraft::default();
-    draft.calculation = CorrelationCalculationDraft::AbsoluteLinear;
+    let mut draft = CorrelationMetricDraft {
+        calculation: CorrelationCalculationDraft::AbsoluteLinear,
+        ..Default::default()
+    };
     let Some(suite) = projection.suite.as_ref() else {
         return draft;
     };

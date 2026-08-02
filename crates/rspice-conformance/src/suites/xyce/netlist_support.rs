@@ -3830,8 +3830,8 @@ impl XyceTestRunner {
             }
             model_params.insert(normalized, *value);
         }
-        if !Self::numeric_param_value(&model.params, "LEVEL")
-            .is_some_and(|level| level.to_bits() == 260.0f64.to_bits())
+        if Self::numeric_param_value(&model.params, "LEVEL")
+            .is_none_or(|level| level.to_bits() != 260.0f64.to_bits())
         {
             return None;
         }

@@ -13,9 +13,11 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(any(test, target_arch = "wasm32"))]
+use super::BrowserHistoryEffect;
 use super::{
-    BrowserHistoryEffect, RouteTransition, RouteTransitionSource, SurfaceArchetype, SurfaceId,
-    SurfaceNavigation, SurfaceRoute, WorkspacePreset,
+    RouteTransition, RouteTransitionSource, SurfaceArchetype, SurfaceId, SurfaceNavigation,
+    SurfaceRoute, WorkspacePreset,
 };
 
 const NAVIGATION_SCHEMA_VERSION: u8 = 1;
@@ -371,6 +373,7 @@ impl EngineeringProfile {
         Self::All,
     ];
 
+    #[cfg(test)]
     pub const fn id(self) -> &'static str {
         match self {
             Self::AnalogIc => "analog-ic",
@@ -715,6 +718,7 @@ impl VerificationPage {
     /// Persisted route catalog. Physical DRC remains decodable for backward
     /// compatibility but is absent from navigation until layout/rule-deck
     /// evidence has a production executor.
+    #[cfg(test)]
     pub const ALL: [Self; 7] = [
         Self::Yield,
         Self::Corners,
@@ -1497,6 +1501,7 @@ impl WorkbenchState {
     /// Only the browser build reads this: `app::apply_browser_history_delta`
     /// refuses a forward jump that would leave the in-app task stack.
     #[must_use]
+    #[cfg(target_arch = "wasm32")]
     pub fn forward_route_count(&self) -> usize {
         self.navigation.forward_entries().len()
     }
@@ -1540,6 +1545,7 @@ impl WorkbenchState {
         Some(transition)
     }
 
+    #[cfg(test)]
     pub fn navigate_forward(&mut self, source: RouteTransitionSource) -> Option<RouteTransition> {
         self.navigate_forward_steps(1, source)
     }
@@ -1547,6 +1553,7 @@ impl WorkbenchState {
     /// Atomically advance across up to `count` known routes, reconciling the
     /// foreground surface only once from the original route to the final
     /// destination.
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub fn navigate_forward_steps(
         &mut self,
         count: usize,
@@ -1604,6 +1611,7 @@ impl WorkbenchState {
         }
     }
 
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub fn take_browser_history_effect(&mut self) -> Option<BrowserHistoryEffect> {
         self.navigation.take_browser_effect()
     }
@@ -1843,9 +1851,12 @@ fn allocate_restored_identity(used: &HashSet<u64>, next_identity: &mut u64) -> O
 const fn result_viewer_document_id(viewer: super::ResultViewer) -> Option<&'static str> {
     Some(match viewer {
         super::ResultViewer::Manifest => return None,
-        super::ResultViewer::Waves => "viewer-waveform",
-        super::ResultViewer::Bode | super::ResultViewer::Nyquist => "viewer-bode",
-        super::ResultViewer::Fft | super::ResultViewer::NoiseContrib => "viewer-spectrum",
+        super::ResultViewer::Waves | super::ResultViewer::DcSweep => "viewer-waveform",
+        super::ResultViewer::Bode
+        | super::ResultViewer::Nyquist
+        | super::ResultViewer::NoiseContrib => "viewer-bode",
+        super::ResultViewer::Fft | super::ResultViewer::HarmonicBalance => "viewer-spectrum",
+        super::ResultViewer::PhaseNoise => "viewer-phase-noise",
         super::ResultViewer::Contribution => "viewer-contribution",
         super::ResultViewer::TransferFunction => "viewer-transfer-function",
         super::ResultViewer::Eye => "eye-viewer",

@@ -30,6 +30,10 @@ impl VisualizationDock {
     }
 }
 
+/// The shared coordinate axis, then the baseline and candidate series
+/// resampled onto it.
+type AlignedComparisonSeries = (Vec<f64>, Vec<Vec<f64>>, Vec<Vec<f64>>);
+
 pub(super) fn dock_body(ui: &mut Ui, app: &mut RSpiceApp, dock: VisualizationDock) -> bool {
     match dock {
         VisualizationDock::AddPane => add_pane_dock(ui, app),
@@ -1695,7 +1699,7 @@ fn exact_intersection(
     candidate_axis: &[f64],
     baseline_values: &[Vec<f64>],
     candidate_values: &[Vec<f64>],
-) -> Result<(Vec<f64>, Vec<Vec<f64>>, Vec<Vec<f64>>), String> {
+) -> Result<AlignedComparisonSeries, String> {
     let mut coordinates = Vec::new();
     let mut baseline_aligned = vec![Vec::new(); baseline_values.len()];
     let mut candidate_aligned = vec![Vec::new(); candidate_values.len()];
@@ -2266,6 +2270,7 @@ pub(super) fn execute_comparison_draft_with_differences(
     })
 }
 
+#[cfg(test)]
 pub(super) fn execute_comparison_draft(app: &RSpiceApp) -> Result<ComparisonReceipt, String> {
     execute_comparison_draft_with_differences(app).map(|execution| execution.receipt)
 }

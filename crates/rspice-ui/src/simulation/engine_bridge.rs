@@ -19,7 +19,9 @@
 
 use std::path::Path;
 
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
+#[cfg(test)]
+use rspice_core::abort_signal::NoAbort;
 
 use super::config::AnalysisConfig;
 use super::results::SimulationResult;
@@ -66,6 +68,7 @@ impl EngineBridge {
     ///
     /// Prefer this constructor at service and job-queue boundaries so invalid
     /// configuration is rejected before parsing or simulation work begins.
+    #[cfg(test)]
     pub fn try_with_config(
         config: rspice_core::SimulationConfig,
     ) -> Result<Self, rspice_core::SimulationConfigError> {
@@ -79,6 +82,7 @@ impl EngineBridge {
     /// This compatibility convenience API is intended for direct synchronous
     /// callers. Production queued execution must use [`Self::run_with_abort`]
     /// or [`Self::run_with_abort_and_source_path`].
+    #[cfg(test)]
     pub fn run(
         &self,
         config: &AnalysisConfig,
@@ -95,6 +99,7 @@ impl EngineBridge {
     }
 
     /// Run simulation with abort signal for cooperative cancellation.
+    #[cfg(test)]
     pub fn run_with_abort(
         &self,
         config: &AnalysisConfig,

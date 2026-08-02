@@ -23,9 +23,6 @@ impl Instant {
     pub fn elapsed(&self) -> std::time::Duration {
         std::time::Duration::from_secs_f64(((js_sys::Date::now() - self.0).max(0.0)) / 1000.0)
     }
-    pub fn duration_since(&self, earlier: Instant) -> std::time::Duration {
-        std::time::Duration::from_secs_f64(((self.0 - earlier.0).max(0.0)) / 1000.0)
-    }
 }
 
 /// Wall-clock time since the unix epoch (wasm-safe `SystemTime::now()`).

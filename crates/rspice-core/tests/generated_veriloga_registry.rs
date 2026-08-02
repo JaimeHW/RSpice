@@ -1,6 +1,6 @@
 #![cfg(feature = "veriloga-builtins")]
 
-use rspice_core::device::veriloga_generated::builtins;
+use rspice_core::device::veriloga_builtins::builtins;
 
 #[test]
 fn build_script_generates_registry_from_veriloga_directory() {

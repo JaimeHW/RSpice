@@ -152,7 +152,7 @@ impl DeviceRunner {
 
         // The reference records |I| through the sweep source, which is the
         // quantity the upstream deck printed.
-        let branch = format!("{sweep_source}");
+        let branch = sweep_source.to_string();
         let actual: Vec<f64> = swept
             .iter()
             .map(|(_, result)| {

@@ -11,18 +11,13 @@ use sha2::{Digest, Sha256};
 
 use crate::product::{ContentDigest, ObjectRevision, ProjectId};
 use crate::services::drc::{DrcConfig, DrcResult};
-use crate::state::{CanonicalCellViewOwnerKey, CellViewRef, canonical_cell_view_owner_key};
+use crate::state::{
+    CanonicalCellViewOwnerKey, CellViewRef, ViewType, canonical_cell_view_owner_key,
+};
 
 use super::AppState;
 
 const DESIGN_CHECK_DIGEST_DOMAIN: &[u8] = b"rspice-interactive-design-check/v1\0";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DesignCheckOrigin {
-    Manual,
-    Incremental,
-    ConnectivityCommit,
-}
 
 #[derive(Debug, Clone)]
 pub(crate) struct CellViewCheckReceipt {
@@ -30,8 +25,6 @@ pub(crate) struct CellViewCheckReceipt {
     pub(crate) subject: CellViewRef,
     pub(crate) checked_project_revision: ObjectRevision,
     pub(crate) input_digest: ContentDigest,
-    pub(crate) checked_unix_ms: u64,
-    pub(crate) origin: DesignCheckOrigin,
     pub(crate) result: DrcResult,
 }
 
@@ -87,10 +80,7 @@ impl DesignCheckRuntime {
 }
 
 impl AppState {
-    pub(crate) fn run_active_design_checks(
-        &mut self,
-        origin: DesignCheckOrigin,
-    ) -> Result<DrcResult, String> {
+    pub(crate) fn run_active_design_checks(&mut self) -> Result<DrcResult, String> {
         let subject = self.workspace.active_schematic_reference();
         let config = design_check_config(self, &subject);
         let mut live_buffers = self.workspace.schematic_buffers.clone();
@@ -106,18 +96,26 @@ impl AppState {
             &hierarchy,
             config.clone(),
         );
-        self.publish_design_check_result(subject, config, result.clone(), origin)?;
+        self.publish_design_check_result(subject, config, result.clone())?;
         Ok(result)
     }
 
     pub(crate) fn publish_active_design_check_result(
         &mut self,
         result: DrcResult,
-        origin: DesignCheckOrigin,
     ) -> Result<(), String> {
+        if !matches!(
+            self.workspace.active_view_type(),
+            ViewType::Schematic | ViewType::Testbench
+        ) {
+            return Err(
+                "schematic design-check evidence can only be published from a schematic or testbench"
+                    .to_owned(),
+            );
+        }
         let subject = self.workspace.active_schematic_reference();
         let config = design_check_config(self, &subject);
-        self.publish_design_check_result(subject, config, result, origin)
+        self.publish_design_check_result(subject, config, result)
     }
 
     fn publish_design_check_result(
@@ -125,18 +123,25 @@ impl AppState {
         subject: CellViewRef,
         config: DrcConfig,
         result: DrcResult,
-        origin: DesignCheckOrigin,
     ) -> Result<(), String> {
+        if !result.completed {
+            return Err(
+                "an incomplete design-check result cannot become current evidence".to_owned(),
+            );
+        }
+        let is_active_subject =
+            owner_key(&subject) == owner_key(&self.workspace.active_schematic_reference());
         let input_digest = design_check_input_digest(self, &subject, &config)?;
         self.design_checks.insert(CellViewCheckReceipt {
             project_id: self.workspace.project.id(),
             subject,
             checked_project_revision: self.workspace.project.revision(),
             input_digest,
-            checked_unix_ms: crate::time_compat::unix_epoch().as_millis() as u64,
-            origin,
             result,
         });
+        if is_active_subject {
+            self.refresh_active_design_check_projection();
+        }
         Ok(())
     }
 
@@ -160,6 +165,12 @@ impl AppState {
     }
 
     pub(crate) fn active_design_check_status(&self) -> DesignCheckStatus<'_> {
+        if !matches!(
+            self.workspace.active_view_type(),
+            ViewType::Schematic | ViewType::Testbench
+        ) {
+            return DesignCheckStatus::NotRun;
+        }
         self.design_check_status(&self.workspace.active_schematic_reference())
     }
 
@@ -168,6 +179,13 @@ impl AppState {
     }
 
     pub(crate) fn clear_active_design_check(&mut self) {
+        if !matches!(
+            self.workspace.active_view_type(),
+            ViewType::Schematic | ViewType::Testbench
+        ) {
+            self.refresh_active_design_check_projection();
+            return;
+        }
         let subject = self.workspace.active_schematic_reference();
         self.design_checks.clear_subject(&subject);
     }
@@ -180,6 +198,15 @@ impl AppState {
     /// schematic. Remaining canvas/status consumers can therefore never show
     /// a different cell/view's findings while they are migrated to receipts.
     pub(crate) fn refresh_active_design_check_projection(&mut self) {
+        if !matches!(
+            self.workspace.active_view_type(),
+            ViewType::Schematic | ViewType::Testbench
+        ) {
+            self.dialogs.drc_checked_version = 0;
+            self.dialogs.drc_results = None;
+            self.dialogs.drc_cycle = None;
+            return;
+        }
         let current = match self.active_design_check_status() {
             DesignCheckStatus::Current(receipt) => Some(receipt.result.clone()),
             DesignCheckStatus::NotRun
@@ -218,27 +245,28 @@ fn design_check_input_digest(
     subject: &CellViewRef,
     config: &DrcConfig,
 ) -> Result<ContentDigest, String> {
-    let active = state.workspace.active_schematic_reference();
-    let active_key = active.key();
-    let mut schematic_digests = state
-        .workspace
-        .schematic_buffers
+    let mut live_buffers = state.workspace.schematic_buffers.clone();
+    if matches!(
+        state.workspace.active_view_type(),
+        ViewType::Schematic | ViewType::Testbench
+    ) {
+        live_buffers.insert(state.workspace.active_view.key(), state.schematic.clone());
+    }
+    let mut schematic_digests = live_buffers
         .iter()
-        .filter(|(key, _)| key.as_str() != active_key)
         .map(|(key, schematic)| {
-            schematic
+            let content_digest = schematic
                 .validated_design_content_digest()
-                .map(|digest| (key.clone(), digest))
-                .map_err(|error| format!("could not digest schematic {key}: {error}"))
+                .map_err(|error| format!("could not digest schematic {key}: {error}"))?;
+            let mut net_mapping = schematic
+                .net_mapping
+                .iter()
+                .map(|(point, net)| (point.x, point.y, net.as_str()))
+                .collect::<Vec<_>>();
+            net_mapping.sort_unstable();
+            Ok((key.clone(), content_digest, net_mapping))
         })
-        .collect::<Result<Vec<_>, _>>()?;
-    schematic_digests.push((
-        active_key,
-        state
-            .schematic
-            .validated_design_content_digest()
-            .map_err(|error| format!("could not digest active schematic: {error}"))?,
-    ));
+        .collect::<Result<Vec<_>, String>>()?;
     schematic_digests.sort_by(|left, right| left.0.cmp(&right.0));
 
     let mut overrides = config
@@ -262,6 +290,7 @@ fn design_check_input_digest(
         state.workspace.project.id(),
         owner_key(subject).to_string(),
         schematic_digests,
+        state.library_manager.revision(),
         &state.workspace.connectivity,
         profile,
     ))
@@ -276,6 +305,12 @@ fn design_check_input_digest(
 mod tests {
     use super::*;
 
+    fn completed_result() -> DrcResult {
+        let mut result = DrcResult::new();
+        result.completed = true;
+        result
+    }
+
     #[test]
     fn receipts_never_alias_another_active_cell_view() {
         let mut state = AppState::default();
@@ -286,7 +321,7 @@ mod tests {
             .schematic_buffers
             .insert(other.key(), crate::state::SchematicState::default());
         state
-            .publish_active_design_check_result(DrcResult::new(), DesignCheckOrigin::Manual)
+            .publish_active_design_check_result(completed_result())
             .expect("publish root receipt");
 
         state
@@ -295,11 +330,14 @@ mod tests {
             .insert(root.key(), state.schematic.clone());
         state.workspace.active_view = other;
         state.schematic = crate::state::SchematicState::default();
+        state.refresh_active_design_check_projection();
 
         assert!(matches!(
             state.active_design_check_status(),
             DesignCheckStatus::NotRun
         ));
+        assert!(state.dialogs.drc_results.is_none());
+        assert_eq!(state.dialogs.drc_checked_version, 0);
         assert!(matches!(
             state.design_check_status(&root),
             DesignCheckStatus::Current(_)
@@ -307,10 +345,32 @@ mod tests {
     }
 
     #[test]
+    fn publishing_an_active_receipt_refreshes_the_canvas_projection() {
+        let mut state = AppState::default();
+        let result = completed_result();
+
+        state
+            .publish_active_design_check_result(result)
+            .expect("publish active receipt");
+
+        assert!(
+            state
+                .dialogs
+                .drc_results
+                .as_ref()
+                .is_some_and(|projected| projected.completed)
+        );
+        assert_eq!(
+            state.dialogs.drc_checked_version,
+            state.schematic.topology_version()
+        );
+    }
+
+    #[test]
     fn connectivity_changes_stale_previously_current_receipts() {
         let mut state = AppState::default();
         state
-            .publish_active_design_check_result(DrcResult::new(), DesignCheckOrigin::Manual)
+            .publish_active_design_check_result(completed_result())
             .expect("publish current receipt");
         assert!(matches!(
             state.active_design_check_status(),
@@ -323,6 +383,86 @@ mod tests {
         assert!(matches!(
             state.active_design_check_status(),
             DesignCheckStatus::Stale(_)
+        ));
+    }
+
+    #[test]
+    fn incomplete_results_can_never_become_current_evidence() {
+        let mut state = AppState::default();
+
+        let error = state
+            .publish_active_design_check_result(DrcResult::new())
+            .expect_err("incomplete result must be rejected");
+
+        assert!(error.contains("incomplete"));
+        assert!(matches!(
+            state.active_design_check_status(),
+            DesignCheckStatus::NotRun
+        ));
+        assert!(state.dialogs.drc_results.is_none());
+    }
+
+    #[test]
+    fn focusing_a_non_schematic_view_does_not_stale_root_evidence() {
+        let mut state = AppState::default();
+        let root = state.workspace.active_view.clone();
+        state
+            .publish_active_design_check_result(completed_result())
+            .expect("publish root receipt");
+        state
+            .workspace
+            .schematic_buffers
+            .insert(root.key(), state.schematic.clone());
+        let layout = CellViewRef::new(&root.library, &root.cell, "layout");
+        state
+            .workspace
+            .open_views
+            .push(crate::state::OpenCellView::new(
+                layout.clone(),
+                ViewType::Layout,
+            ));
+        state.workspace.active_view = layout;
+        state.schematic = crate::state::SchematicState::default();
+
+        assert!(matches!(
+            state.design_check_status(&root),
+            DesignCheckStatus::Current(_)
+        ));
+    }
+
+    #[test]
+    fn symbol_focus_never_aliases_or_clears_its_sibling_schematic_receipt() {
+        let mut state = AppState::default();
+        let root = state.workspace.active_view.clone();
+        state
+            .publish_active_design_check_result(completed_result())
+            .expect("publish root receipt");
+        let symbol = CellViewRef::new(&root.library, &root.cell, "symbol");
+        state
+            .workspace
+            .open_views
+            .push(crate::state::OpenCellView::new(
+                symbol.clone(),
+                ViewType::Symbol,
+            ));
+        state.workspace.active_view = symbol;
+
+        state.refresh_active_design_check_projection();
+
+        assert!(matches!(
+            state.active_design_check_status(),
+            DesignCheckStatus::NotRun
+        ));
+        assert!(state.dialogs.drc_results.is_none());
+        assert!(
+            state
+                .publish_active_design_check_result(completed_result())
+                .is_err()
+        );
+        state.clear_active_design_check();
+        assert!(matches!(
+            state.design_check_status(&root),
+            DesignCheckStatus::Current(_)
         ));
     }
 }

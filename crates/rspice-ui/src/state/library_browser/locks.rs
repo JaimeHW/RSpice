@@ -332,9 +332,9 @@ pub enum ProjectLibraryLockBlockReason {
         snapshot_library_revision: u64,
         current_library_revision: u64,
     },
-    Locked {
-        lock: ProjectLibraryEditLock,
-    },
+    /// Boxed: the lock record dwarfs every other reason, and this enum is the
+    /// `Err` of results whose success value is `()`.
+    Locked { lock: Box<ProjectLibraryEditLock> },
 }
 
 impl std::fmt::Display for ProjectLibraryLockBlockReason {
@@ -432,14 +432,18 @@ impl ProjectLibraryLockAuthority {
         if matches!(mutation, ProjectLibraryMutation::RollbackPublication { .. })
             && let Some(lock) = snapshot.locks.first()
         {
-            return Err(ProjectLibraryLockBlockReason::Locked { lock: lock.clone() });
+            return Err(ProjectLibraryLockBlockReason::Locked {
+                lock: Box::new(lock.clone()),
+            });
         }
         if let Some(lock) = snapshot
             .locks
             .iter()
             .find(|lock| scope_conflicts(&lock.scope, mutation))
         {
-            return Err(ProjectLibraryLockBlockReason::Locked { lock: lock.clone() });
+            return Err(ProjectLibraryLockBlockReason::Locked {
+                lock: Box::new(lock.clone()),
+            });
         }
         Ok(())
     }

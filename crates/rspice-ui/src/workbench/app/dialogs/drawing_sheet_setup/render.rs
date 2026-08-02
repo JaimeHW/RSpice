@@ -389,9 +389,17 @@ fn section_navigation(ui: &mut Ui, state: &mut DrawingSheetSetupState, height: f
                     t.color.accent,
                 );
             }
-            if response
-                .response
-                .interact(Sense::click())
+            let section_response = response.response.interact(Sense::click());
+            section_response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::SelectableLabel,
+                    ui.is_enabled(),
+                    selected,
+                    section.label(),
+                )
+            });
+            crate::ui::theme::paint_focus_ring(ui, &section_response, rect);
+            if section_response
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .clicked()
             {
@@ -1907,6 +1915,8 @@ fn resource_action(
                 .interact(Sense::click())
         })
         .inner;
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, title));
+    crate::ui::theme::paint_focus_ring(ui, &response, response.rect);
     ui.add_space(6.0);
     response.clicked()
 }

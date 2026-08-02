@@ -230,8 +230,6 @@ pub enum ModelsCatalogScope {
 }
 
 impl ModelsCatalogScope {
-    pub const ALL: [Self; 3] = [Self::Project, Self::InstalledPacks, Self::RSpiceLibrary];
-
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
@@ -372,8 +370,6 @@ impl RSpicePartFacet {
 pub enum ModelsOperationalState {
     #[default]
     Ready,
-    Empty,
-    Loading,
     InvalidInput,
     ExecutionError,
     ReadOnly,
@@ -390,10 +386,9 @@ pub enum ModelsOperationalState {
 }
 
 impl ModelsOperationalState {
-    pub const ALL: [Self; 16] = [
+    #[cfg(test)]
+    pub const ALL: [Self; 14] = [
         Self::Ready,
-        Self::Empty,
-        Self::Loading,
         Self::InvalidInput,
         Self::ExecutionError,
         Self::ReadOnly,
@@ -410,11 +405,10 @@ impl ModelsOperationalState {
     ];
 
     #[must_use]
+    #[cfg(test)]
     pub const fn label(self) -> &'static str {
         match self {
             Self::Ready => "Ready",
-            Self::Empty => "Empty",
-            Self::Loading => "Loading",
             Self::InvalidInput => "Invalid input",
             Self::ExecutionError => "Execution error",
             Self::ReadOnly => "Read-only",
@@ -971,7 +965,6 @@ pub enum NotificationFilter {
     #[default]
     All,
     Jobs,
-    Approvals,
     System,
 }
 
@@ -1154,13 +1147,12 @@ impl Default for CapabilityMatrixState {
 }
 
 impl NotificationFilter {
-    pub const ALL: [Self; 4] = [Self::All, Self::Jobs, Self::Approvals, Self::System];
+    pub const ALL: [Self; 3] = [Self::All, Self::Jobs, Self::System];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::All => "All",
             Self::Jobs => "Jobs",
-            Self::Approvals => "Approvals",
             Self::System => "System",
         }
     }
@@ -1275,8 +1267,6 @@ mod tests {
             ModelsOperationalState::ALL.map(ModelsOperationalState::label),
             [
                 "Ready",
-                "Empty",
-                "Loading",
                 "Invalid input",
                 "Execution error",
                 "Read-only",

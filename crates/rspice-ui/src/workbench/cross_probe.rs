@@ -305,10 +305,10 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
                     .find(|net| net.wire_ids.contains(&wire.id))
                     .map(|net| net.name.as_str())
             });
-        if let Some(name) = names.next() {
-            if !accept(name) || names.any(|candidate| !accept(candidate)) {
-                return None;
-            }
+        if let Some(name) = names.next()
+            && (!accept(name) || names.any(|candidate| !accept(candidate)))
+        {
+            return None;
         }
     }
     resolved

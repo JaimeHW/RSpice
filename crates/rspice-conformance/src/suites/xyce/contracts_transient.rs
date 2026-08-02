@@ -3131,15 +3131,14 @@ impl XyceTestRunner {
         {
             return Ok(());
         }
-        if let Some(voltage_probe) = Self::parse_tran_voltage_probe(normalized) {
-            if !voltage_probe.node_pos.is_empty()
-                && voltage_probe
-                    .node_neg
-                    .as_deref()
-                    .is_none_or(|node| !node.is_empty())
-            {
-                return Ok(());
-            }
+        if let Some(voltage_probe) = Self::parse_tran_voltage_probe(normalized)
+            && !voltage_probe.node_pos.is_empty()
+            && voltage_probe
+                .node_neg
+                .as_deref()
+                .is_none_or(|node| !node.is_empty())
+        {
+            return Ok(());
         }
         if let Some(element_name) = Self::parse_current_probe(normalized) {
             if Self::netlist_has_recorded_branch_current(netlist, &element_name) {

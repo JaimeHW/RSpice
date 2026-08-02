@@ -36,6 +36,7 @@ pub struct ShortcutExportRequest {
 
 impl ShortcutExportRequest {
     #[must_use]
+    #[cfg(test)]
     pub fn user_overrides(
         runtime_platform: CommandPlatform,
         operating_system: OperatingSystem,
@@ -86,6 +87,7 @@ impl ShortcutReferenceModel {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn profile(&self) -> &Value {
         &self.profile
     }

@@ -131,7 +131,7 @@ fn result_import_block_reason(state: &AppState) -> Option<String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn read_native_file_bounded(path: &Path) -> Result<Vec<u8>, String> {
-    let mut file = std::fs::File::open(path)
+    let file = std::fs::File::open(path)
         .map_err(|error| format!("could not open {}: {error}", path.display()))?;
     let size = file
         .metadata()
@@ -210,6 +210,12 @@ pub(crate) fn apply_imported_result_dataset(
     state
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
+    let document = crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id);
+    if !crate::workbench::chrome::document_bar::activate_document_by_id(state, &document) {
+        return Err(format!(
+            "imported dataset {dataset_id} was retained but its Results document could not be activated"
+        ));
+    }
     state.ui.results.viewer = crate::workbench::ResultViewer::Waves;
     state.push_user_message(ConsoleMessage::info(format!(
         "Imported {source_name} as immutable dataset {dataset_id}: {signal_count} signals × {sample_count} samples ({})",
@@ -584,19 +590,19 @@ fn infer_analysis_type(header: &ColumnContract) -> Result<(AnalysisType, f64), S
         _ => (AnalysisType::DcSweep, None, 1.0),
     };
 
-    if let (Some(required), Some(unit)) = (required_dimension, header.unit) {
-        if unit.dimension != required {
-            return Err(format!(
-                "{} coordinate {:?} requires a {} unit",
-                analysis_domain_label(analysis_type),
-                header.name,
-                match required {
-                    UnitDimension::Time => "time",
-                    UnitDimension::Frequency => "frequency",
-                    _ => "compatible",
-                }
-            ));
-        }
+    if let (Some(required), Some(unit)) = (required_dimension, header.unit)
+        && unit.dimension != required
+    {
+        return Err(format!(
+            "{} coordinate {:?} requires a {} unit",
+            analysis_domain_label(analysis_type),
+            header.name,
+            match required {
+                UnitDimension::Time => "time",
+                UnitDimension::Frequency => "frequency",
+                _ => "compatible",
+            }
+        ));
     }
     if analysis_type == AnalysisType::DcSweep
         && header.unit.is_some_and(|unit| {
@@ -913,6 +919,13 @@ mod tests {
         assert_eq!(
             state.workbench.workspace,
             crate::workbench::state::Workspace::Results
+        );
+        assert_eq!(
+            state
+                .workbench
+                .documents
+                .active(crate::workbench::state::Workspace::Results),
+            Some(&crate::workbench::state::WorkspaceDocumentId::ResultDataset(run.dataset_id))
         );
         assert!(
             crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state),

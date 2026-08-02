@@ -1029,6 +1029,10 @@ pub fn render_schematic_view(
             node.set_label(selection_status);
             node.set_live(egui::accesskit::Live::Polite);
         });
+    // The canvas takes keyboard focus for tool, nudge, and routing shortcuts,
+    // so it owes a visible focus ring like every other custom click target.
+    // Painted last so the schematic artwork does not cover it.
+    crate::ui::theme::paint_focus_ring(ui, &response, available);
     crate::workbench::app_state::report_engineering_canvas_focus(
         &response,
         state.workspace.active_view_type(),

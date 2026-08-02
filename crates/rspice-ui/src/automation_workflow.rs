@@ -10,12 +10,16 @@ mod parser;
 mod regression;
 
 pub use artifacts::{
-    ArtifactRenderError, CheckEvidence, CheckOutcome, ComparisonEvidence, CompletedEvidence,
-    EvidenceError, RenderedArtifact, render_requested_artifacts,
+    CheckEvidence, CheckOutcome, ComparisonEvidence, CompletedEvidence, RenderedArtifact,
+    render_requested_artifacts,
 };
-pub use parser::{
-    ArtifactKind, AutomationPlan, DiagnosticCode, DiagnosticSet, compile_workflow, parse_workflow,
-};
+pub use parser::{ArtifactKind, AutomationPlan, DiagnosticSet, compile_workflow};
+// The error vocabularies and the standalone parser entry point are asserted
+// on by this module's tests; `artifacts` and `parser` are private.
+#[cfg(test)]
+pub use artifacts::{ArtifactRenderError, EvidenceError};
+#[cfg(test)]
+pub use parser::{DiagnosticCode, parse_workflow};
 pub(crate) use regression::compare_governed_waveforms;
 
 #[cfg(test)]

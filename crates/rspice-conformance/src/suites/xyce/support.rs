@@ -74,8 +74,10 @@ impl XyceTestRunner {
     }
 
     pub fn statistics(results: &[XyceTestResult]) -> XyceStatistics {
-        let mut stats = XyceStatistics::default();
-        stats.total = results.len();
+        let mut stats = XyceStatistics {
+            total: results.len(),
+            ..Default::default()
+        };
         for result in results {
             stats.total_time_ms += result.duration_ms;
             if result.expected_unsupported {
@@ -1155,22 +1157,20 @@ impl XyceTestRunner {
                 XyceStaticTranPlanPurpose::AbsoluteOracle,
             )
             .is_ok()
-        {
-            if let Ok(tolerances) =
+            && let Ok(tolerances) =
                 Self::xyce_verify_comp_tolerances(&plan.source, &plan.print.probes)
-            {
-                return Ok(XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
-                    scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
-                    error_bounds: if tolerances
-                        .into_iter()
-                        .any(XyceVerifyTransientTolerance::has_nondefault_error_bounds)
-                    {
-                        XyceVerifyCompErrorBounds::DeckOverrides
-                    } else {
-                        XyceVerifyCompErrorBounds::Release710Default
-                    },
-                });
-            }
+        {
+            return Ok(XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
+                scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+                error_bounds: if tolerances
+                    .into_iter()
+                    .any(XyceVerifyTransientTolerance::has_nondefault_error_bounds)
+                {
+                    XyceVerifyCompErrorBounds::DeckOverrides
+                } else {
+                    XyceVerifyCompErrorBounds::Release710Default
+                },
+            });
         }
         // EKV26's canonical transient implementation is adaptive while the
         // Xyce PRN oracle records accepted breakpoints.  A reference-grid
@@ -3180,18 +3180,6 @@ impl XyceTestRunner {
     ) -> Engine {
         let mut config = self.xyce_engine_config(locked_time_grid);
         config.locked_time_step_sizes = locked_time_step_sizes.map(Arc::new);
-        config.transient_initial_timestep = initial_timestep;
-        config.integration_method = integration_method;
-        Engine::new(config)
-    }
-
-    pub(super) fn create_xyce_static_tran_engine_with_integration_method(
-        &self,
-        locked_time_grid: Option<Vec<Value>>,
-        integration_method: rspice_core::numerics::integration::IntegrationMethod,
-        initial_timestep: Option<Value>,
-    ) -> Engine {
-        let mut config = self.xyce_engine_config(locked_time_grid);
         config.transient_initial_timestep = initial_timestep;
         config.integration_method = integration_method;
         Engine::new(config)
@@ -5217,10 +5205,10 @@ impl XyceTestRunner {
             return Ok(None);
         };
 
-        if Self::resistor_uses_xyce_default_marker(instance_params) {
-            if let Some(resistance) = Self::effective_resistor_value(netlist, name)? {
-                return Ok(Some(resistance));
-            }
+        if Self::resistor_uses_xyce_default_marker(instance_params)
+            && let Some(resistance) = Self::effective_resistor_value(netlist, name)?
+        {
+            return Ok(Some(resistance));
         }
         if let Some(resistance) = Self::instance_param(instance_params, &["R", "VALUE"]) {
             return Ok(Some(resistance));

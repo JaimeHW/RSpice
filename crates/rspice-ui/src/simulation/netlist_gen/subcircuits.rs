@@ -88,6 +88,7 @@ impl<'a> HierarchySource<'a> {
 
     /// An empty source — netlisting behaves exactly as before hierarchy
     /// support (every project-cell instance is an unresolved master).
+    #[cfg(test)]
     pub fn empty() -> Self {
         Self {
             masters: HashMap::new(),
@@ -169,6 +170,7 @@ impl<'a> HierarchySource<'a> {
     }
 
     /// Register a master directly (tests, ad-hoc callers).
+    #[cfg(test)]
     pub fn insert(&mut self, library: &str, cell: &str, schematic: &'a SchematicState) {
         self.masters
             .insert(Self::view_key(library, cell, "schematic"), schematic);
@@ -446,7 +448,6 @@ fn emit_configured_definition(
 
 /// Emit one cell's `.SUBCKT` block (children first), guarding against
 /// recursive hierarchies and reporting every defect with cell context.
-#[allow(clippy::too_many_arguments)]
 fn emit_cell_definition(
     hierarchy: &HierarchySource<'_>,
     library: &str,

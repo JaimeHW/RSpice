@@ -189,7 +189,6 @@ fn run_tf(
         output_quantity,
         input_unit: quantity_unit(input_quantity).to_owned(),
         output_unit: quantity_unit(output_quantity).to_owned(),
-        gain_unit: gain_unit(data.gain_metadata.unit).to_owned(),
         normalization,
         accuracy,
         gain: data
@@ -226,16 +225,6 @@ fn quantity_unit(quantity: crate::simulation::results::TransferFunctionQuantity)
     match quantity {
         crate::simulation::results::TransferFunctionQuantity::Voltage => "V",
         crate::simulation::results::TransferFunctionQuantity::Current => "A",
-    }
-}
-
-fn gain_unit(unit: svc_runner::TfGainUnit) -> &'static str {
-    match unit {
-        svc_runner::TfGainUnit::Dimensionless => "1",
-        svc_runner::TfGainUnit::VoltsPerVolt => "V/V",
-        svc_runner::TfGainUnit::AmpsPerVolt => "A/V",
-        svc_runner::TfGainUnit::VoltsPerAmpere => "V/A",
-        svc_runner::TfGainUnit::AmpsPerAmpere => "A/A",
     }
 }
 
@@ -635,7 +624,7 @@ fn insert_scalar_waveform(
     x_values: Vec<f64>,
     y_values: Vec<f64>,
     y_unit: &str,
-    x_unit: &str,
+    _x_unit: &str,
 ) {
     waveforms.insert(
         name.clone(),
@@ -644,7 +633,6 @@ fn insert_scalar_waveform(
             x_values,
             y_values,
             y_unit: y_unit.to_string(),
-            x_unit: x_unit.to_string(),
             is_complex: false,
             y_imag: None,
         },
@@ -712,7 +700,6 @@ R2 out 0 1k
             output_quantity,
             input_unit,
             output_unit,
-            gain_unit,
             normalization,
             accuracy,
             gain,
@@ -730,7 +717,6 @@ R2 out 0 1k
         assert_eq!(output_quantity, TransferFunctionQuantity::Voltage);
         assert_eq!(input_unit, "V");
         assert_eq!(output_unit, "V");
-        assert_eq!(gain_unit, "V/V");
         assert_eq!(normalization, TfNormalization::None);
         assert_eq!(accuracy, TfAccuracy::Balanced);
         assert_finite_scalar_close(gain, 0.5, "gain");

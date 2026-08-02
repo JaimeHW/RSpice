@@ -1490,15 +1490,14 @@ impl XyceTestRunner {
         netlist: &Netlist,
         probe_index: &mut XyceDcProbeIndex,
     ) -> Result<(), String> {
-        if let Some(voltage_probe) = Self::parse_tran_voltage_probe(normalized) {
-            if !voltage_probe.node_pos.is_empty()
-                && voltage_probe
-                    .node_neg
-                    .as_deref()
-                    .is_none_or(|node| !node.is_empty())
-            {
-                return Ok(());
-            }
+        if let Some(voltage_probe) = Self::parse_tran_voltage_probe(normalized)
+            && !voltage_probe.node_pos.is_empty()
+            && voltage_probe
+                .node_neg
+                .as_deref()
+                .is_none_or(|node| !node.is_empty())
+        {
+            return Ok(());
         }
         if let Some((element_name, parameter)) =
             Self::parse_device_operating_point_probe(normalized)
@@ -3010,10 +3009,10 @@ impl XyceTestRunner {
                 ));
             }
         }
-        if kind == XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources {
-            if counts.remove(&'b') != Some(3) {
-                return Err("INT/FLOOR/CEIL wrapper requires exactly three B sources".to_string());
-            }
+        if kind == XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources
+            && counts.remove(&'b') != Some(3)
+        {
+            return Err("INT/FLOOR/CEIL wrapper requires exactly three B sources".to_string());
         }
         if !counts.is_empty() {
             return Err("analytic integer DC source contains extra statements".to_string());

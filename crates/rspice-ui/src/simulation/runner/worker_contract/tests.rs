@@ -125,13 +125,13 @@ use std::collections::HashMap;
 fn worker_request_round_trips_through_json() {
     let request = WorkerRequest {
         id: 7,
-        request: WorkerSimulationRequest::Config(WorkerAnalysisConfig::Transient {
+        request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::Transient {
             stop_time: 1e-6,
             step_time: 1e-9,
             start_time: 0.0,
             max_timestep: Some(1e-9),
             uic: false,
-        }),
+        })),
         netlist: "V1 in 0 1\nR1 in 0 1k\n.tran 1n 1u\n.end\n".to_string(),
         source_path: None,
         project_veriloga_runtimes: Default::default(),
@@ -359,13 +359,13 @@ fn worker_request_round_trips_project_veriloga_runtime_artifacts() {
         .unwrap();
     let request = WorkerRequest {
         id: 8,
-        request: WorkerSimulationRequest::Config(WorkerAnalysisConfig::Transient {
+        request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::Transient {
             stop_time: 1e-6,
             step_time: 1e-9,
             start_time: 0.0,
             max_timestep: None,
             uic: false,
-        }),
+        })),
         netlist: format!(
             "{}\n.end\n",
             crate::simulation::veriloga::project_veriloga_directive(
@@ -398,7 +398,7 @@ fn worker_request_detaches_and_authenticates_op_previous_state() {
     let config = nondefault_op_config();
     let request = WorkerRequest {
         id: 10,
-        request: WorkerSimulationRequest::Config(WorkerAnalysisConfig::DcOp(config)),
+        request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::DcOp(config))),
         netlist: "V1 out 0 1\n.op\n.end\n".to_owned(),
         source_path: None,
         project_veriloga_runtimes: Default::default(),
@@ -435,9 +435,10 @@ fn worker_request_detaches_and_authenticates_op_previous_state() {
     assert!(oversized.into_request().unwrap_err().contains("exceeding"));
 
     let mut duplicate = transport;
-    let WorkerSimulationRequest::Config(WorkerAnalysisConfig::DcOp(config)) =
-        &mut duplicate.request.request.request
-    else {
+    let WorkerSimulationRequest::Config(config) = &mut duplicate.request.request.request else {
+        panic!("expected configured OP request")
+    };
+    let WorkerAnalysisConfig::DcOp(config) = config.as_mut() else {
         panic!("expected configured OP request")
     };
     config.previous_state = nondefault_op_config().previous_state;
@@ -571,7 +572,6 @@ fn transient_worker_result_round_trips_through_json() {
             x_values: vec![0.0, 1e-9],
             y_values: vec![0.0, 1.0],
             y_unit: "V".to_string(),
-            x_unit: "s".to_string(),
             is_complex: false,
             y_imag: None,
         }],
@@ -664,7 +664,6 @@ fn worker_result_payload_estimate_counts_high_volume_arrays() {
             x_values: vec![0.0, 1.0],
             y_values: vec![0.2, 0.4],
             y_unit: "V".to_string(),
-            x_unit: "s".to_string(),
             is_complex: false,
             y_imag: None,
         }],
@@ -679,7 +678,6 @@ fn worker_result_payload_estimate_counts_high_volume_arrays() {
             x_values: vec![1.0, 10.0, 100.0],
             y_values: vec![1.0, 0.5, 0.25],
             y_unit: String::new(),
-            x_unit: "Hz".to_string(),
             is_complex: true,
             y_imag: Some(vec![0.0, -0.1, -0.2]),
         }],
@@ -766,19 +764,18 @@ fn worker_transfer_response_does_not_apply_legacy_clone_budget() {
 fn worker_transport_extracts_transient_waveform_buffers() {
     let response = WorkerResponse {
         id: 77,
-        outcome: WorkerOutcome::Success(WorkerSimulationResult::Transient {
+        outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Transient {
             time: vec![0.0, 1.0],
             waveforms: vec![WorkerWaveform {
                 name: "V(out)".to_string(),
                 x_values: vec![0.0, 1.0],
                 y_values: vec![0.2, 0.4],
                 y_unit: "V".to_string(),
-                x_unit: "s".to_string(),
                 is_complex: false,
                 y_imag: None,
             }],
             measurements: Vec::new(),
-        }),
+        })),
     };
 
     let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
@@ -818,7 +815,7 @@ fn worker_transport_extracts_transient_waveform_buffers() {
 fn worker_transport_retains_monte_carlo_seed_and_samples() {
     let response = WorkerResponse {
         id: 91,
-        outcome: WorkerOutcome::Success(WorkerSimulationResult::MonteCarlo {
+        outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::MonteCarlo {
             seed: 77,
             runs_requested: 3,
             runs_completed: 3,
@@ -834,7 +831,7 @@ fn worker_transport_retains_monte_carlo_seed_and_samples() {
                 histogram: vec![1, 1, 1],
                 bin_edges: vec![0.9, 0.95, 1.05, 1.1],
             }],
-        }),
+        })),
     };
 
     let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
@@ -849,19 +846,18 @@ fn worker_transport_retains_monte_carlo_seed_and_samples() {
 fn worker_transport_round_trips_ac_and_noise_buffers() {
     let ac = WorkerResponse {
         id: 10,
-        outcome: WorkerOutcome::Success(WorkerSimulationResult::Ac {
+        outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Ac {
             frequencies: vec![1.0, 10.0, 100.0],
             waveforms: vec![WorkerWaveform {
                 name: "V(out)".to_string(),
                 x_values: vec![1.0, 10.0, 100.0],
                 y_values: vec![0.5, 0.25, 0.125],
                 y_unit: String::new(),
-                x_unit: "Hz".to_string(),
                 is_complex: true,
                 y_imag: Some(vec![-0.1, -0.2, -0.3]),
             }],
             measurements: Vec::new(),
-        }),
+        })),
     };
     let ac_transport = WorkerResponseTransport::from_response(ac.clone()).unwrap();
     assert_eq!(ac_transport.buffers.len(), 4);
@@ -869,7 +865,7 @@ fn worker_transport_round_trips_ac_and_noise_buffers() {
 
     let noise = WorkerResponse {
         id: 11,
-        outcome: WorkerOutcome::Success(WorkerSimulationResult::Noise {
+        outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Noise {
             frequencies: vec![1.0, 10.0],
             output_noise: vec![1.0e-18, 2.0e-18],
             input_noise: Some(vec![3.0e-18, 4.0e-18]),
@@ -878,7 +874,7 @@ fn worker_transport_round_trips_ac_and_noise_buffers() {
                 ("M1".to_string(), vec![0.25e-18, 0.5e-18]),
             ]),
             summary: None,
-        }),
+        })),
     };
     let noise_transport = WorkerResponseTransport::from_response(noise.clone()).unwrap();
     assert_eq!(noise_transport.buffers.len(), 5);
@@ -892,19 +888,18 @@ fn worker_transport_round_trips_ac_and_noise_buffers() {
 fn worker_transport_rejects_missing_or_mismatched_buffers() {
     let response = WorkerResponse {
         id: 12,
-        outcome: WorkerOutcome::Success(WorkerSimulationResult::Transient {
+        outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Transient {
             time: vec![0.0, 1.0],
             waveforms: vec![WorkerWaveform {
                 name: "V(out)".to_string(),
                 x_values: vec![0.0, 1.0],
                 y_values: vec![0.2, 0.4],
                 y_unit: "V".to_string(),
-                x_unit: "s".to_string(),
                 is_complex: false,
                 y_imag: None,
             }],
             measurements: Vec::new(),
-        }),
+        })),
     };
 
     let mut missing = WorkerResponseTransport::from_response(response.clone()).unwrap();
@@ -936,7 +931,6 @@ fn worker_transport_validates_complex_waveform_shape() {
                     x_values: WorkerF64Series::Buffer { buffer: 1, len: 2 },
                     y_values: WorkerF64Series::Buffer { buffer: 2, len: 2 },
                     y_unit: "V".to_string(),
-                    x_unit: "s".to_string(),
                     is_complex: true,
                     y_imag: Some(WorkerF64Series::Buffer { buffer: 3, len: 1 }),
                 }],
@@ -961,7 +955,6 @@ fn worker_transport_validates_complex_waveform_shape() {
                     x_values: WorkerF64Series::Buffer { buffer: 1, len: 2 },
                     y_values: WorkerF64Series::Buffer { buffer: 2, len: 2 },
                     y_unit: "V".to_string(),
-                    x_unit: "s".to_string(),
                     is_complex: false,
                     y_imag: Some(WorkerF64Series::Buffer { buffer: 3, len: 2 }),
                 }],
@@ -1005,7 +998,6 @@ fn worker_progress_snapshot_applies_to_progress_state() {
         time: 5.0e-7,
         stop_time: 1.0e-6,
     });
-    progress.message = Some("Halfway through transient".to_string());
 
     let snapshot = WorkerProgressSnapshot::from_progress(22, &progress);
     let encoded = serde_json::to_string(&snapshot).expect("progress snapshot serializes");
@@ -1024,10 +1016,6 @@ fn worker_progress_snapshot_applies_to_progress_state() {
             stop_time
         } if (time - 5.0e-7).abs() < 1e-15 && (stop_time - 1.0e-6).abs() < 1e-15
     ));
-    assert_eq!(
-        applied.message.as_deref(),
-        Some("Halfway through transient")
-    );
 }
 
 #[test]
@@ -1721,7 +1709,7 @@ fn worker_spec_request_preserves_corner_execution_options() {
 
 #[test]
 fn worker_result_round_trip() {
-    let dc_op = SimulationResult::DcOp(DcOpResult {
+    let dc_op = SimulationResult::DcOp(Box::new(DcOpResult {
         configuration: crate::simulation::dialog::OpConfig::default(),
         validated_startup_directives: 0,
         mna_node_names: vec!["out".to_owned()],
@@ -1729,9 +1717,8 @@ fn worker_result_round_trip() {
         mna_solution: vec![1.2, -0.01],
         node_voltages: HashMap::from([("out".to_string(), 1.2)]),
         branch_currents: HashMap::from([("V1".to_string(), -0.01)]),
-        device_ops: HashMap::new(),
         device_report: None,
-    });
+    }));
     let dc_op = round_trip_result(dc_op);
     match dc_op {
         SimulationResult::DcOp(result) => {
@@ -2087,10 +2074,7 @@ fn worker_request_from_runner_parts_preserves_payload() {
     let worker = WorkerRequest::from_runner_parts(41, &request, &input).expect("request converts");
 
     assert_eq!(worker.id, 41);
-    assert!(matches!(
-        worker.request,
-        WorkerSimulationRequest::Config(WorkerAnalysisConfig::DcOp(_))
-    ));
+    assert!(matches!(worker.request, WorkerSimulationRequest::Config(_)));
     assert_eq!(worker.netlist, input.netlist);
     assert_eq!(worker.source_path.as_deref(), Some("deck.cir"));
 }
@@ -2098,7 +2082,7 @@ fn worker_request_from_runner_parts_preserves_payload() {
 #[test]
 fn dc_op_worker_result_round_trip_preserves_exact_mna_state_and_contract() {
     let expected_config = nondefault_op_config();
-    let result = SimulationResult::DcOp(DcOpResult {
+    let result = SimulationResult::DcOp(Box::new(DcOpResult {
         configuration: expected_config.clone(),
         validated_startup_directives: 2,
         mna_node_names: vec!["out".to_owned()],
@@ -2106,9 +2090,8 @@ fn dc_op_worker_result_round_trip_preserves_exact_mna_state_and_contract() {
         mna_solution: vec![1.25, -1.0e-3],
         node_voltages: HashMap::from([("out".to_owned(), 1.25)]),
         branch_currents: HashMap::from([("V1".to_owned(), -1.0e-3)]),
-        device_ops: HashMap::new(),
         device_report: None,
-    });
+    }));
 
     let restored = round_trip_result(result);
     let SimulationResult::DcOp(restored) = restored else {
@@ -2125,9 +2108,9 @@ fn dc_op_worker_result_round_trip_preserves_exact_mna_state_and_contract() {
 fn worker_request_runs_dc_op() {
     let request = WorkerRequest {
         id: 12,
-        request: WorkerSimulationRequest::Config(WorkerAnalysisConfig::DcOp(
+        request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::DcOp(
             crate::simulation::dialog::OpConfig::default(),
-        )),
+        ))),
         netlist: "* worker op\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n".to_string(),
         source_path: None,
         project_veriloga_runtimes: Default::default(),
@@ -2202,7 +2185,6 @@ fn tf_worker_result_round_trip_keeps_infinite_resistance_json_safe() {
         output_quantity: TransferFunctionQuantity::Current,
         input_unit: "V".to_owned(),
         output_unit: "A".to_owned(),
-        gain_unit: "A/V".to_owned(),
         normalization: TfNormalization::PerSourceUnit,
         accuracy: TfAccuracy::Accurate,
         gain: Some(TransferFunctionScalar::Finite(-2.5e-3)),

@@ -141,6 +141,7 @@ pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
     };
 }
 
+#[cfg(test)]
 pub(crate) fn open_create_subcircuit_bound_symbol_dialog(
     state: &mut AppState,
     source_library: String,
@@ -637,6 +638,7 @@ pub(super) fn build_create_symbol_definition(
     Ok(definition)
 }
 
+#[cfg(test)]
 fn subcircuit_instance_parameters(
     defaults: std::collections::BTreeMap<String, String>,
 ) -> Vec<CreateSymbolParameterDraft> {
@@ -697,7 +699,6 @@ fn model_instance_parameters(
     // Keeping the complete numeric contract in one constructor prevents a
     // caller from accidentally dropping bounds or requiredness while adding
     // a model-family field.
-    #[allow(clippy::too_many_arguments)]
     fn numeric(
         key: &str,
         label: &str,

@@ -46,6 +46,7 @@ impl AnalysisResultProvenance {
     /// Build a complete, internally consistent prepared-task provenance
     /// record. Dependency order is retained exactly as it appeared in the
     /// frozen prepared snapshot.
+    #[cfg(test)]
     pub fn new(
         source_instance_id: AnalysisInstanceId,
         source_revision: ObjectRevision,
@@ -61,6 +62,7 @@ impl AnalysisResultProvenance {
         )
     }
 
+    #[cfg(test)]
     pub fn new_with_source_domain(
         source_domain: AnalysisResultSourceDomain,
         source_instance_id: AnalysisInstanceId,
@@ -441,6 +443,11 @@ macro_rules! op_evidence_enum {
         #[serde(rename_all = "snake_case")]
         pub enum $name { $($variant),+ }
     };
+    ($name:ident { default $first:ident, $($variant:ident),+ $(,)? }) => {
+        #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        pub enum $name { #[default] $first, $($variant),+ }
+    };
 }
 
 op_evidence_enum!(OperatingPointTemperatureEvidence {
@@ -491,13 +498,13 @@ op_evidence_enum!(OperatingPointAccuracyEvidence {
     Accurate,
     Robust
 });
-op_evidence_enum!(OperatingPointProcessEvidence { TT, SS, FF, SF, FS });
-
-impl Default for OperatingPointProcessEvidence {
-    fn default() -> Self {
-        Self::TT
-    }
-}
+op_evidence_enum!(OperatingPointProcessEvidence {
+    default TT,
+    SS,
+    FF,
+    SF,
+    FS
+});
 
 const fn default_op_run_point_count() -> u64 {
     1
@@ -1125,6 +1132,16 @@ fn validate_complex_values(values: &[ComplexResultValue], label: &str) -> Result
     Ok(())
 }
 
+/// Exact physical quantity retained for the primary periodic-noise trace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PeriodicNoiseOutputQuantity {
+    /// Output-referred voltage or current noise power spectral density.
+    OutputNoisePowerSpectralDensity,
+    /// Single-sideband phase noise L(f) in dBc/Hz.
+    PhaseNoiseDbcPerHz,
+}
+
 /// Typed, lossless metadata for result families whose execution contract is
 /// richer than a collection of plotted waveforms.
 ///
@@ -1167,6 +1184,12 @@ pub enum AnalysisResultFamilyMetadata {
     Soa {
         time: Vec<f64>,
     },
+    /// Periodic-noise quantity and carrier authority. This prevents an
+    /// output-noise PSD from being mislabeled as phase noise downstream.
+    PeriodicNoise {
+        output_quantity: PeriodicNoiseOutputQuantity,
+        carrier_frequency_hz: Option<f64>,
+    },
 }
 
 impl AnalysisResultFamilyMetadata {
@@ -1180,6 +1203,10 @@ impl AnalysisResultFamilyMetadata {
                 | (Self::Reliability { .. }, AnalysisType::Reliability)
                 | (Self::Optimization { .. }, AnalysisType::Optimization)
                 | (Self::Soa { .. }, AnalysisType::Soa)
+                | (
+                    Self::PeriodicNoise { .. },
+                    AnalysisType::Pnoise | AnalysisType::Qpnoise
+                )
         );
         if !compatible {
             return Err(format!(
@@ -1305,6 +1332,25 @@ impl AnalysisResultFamilyMetadata {
                     return Err(
                         "SOA time must be non-empty, nonnegative, unique, and strictly increasing"
                             .to_owned(),
+                    );
+                }
+            }
+            Self::PeriodicNoise {
+                output_quantity,
+                carrier_frequency_hz,
+            } => {
+                if let Some(carrier_frequency_hz) = carrier_frequency_hz
+                    && (!carrier_frequency_hz.is_finite() || *carrier_frequency_hz <= 0.0)
+                {
+                    return Err(
+                        "periodic-noise carrier frequency must be finite and positive".to_owned(),
+                    );
+                }
+                if *output_quantity == PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz
+                    && carrier_frequency_hz.is_none()
+                {
+                    return Err(
+                        "phase-noise evidence is missing its retained carrier frequency".to_owned(),
                     );
                 }
             }
@@ -1515,6 +1561,7 @@ impl AnalysisResult {
     }
 
     /// Check if this analysis has any viewable data
+    #[cfg(test)]
     pub fn has_data(&self) -> bool {
         !self.waveforms.is_empty()
             || self.dc_op.is_some()

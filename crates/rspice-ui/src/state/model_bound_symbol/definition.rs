@@ -29,6 +29,7 @@ impl SymbolNetlistBinding {
         !self.device_prefix.is_empty() && !self.template.is_empty()
     }
 
+    #[cfg(test)]
     pub fn validate_template(
         &self,
         pins: &[SymbolPinDefinition],
@@ -39,6 +40,7 @@ impl SymbolNetlistBinding {
 
     /// Render the constrained template without evaluating arbitrary text.
     /// Values are substituted only into the validated placeholders.
+    #[cfg(test)]
     pub fn render(
         &self,
         name: &str,
@@ -173,7 +175,6 @@ pub struct ModelBoundSymbolDefinition {
 }
 
 impl ModelBoundSymbolDefinition {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         identity: SymbolIdentity,
         source: SymbolSourceContract,
@@ -262,6 +263,7 @@ impl ModelBoundSymbolDefinition {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn to_json_pretty(&self) -> Result<String, SymbolDefinitionError> {
         self.validate()?;
         serde_json::to_string_pretty(self)
@@ -438,15 +440,12 @@ impl ModelBoundSymbolDefinition {
             after.add_view(view);
         }
 
-        let expected_cell_json = before.as_ref().map(serialize_cell).transpose()?;
-        let after_cell_json = serialize_cell(&after)?;
+        let expected_cell_json = before.map(|cell| serialize_cell(&cell)).transpose()?;
         Ok(SymbolConstructionPlan {
             library: library.name.clone(),
             cell: self.identity.cell.clone(),
             expected_cell_json,
-            before,
             after,
-            after_cell_json,
         })
     }
 

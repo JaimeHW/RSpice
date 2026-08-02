@@ -255,6 +255,7 @@ impl LogBuffer {
     }
 
     /// Convenience: Log a warning
+    #[cfg(test)]
     pub fn warning(&mut self, source: LogSource, message: impl Into<String>) {
         self.log(LogSeverity::Warning, source, message, None);
     }
@@ -279,6 +280,7 @@ impl LogBuffer {
     }
 
     /// Get entries filtered by source
+    #[cfg(test)]
     pub fn entries_by_source(&self, source: LogSource) -> impl Iterator<Item = &LogEntry> {
         self.entries.iter().filter(move |e| e.source == source)
     }

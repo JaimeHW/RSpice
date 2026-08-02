@@ -178,9 +178,9 @@ impl ResolvedAssemblyVariant {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum VariantDifferenceKind {
-    AddedOverride,
-    RemovedOverride,
-    ChangedOverride,
+    Added,
+    Removed,
+    Changed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -601,9 +601,9 @@ impl AssemblyVariantCatalog {
                     return None;
                 }
                 let kind = match (left, right) {
-                    (None, Some(_)) => VariantDifferenceKind::AddedOverride,
-                    (Some(_), None) => VariantDifferenceKind::RemovedOverride,
-                    (Some(_), Some(_)) => VariantDifferenceKind::ChangedOverride,
+                    (None, Some(_)) => VariantDifferenceKind::Added,
+                    (Some(_), None) => VariantDifferenceKind::Removed,
+                    (Some(_), Some(_)) => VariantDifferenceKind::Changed,
                     (None, None) => unreachable!(),
                 };
                 Some(VariantDifference {

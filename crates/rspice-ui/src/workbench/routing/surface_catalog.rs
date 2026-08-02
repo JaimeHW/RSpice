@@ -132,6 +132,7 @@ macro_rules! define_surface_catalog {
 
         impl SurfaceId {
             /// Every canonical surface in exact registry order.
+            #[cfg(test)]
             pub const ALL: [Self; 64] = [$(Self::$variant),+];
 
             #[must_use]
@@ -167,11 +168,13 @@ macro_rules! define_surface_catalog {
             }
 
             #[must_use]
+            #[cfg(test)]
             pub const fn canonical_tier(self) -> CanonicalTier {
                 self.metadata().canonical_tier
             }
 
             #[must_use]
+            #[cfg(test)]
             pub const fn release_status(self) -> ReleaseStatus {
                 self.metadata().release_status
             }

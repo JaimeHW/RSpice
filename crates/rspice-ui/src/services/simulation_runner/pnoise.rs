@@ -916,6 +916,7 @@ fn estimate_carrier_rms_for_output_with_abort(
     estimate_carrier_rms_for_node_with_abort(pss_data, output_node, abort)
 }
 
+#[cfg(test)]
 fn integrate_noise_rms_with_abort(
     frequencies: &[Value],
     psd: &[Value],

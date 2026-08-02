@@ -319,7 +319,7 @@ impl RSpiceApp {
                             );
                             publish::select_printer_capabilities(
                                 self,
-                                capabilities,
+                                *capabilities,
                                 Some(suggestion),
                             );
                         }
@@ -922,7 +922,7 @@ fn preview_surface(ui: &mut Ui, draft: &mut HardcopyDialogState) {
             ui.set_width((width - 28.0).max(0.0));
             if let Some(plan) = draft.preview_plan.as_ref() {
                 let mut selected_adjacent = None;
-                let card_count = plan.pagination().pages().len().min(2).max(1);
+                let card_count = plan.pagination().pages().len().clamp(1, 2);
                 let stacked = ui.ctx().content_rect().width() <= 460.0;
                 let height = if stacked {
                     card_count as f32 * 112.0 + card_count.saturating_sub(1) as f32 * 16.0
@@ -1146,7 +1146,18 @@ fn preview_card(
             egui::StrokeKind::Outside,
         );
     }
-    card.response.interact(Sense::click()).clicked()
+    let response = card.response.interact(Sense::click());
+    let label = format!("Page {} · {}", preview.page_number(), preview.coordinate());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            selected,
+            label.clone(),
+        )
+    });
+    crate::ui::theme::paint_focus_ring(ui, &response, response.rect);
+    response.clicked()
 }
 
 fn preview_placeholder(ui: &mut Ui, selected: bool) {
@@ -1801,9 +1812,9 @@ fn format_label(format: OutputFormat) -> &'static str {
         OutputFormat::PdfVector => "PDF · vector",
         OutputFormat::PdfA => "PDF/A · vector",
         OutputFormat::SvgVector => "SVG · vector",
-        OutputFormat::Png { dpi } if dpi == 600 => "PNG · 600 dpi",
+        OutputFormat::Png { dpi: 600 } => "PNG · 600 dpi",
         OutputFormat::Png { .. } => "PNG · raster",
-        OutputFormat::Tiff { dpi } if dpi == 600 => "TIFF · 600 dpi",
+        OutputFormat::Tiff { dpi: 600 } => "TIFF · 600 dpi",
         OutputFormat::Tiff { .. } => "TIFF · raster",
     }
 }
@@ -2016,7 +2027,6 @@ fn media_label(value: &crate::hardcopy::PrinterMediaSource) -> String {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 #[cfg(target_os = "windows")]
 fn apply_printer_job(
     draft: &mut HardcopyDialogState,

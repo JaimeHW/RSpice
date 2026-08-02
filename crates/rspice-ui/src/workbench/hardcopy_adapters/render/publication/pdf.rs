@@ -170,7 +170,7 @@ pub(super) fn draw_pdf_trim_marks(
     let right = width.micrometres().saturating_sub(inset);
     let bottom = height.micrometres().saturating_sub(inset);
     let gap = (inset / 4).max(100);
-    let length = (inset.saturating_mul(3) / 4).min(5_000).max(500);
+    let length = (inset.saturating_mul(3) / 4).clamp(500, 5_000);
     let segments = [
         (
             inset.saturating_sub(gap.saturating_add(length)),
@@ -559,7 +559,6 @@ pub(super) fn draw_pdf_primitive(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn draw_pdf_text(
     surface: &mut krilla::surface::Surface<'_>,
     font: &Font,

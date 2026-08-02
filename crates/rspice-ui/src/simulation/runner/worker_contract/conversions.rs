@@ -521,7 +521,6 @@ pub(crate) struct WorkerWaveform {
     pub x_values: Vec<f64>,
     pub y_values: Vec<f64>,
     pub y_unit: String,
-    pub x_unit: String,
     pub is_complex: bool,
     pub y_imag: Option<Vec<f64>>,
 }
@@ -546,7 +545,6 @@ impl From<WaveformData> for WorkerWaveform {
             x_values: value.x_values,
             y_values: value.y_values,
             y_unit: value.y_unit,
-            x_unit: value.x_unit,
             is_complex: value.is_complex,
             y_imag: value.y_imag,
         }
@@ -560,7 +558,6 @@ impl From<WorkerWaveform> for WaveformData {
             x_values: value.x_values,
             y_values: value.y_values,
             y_unit: value.y_unit,
-            x_unit: value.x_unit,
             is_complex: value.is_complex,
             y_imag: value.y_imag,
         }
@@ -614,39 +611,6 @@ impl From<WorkerMeasurement> for rspice_core::MeasureResult {
             expected: value.expected,
             tolerance: value.tolerance,
             event_axis: value.event_axis,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct WorkerDeviceOpPoint {
-    pub name: String,
-    pub device_type: String,
-    pub parameters: HashMap<String, f64>,
-}
-
-#[cfg(test)]
-impl WorkerDeviceOpPoint {
-    pub(super) fn estimated_numeric_payload_bytes(&self) -> usize {
-        f64_payload_bytes(self.parameters.len())
-    }
-}
-
-impl From<(String, DeviceOpPoint)> for WorkerDeviceOpPoint {
-    fn from((name, value): (String, DeviceOpPoint)) -> Self {
-        Self {
-            name,
-            device_type: value.device_type,
-            parameters: value.parameters,
-        }
-    }
-}
-
-impl From<WorkerDeviceOpPoint> for DeviceOpPoint {
-    fn from(value: WorkerDeviceOpPoint) -> Self {
-        Self {
-            device_type: value.device_type,
-            parameters: value.parameters,
         }
     }
 }
@@ -1114,14 +1078,6 @@ pub(super) fn vec_map_payload_bytes(values_by_name: &HashMap<String, Vec<f64>>) 
 }
 
 #[cfg(test)]
-pub(super) fn device_ops_payload_bytes(device_ops: &[WorkerDeviceOpPoint]) -> usize {
-    device_ops
-        .iter()
-        .map(WorkerDeviceOpPoint::estimated_numeric_payload_bytes)
-        .fold(0usize, |total, bytes| total.saturating_add(bytes))
-}
-
-#[cfg(test)]
 pub(super) fn reliability_results_payload_bytes(results: &[WorkerReliabilityResult]) -> usize {
     results
         .iter()
@@ -1186,7 +1142,6 @@ pub(super) fn validate_pss_display_contract(
         if display.name != display_name
             || display.x_values.as_slice() != result.time.as_slice()
             || display.y_values.as_slice() != periodic.values.as_slice()
-            || display.x_unit != "s"
             || display.y_unit != "V"
             || display.is_complex
             || display.y_imag.is_some()

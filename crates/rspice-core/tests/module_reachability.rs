@@ -55,9 +55,12 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
 /// bodies are ignored — they need no file, so counting them would let an
 /// orphan slip through beside any module with a `mod tests { .. }`.
 ///
-/// `include!` matters because generated code uses it: the Verilog-A registry
-/// is `include!("registry.rs")` inside `veriloga_generated/mod.rs`, which is a
-/// perfectly real way to be part of the crate and must not read as an orphan.
+/// `include!` matters because it is a perfectly real way for a file to be part
+/// of the crate and must not read as an orphan. The Verilog-A registry used to
+/// be the live example, pulled in as `include!("registry.rs")`; it compiles
+/// inside `rspice-veriloga-models` now, so the crate currently has no such
+/// file. The detection stays because the next one should not be an orphan
+/// either.
 ///
 /// Attributes may sit between the visibility and the keyword in real code
 /// (`#[cfg(feature = "simd")] pub mod simd;`), but those are on their own
@@ -72,12 +75,11 @@ fn declared_submodules(source: &str) -> BTreeSet<String> {
         let line = line.trim();
 
         // `include!("foo.rs")` — take the file stem.
-        if let Some(rest) = line.split_once("include!(").map(|(_, rest)| rest) {
-            if let Some(path) = rest.split('"').nth(1) {
-                if let Some(stem) = Path::new(path).file_stem().and_then(|stem| stem.to_str()) {
-                    names.insert(stem.to_owned());
-                }
-            }
+        if let Some(rest) = line.split_once("include!(").map(|(_, rest)| rest)
+            && let Some(path) = rest.split('"').nth(1)
+            && let Some(stem) = Path::new(path).file_stem().and_then(|stem| stem.to_str())
+        {
+            names.insert(stem.to_owned());
         }
 
         let rest = line
@@ -114,10 +116,10 @@ fn possible_parents(root: &Path, path: &Path) -> Vec<PathBuf> {
         return vec![root.join("lib.rs")];
     }
     let mut parents = vec![dir.join("mod.rs")];
-    if let Some(name) = dir.file_name() {
-        if let Some(grandparent) = dir.parent() {
-            parents.push(grandparent.join(format!("{}.rs", name.to_string_lossy())));
-        }
+    if let Some(name) = dir.file_name()
+        && let Some(grandparent) = dir.parent()
+    {
+        parents.push(grandparent.join(format!("{}.rs", name.to_string_lossy())));
     }
     parents
 }
@@ -204,8 +206,14 @@ mod inline_with_brace { }
 /// depth (`device/mosfet/b3soi/fd/`) that the parent directory is not on
 /// screen to disambiguate it.
 ///
-/// `device/veriloga_generated/` is exempt. It is emitted by
-/// `rspice-veriloga-gen`, and generated layout is the generator's decision.
+/// `device/veriloga_builtins/` is exempt, and the reason has expired. It was
+/// emitted by `rspice-veriloga-gen`, so its layout was the generator's call. The
+/// directory holds one hand-written file now, and `veriloga_builtins/mod.rs` is
+/// exactly what this test exists to forbid. Collapsing it to a sibling
+/// `veriloga_builtins.rs` is a one-file move; it is deliberately not done here
+/// because the same directory name is what excludes the adapter from
+/// `module_layering`, and that exclusion has to survive until its upward edge
+/// to `engine` is closed.
 #[test]
 fn module_files_use_sibling_style_not_mod_rs() {
     let root = src_dir();
@@ -217,7 +225,7 @@ fn module_files_use_sibling_style_not_mod_rs() {
         }
         let relative = path.strip_prefix(&root).unwrap_or(&path);
         let display = relative.display().to_string().replace('\\', "/");
-        if display.starts_with("device/veriloga_generated/") {
+        if display.starts_with("device/veriloga_builtins/") {
             continue;
         }
         let directory = relative
@@ -261,7 +269,7 @@ fn glob_imports_stay_within_their_own_module() {
             .display()
             .to_string()
             .replace('\\', "/");
-        if display.starts_with("device/veriloga_generated/") {
+        if display.starts_with("device/veriloga_builtins/") {
             continue;
         }
         let source = fs::read_to_string(&path)

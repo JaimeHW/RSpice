@@ -30,7 +30,6 @@ pub enum ToastKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NotificationCategory {
     Job,
-    Approval,
     #[default]
     System,
 }
@@ -39,7 +38,6 @@ impl NotificationCategory {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Job => "Job",
-            Self::Approval => "Approval",
             Self::System => "System",
         }
     }
@@ -200,6 +198,7 @@ impl Toasts {
     }
 
     /// Queue a warning toast.
+    #[cfg(test)]
     pub fn warn(&mut self, ctx: &Context, message: impl Into<String>) {
         self.notify(ctx, NotificationCategory::System, ToastKind::Warn, message);
     }
@@ -360,6 +359,7 @@ impl Toasts {
         self.observed_log_revision
     }
 
+    #[cfg(test)]
     pub fn mark_read(&mut self, id: u64) -> bool {
         let Some(item) = self.activity.iter_mut().find(|item| item.id == id) else {
             return false;

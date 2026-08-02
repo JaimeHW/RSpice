@@ -86,6 +86,7 @@ pub enum ContextTarget {
 
 impl InteractionState {
     /// Clear all transient state
+    #[cfg(test)]
     pub fn clear(&mut self) {
         self.drag.cancel();
         self.hover_component_id = None;

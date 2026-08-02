@@ -164,7 +164,7 @@ pub(super) fn visualization_configuration_status(state: &AppState) -> Result<(),
                     pane.id
                 ));
             }
-            ViewerCompatibility::UnknownDocument | ViewerCompatibility::UnknownQuickMode => {
+            ViewerCompatibility::UnknownDocument => {
                 return Err(format!("Pane {:02} viewer is not registered", pane.id));
             }
         }

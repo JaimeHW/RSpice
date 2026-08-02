@@ -7,6 +7,16 @@
 //! reconciled with the metadata that claims them, and a response that fails
 //! either check is rejected rather than partially reconstructed.
 
+// These result enums have one variant per analysis kind, and the analyses
+// genuinely differ in payload size — a transient result carries waveform
+// series where a DC operating point carries scalars. The value is built once
+// per run, serialized, and dropped; it is never stored in a collection, so
+// the size the lint measures is a transient stack cost on a path that is
+// already doing IO. Boxing each variant's fields would mean a payload struct
+// per analysis and, for the struct variants, a change to the JSON shape the
+// worker protocol is pinned to.
+#![allow(clippy::large_enum_variant)]
+
 use super::*;
 
 impl WorkerResponseTransport {
@@ -44,13 +54,14 @@ impl WorkerResponseTransport {
 pub(super) fn validate_worker_response_before_transport(
     response: &WorkerResponse,
 ) -> Result<(), String> {
-    if let WorkerOutcome::Success(WorkerSimulationResult::DcOp {
-        configuration,
-        mna_node_names,
-        mna_branch_names,
-        mna_solution,
-        ..
-    }) = &response.outcome
+    if let WorkerOutcome::Success(result) = &response.outcome
+        && let WorkerSimulationResult::DcOp {
+            configuration,
+            mna_node_names,
+            mna_branch_names,
+            mna_solution,
+            ..
+        } = result.as_ref()
     {
         if let Some(previous_state) = configuration.previous_state.as_ref()
             && previous_state.solution.len() > MAX_WORKER_F64_VALUES
@@ -73,9 +84,12 @@ pub(super) fn validate_worker_response_before_transport(
             mna_solution,
         );
     }
-    let WorkerOutcome::Success(WorkerSimulationResult::Pss {
+    let WorkerOutcome::Success(result) = &response.outcome else {
+        return Ok(());
+    };
+    let WorkerSimulationResult::Pss {
         operating_point, ..
-    }) = &response.outcome
+    } = result.as_ref()
     else {
         return Ok(());
     };
@@ -165,7 +179,7 @@ impl WorkerOutcomeTransport {
     pub(super) fn from_outcome(outcome: WorkerOutcome, buffers: &mut Vec<Vec<f64>>) -> Self {
         match outcome {
             WorkerOutcome::Success(result) => Self::Success(
-                WorkerSimulationResultTransport::from_result(result, buffers),
+                WorkerSimulationResultTransport::from_result(*result, buffers),
             ),
             WorkerOutcome::Failure(error) => Self::Failure(error),
         }
@@ -173,7 +187,9 @@ impl WorkerOutcomeTransport {
 
     pub(super) fn into_outcome(self, buffers: &[Vec<f64>]) -> Result<WorkerOutcome, String> {
         match self {
-            Self::Success(result) => Ok(WorkerOutcome::Success(result.into_result(buffers)?)),
+            Self::Success(result) => Ok(WorkerOutcome::Success(Box::new(
+                result.into_result(buffers)?,
+            ))),
             Self::Failure(error) => Ok(WorkerOutcome::Failure(error)),
         }
     }
@@ -383,10 +399,10 @@ pub(super) fn validate_worker_op_previous_state(
 pub(super) fn worker_transport_extracts_every_retained_pss_numeric_array_from_metadata() {
     let response = WorkerResponse {
         id: 78,
-        outcome: WorkerOutcome::Success(WorkerSimulationResult::Pss {
+        outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Pss {
             measurements: Vec::new(),
             operating_point: tests::retained_pss_operating_point(),
-        }),
+        })),
     };
     let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
     let metadata = serde_json::to_string(&transport.response).unwrap();
@@ -430,7 +446,7 @@ pub(super) fn worker_transport_extracts_and_authenticates_dc_op_mna_solution() {
     let configuration = tests::nondefault_op_config();
     let response = WorkerResponse {
         id: 79,
-        outcome: WorkerOutcome::Success(WorkerSimulationResult::DcOp {
+        outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::DcOp {
             configuration,
             validated_startup_directives: 0,
             mna_node_names: vec!["out".to_owned()],
@@ -438,9 +454,8 @@ pub(super) fn worker_transport_extracts_and_authenticates_dc_op_mna_solution() {
             mna_solution: vec![1.25, -0.001],
             node_voltages: HashMap::from([("out".to_owned(), 1.25)]),
             branch_currents: HashMap::from([("V1".to_owned(), -0.001)]),
-            device_ops: Vec::new(),
             device_report: None,
-        }),
+        })),
     };
     let mut transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
     let metadata = serde_json::to_string(&transport.response).unwrap();
@@ -693,7 +708,6 @@ pub(crate) enum WorkerSimulationResultTransport {
         mna_solution_digest: crate::product::ContentDigest,
         node_voltages: HashMap<String, f64>,
         branch_currents: HashMap<String, f64>,
-        device_ops: Vec<WorkerDeviceOpPoint>,
         device_report: Option<WorkerDeviceOpReport>,
     },
     DcSweep {
@@ -812,7 +826,6 @@ impl WorkerSimulationResultTransport {
                 mna_solution,
                 node_voltages,
                 branch_currents,
-                device_ops,
                 device_report,
             } => Self::DcOp {
                 configuration: WorkerOpConfigTransport::from_config(configuration, buffers),
@@ -826,7 +839,6 @@ impl WorkerSimulationResultTransport {
                 mna_solution: WorkerF64Series::from_vec(mna_solution, buffers),
                 node_voltages,
                 branch_currents,
-                device_ops,
                 device_report,
             },
             WorkerSimulationResult::DcSweep {
@@ -964,7 +976,6 @@ impl WorkerSimulationResultTransport {
                 mna_solution_digest,
                 node_voltages,
                 branch_currents,
-                device_ops,
                 device_report,
             } => {
                 let configuration = configuration.into_config(buffers)?;
@@ -992,7 +1003,6 @@ impl WorkerSimulationResultTransport {
                     mna_solution,
                     node_voltages,
                     branch_currents,
-                    device_ops,
                     device_report,
                 })
             }
@@ -1137,7 +1147,6 @@ pub(crate) struct WorkerWaveformTransport {
     pub x_values: WorkerF64Series,
     pub y_values: WorkerF64Series,
     pub y_unit: String,
-    pub x_unit: String,
     pub is_complex: bool,
     pub y_imag: Option<WorkerF64Series>,
 }
@@ -1149,7 +1158,6 @@ impl WorkerWaveformTransport {
             x_values: WorkerF64Series::from_vec(waveform.x_values, buffers),
             y_values: WorkerF64Series::from_vec(waveform.y_values, buffers),
             y_unit: waveform.y_unit,
-            x_unit: waveform.x_unit,
             is_complex: waveform.is_complex,
             y_imag: waveform
                 .y_imag
@@ -1196,7 +1204,6 @@ impl WorkerWaveformTransport {
             x_values: self.x_values.into_vec(buffers)?,
             y_values: self.y_values.into_vec(buffers)?,
             y_unit: self.y_unit,
-            x_unit: self.x_unit,
             is_complex: self.is_complex,
             y_imag: self
                 .y_imag

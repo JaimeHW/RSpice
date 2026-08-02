@@ -4516,17 +4516,21 @@ impl XyceTestRunner {
                 }
                 ElementKind::VoltageSource(spec) if nodes.len() == 2 => {
                     let (waveform, bits) = Self::scoped_model_source_fingerprint(spec)?;
-                    if waveform == "PULSE"
+                    // Exactly one bounded PULSE stimulus and one zero-DC
+                    // monitor are admitted, and `replace` returning `Some`
+                    // means a second of that role appeared. The DC arm stays
+                    // guarded by the pulse result so its side effect keeps
+                    // the original short-circuit order.
+                    let bounded_pulse = waveform == "PULSE"
                         && Self::age_cap_pulse_spec_is_bounded(spec)
-                        && pulse.replace(nodes.clone()).is_none()
-                    {
-                    } else if waveform == "DC"
+                        && pulse.replace(nodes.clone()).is_none();
+                    let zero_dc_monitor = !bounded_pulse
+                        && waveform == "DC"
                         && bits == [0.0f64.to_bits()]
                         && monitor
                             .replace((element.name.clone(), nodes.clone()))
-                            .is_none()
-                    {
-                    } else {
+                            .is_none();
+                    if !bounded_pulse && !zero_dc_monitor {
                         return Err(format!("{LABEL} has an unqualified voltage source"));
                     }
                     XyceRelationalElementFingerprint {
@@ -5145,9 +5149,10 @@ impl XyceTestRunner {
             .any(|node| node == "0" || Self::xyce_ground_alias_name(node))
             || signal_nodes.iter().cloned().collect::<BTreeSet<_>>().len() != 3
         {
-            return Err(format!(
+            return Err(
                 "subcircuit instance signal bindings must be three distinct non-ground nodes"
-            ));
+                    .to_string(),
+            );
         }
 
         let mut resistor_signal_nodes = BTreeSet::new();

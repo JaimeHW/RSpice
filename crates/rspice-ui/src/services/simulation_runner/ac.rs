@@ -10,7 +10,9 @@ use super::{
 };
 use num_complex::Complex64;
 use rspice_core::Value;
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
+#[cfg(test)]
+use rspice_core::abort_signal::NoAbort;
 use rspice_core::analysis::ac::AcResult;
 use rspice_core::engine::Engine;
 use std::path::Path;
@@ -112,7 +114,6 @@ pub fn run_ac_analysis_with_abort(
 
 /// Run AC small-signal analysis with source-path resolution and cooperative
 /// cancellation through parsing, sweep generation, solving, and conversion.
-#[allow(clippy::too_many_arguments)]
 pub fn run_ac_analysis_with_source_path_and_abort(
     netlist_text: &str,
     start_freq: Value,

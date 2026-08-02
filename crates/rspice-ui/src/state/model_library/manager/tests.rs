@@ -78,8 +78,8 @@ fn authenticated_root_expands_retained_model_include_closure_without_filesystem_
     assert!(expanded.contains("sealed_n"), "{expanded}");
     assert!(expanded.lines().all(|line| {
         rspice_core::netlist::parse_include_directive(line).is_none()
-            && !rspice_core::netlist::parse_lib_directive(line)
-                .is_some_and(|(_, section)| section.is_some())
+            && rspice_core::netlist::parse_lib_directive(line)
+                .is_none_or(|(_, section)| section.is_none())
     }));
     assert_eq!(dependencies.len(), 2);
 

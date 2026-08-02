@@ -43,11 +43,14 @@ fn disarming_the_cursor_tool_clears_the_pair_and_hides_the_strip() {
 }
 
 #[test]
-fn the_strip_never_grows_past_its_trace_limit() {
-    assert_eq!(READOUT_TRACE_LIMIT, 4);
-    // Height is header + rows, so the limit bounds the strip exactly.
-    let bounded = READOUT_HEADER_H + READOUT_TRACE_LIMIT as f32 * READOUT_ROW_H;
-    assert!(bounded < 120.0, "the readout is a strip, not a dock");
+fn deep_readouts_scroll_without_exceeding_the_212_px_body_cap() {
+    let state = deep_readout_fixture(16);
+
+    assert_eq!(readout_trace_count(&state), 16);
+    assert_eq!(READOUT_BODY_MAX_H, 212.0);
+    assert_eq!(READOUT_MAX_H, READOUT_HEADER_H + READOUT_BODY_MAX_H);
+    assert_eq!(readout_strip_height(&state), READOUT_MAX_H);
+    assert!(readout_strip_height(&state) <= 238.0);
 }
 use crate::product::{AnalysisInstanceId, ContentDigest, DatasetId, ObjectRevision};
 use crate::results::visualization_document::{
@@ -172,6 +175,161 @@ fn marker_fixture() -> AppState {
     state
 }
 
+fn deep_readout_fixture(trace_count: usize) -> AppState {
+    let waveforms = (0..trace_count)
+        .map(|index| {
+            WaveformData::new(
+                format!("V(out{index})"),
+                vec![0.0, 1.0],
+                vec![index as f64, index as f64 + 1.0],
+                "#fff",
+            )
+        })
+        .collect();
+    let mut state = AppState::default();
+    state.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(waveforms),
+    );
+    state.ui.results.cursors.place(0.5);
+    state.ui.results.cursor_strip = Some(0);
+    state
+}
+
+#[test]
+fn shared_x_navigator_preserves_view_width_and_clamps_to_the_full_domain() {
+    let linear = panned_shared_x_view(XScale::Linear, (0.0, 10.0), (2.0, 6.0), 0.7)
+        .expect("a zoomed linear view can pan");
+    assert!((linear.0 - 6.0).abs() < 1.0e-9);
+    assert!((linear.1 - 10.0).abs() < 1.0e-9);
+
+    let logarithmic = panned_shared_x_view(XScale::Log10, (1.0, 1.0e6), (10.0, 1.0e3), 1.0 / 6.0)
+        .expect("a zoomed logarithmic view can pan");
+    assert!((logarithmic.0 / 100.0 - 1.0).abs() < 1.0e-9);
+    assert!((logarithmic.1 / 1.0e4 - 1.0).abs() < 1.0e-9);
+
+    assert!(panned_shared_x_view(XScale::Linear, (0.0, 10.0), (0.0, 10.0), 0.1).is_none());
+}
+
+#[test]
+fn shared_x_zoom_stays_pointer_anchored_and_inside_the_retained_domain() {
+    let zoomed = zoomed_shared_x_view(XScale::Linear, (0.0, 100.0), (20.0, 60.0), 0.4, 0.5)
+        .expect("a finite zoomed view");
+    assert!((zoomed.0 - 30.0).abs() < 1.0e-9);
+    assert!((zoomed.1 - 50.0).abs() < 1.0e-9);
+
+    let full = zoomed_shared_x_view(XScale::Log10, (1.0, 1.0e6), (10.0, 1.0e3), 1.0, 100.0)
+        .expect("zoom-out clamps to the retained range");
+    assert!((full.0 - 1.0).abs() < 1.0e-9);
+    assert!((full.1 / 1.0e6 - 1.0).abs() < 1.0e-9);
+}
+
+#[test]
+fn shared_x_click_recenters_without_changing_window_width() {
+    let view = recentered_shared_x_view(XScale::Linear, (0.0, 10.0), (1.0, 5.0), 0.8)
+        .expect("a zoomed view can recenter");
+    assert!((view.0 - 6.0).abs() < 1.0e-9);
+    assert!((view.1 - 10.0).abs() < 1.0e-9);
+    assert!(recentered_shared_x_view(XScale::Linear, (0.0, 10.0), (0.0, 10.0), 0.5).is_none());
+}
+
+#[test]
+fn multi_pane_geometry_never_grows_past_its_strip_budget() {
+    for available in [0.0, 18.0, 60.0, 140.0, 320.0] {
+        for pane_count in 1..=8 {
+            let geometry = wave_stack_geometry(available, pane_count);
+            let seams = geometry.seam_height * pane_count.saturating_sub(1) as f32;
+            let used = geometry.pane_height * pane_count as f32 + geometry.shared_x_height + seams;
+            assert!(geometry.pane_height >= 0.0);
+            assert!((0.0..=WAVE_SHARED_X_HEIGHT).contains(&geometry.shared_x_height));
+            assert!(used <= available.max(0.0) + f32::EPSILON * 16.0);
+        }
+    }
+}
+
+#[test]
+fn hidden_unit_signals_keep_a_pane_available_for_reactivation() {
+    let mut state = marker_fixture();
+    state.simulation.runs[0].analyses[0].waveforms[0].visible = false;
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    let panes = models[0].unit_panes();
+    assert_eq!(panes.len(), 1);
+    assert_eq!(panes[0].unit, "V");
+    assert!(panes[0].traces.is_empty());
+}
+
+#[test]
+fn shared_x_frame_exposes_current_and_full_ranges_to_accessibility() {
+    let mut state = marker_fixture();
+    state.ui.results.cursor_strip = Some(0);
+    state.ui.results.cursors.a = Some(0.25);
+    state.ui.results.cursors.b = Some(0.75);
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    let model = &models[0];
+    set_shared_x_view(
+        &mut state.ui.results,
+        model.analysis_key,
+        1,
+        Some((0.25, 0.75)),
+    );
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let output = ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            show_shared_x_axis(ui, &mut state, model, (0.0, 1.0), 1, 50.0, None);
+        });
+    });
+    let nodes = output
+        .platform_output
+        .accesskit_update
+        .expect("AccessKit tree")
+        .nodes;
+    assert!(nodes.iter().any(|(_, node)| {
+        node.role() == egui::accesskit::Role::GraphicsDocument
+            && node.label().is_some_and(|label| {
+                label.contains("Shared ")
+                    && label.contains("Current range")
+                    && label.contains("Full retained range")
+                    && label.contains("Cursor A")
+                    && label.contains("cursor B")
+            })
+    }));
+}
+
+#[test]
+fn each_cursor_trace_reports_its_own_linear_slope() {
+    let mut state = marker_fixture();
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let complex_display = presentation.complex_number_display();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        complex_display,
+        &Tokens::default(),
+    );
+
+    let slopes = slope_values(&models[0], 0.0, 1.0, presentation);
+
+    assert_eq!(slopes.len(), 1);
+    assert!(
+        slopes[0].contains("5") && slopes[0].contains("V/s"),
+        "unexpected slope readout: {}",
+        slopes[0]
+    );
+}
+
 fn marker_identity(state: &AppState) -> (AnalysisPresentationKey, WaveformPresentationKey) {
     let run = state.simulation.active_run().expect("active marker run");
     let analysis = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
@@ -248,7 +406,7 @@ fn markers_alone_keep_a_compact_readout_strip_on_screen() {
     assert_eq!(
         readout_strip_height(&state),
         READOUT_HEADER_H + MARKER_ROW_H,
-        "markers-only strip: the marker header and its one row"
+        "markers-only dock: one shared header and its one row"
     );
 
     // A closed strip takes its markers off screen with it.
@@ -271,8 +429,51 @@ fn the_strip_carries_cursors_and_markers_together() {
         .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5);
     assert_eq!(
         readout_strip_height(&state),
-        cursors_only + READOUT_HEADER_H + MARKER_ROW_H
+        cursors_only,
+        "desktop columns share one body height instead of stacking sections"
     );
+}
+
+#[test]
+fn collapse_keeps_one_header_and_no_content_still_removes_the_strip() {
+    let mut state = marker_fixture();
+    let (analysis, waveform) = marker_identity(&state);
+    state
+        .ui
+        .results
+        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5);
+    state.ui.results.readout_collapsed = true;
+
+    assert_eq!(readout_strip_height(&state), READOUT_HEADER_H);
+
+    state.ui.results.hidden_strips.insert(analysis);
+    assert_eq!(readout_strip_height(&state), 0.0);
+}
+
+#[test]
+fn every_visible_marker_remains_in_the_scroll_owned_body() {
+    let mut state = marker_fixture();
+    let (analysis, waveform) = marker_identity(&state);
+    for index in 0..12 {
+        state.ui.results.add_marker(
+            analysis,
+            waveform.clone(),
+            "V(out)".to_owned(),
+            index as f64 / 12.0,
+        );
+    }
+
+    assert_eq!(visible_markers(&state).len(), 12);
+    assert_eq!(marker_body_height(&state), 12.0 * MARKER_ROW_H);
+    assert_eq!(readout_strip_height(&state), READOUT_MAX_H);
+}
+
+#[test]
+fn cursor_and_marker_columns_split_at_normal_desktop_widths() {
+    assert!(!readout_columns_side_by_side(679.0, true, true));
+    assert!(readout_columns_side_by_side(680.0, true, true));
+    assert!(!readout_columns_side_by_side(900.0, true, false));
+    assert!(!readout_columns_side_by_side(900.0, false, true));
 }
 
 #[test]
@@ -445,7 +646,7 @@ fn one_unit_stays_one_pane() {
 }
 
 #[test]
-fn a_hidden_trace_takes_its_pane_with_it() {
+fn a_hidden_trace_keeps_its_unit_pane_available_for_reactivation() {
     let mut simulation = SimulationState::default();
     simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
@@ -471,8 +672,13 @@ fn a_hidden_trace_takes_its_pane_with_it() {
     );
 
     let panes = models[0].unit_panes();
-    assert_eq!(panes.len(), 1);
-    assert_eq!(panes[0].unit, "V", "the amp axis goes with its only trace");
+    assert_eq!(panes.len(), 2);
+    assert_eq!(panes[0].unit, "V");
+    assert_eq!(panes[1].unit, "A");
+    assert!(
+        panes[1].traces.is_empty(),
+        "the amp pane remains as the owner of its hidden signal"
+    );
 }
 
 #[test]

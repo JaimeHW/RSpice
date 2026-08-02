@@ -21,7 +21,11 @@ mod qualification;
 mod types;
 
 pub use authoring::ProjectModelDefinition;
-pub use corner::{CornerSectionBinding, CornerSectionDomain, ProcessCorner};
+pub use corner::{CornerSectionDomain, ProcessCorner};
+// Test-only aliases: the submodule is private, so this path is the only
+// way the tests can name these.
+#[cfg(test)]
+pub use corner::CornerSectionBinding;
 pub use correlation::{
     CorrelationAggregation, CorrelationAlignmentEvidence, CorrelationAlignmentPolicy,
     CorrelationCalculation, CorrelationDatasetClass, CorrelationDatasetRevision,
@@ -33,11 +37,16 @@ pub use correlation::{
 };
 pub use definition_metadata::{
     CorrelationMatrix, DefinitionMetadataError, FiniteBounds, FiniteF64, LookupInterpolation,
-    MODEL_DEFINITION_METADATA_SCHEMA_VERSION, ModelDefinitionMetadata, ModelFileIdentity,
-    ModelSectionDefinition, ModelSectionQualification, ParameterDataType, ParameterDefinition,
-    ParameterSource, ParameterValue, StatisticalDefinition, StatisticalDistribution,
-    StatisticalHierarchyScope, StatisticalVariableDefinition, TemperatureExtrapolationPolicy,
+    ModelDefinitionMetadata, ModelFileIdentity, ModelSectionDefinition, ModelSectionQualification,
+    ParameterDataType, ParameterDefinition, ParameterSource, ParameterValue,
+    StatisticalDistribution, StatisticalHierarchyScope, TemperatureExtrapolationPolicy,
     TemperatureLawDefinition, TemperatureLawRepresentation,
+};
+// Test-only aliases: `definition_metadata` is private, so this path is the
+// only way the tests can name these.
+#[cfg(test)]
+pub use definition_metadata::{
+    MODEL_DEFINITION_METADATA_SCHEMA_VERSION, StatisticalDefinition, StatisticalVariableDefinition,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use library::is_foreign_platform_absolute_path;
@@ -57,16 +66,19 @@ pub use project_revision::ProjectModelRevisionDefinition;
 pub use qualification::{
     ApprovalDecision, CompatibilityAssessment, CompatibilityDisposition, ConsumerChange,
     ConsumerImpactAssessment, DocumentReference, DocumentationDeclaration, DocumentationSet,
-    FiniteValue, LicenseDeclaration, LicenseScope, MODEL_QUALIFICATION_SCHEMA_VERSION,
-    ModelQualificationState, ModelReleaseCandidate, ModelReleaseIdentity,
-    ModelSourceEvidenceBinding, NonNegativeFinite, PlatformCompatibilityEvidence,
-    PlatformQualificationOutcome, PromotionApproval, PromotionApprovalRole, QualificationAnalysis,
+    FiniteValue, LicenseDeclaration, LicenseScope, ModelQualificationState, ModelReleaseCandidate,
+    ModelReleaseIdentity, ModelSourceEvidenceBinding, NonNegativeFinite,
+    PlatformCompatibilityEvidence, PromotionApproval, PromotionApprovalRole, QualificationAnalysis,
     QualificationErrorCode, QualificationEvidence, QualificationExecutionProgress,
     QualificationExecutionSession, QualificationExecutionStep, QualificationOutputDefinition,
-    QualificationPlatform, QualificationPlatformRun, QualificationPlatformVectorOutcome,
-    QualificationProbe, QualificationReference, QualificationSample, QualificationSuite,
-    QualificationVector, QualificationVectorDisposition, QualificationVectorDispositionCause,
-    QualificationVectorOutcome, QualificationVectorRequiredAction, ReleaseCandidateIdentity,
-    RequiredDocumentation,
+    QualificationPlatform, QualificationPlatformRun, QualificationProbe, QualificationReference,
+    QualificationSample, QualificationSuite, QualificationVector, QualificationVectorDisposition,
+    QualificationVectorDispositionCause, QualificationVectorOutcome,
+    QualificationVectorRequiredAction, ReleaseCandidateIdentity, RequiredDocumentation,
+};
+#[cfg(test)]
+pub use qualification::{
+    MODEL_QUALIFICATION_SCHEMA_VERSION, PlatformQualificationOutcome,
+    QualificationPlatformVectorOutcome,
 };
 pub use types::{ModelLevel, ModelType};

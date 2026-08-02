@@ -41,6 +41,7 @@ impl ShortcutLibraryPersistenceError {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn code(&self) -> &'static str {
         self.code
     }
@@ -49,6 +50,7 @@ impl ShortcutLibraryPersistenceError {
     /// it verbatim; the native path matches on the variant instead, so this
     /// looks unused on a native-only build.
     #[must_use]
+    #[cfg(target_arch = "wasm32")]
     pub fn message(&self) -> &str {
         &self.message
     }
@@ -57,6 +59,7 @@ impl ShortcutLibraryPersistenceError {
     /// exact stored bytes afterwards. The caller must not restore stale CAS
     /// authority or attempt another write until storage is reloaded.
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub fn is_commit_in_doubt(&self) -> bool {
         self.code == "shortcut-library.browser-commit-in-doubt"
     }
@@ -78,6 +81,7 @@ pub struct ShortcutLibraryPersistenceToken {
 
 impl ShortcutLibraryPersistenceToken {
     #[must_use]
+    #[cfg(test)]
     pub const fn generation(self) -> u64 {
         self.generation
     }
@@ -96,6 +100,7 @@ impl PersistedShortcutProfileLibrary {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn token(&self) -> ShortcutLibraryPersistenceToken {
         self.token
     }
@@ -127,6 +132,7 @@ pub struct RetainedShortcutLibraryBytes {
 
 impl RetainedShortcutLibraryBytes {
     #[must_use]
+    #[cfg(test)]
     pub fn raw_bytes(&self) -> &[u8] {
         &self.raw_bytes
     }
@@ -154,6 +160,7 @@ pub enum ShortcutProfileLibraryRestore {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(not(target_arch = "wasm32"))]
 pub enum ShortcutProfileLibraryStartup {
     Ready {
         persisted: Box<PersistedShortcutProfileLibrary>,
@@ -576,6 +583,7 @@ fn prepare_update(
 }
 
 #[cfg(any(test, not(target_arch = "wasm32")))]
+#[cfg(any(test, target_arch = "wasm32"))]
 fn edit_in_store(
     store: &impl ShortcutLibraryStore,
     predecessor: &PersistedShortcutProfileLibrary,
@@ -900,21 +908,6 @@ pub fn start_update_shortcut_profile_library_browser(
     repaint: &egui::Context,
 ) -> Result<BrowserShortcutLibraryWriteToken, ShortcutLibraryPersistenceError> {
     start_browser_write(prepare_update(predecessor, candidate)?, repaint)
-}
-
-/// Clone, edit, fully validate, and stage a browser CAS without changing the
-/// caller's live library. Apply only the library returned by `poll_*` success.
-#[cfg(target_arch = "wasm32")]
-pub fn start_edit_shortcut_profile_library_browser(
-    predecessor: &PersistedShortcutProfileLibrary,
-    edit: impl FnOnce(&mut ShortcutProfileLibrary) -> Result<(), String>,
-    repaint: &egui::Context,
-) -> Result<BrowserShortcutLibraryWriteToken, ShortcutLibraryPersistenceError> {
-    let mut candidate = predecessor.library.clone();
-    edit(&mut candidate).map_err(|message| {
-        ShortcutLibraryPersistenceError::new("shortcut-library.edit-rejected", message)
-    })?;
-    start_browser_write(prepare_update(predecessor, &candidate)?, repaint)
 }
 
 #[cfg(target_arch = "wasm32")]

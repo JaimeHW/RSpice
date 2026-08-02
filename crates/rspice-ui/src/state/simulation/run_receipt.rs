@@ -85,6 +85,7 @@ impl PreparedSourceCheckReceipt {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub const fn is_manual_source_check(self) -> bool {
         matches!(self, Self::ManualSourceCheck(_))
     }
@@ -218,7 +219,6 @@ pub struct PreparedRunReceipt {
 }
 
 impl PreparedRunReceipt {
-    #[allow(clippy::too_many_arguments)]
     #[cfg(test)]
     pub(crate) fn new(
         source_domain: AnalysisResultSourceDomain,
@@ -241,7 +241,6 @@ impl PreparedRunReceipt {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_with_project_model_sources(
         source_domain: AnalysisResultSourceDomain,
         simulation_plan_id: Option<SimulationPlanId>,

@@ -98,8 +98,7 @@ pub(crate) use sweeps::{
     materialize_corner_process_source,
 };
 pub use tf::{
-    TfAccuracy, TfGainUnit, TfNormalization, TfQuantity, TfRunConfig,
-    run_tf_analysis_with_config_and_abort,
+    TfAccuracy, TfNormalization, TfQuantity, TfRunConfig, run_tf_analysis_with_config_and_abort,
 };
 pub use transient::{TransientData, run_transient_analysis_with_source_path_and_abort};
 
@@ -109,19 +108,12 @@ pub use transient::{TransientData, run_transient_analysis_with_source_path_and_a
 
 /// Get current time in milliseconds (for performance measurement)
 #[cfg(not(target_arch = "wasm32"))]
+#[cfg(test)]
 fn now_ms() -> f64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs_f64() * 1000.0)
-        .unwrap_or(0.0)
-}
-
-#[cfg(target_arch = "wasm32")]
-fn now_ms() -> f64 {
-    web_sys::window()
-        .and_then(|w| w.performance())
-        .map(|p| p.now())
         .unwrap_or(0.0)
 }
 

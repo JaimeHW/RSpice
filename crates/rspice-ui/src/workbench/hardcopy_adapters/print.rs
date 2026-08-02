@@ -499,36 +499,43 @@ pub struct ResolvedNativePrinterJob {
 // also exercised by contract tests.
 impl ResolvedNativePrinterJob {
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub const fn paper_platform_id(&self) -> i16 {
         self.paper_platform_id
     }
 
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub const fn source_platform_id(&self) -> Option<i16> {
         self.source_platform_id
     }
 
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub const fn resolution_dpi(&self) -> u16 {
         self.resolution_dpi
     }
 
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub const fn orientation(&self) -> ResolvedOrientation {
         self.orientation
     }
 
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub const fn duplex(&self) -> DuplexMode {
         self.duplex
     }
 
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub const fn copies(&self) -> u16 {
         self.copies
     }
 
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub const fn collate(&self) -> bool {
         self.collate
     }
@@ -547,7 +554,9 @@ pub struct PrinterDriverSettingsSuggestion {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrinterDriverPropertiesOutcome {
     Accepted {
-        capabilities: PrinterCapabilitySnapshot,
+        /// Boxed: the accepted case carries a full capability snapshot beside
+        /// a `Cancelled` that carries nothing.
+        capabilities: Box<PrinterCapabilitySnapshot>,
         suggestion: PrinterDriverSettingsSuggestion,
     },
     Cancelled,
@@ -648,11 +657,13 @@ impl HardcopySpoolFailure {
     }
 
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub const fn pages_completed(&self) -> u32 {
         self.pages_completed
     }
 
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub fn failure_outcome(&self) -> HardcopyOutcome {
         self.error.failure_outcome(self.pages_completed)
     }
@@ -1532,7 +1543,6 @@ mod tests {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn native_plan_with_layout(
         capabilities: &PrinterCapabilitySnapshot,
         media: PrinterMediaSource,

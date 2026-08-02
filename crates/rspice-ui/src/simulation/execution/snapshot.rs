@@ -705,6 +705,12 @@ impl AuthorizedTaskDispatch {
         self.task.config.as_ref()
     }
 
+    pub(in crate::simulation) fn spec_options(
+        &self,
+    ) -> &crate::simulation::runner::SpecExecutionOptions {
+        &self.task.spec_options
+    }
+
     pub(in crate::simulation) fn saved_output_contracts(&self) -> &[PreparedSavedOutput] {
         &self.saved_output_contracts
     }
@@ -1048,9 +1054,12 @@ impl PreparedRunSnapshot {
                     format!("Prepared executable netlist is invalid: {error}"),
                 )
             })?;
-        let mut model_bin_config = rspice_core::SimulationConfig::default();
-        model_bin_config.temperature =
-            rspice_core::constants::celsius_to_kelvin(parts.reference_temperature_celsius);
+        let model_bin_config = rspice_core::SimulationConfig {
+            temperature: rspice_core::constants::celsius_to_kelvin(
+                parts.reference_temperature_celsius,
+            ),
+            ..Default::default()
+        };
         rspice_core::Engine::new(model_bin_config)
             .validate_model_bin_contracts(&parsed_netlist)
             .map_err(|error| {
@@ -1203,6 +1212,7 @@ impl PreparedRunSnapshot {
         self.digest
     }
 
+    #[cfg(test)]
     pub(in crate::simulation) fn executable_netlist(&self) -> &str {
         &self.executable_netlist
     }
@@ -1700,13 +1710,13 @@ fn validate_retained_operating_point_contract(
                 .to_owned(),
         );
     }
-    if let Some(crate::simulation::AnalysisConfig::DcOp(config)) = task.config.as_ref() {
-        if config != &spec_config {
-            return Err(
-                "the operating-point spec and engine configuration carry different contracts"
-                    .to_owned(),
-            );
-        }
+    if let Some(crate::simulation::AnalysisConfig::DcOp(config)) = task.config.as_ref()
+        && config != &spec_config
+    {
+        return Err(
+            "the operating-point spec and engine configuration carry different contracts"
+                .to_owned(),
+        );
     }
     Ok(())
 }
@@ -1953,7 +1963,6 @@ fn process_to_corner_runner(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn snapshot_digest(
     intent: SimulationRunIntent,
     simulation_plan_id: Option<SimulationPlanId>,

@@ -317,7 +317,7 @@ impl XyceTestRunner {
                     path.display()
                 ));
             }
-            let failed = fields.iter().any(|field| *field == "FAILED");
+            let failed = fields.contains(&"FAILED");
             let value = if failed {
                 XyceMeasurementReferenceValue::Failed
             } else {
@@ -3796,14 +3796,14 @@ impl XyceTestRunner {
                     }
                     index += 1;
                 }
-                if let Some(columns) = &columns {
-                    if row.len() != columns.len() {
-                        return Err(format!(
-                            "Xyce transient CSDF row beginning at line {line_number} has {} column value(s), expected {}",
-                            row.len(),
-                            columns.len()
-                        ));
-                    }
+                if let Some(columns) = &columns
+                    && row.len() != columns.len()
+                {
+                    return Err(format!(
+                        "Xyce transient CSDF row beginning at line {line_number} has {} column value(s), expected {}",
+                        row.len(),
+                        columns.len()
+                    ));
                 }
                 rows.push(row);
             }
@@ -4114,14 +4114,14 @@ impl XyceTestRunner {
                     }
                     index += 1;
                 }
-                if let Some(columns) = &columns {
-                    if row.len() != columns.len() {
-                        return Err(format!(
-                            "Xyce CSDF row beginning at line {line_number} has {} value(s), expected {} column(s)",
-                            row.len(),
-                            columns.len()
-                        ));
-                    }
+                if let Some(columns) = &columns
+                    && row.len() != columns.len()
+                {
+                    return Err(format!(
+                        "Xyce CSDF row beginning at line {line_number} has {} value(s), expected {} column(s)",
+                        row.len(),
+                        columns.len()
+                    ));
                 }
                 rows.push(row);
             }

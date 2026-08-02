@@ -703,6 +703,9 @@ pub(super) fn schematic_nav_row_indented_response(
         SCHEMATIC_NAV_META_SIZE,
         expanded,
         child_guide,
+        // accessibility-pointer-shim: the sense is forwarded to
+        // `nav_row_indented_styled_with_metrics`, which allocates the row and
+        // owns both its WidgetInfo and its focus ring.
         egui::Sense::click(),
     )
 }
@@ -731,6 +734,7 @@ pub(super) fn schematic_nav_row_indented_drag_response(
         SCHEMATIC_NAV_META_SIZE,
         expanded,
         child_guide,
+        // accessibility-pointer-shim: same forwarding wrapper, drag variant.
         egui::Sense::click_and_drag(),
     )
 }

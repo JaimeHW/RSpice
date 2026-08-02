@@ -6036,12 +6036,14 @@ fn bug655_continuation_fixture(
             .to_string(),
         section: XyceDeckSection::Netlists,
     };
-    let mut config = XyceRunnerConfig::default();
     // Each physical-role assertion below independently executes the paired
     // oracle, for four debug Level-1 BJT sweeps in total. Under the fully
     // parallel core suite, either paired execution can exceed the ordinary
     // three-minute production deck budget solely from CPU contention.
-    config.max_time_per_test_ms = BUG655_DEBUG_EXECUTION_TIMEOUT_MS;
+    let config = XyceRunnerConfig {
+        max_time_per_test_ms: BUG655_DEBUG_EXECUTION_TIMEOUT_MS,
+        ..Default::default()
+    };
     let runner = XyceTestRunner::new(&root, config);
     (root, owner, reference, runner)
 }

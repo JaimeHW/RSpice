@@ -4,7 +4,6 @@
 use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
 use crate::services::drc::DrcSeverity;
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::DesignCheckOrigin;
 
 /// Per-run cap on per-finding console rows; the rest stay reachable via
 /// the canvas badges and typed finding-navigation commands.
@@ -15,7 +14,7 @@ const MAX_FINDING_ROWS: usize = 50;
 /// and console rows — one summary line plus a clickable row per finding
 /// that jumps to its anchor.
 pub(crate) fn run_design_rule_check(state: &mut AppState) {
-    let result = match state.run_active_design_checks(DesignCheckOrigin::Manual) {
+    let result = match state.run_active_design_checks() {
         Ok(result) => result,
         Err(error) => {
             state.push_user_message(ConsoleMessage::error(format!(
@@ -62,7 +61,4 @@ pub(crate) fn run_design_rule_check(state: &mut AppState) {
             None,
         );
     }
-
-    state.dialogs.drc_results = Some(result);
-    state.dialogs.drc_checked_version = state.schematic.topology_version();
 }

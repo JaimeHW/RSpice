@@ -670,15 +670,14 @@ impl XyceTestRunner {
         original: &str,
         netlist: &Netlist,
     ) -> Result<(), String> {
-        if let Some(voltage_probe) = Self::parse_ac_voltage_probe(normalized) {
-            if !voltage_probe.node_pos.is_empty()
-                && voltage_probe
-                    .node_neg
-                    .as_deref()
-                    .is_none_or(|node| !node.is_empty())
-            {
-                return Ok(());
-            }
+        if let Some(voltage_probe) = Self::parse_ac_voltage_probe(normalized)
+            && !voltage_probe.node_pos.is_empty()
+            && voltage_probe
+                .node_neg
+                .as_deref()
+                .is_none_or(|node| !node.is_empty())
+        {
+            return Ok(());
         }
         if let Some(current_probe) = Self::parse_ac_current_probe(normalized)
             && Self::netlist_has_recorded_branch_current(netlist, &current_probe.element_name)

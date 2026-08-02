@@ -154,9 +154,7 @@ impl SimulationState {
         &self,
         project_revision: crate::product::ObjectRevision,
     ) -> Option<(crate::product::ContentDigest, Vec<String>)> {
-        let Some(run) = self.active_run() else {
-            return None;
-        };
+        let run = self.active_run()?;
         let receipt = run.prepared_receipt()?;
         if receipt.project_revision() != project_revision {
             return None;

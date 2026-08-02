@@ -1734,7 +1734,6 @@ fn geometry_for_additions(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn geometry_from_parts(
     components: &[Component],
     wires: &[Wire],

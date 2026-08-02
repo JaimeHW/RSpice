@@ -23,6 +23,7 @@ pub struct PoleZeroState {
 
 impl PoleZeroState {
     /// Replace the contents with a single dataset.
+    #[cfg(test)]
     pub fn load_data(&mut self, data: PoleZeroData) {
         self.datasets = vec![data];
         self.selected = 0;
@@ -35,6 +36,7 @@ impl PoleZeroState {
     }
 
     /// Is empty?
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.datasets.is_empty()
     }

@@ -28,8 +28,10 @@
 
 pub(crate) mod state;
 
+#[cfg(test)]
+pub use rspice_core::analysis::signal_integrity::EyeTrace;
 pub use rspice_core::analysis::signal_integrity::{
-    EyeData, EyeDataBuilder, EyeMeasurements, EyeTrace, calculate_eye_measurements, find_edges,
+    EyeData, EyeDataBuilder, EyeMeasurements, calculate_eye_measurements, find_edges,
 };
 pub use state::EyeDiagramState;
 

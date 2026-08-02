@@ -176,6 +176,7 @@ impl SoAManager {
     }
 
     /// Clear all violations
+    #[cfg(test)]
     pub fn clear_violations(&mut self) {
         self.violations.clear();
         self.evaluations.clear();

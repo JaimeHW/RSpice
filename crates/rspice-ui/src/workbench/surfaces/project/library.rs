@@ -997,8 +997,8 @@ fn show_library_audit_history(ctx: &Context, state: &AppState) {
                                 "Project revision",
                                 &format!(
                                     "{} \u{2192} {}",
-                                    receipt.from_project_revision().get(),
-                                    receipt.to_project_revision().get()
+                                    receipt.source_project_revision().get(),
+                                    receipt.target_project_revision().get()
                                 ),
                             );
                             property_row(
@@ -1006,8 +1006,8 @@ fn show_library_audit_history(ctx: &Context, state: &AppState) {
                                 "Library revision",
                                 &format!(
                                     "{} \u{2192} {}",
-                                    receipt.from_library_revision(),
-                                    receipt.to_library_revision()
+                                    receipt.source_library_revision(),
+                                    receipt.target_library_revision()
                                 ),
                             );
                             property_row(

@@ -339,7 +339,6 @@ impl PrefixAnalysis {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn analyze_prefix(
     prefix: &[ShortcutKeyPress],
     profile: &ShortcutPreferences,

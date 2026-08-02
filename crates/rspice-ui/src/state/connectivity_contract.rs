@@ -407,7 +407,7 @@ impl DialectAliasCatalog {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConnectivityPolicy {
     #[serde(default)]
@@ -422,19 +422,6 @@ pub struct ConnectivityPolicy {
     pub alias_comparison: GlobalAliasComparisonPolicy,
     #[serde(default)]
     pub local_shadowing: LocalGlobalShadowingPolicy,
-}
-
-impl Default for ConnectivityPolicy {
-    fn default() -> Self {
-        Self {
-            expansion: BundleExpansionPolicy::default(),
-            index_order: BundleIndexOrderPolicy::default(),
-            width_mismatch: BundleWidthMismatchPolicy::default(),
-            global_promotion: GlobalNetPromotionPolicy::default(),
-            alias_comparison: GlobalAliasComparisonPolicy::default(),
-            local_shadowing: LocalGlobalShadowingPolicy::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

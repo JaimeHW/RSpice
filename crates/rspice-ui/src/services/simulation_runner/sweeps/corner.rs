@@ -266,7 +266,6 @@ fn finish_corner_data(
         x_values,
         x_label,
         x_unit,
-        num_points: temperatures_c.len(),
         temperatures_c,
         corner_labels,
         voltages,
@@ -500,7 +499,7 @@ mod tests {
         let result = run_corner_analysis_with_config(deck, &config)
             .expect("the selected FF section supplies DFAST");
 
-        assert_eq!(result.num_points, 1);
+        assert_eq!(result.temperatures_c.len(), 1);
         assert_eq!(result.corner_labels, vec!["FF_1.000000V_27.000000C"]);
     }
 

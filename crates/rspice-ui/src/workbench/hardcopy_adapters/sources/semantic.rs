@@ -46,6 +46,9 @@ pub struct SemanticPoint {
     pub y_um: i64,
 }
 
+/// One aggregate child with the extent it occupies and where it sits.
+type AggregateChildPlacement<'a> = (&'a SemanticAggregateChild, ContentExtent, SemanticPoint);
+
 impl SemanticPoint {
     #[must_use]
     pub const fn new(x_um: i64, y_um: i64) -> Self {
@@ -403,10 +406,7 @@ impl ResolvedHardcopyDocument {
     pub(crate) fn aggregate_layout_for_setup(
         &self,
         setup: crate::hardcopy::SchematicHardcopySetup,
-    ) -> Result<
-        Option<Vec<(&SemanticAggregateChild, ContentExtent, SemanticPoint)>>,
-        HardcopySourceError,
-    > {
+    ) -> Result<Option<Vec<AggregateChildPlacement<'_>>>, HardcopySourceError> {
         match &self.semantic_document {
             HardcopySemanticDocument::Aggregate(aggregate) => {
                 aggregate_output_layout(aggregate, setup).map(Some)
@@ -570,7 +570,7 @@ impl ResolvedHardcopyDocument {
 
     /// Bounded serde envelope for browser dedicated-worker transfer.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub(crate) fn to_worker_snapshot_json(&self) -> Result<Vec<u8>, HardcopySourceError> {
+    pub(crate) fn worker_snapshot_json(&self) -> Result<Vec<u8>, HardcopySourceError> {
         let snapshot = ResolvedHardcopyWorkerSnapshot::from_resolved(self)?;
         let bytes = serde_json::to_vec(&snapshot)
             .map_err(|error| HardcopySourceError::Serialization(error.to_string()))?;
@@ -596,10 +596,10 @@ impl ResolvedHardcopyDocument {
 /// Deterministic aggregate layout after applying the selected per-sheet
 /// output policy.  Only an authored-sheet clip changes a child footprint;
 /// all other document kinds retain their immutable resolved bounds.
-fn aggregate_output_layout<'a>(
-    aggregate: &'a SemanticAggregate,
+fn aggregate_output_layout(
+    aggregate: &SemanticAggregate,
     setup: crate::hardcopy::SchematicHardcopySetup,
-) -> Result<Vec<(&'a SemanticAggregateChild, ContentExtent, SemanticPoint)>, HardcopySourceError> {
+) -> Result<Vec<(&SemanticAggregateChild, ContentExtent, SemanticPoint)>, HardcopySourceError> {
     let mut next_y_um = 0_i64;
     let mut layout = Vec::with_capacity(aggregate.children.len());
     for (index, child) in aggregate.children.iter().enumerate() {

@@ -27,6 +27,7 @@ pub enum WaveformFormat {
 
 impl WaveformFormat {
     /// Whether this format currently supports writing.
+    #[cfg(test)]
     pub fn can_write(&self) -> bool {
         matches!(
             self,
@@ -181,6 +182,7 @@ impl WaveformDataset {
     }
 
     /// Get signal by name
+    #[cfg(test)]
     pub fn get_signal(&self, name: &str) -> Option<&WaveformSignal> {
         self.signals.iter().find(|s| s.name == name)
     }
@@ -196,6 +198,7 @@ impl WaveformDataset {
     }
 
     /// Get signal names
+    #[cfg(test)]
     pub fn signal_names(&self) -> Vec<&str> {
         self.signals.iter().map(|s| s.name.as_str()).collect()
     }

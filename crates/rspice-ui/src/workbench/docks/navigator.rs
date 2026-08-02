@@ -10,7 +10,7 @@ use netlist::*;
 use egui::{Align, Layout, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::product::DatasetId;
-use crate::state::{CellViewRef, ViewType};
+use crate::state::ViewType;
 use crate::state::{NetlistOutline, OutlineEntry, OutlineEntryKind};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -691,84 +691,6 @@ fn project_recovery_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
             .to_string(),
     );
     nav_property(ui, "Integrity", "payloads verified on load");
-}
-
-fn library_tree(ui: &mut Ui, app: &mut RSpiceApp, open_documents: bool) {
-    let query = app.state.workbench.navigator_query.trim().to_lowercase();
-    let libraries: Vec<_> = app
-        .state
-        .library_manager
-        .libraries_sorted()
-        .into_iter()
-        .map(|library| {
-            let mut cells: Vec<_> = library
-                .cells_sorted()
-                .into_iter()
-                .map(|cell| {
-                    let views = cell
-                        .views_sorted()
-                        .into_iter()
-                        .map(|view| (view.name.clone(), view.view_type))
-                        .collect::<Vec<_>>();
-                    (cell.name.clone(), views)
-                })
-                .collect();
-            cells.sort_by(|a, b| a.0.cmp(&b.0));
-            (library.name.clone(), library.read_only, cells)
-        })
-        .collect();
-
-    let mut requested = None;
-    for (library, read_only, cells) in libraries {
-        if !query.is_empty()
-            && !library.to_lowercase().contains(&query)
-            && !cells.iter().any(|(cell, views)| {
-                cell.to_lowercase().contains(&query)
-                    || views
-                        .iter()
-                        .any(|(view, _)| view.to_lowercase().contains(&query))
-            })
-        {
-            continue;
-        }
-        let _ = nav_row_indented(
-            ui,
-            WorkbenchIcon::Folder,
-            &library,
-            library == app.state.workspace.active_view.library,
-            read_only.then_some("read-only"),
-            0,
-        );
-        for (cell, views) in cells {
-            let _ = nav_row_indented(
-                ui,
-                WorkbenchIcon::Project,
-                &cell,
-                library == app.state.workspace.active_view.library
-                    && cell == app.state.workspace.active_view.cell,
-                Some(&views.len().to_string()),
-                1,
-            );
-            for (view, view_type) in views {
-                let reference = CellViewRef::new(&library, &cell, &view);
-                let active = reference == app.state.workspace.active_view;
-                if nav_row_indented(
-                    ui,
-                    view_icon(view_type),
-                    &view,
-                    active,
-                    Some(view_type.display_name()),
-                    2,
-                ) && open_documents
-                {
-                    requested = Some(reference);
-                }
-            }
-        }
-    }
-    if let Some(reference) = requested {
-        app.state.open_workspace_view(reference);
-    }
 }
 
 fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -1528,7 +1450,17 @@ fn signal_row(
 }
 
 fn select_result_dataset(app: &mut RSpiceApp, run_index: usize) -> bool {
-    if !app.state.simulation.select_run(run_index) {
+    let Some(dataset_id) = app
+        .state
+        .simulation
+        .runs
+        .get(run_index)
+        .map(|run| run.dataset_id)
+    else {
+        return false;
+    };
+    let document = super::super::state::WorkspaceDocumentId::ResultDataset(dataset_id);
+    if !super::super::chrome::document_bar::activate_document_by_id(&mut app.state, &document) {
         return false;
     }
     app.state.ui.results.selected_trace = None;
@@ -1536,9 +1468,17 @@ fn select_result_dataset(app: &mut RSpiceApp, run_index: usize) -> bool {
 }
 
 fn select_result_analysis(app: &mut RSpiceApp, run_index: usize, analysis_index: usize) -> bool {
-    if app.state.simulation.active_run_idx != Some(run_index)
-        && !select_result_dataset(app, run_index)
+    if app
+        .state
+        .simulation
+        .runs
+        .get(run_index)
+        .and_then(|run| run.analyses.get(analysis_index))
+        .is_none()
     {
+        return false;
+    }
+    if !select_result_dataset(app, run_index) {
         return false;
     }
     if !app.state.simulation.select_analysis(analysis_index) {
@@ -1566,6 +1506,14 @@ fn select_result_signal(
     else {
         return false;
     };
+    if !select_result_analysis(app, run_index, analysis_index) {
+        return false;
+    }
+    // Document/run activation advances the canonical simulation data version.
+    // Reconcile the viewer before installing the exact trace selection so the
+    // next Results frame cannot clear the selection as if it belonged to the
+    // previously active dataset.
+    crate::workbench::documents::result_document::prepare_viewer_state(app);
     app.state.ui.results.selected_trace = Some(selected);
     true
 }
@@ -2334,7 +2282,6 @@ fn nav_row_indented_styled(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn nav_row_indented_styled_with_metrics(
     ui: &mut Ui,
     icon: WorkbenchIcon,
@@ -2502,15 +2449,6 @@ fn muted(ui: &mut Ui, text: &str) {
         });
 }
 
-const fn view_icon(view_type: ViewType) -> WorkbenchIcon {
-    match view_type {
-        ViewType::Schematic | ViewType::Testbench => WorkbenchIcon::Design,
-        ViewType::Symbol => WorkbenchIcon::Models,
-        ViewType::Spice | ViewType::Verilog | ViewType::VerilogA => WorkbenchIcon::Netlist,
-        _ => WorkbenchIcon::File,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -2638,6 +2576,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state.workspace.specs.push(crate::state::SpecEntry {
             measurement: "gain".to_owned(),
+            expression: String::new(),
             min: Some(1.0),
             max: None,
             unit: "V/V".to_owned(),
@@ -2669,6 +2608,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state.workspace.specs.push(crate::state::SpecEntry {
             measurement: "gain".to_owned(),
+            expression: String::new(),
             min: Some(41.0),
             max: None,
             unit: "V/V".to_owned(),
@@ -2833,6 +2773,7 @@ mod tests {
 
     fn result_navigator_app() -> RSpiceApp {
         let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Results;
         let transient =
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
                 WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e"),
@@ -2856,10 +2797,15 @@ mod tests {
     #[test]
     fn result_navigator_selection_preserves_dataset_and_visibility_invariants() {
         let mut app = result_navigator_app();
+        let dataset_id = app.state.simulation.runs[0].dataset_id;
 
         assert!(select_result_dataset(&mut app, 0));
         assert_eq!(app.state.simulation.active_run_idx, Some(0));
         assert_eq!(app.state.simulation.active_analysis_idx, Some(0));
+        assert_eq!(
+            app.state.workbench.documents.active(Workspace::Results),
+            Some(&crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id))
+        );
 
         let was_visible = app.state.simulation.runs[0].analyses[0].waveforms[0].visible;
         assert!(select_result_signal(&mut app, 0, 0, 0));
@@ -2870,6 +2816,16 @@ mod tests {
             .valid_selected_trace(&app.state.simulation)
             .expect("signal selection resolves against the active dataset");
         assert_eq!(selected.source_name(), "V(out)");
+        crate::workbench::documents::result_document::prepare_viewer_state(&mut app);
+        assert_eq!(
+            app.state
+                .ui
+                .results
+                .valid_selected_trace(&app.state.simulation)
+                .map(|selected| selected.source_name()),
+            Some("V(out)"),
+            "the first Results render after activation must retain the navigator selection"
+        );
         assert_eq!(
             app.state.simulation.runs[0].analyses[0].waveforms[0].visible,
             was_visible

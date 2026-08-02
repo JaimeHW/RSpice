@@ -66,6 +66,7 @@ pub(crate) struct ManifestViewModel {
     pub lifecycle: String,
     pub execution_target: String,
     pub elapsed_time: String,
+    pub inventory_title: String,
     pub inventory_status: String,
     pub integrity: String,
     pub qualification: String,
@@ -79,6 +80,7 @@ impl ManifestViewModel {
     #[must_use]
     pub(crate) fn from_run(run: &SimulationRun) -> Self {
         let provenance_validation = run.validate_provenance();
+        let provenance_is_valid = provenance_validation.is_ok();
         let prepared = run.prepared_receipt();
         let rows = match prepared {
             Some(receipt) if provenance_validation.is_ok() => receipt
@@ -104,12 +106,12 @@ impl ManifestViewModel {
                             precision_label,
                         ),
                         eligibility: result.map_or_else(
-                            || missing_result_status(run.lifecycle).to_owned(),
+                            || format!("{} · non-sign-off", missing_result_status(run.lifecycle)),
                             |analysis| {
                                 if analysis.success {
-                                    "authenticated result".to_owned()
+                                    "retained · receipt matched · sign-off unavailable".to_owned()
                                 } else {
-                                    "failed".to_owned()
+                                    "failed · non-sign-off".to_owned()
                                 }
                             },
                         ),
@@ -130,7 +132,7 @@ impl ManifestViewModel {
                     precision: domain_meta(task.result_analysis_type())
                         .precision
                         .to_owned(),
-                    eligibility: "blocked by receipt mismatch".to_owned(),
+                    eligibility: "blocked by receipt mismatch · non-sign-off".to_owned(),
                     task_identity: Some(task.instance_id().to_string()),
                     config_digest: Some(task.config_digest().to_string()),
                 })
@@ -146,9 +148,9 @@ impl ManifestViewModel {
                     stored_values: stored_values_label(analysis),
                     precision: precision_label(analysis),
                     eligibility: if analysis.success {
-                        "legacy · no prepared receipt".to_owned()
+                        "legacy · no prepared receipt · sign-off unavailable".to_owned()
                     } else {
-                        "failed · no prepared receipt".to_owned()
+                        "failed · no prepared receipt · non-sign-off".to_owned()
                     },
                     task_identity: analysis
                         .provenance()
@@ -212,13 +214,10 @@ impl ManifestViewModel {
                 |target| target.label().to_owned(),
             ),
             elapsed_time: format!("{:.3} s", run.elapsed_time),
-            inventory_status: if run.lifecycle.is_terminal() {
-                "locked manifest".to_owned()
-            } else {
-                "live manifest · digest changes until terminal".to_owned()
-            },
+            inventory_title: inventory_title(run.lifecycle).to_owned(),
+            inventory_status: inventory_status(run.lifecycle).to_owned(),
             integrity,
-            qualification: "not retained · non-sign-off".to_owned(),
+            qualification: qualification_label(run, provenance_is_valid).to_owned(),
             task_count,
             retained_result_count: run.analyses.len(),
             rows,
@@ -240,15 +239,15 @@ pub(crate) fn show(ui: &mut Ui, state: &AppState) {
             ui.vertical(|ui| {
                 ui.label(
                     egui::RichText::new(format!(
-                        "Frozen analysis inventory · {}",
-                        manifest.run_label
+                        "{} · {}",
+                        manifest.inventory_title, manifest.run_label
                     ))
                     .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
                     .color(t.color.text),
                 );
                 ui.label(
                     egui::RichText::new(format!(
-                        "{} retained results across {} frozen tasks",
+                        "{} retained results across {} manifest tasks",
                         manifest.retained_result_count, manifest.task_count
                     ))
                     .font(theme::sans(tokens::FS_1, FontWeight::Regular))
@@ -273,7 +272,7 @@ pub(crate) fn show(ui: &mut Ui, state: &AppState) {
         .response;
     ui.ctx().accesskit_node_builder(header.id, |node| {
         node.set_role(egui::accesskit::Role::Heading);
-        node.set_label("Frozen analysis inventory");
+        node.set_label(manifest.inventory_title.clone());
     });
     ui.add_space(tokens::SP_4);
 
@@ -346,7 +345,7 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &AppState) {
     let integrity = [
         ("Receipt", manifest.integrity.as_str()),
         ("Qualification", manifest.qualification.as_str()),
-        ("Frozen tasks", task_count.as_str()),
+        ("Manifest tasks", task_count.as_str()),
         ("Retained results", retained_result_count.as_str()),
     ];
     measurement_table(ui, &integrity);
@@ -699,6 +698,35 @@ fn family_values_label(family: &AnalysisResultFamilyMetadata) -> String {
         AnalysisResultFamilyMetadata::Soa { time } => {
             format!("{} SOA time points", time.len())
         }
+        AnalysisResultFamilyMetadata::PeriodicNoise {
+            output_quantity,
+            carrier_frequency_hz,
+        } => {
+            let quantity = match output_quantity {
+                crate::state::PeriodicNoiseOutputQuantity::OutputNoisePowerSpectralDensity => {
+                    "output-noise PSD"
+                }
+                crate::state::PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz => {
+                    "phase noise in dBc/Hz"
+                }
+            };
+            carrier_frequency_hz.map_or_else(
+                || quantity.to_owned(),
+                |carrier| format!("{quantity} / {} carrier", format_frequency(carrier)),
+            )
+        }
+    }
+}
+
+fn format_frequency(value: f64) -> String {
+    if value >= 1.0e9 {
+        format!("{:.6} GHz", value / 1.0e9)
+    } else if value >= 1.0e6 {
+        format!("{:.6} MHz", value / 1.0e6)
+    } else if value >= 1.0e3 {
+        format!("{:.6} kHz", value / 1.0e3)
+    } else {
+        format!("{value:.6} Hz")
     }
 }
 
@@ -762,6 +790,57 @@ const fn missing_result_status(lifecycle: SimulationRunLifecycle) -> &'static st
     }
 }
 
+fn qualification_label(run: &SimulationRun, provenance_is_valid: bool) -> &'static str {
+    match run.lifecycle {
+        SimulationRunLifecycle::LegacyUnknown => {
+            "unavailable · legacy lifecycle unknown · non-sign-off"
+        }
+        SimulationRunLifecycle::Preparing
+        | SimulationRunLifecycle::Running
+        | SimulationRunLifecycle::Cancelling => "unavailable · run is not terminal · non-sign-off",
+        SimulationRunLifecycle::Completed
+        | SimulationRunLifecycle::Failed
+        | SimulationRunLifecycle::Aborted
+        | SimulationRunLifecycle::Interrupted => {
+            if run.prepared_receipt().is_none() {
+                "unavailable · no retained qualification authority · non-sign-off"
+            } else if !provenance_is_valid {
+                "blocked · receipt integrity mismatch · non-sign-off"
+            } else {
+                "unavailable · no retained sign-off qualification"
+            }
+        }
+    }
+}
+
+const fn inventory_title(lifecycle: SimulationRunLifecycle) -> &'static str {
+    match lifecycle {
+        SimulationRunLifecycle::LegacyUnknown => "Legacy analysis inventory",
+        SimulationRunLifecycle::Preparing
+        | SimulationRunLifecycle::Running
+        | SimulationRunLifecycle::Cancelling => "Live analysis inventory",
+        SimulationRunLifecycle::Completed
+        | SimulationRunLifecycle::Failed
+        | SimulationRunLifecycle::Aborted
+        | SimulationRunLifecycle::Interrupted => "Retained analysis inventory",
+    }
+}
+
+const fn inventory_status(lifecycle: SimulationRunLifecycle) -> &'static str {
+    match lifecycle {
+        SimulationRunLifecycle::LegacyUnknown => {
+            "legacy manifest · mutability authority unavailable"
+        }
+        SimulationRunLifecycle::Preparing
+        | SimulationRunLifecycle::Running
+        | SimulationRunLifecycle::Cancelling => "live manifest · digest changes until terminal",
+        SimulationRunLifecycle::Completed
+        | SimulationRunLifecycle::Failed
+        | SimulationRunLifecycle::Aborted
+        | SimulationRunLifecycle::Interrupted => "locked manifest",
+    }
+}
+
 const fn lifecycle_label(lifecycle: SimulationRunLifecycle) -> &'static str {
     match lifecycle {
         SimulationRunLifecycle::LegacyUnknown => "legacy status unknown",
@@ -790,7 +869,15 @@ const fn plural(count: usize) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{AnalysisResult, SimulationRun, WaveformData};
+    use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId};
+    use crate::state::{
+        AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, PreparedRunReceipt,
+        PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationRun, WaveformData,
+    };
+
+    fn digest(byte: u8) -> ContentDigest {
+        ContentDigest::from_bytes([byte; 32])
+    }
 
     #[test]
     fn legacy_manifest_is_digest_bound_and_fails_closed() {
@@ -812,8 +899,84 @@ mod tests {
         assert_eq!(manifest.rows.len(), 1);
         assert_eq!(manifest.rows[0].domain_axis, "adaptive time");
         assert!(manifest.rows[0].stored_values.contains("2 samples"));
-        assert_eq!(manifest.rows[0].eligibility, "legacy · no prepared receipt");
-        assert_eq!(manifest.qualification, "not retained · non-sign-off");
+        assert_eq!(
+            manifest.rows[0].eligibility,
+            "legacy · no prepared receipt · sign-off unavailable"
+        );
+        assert_eq!(
+            manifest.qualification,
+            "unavailable · no retained qualification authority · non-sign-off"
+        );
+        assert_eq!(manifest.inventory_title, "Retained analysis inventory");
+    }
+
+    #[test]
+    fn active_manifest_never_claims_to_be_frozen_or_qualified() {
+        let run = SimulationRun::new(8);
+
+        let manifest = ManifestViewModel::from_run(&run);
+
+        assert_eq!(manifest.inventory_title, "Live analysis inventory");
+        assert!(manifest.inventory_status.starts_with("live manifest"));
+        assert_eq!(
+            manifest.qualification,
+            "unavailable · run is not terminal · non-sign-off"
+        );
+        assert!(!manifest.inventory_title.contains("Frozen"));
+    }
+
+    #[test]
+    fn legacy_unknown_manifest_does_not_claim_live_or_locked_authority() {
+        let mut run = SimulationRun::new(9);
+        run.lifecycle = SimulationRunLifecycle::LegacyUnknown;
+
+        let manifest = ManifestViewModel::from_run(&run);
+
+        assert_eq!(manifest.inventory_title, "Legacy analysis inventory");
+        assert!(manifest.inventory_status.starts_with("legacy manifest"));
+        assert_eq!(
+            manifest.qualification,
+            "unavailable · legacy lifecycle unknown · non-sign-off"
+        );
+    }
+
+    #[test]
+    fn valid_prepared_receipt_does_not_invent_sign_off_qualification() {
+        let instance_id = AnalysisInstanceId::new();
+        let revision = ObjectRevision::INITIAL;
+        let snapshot = digest(0x41);
+        let receipt = PreparedRunReceipt::new(
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(SimulationPlanId::new()),
+            revision,
+            snapshot,
+            digest(0x42),
+            PreparedSourceCheckReceipt::SchematicDrc(digest(0x43)),
+            vec![
+                PreparedRunTaskReceipt::new(instance_id, revision, Vec::new(), 5, digest(0x44))
+                    .expect("valid task"),
+            ],
+        )
+        .expect("valid receipt");
+        let provenance = AnalysisResultProvenance::new(instance_id, revision, snapshot, Vec::new())
+            .expect("valid provenance");
+        let mut run = SimulationRun::new_prepared(10, receipt);
+        run.lifecycle = SimulationRunLifecycle::Completed;
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Transient")
+                .with_provenance(provenance),
+        );
+
+        let manifest = ManifestViewModel::from_run(&run);
+
+        assert_eq!(
+            manifest.qualification,
+            "unavailable · no retained sign-off qualification"
+        );
+        assert_eq!(
+            manifest.rows[0].eligibility,
+            "retained · receipt matched · sign-off unavailable"
+        );
     }
 
     #[test]

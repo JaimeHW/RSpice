@@ -1,8 +1,14 @@
-//! Numerical limiting laws shared by generated Verilog-A devices.
+//! Numerical limiting laws for semiconductor junctions.
 //!
-//! These helpers implement simulator iteration policy, rather than device
-//! equations, and therefore belong to the handwritten runtime ABI instead of
-//! any generated device module.
+//! These helpers implement simulator iteration policy rather than device
+//! equations, so they sit beside the devices that apply them instead of inside
+//! any one device's model.
+//!
+//! Generated Verilog-A devices do not use this module. A `$limit(..., "pnjlim_new", ...)`
+//! contribution is lowered by the Rust backend into the device's own
+//! `CanonicalLimitState`, which keeps the limiter's previous-iteration storage
+//! next to the state it belongs to and leaves the generated crates depending on
+//! nothing but `rspice-veriloga-runtime`.
 
 use crate::Value;
 

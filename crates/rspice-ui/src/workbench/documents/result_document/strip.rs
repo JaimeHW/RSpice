@@ -184,7 +184,6 @@ pub struct StripHeader<'a> {
     zoomed: bool,
     expr_action: bool,
     removable_from: usize,
-    selected_legend: Option<usize>,
     pane_actions: bool,
 }
 
@@ -200,7 +199,6 @@ impl<'a> StripHeader<'a> {
             zoomed: false,
             expr_action: false,
             removable_from: usize::MAX,
-            selected_legend: None,
             pane_actions: true,
         }
     }
@@ -233,12 +231,6 @@ impl<'a> StripHeader<'a> {
     /// (user expression traces).
     pub fn removable_from(mut self, index: usize) -> Self {
         self.removable_from = index;
-        self
-    }
-
-    /// Mark the exact trace chip selected by the result document.
-    pub fn selected_legend(mut self, index: Option<usize>) -> Self {
-        self.selected_legend = index;
         self
     }
 
@@ -358,7 +350,6 @@ impl<'a> StripHeader<'a> {
         // Chips own exactly the remaining clipped width; drag/wheel scrolling
         // keeps every trace reachable without crossing into the action rect.
         let removable_from = self.removable_from;
-        let selected_legend = self.selected_legend;
         let legend = self.legend;
         let expr_action = self.expr_action;
         let legend_rect = span_rect(layout.legend);
@@ -377,8 +368,7 @@ impl<'a> StripHeader<'a> {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     for (index, chip) in legend.iter().enumerate() {
-                        let (response, visibility) =
-                            legend_chip(ui, chip, selected_legend == Some(index));
+                        let (response, visibility) = legend_chip(ui, chip, false);
                         if response.clicked() && !visibility.clicked() {
                             out.legend_clicked = Some(index);
                         }
@@ -623,6 +613,9 @@ fn legend_chip(
     );
 
     theme::paint_focus_ring(ui, &response, rect);
+    // The swatch is a separate tab stop that toggles visibility, so it needs
+    // its own ring around the swatch rather than the whole chip.
+    theme::paint_focus_ring(ui, &visibility, swatch);
 
     (
         response.on_hover_cursor(egui::CursorIcon::PointingHand),

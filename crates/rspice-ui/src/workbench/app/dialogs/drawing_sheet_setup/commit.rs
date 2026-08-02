@@ -592,7 +592,6 @@ fn apply_governed_sheet_setup(
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn record_drawing_sheet_transaction(
     candidate: &mut crate::state::DesignManagementCatalog,
     kind: DrawingSheetTransactionKind,

@@ -17,7 +17,13 @@ use super::well_hint;
 /// Spectrum arrays + the analysis summary, with the arrays cached on the
 /// FFT state's spectrum revision.
 struct FftModel {
+    revision: u64,
     subtitle: String,
+    source: String,
+    window: crate::analysis::fft::WindowFunction,
+    fft_size: usize,
+    resolution_bandwidth: Option<f64>,
+    normalization: crate::analysis::fft::data::SpectrumNormalization,
     frequency: Arc<[f64]>,
     magnitude_db: Arc<[f64]>,
     fundamental: Option<(f64, f64)>,
@@ -62,17 +68,71 @@ fn build_model(state: &mut AppState) -> Option<FftModel> {
     };
 
     Some(FftModel {
+        revision,
         subtitle: format!(
-            "{} · {} · {} pts",
-            data.name,
+            "{} · {} · {} points",
+            fft.source_cache
+                .as_ref()
+                .map_or(data.name.as_str(), |source| source.name.as_str()),
             data.window.display_name().to_lowercase(),
             data.fft_size
         ),
+        source: fft
+            .source_cache
+            .as_ref()
+            .map_or_else(|| data.name.clone(), |source| source.name.clone()),
+        window: data.window,
+        fft_size: data.fft_size,
+        resolution_bandwidth: resolution_bandwidth(data),
+        normalization: data.normalization,
         frequency,
         magnitude_db,
         fundamental,
         harmonics,
     })
+}
+
+/// Reference-aware logarithmic amplitude unit for the retained source.
+///
+/// `FftSourceCache` currently retains the source identity rather than a typed
+/// unit, so recognize only canonical SPICE quantity expressions. Unknown and
+/// derived names deliberately fall back to a generic dB label instead of
+/// making a false voltage assertion.
+fn spectrum_level_unit(
+    source: &str,
+    normalization: crate::analysis::fft::data::SpectrumNormalization,
+) -> &'static str {
+    let source = source.trim();
+    let quantity = if source
+        .get(..2)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("V("))
+    {
+        "V"
+    } else if source
+        .get(..2)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("I("))
+    {
+        "A"
+    } else {
+        ""
+    };
+    match (quantity, normalization) {
+        ("V", crate::analysis::fft::data::SpectrumNormalization::Peak) => "dBV pk",
+        ("V", crate::analysis::fft::data::SpectrumNormalization::Rms) => "dBV rms",
+        ("A", crate::analysis::fft::data::SpectrumNormalization::Peak) => "dBA pk",
+        ("A", crate::analysis::fft::data::SpectrumNormalization::Rms) => "dBA rms",
+        (_, crate::analysis::fft::data::SpectrumNormalization::Peak) => "dB pk",
+        (_, crate::analysis::fft::data::SpectrumNormalization::Rms) => "dB rms",
+    }
+}
+
+fn trace_cache_key(revision: u64) -> u64 {
+    0x0FF7_0001_0000_0000_u64 ^ revision.rotate_left(17)
+}
+
+fn resolution_bandwidth(data: &crate::analysis::fft::data::FftData) -> Option<f64> {
+    let bandwidth = data.resolution_bandwidth();
+    (bandwidth.is_finite() && bandwidth > 0.0).then_some(bandwidth)
 }
 
 // ---------------------------------------------------------------------------
@@ -88,9 +148,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         well_hint(ui, "No spectrum yet — the FFT runs on the active transient");
         return;
     };
+    let level_unit = spectrum_level_unit(&model.source, model.normalization);
 
     let legend = [LegendChip {
-        name: "dBV",
+        name: level_unit,
         color: c.traces[0],
         on: true,
     }];
@@ -105,8 +166,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .reset_plot_view(super::ResultViewer::Fft, 0);
     }
 
-    // Window-function selector: the leakage/resolution tradeoff is an
-    // analysis decision, so it lives on the strip, not in a buried dialog.
+    // Window and amplitude normalization are transform decisions. Both
+    // recompute from the cached uniformly sampled source and therefore stay
+    // coupled to the provenance shown by the inspector.
     ui.horizontal(|ui| {
         ui.add_space(10.0);
         ui.label(
@@ -117,16 +179,40 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 ))
                 .color(c.text_dim),
         );
-        let current = state.analysis.fft_state.window;
-        egui::ComboBox::from_id_salt("rspice.fft.window")
+        ui.add_enabled_ui(state.analysis.fft_state.source_cache.is_some(), |ui| {
+            let current = state.analysis.fft_state.window;
+            egui::ComboBox::from_id_salt("rspice.fft.window")
+                .selected_text(current.display_name())
+                .show_ui(ui, |ui| {
+                    for &window in crate::analysis::fft::WindowFunction::all() {
+                        if ui
+                            .selectable_label(window == current, window.display_name())
+                            .clicked()
+                        {
+                            state.analysis.fft_state.set_window(window);
+                        }
+                    }
+                });
+        });
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new("normalization")
+                .font(crate::ui::theme::mono(
+                    crate::ui::tokens::FS_0,
+                    crate::ui::theme::FontWeight::Medium,
+                ))
+                .color(c.text_dim),
+        );
+        let current = state.analysis.fft_state.normalization;
+        egui::ComboBox::from_id_salt("rspice.fft.normalization")
             .selected_text(current.display_name())
             .show_ui(ui, |ui| {
-                for &window in crate::analysis::fft::WindowFunction::all() {
+                for &normalization in crate::analysis::fft::data::SpectrumNormalization::all() {
                     if ui
-                        .selectable_label(window == current, window.display_name())
+                        .selectable_label(normalization == current, normalization.display_name())
                         .clicked()
                     {
-                        state.analysis.fft_state.set_window(window);
+                        state.analysis.fft_state.set_normalization(normalization);
                     }
                 }
             });
@@ -166,7 +252,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     };
     let (y_lo, y_hi) = view.y.unwrap_or(((lo - 8.0).max(-200.0), hi + 12.0));
-    let y = Axis::linear_with(y_lo, y_hi, "dBV", 7);
+    let y = Axis::linear_with(y_lo, y_hi, level_unit, 7);
 
     let (x_lo, x_hi) = view.x.unwrap_or((0.0, x1));
     let (frequency_scale, frequency_offset, frequency_unit) =
@@ -181,7 +267,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     spec.traces.push(
         Trace::new(&model.frequency, &model.magnitude_db, c.traces[0])
             .thin()
-            .cache_key(0xFF7_0001),
+            .cache_key(trace_cache_key(model.revision)),
     );
 
     if let Some((f0, db0)) = model.fundamental {
@@ -190,7 +276,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             y: db0,
             side: plot::YSide::Left,
             color: c.accent,
-            label: format!("f₀ {:.1} dBV", db0),
+            label: format!("f₀ {:.1} {level_unit}", db0),
             drop_line: false,
             label_dy: 0.0,
             shape: plot::MarkerShape::Point,
@@ -217,8 +303,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             (
                 "level".to_owned(),
                 format!(
-                    "{:.1} dBV",
-                    sample_at(&model.frequency, &model.magnitude_db, x)
+                    "{:.1} {}",
+                    sample_at(&model.frequency, &model.magnitude_db, x),
+                    level_unit
                 ),
             ),
         ]
@@ -242,10 +329,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     section_header(ui, "Spectrum", None);
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let Some(model) = build_model(state) else {
+        super::panel_note(ui, "Spectrum metrics appear once the FFT is computed.");
+        return;
+    };
     let Some(analysis) = state.analysis.fft_state.analysis.clone() else {
         super::panel_note(ui, "Spectrum metrics appear once the FFT is computed.");
         return;
     };
+    let level_unit = spectrum_level_unit(&model.source, model.normalization);
 
     let f = |v: Option<f64>, digits: usize| {
         v.map_or("—".to_owned(), |v| {
@@ -257,27 +349,38 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let enob = analysis
         .sinad_db
         .map(|sinad| format!("{:.1} bit", (sinad - 1.76) / 6.02));
-    let thd = analysis
-        .thd_percent
-        .map_or("—".to_owned(), |v| format!("{v:.3} %"));
+    let thd = analysis.thd_percent.map_or("—".to_owned(), |value| {
+        format!("{value:.3} % · {} harmonics", analysis.harmonics.len())
+    });
+    let amplitude = analysis
+        .fundamental_db
+        .map_or("—".to_owned(), |value| format!("{value:.1} {level_unit}"));
+    let resolution_bandwidth = model.resolution_bandwidth.map_or("—".to_owned(), |value| {
+        quantity_policy.format_frequency(value, 3)
+    });
+    let noise_floor = match (analysis.noise_floor_db, analysis.fundamental_db) {
+        (Some(noise), Some(fundamental)) => format!("{:.1} dBc", noise - fundamental),
+        _ => "—".to_owned(),
+    };
 
     let rows = [
-        ("Fundamental", f(analysis.fundamental_frequency, 1), false),
+        ("Source", model.source, false),
+        ("Window", model.window.display_name().to_owned(), false),
+        ("Points", model.fft_size.to_string(), false),
+        ("Resolution BW", resolution_bandwidth, false),
         (
-            "Amplitude",
-            db(analysis.fundamental_db).replace(" dB", " dBV"),
+            "Normalization",
+            model.normalization.display_name().to_owned(),
             false,
         ),
+        ("Fundamental", f(analysis.fundamental_frequency, 1), false),
+        ("Amplitude", amplitude, false),
         ("THD", thd, true),
         ("SNR", db(analysis.snr_db), false),
         ("SINAD", db(analysis.sinad_db), false),
         ("SFDR", db(analysis.sfdr_db), false),
         ("ENOB", enob.unwrap_or_else(|| "—".to_owned()), false),
-        (
-            "Noise floor",
-            db(analysis.noise_floor_db).replace(" dB", " dBV"),
-            false,
-        ),
+        ("Noise floor", noise_floor, false),
     ];
     super::stat_table(ui, &rows);
 
@@ -304,5 +407,59 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                 .collect();
             super::stat_table(ui, &rows);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analysis::fft::WindowFunction;
+    use crate::analysis::fft::data::{FftData, SpectrumNormalization};
+
+    #[test]
+    fn rectangular_resolution_bandwidth_equals_bin_width() {
+        let data = FftData::from_time_domain_with_normalization(
+            "V(out)",
+            &[0.0; 64],
+            6_400.0,
+            WindowFunction::Rectangular,
+            SpectrumNormalization::Rms,
+        );
+        assert!((resolution_bandwidth(&data).unwrap() - 100.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn window_resolution_bandwidth_includes_equivalent_noise_bandwidth() {
+        let data = FftData::from_time_domain_with_normalization(
+            "V(out)",
+            &[0.0; 1024],
+            1024.0,
+            WindowFunction::BlackmanHarris,
+            SpectrumNormalization::Rms,
+        );
+        let bandwidth = resolution_bandwidth(&data).unwrap();
+        assert!(bandwidth > data.frequency_resolution());
+        assert!(bandwidth < 2.1 * data.frequency_resolution());
+    }
+
+    #[test]
+    fn spectrum_level_units_never_call_current_or_unknown_sources_voltage() {
+        assert_eq!(
+            spectrum_level_unit("V(out)", SpectrumNormalization::Peak),
+            "dBV pk"
+        );
+        assert_eq!(
+            spectrum_level_unit("i(VSENSE)", SpectrumNormalization::Rms),
+            "dBA rms"
+        );
+        assert_eq!(
+            spectrum_level_unit("derived_expression", SpectrumNormalization::Peak),
+            "dB pk"
+        );
+    }
+
+    #[test]
+    fn spectrum_revisions_never_share_a_trace_cache_identity() {
+        assert_ne!(trace_cache_key(41), trace_cache_key(42));
     }
 }

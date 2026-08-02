@@ -106,6 +106,7 @@ impl EyeMask {
     /// volts — violates (falls inside) the inner mask. Batch tests should
     /// map the polygon once via [`EyeMask::inner_in_ui_volts`] instead of
     /// calling this per sample.
+    #[cfg(test)]
     pub fn check_violation(&self, t_ui: f64, volts: f64) -> bool {
         self.inner_in_ui_volts().contains(t_ui, volts)
     }

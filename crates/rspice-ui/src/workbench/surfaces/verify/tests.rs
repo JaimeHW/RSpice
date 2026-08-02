@@ -761,6 +761,7 @@ fn histogram_bins_preserve_every_exact_sample() {
 fn signed_margin_is_positive_inside_and_negative_outside_bounds() {
     let spec = SpecEntry {
         measurement: "gain".to_owned(),
+        expression: String::new(),
         min: Some(10.0),
         max: Some(20.0),
         unit: "dB".to_owned(),

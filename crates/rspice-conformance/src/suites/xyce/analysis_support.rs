@@ -2566,7 +2566,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
 
         let mut power = Vec::with_capacity(result.time.len());
-        for index in 0..result.time.len() {
+        for (index, branch_current) in current.iter().enumerate().take(result.time.len()) {
             let v_pos = if pos_index == 0 {
                 0.0
             } else {
@@ -2587,7 +2587,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     )
                 })?
             };
-            power.push((v_pos - v_neg) * current[index]);
+            power.push((v_pos - v_neg) * branch_current);
         }
 
         Self::interpolate_transient_waveform_at(&result.time, &power, time)
@@ -2636,15 +2636,15 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 if element_name.eq_ignore_ascii_case(&dc.source) {
                     return Ok(sweep_point.primary);
                 }
-                if let Some(sweep2) = &dc.sweep2 {
-                    if element_name.eq_ignore_ascii_case(&sweep2.source) {
-                        return sweep_point.secondary.ok_or_else(|| {
-                            format!(
-                                "secondary sweep value for '{}' is unavailable",
-                                element_name
-                            )
-                        });
-                    }
+                if let Some(sweep2) = &dc.sweep2
+                    && element_name.eq_ignore_ascii_case(&sweep2.source)
+                {
+                    return sweep_point.secondary.ok_or_else(|| {
+                        format!(
+                            "secondary sweep value for '{}' is unavailable",
+                            element_name
+                        )
+                    });
                 }
                 Self::independent_source_dc_value(netlist, element_name).ok_or_else(|| {
                     format!(
@@ -3041,10 +3041,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             ));
         };
 
-        if Self::resistor_uses_xyce_default_marker(instance_params) {
-            if let Some(resistance) = Self::effective_resistor_value(netlist, name)? {
-                return Ok(resistance);
-            }
+        if Self::resistor_uses_xyce_default_marker(instance_params)
+            && let Some(resistance) = Self::effective_resistor_value(netlist, name)?
+        {
+            return Ok(resistance);
         }
         let value = Self::evaluate_transient_static_passive_parameter_value(
             netlist,
@@ -3060,10 +3060,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         if value.is_ok() {
             return value;
         }
-        if model.is_some() {
-            if let Some(resistance) = Self::resistor_parameter_r_value(netlist, name)? {
-                return Ok(resistance);
-            }
+        if model.is_some()
+            && let Some(resistance) = Self::resistor_parameter_r_value(netlist, name)?
+        {
+            return Ok(resistance);
         }
         value
     }
@@ -3710,10 +3710,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             ));
         };
 
-        if Self::resistor_uses_xyce_default_marker(instance_params) {
-            if let Some(resistance) = Self::effective_resistor_value(netlist, name)? {
-                return Ok(resistance);
-            }
+        if Self::resistor_uses_xyce_default_marker(instance_params)
+            && let Some(resistance) = Self::effective_resistor_value(netlist, name)?
+        {
+            return Ok(resistance);
         }
         if let Some(resistance) = Self::instance_param(instance_params, &["R", "VALUE"]) {
             return Ok(resistance);
@@ -3743,10 +3743,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 format!("failed to evaluate resistor parameter probe '{name}:R': {err}")
             });
         }
-        if model.is_some() {
-            if let Some(resistance) = Self::resistor_parameter_r_value(netlist, name)? {
-                return Ok(resistance);
-            }
+        if model.is_some()
+            && let Some(resistance) = Self::resistor_parameter_r_value(netlist, name)?
+        {
+            return Ok(resistance);
         }
 
         Err(format!(
@@ -3881,11 +3881,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 | rspice_core::netlist::FreqVariation::Oct => fstart * step.powf(index as Value),
             })
             .collect::<Vec<_>>();
-        frequencies
-            .iter()
-            .all(|frequency| frequency.is_finite())
-            .then_some(frequencies)
-            .unwrap_or_default()
+        if frequencies.iter().all(|frequency| frequency.is_finite()) {
+            frequencies
+        } else {
+            Default::default()
+        }
     }
 
     pub(super) fn dc_sweep_dimensions(netlist: &Netlist) -> Vec<XyceDcSweepDimension> {

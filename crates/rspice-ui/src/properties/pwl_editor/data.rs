@@ -118,6 +118,7 @@ pub struct PwlData {
 
 impl PwlData {
     /// Create PWL data with initial points.
+    #[cfg(test)]
     pub fn with_points(points: Vec<PwlPoint>) -> Self {
         let mut data = Self {
             points,
@@ -246,6 +247,7 @@ impl PwlData {
     }
 
     /// Check if empty.
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.points.is_empty()
     }

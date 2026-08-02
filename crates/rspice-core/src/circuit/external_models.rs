@@ -287,7 +287,7 @@ impl CircuitData {
     #[cfg(feature = "veriloga-builtins-base")]
     pub fn add_generated_veriloga_device(
         &mut self,
-        device: crate::device::veriloga_generated::BuiltinVerilogAInstance,
+        device: crate::device::veriloga_builtins::BuiltinVerilogAInstance,
     ) {
         self.generated_veriloga_devices.add(device);
     }
@@ -295,14 +295,14 @@ impl CircuitData {
     #[cfg(feature = "veriloga-builtins-base")]
     pub(crate) fn generated_veriloga_devices(
         &self,
-    ) -> &crate::device::veriloga_generated::BuiltinVerilogADevices {
+    ) -> &crate::device::veriloga_builtins::BuiltinVerilogADevices {
         &self.generated_veriloga_devices
     }
 
     #[cfg(feature = "veriloga-builtins-base")]
     pub(crate) fn generated_veriloga_devices_mut(
         &mut self,
-    ) -> &mut crate::device::veriloga_generated::BuiltinVerilogADevices {
+    ) -> &mut crate::device::veriloga_builtins::BuiltinVerilogADevices {
         &mut self.generated_veriloga_devices
     }
 
@@ -1781,7 +1781,7 @@ impl CircuitData {
         final_step: bool,
     ) {
         let ddt_coefficients =
-            crate::device::veriloga_generated::GeneratedDdtCoefficients::from_companion_values(
+            crate::device::veriloga_builtins::GeneratedDdtCoefficients::from_companion_values(
                 coefficients.coeff_g,
                 coefficients.coeff_v_n,
                 coefficients.coeff_v_n_minus_1,
@@ -1803,7 +1803,7 @@ impl CircuitData {
 
     pub(crate) fn generated_veriloga_checkpoint_states(
         &self,
-    ) -> Vec<crate::device::veriloga_generated::GeneratedVerilogAInstanceCheckpoint> {
+    ) -> Vec<crate::device::veriloga_builtins::GeneratedVerilogAInstanceCheckpoint> {
         #[cfg(feature = "veriloga-builtins-base")]
         {
             self.generated_veriloga_devices.checkpoint_states()
@@ -1816,7 +1816,7 @@ impl CircuitData {
 
     pub(crate) fn restore_generated_veriloga_checkpoint_states(
         &mut self,
-        states: &[crate::device::veriloga_generated::GeneratedVerilogAInstanceCheckpoint],
+        states: &[crate::device::veriloga_builtins::GeneratedVerilogAInstanceCheckpoint],
         state_available: bool,
     ) -> Result<(), String> {
         self.validate_generated_veriloga_checkpoint_states(states, state_available)?;
@@ -1835,7 +1835,7 @@ impl CircuitData {
 
     pub(crate) fn validate_generated_veriloga_checkpoint_states(
         &self,
-        states: &[crate::device::veriloga_generated::GeneratedVerilogAInstanceCheckpoint],
+        states: &[crate::device::veriloga_builtins::GeneratedVerilogAInstanceCheckpoint],
         state_available: bool,
     ) -> Result<(), String> {
         if !state_available {

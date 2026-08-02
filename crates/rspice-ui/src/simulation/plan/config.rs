@@ -608,6 +608,7 @@ impl AnalysisDraft {
     }
 
     /// Construct a semantic draft from a current singleton-model index.
+    #[cfg(test)]
     pub fn from_legacy_index(index: usize) -> Option<Self> {
         AnalysisKind::from_legacy_index(index).map(Self::for_kind)
     }
@@ -676,7 +677,7 @@ impl AnalysisDraft {
     /// because doing so would overwrite persisted raw edits with defaults.
     pub fn prepare_after_restore(&mut self) {
         match self {
-            Self::OperatingPoint(state) => state.initialized = true,
+            Self::OperatingPoint(state) => state.prepare_after_restore(),
             Self::PoleZero(state) => state.initialized = true,
             Self::Sensitivity(state) => state.initialized = true,
             Self::MonteCarlo(state) => state.initialized = true,
@@ -1044,8 +1045,10 @@ pub(super) fn prerequisite_draft_for(
             periodic_state_requirement(dependent)?;
         }
         let sources = context.periodic_sources()?;
-        let mut draft = PssDialogState::default();
-        draft.tone_sources = sources.join(", ");
+        let draft = PssDialogState {
+            tone_sources: sources.join(", "),
+            ..Default::default()
+        };
         context.validate_pss_sources(&draft)?;
         let draft = AnalysisDraft::Pss(draft);
         if let Some(issue) = dependency_configuration_issue(dependent, &draft) {

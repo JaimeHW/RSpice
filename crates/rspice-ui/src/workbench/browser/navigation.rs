@@ -5,6 +5,7 @@
 //! parameter byte-for-byte. Browser APIs are isolated behind `wasm32` so the
 //! protocol receives ordinary native unit-test coverage.
 
+#[cfg(any(test, target_arch = "wasm32"))]
 use std::{borrow::Cow, fmt, str::FromStr};
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -13,11 +14,16 @@ use std::collections::BTreeMap;
 #[cfg(any(test, target_arch = "wasm32"))]
 use serde::{Deserialize, Serialize};
 
+#[cfg(any(test, target_arch = "wasm32"))]
 use crate::workbench::routing::surface_route::{SurfaceRoute, SurfaceRouteParseError};
 
+#[cfg(any(test, target_arch = "wasm32"))]
 const VIEW_KEY: &str = "view";
+#[cfg(any(test, target_arch = "wasm32"))]
 const SURFACE_KEY: &str = "surface";
+#[cfg(any(test, target_arch = "wasm32"))]
 const OBJECT_KIND_KEY: &str = "object-kind";
+#[cfg(any(test, target_arch = "wasm32"))]
 const OBJECT_ID_KEY: &str = "object-id";
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -76,31 +82,37 @@ fn remove_listener_registration<T, E>(
 /// the host page (for example `locale`, test controls, or campaign tags) keep
 /// their original spelling, encoding, order, and duplicates.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(any(test, target_arch = "wasm32"))]
 pub struct LocationSearch {
     route: Option<SurfaceRoute>,
     unrelated_parameters: Vec<String>,
 }
 
+#[cfg(any(test, target_arch = "wasm32"))]
 impl LocationSearch {
     /// Parse a browser `Location.search` value. An empty string means that the
     /// URL has no query; a non-empty value must include its leading `?`.
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub fn parse(search: &str) -> Result<Self, BrowserNavigationError> {
         search.parse()
     }
 
     /// The canonical route selected by this query, if one is present.
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub const fn route(&self) -> Option<SurfaceRoute> {
         self.route
     }
 
     /// Raw host-owned parameters in their original order.
+    #[cfg(test)]
     pub fn unrelated_parameters(&self) -> impl ExactSizeIterator<Item = &str> {
         self.unrelated_parameters.iter().map(String::as_str)
     }
 
     /// Return an equivalent query selecting `route`.
     #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub fn with_route(&self, route: SurfaceRoute) -> Self {
         Self {
             route: Some(route),
@@ -110,6 +122,7 @@ impl LocationSearch {
 
     /// Return the host-owned portion of this query with no workbench route.
     #[must_use]
+    #[cfg(test)]
     pub fn without_route(&self) -> Self {
         Self {
             route: None,
@@ -117,6 +130,7 @@ impl LocationSearch {
         }
     }
 
+    #[cfg(any(test, target_arch = "wasm32"))]
     fn render(&self) -> String {
         let mut parameters = Vec::with_capacity(
             self.unrelated_parameters.len() + usize::from(self.route.is_some()) * 3,
@@ -141,12 +155,14 @@ impl LocationSearch {
     }
 }
 
+#[cfg(any(test, target_arch = "wasm32"))]
 impl fmt::Display for LocationSearch {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.render())
     }
 }
 
+#[cfg(any(test, target_arch = "wasm32"))]
 impl FromStr for LocationSearch {
     type Err = BrowserNavigationError;
 
@@ -260,11 +276,13 @@ impl FromStr for LocationSearch {
 }
 
 /// Parse only the canonical route while still validating the entire query.
+#[cfg(test)]
 pub fn route_from_search(search: &str) -> Result<Option<SurfaceRoute>, BrowserNavigationError> {
     Ok(LocationSearch::parse(search)?.route())
 }
 
 /// Replace or add the canonical route without losing host-owned parameters.
+#[cfg(test)]
 pub fn search_with_route(
     search: &str,
     route: SurfaceRoute,
@@ -273,10 +291,12 @@ pub fn search_with_route(
 }
 
 /// Remove the canonical route without losing host-owned parameters.
+#[cfg(test)]
 pub fn search_without_route(search: &str) -> Result<String, BrowserNavigationError> {
     Ok(LocationSearch::parse(search)?.without_route().to_string())
 }
 
+#[cfg(any(test, target_arch = "wasm32"))]
 fn reserved_key(decoded_key: &str) -> Option<&'static str> {
     match decoded_key {
         VIEW_KEY => Some(VIEW_KEY),
@@ -290,6 +310,7 @@ fn reserved_key(decoded_key: &str) -> Option<&'static str> {
 /// Decode query keys only, so percent-encoded aliases of route-owned keys
 /// cannot evade duplicate and conflict checks. Values of unrelated parameters
 /// remain opaque and are never decoded or rewritten.
+#[cfg(any(test, target_arch = "wasm32"))]
 fn decode_query_key(raw: &str) -> Result<Cow<'_, str>, BrowserNavigationError> {
     if !raw
         .as_bytes()
@@ -334,6 +355,7 @@ fn decode_query_key(raw: &str) -> Result<Cow<'_, str>, BrowserNavigationError> {
         .map_err(|_| BrowserNavigationError::MalformedPercentEncoding(raw.to_owned()))
 }
 
+#[cfg(any(test, target_arch = "wasm32"))]
 const fn hex_value(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),
@@ -344,6 +366,7 @@ const fn hex_value(byte: u8) -> Option<u8> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[cfg(any(test, target_arch = "wasm32"))]
 pub enum BrowserNavigationError {
     #[error("browser location search must be empty or start with `?`")]
     MissingQueryPrefix,
@@ -370,8 +393,8 @@ pub enum BrowserNavigationError {
     NonCanonicalRouteOrder,
     #[error(transparent)]
     SurfaceRoute(#[from] SurfaceRouteParseError),
-    /// Raised only by the wasm32 history module below, so a native build
-    /// reports it as never constructed. It is not dead.
+    /// Raised only by the wasm32 history module below.
+    #[cfg(target_arch = "wasm32")]
     #[error("browser navigation session is not initialized")]
     BrowserSessionUnavailable,
     #[error("invalid RSpice browser history state: {0}")]
@@ -385,6 +408,7 @@ pub enum BrowserNavigationError {
     #[error("browser history route does not match the active RSpice task")]
     HistoryRouteMismatch,
     /// Also wasm32-only; see [`Self::BrowserSessionUnavailable`].
+    #[cfg(target_arch = "wasm32")]
     #[error("browser navigation API failed: {0}")]
     BrowserApi(String),
 }
@@ -1125,10 +1149,9 @@ mod browser {
 
 #[cfg(target_arch = "wasm32")]
 pub use browser::{
-    BrowserPopEvent, active_browser_route, current_location, ensure_popstate_listener,
-    history_session_ready, install_popstate_listener, poll_popstate, push_route, replace_route,
-    restart_history_session, traversal_in_flight, traversal_watchdog_expired, traverse_history,
-    uninstall_popstate_listener,
+    active_browser_route, current_location, ensure_popstate_listener, history_session_ready,
+    install_popstate_listener, poll_popstate, push_route, replace_route, restart_history_session,
+    traversal_in_flight, traversal_watchdog_expired, traverse_history, uninstall_popstate_listener,
 };
 
 #[cfg(test)]

@@ -39,9 +39,10 @@ impl ReadinessState {
         }
     }
 
-    /// Only `current` permits the fixture's unprotected design label. This
-    /// still does not constitute product evidence or target qualification.
-    #[must_use]
+    /// Only `Current` permits the fixture's unprotected design label. This
+    /// still does not constitute product evidence or target qualification,
+    /// and only the fixture-parity test reads it.
+    #[cfg(test)]
     pub const fn is_current(self) -> bool {
         matches!(self, Self::Current)
     }
@@ -107,20 +108,6 @@ pub const PLATFORM_AVAILABILITY_ROWS: [PlatformAvailabilityRow; 4] = [
         sign_off_rule: PLATFORM_SIGN_OFF_RULE,
     },
 ];
-
-#[must_use]
-pub fn platform_availability_row(id: &str) -> Option<&'static PlatformAvailabilityRow> {
-    PLATFORM_AVAILABILITY_ROWS.iter().find(|row| row.id == id)
-}
-
-pub fn platform_rows_matching(
-    query: &str,
-) -> impl Iterator<Item = &'static PlatformAvailabilityRow> {
-    let query = normalized_query(query);
-    PLATFORM_AVAILABILITY_ROWS
-        .iter()
-        .filter(move |row| matches_query(&query, &[row.id, row.label, row.capability_mode_summary]))
-}
 
 /// Roadmap/deferred status from the canonical planned design catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -257,19 +244,6 @@ pub fn planned_workflow_row(id: &str) -> Option<&'static PlannedWorkflowRow> {
     PLANNED_WORKFLOW_ROWS.iter().find(|row| row.id == id)
 }
 
-pub fn planned_workflow_rows_matching(
-    query: &str,
-) -> impl Iterator<Item = &'static PlannedWorkflowRow> {
-    let query = normalized_query(query);
-    PLANNED_WORKFLOW_ROWS.iter().filter(move |row| {
-        matches_query(
-            &query,
-            &[row.id, row.label, row.group, row.owner, row.entry],
-        ) || planned_workflow_specification(row.id)
-            .is_some_and(|specification| specification.matches_query(&query))
-    })
-}
-
 /// Presentation intent carried by exact mockup specification text.
 ///
 /// This is deliberately semantic rather than an egui color. A renderer maps
@@ -284,7 +258,10 @@ pub enum PlannedWorkflowTextStyle {
 }
 
 impl PlannedWorkflowTextStyle {
-    #[must_use]
+    /// The mockup's CSS class for this intent. egui does not use it; the
+    /// fixture-parity test does, to reconstruct the exact source fragment
+    /// each cell and property must appear as.
+    #[cfg(test)]
     pub const fn source_class(self) -> Option<&'static str> {
         match self {
             Self::Plain => None,
@@ -452,50 +429,7 @@ pub struct PlannedWorkflowSpecification {
     pub outputs_provenance: &'static str,
 }
 
-impl PlannedWorkflowSpecification {
-    fn matches_query(self, query: &str) -> bool {
-        if matches_query(
-            query,
-            &[
-                self.id,
-                self.purpose,
-                self.content_section_title,
-                self.property_section_title.unwrap_or_default(),
-                self.validation_recovery,
-                self.outputs_provenance,
-            ],
-        ) {
-            return true;
-        }
-        if self.tables.iter().any(|table| {
-            table
-                .headers
-                .iter()
-                .any(|header| matches_query(query, &[header]))
-                || table
-                    .rows
-                    .iter()
-                    .flat_map(|row| (*row).iter())
-                    .any(|cell| matches_query(query, &[cell.text]))
-        }) {
-            return true;
-        }
-        if self
-            .properties
-            .iter()
-            .any(|property| matches_query(query, &[property.label, property.value]))
-        {
-            return true;
-        }
-        self.chip_section.is_some_and(|section| {
-            matches_query(query, &[section.title])
-                || section
-                    .chips
-                    .iter()
-                    .any(|chip| matches_query(query, &[chip]))
-        })
-    }
-}
+impl PlannedWorkflowSpecification {}
 
 macro_rules! planned_row {
     ($($cell:literal),+ $(,)?) => {
@@ -1243,6 +1177,7 @@ pub enum ContractTone {
 
 impl ContractTone {
     #[must_use]
+    #[cfg(test)]
     pub const fn source_class(self) -> Option<&'static str> {
         match self {
             Self::Plain => None,
@@ -1688,7 +1623,6 @@ impl AnalysisAvailabilityRow {
     }
 }
 
-pub const CAPABILITY_FIXTURE_STATUS: &str = "design-fixture";
 pub const CAPABILITY_FIXTURE_REVISION: &str = "2026-07-13.1";
 pub const CAPABILITY_FIXTURE_AS_OF: &str = "2026-07-13T12:00:00Z";
 pub const CAPABILITY_FIXTURE_BOUNDARY: &str = "This fixture does not prove that Rust, a simulator, an engine, a connector, a platform build, a model, or a commercial release has been implemented, qualified, approved, or made sign-off eligible.";
@@ -1697,9 +1631,6 @@ pub const CAPABILITY_FIXTURE_BOUNDARY: &str = "This fixture does not prove that 
 pub enum EntitlementState {
     Granted,
     Denied,
-    Expired,
-    Revoked,
-    Unknown,
 }
 
 /// Coarse, display-only classification of the exact fixture binding.
@@ -1936,43 +1867,6 @@ pub const CAPABILITY_CLAIM_PROJECTIONS: [CapabilityClaimProjection; 12] = [
         boundary: CAPABILITY_FIXTURE_BOUNDARY,
     },
 ];
-
-#[must_use]
-pub fn capability_claim_projection(case_id: &str) -> Option<&'static CapabilityClaimProjection> {
-    CAPABILITY_CLAIM_PROJECTIONS
-        .iter()
-        .find(|row| row.case_id == case_id)
-}
-
-pub fn capability_claim_rows_matching(
-    query: &str,
-) -> impl Iterator<Item = &'static CapabilityClaimProjection> {
-    let query = normalized_query(query);
-    CAPABILITY_CLAIM_PROJECTIONS.iter().filter(move |row| {
-        matches_query(
-            &query,
-            &[
-                row.case_id,
-                row.original_label,
-                row.resolved_label,
-                row.subject_kind,
-                row.asserted_stage,
-                row.applicable_source_summary,
-            ],
-        )
-    })
-}
-
-fn normalized_query(query: &str) -> String {
-    query.trim().to_lowercase()
-}
-
-fn matches_query(query: &str, values: &[&str]) -> bool {
-    query.is_empty()
-        || values
-            .iter()
-            .any(|value| value.to_lowercase().contains(query))
-}
 
 #[cfg(test)]
 mod tests;

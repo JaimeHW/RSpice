@@ -71,8 +71,8 @@ impl Default for ApplicationWindowBounds {
 
 impl ApplicationWindowBounds {
     fn normalize(&mut self) {
-        self.inner_size[0] = self.inner_size[0].max(MIN_WINDOW_SIZE[0]).min(16_384.0);
-        self.inner_size[1] = self.inner_size[1].max(MIN_WINDOW_SIZE[1]).min(16_384.0);
+        self.inner_size[0] = self.inner_size[0].clamp(MIN_WINDOW_SIZE[0], 16_384.0);
+        self.inner_size[1] = self.inner_size[1].clamp(MIN_WINDOW_SIZE[1], 16_384.0);
         if self
             .position
             .is_some_and(|position| !position[0].is_finite() || !position[1].is_finite())

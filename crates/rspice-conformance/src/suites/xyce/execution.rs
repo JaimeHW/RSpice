@@ -4686,25 +4686,23 @@ impl XyceTestRunner {
             }
         };
 
-        if plan.contract.compares_step_res_reference() {
-            if let Some(res_reference_path) =
+        if plan.contract.compares_step_res_reference()
+            && let Some(res_reference_path) =
                 Self::step_res_reference_path(&plan.deck_path, &plan.reference_path)
-            {
-                if let Err(err) = self.compare_step_res_reference(
-                    &res_reference_path,
-                    &netlist,
-                    &plan.steps,
-                    &step_runs,
-                ) {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        contract,
-                        format!("Xyce .STEP result summary comparison error: {err}"),
-                        Vec::new(),
-                    );
-                }
-            }
+            && let Err(err) = self.compare_step_res_reference(
+                &res_reference_path,
+                &netlist,
+                &plan.steps,
+                &step_runs,
+            )
+        {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                format!("Xyce .STEP result summary comparison error: {err}"),
+                Vec::new(),
+            );
         }
 
         let mut batches = Vec::with_capacity(step_runs.len());

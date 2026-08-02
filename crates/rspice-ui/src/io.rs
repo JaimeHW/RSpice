@@ -22,14 +22,13 @@ pub(crate) mod waveform_io;
 pub use netlist_export::NetlistFormat;
 pub use project_execution::{PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION, ProjectExecutionContext};
 #[allow(deprecated)]
-pub use project_io::{
-    ProjectFile, ProjectIoError, ProjectSimulationResults, load_project_file,
-    show_open_project_dialog, show_save_project_dialog,
-};
-pub use schematic_io::{
-    SchematicFile, SchematicIoError, load_schematic, save_schematic, show_open_dialog,
-    show_save_dialog,
-};
+pub use project_io::{ProjectFile, ProjectIoError, ProjectSimulationResults, load_project_file};
+pub use schematic_io::{SchematicIoError, load_schematic, save_schematic, show_save_dialog};
+// Native file pickers. The browser reaches its own import path instead.
+#[cfg(not(target_arch = "wasm32"))]
+pub use project_io::{show_open_project_dialog, show_save_project_dialog};
+#[cfg(not(target_arch = "wasm32"))]
+pub use schematic_io::{SchematicFile, show_open_dialog};
 
 pub use waveform_io::{
     SignalType, WaveformDataset, WaveformFormat, WaveformSignal, WaveformWriter,

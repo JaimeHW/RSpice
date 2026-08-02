@@ -1853,7 +1853,7 @@ fn technology_change_receipts_are_checkpoint_bound_atomic_and_tamper_evident() {
         ProjectTechnologyChangeAction::Replace
     );
     assert_eq!(
-        replacement_receipt.from_project_revision(),
+        replacement_receipt.source_project_revision(),
         replacement_from
     );
     assert_eq!(project.technology_binding(), Some(&bypass));
@@ -2405,14 +2405,14 @@ fn project_library_mutation_receipts_are_exact_hash_chained_and_tamper_evident()
     assert_eq!(project.library_mutation_audit().len(), 2);
     assert_eq!(first.sequence(), 1);
     assert_eq!(second.sequence(), 2);
-    assert_eq!(first.from_project_revision().get(), 1);
-    assert_eq!(first.to_project_revision().get(), 2);
-    assert_eq!(second.from_project_revision().get(), 2);
-    assert_eq!(second.to_project_revision().get(), 3);
-    assert_eq!(first.from_library_revision(), 7);
-    assert_eq!(first.to_library_revision(), 8);
-    assert_eq!(second.from_library_revision(), 8);
-    assert_eq!(second.to_library_revision(), 10);
+    assert_eq!(first.source_project_revision().get(), 1);
+    assert_eq!(first.target_project_revision().get(), 2);
+    assert_eq!(second.source_project_revision().get(), 2);
+    assert_eq!(second.target_project_revision().get(), 3);
+    assert_eq!(first.source_library_revision(), 7);
+    assert_eq!(first.target_library_revision(), 8);
+    assert_eq!(second.source_library_revision(), 8);
+    assert_eq!(second.target_library_revision(), 10);
     assert_eq!(
         second.previous_receipt_digest(),
         Some(first.receipt_digest())

@@ -24,45 +24,9 @@ fn model_tabs_match_the_mockup_taxonomy() {
 
 #[test]
 fn responsive_model_geometry_matches_mockup_breakpoints() {
-    assert_eq!(model_tab_strip_height(false, false), 38.0);
-    assert_eq!(model_tab_strip_height(false, true), 38.0);
-    assert_eq!(model_tab_strip_height(true, false), 44.0);
-    assert_eq!(model_tab_strip_height(true, true), 54.0);
-
-    assert_eq!(model_catalog_min_width(561.0), 780.0);
-    assert_eq!(model_catalog_min_width(560.0), 690.0);
     assert!(!model_title_actions_stack(820.0));
     assert!(!model_title_actions_stack(561.0));
     assert!(model_title_actions_stack(560.0));
-}
-
-#[test]
-fn symbol_and_corner_compositions_own_overflow_without_changing_desktop_geometry() {
-    let desktop = model_table_summary_layout(egui::vec2(1_120.0, 620.0), false);
-    assert!(!desktop.narrow);
-    assert_eq!(desktop.table_height, 470.0);
-    assert_eq!(desktop.summary_height, MODEL_WIDE_SUMMARY_H);
-    assert!(!desktop.owns_vertical_scroll);
-
-    let short_desktop = model_table_summary_layout(egui::vec2(1_120.0, 240.0), false);
-    assert!(!short_desktop.narrow);
-    assert_eq!(short_desktop.table_height, MODEL_TABLE_MIN_H);
-    assert!(short_desktop.owns_vertical_scroll);
-
-    let narrow = model_table_summary_layout(egui::vec2(560.0, 500.0), false);
-    assert!(narrow.narrow);
-    assert_eq!(narrow.table_height, 200.0);
-    assert_eq!(narrow.summary_height, MODEL_STACKED_SUMMARY_H);
-    assert!(!narrow.owns_vertical_scroll);
-
-    let short_narrow = model_table_summary_layout(egui::vec2(560.0, 380.0), false);
-    assert!(short_narrow.narrow);
-    assert_eq!(short_narrow.table_height, MODEL_TABLE_MIN_H);
-    assert!(short_narrow.owns_vertical_scroll);
-
-    let touch = model_table_summary_layout(egui::vec2(1_120.0, 380.0), true);
-    assert!(touch.narrow);
-    assert!(touch.owns_vertical_scroll);
 }
 
 #[test]
@@ -81,12 +45,13 @@ fn action_title_keeps_its_button_in_the_title_band_and_leaves_body_space() {
         },
         |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                surface_title(
+                surface_title_with_action_reserve(
                     ui,
                     "SYMBOLS, PINS & DEVICE FORMS",
                     "Symbol and component-definition manager",
                     "Bind graphical symbols and explicit terminal contracts.",
                     true,
+                    240.0,
                     |ui| action_rect = Some(ui.button("Create symbol").rect),
                 );
                 body_rect = Some(ui.label("BODY CONTENT").rect);
@@ -165,105 +130,6 @@ fn complete_models_surface_keeps_action_pages_inside_the_title_band() {
             );
         }
     }
-}
-
-#[test]
-fn summary_cards_reserve_exact_height_when_long_values_wrap() {
-    let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    let mut consumed = None;
-    let _ = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(825.0, 420.0),
-                )),
-                ..Default::default()
-            },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    let long_value = "C:/commercial/pdk/releases/current/models/process/sections/temperature-and-voltage-corner".to_owned();
-                    let left = [
-                        ("Resolved bindings", long_value.clone()),
-                        ("Unresolved bindings", long_value.clone()),
-                        ("Missing non-TT section", long_value.clone()),
-                    ];
-                    let right = [
-                        ("Temperature", long_value.clone()),
-                        ("Supply factor", long_value.clone()),
-                        ("PDK search paths", long_value),
-                    ];
-                    let response = summary_cards(
-                        ui,
-                        false,
-                        MODEL_WIDE_SUMMARY_H,
-                        false,
-                        SummaryCardSpec::new("Binding policy", &left),
-                        SummaryCardSpec::new("Environment axes", &right),
-                    );
-                    consumed = Some(response.rect.height());
-                });
-            },
-        );
-
-    assert!((consumed.expect("summary rendered") - MODEL_WIDE_SUMMARY_H).abs() <= 0.5);
-}
-
-#[test]
-fn parent_scrolled_summary_uses_natural_height_instead_of_nesting_scrollbars() {
-    let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    let mut consumed = None;
-    // Narrow enough that the long paths below wrap past the nominal summary
-    // height. egui 0.35's root `Ui` carries no margin, so the same screen rect
-    // yields a wider content column than it did on 0.34.
-    let _ = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(620.0, 260.0),
-                )),
-                ..Default::default()
-            },
-            |root| {
-                egui::CentralPanel::default().show(root, |ui| {
-                    let long: String = "C:/commercial/pdk/releases/current/models/process/sections/temperature-and-voltage-corner".to_owned();
-                    let left = [
-                        ("Resolved bindings", long.clone()),
-                        ("Unresolved bindings", long.clone()),
-                        ("Missing non-TT section", long.clone()),
-                        ("Stale section digest", long.clone()),
-                        ("Unbound corner", long.clone()),
-                        ("Shadowed library", long.clone()),
-                    ];
-                    let right = [
-                        ("Temperature", long.clone()),
-                        ("Supply factor", long.clone()),
-                        ("PDK search paths", long.clone()),
-                        ("Section policy", long.clone()),
-                        ("Corner set", long.clone()),
-                        ("Binding authority", long.clone()),
-                    ];
-                    consumed = Some(
-                        summary_cards(
-                            ui,
-                            false,
-                            MODEL_WIDE_SUMMARY_H,
-                            true,
-                            SummaryCardSpec::new("Binding policy", &left),
-                            SummaryCardSpec::new("Environment axes", &right),
-                        )
-                        .rect
-                        .height(),
-                    );
-                });
-            },
-        );
-
-    assert!(
-        consumed.expect("summary rendered") > MODEL_WIDE_SUMMARY_H,
-        "natural content must expand inside the single parent scroll owner"
-    );
 }
 
 #[test]

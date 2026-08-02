@@ -28,20 +28,6 @@ macro_rules! define_uuid_id {
                     .then_some(Self(value))
                     .ok_or(UuidIdError::Nil)
             }
-
-            /// Deterministically derive an identity within an explicitly
-            /// versioned namespace. This is reserved for reproducible
-            /// migrations and immutable source projections; ordinary object
-            /// creation must use [`Self::new`].
-            #[must_use]
-            pub fn from_namespace(namespace: Uuid, name: &[u8]) -> Self {
-                Self(Uuid::new_v5(&namespace, name))
-            }
-
-            #[must_use]
-            pub const fn as_uuid(self) -> Uuid {
-                self.0
-            }
         }
 
         impl Default for $name {
@@ -91,22 +77,54 @@ pub enum UuidIdParseError {
     Invalid(#[from] UuidIdError),
 }
 
+/// The same identity plus its raw value, for the identities that are digested
+/// or ordered by it.
+macro_rules! define_raw_uuid_id {
+    ($name:ident) => {
+        define_uuid_id!($name);
+
+        impl $name {
+            #[must_use]
+            pub const fn as_uuid(self) -> Uuid {
+                self.0
+            }
+        }
+    };
+}
+
+/// The same again plus deterministic derivation within an explicitly
+/// versioned namespace. Derivation is reserved for reproducible migrations
+/// and immutable source projections; ordinary object creation uses
+/// `Self::new`.
+macro_rules! define_derivable_uuid_id {
+    ($name:ident) => {
+        define_raw_uuid_id!($name);
+
+        impl $name {
+            #[must_use]
+            pub fn from_namespace(namespace: Uuid, name: &[u8]) -> Self {
+                Self(Uuid::new_v5(&namespace, name))
+            }
+        }
+    };
+}
+
 // The identities the product model actually mints. `DesignId`, `TestbenchId`,
 // `RunSetId`, `VerificationPlanId`, `AutomationPipelineId`, `ModelBindingId`,
 // and `ReleaseCandidateId` were declared here too and never constructed
 // anywhere — vocabulary for object kinds that do not exist yet. Reintroducing
 // one is a single line whenever the object arrives.
-define_uuid_id!(ProjectId);
-define_uuid_id!(SimulationPlanId);
-define_uuid_id!(AnalysisInstanceId);
-define_uuid_id!(DesignVariableId);
-define_uuid_id!(SavedOutputId);
+define_derivable_uuid_id!(ProjectId);
+define_derivable_uuid_id!(SimulationPlanId);
+define_derivable_uuid_id!(AnalysisInstanceId);
+define_derivable_uuid_id!(DesignVariableId);
+define_derivable_uuid_id!(SavedOutputId);
 define_uuid_id!(JobId);
-define_uuid_id!(RunId);
-define_uuid_id!(DatasetId);
-define_uuid_id!(ResultDocumentId);
-define_uuid_id!(VerificationEvidenceId);
-define_uuid_id!(ModelSourceId);
+define_derivable_uuid_id!(RunId);
+define_derivable_uuid_id!(DatasetId);
+define_raw_uuid_id!(ResultDocumentId);
+define_derivable_uuid_id!(VerificationEvidenceId);
+define_derivable_uuid_id!(ModelSourceId);
 
 /// A type-erased reference used by receipts and cross-domain links. Domain
 /// records retain their strongly typed IDs; erasure occurs only at boundaries

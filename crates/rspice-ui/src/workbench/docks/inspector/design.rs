@@ -904,7 +904,9 @@ enum ComponentTuningPreparation {
         variable_id: crate::product::DesignVariableId,
     },
     StageBinding {
-        variable: crate::state::DesignVariable,
+        /// Boxed: a staged variable is an order of magnitude larger than the
+        /// existing-binding case's identifier.
+        variable: Box<crate::state::DesignVariable>,
         creates_variable: bool,
     },
 }
@@ -1051,7 +1053,7 @@ fn prepare_component_tuning(
         source_topology_version,
         active_plan_run,
         preparation: ComponentTuningPreparation::StageBinding {
-            variable,
+            variable: Box::new(variable),
             creates_variable,
         },
     })
@@ -1116,7 +1118,7 @@ fn stage_component_tuning(app: &mut RSpiceApp, component_id: u64) -> Result<(), 
         ComponentTuningPreparation::StageBinding {
             variable,
             creates_variable,
-        } => (variable, creates_variable),
+        } => (*variable, creates_variable),
     };
     if creates_variable {
         session.tuning_variables.retain(|draft| !draft.proposed);

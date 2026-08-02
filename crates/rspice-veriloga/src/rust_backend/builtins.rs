@@ -299,7 +299,7 @@ fn read_generated_manifest(
     source_tree_digest: &str,
     generator_digest: &str,
 ) -> Option<GeneratedBuiltinManifest> {
-    if !generated_root.join("registry.rs").is_file() {
+    if !generated_root.join("src").join("registry.rs").is_file() {
         return None;
     }
     let manifest_path = generated_root.join(GENERATED_BUILTIN_MANIFEST_FILE_NAME);
@@ -369,7 +369,10 @@ const LEGACY_AD_RUNTIME_MARKERS: &[&str] = &[
 ];
 
 fn remove_obsolete_generated_runtime_files(generated_root: &Path) -> BuiltinResult<()> {
-    for file_name in ["kernel_runtime.rs", "support.rs"] {
+    // `registry.rs` sat at the catalog root while it was `include!`d into
+    // rspice-core. It is a module of the catalog now, so a root copy left by an
+    // older generator is stale input the manifest would still fingerprint.
+    for file_name in ["kernel_runtime.rs", "support.rs", "registry.rs"] {
         let path = generated_root.join(file_name);
         if path.is_file() {
             fs::remove_file(path)?;
@@ -519,7 +522,7 @@ fn render_model_catalog_manifest(packages: &[GeneratedModelPackage]) -> String {
             package.package_name
         );
     }
-    out.push_str("]\n\n[dependencies]\n");
+    out.push_str("]\n\n[dependencies]\nrspice-veriloga-runtime.workspace = true\n");
     for package in packages {
         let _ = writeln!(
             out,
@@ -534,7 +537,13 @@ fn render_model_catalog_manifest(packages: &[GeneratedModelPackage]) -> String {
 
 fn render_model_catalog_lib(packages: &[GeneratedModelPackage]) -> String {
     let mut out = String::from(
-        "//! Feature-selectable precompiled Verilog-A model catalog. Do not edit.\n\n",
+        "//! Feature-selectable precompiled Verilog-A model catalog. Do not edit.\n\
+         \n\
+         // `registry` reaches its ABI types through `super::`, so the catalog\n\
+         // root is where they have to land.\n\
+         pub use rspice_veriloga_runtime::*;\n\
+         \n\
+         pub mod registry;\n\n",
     );
     for package in packages {
         let crate_name = package.package_name.replace('-', "_");
@@ -1498,7 +1507,9 @@ mod tests {
         fs::write(folder.join("stamp.rs"), "abc").expect("write generated fixture");
         fs::write(folder.join(".rspice-veriloga-generated"), "marker")
             .expect("write generated ownership marker");
-        fs::write(root.join("registry.rs"), "registry").expect("write registry fixture");
+        fs::create_dir_all(root.join("src")).expect("create registry fixture src dir");
+        fs::write(root.join("src").join("registry.rs"), "registry")
+            .expect("write registry fixture");
 
         let manifest = build_generated_manifest(
             &root,
@@ -1601,7 +1612,8 @@ mod tests {
         let packages = generated_model_packages(&devices);
 
         write_registry(&root, &devices, &packages).expect("write generated registry");
-        let registry = fs::read_to_string(root.join("registry.rs")).expect("read registry");
+        let registry =
+            fs::read_to_string(root.join("src").join("registry.rs")).expect("read registry");
 
         assert!(
             registry.contains("#[cfg(feature = \"veriloga-model-first\")]"),
@@ -1612,11 +1624,11 @@ mod tests {
             "{registry}"
         );
         assert!(
-            registry.contains("pub use rspice_veriloga_models::first_model;"),
+            registry.contains("pub use crate::first_model;"),
             "{registry}"
         );
         assert!(
-            registry.contains("pub use rspice_veriloga_models::second_model;"),
+            registry.contains("pub use crate::second_model;"),
             "{registry}"
         );
         assert!(
@@ -1769,7 +1781,8 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
 
         write_registry(&root, &[], &[]).expect("write empty generated registry");
-        let registry = fs::read_to_string(root.join("registry.rs")).expect("read registry");
+        let registry =
+            fs::read_to_string(root.join("src").join("registry.rs")).expect("read registry");
 
         assert!(registry.contains("pub fn limiter_converged(&self) -> bool"));
         assert!(
@@ -1847,7 +1860,7 @@ fn write_registry(
     devices: &[GeneratedRustDevice],
     packages: &[GeneratedModelPackage],
 ) -> BuiltinResult<()> {
-    std::fs::create_dir_all(registry_root)?;
+    std::fs::create_dir_all(registry_root.join("src"))?;
     let registry_model_names = resolve_generated_registry_model_names(devices);
     if packages.len() != devices.len() {
         return Err("generated registry package count differs from device count".into());
@@ -1862,7 +1875,7 @@ fn write_registry(
     for (device, feature) in devices.iter().zip(&feature_names) {
         writeln!(
             out,
-            "#[cfg(feature = {feature:?})]\npub use rspice_veriloga_models::{};",
+            "#[cfg(feature = {feature:?})]\npub use crate::{};",
             device.folder_name,
         )?;
     }
@@ -1883,7 +1896,7 @@ fn write_registry(
 
     out.push_str("impl GeneratedBuiltinKind {\n");
     out.push_str(
-        "    pub(crate) fn capture_rollback_state(&self) -> super::GeneratedVerilogARollbackState {\n",
+        "    pub fn capture_rollback_state(&self) -> super::GeneratedVerilogARollbackState {\n",
     );
     if devices.is_empty() {
         out.push_str("        let _ = self;\n");
@@ -1903,7 +1916,7 @@ fn write_registry(
     }
     out.push_str("    }\n\n");
     out.push_str(
-        "    pub(crate) fn restore_rollback_state(&mut self, state: &super::GeneratedVerilogARollbackState) {\n",
+        "    pub fn restore_rollback_state(&mut self, state: &super::GeneratedVerilogARollbackState) {\n",
     );
     out.push_str("        let _ = state;\n");
     if devices.is_empty() {
@@ -1923,7 +1936,7 @@ fn write_registry(
         out.push_str("        }\n");
     }
     out.push_str("    }\n\n");
-    out.push_str("    pub(crate) fn checkpoint_model_identity(&self) -> &'static str {\n");
+    out.push_str("    pub fn checkpoint_model_identity(&self) -> &'static str {\n");
     if devices.is_empty() {
         out.push_str("        let _ = self;\n");
         out.push_str("        unreachable!(\"empty generated Verilog-A registry has no checkpoint identity\")\n");
@@ -1941,7 +1954,7 @@ fn write_registry(
     }
     out.push_str("    }\n\n");
     out.push_str(
-        "    pub(crate) fn capture_persistent_state(&self) -> super::GeneratedVerilogAPersistentState {\n",
+        "    pub fn capture_persistent_state(&self) -> super::GeneratedVerilogAPersistentState {\n",
     );
     if devices.is_empty() {
         out.push_str("        let _ = self;\n");
@@ -1958,7 +1971,7 @@ fn write_registry(
         out.push_str("        }\n");
     }
     out.push_str("    }\n\n");
-    out.push_str("    pub(crate) fn validate_persistent_state_shape(&self, state: &super::GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
+    out.push_str("    pub fn validate_persistent_state_shape(&self, state: &super::GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
     out.push_str("        let _ = state;\n");
     if devices.is_empty() {
         out.push_str("        let _ = (self, state);\n");
@@ -1975,7 +1988,7 @@ fn write_registry(
         out.push_str("        }\n");
     }
     out.push_str("    }\n\n");
-    out.push_str("    pub(crate) fn restore_persistent_state(&mut self, state: &super::GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
+    out.push_str("    pub fn restore_persistent_state(&mut self, state: &super::GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
     out.push_str("        let _ = state;\n");
     if devices.is_empty() {
         out.push_str("        let _ = (self, state);\n");
@@ -2271,6 +2284,6 @@ fn write_registry(
     }
     out.push_str("}\n");
 
-    write_text_file_if_changed(registry_root.join("registry.rs"), &out)?;
+    write_text_file_if_changed(registry_root.join("src").join("registry.rs"), &out)?;
     Ok(())
 }

@@ -52,6 +52,7 @@ pub struct YieldSpec {
 
 impl YieldSpec {
     /// Create a lower limit spec
+    #[cfg(test)]
     pub fn lower(target: impl Into<String>, min: f64, unit: impl Into<String>) -> Self {
         Self {
             target: target.into(),
@@ -65,6 +66,7 @@ impl YieldSpec {
     }
 
     /// Create an upper limit spec
+    #[cfg(test)]
     pub fn upper(target: impl Into<String>, max: f64, unit: impl Into<String>) -> Self {
         Self {
             target: target.into(),
@@ -78,6 +80,7 @@ impl YieldSpec {
     }
 
     /// Create a range spec
+    #[cfg(test)]
     pub fn range(target: impl Into<String>, min: f64, max: f64, unit: impl Into<String>) -> Self {
         Self {
             target: target.into(),
@@ -227,6 +230,7 @@ impl YieldAnalysisManager {
     }
 
     /// Add a yield specification
+    #[cfg(test)]
     pub fn add_spec(&mut self, spec: YieldSpec) {
         self.specs.insert(spec.target.clone(), spec);
     }

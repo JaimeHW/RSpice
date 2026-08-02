@@ -132,6 +132,7 @@ impl QuantityPresentationPolicy {
 
     /// Copy temperature. Scientific mode always emits stored SI kelvin.
     #[must_use]
+    #[cfg(test)]
     pub fn copy_temperature(self, kelvin: f64) -> String {
         match self.copied_value_format {
             CopiedValueFormat::ScientificNotationWithSiUnit => scientific_value(kelvin, "K"),

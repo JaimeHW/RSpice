@@ -142,6 +142,7 @@ impl SchematicFile {
 #[derive(Debug, Clone)]
 pub enum SchematicIoError {
     /// User cancelled the file dialog
+    #[cfg(not(target_arch = "wasm32"))]
     Cancelled,
     /// File not found
     NotFound(PathBuf),
@@ -163,6 +164,7 @@ pub enum SchematicIoError {
 impl std::fmt::Display for SchematicIoError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            #[cfg(not(target_arch = "wasm32"))]
             SchematicIoError::Cancelled => write!(f, "Operation cancelled"),
             SchematicIoError::NotFound(p) => write!(f, "File not found: {}", p.display()),
             SchematicIoError::PermissionDenied(p) => {
@@ -256,13 +258,6 @@ pub fn show_save_dialog(default_name: Option<&str>) -> Result<PathBuf, Schematic
 }
 
 // Web stubs
-#[cfg(target_arch = "wasm32")]
-pub fn show_open_dialog() -> Result<PathBuf, SchematicIoError> {
-    Err(SchematicIoError::Io(
-        "Use the browser schematic import workflow for web file selection".to_string(),
-    ))
-}
-
 #[cfg(target_arch = "wasm32")]
 pub fn show_save_dialog(default_name: Option<&str>) -> Result<PathBuf, SchematicIoError> {
     Ok(suggested_schematic_save_path(default_name))

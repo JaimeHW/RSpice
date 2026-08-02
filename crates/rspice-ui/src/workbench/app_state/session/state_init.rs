@@ -60,7 +60,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         .project_sources
         .get(crate::state::ProjectSourceLanguage::RSpiceAutomation)
     {
-        let plan = crate::automation_workflow::compile_workflow(document.content())
+        let _plan = crate::automation_workflow::compile_workflow(document.content())
             .expect("the canonical bootstrapped Automation source must compile");
         ui.code_workspace.automation.receipt = Some(
             crate::workbench::documents::code_workspace::AutomationValidationReceipt {
@@ -69,7 +69,6 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
                     revision: document.revision().get(),
                     content_digest: document.content_digest(),
                 },
-                plan,
             },
         );
     }
@@ -178,7 +177,6 @@ mod tests {
         assert_eq!(receipt.token.project_id, state.workspace.project.id());
         assert_eq!(receipt.token.revision, automation.revision().get());
         assert_eq!(receipt.token.content_digest, automation.content_digest());
-        assert_eq!(receipt.plan.project_name(), "Lab characterization");
         assert!(state.ui.code_workspace.veriloga.receipt.is_some());
     }
 }

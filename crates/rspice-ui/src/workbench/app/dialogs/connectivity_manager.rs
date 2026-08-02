@@ -239,8 +239,9 @@ enum RevealTarget {
     Violation(DrcLocation),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 enum ConnectivityBodyAction {
+    #[default]
     None,
     Reveal(RevealTarget),
     Refresh,
@@ -248,12 +249,6 @@ enum ConnectivityBodyAction {
     ReviewAliases,
     RouteRepair(String),
     OpenSourceMap,
-}
-
-impl Default for ConnectivityBodyAction {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 pub(crate) fn open_connectivity_manager(state: &mut AppState) {
@@ -1325,12 +1320,8 @@ impl RSpiceApp {
         let policy = self.state.workspace.connectivity.policy.clone();
         let report = build_report(&self.state, &policy);
         let authority = SchematicEditAuthority::capture(&self.state);
-        self.state.publish_active_design_check_result(
-            report.drc.clone(),
-            crate::workbench::app_state::DesignCheckOrigin::ConnectivityCommit,
-        )?;
-        self.state.dialogs.drc_results = Some(report.drc.clone());
-        self.state.dialogs.drc_checked_version = self.state.schematic.topology_version();
+        self.state
+            .publish_active_design_check_result(report.drc.clone())?;
         let dialog = &mut self.state.dialogs.connectivity_manager;
         dialog.report = report;
         dialog.authority = Some(authority);

@@ -58,8 +58,7 @@ pub(crate) use persistence::{
     BrowserPdkStorageStatus, start_browser_pdk_config_load, start_browser_pdk_config_save,
 };
 pub use technology_callback::{
-    MAX_PROJECT_PDK_CALLBACK_RECEIPTS, PDK_CALLBACK_EXECUTION_RECEIPT_SCHEMA_VERSION,
-    PROJECT_PDK_CALLBACK_RECEIPT_SCHEMA_VERSION, PdkCallbackError, PdkCallbackExecutionInput,
+    MAX_PROJECT_PDK_CALLBACK_RECEIPTS, PdkCallbackError, PdkCallbackExecutionInput,
     PdkCallbackExecutionReceipt, ProjectPdkCallbackReceipt,
 };
 #[cfg(test)]
@@ -73,14 +72,11 @@ pub(crate) use technology_package::tests::fixture_archive as signed_technology_t
 #[cfg(test)]
 pub(crate) use technology_package::tests::fixture_archive_with_veriloga as signed_veriloga_technology_test_fixture;
 pub use technology_package::{
-    MAX_PDK_ARCHIVE_BYTES, MAX_PDK_ARTIFACT_BYTES, MAX_PDK_ARTIFACTS,
-    MAX_PDK_CALLBACK_ARTIFACT_BYTES, MAX_PDK_CALLBACK_CONTRACTS, MAX_PDK_TOTAL_ARTIFACT_BYTES,
-    PDK_CALLBACK_ABI_VERSION, PdkAdministrativeAuthority, PdkCallbackCapability,
-    PdkCallbackContract, PdkExecutionTarget, PdkExtractionQuantity, PdkModelDomain,
-    PdkModelProcess, PdkModelProcessContract, PdkModelSectionSource, PdkPublisherTrustStore,
-    PdkTechnologyArtifactKind, PdkTechnologyAuditAction, PdkTechnologyAuditReceipt,
-    PdkTechnologyBinding, PdkTechnologyLayer, PdkTechnologyRegistry, PdkTrustAuditAction,
-    PdkTrustAuditReceipt, PdkVerilogASourceContract, TrustedPdkPublisherKey,
+    MAX_PDK_ARCHIVE_BYTES, MAX_PDK_ARTIFACT_BYTES, MAX_PDK_ARTIFACTS, MAX_PDK_TOTAL_ARTIFACT_BYTES,
+    PdkAdministrativeAuthority, PdkExecutionTarget, PdkExtractionQuantity, PdkModelProcess,
+    PdkPublisherTrustStore, PdkTechnologyArtifactKind, PdkTechnologyAuditAction,
+    PdkTechnologyAuditReceipt, PdkTechnologyBinding, PdkTechnologyLayer, PdkTechnologyRegistry,
+    PdkTrustAuditAction, PdkTrustAuditReceipt, TrustedPdkPublisherKey,
     ValidatedPdkTechnologyPackage,
 };
 pub(crate) use technology_package::{
@@ -190,6 +186,7 @@ impl Default for PdkConfig {
 
 impl PdkConfig {
     /// Create a new empty configuration
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
     }

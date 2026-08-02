@@ -44,7 +44,7 @@ pub(super) enum QualificationDomain {
 }
 
 impl QualificationDomain {
-    const fn label(self) -> &'static str {
+    pub(super) const fn label(self) -> &'static str {
         match self {
             Self::Dc => "DC operating curves",
             Self::Ac => "AC / charge",
@@ -988,6 +988,15 @@ pub(super) fn qualification_suite_table(
                                 .with(("models.qualification.suite", summary.key.as_str())),
                             Sense::click(),
                         );
+                        let suite_label = summary.key.clone();
+                        response.widget_info(|| {
+                            egui::WidgetInfo::selected(
+                                egui::WidgetType::SelectableLabel,
+                                ui.is_enabled(),
+                                selected,
+                                suite_label.clone(),
+                            )
+                        });
                         if selected {
                             ui.painter().rect_filled(row, 0.0, t.color.accent_dim);
                             ui.painter().rect_filled(
@@ -1178,7 +1187,7 @@ pub(super) fn qualification_domain_table(
         selected.map(|selected| (selected.gate.label(), selected.gate.color(&t))),
         size,
         |ui, table_size| {
-            let _ = data_table(
+            data_table(
                 ui,
                 "models.qualification.domains",
                 470.0,

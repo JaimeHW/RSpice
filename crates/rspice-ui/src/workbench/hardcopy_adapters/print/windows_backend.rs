@@ -155,7 +155,7 @@ pub(super) fn show_native_printer_properties(
     }
     let suggestion = suggestion_from_devmode(&printer.devmode, &printer.capabilities);
     Ok(PrinterDriverPropertiesOutcome::Accepted {
-        capabilities: printer.capabilities,
+        capabilities: Box::new(printer.capabilities),
         suggestion,
     })
 }
@@ -398,7 +398,6 @@ fn default_devmode(
     Ok(buffer)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn resolve_capabilities(
     device_id: &str,
     display_name: &str,

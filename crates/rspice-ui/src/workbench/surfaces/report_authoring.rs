@@ -3085,7 +3085,7 @@ fn add_report_element_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
                 }
             });
         }
-        if matches!(kind_index, 3 | 4 | 5) {
+        if matches!(kind_index, 3..=5) {
             ui.add_space(8.0);
             let status_labels: &[&str] = match kind_index {
                 3 => &["Not evaluated", "Passed", "Failed", "Waived"],
@@ -5084,12 +5084,14 @@ mod tests {
         app.state.workspace.specs = vec![
             crate::state::SpecEntry {
                 measurement: "gain".to_owned(),
+                expression: String::new(),
                 min: Some(10.0),
                 max: None,
                 unit: "V/V".to_owned(),
             },
             crate::state::SpecEntry {
                 measurement: "bandwidth".to_owned(),
+                expression: String::new(),
                 min: Some(1_000.0),
                 max: None,
                 unit: "Hz".to_owned(),

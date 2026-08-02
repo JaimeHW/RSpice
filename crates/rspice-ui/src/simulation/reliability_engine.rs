@@ -19,6 +19,9 @@ use std::collections::HashMap;
 
 /// Type of aging mechanism
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+// HCI and NBTI are how the literature, the PDK aging cards, and the engineers
+// reading this write them. `Hci` and `Nbti` would be neither.
+#[allow(clippy::upper_case_acronyms)]
 pub enum AgingMechanism {
     /// Hot Carrier Injection
     HCI,

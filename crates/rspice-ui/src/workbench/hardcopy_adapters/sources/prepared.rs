@@ -11,6 +11,12 @@
 //! to be reproducible from what it says it came from, so a source set that
 //! drifted after preparation is an error, not a silent re-resolve.
 
+// A prepared source is the sealed form of a whole engineering document, so
+// the schematic variant is inherently far larger than the symbol or results
+// ones. Exactly one exists per publication, built immediately before the run
+// that consumes it, so the size the lint measures is never multiplied.
+#![allow(clippy::large_enum_variant)]
+
 use super::*;
 
 /// Cheap, semantic-free descriptor used by command enablement and the
@@ -611,11 +617,13 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 presentation,
                 scope,
             } => {
-                let mut simulation = SimulationState::default();
-                simulation.next_run_id = run.id;
-                simulation.active_run_idx = Some(0);
-                simulation.active_analysis_idx = Some(0);
-                simulation.runs = vec![run];
+                let simulation = SimulationState {
+                    next_run_id: run.id,
+                    active_run_idx: Some(0),
+                    active_analysis_idx: Some(0),
+                    runs: vec![run],
+                    ..Default::default()
+                };
                 Self::Results {
                     source_key,
                     project_id,
@@ -1437,7 +1445,7 @@ impl PreparedRetainedHardcopyResolution {
     /// worker. Consuming `self` avoids cloning large retained result arrays.
     /// The returned bytes are bounded and authenticated as one atomic unit.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub(crate) fn to_worker_snapshot_json(self) -> Result<Vec<u8>, HardcopySourceError> {
+    pub(crate) fn into_worker_snapshot_json(self) -> Result<Vec<u8>, HardcopySourceError> {
         let snapshot = PreparedRetainedHardcopyWorkerSnapshot::capture(self)?;
         let bytes = serde_json::to_vec(&snapshot)
             .map_err(|error| HardcopySourceError::Serialization(error.to_string()))?;

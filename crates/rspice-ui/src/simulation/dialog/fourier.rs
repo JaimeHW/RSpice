@@ -42,6 +42,7 @@ impl Default for FourierConfig {
 }
 
 impl FourierConfig {
+    #[cfg(test)]
     pub fn new(fundamental: f64, harmonics: u32) -> Self {
         Self {
             fundamental_freq: fundamental,
@@ -50,6 +51,7 @@ impl FourierConfig {
         }
     }
 
+    #[cfg(test)]
     pub fn with_window(mut self, start: f64, stop: f64) -> Self {
         self.start_time = start;
         self.stop_time = stop;

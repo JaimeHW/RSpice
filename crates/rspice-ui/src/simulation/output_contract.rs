@@ -756,6 +756,7 @@ pub(in crate::simulation) fn materialize_saved_outputs(
 /// Materialize one deferred receipt against its retained source analysis.
 /// The receipt's immutable digest and source text are reused; live project
 /// rows are never consulted.
+#[cfg(test)]
 pub fn materialize_deferred_saved_output(
     analysis: &mut AnalysisResult,
     receipt_index: usize,

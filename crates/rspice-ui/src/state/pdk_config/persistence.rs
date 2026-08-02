@@ -107,7 +107,9 @@ struct BrowserPdkBlob {
 
 #[cfg(any(test, target_arch = "wasm32"))]
 struct PreparedBrowserPdkSnapshot {
+    #[cfg(target_arch = "wasm32")]
     head_key: String,
+    #[cfg(target_arch = "wasm32")]
     head: BrowserPdkHead,
     head_bytes: Vec<u8>,
     metadata: BrowserPdkBlob,
@@ -128,34 +130,26 @@ impl PdkConfig {
             .join(CONFIG_FILE_NAME)
     }
 
-    /// Load configuration from the default path
+    /// Load configuration from the default path. Only the native application
+    /// starts this way: tests build a configuration explicitly, and the
+    /// browser restores one through the asynchronous persistence workflow.
+    #[cfg(all(not(test), not(target_arch = "wasm32")))]
     pub fn load() -> Result<Self, ConfigError> {
         Self::load_from(&Self::default_config_path())
     }
 
     /// Load configuration from a specific path
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load_from(path: &Path) -> Result<Self, ConfigError> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let _ = path;
-            Err(ConfigError::Io(
-                "browser PDK configuration loading is asynchronous; use the application persistence workflow"
-                    .to_owned(),
-            ))
+        crate::io::durable_file::reconcile_publication(path)
+            .map_err(|e| ConfigError::Io(e.to_string()))?;
+        if !path.exists() {
+            return Ok(Self::default());
         }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            crate::io::durable_file::reconcile_publication(path)
-                .map_err(|e| ConfigError::Io(e.to_string()))?;
-            if !path.exists() {
-                return Ok(Self::default());
-            }
 
-            let content =
-                std::fs::read_to_string(path).map_err(|e| ConfigError::Io(e.to_string()))?;
+        let content = std::fs::read_to_string(path).map_err(|e| ConfigError::Io(e.to_string()))?;
 
-            serde_json::from_str(&content).map_err(|e| ConfigError::Parse(e.to_string()))
-        }
+        serde_json::from_str(&content).map_err(|e| ConfigError::Parse(e.to_string()))
     }
 
     /// Save configuration to the default path
@@ -217,12 +211,12 @@ fn browser_head_key(path_digest: ContentDigest) -> String {
     format!("head:{path_digest}")
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
 fn browser_metadata_key(path_digest: ContentDigest, digest: ContentDigest) -> String {
     format!("metadata:{path_digest}:{digest}")
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
 fn browser_archive_key(digest: ContentDigest) -> String {
     format!("archive:{digest}")
 }
@@ -400,7 +394,9 @@ fn prepare_browser_pdk_snapshot(
     let head_bytes =
         serde_json::to_vec(&head).map_err(|error| ConfigError::Serialize(error.to_string()))?;
     Ok(PreparedBrowserPdkSnapshot {
+        #[cfg(target_arch = "wasm32")]
         head_key: browser_head_key(path_digest),
+        #[cfg(target_arch = "wasm32")]
         head,
         head_bytes,
         metadata,

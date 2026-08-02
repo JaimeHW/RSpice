@@ -19,9 +19,6 @@ pub struct WaveformData {
     /// Unit for Y-axis (V, A, dB, degrees, etc.)
     pub y_unit: String,
 
-    /// Unit for X-axis (s, Hz, etc.)
-    pub x_unit: String,
-
     /// Whether this is a complex result (for AC analysis)
     pub is_complex: bool,
 
@@ -37,7 +34,6 @@ impl WaveformData {
             x_values: time,
             y_values: values,
             y_unit: "V".to_string(),
-            x_unit: "s".to_string(),
             is_complex: false,
             y_imag: None,
         }
@@ -55,7 +51,6 @@ impl WaveformData {
             x_values: freq,
             y_values: real,
             y_unit: "".to_string(),
-            x_unit: "Hz".to_string(),
             is_complex: true,
             y_imag: Some(imag),
         }
@@ -75,7 +70,6 @@ impl WaveformData {
             x_values: time,
             y_values: real,
             y_unit: "V".to_string(),
-            x_unit: "s".to_string(),
             is_complex: true,
             y_imag: Some(imag),
         }

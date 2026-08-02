@@ -813,10 +813,11 @@ pub struct OwnedNetlistDescriptor {
 // integrations keep compiling" -- there are no downstream integrations; the
 // crate is the application. What is left is what `state::workspace` callers
 // actually name through this path.
+#[cfg(test)]
+pub use super::project_sources::{MAX_PROJECT_CODE_SOURCE_BYTES, ProjectSourceBundle};
 pub use super::project_sources::{
-    MAX_PROJECT_CODE_SOURCE_BYTES, ProjectSourceBundle, ProjectSourceDocument, ProjectSourceError,
-    ProjectSourceId, ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry,
-    ProjectSourceValidationIdentity,
+    ProjectSourceDocument, ProjectSourceError, ProjectSourceId, ProjectSourceLanguage,
+    ProjectSourceOwner, ProjectSourceRegistry, ProjectSourceValidationIdentity,
 };
 
 /// Project-level workspace state.
@@ -1324,7 +1325,6 @@ impl ProjectWorkspace {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn commit_pdk_callback_execution(
         &mut self,
         plan_id: SimulationPlanId,

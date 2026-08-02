@@ -7,10 +7,6 @@
 use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::file_workflow::FileWorkflowIo;
 
-pub(in crate::workbench) fn action_file_new(state: &mut AppState) {
-    crate::workbench::workflows::file_workflow::create_new_schematic(state);
-}
-
 pub(in crate::workbench) fn action_file_open_with_io(
     state: &mut AppState,
     io: &(impl FileWorkflowIo + ?Sized),

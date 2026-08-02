@@ -100,23 +100,9 @@ pub(crate) struct ProjectCheckpointQuarantine {
 }
 
 impl ProjectCheckpointQuarantine {
-    pub(crate) fn label(&self) -> &str {
-        &self.label
-    }
-
+    #[cfg(test)]
     pub(crate) fn reason(&self) -> &str {
         &self.reason
-    }
-
-    pub(crate) fn artifact_count(&self) -> usize {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.artifacts.len()
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            self.artifact_keys.len()
-        }
     }
 }
 

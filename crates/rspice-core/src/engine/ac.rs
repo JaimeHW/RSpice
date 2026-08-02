@@ -1438,7 +1438,7 @@ impl Engine {
             generated.set_timepoint(
                 0.0,
                 0.0,
-                crate::device::veriloga_generated::GeneratedDdtCoefficients::inactive(),
+                crate::device::veriloga_builtins::GeneratedDdtCoefficients::inactive(),
             );
             generated
                 .stamp_ac_real_all(matrix, op_voltages, num_nodes, simparams)

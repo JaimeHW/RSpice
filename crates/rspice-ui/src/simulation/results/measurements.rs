@@ -103,6 +103,7 @@ impl SimulationResult {
     }
 
     /// Get all measurements associated with this result
+    #[cfg(test)]
     pub fn measurements(&self) -> HashMap<String, f64> {
         match self {
             SimulationResult::DcOp(op) => {
@@ -296,7 +297,6 @@ mod transfer_function_tests {
             output_quantity: TransferFunctionQuantity::Voltage,
             input_unit: "V".to_owned(),
             output_unit: "V".to_owned(),
-            gain_unit: "V/V".to_owned(),
             normalization: TfNormalization::None,
             accuracy: TfAccuracy::Balanced,
             gain,
