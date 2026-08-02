@@ -242,7 +242,7 @@ fn generated_veriloga_noise_is_a_slice_rather_than_a_second_model() {
 fn generated_model_features_match_the_core_feature_catalog() {
     let workspace_root = workspace_root();
     let generated_root = generated_veriloga_root();
-    let registry = fs::read_to_string(generated_root.join("registry.rs"))
+    let registry = fs::read_to_string(generated_root.join("src").join("registry.rs"))
         .expect("read generated built-in registry");
     let core_manifest = fs::read_to_string(workspace_root.join("crates/rspice-core/Cargo.toml"))
         .expect("read rspice-core manifest");
