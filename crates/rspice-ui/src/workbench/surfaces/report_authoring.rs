@@ -5084,12 +5084,14 @@ mod tests {
         app.state.workspace.specs = vec![
             crate::state::SpecEntry {
                 measurement: "gain".to_owned(),
+                expression: String::new(),
                 min: Some(10.0),
                 max: None,
                 unit: "V/V".to_owned(),
             },
             crate::state::SpecEntry {
                 measurement: "bandwidth".to_owned(),
+                expression: String::new(),
                 min: Some(1_000.0),
                 max: None,
                 unit: "Hz".to_owned(),

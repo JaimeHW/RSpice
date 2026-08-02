@@ -938,6 +938,7 @@ mod tests {
     fn spec(name: &str) -> SpecEntry {
         SpecEntry {
             measurement: name.to_owned(),
+            expression: String::new(),
             min: Some(0.5),
             max: Some(1.5),
             unit: "V".to_owned(),

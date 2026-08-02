@@ -2576,6 +2576,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state.workspace.specs.push(crate::state::SpecEntry {
             measurement: "gain".to_owned(),
+            expression: String::new(),
             min: Some(1.0),
             max: None,
             unit: "V/V".to_owned(),
@@ -2607,6 +2608,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state.workspace.specs.push(crate::state::SpecEntry {
             measurement: "gain".to_owned(),
+            expression: String::new(),
             min: Some(41.0),
             max: None,
             unit: "V/V".to_owned(),

@@ -196,6 +196,119 @@ fn deep_readout_fixture(trace_count: usize) -> AppState {
 }
 
 #[test]
+fn shared_x_navigator_preserves_view_width_and_clamps_to_the_full_domain() {
+    let linear = panned_shared_x_view(XScale::Linear, (0.0, 10.0), (2.0, 6.0), 0.7)
+        .expect("a zoomed linear view can pan");
+    assert!((linear.0 - 6.0).abs() < 1.0e-9);
+    assert!((linear.1 - 10.0).abs() < 1.0e-9);
+
+    let logarithmic = panned_shared_x_view(XScale::Log10, (1.0, 1.0e6), (10.0, 1.0e3), 1.0 / 6.0)
+        .expect("a zoomed logarithmic view can pan");
+    assert!((logarithmic.0 / 100.0 - 1.0).abs() < 1.0e-9);
+    assert!((logarithmic.1 / 1.0e4 - 1.0).abs() < 1.0e-9);
+
+    assert!(panned_shared_x_view(XScale::Linear, (0.0, 10.0), (0.0, 10.0), 0.1).is_none());
+}
+
+#[test]
+fn shared_x_zoom_stays_pointer_anchored_and_inside_the_retained_domain() {
+    let zoomed = zoomed_shared_x_view(XScale::Linear, (0.0, 100.0), (20.0, 60.0), 0.4, 0.5)
+        .expect("a finite zoomed view");
+    assert!((zoomed.0 - 30.0).abs() < 1.0e-9);
+    assert!((zoomed.1 - 50.0).abs() < 1.0e-9);
+
+    let full = zoomed_shared_x_view(XScale::Log10, (1.0, 1.0e6), (10.0, 1.0e3), 1.0, 100.0)
+        .expect("zoom-out clamps to the retained range");
+    assert!((full.0 - 1.0).abs() < 1.0e-9);
+    assert!((full.1 / 1.0e6 - 1.0).abs() < 1.0e-9);
+}
+
+#[test]
+fn shared_x_click_recenters_without_changing_window_width() {
+    let view = recentered_shared_x_view(XScale::Linear, (0.0, 10.0), (1.0, 5.0), 0.8)
+        .expect("a zoomed view can recenter");
+    assert!((view.0 - 6.0).abs() < 1.0e-9);
+    assert!((view.1 - 10.0).abs() < 1.0e-9);
+    assert!(recentered_shared_x_view(XScale::Linear, (0.0, 10.0), (0.0, 10.0), 0.5).is_none());
+}
+
+#[test]
+fn multi_pane_geometry_never_grows_past_its_strip_budget() {
+    for available in [0.0, 18.0, 60.0, 140.0, 320.0] {
+        for pane_count in 1..=8 {
+            let geometry = wave_stack_geometry(available, pane_count);
+            let seams = geometry.seam_height * pane_count.saturating_sub(1) as f32;
+            let used = geometry.pane_height * pane_count as f32 + geometry.shared_x_height + seams;
+            assert!(geometry.pane_height >= 0.0);
+            assert!((0.0..=WAVE_SHARED_X_HEIGHT).contains(&geometry.shared_x_height));
+            assert!(used <= available.max(0.0) + f32::EPSILON * 16.0);
+        }
+    }
+}
+
+#[test]
+fn hidden_unit_signals_keep_a_pane_available_for_reactivation() {
+    let mut state = marker_fixture();
+    state.simulation.runs[0].analyses[0].waveforms[0].visible = false;
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    let panes = models[0].unit_panes();
+    assert_eq!(panes.len(), 1);
+    assert_eq!(panes[0].unit, "V");
+    assert!(panes[0].traces.is_empty());
+}
+
+#[test]
+fn shared_x_frame_exposes_current_and_full_ranges_to_accessibility() {
+    let mut state = marker_fixture();
+    state.ui.results.cursor_strip = Some(0);
+    state.ui.results.cursors.a = Some(0.25);
+    state.ui.results.cursors.b = Some(0.75);
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    let model = &models[0];
+    set_shared_x_view(
+        &mut state.ui.results,
+        model.analysis_key,
+        1,
+        Some((0.25, 0.75)),
+    );
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let output = ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            show_shared_x_axis(ui, &mut state, model, (0.0, 1.0), 1, 50.0, None);
+        });
+    });
+    let nodes = output
+        .platform_output
+        .accesskit_update
+        .expect("AccessKit tree")
+        .nodes;
+    assert!(nodes.iter().any(|(_, node)| {
+        node.role() == egui::accesskit::Role::GraphicsDocument
+            && node.label().is_some_and(|label| {
+                label.contains("Shared ")
+                    && label.contains("Current range")
+                    && label.contains("Full retained range")
+                    && label.contains("Cursor A")
+                    && label.contains("cursor B")
+            })
+    }));
+}
+
+#[test]
 fn each_cursor_trace_reports_its_own_linear_slope() {
     let mut state = marker_fixture();
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -533,7 +646,7 @@ fn one_unit_stays_one_pane() {
 }
 
 #[test]
-fn a_hidden_trace_takes_its_pane_with_it() {
+fn a_hidden_trace_keeps_its_unit_pane_available_for_reactivation() {
     let mut simulation = SimulationState::default();
     simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
@@ -559,8 +672,13 @@ fn a_hidden_trace_takes_its_pane_with_it() {
     );
 
     let panes = models[0].unit_panes();
-    assert_eq!(panes.len(), 1);
-    assert_eq!(panes[0].unit, "V", "the amp axis goes with its only trace");
+    assert_eq!(panes.len(), 2);
+    assert_eq!(panes[0].unit, "V");
+    assert_eq!(panes[1].unit, "A");
+    assert!(
+        panes[1].traces.is_empty(),
+        "the amp pane remains as the owner of its hidden signal"
+    );
 }
 
 #[test]

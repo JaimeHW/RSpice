@@ -16,6 +16,11 @@ use super::*;
 pub struct SpecEntry {
     /// `.MEAS` result name this spec bounds (case-insensitive match).
     pub measurement: String,
+    /// Authored `.MEAS` expression or statement body that defines the
+    /// measurement. Older projects did not retain this text, so migration
+    /// leaves it empty rather than reconstructing source from a result value.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub expression: String,
     /// Lower bound (pass when value ≥ min).
     pub min: Option<f64>,
     /// Upper bound (pass when value ≤ max).
@@ -28,6 +33,9 @@ impl SpecEntry {
     pub fn validate(&self) -> Result<(), String> {
         validate_parameter_name(&self.measurement)
             .map_err(|error| format!("measurement name is invalid: {error}"))?;
+        if !self.expression.trim().is_empty() {
+            validate_single_line_expression("measurement expression", &self.expression)?;
+        }
         if self.min.is_some_and(|value| !value.is_finite())
             || self.max.is_some_and(|value| !value.is_finite())
         {

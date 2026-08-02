@@ -262,10 +262,20 @@ fn paint_trace_markers(
 }
 
 fn right_margin(spec: &PlotSpec<'_>) -> f32 {
-    if spec.y_right.is_some() {
+    if let Some(margin) = spec.right_margin {
+        margin
+    } else if spec.y_right.is_some() {
         MARGIN_RIGHT_AXIS
     } else {
         MARGIN_RIGHT_PLAIN
+    }
+}
+
+fn bottom_margin(spec: &PlotSpec<'_>) -> f32 {
+    if spec.x_axis_chrome {
+        MARGIN_BOTTOM
+    } else {
+        MARGIN_TOP
     }
 }
 
@@ -274,7 +284,7 @@ fn inner_rect(rect: Rect, spec: &PlotSpec<'_>) -> Rect {
         pos2(rect.left() + spec.left_margin, rect.top() + MARGIN_TOP),
         pos2(
             rect.right() - right_margin(spec),
-            rect.bottom() - MARGIN_BOTTOM,
+            rect.bottom() - bottom_margin(spec),
         ),
     )
 }
@@ -341,7 +351,7 @@ fn plot_accessibility_label(spec: &PlotSpec<'_>, cursors: Option<&CursorPair>) -
 /// would lie about |Γ| = 1.
 pub fn square_outer_rect(avail: Rect, spec: &PlotSpec<'_>) -> Rect {
     let h_margins = spec.left_margin + right_margin(spec);
-    let v_margins = MARGIN_TOP + MARGIN_BOTTOM;
+    let v_margins = MARGIN_TOP + bottom_margin(spec);
     let inner = (avail.width() - h_margins)
         .min(avail.height() - v_margins)
         .max(48.0);
@@ -406,7 +416,7 @@ pub fn show(
     };
     let my = |y: f64| -> f32 {
         plot_rect.bottom()
-            - (((y - spec.y.min) / (spec.y.max - spec.y.min)) as f32) * plot_rect.height()
+            - (spec.y_scale.normalize(y, spec.y.min, spec.y.max) as f32) * plot_rect.height()
     };
     let my_r = |y: f64| -> f32 {
         // A right-side trace with no right axis is an inconsistent spec;
@@ -443,7 +453,10 @@ pub fn show(
     // ---- grid + ticks
     // The x-axis unit owns the right end of the tick row; a tick label that
     // would run into it is dropped (its gridline stays).
-    let x_end_label = spec.x.end_label();
+    let x_end_label = spec
+        .x_axis_chrome
+        .then(|| spec.x.end_label())
+        .unwrap_or_default();
     let x_unit_left = if x_end_label.is_empty() {
         f32::INFINITY
     } else {
@@ -468,7 +481,13 @@ pub fn show(
         }
         for pair in spec.y.ticks.windows(2) {
             for step in 1..4 {
-                let value = pair[0].0 + (pair[1].0 - pair[0].0) * f64::from(step) / 4.0;
+                let a = spec.y_scale.normalize(pair[0].0, spec.y.min, spec.y.max);
+                let b = spec.y_scale.normalize(pair[1].0, spec.y.min, spec.y.max);
+                let value = spec.y_scale.denormalize(
+                    a + (b - a) * f64::from(step) / 4.0,
+                    spec.y.min,
+                    spec.y.max,
+                );
                 painter.hline(plot_rect.x_range(), my(value), minor);
             }
         }
@@ -479,7 +498,7 @@ pub fn show(
         painter.vline(px, plot_rect.y_range(), grid);
         let galley = painter.layout_no_wrap(label.clone(), tick_font.clone(), c.text_dim);
         let half = galley.size().x * 0.5;
-        if px + half <= x_unit_left && px - half >= last_label_right + 6.0 {
+        if spec.x_axis_chrome && px + half <= x_unit_left && px - half >= last_label_right + 6.0 {
             last_label_right = px + half;
             painter.galley(
                 pos2(px - half, rect.bottom() - 9.0 - galley.size().y * 0.5),
@@ -817,8 +836,11 @@ pub fn show(
             && (out.response.clicked() || out.response.dragged_by(egui::PointerButton::Primary))
         {
             let fraction = ((plot_rect.bottom() - pointer.y) / plot_rect.height()).clamp(0.0, 1.0);
-            out.horizontal_cursor_y =
-                Some(spec.y.min + f64::from(fraction) * (spec.y.max - spec.y.min));
+            out.horizontal_cursor_y = Some(spec.y_scale.denormalize(
+                f64::from(fraction),
+                spec.y.min,
+                spec.y.max,
+            ));
         }
     }
 
@@ -849,7 +871,7 @@ fn handle_navigation(
     let fx_of = |px: f32| ((px - plot_rect.left()) / plot_rect.width()) as f64;
     let fy_of = |py: f32| ((plot_rect.bottom() - py) / plot_rect.height()) as f64;
     let denorm_x = |frac: f64| spec.x_scale.denormalize(frac, spec.x.min, spec.x.max);
-    let denorm_y = |frac: f64| spec.y.min + frac * (spec.y.max - spec.y.min);
+    let denorm_y = |frac: f64| spec.y_scale.denormalize(frac, spec.y.min, spec.y.max);
     let denorm_yr = |frac: f64| {
         spec.y_right
             .as_ref()
@@ -930,8 +952,7 @@ fn handle_navigation(
             }
             let dy = f64::from(delta.y) / f64::from(plot_rect.height());
             if dy != 0.0 {
-                let span = spec.y.max - spec.y.min;
-                out.view.y = Some((spec.y.min + dy * span, spec.y.max + dy * span));
+                out.view.y = Some((denorm_y(dy), denorm_y(1.0 + dy)));
                 if let Some((axis, _)) = &spec.y_right {
                     let span_r = axis.max - axis.min;
                     out.view.y_right = Some((axis.min + dy * span_r, axis.max + dy * span_r));
@@ -1101,6 +1122,42 @@ mod tests {
         assert!(label.contains(&format!("Left Y axis {} to 5 dB.", tick_label(-5.0))));
         assert!(label.contains("1 marker."));
         assert!(label.contains("Cursor A 2, cursor B 5, delta 3."));
+    }
+
+    #[test]
+    fn shared_axis_panes_keep_aligned_margins_without_repeated_x_chrome() {
+        let ordinary = PlotSpec::new(
+            Axis::linear(0.0, 1.0, "s"),
+            XScale::Linear,
+            Axis::linear(0.0, 1.0, "V"),
+        );
+        let shared = PlotSpec::new(
+            Axis::linear(0.0, 1.0, "s"),
+            XScale::Linear,
+            Axis::linear(0.0, 1.0, "V"),
+        )
+        .without_x_axis_chrome()
+        .with_right_margin(54.0);
+
+        assert_eq!(right_margin(&shared), 54.0);
+        assert_eq!(bottom_margin(&ordinary), MARGIN_BOTTOM);
+        assert_eq!(bottom_margin(&shared), MARGIN_TOP);
+        let outer = Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 300.0));
+        assert_eq!(inner_rect(outer, &shared).right(), 746.0);
+        assert!(inner_rect(outer, &shared).height() > inner_rect(outer, &ordinary).height());
+    }
+
+    #[test]
+    fn logarithmic_y_spec_uses_decade_geometry() {
+        let spec = PlotSpec::new(
+            Axis::linear(0.0, 1.0, "s"),
+            XScale::Linear,
+            Axis::log_decades(1.0, 100.0, "V"),
+        )
+        .with_log_y();
+        assert_eq!(spec.y_scale, XScale::Log10);
+        assert!((spec.y_scale.normalize(10.0, spec.y.min, spec.y.max) - 0.5).abs() < 1.0e-12);
+        assert!((spec.y_scale.denormalize(0.5, spec.y.min, spec.y.max) - 10.0).abs() < 1.0e-12);
     }
 
     #[test]

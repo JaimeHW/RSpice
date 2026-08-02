@@ -2367,6 +2367,7 @@ mod integrity_scan_tests {
         let mut app = app_with_exact_source();
         app.state.workspace.specs.push(SpecEntry {
             measurement: "v(OUT)".to_owned(),
+            expression: String::new(),
             min: Some(-2.0),
             max: Some(5.0),
             unit: "V".to_owned(),
@@ -2386,6 +2387,7 @@ mod integrity_scan_tests {
         let mut app = app_with_exact_source();
         app.state.workspace.specs.push(SpecEntry {
             measurement: "V(out)".to_owned(),
+            expression: String::new(),
             min: Some(-2.0),
             max: Some(5.0),
             unit: "V".to_owned(),

@@ -22,13 +22,14 @@ use crate::results::visualization_document::AccessibleColorPalette;
 use crate::state::{
     AnalysisResult, AnalysisType, SharedWaveformValues, SimulationRun, SimulationState,
 };
+use crate::ui::icons::Icon;
 use crate::ui::plot::{
     self, Axis, CursorPair, DisplayDecimation, PlotSpec, SampleInterpolation, Trace, XScale,
     fmt_si_significant, fmt_significant, sample_at_with,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{chip, section_header};
+use crate::ui::widgets::{IconButton, chip, section_header};
 use crate::workbench::AppState;
 use crate::workbench::documents::visualization_family::{
     FamilyRenderGroup, FamilyRenderPlan, FamilyTraceStyle, SourceSampleSelection,
@@ -44,6 +45,12 @@ use super::{
     TracePresentationKey, WavePanePresentationKey, WaveformPresentationKey, WaveformSeriesResult,
     waveform_color, well_hint,
 };
+
+const WAVE_SHARED_X_HEIGHT: f32 = 50.0;
+const WAVE_SHARED_LEFT_MARGIN: f32 = 56.0;
+const WAVE_SHARED_RIGHT_MARGIN: f32 = 54.0;
+const WAVE_PANE_HEADER_HEIGHT: f32 = 25.0;
+const WAVE_MIN_PLOT_HEIGHT: f32 = 24.0;
 
 /// How a trace's Y values are interpreted.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -384,8 +391,10 @@ impl StripModel {
         signal_unit(&trace.base_name, trace.kind, self.y_unit)
     }
 
-    /// The strip's panes: visible traces grouped by unit, in the order the
-    /// units first appear so a strip's layout is stable across frames.
+    /// The strip's panes: retained signal identities grouped by unit, in the
+    /// order the units first appear so a strip's layout is stable across
+    /// visibility changes. A pane with no visible trace remains as the exact
+    /// owner of its hidden signals so its Add signal control can restore one.
     ///
     /// Phase does not take a pane of its own while a magnitude pane exists
     /// to read it against — splitting a Bode pair across two stacked panes
@@ -394,19 +403,20 @@ impl StripModel {
         let mut panes: Vec<UnitPane> = Vec::new();
         let mut phase: Vec<usize> = Vec::new();
         for (index, trace) in self.traces.iter().enumerate() {
-            if !trace.visible {
-                continue;
-            }
             if trace.kind.is_phase() {
                 phase.push(index);
                 continue;
             }
             let unit = self.trace_unit(trace);
             match panes.iter_mut().find(|pane| pane.unit == unit) {
-                Some(pane) => pane.traces.push(index),
+                Some(pane) => {
+                    if trace.visible {
+                        pane.traces.push(index);
+                    }
+                }
                 None => panes.push(UnitPane {
                     unit,
-                    traces: vec![index],
+                    traces: trace.visible.then_some(index).into_iter().collect(),
                     right: Vec::new(),
                 }),
             }
@@ -420,8 +430,13 @@ impl StripModel {
             .iter()
             .position(|pane| pane.unit == "dB")
             .or_else(|| (!panes.is_empty()).then_some(0));
+        let visible_phase = phase
+            .iter()
+            .copied()
+            .filter(|index| self.traces.get(*index).is_some_and(|trace| trace.visible))
+            .collect::<Vec<_>>();
         match host.and_then(|index| panes.get_mut(index)) {
-            Some(pane) => pane.right = phase,
+            Some(pane) => pane.right = visible_phase,
             None => {
                 let unit = self
                     .traces
@@ -429,7 +444,7 @@ impl StripModel {
                     .map_or("°", |trace| self.trace_unit(trace));
                 panes.push(UnitPane {
                     unit,
-                    traces: phase,
+                    traces: visible_phase,
                     right: Vec::new(),
                 });
             }
@@ -1780,15 +1795,12 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
     }
 
     // Deferred state mutations (collected while iterating immutably).
-    let mut toggle_trace: Option<(usize, usize)> = None;
-    let mut toggle_family_trace: Option<FamilyTraceVisibilityKey> = None;
     let mut toggle_maximize: Option<AnalysisPresentationKey> = None;
     let mut close_strip: Option<AnalysisPresentationKey> = None;
     let mut fit_strip: Option<AnalysisPresentationKey> = None;
     let mut toggle_expr: Option<(AnalysisPresentationKey, usize)> = None;
     let mut remove_expr: Option<(AnalysisPresentationKey, usize)> = None;
     let mut open_editor: Option<AnalysisPresentationKey> = None;
-    let mut select_trace: Option<SelectedResultTrace> = None;
     let avail = ui.available_rect_before_wrap();
     let n = visible.len();
     let separators = (n.saturating_sub(1)) as f32;
@@ -1820,21 +1832,10 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         ui.set_min_height(strip_height);
-                        // Legend chips list signals only (the active-run
-                        // prefix): one chip per signal toggles it across
-                        // every overlaid run.
-                        let legend: Vec<LegendChip<'_>> = model
-                            .traces
-                            .iter()
-                            .take(model.signal_trace_count)
-                            .map(|trace| LegendChip {
-                                name: &trace.name,
-                                color: trace.color,
-                                on: trace.visible,
-                            })
-                            .collect();
-                        // Expression chips follow the waveform chips; long
-                        // expressions are elided so a chip never eats the row.
+                        // Analysis identity remains in the strip header.
+                        // Unit-owned signal legends live in the pane headers;
+                        // only unitless expressions remain alongside the
+                        // analysis identity here.
                         let strip_exprs: Vec<ExprTrace> = state
                             .ui
                             .results
@@ -1844,79 +1845,36 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
                             .unwrap_or_default();
                         let expr_labels: Vec<String> =
                             strip_exprs.iter().map(|e| elide(&e.text, 24)).collect();
-                        let mut legend = legend;
-                        for (i, expr) in strip_exprs.iter().enumerate() {
-                            legend.push(LegendChip {
+                        let legend: Vec<LegendChip<'_>> = strip_exprs
+                            .iter()
+                            .enumerate()
+                            .map(|(i, expr)| LegendChip {
                                 name: &expr_labels[i],
                                 color: expr_color(&t, model.signal_trace_count + i),
                                 on: expr.visible,
-                            });
-                        }
+                            })
+                            .collect();
 
                         let zoomed = state.ui.results.analysis_strip_is_zoomed(
                             super::ResultViewer::Waves,
                             model.analysis_key,
                         );
-                        let selected_legend = state
-                            .ui
-                            .results
-                            .valid_selected_trace(&state.simulation)
-                            .and_then(|selected| {
-                                (selected.analysis_key() == model.analysis_key).then(|| {
-                                    model.traces.iter().take(model.signal_trace_count).position(
-                                        |trace| {
-                                            trace.source_waveform_name == selected.source_name()
-                                        },
-                                    )
-                                })
-                            })
-                            .flatten();
                         let header = StripHeader::new(&model.kind_tag, &model.subtitle, &legend)
                             .maximized(maximized)
                             .closable(pane_chrome && !maximized && n > 1)
                             .zoomed(zoomed)
                             .expr_action(pane_chrome)
-                            .removable_from(model.signal_trace_count)
-                            .selected_legend(selected_legend)
+                            .removable_from(0)
                             .pane_actions(pane_chrome)
                             .show(ui);
                         if let Some(chip_index) = header.legend_clicked {
-                            if chip_index < model.signal_trace_count {
-                                if let Some(trace) = model.traces.get(chip_index) {
-                                    select_trace = Some(SelectedResultTrace::from_identity(
-                                        model.analysis_key,
-                                        trace.source_waveform_name.clone(),
-                                    ));
-                                }
-                            } else {
-                                toggle_expr = Some((
-                                    model.analysis_key,
-                                    chip_index - model.signal_trace_count,
-                                ));
-                            }
+                            toggle_expr = Some((model.analysis_key, chip_index));
                         }
                         if let Some(chip_index) = header.legend_visibility_clicked {
-                            if chip_index < model.signal_trace_count {
-                                if let Some(trace) = model.traces.get(chip_index) {
-                                    if let Some(key) = trace.family_visibility_key {
-                                        toggle_family_trace = Some(key);
-                                    } else {
-                                        toggle_trace =
-                                            Some((model.analysis_index, trace.waveform_index));
-                                    }
-                                }
-                            } else {
-                                toggle_expr = Some((
-                                    model.analysis_key,
-                                    chip_index - model.signal_trace_count,
-                                ));
-                            }
+                            toggle_expr = Some((model.analysis_key, chip_index));
                         }
-                        if let Some(chip_index) = header.legend_removed
-                            && chip_index >= model.signal_trace_count
-                        {
-                            remove_expr =
-                                Some((model.analysis_key, chip_index - model.signal_trace_count));
+                        if let Some(chip_index) = header.legend_removed {
+                            remove_expr = Some((model.analysis_key, chip_index));
                         }
                         if header.maximize_clicked {
                             toggle_maximize = Some(model.analysis_key);
@@ -1948,15 +1906,6 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
         });
 
     // Apply deferred mutations.
-    if let Some((analysis_index, waveform_index)) = toggle_trace {
-        toggle_visibility(state, analysis_index, waveform_index);
-    }
-    if let Some(key) = toggle_family_trace {
-        state.ui.results.toggle_family_trace_visibility(key);
-    }
-    if let Some(selected) = select_trace {
-        state.ui.results.selected_trace = Some(selected);
-    }
     let results = &mut state.ui.results;
     if let Some(idx) = toggle_maximize {
         results.maximized_strip = (results.maximized_strip != Some(idx)).then_some(idx);
@@ -2078,6 +2027,810 @@ fn marker_label(marker: &ResultMarker) -> String {
     }
 }
 
+fn model_x_axis(
+    model: &StripModel,
+    x0: f64,
+    x1: f64,
+    quantity_policy: crate::quantity::QuantityPresentationPolicy,
+) -> Axis {
+    let axis = match model.x_scale {
+        XScale::Log10 => Axis::log_decades(x0, x1, &model.x_unit),
+        XScale::Linear => Axis::linear(x0, x1, &model.x_unit),
+    }
+    .with_label(&model.x_label);
+    if model.x_unit == "Hz" {
+        let (scale, offset, unit) = quantity_policy.frequency_axis_transform();
+        axis.with_display_transform(scale, offset, unit)
+    } else {
+        axis
+    }
+}
+
+fn shared_x_view(
+    results: &ResultsState,
+    analysis: AnalysisPresentationKey,
+    pane_count: usize,
+) -> Option<(f64, f64)> {
+    (0..pane_count).find_map(|ordinal| {
+        results
+            .analysis_plot_view_pane(super::ResultViewer::Waves, analysis, ordinal)
+            .x
+    })
+}
+
+fn set_shared_x_view(
+    results: &mut ResultsState,
+    analysis: AnalysisPresentationKey,
+    pane_count: usize,
+    range: Option<(f64, f64)>,
+) {
+    for ordinal in 0..pane_count {
+        results
+            .analysis_plot_view_pane_mut(super::ResultViewer::Waves, analysis, ordinal)
+            .x = range;
+    }
+}
+
+fn shared_axis_viewport_fraction(scale: XScale, full: (f64, f64), view: (f64, f64)) -> (f64, f64) {
+    let start = scale.normalize(view.0, full.0, full.1).clamp(0.0, 1.0);
+    let end = scale.normalize(view.1, full.0, full.1).clamp(0.0, 1.0);
+    (start.min(end), start.max(end))
+}
+
+fn panned_shared_x_view(
+    scale: XScale,
+    full: (f64, f64),
+    view: (f64, f64),
+    fraction_delta: f64,
+) -> Option<(f64, f64)> {
+    if !fraction_delta.is_finite() {
+        return None;
+    }
+    let (start, end) = shared_axis_viewport_fraction(scale, full, view);
+    let width = end - start;
+    if !(width > 0.0 && width < 1.0) {
+        return None;
+    }
+    let next_start = (start + fraction_delta).clamp(0.0, 1.0 - width);
+    let next_end = next_start + width;
+    Some((
+        scale.denormalize(next_start, full.0, full.1),
+        scale.denormalize(next_end, full.0, full.1),
+    ))
+}
+
+fn zoomed_shared_x_view(
+    scale: XScale,
+    full: (f64, f64),
+    view: (f64, f64),
+    anchor_fraction: f64,
+    factor: f64,
+) -> Option<(f64, f64)> {
+    if !anchor_fraction.is_finite() || !factor.is_finite() || factor <= 0.0 {
+        return None;
+    }
+    let (start, end) = shared_axis_viewport_fraction(scale, full, view);
+    let width = end - start;
+    if width <= 0.0 {
+        return None;
+    }
+    let anchor = anchor_fraction.clamp(0.0, 1.0);
+    let relative = ((anchor - start) / width).clamp(0.0, 1.0);
+    let next_width = (width * factor).clamp(1.0e-6, 1.0);
+    let next_start = (anchor - relative * next_width).clamp(0.0, 1.0 - next_width);
+    let next_end = next_start + next_width;
+    Some((
+        scale.denormalize(next_start, full.0, full.1),
+        scale.denormalize(next_end, full.0, full.1),
+    ))
+}
+
+fn recentered_shared_x_view(
+    scale: XScale,
+    full: (f64, f64),
+    view: (f64, f64),
+    centre_fraction: f64,
+) -> Option<(f64, f64)> {
+    let (start, end) = shared_axis_viewport_fraction(scale, full, view);
+    let width = end - start;
+    if !(width > 0.0 && width < 1.0) || !centre_fraction.is_finite() {
+        return None;
+    }
+    let next_start = (centre_fraction.clamp(0.0, 1.0) - width * 0.5).clamp(0.0, 1.0 - width);
+    Some((
+        scale.denormalize(next_start, full.0, full.1),
+        scale.denormalize(next_start + width, full.0, full.1),
+    ))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct WaveStackGeometry {
+    pane_height: f32,
+    shared_x_height: f32,
+    seam_height: f32,
+}
+
+fn wave_stack_geometry(available_height: f32, pane_count: usize) -> WaveStackGeometry {
+    if pane_count == 0 || !available_height.is_finite() {
+        return WaveStackGeometry {
+            pane_height: 0.0,
+            shared_x_height: 0.0,
+            seam_height: 0.0,
+        };
+    }
+    let available = available_height.max(0.0);
+    let seam_count = pane_count.saturating_sub(1) as f32;
+    let seam_height = if seam_count > 0.0 {
+        (available / seam_count).min(1.0)
+    } else {
+        0.0
+    };
+    let content = (available - seam_height * seam_count).max(0.0);
+    // The normal 50 px navigator is retained when space permits and shrinks
+    // proportionally in constrained multi-pane/multi-strip arrangements.
+    // The sum is exact: this function never asks the parent to grow.
+    let shared_x_height = (content * 0.28).min(WAVE_SHARED_X_HEIGHT);
+    let pane_height = ((content - shared_x_height) / pane_count as f32).max(0.0);
+    WaveStackGeometry {
+        pane_height,
+        shared_x_height,
+        seam_height,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SharedXDrag {
+    Viewport,
+    CursorA,
+    CursorB,
+}
+
+fn shared_x_drag_id(model: &StripModel) -> egui::Id {
+    egui::Id::new(("rspice.results.shared-x-drag", model.analysis_key))
+}
+
+fn pane_log_y_id(model: &StripModel, pane: &UnitPane) -> egui::Id {
+    egui::Id::new(("rspice.results.pane-log-y", model.analysis_key, pane.unit))
+}
+
+fn pane_log_y(ui: &Ui, model: &StripModel, pane: &UnitPane) -> bool {
+    ui.ctx()
+        .data_mut(|data| data.get_persisted::<bool>(pane_log_y_id(model, pane)))
+        .unwrap_or(false)
+}
+
+fn set_pane_log_y(ui: &Ui, model: &StripModel, pane: &UnitPane, enabled: bool) {
+    ui.ctx()
+        .data_mut(|data| data.insert_persisted(pane_log_y_id(model, pane), enabled));
+}
+
+fn trace_belongs_to_pane(
+    model: &StripModel,
+    pane: &UnitPane,
+    ordinal: usize,
+    trace: &StripTrace,
+) -> bool {
+    if !trace.kind.is_phase() {
+        return model.trace_unit(trace) == pane.unit;
+    }
+    let has_magnitude = model
+        .traces
+        .iter()
+        .any(|candidate| !candidate.kind.is_phase() && model.trace_unit(candidate) == "dB");
+    if has_magnitude {
+        pane.unit == "dB"
+    } else {
+        ordinal == 0
+    }
+}
+
+#[derive(Default)]
+struct UnitPaneHeaderResponse {
+    autoscale_y: bool,
+    toggle_log_y: bool,
+}
+
+fn show_unit_pane_header(
+    ui: &mut Ui,
+    state: &mut AppState,
+    model: &StripModel,
+    pane: &UnitPane,
+    ordinal: usize,
+    log_y: bool,
+    log_y_available: bool,
+    height: f32,
+) -> UnitPaneHeaderResponse {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let height = height.min(WAVE_PANE_HEADER_HEIGHT).max(0.0);
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), height),
+        egui::Sense::hover(),
+    );
+    ui.painter().rect_filled(rect, 0.0, c.bg_panel);
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        egui::Stroke::new(1.0, c.border),
+    );
+    if height < 18.0 {
+        return UnitPaneHeaderResponse::default();
+    }
+
+    let pane_key = WavePanePresentationKey {
+        analysis: model.analysis_key,
+        unit: pane.unit.to_owned(),
+    };
+    let active = state.ui.results.active_wave_pane.as_ref() == Some(&pane_key);
+    let action_width = 58.0;
+    let unit_width = 46.0;
+    let unit_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + 5.0, rect.top() + 1.5),
+        egui::pos2(
+            (rect.left() + unit_width).min(rect.right()),
+            rect.bottom() - 1.5,
+        ),
+    );
+    let actions_rect = egui::Rect::from_min_max(
+        egui::pos2(
+            (rect.right() - action_width).max(unit_rect.right()),
+            rect.top(),
+        ),
+        rect.right_bottom(),
+    );
+    let legend_rect = egui::Rect::from_min_max(
+        egui::pos2(unit_rect.right() + 3.0, rect.top()),
+        egui::pos2(
+            (actions_rect.left() - 3.0).max(unit_rect.right() + 3.0),
+            rect.bottom(),
+        ),
+    );
+
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(unit_rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        |ui| {
+            ui.set_clip_rect(unit_rect);
+            let response = chip(ui, pane.unit, active)
+                .on_hover_text(format!("{} unit-scoped Y axis", pane.unit));
+            if response.clicked() {
+                state.ui.results.active_wave_pane = Some(pane_key.clone());
+            }
+        },
+    );
+
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(legend_rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        |ui| {
+            ui.set_clip_rect(legend_rect);
+            egui::ScrollArea::horizontal()
+                .id_salt(("rspice.results.pane-legend", model.analysis_key, pane.unit))
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.x = 3.0;
+                    let traces = model
+                        .traces
+                        .iter()
+                        .take(model.signal_trace_count)
+                        .enumerate()
+                        .filter(|(_, trace)| trace_belongs_to_pane(model, pane, ordinal, trace));
+                    for (_, trace) in traces {
+                        let selected = state
+                            .ui
+                            .results
+                            .valid_selected_trace(&state.simulation)
+                            .is_some_and(|selected| {
+                                selected.analysis_key() == model.analysis_key
+                                    && selected.source_name() == trace.source_waveform_name
+                            });
+                        let (swatch, swatch_response) =
+                            ui.allocate_exact_size(egui::vec2(13.0, 19.0), egui::Sense::click());
+                        ui.painter().hline(
+                            egui::Rangef::new(swatch.left() + 1.0, swatch.right() - 1.0),
+                            swatch.center().y,
+                            egui::Stroke::new(2.0, trace.color),
+                        );
+                        swatch_response.widget_info(|| {
+                            egui::WidgetInfo::selected(
+                                egui::WidgetType::Button,
+                                true,
+                                trace.visible,
+                                format!("Toggle {} visibility", trace.name),
+                            )
+                        });
+                        if swatch_response.clicked() {
+                            if let Some(key) = trace.family_visibility_key {
+                                state.ui.results.toggle_family_trace_visibility(key);
+                            } else {
+                                toggle_visibility(
+                                    state,
+                                    model.analysis_index,
+                                    trace.waveform_index,
+                                );
+                            }
+                        }
+                        let label = elide(&trace.name, 20);
+                        if ui
+                            .selectable_label(selected, label)
+                            .on_hover_text(&trace.name)
+                            .clicked()
+                        {
+                            state.ui.results.selected_trace =
+                                Some(SelectedResultTrace::from_identity(
+                                    model.analysis_key,
+                                    trace.source_waveform_name.clone(),
+                                ));
+                            state.ui.results.active_wave_pane = Some(pane_key.clone());
+                        }
+                    }
+                    ui.menu_button("+", |ui| {
+                        let mut any = false;
+                        for trace in
+                            model
+                                .traces
+                                .iter()
+                                .take(model.signal_trace_count)
+                                .filter(|trace| {
+                                    !trace.visible
+                                        && trace_belongs_to_pane(model, pane, ordinal, trace)
+                                })
+                        {
+                            any = true;
+                            if ui.button(&trace.name).clicked() {
+                                if let Some(key) = trace.family_visibility_key {
+                                    state.ui.results.toggle_family_trace_visibility(key);
+                                } else {
+                                    toggle_visibility(
+                                        state,
+                                        model.analysis_index,
+                                        trace.waveform_index,
+                                    );
+                                }
+                                ui.close();
+                            }
+                        }
+                        if !any {
+                            ui.label("All compatible signals are already shown");
+                        }
+                    })
+                    .response
+                    .on_hover_text(format!("Add a signal to the {} pane", pane.unit));
+                });
+        },
+    );
+
+    let mut output = UnitPaneHeaderResponse::default();
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(actions_rect)
+            .layout(egui::Layout::right_to_left(egui::Align::Center)),
+        |ui| {
+            ui.set_clip_rect(actions_rect);
+            let log = ui
+                .add_enabled_ui(log_y_available, |ui| chip(ui, "log", log_y))
+                .inner
+                .on_hover_text(if log_y_available {
+                    "Toggle logarithmic Y axis"
+                } else {
+                    "Logarithmic Y requires strictly positive visible values"
+                });
+            if log.clicked() {
+                output.toggle_log_y = true;
+            }
+            if IconButton::new(Icon::ZoomFit)
+                .side(19.0)
+                .tooltip("Autoscale Y to visible traces")
+                .show(ui)
+                .clicked()
+            {
+                output.autoscale_y = true;
+            }
+        },
+    );
+    output
+}
+
+/// One shared X-axis and viewport navigator for every unit pane in an
+/// analysis strip. The plots retain X grid/interactions but never repeat the
+/// labeled axis, so vertical grids remain aligned and readable.
+fn show_shared_x_axis(
+    ui: &mut Ui,
+    state: &mut AppState,
+    model: &StripModel,
+    full_domain: (f64, f64),
+    pane_count: usize,
+    height: f32,
+    linked_cursor_domain: Option<&CursorDomain>,
+) {
+    if height <= 1.0 {
+        return;
+    }
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let current =
+        shared_x_view(&state.ui.results, model.analysis_key, pane_count).unwrap_or(full_domain);
+    let axis = model_x_axis(
+        model,
+        current.0,
+        current.1,
+        state.ui.preferences.quantity_presentation_policy(),
+    );
+    let cursor_owner = state.ui.results.cursor_strip == Some(model.analysis_index);
+    let linked_cursor =
+        state.ui.results.linked_cursors && linked_cursor_domain == Some(&model.cursor_domain());
+    let cursor_values = (cursor_owner || linked_cursor).then_some(state.ui.results.cursors);
+    let cursor_summary = cursor_values.map_or_else(
+        || "No A/B cursors on this axis".to_owned(),
+        |cursors| {
+            let a = cursors.a.map_or_else(
+                || "not placed".to_owned(),
+                |value| axis.format_display_value(value),
+            );
+            let b = cursors.b.map_or_else(
+                || "not placed".to_owned(),
+                |value| axis.format_display_value(value),
+            );
+            format!("Cursor A {a}; cursor B {b}")
+        },
+    );
+    let accessibility_label = format!(
+        "Shared {} axis. Current range {} to {}. Full retained range {} to {}. {}. Drag the viewport to pan, click the overview to recenter, use the wheel to zoom at the pointer, drag A or B to move a cursor, and press F to fit.",
+        model.x_label(),
+        axis.format_display_value(current.0),
+        axis.format_display_value(current.1),
+        axis.format_display_value(full_domain.0),
+        axis.format_display_value(full_domain.1),
+        cursor_summary,
+    );
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), height),
+        egui::Sense::click_and_drag(),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Image, true, accessibility_label.clone())
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::GraphicsDocument);
+        node.set_label(accessibility_label.clone());
+    });
+    let painter = ui.painter().with_clip_rect(rect);
+    painter.rect_filled(rect, 0.0, c.canvas_bg);
+    painter.hline(rect.x_range(), rect.top(), egui::Stroke::new(1.0, c.border));
+
+    let plot_left = (rect.left() + WAVE_SHARED_LEFT_MARGIN).min(rect.right());
+    let plot_right = (rect.right() - WAVE_SHARED_RIGHT_MARGIN).max(plot_left);
+    let track = egui::Rect::from_min_max(
+        egui::pos2(plot_left, rect.top() + 5.0),
+        egui::pos2(plot_right, (rect.top() + 17.0).min(rect.bottom())),
+    );
+    let mut viewport = egui::Rect::NOTHING;
+    if track.width() > 1.0 {
+        painter.rect_filled(track, 0.0, c.bg_panel);
+        painter.rect_stroke(
+            track,
+            0.0,
+            egui::Stroke::new(1.0, c.border),
+            egui::StrokeKind::Inside,
+        );
+        if let Some(trace) = model
+            .traces
+            .iter()
+            .find(|trace| trace.visible && !trace.overlay)
+        {
+            let (minimum, maximum) = trace
+                .y
+                .iter()
+                .copied()
+                .filter(|value| value.is_finite())
+                .fold(
+                    (f64::INFINITY, f64::NEG_INFINITY),
+                    |(minimum, maximum), value| (minimum.min(value), maximum.max(value)),
+                );
+            let (minimum, maximum) = if minimum.is_finite() && maximum.is_finite() {
+                (minimum, maximum)
+            } else {
+                (0.0, 1.0)
+            };
+            let span = (maximum - minimum).max(f64::EPSILON);
+            let points = trace
+                .x
+                .iter()
+                .zip(trace.y.iter())
+                .step_by((trace.x.len() / 160).max(1))
+                .filter_map(|(&x, &y)| {
+                    let fraction = model.x_scale.normalize(x, full_domain.0, full_domain.1);
+                    (fraction.is_finite() && y.is_finite()).then(|| {
+                        egui::pos2(
+                            track.left() + track.width() * fraction as f32,
+                            track.bottom()
+                                - 2.0
+                                - ((y - minimum) / span) as f32 * (track.height() - 4.0),
+                        )
+                    })
+                })
+                .collect::<Vec<_>>();
+            if points.len() >= 2 {
+                painter.add(egui::Shape::line(
+                    points,
+                    egui::Stroke::new(1.0, trace.color.gamma_multiply(0.75)),
+                ));
+            }
+        }
+
+        let (start, end) = shared_axis_viewport_fraction(model.x_scale, full_domain, current);
+        viewport = egui::Rect::from_min_max(
+            egui::pos2(track.left() + track.width() * start as f32, track.top()),
+            egui::pos2(track.left() + track.width() * end as f32, track.bottom()),
+        );
+        painter.rect_filled(viewport, 0.0, c.accent.gamma_multiply(0.16));
+        painter.rect_stroke(
+            viewport,
+            0.0,
+            egui::Stroke::new(1.0, c.accent),
+            egui::StrokeKind::Inside,
+        );
+    }
+
+    let baseline_y = rect.bottom() - 20.0;
+    painter.hline(
+        egui::Rangef::new(plot_left, plot_right),
+        baseline_y,
+        egui::Stroke::new(1.0, c.border_strong),
+    );
+    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let end_label = axis.end_label();
+    let end_label_width = if end_label.is_empty() {
+        0.0
+    } else {
+        painter
+            .layout_no_wrap(end_label.clone(), font.clone(), c.text_dim)
+            .size()
+            .x
+    };
+    let labels_right = plot_right - end_label_width - 8.0;
+    let mut last_right = f32::NEG_INFINITY;
+    for (value, label) in &axis.ticks {
+        let fraction = model.x_scale.normalize(*value, axis.min, axis.max);
+        if !fraction.is_finite() || !(0.0..=1.0).contains(&fraction) {
+            continue;
+        }
+        let x = plot_left + (plot_right - plot_left) * fraction as f32;
+        painter.vline(
+            x,
+            egui::Rangef::new(baseline_y, baseline_y + 4.0),
+            egui::Stroke::new(1.0, c.border_strong),
+        );
+        let galley = painter.layout_no_wrap(label.clone(), font.clone(), c.text_dim);
+        let left = x - galley.size().x * 0.5;
+        if left >= last_right + 6.0 && left + galley.size().x <= labels_right {
+            last_right = left + galley.size().x;
+            painter.galley(egui::pos2(left, baseline_y + 5.0), galley, c.text_dim);
+        }
+    }
+    if !end_label.is_empty() {
+        painter.text(
+            egui::pos2(plot_right, baseline_y + 5.0),
+            egui::Align2::RIGHT_TOP,
+            end_label,
+            font,
+            c.text_dim,
+        );
+    }
+
+    let flag_top = track.bottom() + 2.0;
+    let flag_bottom = (flag_top + 13.0).min(baseline_y + 1.0);
+    let cursor_rect = |x: f64| {
+        let fraction = model.x_scale.normalize(x, full_domain.0, full_domain.1);
+        let px = track.left() + track.width() * fraction.clamp(0.0, 1.0) as f32;
+        egui::Rect::from_min_max(
+            egui::pos2(px - 8.0, flag_top),
+            egui::pos2(px + 8.0, flag_bottom),
+        )
+    };
+    if let Some(cursors) = cursor_values {
+        for (label, value, color) in [("A", cursors.a, c.traces[1]), ("B", cursors.b, c.accent)] {
+            let Some(value) = value else { continue };
+            let flag = cursor_rect(value);
+            painter.vline(
+                flag.center().x,
+                egui::Rangef::new(track.top(), flag.bottom()),
+                egui::Stroke::new(1.0, color),
+            );
+            painter.rect_filled(flag, 2.0, color);
+            painter.text(
+                flag.center(),
+                egui::Align2::CENTER_CENTER,
+                label,
+                theme::mono(tokens::FS_0, FontWeight::SemiBold),
+                c.canvas_bg,
+            );
+        }
+    }
+
+    let fit_rect = egui::Rect::from_min_size(
+        egui::pos2((rect.right() - 42.0).max(rect.left()), rect.top() + 2.0),
+        egui::vec2(36.0, 18.0),
+    );
+    let fit = ui.interact(fit_rect, response.id.with("fit"), egui::Sense::click());
+    fit.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Fit shared X to full range")
+    });
+    painter.text(
+        fit_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "FIT",
+        theme::mono(tokens::FS_0, FontWeight::SemiBold),
+        if fit.hovered() { c.text } else { c.text_dim },
+    );
+
+    if response.clicked() {
+        response.request_focus();
+    }
+    let drag_id = shared_x_drag_id(model);
+    if response.drag_started()
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        let drag = if cursor_values
+            .and_then(|cursors| cursors.a)
+            .is_some_and(|x| cursor_rect(x).expand(3.0).contains(pointer))
+        {
+            SharedXDrag::CursorA
+        } else if cursor_values
+            .and_then(|cursors| cursors.b)
+            .is_some_and(|x| cursor_rect(x).expand(3.0).contains(pointer))
+        {
+            SharedXDrag::CursorB
+        } else {
+            SharedXDrag::Viewport
+        };
+        ui.memory_mut(|memory| memory.data.insert_temp(drag_id, drag));
+    }
+    let drag = ui.memory(|memory| memory.data.get_temp::<SharedXDrag>(drag_id));
+    if response.dragged()
+        && let Some(pointer) = response.interact_pointer_pos()
+        && track.width() > 1.0
+        && let Some(drag) = drag
+    {
+        let fraction = f64::from(((pointer.x - track.left()) / track.width()).clamp(0.0, 1.0));
+        match drag {
+            SharedXDrag::Viewport => {
+                let delta = ui.ctx().input(|input| input.pointer.delta().x);
+                if let Some(range) = panned_shared_x_view(
+                    model.x_scale,
+                    full_domain,
+                    current,
+                    f64::from(delta / track.width()),
+                ) {
+                    set_shared_x_view(
+                        &mut state.ui.results,
+                        model.analysis_key,
+                        pane_count,
+                        Some(range),
+                    );
+                }
+            }
+            SharedXDrag::CursorA | SharedXDrag::CursorB => {
+                let x = model
+                    .x_scale
+                    .denormalize(fraction, full_domain.0, full_domain.1);
+                if !cursor_owner && !linked_cursor {
+                    state.ui.results.clear_cursors();
+                    state.ui.results.cursor_strip = Some(model.analysis_index);
+                }
+                match drag {
+                    SharedXDrag::CursorA => {
+                        state.ui.results.cursors.a = Some(x);
+                        state.ui.results.cursor_a_anchor = None;
+                    }
+                    SharedXDrag::CursorB => state.ui.results.cursors.b = Some(x),
+                    SharedXDrag::Viewport => {}
+                }
+            }
+        }
+    }
+    if response.drag_stopped() {
+        ui.memory_mut(|memory| memory.data.remove::<SharedXDrag>(drag_id));
+    }
+
+    if response.clicked()
+        && !fit.clicked()
+        && let Some(pointer) = response.interact_pointer_pos()
+        && track.contains(pointer)
+        && !viewport.contains(pointer)
+        && let Some(range) = recentered_shared_x_view(
+            model.x_scale,
+            full_domain,
+            current,
+            f64::from((pointer.x - track.left()) / track.width()),
+        )
+    {
+        set_shared_x_view(
+            &mut state.ui.results,
+            model.analysis_key,
+            pane_count,
+            Some(range),
+        );
+    }
+
+    if response.hovered() && track.width() > 1.0 {
+        let scroll = ui.input(|input| input.smooth_scroll_delta.y);
+        if scroll != 0.0
+            && let Some(pointer) = response.hover_pos()
+            && let Some(range) = zoomed_shared_x_view(
+                model.x_scale,
+                full_domain,
+                current,
+                f64::from((pointer.x - track.left()) / track.width()),
+                (f64::from(-scroll) * 0.002).exp(),
+            )
+        {
+            ui.input_mut(|input| input.smooth_scroll_delta = egui::Vec2::ZERO);
+            set_shared_x_view(
+                &mut state.ui.results,
+                model.analysis_key,
+                pane_count,
+                Some(range),
+            );
+        }
+    }
+
+    if response.has_focus() {
+        let fit_key =
+            ui.input(|input| input.key_pressed(egui::Key::F) || input.key_pressed(egui::Key::Home));
+        if fit_key {
+            set_shared_x_view(&mut state.ui.results, model.analysis_key, pane_count, None);
+        }
+        let zoom_in = ui.input(|input| input.key_pressed(egui::Key::Plus));
+        let zoom_out = ui.input(|input| input.key_pressed(egui::Key::Minus));
+        if (zoom_in || zoom_out)
+            && let Some(range) = zoomed_shared_x_view(
+                model.x_scale,
+                full_domain,
+                current,
+                0.5,
+                if zoom_in { 0.8 } else { 1.25 },
+            )
+        {
+            set_shared_x_view(
+                &mut state.ui.results,
+                model.analysis_key,
+                pane_count,
+                Some(range),
+            );
+        }
+        let direction = ui.input(|input| {
+            if input.key_pressed(egui::Key::ArrowLeft) {
+                -1.0
+            } else if input.key_pressed(egui::Key::ArrowRight) {
+                1.0
+            } else {
+                0.0
+            }
+        });
+        if direction != 0.0
+            && let Some(range) =
+                panned_shared_x_view(model.x_scale, full_domain, current, direction * 0.05)
+        {
+            set_shared_x_view(
+                &mut state.ui.results,
+                model.analysis_key,
+                pane_count,
+                Some(range),
+            );
+        }
+    }
+
+    if fit.clicked() || response.double_clicked() {
+        set_shared_x_view(&mut state.ui.results, model.analysis_key, pane_count, None);
+    }
+    response.on_hover_text(
+        "Shared X overview — drag the viewport, click to recenter, wheel to zoom, drag A/B, F to fit",
+    );
+}
+
 /// One strip, drawn as one pane per unit.
 ///
 /// Signals route to the pane that owns their unit; the panes stack and
@@ -2104,20 +2857,21 @@ fn show_strip_plot(
     let exprs = resolve_strip_exprs(state, model, &t);
     let available = ui.available_rect_before_wrap();
     let count = panes.len();
-    let seams = count.saturating_sub(1) as f32;
-    let pane_height = ((available.height() - seams) / count as f32).max(56.0);
+    let geometry = wave_stack_geometry(available.height(), count);
 
     for (ordinal, pane) in panes.iter().enumerate() {
         if ordinal > 0 {
-            let (seam, _) =
-                ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+            let (seam, _) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width(), geometry.seam_height),
+                egui::Sense::hover(),
+            );
             ui.painter().rect_filled(seam, 0.0, t.color.canvas_grid);
         }
         ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), pane_height),
+            egui::vec2(ui.available_width(), geometry.pane_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                ui.set_min_height(pane_height);
+                ui.set_height(geometry.pane_height);
                 show_unit_pane(
                     ui,
                     state,
@@ -2130,10 +2884,20 @@ fn show_strip_plot(
                     // routed to a unit-owning pane on the evidence available.
                     if ordinal == 0 { &exprs } else { &[] },
                     linked_cursor_domain,
+                    count,
                 );
             },
         );
     }
+    show_shared_x_axis(
+        ui,
+        state,
+        model,
+        x_domain,
+        count,
+        geometry.shared_x_height,
+        linked_cursor_domain,
+    );
 }
 
 fn show_unit_pane(
@@ -2145,6 +2909,7 @@ fn show_unit_pane(
     x_domain: (f64, f64),
     exprs: &[ResolvedExpr],
     linked_cursor_domain: Option<&CursorDomain>,
+    pane_count: usize,
 ) {
     let t = Tokens::get(ui.ctx());
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -2178,42 +2943,82 @@ fn show_unit_pane(
         }
         if !lo.is_finite() || !hi.is_finite() {
             None
+        } else if lo == hi && lo > 0.0 {
+            Some((lo / 1.1, hi * 1.1))
         } else if lo == hi {
             Some((lo - 1.0, hi + 1.0))
         } else {
             Some((lo, hi))
         }
     };
-    let Some((y0, y1)) = auto_y else {
+    let log_y_available = auto_y.is_some_and(|(minimum, maximum)| minimum > 0.0 && maximum > 0.0);
+    let mut log_y = pane_log_y(ui, model, pane) && log_y_available;
+    if !log_y_available && pane_log_y(ui, model, pane) {
+        set_pane_log_y(ui, model, pane, false);
+    }
+    let header = show_unit_pane_header(
+        ui,
+        state,
+        model,
+        pane,
+        ordinal,
+        log_y,
+        log_y_available,
+        WAVE_PANE_HEADER_HEIGHT.min(ui.available_height()),
+    );
+    if header.autoscale_y || header.toggle_log_y {
+        let view = state.ui.results.analysis_plot_view_pane_mut(
+            super::ResultViewer::Waves,
+            model.analysis_key,
+            ordinal,
+        );
+        view.y = None;
+        view.y_right = None;
+    }
+    if header.toggle_log_y {
+        log_y = !log_y;
+        set_pane_log_y(ui, model, pane, log_y);
+    }
+
+    let Some((auto_y0, auto_y1)) = auto_y else {
         well_hint(ui, "No visible traces — enable one in the legend");
         return;
     };
+    if ui.available_height() < WAVE_MIN_PLOT_HEIGHT {
+        return;
+    }
 
     // User zoom/pan overrides the automatic fit per axis, per pane.
-    let view = state.ui.results.analysis_plot_view_pane(
+    let pane_view = state.ui.results.analysis_plot_view_pane(
         super::ResultViewer::Waves,
         model.analysis_key,
         ordinal,
     );
-    let (x0, x1) = view.x.unwrap_or((x0, x1));
-    let (y0, y1) = view.y.unwrap_or((y0, y1));
+    let (x0, x1) =
+        shared_x_view(&state.ui.results, model.analysis_key, pane_count).unwrap_or((x0, x1));
+    let (y0, y1) = pane_view
+        .y
+        .filter(|(minimum, maximum)| !log_y || (*minimum > 0.0 && *maximum > 0.0))
+        .unwrap_or((auto_y0, auto_y1));
 
-    let mut x_axis = match model.x_scale {
-        XScale::Log10 => Axis::log_decades(x0, x1, &model.x_unit),
-        XScale::Linear => Axis::linear(x0, x1, &model.x_unit),
-    }
-    .with_label(&model.x_label);
-    if model.x_unit == "Hz" {
-        let (scale, offset, unit) = quantity_policy.frequency_axis_transform();
-        x_axis = x_axis.with_display_transform(scale, offset, unit);
-    }
+    let x_axis = model_x_axis(model, x0, x1, quantity_policy);
     let family_envelopes = if state.ui.results.show_family_envelope {
         family_envelope_series(model, pane)
     } else {
         Vec::new()
     };
-    let mut spec = PlotSpec::new(x_axis, model.x_scale, Axis::linear(y0, y1, pane.unit))
-        .accessible_name("Waveform plot");
+    let y_axis = if log_y {
+        Axis::log_decades(y0, y1, pane.unit)
+    } else {
+        Axis::linear(y0, y1, pane.unit)
+    };
+    let mut spec = PlotSpec::new(x_axis, model.x_scale, y_axis)
+        .accessible_name("Waveform plot")
+        .without_x_axis_chrome()
+        .with_right_margin(WAVE_SHARED_RIGHT_MARGIN);
+    if log_y {
+        spec = spec.with_log_y();
+    }
     spec.display_decimation = display_decimation(presentation.large_dataset_display());
     spec.limit_lines = specification_limits;
     spec.minor_grid = state.ui.results.show_minor_grid;
@@ -2240,7 +3045,7 @@ fn show_unit_pane(
             .iter()
             .filter_map(|index| model.traces.get(*index))
             .any(|trace| trace.kind == TraceKind::PhaseRad);
-        let axis = match (view.y_right, displays_radians) {
+        let axis = match (pane_view.y_right, displays_radians) {
             (Some((z0, z1)), true) => Axis::linear_with(z0, z1, "rad", 5),
             (None, true) => Axis::linear_with(p0, p1, "rad", 5),
             // Zoomed degree axes use plain linear ticks; the 45° lattice
@@ -2495,12 +3300,35 @@ fn show_unit_pane(
         results.cursors.place(clicked_x);
     }
 
-    if response.view.any() {
-        state
-            .ui
-            .results
-            .analysis_plot_view_pane_mut(super::ResultViewer::Waves, model.analysis_key, ordinal)
-            .apply(&response.view);
+    if response.view.reset {
+        set_shared_x_view(&mut state.ui.results, model.analysis_key, pane_count, None);
+        let view = state.ui.results.analysis_plot_view_pane_mut(
+            super::ResultViewer::Waves,
+            model.analysis_key,
+            ordinal,
+        );
+        view.y = None;
+        view.y_right = None;
+    } else if response.view.any() {
+        if let Some(x) = response.view.x {
+            set_shared_x_view(
+                &mut state.ui.results,
+                model.analysis_key,
+                pane_count,
+                Some(x),
+            );
+        }
+        let view = state.ui.results.analysis_plot_view_pane_mut(
+            super::ResultViewer::Waves,
+            model.analysis_key,
+            ordinal,
+        );
+        if let Some(y) = response.view.y {
+            view.y = Some(y);
+        }
+        if let Some(y_right) = response.view.y_right {
+            view.y_right = Some(y_right);
+        }
     }
 }
 

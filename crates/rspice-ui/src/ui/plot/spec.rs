@@ -361,6 +361,9 @@ pub struct PlotSpec<'a> {
     pub x_scale: XScale,
     /// Left Y axis.
     pub y: Axis,
+    /// Left Y scale. Linear by default; unit-pane controls may opt into
+    /// logarithmic decades only for strictly positive source data.
+    pub y_scale: XScale,
     /// Optional right Y axis with its tick/unit tint.
     pub y_right: Option<(Axis, Color32)>,
     /// Traces, drawn in order (first = bottom).
@@ -385,6 +388,13 @@ pub struct PlotSpec<'a> {
     pub underlay: Option<Underlay<'a>>,
     /// Left margin in points (56 default; widen for long tick labels).
     pub left_margin: f32,
+    /// Right margin in points. `None` selects the renderer default. A stack
+    /// uses one explicit margin so every pane's X grid stays aligned even
+    /// when only one pane owns a secondary Y axis.
+    pub right_margin: Option<f32>,
+    /// Whether this plot owns labeled X-axis chrome. Unit-scoped waveform
+    /// panes disable it and render one shared X strip beneath the stack.
+    pub x_axis_chrome: bool,
 }
 
 impl<'a> PlotSpec<'a> {
@@ -395,6 +405,7 @@ impl<'a> PlotSpec<'a> {
             x,
             x_scale,
             y,
+            y_scale: XScale::Linear,
             y_right: None,
             traces: Vec::new(),
             display_decimation: DisplayDecimation::default(),
@@ -407,12 +418,36 @@ impl<'a> PlotSpec<'a> {
             bands: Vec::new(),
             underlay: None,
             left_margin: 56.0,
+            right_margin: None,
+            x_axis_chrome: true,
         }
     }
 
     /// Set the screen-reader name for this engineering graphic.
     pub fn accessible_name(mut self, name: &'a str) -> Self {
         self.accessible_name = name;
+        self
+    }
+
+    /// Keep X geometry, grids, cursors, and interactions while suppressing
+    /// the repeated labels owned by a shared axis strip.
+    #[must_use]
+    pub fn without_x_axis_chrome(mut self) -> Self {
+        self.x_axis_chrome = false;
+        self
+    }
+
+    /// Reserve an explicit right margin for alignment with sibling plots.
+    #[must_use]
+    pub fn with_right_margin(mut self, points: f32) -> Self {
+        self.right_margin = points.is_finite().then_some(points.max(0.0));
+        self
+    }
+
+    /// Render and navigate the left Y axis in logarithmic decades.
+    #[must_use]
+    pub fn with_log_y(mut self) -> Self {
+        self.y_scale = XScale::Log10;
         self
     }
 }
