@@ -1,5 +1,11 @@
 //! Feature-selectable precompiled Verilog-A model catalog. Do not edit.
 
+// `registry` reaches its ABI types through `super::`, so the catalog
+// root is where they have to land.
+pub use rspice_veriloga_runtime::*;
+
+pub mod registry;
+
 #[cfg(feature = "veriloga-model-diode-cmc")]
 pub use rspice_veriloga_model_diode_cmc::diode_cmc__diode_cmc__cdfab304;
 #[cfg(feature = "veriloga-model-epfl-hemt-10a")]

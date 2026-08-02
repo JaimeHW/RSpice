@@ -11,14 +11,13 @@ use std::sync::Arc;
 
 pub(crate) mod limiting;
 
+// The registry compiles inside the catalog crate rather than being pulled
+// through the crate boundary by `include!`. The old form hard-coded a sibling
+// directory layout and made rspice-core's build depend on another crate's
+// source path; the catalog's own feature set already gates the same models,
+// because every `veriloga-model-*` here forwards to it.
 #[cfg(feature = "veriloga-builtins-base")]
-#[allow(clippy::all)]
-pub mod builtins {
-    include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../rspice-veriloga-models/registry.rs"
-    ));
-}
+pub use rspice_veriloga_models::registry as builtins;
 
 pub use rspice_veriloga_runtime::*;
 
