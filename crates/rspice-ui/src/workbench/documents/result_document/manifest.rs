@@ -698,6 +698,35 @@ fn family_values_label(family: &AnalysisResultFamilyMetadata) -> String {
         AnalysisResultFamilyMetadata::Soa { time } => {
             format!("{} SOA time points", time.len())
         }
+        AnalysisResultFamilyMetadata::PeriodicNoise {
+            output_quantity,
+            carrier_frequency_hz,
+        } => {
+            let quantity = match output_quantity {
+                crate::state::PeriodicNoiseOutputQuantity::OutputNoisePowerSpectralDensity => {
+                    "output-noise PSD"
+                }
+                crate::state::PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz => {
+                    "phase noise in dBc/Hz"
+                }
+            };
+            carrier_frequency_hz.map_or_else(
+                || quantity.to_owned(),
+                |carrier| format!("{quantity} / {} carrier", format_frequency(carrier)),
+            )
+        }
+    }
+}
+
+fn format_frequency(value: f64) -> String {
+    if value >= 1.0e9 {
+        format!("{:.6} GHz", value / 1.0e9)
+    } else if value >= 1.0e6 {
+        format!("{:.6} MHz", value / 1.0e6)
+    } else if value >= 1.0e3 {
+        format!("{:.6} kHz", value / 1.0e3)
+    } else {
+        format!("{value:.6} Hz")
     }
 }
 

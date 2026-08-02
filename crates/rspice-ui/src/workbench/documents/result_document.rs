@@ -9,12 +9,14 @@ mod bode;
 mod create_document;
 mod eye;
 mod fft;
+mod harmonic_balance;
 mod hist;
 pub(crate) mod manifest;
 mod noise_contrib;
 mod nyquist;
 mod op_inspector;
 mod persistent_document;
+mod phase_noise;
 mod pz;
 mod sensitivity;
 mod smith;
@@ -24,6 +26,22 @@ mod transfer_function;
 
 pub(crate) fn open_specification_editor(state: &mut AppState) {
     specs::open_editor(state);
+}
+
+pub(crate) fn harmonic_balance_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
+    harmonic_balance::analysis_is_renderable(analysis)
+}
+
+pub(crate) fn harmonic_balance_waveform_is_renderable(waveform: &WaveformData) -> bool {
+    harmonic_balance::spectrum_trace_is_renderable(waveform)
+}
+
+pub(crate) fn phase_noise_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
+    phase_noise::phase_noise_is_renderable(analysis)
+}
+
+pub(crate) fn phase_noise_waveform_is_renderable(waveform: &WaveformData) -> bool {
+    phase_noise::phase_noise_waveform_is_renderable(waveform)
 }
 
 /// Open the dataset/manifest browser in its canonical Results frame.
@@ -161,10 +179,16 @@ pub enum ResultViewer {
     /// Stacked waveform strips, one per analysis.
     #[default]
     Waves,
+    /// Swept-source or swept-parameter DC transfer curves.
+    DcSweep,
     /// Loop-gain stability view with margin markers.
     Bode,
     /// Spectrum with harmonic markers.
     Fft,
+    /// Retained complex harmonic-balance coefficient spectrum.
+    HarmonicBalance,
+    /// Periodic phase-noise spectrum versus offset frequency.
+    PhaseNoise,
     /// Eye diagram with compliance mask.
     Eye,
     /// Monte-Carlo distribution.
@@ -181,11 +205,11 @@ pub enum ResultViewer {
     Specs,
     /// The retained samples of one analysis, as rows.
     Table,
-    /// Legacy Nyquist surface (pre-redesign chrome).
+    /// Nyquist loop-gain stability surface.
     Nyquist,
-    /// Legacy Smith chart surface.
+    /// Smith-chart RF/network surface.
     Smith,
-    /// Legacy pole-zero surface.
+    /// Complex-plane pole-zero surface.
     PoleZero,
     /// Immutable task and retained-value inventory for the active dataset.
     ///
@@ -199,8 +223,11 @@ impl ResultViewer {
     pub fn label(self) -> &'static str {
         match self {
             ResultViewer::Waves => "WAVES",
+            ResultViewer::DcSweep => "DC",
             ResultViewer::Bode => "BODE",
             ResultViewer::Fft => "FFT",
+            ResultViewer::HarmonicBalance => "HB",
+            ResultViewer::PhaseNoise => "PNOISE",
             ResultViewer::Eye => "EYE",
             ResultViewer::Hist => "HIST",
             ResultViewer::Op => "OP",
@@ -216,22 +243,23 @@ impl ResultViewer {
         }
     }
 
-    const PRIMARY: [ResultViewer; 11] = [
+    const PRIMARY: [ResultViewer; 17] = [
         ResultViewer::Waves,
+        ResultViewer::DcSweep,
         ResultViewer::Bode,
-        ResultViewer::Fft,
-        ResultViewer::Eye,
-        ResultViewer::Hist,
-        ResultViewer::Op,
         ResultViewer::NoiseContrib,
-        ResultViewer::Contribution,
+        ResultViewer::Nyquist,
+        ResultViewer::Fft,
+        ResultViewer::HarmonicBalance,
+        ResultViewer::PhaseNoise,
+        ResultViewer::Smith,
         ResultViewer::TransferFunction,
+        ResultViewer::Contribution,
+        ResultViewer::Op,
         ResultViewer::Specs,
         ResultViewer::Table,
-    ];
-    const LEGACY: [ResultViewer; 3] = [
-        ResultViewer::Nyquist,
-        ResultViewer::Smith,
+        ResultViewer::Hist,
+        ResultViewer::Eye,
         ResultViewer::PoleZero,
     ];
     const DATASET_NATIVE: [ResultViewer; 1] = [ResultViewer::Manifest];
@@ -240,8 +268,11 @@ impl ResultViewer {
     const fn tab_label(self) -> &'static str {
         match self {
             ResultViewer::Waves => "Waves",
+            ResultViewer::DcSweep => "DC Sweep",
             ResultViewer::Bode => "Bode",
             ResultViewer::Fft => "FFT",
+            ResultViewer::HarmonicBalance => "HB Tones",
+            ResultViewer::PhaseNoise => "Phase Noise",
             ResultViewer::Eye => "Eye",
             ResultViewer::Hist => "Histogram",
             ResultViewer::Op => "OP",
@@ -259,9 +290,13 @@ impl ResultViewer {
 
     const fn tab_icon(self) -> WorkbenchIcon {
         match self {
-            ResultViewer::Waves | ResultViewer::NoiseContrib => WorkbenchIcon::Results,
+            ResultViewer::Waves | ResultViewer::DcSweep | ResultViewer::NoiseContrib => {
+                WorkbenchIcon::Results
+            }
             ResultViewer::Bode
             | ResultViewer::Fft
+            | ResultViewer::HarmonicBalance
+            | ResultViewer::PhaseNoise
             | ResultViewer::Hist
             | ResultViewer::Contribution => WorkbenchIcon::Results,
             ResultViewer::Eye
@@ -1621,7 +1656,7 @@ fn result_stage_bar_visible(state: &AppState) -> bool {
 /// documents (OP, specs, tables) have no cursor to report.
 fn readout_strip_height(state: &AppState) -> f32 {
     match state.ui.results.viewer {
-        ResultViewer::Waves => waves::readout_strip_height(state),
+        ResultViewer::Waves | ResultViewer::DcSweep => waves::readout_strip_height(state),
         _ => 0.0,
     }
 }
@@ -1718,7 +1753,7 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     }
 
     match viewer {
-        ResultViewer::Waves => match chrome {
+        ResultViewer::Waves | ResultViewer::DcSweep => match chrome {
             ResultChrome::Full => waves::show(ui, &mut app.state),
             ResultChrome::CompactSplit => waves::show_compact(ui, &mut app.state),
         },
@@ -1728,6 +1763,8 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
                 fft::show(ui, &mut app.state);
             }
         }
+        ResultViewer::HarmonicBalance => harmonic_balance::show(ui, &mut app.state),
+        ResultViewer::PhaseNoise => phase_noise::show(ui, &mut app.state),
         ResultViewer::Eye => {
             if ensure_derived(ui, app, ActiveViewer::EyeDiagram) {
                 eye::show(ui, &mut app.state);
@@ -1906,7 +1943,7 @@ fn show_sheet_bar(ui: &mut Ui, state: &mut AppState) {
     );
     let accessible_label = if structured {
         "Structured result controls"
-    } else if viewer == ResultViewer::Waves {
+    } else if matches!(viewer, ResultViewer::Waves | ResultViewer::DcSweep) {
         "Plot instrument controls"
     } else {
         "Result sheet controls"
@@ -1927,7 +1964,7 @@ fn show_sheet_bar(ui: &mut Ui, state: &mut AppState) {
     child.spacing_mut().item_spacing.x = 4.0;
     if structured {
         show_structured_result_strip(&mut child, state);
-    } else if viewer == ResultViewer::Waves {
+    } else if matches!(viewer, ResultViewer::Waves | ResultViewer::DcSweep) {
         show_wave_instrument(&mut child, state);
     } else {
         child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2268,7 +2305,7 @@ fn inline_result_actions(ui: &mut Ui, state: &mut AppState) {
 
 fn result_viewer_actions(ui: &mut Ui, state: &mut AppState) {
     match state.ui.results.viewer {
-        ResultViewer::Waves => {
+        ResultViewer::Waves | ResultViewer::DcSweep => {
             let linked_shortcut = state.ui.preferences.shortcuts().resolved_label(
                 crate::workbench::commands::vocabulary::Command::ToggleLinkedCursors,
                 crate::workbench::app_state::runtime_command_platform(ui.ctx()),
@@ -2393,38 +2430,12 @@ fn viewer_tabs_filtered(
     state: &mut AppState,
     mut include: impl FnMut(ResultViewer) -> bool,
 ) {
-    let t = Tokens::get(ui.ctx());
     ui.spacing_mut().item_spacing.x = 0.0;
 
     let current = state.ui.results.viewer;
     let mut clicked: Option<ResultViewer> = None;
 
     for viewer in ResultViewer::PRIMARY {
-        let availability = viewer_availability(state, viewer);
-        if !include(viewer) || !availability.available {
-            continue;
-        }
-        if viewer_tab(ui, viewer, current == viewer, availability) {
-            clicked = Some(viewer);
-        }
-    }
-    let has_primary = ResultViewer::PRIMARY
-        .into_iter()
-        .any(|viewer| include(viewer) && viewer_availability(state, viewer).available);
-    let has_legacy = ResultViewer::LEGACY
-        .into_iter()
-        .any(|viewer| include(viewer) && viewer_availability(state, viewer).available);
-    if has_primary && has_legacy {
-        // Legacy surfaces, gated on data availability and visually set apart.
-        let tab_height = ui.available_height().min(40.0);
-        let (sep, _) = ui.allocate_exact_size(egui::vec2(13.0, tab_height), egui::Sense::hover());
-        ui.painter().vline(
-            sep.center().x,
-            egui::Rangef::new(sep.center().y - 7.0, sep.center().y + 7.0),
-            egui::Stroke::new(1.0, t.color.border),
-        );
-    }
-    for viewer in ResultViewer::LEGACY {
         let availability = viewer_availability(state, viewer);
         if !include(viewer) || !availability.available {
             continue;
@@ -2455,6 +2466,7 @@ fn family_allows_viewer(family_label: &str, viewer: ResultViewer) -> bool {
         "Waveform worksheet" => matches!(
             viewer,
             ResultViewer::Waves
+                | ResultViewer::DcSweep
                 | ResultViewer::Eye
                 | ResultViewer::TransferFunction
                 | ResultViewer::Table
@@ -2467,7 +2479,13 @@ fn family_allows_viewer(family_label: &str, viewer: ResultViewer) -> bool {
                 | ResultViewer::Nyquist
                 | ResultViewer::PoleZero
         ),
-        "RF & network" => matches!(viewer, ResultViewer::Fft | ResultViewer::Smith),
+        "RF & network" => matches!(
+            viewer,
+            ResultViewer::Smith
+                | ResultViewer::HarmonicBalance
+                | ResultViewer::Fft
+                | ResultViewer::PhaseNoise
+        ),
         "Statistics & yield" => matches!(viewer, ResultViewer::Hist | ResultViewer::Contribution),
         // These specialist mockup families have no native quick modes. They
         // resolve to the dataset manifest rather than substituting an
@@ -2488,7 +2506,6 @@ fn reconcile_active_viewer(state: &mut AppState) {
     }
     if let Some(viewer) = ResultViewer::PRIMARY
         .into_iter()
-        .chain(ResultViewer::LEGACY)
         .chain(ResultViewer::DATASET_NATIVE)
         .find(|viewer| viewer_availability(state, *viewer).available)
     {
@@ -2501,13 +2518,34 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
     match viewer {
         ResultViewer::Waves => {
             if active_run.is_some_and(|run| {
-                run.analyses
-                    .iter()
-                    .any(|analysis| !analysis.waveforms.is_empty())
+                run.analyses.iter().any(|analysis| {
+                    analysis.analysis_type == crate::state::AnalysisType::Transient
+                        && !analysis.waveforms.is_empty()
+                })
             }) {
-                ViewerAvailability::available("Waveforms are present in the active dataset")
+                ViewerAvailability::available(
+                    "Transient waveforms are present in the active dataset",
+                )
             } else {
-                ViewerAvailability::unavailable("Requires waveform data in the active dataset")
+                ViewerAvailability::unavailable(
+                    "Requires transient waveform data in the active dataset",
+                )
+            }
+        }
+        ResultViewer::DcSweep => {
+            if active_run.is_some_and(|run| {
+                run.analyses.iter().any(|analysis| {
+                    analysis.analysis_type == crate::state::AnalysisType::DcSweep
+                        && !analysis.waveforms.is_empty()
+                })
+            }) {
+                ViewerAvailability::available(
+                    "A retained swept-source or swept-parameter DC transfer is available",
+                )
+            } else {
+                ViewerAvailability::unavailable(
+                    "Requires DC sweep waveform data in the active dataset",
+                )
             }
         }
         ResultViewer::Bode => {
@@ -2528,6 +2566,32 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
             }
         }
         ResultViewer::Fft => specialized_availability(state, ActiveViewer::Fft),
+        ResultViewer::HarmonicBalance => {
+            if harmonic_balance::active_analysis_is_renderable(state) {
+                ViewerAvailability::available(
+                    "The selected analysis contains retained complex HB coefficients",
+                )
+            } else {
+                ViewerAvailability::unavailable(
+                    "Requires the selected harmonic-balance analysis to retain complex coefficients",
+                )
+            }
+        }
+        ResultViewer::PhaseNoise => {
+            if active_run.is_some_and(|run| {
+                run.analyses
+                    .iter()
+                    .any(phase_noise::phase_noise_is_renderable)
+            }) {
+                ViewerAvailability::available(
+                    "A retained periodic phase-noise spectrum is available",
+                )
+            } else {
+                ViewerAvailability::unavailable(
+                    "Requires PNOISE/QPNOISE data explicitly retained as phase noise",
+                )
+            }
+        }
         ResultViewer::Eye => specialized_availability(state, ActiveViewer::EyeDiagram),
         ResultViewer::Hist => specialized_availability(state, ActiveViewer::Histogram),
         ResultViewer::Op => {
@@ -2783,9 +2847,11 @@ fn ensure_derived(ui: &mut Ui, app: &mut RSpiceApp, viewer: ActiveViewer) -> boo
 /// Render the Results context right panel for the active viewer.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     match state.ui.results.viewer {
-        ResultViewer::Waves => waves::right_panel(ui, state),
+        ResultViewer::Waves | ResultViewer::DcSweep => waves::right_panel(ui, state),
         ResultViewer::Bode => bode::right_panel(ui, state),
         ResultViewer::Fft => fft::right_panel(ui, state),
+        ResultViewer::HarmonicBalance => harmonic_balance::right_panel(ui, state),
+        ResultViewer::PhaseNoise => phase_noise::right_panel(ui, state),
         ResultViewer::Eye => eye::right_panel(ui, state),
         ResultViewer::Hist => hist::right_panel(ui, state),
         ResultViewer::Op => op_inspector::right_panel(ui, state),
@@ -3006,6 +3072,48 @@ mod availability_tests {
     }
 
     #[test]
+    fn dc_sweep_is_a_distinct_mockup_viewer_and_waveform_projection() {
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new("V(time)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
+            ]),
+        );
+        run.add_analysis(
+            AnalysisResult::new(2, AnalysisType::DcSweep, "DC").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.1, 0.9], "#ffbd2e"),
+            ]),
+        );
+        let mut state = AppState::default();
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+
+        assert!(viewer_availability(&state, ResultViewer::Waves).available);
+        assert!(viewer_availability(&state, ResultViewer::DcSweep).available);
+
+        state.ui.results.viewer = ResultViewer::Waves;
+        let presentation = state.ui.preferences.result_presentation_policy();
+        let waves = waves::cached_models(
+            &state.simulation,
+            &mut state.ui.results,
+            presentation.complex_number_display(),
+            &Tokens::default(),
+        );
+        assert_eq!(waves.len(), 1);
+        assert_eq!(waves[0].analysis_type(), AnalysisType::Transient);
+
+        state.ui.results.viewer = ResultViewer::DcSweep;
+        let dc = waves::cached_models(
+            &state.simulation,
+            &mut state.ui.results,
+            presentation.complex_number_display(),
+            &Tokens::default(),
+        );
+        assert_eq!(dc.len(), 1);
+        assert_eq!(dc[0].analysis_type(), AnalysisType::DcSweep);
+    }
+
+    #[test]
     fn ordinary_noise_enables_noise_but_never_substitutes_for_bode() {
         let state = state_with_analysis(
             AnalysisResult::new(1, AnalysisType::Noise, "NOISE").with_waveforms(vec![
@@ -3098,6 +3206,32 @@ mod availability_tests {
     }
 
     #[test]
+    fn result_tabs_follow_the_upgraded_mockup_mode_order() {
+        assert_eq!(
+            ResultViewer::PRIMARY,
+            [
+                ResultViewer::Waves,
+                ResultViewer::DcSweep,
+                ResultViewer::Bode,
+                ResultViewer::NoiseContrib,
+                ResultViewer::Nyquist,
+                ResultViewer::Fft,
+                ResultViewer::HarmonicBalance,
+                ResultViewer::PhaseNoise,
+                ResultViewer::Smith,
+                ResultViewer::TransferFunction,
+                ResultViewer::Contribution,
+                ResultViewer::Op,
+                ResultViewer::Specs,
+                ResultViewer::Table,
+                ResultViewer::Hist,
+                ResultViewer::Eye,
+                ResultViewer::PoleZero,
+            ]
+        );
+    }
+
+    #[test]
     fn structured_result_controls_have_a_reachable_40_px_strip() {
         for viewer in [ResultViewer::Op, ResultViewer::Specs, ResultViewer::Table] {
             assert!(viewer_has_structured_strip(viewer), "{viewer:?}");
@@ -3109,8 +3243,11 @@ mod availability_tests {
         }
         for viewer in [
             ResultViewer::Waves,
+            ResultViewer::DcSweep,
             ResultViewer::Bode,
             ResultViewer::Fft,
+            ResultViewer::HarmonicBalance,
+            ResultViewer::PhaseNoise,
             ResultViewer::Eye,
             ResultViewer::Hist,
             ResultViewer::NoiseContrib,
@@ -3167,6 +3304,10 @@ mod availability_tests {
         assert!(family_allows_viewer(
             "Waveform worksheet",
             ResultViewer::Waves
+        ));
+        assert!(family_allows_viewer(
+            "Waveform worksheet",
+            ResultViewer::DcSweep
         ));
         assert!(family_allows_viewer(
             "Waveform worksheet",

@@ -1851,11 +1851,12 @@ fn allocate_restored_identity(used: &HashSet<u64>, next_identity: &mut u64) -> O
 const fn result_viewer_document_id(viewer: super::ResultViewer) -> Option<&'static str> {
     Some(match viewer {
         super::ResultViewer::Manifest => return None,
-        super::ResultViewer::Waves => "viewer-waveform",
+        super::ResultViewer::Waves | super::ResultViewer::DcSweep => "viewer-waveform",
         super::ResultViewer::Bode
         | super::ResultViewer::Nyquist
         | super::ResultViewer::NoiseContrib => "viewer-bode",
-        super::ResultViewer::Fft => "viewer-spectrum",
+        super::ResultViewer::Fft | super::ResultViewer::HarmonicBalance => "viewer-spectrum",
+        super::ResultViewer::PhaseNoise => "viewer-phase-noise",
         super::ResultViewer::Contribution => "viewer-contribution",
         super::ResultViewer::TransferFunction => "viewer-transfer-function",
         super::ResultViewer::Eye => "eye-viewer",

@@ -18,10 +18,18 @@ use crate::results::visualization_document::{
     SourceColumn, SourceDataset, SourceRow, TypedValue, ValueType, VisualizationDocument,
 };
 use crate::state::{
-    AnalysisType, Cell, ComplexResultValue, Library, LibraryCellInstance, LibraryManager,
-    MonteCarloVariableMetadata, PortDirection, SheetDefinition, SheetPortPolicy, SheetTemplate,
-    SimulationRunLifecycle, View, ViewType,
+    AnalysisResultFamilyMetadata, AnalysisType, Cell, ComplexResultValue, Library,
+    LibraryCellInstance, LibraryManager, MonteCarloVariableMetadata, PeriodicNoiseOutputQuantity,
+    PortDirection, SheetDefinition, SheetPortPolicy, SheetTemplate, SimulationRunLifecycle, View,
+    ViewType,
 };
+
+fn phase_noise_metadata() -> AnalysisResultFamilyMetadata {
+    AnalysisResultFamilyMetadata::PeriodicNoise {
+        output_quantity: PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz,
+        carrier_frequency_hz: Some(2.4e9),
+    }
+}
 
 fn identity(key: &str) -> HardcopySourceIdentity {
     HardcopySourceIdentity::try_new(
@@ -50,6 +58,42 @@ fn resolve_quick_view(state: &AppState) -> Result<ResolvedHardcopyDocument, Hard
         source_key: "results-quick-view".to_owned(),
         project_id: state.workspace.project.id(),
         state,
+        scope: HardcopyScope::ActivePlotDocument,
+    })
+}
+
+fn resolve_studio_viewer(
+    analysis: AnalysisResult,
+    viewer: ResultViewer,
+) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
+    let project_id = ProjectId::new();
+    let analysis_sequence = analysis.id;
+    let mut run = SimulationRun::new(1);
+    run.lifecycle = SimulationRunLifecycle::Completed;
+    run.analyses.push(analysis);
+    let dataset_id = run.dataset_id;
+    let mut simulation = SimulationState::default();
+    simulation.runs.push(run);
+    let mut studio = VisualizationStudioState::default();
+    studio.revision = 1;
+    studio.panes.push(StudioPane {
+        id: 1,
+        viewer,
+        viewer_document_id: "test-viewer".to_owned(),
+        dataset_id,
+        analysis_sequence,
+        x_link: None,
+        cursor_group: None,
+        page: "Results".to_owned(),
+        placement: Default::default(),
+    });
+    studio.active_pane = Some(1);
+    resolve_active_studio_pane_source(ActiveStudioPaneHardcopySource {
+        source_key: "studio-specialist".to_owned(),
+        project_id,
+        studio: &studio,
+        simulation: &simulation,
+        pane_id: 1,
         scope: HardcopyScope::ActivePlotDocument,
     })
 }
@@ -1190,9 +1234,12 @@ fn plot_line_clipping_preserves_true_axis_boundary_intersections() {
 fn viewer_partition_covers_every_results_family() {
     let curve_viewers = [
         ResultViewer::Waves,
+        ResultViewer::DcSweep,
         ResultViewer::Bode,
         ResultViewer::NoiseContrib,
         ResultViewer::Fft,
+        ResultViewer::HarmonicBalance,
+        ResultViewer::PhaseNoise,
         ResultViewer::Eye,
         ResultViewer::Hist,
         ResultViewer::Nyquist,
@@ -1211,6 +1258,90 @@ fn viewer_partition_covers_every_results_family() {
             .into_iter()
             .all(|viewer| !is_curve_viewer(viewer))
     );
+}
+
+#[test]
+fn harmonic_balance_quick_view_exports_only_retained_complex_coefficients() {
+    let spectrum = WaveformData::new(
+        "|V(out)|",
+        vec![0.0, 1.0e6, 2.0e6],
+        vec![0.1, 1.0, 0.2],
+        "#ffbd2e",
+    )
+    .with_complex_components("V(out)", vec![0.1, 1.0, 0.2], vec![0.0, 0.0, 0.0]);
+    let state = quick_view_state(
+        AnalysisResult::new(1, AnalysisType::HarmonicBalance, "HB").with_waveforms(vec![spectrum]),
+        ResultViewer::HarmonicBalance,
+    );
+
+    let resolved = resolve_quick_view(&state).expect("HB semantic hardcopy");
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        panic!("expected semantic HB plot")
+    };
+    assert_eq!(plot.viewer, ResultViewer::HarmonicBalance);
+    assert_eq!(plot.traces.len(), 1);
+    assert_eq!(plot.traces[0].label, "V(out)");
+}
+
+#[test]
+fn phase_noise_quick_view_never_exports_ordinary_periodic_noise_as_l_of_f() {
+    let state = quick_view_state(
+        AnalysisResult::new(1, AnalysisType::Pnoise, "PNOISE")
+            .with_waveforms(vec![
+                WaveformData::new(
+                    "onoise",
+                    vec![1.0, 1.0e3, 1.0e6],
+                    vec![1.0e-18, 1.0e-19, 1.0e-20],
+                    "#4ec9b0",
+                ),
+                WaveformData::new(
+                    "phase_noise",
+                    vec![1.0, 1.0e3, 1.0e6],
+                    vec![-72.0, -103.0, -132.0],
+                    "#ffbd2e",
+                ),
+            ])
+            .with_family_metadata(phase_noise_metadata()),
+        ResultViewer::PhaseNoise,
+    );
+
+    let resolved = resolve_quick_view(&state).expect("phase-noise semantic hardcopy");
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        panic!("expected semantic phase-noise plot")
+    };
+    assert_eq!(plot.viewer, ResultViewer::PhaseNoise);
+    assert_eq!(plot.traces.len(), 1);
+    assert!(plot.traces[0].label.contains("phase_noise"));
+    assert!(plot.traces[0].label.contains("dBc/Hz"));
+}
+
+#[test]
+fn waves_quick_view_selects_retained_transient_when_another_analysis_is_active() {
+    let mut state = AppState::default();
+    let mut run = SimulationRun::new(1);
+    run.lifecycle = SimulationRunLifecycle::Completed;
+    run.analyses.push(
+        AnalysisResult::new(1, AnalysisType::DcSweep, "DC").with_waveforms(vec![
+            WaveformData::new("V(dc)", vec![0.0, 1.0], vec![0.0, 2.0], "#ffbd2e"),
+        ]),
+    );
+    run.analyses.push(
+        AnalysisResult::new(2, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            WaveformData::new("V(time)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
+        ]),
+    );
+    state.simulation.runs.push(run);
+    state.simulation.active_run_idx = Some(0);
+    state.simulation.active_analysis_idx = Some(0);
+    state.ui.results.viewer = ResultViewer::Waves;
+
+    let resolved = resolve_quick_view(&state).expect("transient Waves semantic hardcopy");
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        panic!("expected semantic Waves plot")
+    };
+    assert_eq!(plot.viewer, ResultViewer::Waves);
+    assert_eq!(plot.traces.len(), 1);
+    assert_eq!(plot.traces[0].label, "V(time)");
 }
 
 #[test]
@@ -1693,6 +1824,71 @@ fn studio_adapter_reads_retained_dataset_and_places_markers_without_report_refer
         annotation_changed.authority().content_digest(),
         "annotation semantics must bind the resolved visualization digest"
     );
+}
+
+#[test]
+fn studio_specialist_exports_filter_exact_hb_and_phase_noise_evidence() {
+    let hb = AnalysisResult::new(31, AnalysisType::HarmonicBalance, "HB").with_waveforms(vec![
+        WaveformData::new(
+            "|V(out)|",
+            vec![0.0, 1.0e6, 2.0e6],
+            vec![0.1, 1.0, 0.2],
+            "#ffbd2e",
+        )
+        .with_complex_components("V(out)", vec![0.1, 1.0, 0.2], vec![0.0, 0.0, 0.0]),
+        WaveformData::new(
+            "unrelated",
+            vec![0.0, 1.0e6, 2.0e6],
+            vec![3.0, 4.0, 5.0],
+            "#00aaff",
+        ),
+    ]);
+    let resolved =
+        resolve_studio_viewer(hb, ResultViewer::HarmonicBalance).expect("exact HB Studio hardcopy");
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        panic!("expected HB Studio plot")
+    };
+    assert_eq!(plot.viewer, ResultViewer::HarmonicBalance);
+    assert_eq!(plot.traces.len(), 1);
+    assert_eq!(plot.traces[0].label, "|V(out)|");
+
+    let phase_noise = AnalysisResult::new(32, AnalysisType::Pnoise, "PNOISE")
+        .with_waveforms(vec![
+            WaveformData::new(
+                "onoise",
+                vec![1.0, 1.0e3, 1.0e6],
+                vec![1.0e-18, 1.0e-19, 1.0e-20],
+                "#4ec9b0",
+            ),
+            WaveformData::new(
+                "phase_noise",
+                vec![1.0, 1.0e3, 1.0e6],
+                vec![-72.0, -103.0, -132.0],
+                "#ffbd2e",
+            ),
+        ])
+        .with_family_metadata(phase_noise_metadata());
+    let resolved = resolve_studio_viewer(phase_noise, ResultViewer::PhaseNoise)
+        .expect("exact phase-noise Studio hardcopy");
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        panic!("expected phase-noise Studio plot")
+    };
+    assert_eq!(plot.viewer, ResultViewer::PhaseNoise);
+    assert_eq!(plot.traces.len(), 1);
+    assert_eq!(plot.traces[0].label, "phase_noise");
+}
+
+#[test]
+fn studio_specialist_export_rejects_an_incompatible_bound_analysis() {
+    let transient = AnalysisResult::new(33, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+        WaveformData::new("phase_noise", vec![1.0, 2.0], vec![-80.0, -90.0], "#ffbd2e"),
+    ]);
+    assert!(matches!(
+        resolve_studio_viewer(transient, ResultViewer::PhaseNoise),
+        Err(HardcopySourceError::MissingViewerEvidence(
+            "phase-noise spectrum"
+        ))
+    ));
 }
 
 #[test]

@@ -2,9 +2,11 @@
 
 use egui::Ui;
 
+use crate::product::DatasetId;
 use crate::state::{
-    AnalysisResultPayload, TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
-    TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
+    AnalysisResultPayload, SimulationRun, TransferFunctionAccuracyEvidence,
+    TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
+    TransferFunctionScalarEvidence,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -29,9 +31,12 @@ struct TransferFunctionView<'a> {
     output_resistance: Option<TransferFunctionScalarEvidence>,
     nominal_input: Option<f64>,
     nominal_output: Option<f64>,
+    dataset_id: DatasetId,
+    dataset_authority: &'static str,
 }
 
 fn active_transfer_function(state: &AppState) -> Option<TransferFunctionView<'_>> {
+    let run = state.simulation.active_run()?;
     let analysis = state.simulation.active_analysis()?;
     let payload = analysis.result_payload.as_ref()?;
     let AnalysisResultPayload::TransferFunction {
@@ -70,7 +75,17 @@ fn active_transfer_function(state: &AppState) -> Option<TransferFunctionView<'_>
         output_resistance: *output_resistance,
         nominal_input: *nominal_input,
         nominal_output: *nominal_output,
+        dataset_id: run.dataset_id,
+        dataset_authority: dataset_authority_label(run),
     })
+}
+
+fn dataset_authority_label(run: &SimulationRun) -> &'static str {
+    match (run.prepared_receipt(), run.validate_provenance()) {
+        (Some(_), Ok(())) => "prepared receipt matched",
+        (Some(_), Err(_)) => "prepared receipt mismatch",
+        (None, _) => "prepared receipt unavailable",
+    }
 }
 
 pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
@@ -103,59 +118,72 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .show(ui, |ui| {
             ui.set_min_width(width);
             ui.add_space(14.0);
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = 10.0;
-                let card_width = ((ui.available_width() - 20.0) / 3.0).max(150.0);
-                metric_card(ui, card_width, "TRANSFER GAIN", view.gain, gain_unit(&view));
-                metric_card(
-                    ui,
-                    card_width,
-                    "INPUT RESISTANCE",
-                    view.input_resistance,
-                    "ohm",
-                );
-                metric_card(
-                    ui,
-                    card_width,
-                    "OUTPUT RESISTANCE",
-                    view.output_resistance,
-                    "ohm",
-                );
-            });
+            metric_cards(ui, &view);
 
             ui.add_space(14.0);
-            section_header(ui, "Transfer definition", None);
-            measurement_table(
-                ui,
-                &[
-                    ("Input source", view.input_source),
-                    ("Output expression", view.output_expression),
-                    ("Solve point", "DC operating point"),
-                    ("Normalization", normalization_label(view.normalization)),
-                    ("Accuracy", accuracy_label(view.accuracy)),
-                ],
-            );
-
-            if view.nominal_input.is_some() || view.nominal_output.is_some() {
-                ui.add_space(10.0);
-                section_header(ui, "Normalization evidence", None);
-                let nominal_input = view
-                    .nominal_input
-                    .map(|value| exact_value(value, view.input_unit))
-                    .unwrap_or_else(|| "Not retained".to_owned());
-                let nominal_output = view
-                    .nominal_output
-                    .map(|value| exact_value(value, view.output_unit))
-                    .unwrap_or_else(|| "Not retained".to_owned());
-                measurement_table(
-                    ui,
-                    &[
-                        ("Nominal input", nominal_input.as_str()),
-                        ("Nominal output", nominal_output.as_str()),
-                    ],
-                );
-            }
+            contract_cards(ui, &view);
         });
+}
+
+fn metric_cards(ui: &mut Ui, view: &TransferFunctionView<'_>) {
+    let available = ui.available_width().max(1.0);
+    if available >= 590.0 {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 10.0;
+            let card_width = (available - 20.0) / 3.0;
+            metric_card(
+                ui,
+                card_width,
+                "TRANSFER GAIN",
+                view.gain,
+                gain_unit(view),
+                "exact retained scalar",
+            );
+            metric_card(
+                ui,
+                card_width,
+                "INPUT RESISTANCE",
+                view.input_resistance,
+                "ohm",
+                "small-signal input resistance",
+            );
+            metric_card(
+                ui,
+                card_width,
+                "OUTPUT RESISTANCE",
+                view.output_resistance,
+                "ohm",
+                "small-signal output resistance",
+            );
+        });
+    } else {
+        metric_card(
+            ui,
+            available,
+            "TRANSFER GAIN",
+            view.gain,
+            gain_unit(view),
+            "exact retained scalar",
+        );
+        ui.add_space(8.0);
+        metric_card(
+            ui,
+            available,
+            "INPUT RESISTANCE",
+            view.input_resistance,
+            "ohm",
+            "small-signal input resistance",
+        );
+        ui.add_space(8.0);
+        metric_card(
+            ui,
+            available,
+            "OUTPUT RESISTANCE",
+            view.output_resistance,
+            "ohm",
+            "small-signal output resistance",
+        );
+    }
 }
 
 fn metric_card(
@@ -164,30 +192,154 @@ fn metric_card(
     title: &str,
     value: Option<TransferFunctionScalarEvidence>,
     unit: &str,
+    detail: &str,
 ) {
     let t = Tokens::get(ui.ctx());
-    egui::Frame::new()
-        .fill(t.color.bg_panel)
-        .stroke(egui::Stroke::new(1.0, t.color.border))
-        .inner_margin(egui::Margin::symmetric(12, 11))
-        .show(ui, |ui| {
-            ui.set_min_size(egui::vec2(width - 26.0, 68.0));
-            ui.label(
-                egui::RichText::new(title)
-                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                    .color(t.color.text_faint),
-            );
-            ui.add_space(7.0);
-            ui.label(
-                egui::RichText::new(display_scalar(value, unit))
-                    .font(theme::mono(tokens::FS_3, FontWeight::Medium))
-                    .color(if value.is_some() {
-                        t.color.text
-                    } else {
-                        t.color.text_faint
-                    }),
-            );
+    ui.allocate_ui_with_layout(
+        egui::vec2(width.max(1.0), 104.0),
+        egui::Layout::top_down(egui::Align::Min),
+        |ui| {
+            egui::Frame::new()
+                .fill(t.color.bg_panel)
+                .stroke(egui::Stroke::new(1.0, t.color.border))
+                .inner_margin(egui::Margin::symmetric(12, 11))
+                .show(ui, |ui| {
+                    ui.set_min_size(egui::vec2((width - 26.0).max(1.0), 80.0));
+                    ui.label(
+                        egui::RichText::new(title)
+                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                            .color(t.color.text_faint),
+                    );
+                    ui.add_space(7.0);
+                    ui.label(
+                        egui::RichText::new(display_scalar(value, unit))
+                            .font(theme::mono(tokens::FS_3, FontWeight::Medium))
+                            .color(if value.is_some() {
+                                t.color.text
+                            } else {
+                                t.color.text_faint
+                            }),
+                    );
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(if value.is_some() {
+                            detail
+                        } else {
+                            "scalar not retained"
+                        })
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_dim),
+                    );
+                });
+        },
+    );
+}
+
+fn contract_cards(ui: &mut Ui, view: &TransferFunctionView<'_>) {
+    let available = ui.available_width().max(1.0);
+    if available >= 610.0 {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 10.0;
+            let width = (available - 10.0) / 2.0;
+            transfer_definition_card(ui, width, view);
+            nominal_evidence_card(ui, width, view);
         });
+    } else {
+        transfer_definition_card(ui, available, view);
+        ui.add_space(10.0);
+        nominal_evidence_card(ui, available, view);
+    }
+}
+
+fn transfer_definition_card(ui: &mut Ui, width: f32, view: &TransferFunctionView<'_>) {
+    contract_card(ui, width, "Transfer definition", "retained", |ui| {
+        measurement_table(
+            ui,
+            &[
+                ("Input source", view.input_source),
+                ("Output expression", view.output_expression),
+                ("Solve point", "DC operating point"),
+                ("Normalization", normalization_label(view.normalization)),
+                ("Accuracy", accuracy_label(view.accuracy)),
+            ],
+        );
+    });
+}
+
+fn nominal_evidence_card(ui: &mut Ui, width: f32, view: &TransferFunctionView<'_>) {
+    let nominal_input = nominal_value_label(view.nominal_input, view.input_unit);
+    let nominal_output = nominal_value_label(view.nominal_output, view.output_unit);
+    let input_quantity = quantity_label(view.input_quantity);
+    let output_quantity = quantity_label(view.output_quantity);
+    let dataset = view.dataset_id.to_string();
+    let status = if view.nominal_input.is_some() && view.nominal_output.is_some() {
+        "retained"
+    } else {
+        "unavailable"
+    };
+    contract_card(ui, width, "Nominal evidence", status, |ui| {
+        measurement_table(
+            ui,
+            &[
+                ("Nominal input", nominal_input.as_str()),
+                ("Nominal output", nominal_output.as_str()),
+                ("Input quantity", input_quantity),
+                ("Output quantity", output_quantity),
+                ("Dataset", dataset.as_str()),
+                ("Authority", view.dataset_authority),
+            ],
+        );
+    });
+}
+
+fn contract_card(
+    ui: &mut Ui,
+    width: f32,
+    title: &str,
+    status: &str,
+    add_contents: impl FnOnce(&mut Ui),
+) {
+    let t = Tokens::get(ui.ctx());
+    ui.allocate_ui_with_layout(
+        egui::vec2(width.max(1.0), 232.0),
+        egui::Layout::top_down(egui::Align::Min),
+        |ui| {
+            egui::Frame::new()
+                .fill(t.color.bg_panel)
+                .stroke(egui::Stroke::new(1.0, t.color.border))
+                .inner_margin(egui::Margin::symmetric(10, 9))
+                .show(ui, |ui| {
+                    ui.set_min_size(egui::vec2((width - 22.0).max(1.0), 212.0));
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(title)
+                                .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
+                                .color(t.color.text),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                egui::RichText::new(status)
+                                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                                    .color(if status == "retained" {
+                                        t.color.ok
+                                    } else {
+                                        t.color.text_faint
+                                    }),
+                            );
+                        });
+                    });
+                    ui.separator();
+                    add_contents(ui);
+                });
+        },
+    );
+}
+
+fn nominal_value_label(value: Option<f64>, unit: &str) -> String {
+    value.map_or_else(
+        || "Not retained".to_owned(),
+        |value| exact_value(value, unit),
+    )
 }
 
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
@@ -476,5 +628,31 @@ mod tests {
         );
         assert_eq!(display_scalar(None, "A/V"), "Not retained");
         assert_eq!(exact_value(0.5, "1"), "5.000000000e-1");
+    }
+
+    #[test]
+    fn missing_nominal_evidence_remains_explicit() {
+        assert_eq!(nominal_value_label(None, "V"), "Not retained");
+        assert_eq!(nominal_value_label(Some(1.25), "V"), "1.250000000e0 V");
+    }
+
+    #[test]
+    fn unsealed_dataset_does_not_claim_authenticated_authority() {
+        let state = state_with_analyses(vec![tf_result(
+            1,
+            "XF",
+            TransferFunctionQuantityEvidence::Voltage,
+            TransferFunctionQuantityEvidence::Voltage,
+            TransferFunctionNormalizationEvidence::None,
+            1.0,
+        )]);
+
+        let view = active_transfer_function(&state).expect("active XF view");
+
+        assert_eq!(view.dataset_authority, "prepared receipt unavailable");
+        assert_eq!(
+            view.dataset_id,
+            state.simulation.active_run().unwrap().dataset_id
+        );
     }
 }

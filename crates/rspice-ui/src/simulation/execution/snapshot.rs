@@ -705,6 +705,12 @@ impl AuthorizedTaskDispatch {
         self.task.config.as_ref()
     }
 
+    pub(in crate::simulation) fn spec_options(
+        &self,
+    ) -> &crate::simulation::runner::SpecExecutionOptions {
+        &self.task.spec_options
+    }
+
     pub(in crate::simulation) fn saved_output_contracts(&self) -> &[PreparedSavedOutput] {
         &self.saved_output_contracts
     }

@@ -192,6 +192,24 @@ impl FftData {
         self.sample_rate / self.fft_size as f64
     }
 
+    /// Equivalent-noise resolution bandwidth for the applied window.
+    ///
+    /// This is the FFT bin width multiplied by the exact finite-length ENBW
+    /// of the cached window coefficients, rather than a nominal table value.
+    pub fn resolution_bandwidth(&self) -> f64 {
+        let bin_width = self.frequency_resolution();
+        if !bin_width.is_finite() || bin_width <= 0.0 {
+            return 0.0;
+        }
+        let window = cached_window(self.window, self.fft_size);
+        let bandwidth = bin_width * window.equivalent_noise_bandwidth_bins;
+        if bandwidth.is_finite() && bandwidth > 0.0 {
+            bandwidth
+        } else {
+            0.0
+        }
+    }
+
     /// Nyquist frequency
     pub fn nyquist(&self) -> f64 {
         self.sample_rate / 2.0

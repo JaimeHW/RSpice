@@ -150,6 +150,13 @@ pub(super) struct StripModel {
     traces: Vec<StripTrace>,
 }
 
+impl StripModel {
+    #[cfg(test)]
+    pub(super) const fn analysis_type(&self) -> AnalysisType {
+        self.analysis_type
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CursorDomain {
     analysis_type: AnalysisType,
@@ -176,6 +183,7 @@ impl std::fmt::Debug for ModelsCache {
 /// per-trace visibility and stored color, phase mode, and the theme palette.
 fn models_fingerprint(
     simulation: &SimulationState,
+    viewer: super::ResultViewer,
     phase_continuous: bool,
     complex_display: ComplexNumberDisplay,
     selection: Option<&SourceSampleSelection>,
@@ -185,6 +193,7 @@ fn models_fingerprint(
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     simulation.data_version.hash(&mut h);
+    viewer.hash(&mut h);
     phase_continuous.hash(&mut h);
     complex_display.hash(&mut h);
     selection
@@ -227,6 +236,7 @@ pub(super) fn cached_models(
     results.reconcile_expression_projection(simulation);
     let fp = models_fingerprint(
         simulation,
+        results.viewer,
         results.phase_continuous,
         complex_display,
         results.sample_selection.as_ref(),
@@ -238,7 +248,7 @@ pub(super) fn cached_models(
     {
         return Arc::clone(models);
     }
-    let models = Arc::new(build_models(
+    let mut built = build_models(
         simulation,
         &mut results.derived,
         t,
@@ -246,7 +256,13 @@ pub(super) fn cached_models(
         complex_display,
         results.sample_selection.as_ref(),
         &results.hidden_family_traces,
-    ));
+    );
+    built.retain(|model| match results.viewer {
+        super::ResultViewer::DcSweep => model.analysis_type == AnalysisType::DcSweep,
+        super::ResultViewer::Waves => model.analysis_type == AnalysisType::Transient,
+        _ => true,
+    });
+    let models = Arc::new(built);
     results.models.0 = Some((fp, Arc::clone(&models)));
     models
 }

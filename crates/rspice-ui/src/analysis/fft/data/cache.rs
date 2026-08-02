@@ -16,6 +16,7 @@ use crate::analysis::fft::window::{WindowFunction, generate_window};
 pub(super) struct WindowCacheEntry {
     pub(super) coefficients: Arc<[f64]>,
     pub(super) coherent_gain: f64,
+    pub(super) equivalent_noise_bandwidth_bins: f64,
 }
 
 static WINDOW_CACHE: Lazy<Mutex<HashMap<(WindowFunction, usize), WindowCacheEntry>>> =
@@ -33,14 +34,25 @@ pub(super) fn cached_window(window: WindowFunction, length: usize) -> WindowCach
     }
 
     let coefficients = generate_window(window, length);
+    let coefficient_sum = coefficients.iter().sum::<f64>();
     let coherent_gain = if length == 0 {
         0.0
     } else {
-        coefficients.iter().sum::<f64>() / length as f64
+        coefficient_sum / length as f64
+    };
+    let sum_squares = coefficients
+        .iter()
+        .map(|coefficient| coefficient * coefficient)
+        .sum::<f64>();
+    let equivalent_noise_bandwidth_bins = if coefficient_sum.abs() <= f64::EPSILON {
+        0.0
+    } else {
+        length as f64 * sum_squares / (coefficient_sum * coefficient_sum)
     };
     let entry = WindowCacheEntry {
         coefficients: Arc::from(coefficients),
         coherent_gain,
+        equivalent_noise_bandwidth_bins,
     };
     cache.insert((window, length), entry.clone());
     entry

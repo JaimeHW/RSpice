@@ -1198,6 +1198,38 @@ fn truthful_results_menu_routes_keep_their_stable_dispatch_identities() {
 }
 
 #[test]
+fn every_mockup_results_mode_is_registered_for_commands_and_shortcuts() {
+    use crate::workbench::ResultViewer;
+
+    for viewer in [
+        ResultViewer::Waves,
+        ResultViewer::DcSweep,
+        ResultViewer::Bode,
+        ResultViewer::NoiseContrib,
+        ResultViewer::Nyquist,
+        ResultViewer::Fft,
+        ResultViewer::HarmonicBalance,
+        ResultViewer::PhaseNoise,
+        ResultViewer::Smith,
+        ResultViewer::TransferFunction,
+        ResultViewer::Contribution,
+        ResultViewer::Op,
+        ResultViewer::Specs,
+        ResultViewer::Table,
+        ResultViewer::Hist,
+        ResultViewer::Eye,
+        ResultViewer::PoleZero,
+    ] {
+        let command = Command::ResultViewer(viewer);
+        assert!(
+            vocabulary::COMMAND_REGISTRY.contains(&command),
+            "Results mode is absent from the command registry: {viewer:?}"
+        );
+        assert_eq!(Command::from_stable_id(command.stable_id()), Some(command));
+    }
+}
+
+#[test]
 fn split_results_is_truthfully_gated_by_context_and_materialized_evidence() {
     let mut app = RSpiceApp::test_instance();
     let command = Command::ToggleResultsSplit;

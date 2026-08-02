@@ -981,10 +981,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 fn source_viewer(state: &AppState, analysis_type: AnalysisType) -> ResultViewer {
     let candidate = match analysis_type {
         AnalysisType::DcOp => ResultViewer::Op,
+        AnalysisType::DcSweep => ResultViewer::DcSweep,
         AnalysisType::Ac | AnalysisType::Pac | AnalysisType::Stb | AnalysisType::Pstb => {
             ResultViewer::Bode
         }
-        AnalysisType::Fourier | AnalysisType::HarmonicBalance => ResultViewer::Fft,
+        AnalysisType::Fourier => ResultViewer::Fft,
+        AnalysisType::HarmonicBalance => ResultViewer::HarmonicBalance,
+        AnalysisType::Pnoise | AnalysisType::Qpnoise => ResultViewer::PhaseNoise,
         AnalysisType::Sensitivity => ResultViewer::Contribution,
         AnalysisType::Tf | AnalysisType::Pxf | AnalysisType::Qpxf => ResultViewer::TransferFunction,
         AnalysisType::PoleZero => ResultViewer::PoleZero,

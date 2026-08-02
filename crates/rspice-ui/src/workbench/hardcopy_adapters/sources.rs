@@ -1014,11 +1014,21 @@ fn quick_result_availability(
             .any(|waveform| !waveform.x.is_empty() && waveform.x.len() == waveform.y.len())
     };
     let available = match viewer {
-        ResultViewer::Waves | ResultViewer::Bode => has_waveform(),
+        ResultViewer::Waves | ResultViewer::DcSweep | ResultViewer::Bode => has_waveform(),
         ResultViewer::Fft => visible_waveforms().any(|waveform| {
             waveform.x.len() >= crate::analysis::fft::MIN_FFT_SAMPLES
                 && waveform.x.len() == waveform.y.len()
         }),
+        ResultViewer::HarmonicBalance => {
+            crate::workbench::documents::result_document::harmonic_balance_analysis_is_renderable(
+                analysis,
+            )
+        }
+        ResultViewer::PhaseNoise => {
+            crate::workbench::documents::result_document::phase_noise_analysis_is_renderable(
+                analysis,
+            )
+        }
         ResultViewer::Eye => visible_waveforms()
             .any(|waveform| waveform.x.len() >= 8 && waveform.x.len() == waveform.y.len()),
         ResultViewer::Hist => matches!(
@@ -1149,27 +1159,95 @@ fn ordinary_noise_spectrum_is_renderable(analysis: &AnalysisResult) -> bool {
         })
 }
 
+fn transient_waveform_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
+    analysis.success
+        && analysis.analysis_type == AnalysisType::Transient
+        && analysis.waveforms.iter().any(|waveform| {
+            waveform.visible && !waveform.x.is_empty() && waveform.x.len() == waveform.y.len()
+        })
+}
+
 fn quick_result_analysis_index(
     state: &AppState,
     run: &SimulationRun,
     viewer: ResultViewer,
 ) -> Option<usize> {
-    if viewer != ResultViewer::NoiseContrib {
-        return state.simulation.active_analysis_idx;
+    match viewer {
+        ResultViewer::Waves => state
+            .simulation
+            .active_analysis_idx
+            .filter(|&index| {
+                run.analyses
+                    .get(index)
+                    .is_some_and(transient_waveform_analysis_is_renderable)
+            })
+            .or_else(|| {
+                run.analyses
+                    .iter()
+                    .position(transient_waveform_analysis_is_renderable)
+            }),
+        ResultViewer::NoiseContrib => state
+            .simulation
+            .active_analysis_idx
+            .filter(|&index| {
+                run.analyses
+                    .get(index)
+                    .is_some_and(ordinary_noise_spectrum_is_renderable)
+            })
+            .or_else(|| {
+                run.analyses
+                    .iter()
+                    .position(ordinary_noise_spectrum_is_renderable)
+            }),
+        ResultViewer::DcSweep => state
+            .simulation
+            .active_analysis_idx
+            .filter(|&index| {
+                run.analyses
+                    .get(index)
+                    .is_some_and(|analysis| analysis.analysis_type == AnalysisType::DcSweep)
+            })
+            .or_else(|| {
+                run.analyses
+                    .iter()
+                    .position(|analysis| analysis.analysis_type == AnalysisType::DcSweep)
+            }),
+        ResultViewer::PhaseNoise => state
+            .simulation
+            .active_analysis_idx
+            .filter(|&index| {
+                run.analyses.get(index).is_some_and(|analysis| {
+                    crate::workbench::documents::result_document::phase_noise_analysis_is_renderable(
+                        analysis,
+                    )
+                })
+            })
+            .or_else(|| {
+                run.analyses.iter().position(|analysis| {
+                    crate::workbench::documents::result_document::phase_noise_analysis_is_renderable(
+                        analysis,
+                    )
+                })
+            }),
+        ResultViewer::HarmonicBalance => state
+            .simulation
+            .active_analysis_idx
+            .filter(|&index| {
+                run.analyses.get(index).is_some_and(|analysis| {
+                    crate::workbench::documents::result_document::harmonic_balance_analysis_is_renderable(
+                        analysis,
+                    )
+                })
+            })
+            .or_else(|| {
+                run.analyses.iter().position(|analysis| {
+                    crate::workbench::documents::result_document::harmonic_balance_analysis_is_renderable(
+                        analysis,
+                    )
+                })
+            }),
+        _ => state.simulation.active_analysis_idx,
     }
-    state
-        .simulation
-        .active_analysis_idx
-        .filter(|&index| {
-            run.analyses
-                .get(index)
-                .is_some_and(ordinary_noise_spectrum_is_renderable)
-        })
-        .or_else(|| {
-            run.analyses
-                .iter()
-                .position(ordinary_noise_spectrum_is_renderable)
-        })
 }
 
 fn studio_pane_availability(
@@ -1197,6 +1275,36 @@ fn studio_pane_availability(
         return unavailable(format!(
             "analysis {} is unsuccessful",
             pane.analysis_sequence
+        ));
+    }
+    let specialist_evidence_available = match pane.viewer {
+        ResultViewer::HarmonicBalance => {
+            crate::workbench::documents::result_document::harmonic_balance_analysis_is_renderable(
+                analysis,
+            ) && analysis.waveforms.iter().any(|waveform| {
+                waveform.visible
+                    && crate::workbench::documents::result_document::harmonic_balance_waveform_is_renderable(
+                        waveform,
+                    )
+            })
+        }
+        ResultViewer::PhaseNoise => {
+            crate::workbench::documents::result_document::phase_noise_analysis_is_renderable(
+                analysis,
+            ) && analysis.waveforms.iter().any(|waveform| {
+                waveform.visible
+                    && crate::workbench::documents::result_document::phase_noise_waveform_is_renderable(
+                        waveform,
+                    )
+            })
+        }
+        _ => true,
+    };
+    if !specialist_evidence_available {
+        return unavailable(format!(
+            "analysis {} does not retain visible exact evidence for {}",
+            pane.analysis_sequence,
+            pane.viewer.label()
         ));
     }
     RetainedHardcopySourceAvailability::Available

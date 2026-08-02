@@ -40,6 +40,27 @@ impl FftState {
         self.selected_source = source_name;
     }
 
+    /// Change the displayed amplitude convention and recompute all dependent
+    /// metrics from the same prepared time-domain source. Imported test data
+    /// without a retained source is converted in place instead.
+    pub fn set_normalization(&mut self, normalization: SpectrumNormalization) {
+        if self.normalization == normalization {
+            return;
+        }
+        self.normalization = normalization;
+        if self.source_cache.is_some() {
+            self.recompute_from_source();
+            return;
+        }
+        let Some(data) = self.data.as_mut() else {
+            return;
+        };
+        data.convert_normalization(normalization);
+        self.analysis = Some(SpectrumAnalysis::analyze(data, self.num_harmonics));
+        self.mark_spectrum_changed();
+        self.update_auto_scale();
+    }
+
     /// Active FFT input pipeline policy.
     pub fn input_policy(&self) -> FftInputPolicy {
         self.input_fidelity.input_policy()
@@ -159,5 +180,47 @@ fn finite_time_bounds(time: &[f64]) -> Option<(f64, f64)> {
         Some((start, end))
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analysis::fft::data::SpectrumNormalization;
+
+    #[test]
+    fn normalization_change_recomputes_spectrum_metrics_and_revision() {
+        let samples = (0..64)
+            .map(|index| (index as f64 * std::f64::consts::TAU / 8.0).sin())
+            .collect::<Vec<_>>();
+        let input = PreparedFftInput {
+            name: "V(out)".to_owned(),
+            samples,
+            sample_rate: 64.0,
+            original_count: 64,
+            decimation_factor: 1,
+        };
+        let mut state = FftState::default();
+        state.load_prepared_input(input);
+        let rms_level = state
+            .analysis
+            .as_ref()
+            .and_then(|analysis| analysis.fundamental_db)
+            .unwrap();
+        let revision = state.spectrum_revision();
+
+        state.set_normalization(SpectrumNormalization::Peak);
+
+        let peak_level = state
+            .analysis
+            .as_ref()
+            .and_then(|analysis| analysis.fundamental_db)
+            .unwrap();
+        assert_eq!(
+            state.data.as_ref().unwrap().normalization,
+            SpectrumNormalization::Peak
+        );
+        assert!(state.spectrum_revision() > revision);
+        assert!((peak_level - rms_level - 3.010_299_956_639_812).abs() < 1.0e-9);
     }
 }

@@ -14,6 +14,19 @@ pub enum SpectrumNormalization {
 }
 
 impl SpectrumNormalization {
+    /// Stable UI order for the supported amplitude conventions.
+    pub const fn all() -> &'static [Self] {
+        &[Self::Peak, Self::Rms]
+    }
+
+    /// User-facing name for the amplitude convention.
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::Peak => "Peak amplitude",
+            Self::Rms => "RMS amplitude",
+        }
+    }
+
     #[inline]
     pub(super) fn scale_from_peak(&self) -> f64 {
         match self {

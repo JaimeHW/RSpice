@@ -700,7 +700,21 @@ fn select_pane_context(state: &mut AppState, pane: &Pane) -> Result<(), String> 
 }
 
 fn bound_viewer_projection(state: &AppState, viewer: ResultViewer) -> ResultViewer {
-    if viewer == ResultViewer::Bode
+    if viewer == ResultViewer::Waves
+        && state
+            .simulation
+            .active_analysis()
+            .is_some_and(|analysis| analysis.analysis_type == AnalysisType::DcSweep)
+    {
+        ResultViewer::DcSweep
+    } else if viewer == ResultViewer::Fft
+        && state
+            .simulation
+            .active_analysis()
+            .is_some_and(|analysis| analysis.analysis_type == AnalysisType::HarmonicBalance)
+    {
+        ResultViewer::HarmonicBalance
+    } else if viewer == ResultViewer::Bode
         && state
             .simulation
             .active_analysis()
@@ -729,9 +743,10 @@ fn select_pane_binding(state: &mut AppState, pane: &Pane) -> Result<(), String> 
 const fn viewer_document_id(viewer: ResultViewer) -> Option<&'static str> {
     Some(match viewer {
         ResultViewer::Manifest => return None,
-        ResultViewer::Waves => "viewer-waveform",
+        ResultViewer::Waves | ResultViewer::DcSweep => "viewer-waveform",
         ResultViewer::Bode | ResultViewer::NoiseContrib | ResultViewer::Nyquist => "viewer-bode",
-        ResultViewer::Fft => "viewer-spectrum",
+        ResultViewer::Fft | ResultViewer::HarmonicBalance => "viewer-spectrum",
+        ResultViewer::PhaseNoise => "viewer-phase-noise",
         ResultViewer::Eye => "eye-viewer",
         ResultViewer::Hist => "viewer-histogram",
         ResultViewer::Op | ResultViewer::Specs | ResultViewer::Table => "viewer-table",
@@ -778,6 +793,7 @@ pub(super) fn renderer_for_viewer_document(id: &str) -> Option<ResultViewer> {
         "viewer-waveform" => Some(ResultViewer::Waves),
         "viewer-bode" => Some(ResultViewer::Bode),
         "viewer-spectrum" => Some(ResultViewer::Fft),
+        "viewer-phase-noise" => Some(ResultViewer::PhaseNoise),
         "viewer-smith" => Some(ResultViewer::Smith),
         "viewer-table" => Some(ResultViewer::Table),
         "viewer-histogram" => Some(ResultViewer::Hist),
@@ -814,8 +830,10 @@ pub(super) fn renderer_supports_analysis(id: &str, analysis: &AnalysisResult) ->
         // transient samples. It does not reinterpret HB/PSS tone tables as an
         // FFT document.
         "viewer-spectrum" => {
-            analysis.analysis_type == AnalysisType::Transient && !analysis.waveforms.is_empty()
+            (analysis.analysis_type == AnalysisType::Transient && !analysis.waveforms.is_empty())
+                || super::harmonic_balance_analysis_is_renderable(analysis)
         }
+        "viewer-phase-noise" => super::phase_noise_analysis_is_renderable(analysis),
         "viewer-smith" => {
             analysis.analysis_type == AnalysisType::SParameter && !analysis.waveforms.is_empty()
         }
@@ -1030,7 +1048,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_renderer_mapping_never_substitutes_unimplemented_catalog_viewers() {
+    fn exact_renderer_mapping_exposes_only_implemented_catalog_viewers() {
         assert_eq!(
             renderer_for_viewer_document("viewer-waveform"),
             Some(ResultViewer::Waves)
@@ -1039,7 +1057,10 @@ mod tests {
             renderer_for_viewer_document("viewer-table"),
             Some(ResultViewer::Table)
         );
-        assert_eq!(renderer_for_viewer_document("viewer-phase-noise"), None);
+        assert_eq!(
+            renderer_for_viewer_document("viewer-phase-noise"),
+            Some(ResultViewer::PhaseNoise)
+        );
         assert_eq!(renderer_for_viewer_document("viewer-manifest"), None);
         assert_eq!(renderer_for_viewer_document("manifest"), None);
         assert_eq!(renderer_for_viewer_document("field-viewer-3d"), None);
@@ -1095,8 +1116,11 @@ mod tests {
     fn interactive_result_viewers_keep_canonical_document_identity() {
         for viewer in [
             ResultViewer::Waves,
+            ResultViewer::DcSweep,
             ResultViewer::Bode,
             ResultViewer::Fft,
+            ResultViewer::HarmonicBalance,
+            ResultViewer::PhaseNoise,
             ResultViewer::Eye,
             ResultViewer::Hist,
             ResultViewer::Op,
