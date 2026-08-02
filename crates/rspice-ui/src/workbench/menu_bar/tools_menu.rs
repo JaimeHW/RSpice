@@ -61,7 +61,4 @@ pub(crate) fn run_design_rule_check(state: &mut AppState) {
             None,
         );
     }
-
-    state.dialogs.drc_results = Some(result);
-    state.dialogs.drc_checked_version = state.schematic.topology_version();
 }

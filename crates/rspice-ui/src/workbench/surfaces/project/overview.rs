@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 use egui::{Align, Align2, Color32, Layout, Rect, Sense, Stroke, Ui, pos2, vec2};
 
 use crate::services::drc::DrcSeverity;
+use crate::state::netlist_document::{DiagnosticSeverity, DocumentOwnership};
 use crate::state::{CellViewRef, SimulationRunLifecycle, ViewType};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
@@ -17,6 +18,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::DesignCheckStatus;
+use crate::workbench::commands::CommandAvailability;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
 use crate::workbench::state::{ModelsCatalogScope, ModelsPage, ProjectPage, Workspace};
@@ -27,10 +29,10 @@ const IDENTITY_PANEL_HEIGHT: f32 = 176.0;
 const IDENTITY_PANEL_COMPACT_HEIGHT: f32 = 210.0;
 const FIRST_ROW_MIN_HEIGHT: f32 = 176.0;
 const SECOND_ROW_MIN_HEIGHT: f32 = 214.0;
-const SECTION_HEADER_HEIGHT: f32 = 26.0;
+const SECTION_HEADER_HEIGHT: f32 = 24.0;
 const STATUS_ROW_HEIGHT: f32 = 27.0;
-const REGISTER_ROW_HEIGHT: f32 = 21.0;
-const ACTIVITY_ROW_HEIGHT: f32 = 34.0;
+const REGISTER_ROW_HEIGHT: f32 = 17.0;
+const ACTIVITY_ROW_HEIGHT: f32 = 30.0;
 const TWO_COLUMN_BREAKPOINT: f32 = 561.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,6 +64,8 @@ struct StatusSnapshot {
     action: &'static str,
     tone: Tone,
     intent: OverviewIntent,
+    enabled: bool,
+    disabled_reason: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,6 +164,20 @@ struct DesignObjectSnapshot {
     top: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SourceDeckSnapshot {
+    name: String,
+    ownership: &'static str,
+    revision: u64,
+    line_count: usize,
+    dependency_count: usize,
+    dependencies_sealed: bool,
+    validation_state: String,
+    validation_detail: String,
+    validation_tone: Tone,
+    problem: ProblemSnapshot,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct OverviewSnapshot {
     project_name: String,
@@ -180,6 +198,8 @@ struct OverviewSnapshot {
     root_sheet_count: usize,
     root_instance_count: usize,
     root_net_count: usize,
+    netlist_first: bool,
+    source_deck: Option<SourceDeckSnapshot>,
     configuration: ConfigurationSnapshot,
     statuses: Vec<StatusSnapshot>,
     problem: ProblemSnapshot,
@@ -189,11 +209,151 @@ struct OverviewSnapshot {
     execution_target: String,
 }
 
+fn command_gate(app: &RSpiceApp, command: Command) -> (bool, Option<&'static str>) {
+    match command.availability(app) {
+        CommandAvailability::Available => (true, None),
+        CommandAvailability::Disabled(reason) => (false, Some(reason)),
+        CommandAvailability::Hidden => (false, Some("this action is unavailable in this context")),
+    }
+}
+
+fn source_deck_snapshot(
+    state: &crate::workbench::app_state::AppState,
+) -> Option<SourceDeckSnapshot> {
+    let document = state.workspace.netlist_document.as_ref()?;
+    let name = document
+        .provenance()
+        .imported()
+        .map(|imported| imported.origin().display_name().to_owned())
+        .or_else(|| {
+            document
+                .save_acknowledgement()
+                .map(|saved| saved.origin().display_name().to_owned())
+        })
+        .or_else(|| {
+            state
+                .workspace
+                .netlist_source_path
+                .as_ref()
+                .and_then(|path| path.file_name())
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| "Untitled SPICE deck".to_owned());
+    let ownership = match document.ownership() {
+        DocumentOwnership::Generated => "generated",
+        DocumentOwnership::Imported => "imported",
+        DocumentOwnership::Editable => "editable",
+    };
+    let line_count = document.source().lines().count();
+    let dependency_count = document.dependencies().len();
+    let dependencies_sealed = document.dependency_graph_is_sealed();
+    let validation = document.validation();
+    let validation_current =
+        validation.is_some_and(|report| report.content_digest() == document.content_digest());
+
+    let (validation_state, validation_detail, validation_tone, problem) = match validation {
+        None => (
+            "Not validated".to_owned(),
+            "Validate the retained source before execution".to_owned(),
+            Tone::Warn,
+            ProblemSnapshot {
+                code: "NOT RUN".to_owned(),
+                message: "Validate the project source deck".to_owned(),
+                path: name.clone(),
+                tone: Tone::Warn,
+            },
+        ),
+        Some(_) if !validation_current => (
+            "Stale".to_owned(),
+            "The source changed after the retained validation".to_owned(),
+            Tone::Warn,
+            ProblemSnapshot {
+                code: "STALE".to_owned(),
+                message: "Source changed after the retained validation".to_owned(),
+                path: name.clone(),
+                tone: Tone::Warn,
+            },
+        ),
+        Some(report) => {
+            let errors = report.error_count();
+            let warnings = report.warning_count();
+            let info = report.diagnostics().len().saturating_sub(errors + warnings);
+            let tone = if errors > 0 {
+                Tone::Error
+            } else if warnings > 0 {
+                Tone::Warn
+            } else {
+                Tone::Ok
+            };
+            let state_label = if errors > 0 {
+                format!(
+                    "{errors} blocking {}",
+                    singular_or_plural(errors, "diagnostic", "diagnostics")
+                )
+            } else {
+                "Validated".to_owned()
+            };
+            let detail = format!(
+                "{warnings} {} · {info} information",
+                singular_or_plural(warnings, "advisory", "advisories")
+            );
+            let highest = report
+                .diagnostics()
+                .iter()
+                .max_by_key(|diagnostic| diagnostic.severity());
+            let problem = highest.map_or_else(
+                || ProblemSnapshot {
+                    code: "SOURCE".to_owned(),
+                    message: "No current source diagnostics".to_owned(),
+                    path: name.clone(),
+                    tone: Tone::Ok,
+                },
+                |diagnostic| {
+                    let position = diagnostic.position();
+                    ProblemSnapshot {
+                        code: diagnostic.code().map_or_else(
+                            || match diagnostic.severity() {
+                                DiagnosticSeverity::Info => "SPICE-INFO".to_owned(),
+                                DiagnosticSeverity::Warning => "SPICE-WARN".to_owned(),
+                                DiagnosticSeverity::Error => "SPICE-ERROR".to_owned(),
+                            },
+                            str::to_owned,
+                        ),
+                        message: diagnostic.message().to_owned(),
+                        path: format!("{}:{}:{}", name, position.line(), position.column()),
+                        tone: match diagnostic.severity() {
+                            DiagnosticSeverity::Info => Tone::Info,
+                            DiagnosticSeverity::Warning => Tone::Warn,
+                            DiagnosticSeverity::Error => Tone::Error,
+                        },
+                    }
+                },
+            );
+            (state_label, detail, tone, problem)
+        }
+    };
+
+    Some(SourceDeckSnapshot {
+        name,
+        ownership,
+        revision: document.revision().get(),
+        line_count,
+        dependency_count,
+        dependencies_sealed,
+        validation_state,
+        validation_detail,
+        validation_tone,
+        problem,
+    })
+}
+
 impl OverviewSnapshot {
     fn capture(app: &RSpiceApp) -> Self {
         let state = &app.state;
         let project = &state.workspace.project;
         let dirty_documents = dirty_document_count(state);
+        let netlist_first = state.is_netlist_first_without_schematic();
+        let source_deck = source_deck_snapshot(state);
         let configuration = configuration_snapshot(app);
         let checks = checks_snapshot(app);
         let models = model_snapshot(app);
@@ -225,13 +385,19 @@ impl OverviewSnapshot {
         });
 
         let latest_run_status = state.simulation.runs.first().map_or_else(
-            || StatusSnapshot {
-                area: "Latest run",
-                state: "No retained run".to_owned(),
-                detail: "Run the active plan to create immutable result evidence".to_owned(),
-                action: "Open analyses",
-                tone: Tone::Neutral,
-                intent: OverviewIntent::Command(Command::OpenWorkspace(Workspace::Simulate)),
+            || {
+                let command = Command::OpenWorkspace(Workspace::Simulate);
+                let (enabled, disabled_reason) = command_gate(app, command);
+                StatusSnapshot {
+                    area: "Latest run",
+                    state: "No retained run".to_owned(),
+                    detail: "Run the active plan to create immutable result evidence".to_owned(),
+                    action: "Open analyses",
+                    tone: Tone::Neutral,
+                    intent: OverviewIntent::Command(command),
+                    enabled,
+                    disabled_reason,
+                }
             },
             |run| {
                 let measurement_count: usize = run
@@ -240,6 +406,13 @@ impl OverviewSnapshot {
                     .map(|analysis| analysis.measurements.len())
                     .sum();
                 let has_dataset = !run.analyses.is_empty();
+                let destination = if has_dataset {
+                    Workspace::Results
+                } else {
+                    Workspace::Simulate
+                };
+                let (enabled, disabled_reason) =
+                    command_gate(app, Command::OpenWorkspace(destination));
                 StatusSnapshot {
                     area: "Latest run",
                     state: format!(
@@ -264,11 +437,43 @@ impl OverviewSnapshot {
                     },
                     tone: lifecycle_tone(run.lifecycle, run.success),
                     intent: OverviewIntent::OpenRun(0),
+                    enabled,
+                    disabled_reason,
                 }
             },
         );
 
-        let statuses = vec![
+        let (configuration_enabled, configuration_disabled_reason) =
+            command_gate(app, Command::ConfigurationSets);
+        let (models_enabled, models_disabled_reason) =
+            command_gate(app, Command::ModelsPage(ModelsPage::Models));
+        let primary_status = if netlist_first {
+            let (enabled, disabled_reason) =
+                command_gate(app, Command::OpenWorkspace(Workspace::Netlist));
+            source_deck.as_ref().map_or_else(
+                || StatusSnapshot {
+                    area: "Source deck",
+                    state: "Unavailable".to_owned(),
+                    detail: "The project has no retained canonical source document".to_owned(),
+                    action: "Open deck",
+                    tone: Tone::Error,
+                    intent: OverviewIntent::Command(Command::OpenWorkspace(Workspace::Netlist)),
+                    enabled,
+                    disabled_reason,
+                },
+                |deck| StatusSnapshot {
+                    area: "Source deck",
+                    state: deck.validation_state.clone(),
+                    detail: deck.validation_detail.clone(),
+                    action: "Open deck",
+                    tone: deck.validation_tone,
+                    intent: OverviewIntent::Command(Command::OpenWorkspace(Workspace::Netlist)),
+                    enabled,
+                    disabled_reason,
+                },
+            )
+        } else {
+            let enabled = state.project_lifecycle.project_open;
             StatusSnapshot {
                 area: "Schematic checks",
                 state: checks.state,
@@ -276,7 +481,12 @@ impl OverviewSnapshot {
                 action: "Run checks",
                 tone: checks.tone,
                 intent: OverviewIntent::ProjectRootCommand(Command::RunChecks),
-            },
+                enabled,
+                disabled_reason: (!enabled).then_some("no project is open"),
+            }
+        };
+        let statuses = vec![
+            primary_status,
             StatusSnapshot {
                 area: "Configuration",
                 state: configuration.state.clone(),
@@ -284,6 +494,8 @@ impl OverviewSnapshot {
                 action: "Manage",
                 tone: configuration.tone,
                 intent: OverviewIntent::Command(Command::ConfigurationSets),
+                enabled: configuration_enabled,
+                disabled_reason: configuration_disabled_reason,
             },
             latest_run_status,
             StatusSnapshot {
@@ -293,9 +505,23 @@ impl OverviewSnapshot {
                 action: "Inspect",
                 tone: models.tone,
                 intent: OverviewIntent::OpenProjectModels,
+                enabled: models_enabled,
+                disabled_reason: models_disabled_reason,
             },
         ];
-        let problem = problem_snapshot(app);
+        let problem = if netlist_first {
+            source_deck.as_ref().map_or_else(
+                || ProblemSnapshot {
+                    code: "SOURCE".to_owned(),
+                    message: "The canonical source document is unavailable".to_owned(),
+                    path: "Project source".to_owned(),
+                    tone: Tone::Error,
+                },
+                |deck| deck.problem.clone(),
+            )
+        } else {
+            problem_snapshot(app)
+        };
 
         let open_documents = state
             .workspace
@@ -419,6 +645,8 @@ impl OverviewSnapshot {
             root_sheet_count,
             root_instance_count,
             root_net_count,
+            netlist_first,
+            source_deck,
             configuration,
             statuses,
             problem,
@@ -474,18 +702,21 @@ pub(super) fn overview(ui: &mut Ui, app: &mut RSpiceApp) {
                             overview_header(ui, app, &snapshot)
                         }),
                     );
+                    stacked_divider(ui);
                     retain_first_intent(
                         &mut intent,
                         overview_single_panel(ui, FIRST_ROW_MIN_HEIGHT, |ui| {
                             engineering_status_register(ui, &snapshot.statuses, &snapshot.problem)
                         }),
                     );
+                    stacked_divider(ui);
                     retain_first_intent(
                         &mut intent,
                         overview_single_panel(ui, SECOND_ROW_MIN_HEIGHT, |ui| {
-                            project_and_document_registers(ui, &snapshot)
+                            project_and_document_registers(ui, app, &snapshot)
                         }),
                     );
+                    stacked_divider(ui);
                     retain_first_intent(
                         &mut intent,
                         overview_single_panel(ui, SECOND_ROW_MIN_HEIGHT, |ui| {
@@ -514,7 +745,7 @@ pub(super) fn overview(ui: &mut Ui, app: &mut RSpiceApp) {
                     ui,
                     "design-operations",
                     second_row_height,
-                    |ui| project_and_document_registers(ui, &snapshot),
+                    |ui| project_and_document_registers(ui, app, &snapshot),
                     |ui| run_register(ui, &snapshot),
                 ),
             );
@@ -553,6 +784,13 @@ fn overview_single_panel(
             content(ui)
         })
         .inner
+}
+
+fn stacked_divider(ui: &mut Ui) {
+    let width = visible_workspace_width(ui);
+    let (rect, _) = ui.allocate_exact_size(vec2(width, 1.0), Sense::hover());
+    ui.painter()
+        .rect_filled(rect, 0.0, Tokens::get(ui.ctx()).color.border);
 }
 
 fn overview_panel_pair(
@@ -645,12 +883,12 @@ fn overview_header(
     ui.painter().rect_filled(rect, 0.0, tokens.color.bg_panel);
 
     let content = rect.shrink2(vec2(14.0, 0.0));
-    let text_rect = Rect::from_min_max(content.min, pos2(content.right(), rect.top() + 72.0));
+    let text_rect = Rect::from_min_max(content.min, pos2(content.right(), rect.top() + 54.0));
     let action_rect = Rect::from_min_max(
-        pos2(content.left(), rect.top() + 74.0),
+        pos2(content.left(), rect.top() + 58.0),
         pos2(
             content.right(),
-            rect.top() + if compact { 156.0 } else { 124.0 },
+            rect.top() + if compact { 140.0 } else { 102.0 },
         ),
     );
 
@@ -725,33 +963,23 @@ fn overview_header(
         project_tone.color(&tokens),
     );
     let state_label = if !snapshot.persistence_bound {
-        "No accepted saved baseline".to_owned()
+        "no saved baseline".to_owned()
     } else if snapshot.dirty_documents == 0 {
-        "Saved state current".to_owned()
+        "working tree clean".to_owned()
     } else {
         format!(
-            "{} modified {} · unsaved working changes",
+            "{} working {}",
             snapshot.dirty_documents,
-            singular_or_plural(snapshot.dirty_documents, "document", "documents")
+            singular_or_plural(snapshot.dirty_documents, "change", "changes")
         )
     };
-    let state_color = if snapshot.persistence_bound && snapshot.dirty_documents == 0 {
-        tokens.color.ok
-    } else {
-        tokens.color.warn
-    };
     paint_elided(
         ui,
-        pos2(text_rect.left(), rect.top() + 34.0),
-        &format!("Revision {} · {state_label}", snapshot.project_revision),
-        theme::mono(tokens::FS_1, FontWeight::Medium),
-        state_color,
-        text_rect.width(),
-    );
-    paint_elided(
-        ui,
-        pos2(text_rect.left(), rect.top() + 53.0),
-        &snapshot.path,
+        pos2(text_rect.left(), rect.top() + 36.0),
+        &format!(
+            "main @ r{} · {} · {}",
+            snapshot.project_revision, state_label, snapshot.path
+        ),
         theme::mono(tokens::FS_0, FontWeight::Regular),
         tokens.color.text_faint,
         text_rect.width(),
@@ -764,56 +992,90 @@ fn overview_header(
             .layout(Layout::top_down(Align::Min)),
         |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                if Button::new("Open top schematic")
-                    .icon(Icon::Schematic)
-                    .accent()
-                    .show(ui)
-                    .clicked()
-                {
-                    intent = Some(OverviewIntent::OpenProjectRoot);
-                }
-                let run_label = if narrow_actions {
-                    "Run plan\u{2026}".to_owned()
+                ui.spacing_mut().item_spacing.x = 8.0;
+                let primary = if snapshot.netlist_first {
+                    Button::new("Open SPICE deck").icon(Icon::File)
                 } else {
-                    format!("Run {}…", snapshot.run_plan_name)
+                    Button::new("Open top schematic").icon(Icon::Schematic)
                 };
-                if Button::new(&run_label).show(ui).clicked() {
-                    intent = Some(run_plan_intent());
+                if primary.accent().show(ui).clicked() {
+                    intent = Some(if snapshot.netlist_first {
+                        OverviewIntent::Command(Command::OpenWorkspace(Workspace::Netlist))
+                    } else {
+                        OverviewIntent::OpenProjectRoot
+                    });
                 }
-                let new_cell_allowed = !app.state.workbench.safe_mode.project_read_only()
-                    && app
-                        .state
-                        .library_manager
-                        .libraries_sorted()
-                        .iter()
-                        .any(|library| !library.read_only);
+                if !snapshot.netlist_first {
+                    let run_label = if narrow_actions {
+                        "Run plan\u{2026}".to_owned()
+                    } else {
+                        format!("Run {}…", snapshot.run_plan_name)
+                    };
+                    let command = Command::OpenWorkspace(Workspace::Simulate);
+                    let (enabled, disabled_reason) = command_gate(app, command);
+                    let run_plan = ui
+                        .add_enabled_ui(enabled, |ui| Button::new(&run_label).show(ui))
+                        .inner;
+                    let run_plan = disabled_reason.map_or(run_plan.clone(), |reason| {
+                        run_plan.on_disabled_hover_text(reason)
+                    });
+                    if run_plan.clicked() {
+                        intent = Some(run_plan_intent());
+                    }
+                }
+                let (new_cell_command_enabled, new_cell_command_reason) =
+                    command_gate(app, Command::NewCell);
+                let has_writable_library = app
+                    .state
+                    .library_manager
+                    .libraries_sorted()
+                    .iter()
+                    .any(|library| !library.read_only);
+                let new_cell_allowed = new_cell_command_enabled
+                    && !app.state.workbench.safe_mode.project_read_only()
+                    && has_writable_library;
                 let new_cell = ui
                     .add_enabled_ui(new_cell_allowed, |ui| Button::new("New cell…").show(ui))
                     .inner
-                    .on_disabled_hover_text(if app.state.workbench.safe_mode.project_read_only() {
+                    .on_disabled_hover_text(if let Some(reason) = new_cell_command_reason {
+                        reason
+                    } else if app.state.workbench.safe_mode.project_read_only() {
                         "Safe mode opened this project read-only."
-                    } else {
+                    } else if !has_writable_library {
                         "Attach or create a writable design library first."
+                    } else {
+                        "New cell creation is unavailable."
                     });
                 if new_cell.clicked() {
                     intent = Some(OverviewIntent::Command(Command::NewCell));
                 }
+                let open_deck_command = Command::OpenNetlist;
+                let (open_deck_enabled, open_deck_disabled_reason) =
+                    command_gate(app, open_deck_command);
                 let import_deck = ui
-                    .add_enabled_ui(Command::ImportNetlist.is_enabled(app), |ui| {
-                        Button::new("Import deck…").show(ui)
-                    })
+                    .add_enabled_ui(open_deck_enabled, |ui| Button::new("Import deck…").show(ui))
                     .inner;
+                let import_deck = open_deck_disabled_reason.map_or(import_deck.clone(), |reason| {
+                    import_deck.on_disabled_hover_text(reason)
+                });
                 if import_deck.clicked() {
-                    intent = Some(OverviewIntent::Command(Command::ImportNetlist));
+                    intent = Some(import_deck_intent());
                 }
-                if Button::new("History…").show(ui).clicked() {
+                let history_command = Command::RevisionHistory;
+                let (history_enabled, history_disabled_reason) = command_gate(app, history_command);
+                let history = ui
+                    .add_enabled_ui(history_enabled, |ui| Button::new("History…").show(ui))
+                    .inner;
+                let history = history_disabled_reason.map_or(history.clone(), |reason| {
+                    history.on_disabled_hover_text(reason)
+                });
+                if history.clicked() {
                     intent = Some(OverviewIntent::Command(Command::RevisionHistory));
                 }
             });
         },
     );
-    let context_top = rect.top() + if compact { 160.0 } else { 126.0 };
+    let context_top = rect.top() + if compact { 149.0 } else { 114.0 };
     let context_row_height = 25.0;
     let column_gap = 18.0;
     let column_width = ((content.width() - column_gap) * 0.5).max(1.0);
@@ -830,14 +1092,51 @@ fn overview_header(
         context_top,
         Stroke::new(1.0, tokens.color.border),
     );
+    let (left_top_label, left_top_value, left_bottom_label, left_bottom_value) =
+        if snapshot.netlist_first {
+            let deck = snapshot.source_deck.as_ref();
+            (
+                "Source deck",
+                deck.map_or("Unavailable", |deck| deck.name.as_str())
+                    .to_owned(),
+                "Validation",
+                deck.map_or("Unavailable", |deck| deck.validation_state.as_str())
+                    .to_owned(),
+            )
+        } else {
+            let configuration_status = match snapshot.configuration.tone {
+                Tone::Error => "blocked",
+                Tone::Warn => "review required",
+                _ => "resolved",
+            };
+            (
+                "Top / DUT",
+                format!(
+                    "{} \u{00b7} {}",
+                    snapshot.descriptor_root, snapshot.configuration.dut
+                ),
+                "Configuration",
+                format!("{} · {configuration_status}", snapshot.configuration.state),
+            )
+        };
+    let (right_top_label, right_top_value) = if snapshot.netlist_first {
+        (
+            "Ownership",
+            snapshot
+                .source_deck
+                .as_ref()
+                .map_or("Unavailable", |deck| deck.ownership)
+                .to_owned(),
+        )
+    } else {
+        ("Testbench", snapshot.configuration.root.clone())
+    };
     identity_context_row(
         ui,
         Rect::from_min_size(left.min, vec2(left.width(), context_row_height)),
-        "Top / DUT",
-        &format!(
-            "{} \u{00b7} {}",
-            snapshot.descriptor_root, snapshot.configuration.dut
-        ),
+        left_top_label,
+        &left_top_value,
+        true,
     );
     identity_context_row(
         ui,
@@ -845,14 +1144,16 @@ fn overview_header(
             pos2(left.left(), left.top() + context_row_height),
             vec2(left.width(), context_row_height),
         ),
-        "Configuration",
-        &snapshot.configuration.state,
+        left_bottom_label,
+        &left_bottom_value,
+        false,
     );
     identity_context_row(
         ui,
         Rect::from_min_size(right.min, vec2(right.width(), context_row_height)),
-        "Testbench",
-        &snapshot.configuration.root,
+        right_top_label,
+        &right_top_value,
+        !snapshot.netlist_first,
     );
     identity_context_row(
         ui,
@@ -862,6 +1163,7 @@ fn overview_header(
         ),
         "Execution",
         &snapshot.execution_target,
+        false,
     );
     response.on_hover_text(format!(
         "Project {} · logical revision {} · schema {}",
@@ -874,7 +1176,11 @@ fn run_plan_intent() -> OverviewIntent {
     OverviewIntent::Command(Command::OpenWorkspace(Workspace::Simulate))
 }
 
-fn identity_context_row(ui: &Ui, rect: Rect, label: &str, value: &str) {
+fn import_deck_intent() -> OverviewIntent {
+    OverviewIntent::Command(Command::OpenNetlist)
+}
+
+fn identity_context_row(ui: &Ui, rect: Rect, label: &str, value: &str, mono: bool) {
     let tokens = Tokens::get(ui.ctx());
     ui.painter().hline(
         rect.x_range(),
@@ -891,6 +1197,11 @@ fn identity_context_row(ui: &Ui, rect: Rect, label: &str, value: &str) {
         theme::sans(tokens::FS_0, FontWeight::Regular),
         tokens.color.text_faint,
     );
+    let value_font = if mono {
+        theme::mono(tokens::FS_0, FontWeight::Regular)
+    } else {
+        theme::sans(tokens::FS_0, FontWeight::Regular)
+    };
     paint_elided(
         ui,
         pos2(
@@ -898,7 +1209,7 @@ fn identity_context_row(ui: &Ui, rect: Rect, label: &str, value: &str) {
             rect.center().y - tokens::FS_0 * 0.5,
         ),
         value,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
+        value_font,
         tokens.color.text,
         (rect.width() - label_width - LABEL_VALUE_GAP).max(0.0),
     );
@@ -961,42 +1272,62 @@ fn engineering_status_register(
     problem: &ProblemSnapshot,
 ) -> Option<OverviewIntent> {
     let tokens = Tokens::get(ui.ctx());
+    let status_tone = if statuses.iter().any(|status| status.tone == Tone::Error) {
+        Tone::Error
+    } else if statuses.iter().any(|status| status.tone == Tone::Warn) {
+        Tone::Warn
+    } else {
+        Tone::Ok
+    };
     section_header(
         ui,
         "Project status",
-        if statuses.iter().all(|status| status.tone == Tone::Ok) {
+        if status_tone == Tone::Ok {
             "current"
         } else {
             "review required"
         },
-        if statuses.iter().all(|status| status.tone == Tone::Ok) {
-            Tone::Ok
-        } else {
-            Tone::Warn
-        },
+        status_tone,
     );
+    ui.add_space(4.0);
     let width = ui.available_width().max(1.0);
     let mut requested = None;
     for (index, status) in statuses.iter().enumerate() {
         let detail_offset = (width * 0.42).max(118.0).min((width - 64.0).max(1.0));
-        let (rect, response) =
-            ui.allocate_exact_size(vec2(width, STATUS_ROW_HEIGHT), Sense::click());
-        if response.hovered() || response.has_focus() {
+        let (rect, response) = ui.allocate_exact_size(
+            vec2(width, STATUS_ROW_HEIGHT),
+            if status.enabled {
+                Sense::click()
+            } else {
+                Sense::hover()
+            },
+        );
+        if status.enabled && (response.hovered() || response.has_focus()) {
             ui.painter()
                 .rect_filled(rect.shrink2(vec2(8.0, 2.0)), 3.0, tokens.color.bg_hover);
         }
+        let primary_color = if status.enabled {
+            tokens.color.text
+        } else {
+            tokens.color.text_faint
+        };
+        let detail_color = if status.enabled {
+            tokens.color.text_dim
+        } else {
+            tokens.color.text_faint
+        };
         ui.painter().circle_filled(
-            pos2(rect.left() + 13.0, rect.center().y),
+            pos2(rect.left() + 18.0, rect.center().y),
             3.5,
             status.tone.color(&tokens),
         );
         paint_elided(
             ui,
-            pos2(rect.left() + 25.0, rect.center().y - tokens::FS_0 * 0.5),
+            pos2(rect.left() + 31.0, rect.center().y - tokens::FS_0 * 0.5),
             status.area,
             theme::sans(tokens::FS_0, FontWeight::Medium),
-            tokens.color.text,
-            (detail_offset - 31.0).max(1.0),
+            primary_color,
+            (detail_offset - 37.0).max(1.0),
         );
         paint_elided(
             ui,
@@ -1006,13 +1337,13 @@ fn engineering_status_register(
             ),
             &format!("{} \u{00b7} {}", status.state, status.detail),
             theme::sans(tokens::FS_0, FontWeight::Regular),
-            tokens.color.text_dim,
+            detail_color,
             (width - detail_offset - 8.0).max(1.0),
         );
         response.widget_info(|| {
             egui::WidgetInfo::labeled(
                 egui::WidgetType::Button,
-                ui.is_enabled(),
+                status.enabled,
                 format!(
                     "{}: {}. {}. {}",
                     status.area, status.state, status.detail, status.action
@@ -1020,17 +1351,22 @@ fn engineering_status_register(
             )
         });
         theme::paint_focus_ring_outset(ui, &response, rect);
-        let response = response
-            .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .on_hover_text(format!("{}\n{}", status.detail, status.action));
-        if response.clicked() {
+        let response = if status.enabled {
+            response
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text(format!("{}\n{}", status.detail, status.action))
+        } else {
+            response.on_hover_text(status.disabled_reason.unwrap_or("Action unavailable"))
+        };
+        if status.enabled && response.clicked() {
             requested = Some(status.intent.clone());
         }
         if index + 1 < statuses.len() {
             ui.add_space(3.0);
         }
     }
-    let (rect, _) = ui.allocate_exact_size(vec2(width, 32.0), Sense::hover());
+    ui.add_space(4.0);
+    let (rect, _) = ui.allocate_exact_size(vec2(width, 20.0), Sense::hover());
     ui.painter().hline(
         (rect.left() + 14.0)..=(rect.right() - 14.0),
         rect.top(),
@@ -1040,9 +1376,9 @@ fn engineering_status_register(
     let path_width = 128.0_f32.min(width * 0.34);
     paint_elided(
         ui,
-        pos2(rect.left() + 10.0, rect.center().y - tokens::FS_0 * 0.5),
+        pos2(rect.left() + 10.0, rect.center().y - tokens::FS_MICRO * 0.5),
         &problem.code,
-        theme::mono(tokens::FS_0, FontWeight::Medium),
+        theme::mono(tokens::FS_MICRO, FontWeight::Medium),
         problem.tone.color(&tokens),
         (code_width - 14.0).max(1.0),
     );
@@ -1050,14 +1386,14 @@ fn engineering_status_register(
         ui,
         pos2(
             rect.left() + code_width,
-            rect.center().y - tokens::FS_0 * 0.5,
+            rect.center().y - tokens::FS_MICRO * 0.5,
         ),
         &problem.message,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
+        theme::sans(tokens::FS_MICRO, FontWeight::Regular),
         tokens.color.text_dim,
         (width - code_width - path_width - 12.0).max(1.0),
     );
-    let path_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let path_font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
     let path = elide_text(ui, &problem.path, &path_font, (path_width - 10.0).max(1.0));
     ui.painter().text(
         pos2(rect.right() - 10.0, rect.center().y),
@@ -1071,25 +1407,39 @@ fn engineering_status_register(
 
 fn project_and_document_registers(
     ui: &mut Ui,
+    app: &RSpiceApp,
     snapshot: &OverviewSnapshot,
 ) -> Option<OverviewIntent> {
-    project_register(ui, snapshot)
+    project_register(ui, app, snapshot)
 }
 
-fn project_register(ui: &mut Ui, snapshot: &OverviewSnapshot) -> Option<OverviewIntent> {
+fn project_register(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    snapshot: &OverviewSnapshot,
+) -> Option<OverviewIntent> {
     let objects = design_objects(snapshot);
     section_header(
         ui,
         "Design",
-        &format!(
-            "{} key {} · {} {}",
-            objects.len(),
-            singular_or_plural(objects.len(), "object", "objects"),
-            snapshot.cell_count,
-            singular_or_plural(snapshot.cell_count, "cell", "cells")
-        ),
+        &if snapshot.netlist_first {
+            format!(
+                "{} key {} · netlist-first",
+                objects.len(),
+                singular_or_plural(objects.len(), "source", "sources")
+            )
+        } else {
+            format!(
+                "{} key {} · {} {}",
+                objects.len(),
+                singular_or_plural(objects.len(), "object", "objects"),
+                snapshot.cell_count,
+                singular_or_plural(snapshot.cell_count, "cell", "cells")
+            )
+        },
         Tone::Neutral,
     );
+    ui.add_space(6.0);
     let mut requested = None;
     for (index, object) in objects.iter().enumerate() {
         design_summary_row(
@@ -1105,19 +1455,45 @@ fn project_register(ui: &mut Ui, snapshot: &OverviewSnapshot) -> Option<Overview
             ui.add_space(5.0);
         }
     }
+    ui.add_space(5.0);
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
         .fill(t.color.bg_panel)
-        .inner_margin(egui::Margin::symmetric(10, 5))
+        .inner_margin(egui::Margin {
+            left: 14,
+            right: 14,
+            top: 5,
+            bottom: 0,
+        })
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                if Button::new("Browse library…").show(ui).clicked() {
-                    requested = Some(OverviewIntent::Command(Command::ProjectPage(
-                        ProjectPage::Library,
-                    )));
+                let library_command = Command::ProjectPage(ProjectPage::Library);
+                let (library_enabled, library_disabled_reason) = command_gate(app, library_command);
+                let library = ui
+                    .add_enabled_ui(library_enabled, |ui| {
+                        Button::new("Browse library…").show(ui)
+                    })
+                    .inner;
+                let library = library_disabled_reason.map_or(library.clone(), |reason| {
+                    library.on_disabled_hover_text(reason)
+                });
+                if library.clicked() {
+                    requested = Some(OverviewIntent::Command(library_command));
                 }
-                if Button::new("Configuration sets…").show(ui).clicked() {
-                    requested = Some(OverviewIntent::Command(Command::ConfigurationSets));
+                let configuration_command = Command::ConfigurationSets;
+                let (configuration_enabled, configuration_disabled_reason) =
+                    command_gate(app, configuration_command);
+                let configuration = ui
+                    .add_enabled_ui(configuration_enabled, |ui| {
+                        Button::new("Configuration sets…").show(ui)
+                    })
+                    .inner;
+                let configuration = configuration_disabled_reason
+                    .map_or(configuration.clone(), |reason| {
+                        configuration.on_disabled_hover_text(reason)
+                    });
+                if configuration.clicked() {
+                    requested = Some(OverviewIntent::Command(configuration_command));
                 }
             });
         });
@@ -1147,53 +1523,82 @@ fn design_objects(snapshot: &OverviewSnapshot) -> Vec<DesignObjectSnapshot> {
 
     let mut rows = Vec::with_capacity(5);
     let mut keys = BTreeSet::new();
-    push_unique(
-        &mut rows,
-        &mut keys,
-        DesignObjectSnapshot {
-            key: design_key(&snapshot.descriptor_root),
-            name: snapshot.descriptor_root.clone(),
-            kind: format!(
-                "schematic · {} {}",
-                snapshot.root_sheet_count,
-                singular_or_plural(snapshot.root_sheet_count, "sheet", "sheets")
-            ),
-            detail: format!(
-                "{} {} · {} {}",
-                snapshot.root_instance_count,
-                singular_or_plural(snapshot.root_instance_count, "instance", "instances"),
-                snapshot.root_net_count,
-                singular_or_plural(snapshot.root_net_count, "net", "nets")
-            ),
-            tone: Tone::Info,
-            top: true,
-        },
-    );
-    if snapshot.configuration.configured {
+    if snapshot.netlist_first {
+        if let Some(deck) = &snapshot.source_deck {
+            push_unique(
+                &mut rows,
+                &mut keys,
+                DesignObjectSnapshot {
+                    key: format!("source-deck:{}", deck.name.to_ascii_lowercase()),
+                    name: deck.name.clone(),
+                    kind: format!("SPICE deck · {}", deck.ownership),
+                    detail: format!(
+                        "rev {} · {} {} · {} {}{}",
+                        deck.revision,
+                        deck.line_count,
+                        singular_or_plural(deck.line_count, "line", "lines"),
+                        deck.dependency_count,
+                        singular_or_plural(deck.dependency_count, "dependency", "dependencies"),
+                        if deck.dependencies_sealed {
+                            " · sealed"
+                        } else {
+                            " · unresolved"
+                        }
+                    ),
+                    tone: deck.validation_tone,
+                    top: true,
+                },
+            );
+        }
+    } else {
         push_unique(
             &mut rows,
             &mut keys,
             DesignObjectSnapshot {
-                key: design_key(&snapshot.simulation_root),
-                name: snapshot.simulation_root.clone(),
-                kind: "schematic + config".to_owned(),
-                detail: format!("active testbench · {}", snapshot.configuration.state),
-                tone: snapshot.configuration.tone,
-                top: false,
+                key: design_key(&snapshot.descriptor_root),
+                name: snapshot.descriptor_root.clone(),
+                kind: format!(
+                    "schematic · {} {}",
+                    snapshot.root_sheet_count,
+                    singular_or_plural(snapshot.root_sheet_count, "sheet", "sheets")
+                ),
+                detail: format!(
+                    "{} {} · {} {}",
+                    snapshot.root_instance_count,
+                    singular_or_plural(snapshot.root_instance_count, "instance", "instances"),
+                    snapshot.root_net_count,
+                    singular_or_plural(snapshot.root_net_count, "net", "nets")
+                ),
+                tone: Tone::Info,
+                top: true,
             },
         );
-        push_unique(
-            &mut rows,
-            &mut keys,
-            DesignObjectSnapshot {
-                key: design_key(&snapshot.configuration.dut),
-                name: snapshot.configuration.dut.clone(),
-                kind: "design under test".to_owned(),
-                detail: snapshot.configuration.detail.clone(),
-                tone: snapshot.configuration.tone,
-                top: false,
-            },
-        );
+        if snapshot.configuration.configured {
+            push_unique(
+                &mut rows,
+                &mut keys,
+                DesignObjectSnapshot {
+                    key: design_key(&snapshot.simulation_root),
+                    name: snapshot.simulation_root.clone(),
+                    kind: "schematic + config".to_owned(),
+                    detail: format!("active testbench · {}", snapshot.configuration.state),
+                    tone: snapshot.configuration.tone,
+                    top: false,
+                },
+            );
+            push_unique(
+                &mut rows,
+                &mut keys,
+                DesignObjectSnapshot {
+                    key: design_key(&snapshot.configuration.dut),
+                    name: snapshot.configuration.dut.clone(),
+                    kind: "design under test".to_owned(),
+                    detail: snapshot.configuration.detail.clone(),
+                    tone: snapshot.configuration.tone,
+                    top: false,
+                },
+            );
+        }
     }
     for document in snapshot.open_documents.iter().filter(|document| {
         matches!(
@@ -1320,7 +1725,14 @@ fn design_summary_row(
             rect.center().y - tokens::FS_0 * 0.5,
         ),
         name,
-        theme::mono(tokens::FS_0, FontWeight::Medium),
+        theme::mono(
+            tokens::FS_0,
+            if indent == 0.0 {
+                FontWeight::SemiBold
+            } else {
+                FontWeight::Regular
+            },
+        ),
         t.color.text,
         (name_width - 18.0 - indent).max(1.0),
     );
@@ -1359,10 +1771,10 @@ fn design_summary_row(
         ui,
         pos2(
             rect.left() + name_width + kind_width,
-            rect.center().y - tokens::FS_0 * 0.5,
+            rect.center().y - tokens::FS_MICRO * 0.5,
         ),
         detail,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
+        theme::sans(tokens::FS_MICRO, FontWeight::Regular),
         tone.color(&t),
         (width - name_width - kind_width - 10.0).max(1.0),
     );
@@ -1391,6 +1803,7 @@ fn run_register(ui: &mut Ui, snapshot: &OverviewSnapshot) -> Option<OverviewInte
         &format!("{} retained", snapshot.operations.len()),
         Tone::Neutral,
     );
+    ui.add_space(6.0);
     let mut selected = None;
     if snapshot.operations.is_empty() {
         activity_row(
@@ -1444,7 +1857,7 @@ fn activity_row(
     time: &str,
     event: &str,
     detail: &str,
-    tone: Tone,
+    _tone: Tone,
     interactive: bool,
 ) -> egui::Response {
     let t = Tokens::get(ui.ctx());
@@ -1460,30 +1873,30 @@ fn activity_row(
     if interactive && (response.hovered() || response.has_focus()) {
         ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
     }
-    let time_width = 58.0_f32.min(width * 0.22);
+    let time_width = 54.0_f32.min(width * 0.22);
     paint_elided(
         ui,
-        pos2(rect.left() + 10.0, rect.top() + 4.0),
+        pos2(rect.left() + 14.0, rect.top() + 3.0),
         time,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
+        theme::mono(tokens::FS_MICRO, FontWeight::Regular),
         t.color.text_faint,
-        (time_width - 12.0).max(1.0),
+        (time_width - 14.0).max(1.0),
     );
     paint_elided(
         ui,
-        pos2(rect.left() + time_width, rect.top() + 3.0),
+        pos2(rect.left() + time_width + 14.0, rect.top() + 2.0),
         event,
-        theme::sans(tokens::FS_0, FontWeight::Medium),
-        tone.color(&t),
-        (width - time_width - 10.0).max(1.0),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text,
+        (width - time_width - 24.0).max(1.0),
     );
     paint_elided(
         ui,
-        pos2(rect.left() + time_width, rect.top() + 18.0),
+        pos2(rect.left() + time_width + 14.0, rect.top() + 16.0),
         detail,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-        (width - time_width - 10.0).max(1.0),
+        theme::mono(tokens::FS_MICRO, FontWeight::Regular),
+        t.color.text_faint,
+        (width - time_width - 24.0).max(1.0),
     );
     theme::paint_focus_ring_outset(ui, &response, rect);
     // Painted columns again, so the announced label is assembled here.
@@ -1515,11 +1928,11 @@ fn section_header(ui: &mut Ui, title: &str, meta: &str, tone: Tone) {
         content.left_center() - vec2(0.0, tokens::FS_0 * 0.5),
         &title.to_uppercase(),
         theme::sans(tokens::FS_2, FontWeight::SemiBold),
-        tokens.color.text,
+        tokens.color.text_dim,
         (content.width() - meta_width - 8.0).max(0.0),
     );
-    let meta_font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let meta = elide_text(ui, meta, &meta_font, meta_width);
+    let meta_font = theme::mono(tokens::FS_0, FontWeight::Medium);
+    let meta = elide_text(ui, &meta.to_uppercase(), &meta_font, meta_width);
     ui.painter().text(
         content.right_center(),
         Align2::RIGHT_CENTER,
@@ -2091,6 +2504,50 @@ mod tests {
     }
 
     #[test]
+    fn overview_import_deck_uses_the_independent_netlist_project_workflow() {
+        assert_eq!(
+            import_deck_intent(),
+            OverviewIntent::Command(Command::OpenNetlist)
+        );
+    }
+
+    #[test]
+    fn netlist_first_overview_never_exposes_the_pristine_bootstrap_schematic() {
+        let mut app = RSpiceApp::test_instance();
+        assert!(
+            crate::workbench::workflows::netlist_workflow::apply_imported_netlist(
+                &mut app.state,
+                "V1 out 0 1\n.op\n.end\n".to_owned(),
+                None,
+                "front_end.sp",
+            )
+        );
+        app.state.workbench.workspace = Workspace::Project;
+
+        let snapshot = OverviewSnapshot::capture(&app);
+        let objects = design_objects(&snapshot);
+
+        assert!(snapshot.netlist_first);
+        assert_eq!(snapshot.statuses[0].area, "Source deck");
+        assert!(
+            snapshot
+                .statuses
+                .iter()
+                .all(|status| status.area != "Schematic checks")
+        );
+        assert_eq!(snapshot.problem.code, "NOT RUN");
+        assert_eq!(snapshot.problem.path, "front_end.sp");
+        assert!(objects.first().is_some_and(|object| {
+            object.top && object.name == "front_end.sp" && object.kind.starts_with("SPICE deck")
+        }));
+        assert!(
+            objects
+                .iter()
+                .all(|object| object.name != snapshot.descriptor_root)
+        );
+    }
+
+    #[test]
     fn overview_model_closure_always_opens_the_project_catalog_scope() {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.models_view.catalog_scope = ModelsCatalogScope::InstalledPacks;
@@ -2145,6 +2602,7 @@ mod tests {
             )
             .with_severity(DrcSeverity::Critical),
         );
+        result.completed = true;
         app.state
             .publish_active_design_check_result(result)
             .expect("publish project-root design-check receipt");

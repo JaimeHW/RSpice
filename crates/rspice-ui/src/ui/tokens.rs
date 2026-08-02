@@ -31,6 +31,8 @@ pub const SP_5: f32 = 12.0;
 // Type scale (13 px UI base — dense professional tool)
 // ============================================================================
 
+/// 10 px — dense table metadata and tertiary annotations.
+pub const FS_MICRO: f32 = 10.0;
 /// 11 px — metadata, badges, mono annotations.
 pub const FS_0: f32 = 11.0;
 /// 12 px — secondary UI text, tree rows, inputs.

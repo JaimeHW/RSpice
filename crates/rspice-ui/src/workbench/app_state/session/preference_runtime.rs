@@ -29,10 +29,7 @@ impl RSpiceApp {
         ) {
             return;
         }
-        if let Ok(result) = self.state.run_active_design_checks() {
-            self.state.dialogs.drc_results = Some(result);
-            self.state.dialogs.drc_checked_version = self.state.schematic.topology_version();
-        }
+        let _ = self.state.run_active_design_checks();
     }
 }
 

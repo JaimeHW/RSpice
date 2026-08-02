@@ -1200,6 +1200,12 @@ mod tests {
         result
     }
 
+    fn publish_drc_result(state: &mut AppState, result: DrcResult) {
+        state
+            .publish_active_design_check_result(result)
+            .expect("test DRC receipt must publish");
+    }
+
     fn configure_alternate_simulation_root(
         state: &mut AppState,
         root: CellViewRef,
@@ -1265,8 +1271,10 @@ mod tests {
     #[test]
     fn run_readiness_blocks_current_drc_errors_for_generated_schematic_runs() {
         let mut state = runnable_state();
-        state.dialogs.drc_results = Some(drc_result(DrcViolationType::MissingGround, None));
-        state.dialogs.drc_checked_version = state.schematic.topology_version();
+        publish_drc_result(
+            &mut state,
+            drc_result(DrcViolationType::MissingGround, None),
+        );
 
         assert!(
             !state.can_run_simulation(),
@@ -1275,20 +1283,36 @@ mod tests {
     }
 
     #[test]
-    fn run_readiness_allows_stale_or_warning_only_drc_results() {
+    fn legacy_drc_projection_is_never_execution_authority() {
         let mut state = runnable_state();
         state.dialogs.drc_results = Some(drc_result(DrcViolationType::MissingGround, None));
-        state.dialogs.drc_checked_version = state.schematic.topology_version().wrapping_sub(1);
+        state.dialogs.drc_checked_version = state.schematic.topology_version();
+
+        assert!(
+            schematic_readiness(&state).is_none(),
+            "a presentation-only result without an exact cell/view receipt must not block"
+        );
+    }
+
+    #[test]
+    fn run_readiness_allows_stale_or_warning_only_drc_results() {
+        let mut state = runnable_state();
+        publish_drc_result(
+            &mut state,
+            drc_result(DrcViolationType::MissingGround, None),
+        );
+        state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(20, 20));
         assert!(
             schematic_readiness(&state).is_none(),
             "stale DRC results should not block after schematic edits"
         );
 
-        state.dialogs.drc_results = Some(drc_result(
-            DrcViolationType::UnconnectedPin,
-            Some(DrcSeverity::Warning),
-        ));
-        state.dialogs.drc_checked_version = state.schematic.topology_version();
+        publish_drc_result(
+            &mut state,
+            drc_result(DrcViolationType::UnconnectedPin, Some(DrcSeverity::Warning)),
+        );
         assert!(
             schematic_readiness(&state).is_none(),
             "warning-only DRC results should not block simulation"
@@ -1302,8 +1326,10 @@ mod tests {
         let mut configured = SchematicState::default();
         configured.add_component(ComponentType::Resistor, Point::new(40, 20));
         configure_alternate_simulation_root(&mut state, root, configured);
-        state.dialogs.drc_results = Some(drc_result(DrcViolationType::MissingGround, None));
-        state.dialogs.drc_checked_version = state.schematic.topology_version();
+        publish_drc_result(
+            &mut state,
+            drc_result(DrcViolationType::MissingGround, None),
+        );
 
         assert!(
             schematic_readiness(&state).is_none(),
@@ -1368,8 +1394,10 @@ mod tests {
     fn generated_and_manual_runs_have_separate_drc_readiness() {
         let mut state = runnable_state();
         state.workspace.netlist_source = Some("V1 in 0 1\nR1 in 0 1k\n.end\n".to_string());
-        state.dialogs.drc_results = Some(drc_result(DrcViolationType::MissingGround, None));
-        state.dialogs.drc_checked_version = state.schematic.topology_version();
+        publish_drc_result(
+            &mut state,
+            drc_result(DrcViolationType::MissingGround, None),
+        );
 
         assert!(
             !state.can_run_simulation(),

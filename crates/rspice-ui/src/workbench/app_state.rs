@@ -1010,16 +1010,43 @@ impl AppState {
     }
 
     /// Current error-level schematic DRC result that blocks generated runs.
-    /// Stale DRC is non-blocking because it no longer describes the current
-    /// topology. Manual deck runs use `manual_deck_run_block_reason` instead.
+    /// Only an exact, current receipt for the active cell/view can block. The
+    /// legacy dialog projection is presentation state and is never execution
+    /// authority. Manual deck runs use `manual_deck_run_block_reason` instead.
     pub fn current_blocking_drc_result(&self) -> Option<&crate::services::drc::DrcResult> {
-        if self.dialogs.drc_checked_version != self.schematic.topology_version() {
-            return None;
+        match self.active_design_check_status() {
+            DesignCheckStatus::Current(receipt) if receipt.result.has_errors() => {
+                Some(&receipt.result)
+            }
+            DesignCheckStatus::NotRun
+            | DesignCheckStatus::Current(_)
+            | DesignCheckStatus::Stale(_)
+            | DesignCheckStatus::Unavailable { .. } => None,
         }
-        self.dialogs
-            .drc_results
+    }
+
+    /// Whether this project is intentionally owned by an imported SPICE deck
+    /// and has not yet materialized any authored schematic content.
+    ///
+    /// A pristine bootstrap buffer remains present for legacy document/save
+    /// invariants, but it is not a user-visible schematic and must never be
+    /// advertised or checked as one.
+    pub(crate) fn is_netlist_first_without_schematic(&self) -> bool {
+        let imported_deck_owns_the_project = self
+            .workspace
+            .netlist_document
             .as_ref()
-            .filter(|result| result.has_errors())
+            .is_some_and(|document| document.provenance().imported().is_some());
+        if !imported_deck_owns_the_project || schematic_has_authored_content(&self.schematic) {
+            return false;
+        }
+
+        self.workspace.schematic_buffers.len() <= 1
+            && self
+                .workspace
+                .schematic_buffers
+                .values()
+                .all(|schematic| !schematic_has_authored_content(schematic))
     }
 
     /// Request a run from the Simulate workspace run set.
@@ -1118,6 +1145,20 @@ impl AppState {
             .unwrap_or((20.0, 20.0));
         crate::state::Point::new((x.round() as i32) * grid, (y.round() as i32) * grid)
     }
+}
+
+fn schematic_has_authored_content(schematic: &crate::state::SchematicState) -> bool {
+    !schematic.components.is_empty()
+        || !schematic.wires.is_empty()
+        || !schematic.buses.is_empty()
+        || !schematic.bus_taps.is_empty()
+        || !schematic.design_notes.is_empty()
+        || !schematic.documentation_shapes.is_empty()
+        || !schematic.probes.is_empty()
+        || !schematic.net_labels.is_empty()
+        || !schematic.junctions.is_empty()
+        || !schematic.connections.is_empty()
+        || !schematic.validated_revisions.is_empty()
 }
 
 #[cfg(test)]

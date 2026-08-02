@@ -1322,8 +1322,6 @@ impl RSpiceApp {
         let authority = SchematicEditAuthority::capture(&self.state);
         self.state
             .publish_active_design_check_result(report.drc.clone())?;
-        self.state.dialogs.drc_results = Some(report.drc.clone());
-        self.state.dialogs.drc_checked_version = self.state.schematic.topology_version();
         let dialog = &mut self.state.dialogs.connectivity_manager;
         dialog.report = report;
         dialog.authority = Some(authority);

@@ -434,8 +434,9 @@ mod tests {
             DrcLocation::Global,
         ));
         result.completed = true;
-        state.dialogs.drc_results = Some(result);
-        state.dialogs.drc_checked_version = state.schematic.topology_version();
+        state
+            .publish_active_design_check_result(result)
+            .expect("test DRC receipt must publish");
         state
             .log_buffer
             .log(LogSeverity::Error, LogSource::Drc, "old DRC anchor", None);

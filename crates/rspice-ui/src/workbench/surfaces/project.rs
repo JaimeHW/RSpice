@@ -33,7 +33,7 @@ use technology::{open_technology_attachment_dialog, show_technology_attachment_d
 #[cfg(target_arch = "wasm32")]
 use technology::{poll_browser_recovery_completions, poll_browser_technology_checkpoint};
 
-const PROJECT_TAB_HEIGHT: f32 = 30.0;
+const PROJECT_TAB_HEIGHT: f32 = 24.0;
 const WORKSPACE_TABLE_HEADER_HEIGHT: f32 = 37.0;
 const WORKSPACE_TABLE_COLUMN_HEADER_HEIGHT: f32 = 27.0;
 const WORKSPACE_TABLE_ROW_HEIGHT: f32 = 36.0;
@@ -138,8 +138,8 @@ fn project_chrome(ui: &mut Ui, app: &mut RSpiceApp) {
     let shown = egui::Frame::new()
         .fill(tokens.color.bg_panel)
         .inner_margin(Margin {
-            left: 10,
-            right: 10,
+            left: 8,
+            right: 8,
             top: 0,
             bottom: 0,
         })
@@ -171,7 +171,7 @@ fn project_chrome(ui: &mut Ui, app: &mut RSpiceApp) {
     ui.painter().hline(
         shown.response.rect.x_range(),
         shown.response.rect.bottom(),
-        Stroke::new(1.0, tokens.color.border_strong),
+        Stroke::new(1.0, tokens.color.border),
     );
 }
 
@@ -262,8 +262,8 @@ fn project_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
             if selected {
                 ui.painter().rect_filled(
                     Rect::from_min_max(
-                        pos2(rect.left() + 6.0, rect.bottom() - 2.0),
-                        pos2(rect.right() - 6.0, rect.bottom()),
+                        pos2(rect.left(), rect.bottom() - 2.0),
+                        pos2(rect.right(), rect.bottom()),
                     ),
                     0.0,
                     tokens.color.accent,
@@ -304,7 +304,7 @@ fn project_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
 fn project_revision_label(ui: &mut Ui, app: &RSpiceApp, tokens: &Tokens) {
     ui.label(
         egui::RichText::new(format!(
-            "working revision r{}",
+            "main @ r{}",
             app.state.workspace.project.revision().get()
         ))
         .font(theme::mono(tokens::FS_0, FontWeight::Medium))
@@ -315,59 +315,108 @@ fn project_revision_label(ui: &mut Ui, app: &RSpiceApp, tokens: &Tokens) {
 
 fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
     let tokens = Tokens::get(ui.ctx());
-    let root = crate::state::CellViewRef::new(
-        &app.state.workspace.project.root_library,
-        &app.state.workspace.project.top_cell,
-        crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
-    );
-    let (checks_label, checks_description, checks_tone) = match app
-        .state
-        .project_root_design_check_status()
-    {
-        DesignCheckStatus::Current(receipt) => {
-            let summary = receipt.result.summary();
-            let errors = summary.critical + summary.errors;
-            let advisories = summary.warnings + summary.info;
-            (
-                format!("checks {errors} err · {advisories} adv"),
-                format!(
-                    "Project-root schematic checks: {errors} blocking errors and {advisories} advisories"
-                ),
-                if errors == 0 {
-                    tokens.color.ok
-                } else {
-                    tokens.color.err
+    if app.state.is_netlist_first_without_schematic() {
+        let (label, description, tone) = app
+            .state
+            .workspace
+            .netlist_document
+            .as_ref()
+            .map_or_else(
+                || {
+                    (
+                        "source unavailable".to_owned(),
+                        "The project has no canonical SPICE source document".to_owned(),
+                        tokens.color.err,
+                    )
                 },
-            )
+                |document| match document.validation() {
+                    None => (
+                        "source not validated".to_owned(),
+                        "Open and validate the retained SPICE source deck".to_owned(),
+                        tokens.color.warn,
+                    ),
+                    Some(report) if report.content_digest() != document.content_digest() => (
+                        "source stale".to_owned(),
+                        "The source changed after the retained validation".to_owned(),
+                        tokens.color.warn,
+                    ),
+                    Some(report) => {
+                        let errors = report.error_count();
+                        let warnings = report.warning_count();
+                        (
+                            format!("source {errors} err · {warnings} adv"),
+                            format!(
+                                "Retained SPICE source validation: {errors} errors and {warnings} advisories"
+                            ),
+                            if errors > 0 {
+                                tokens.color.err
+                            } else if warnings > 0 {
+                                tokens.color.warn
+                            } else {
+                                tokens.color.ok
+                            },
+                        )
+                    }
+                },
+            );
+        if project_status_chip(ui, "project-source", &label, &description, tone, true).clicked() {
+            Command::OpenWorkspace(Workspace::Netlist).execute(app);
         }
-        DesignCheckStatus::NotRun => (
-            "checks not run".to_owned(),
-            "Run schematic checks for the project root".to_owned(),
-            tokens.color.warn,
-        ),
-        DesignCheckStatus::Stale(_) => (
-            "checks stale".to_owned(),
-            "Project-root inputs changed after the retained check".to_owned(),
-            tokens.color.warn,
-        ),
-        DesignCheckStatus::Unavailable { reason, .. } => {
-            ("checks unavailable".to_owned(), reason, tokens.color.err)
-        }
-    };
-    if project_status_chip(
-        ui,
-        "project-checks",
-        &checks_label,
-        &checks_description,
-        checks_tone,
-        true,
-    )
-    .clicked()
-    {
-        app.state.open_workspace_view(root);
-        Command::OpenWorkspace(Workspace::Design).execute(app);
-        if Command::RunChecks.is_enabled(app) {
-            Command::RunChecks.execute(app);
+    } else {
+        let root = crate::state::CellViewRef::new(
+            &app.state.workspace.project.root_library,
+            &app.state.workspace.project.top_cell,
+            crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
+        );
+        let (checks_label, checks_description, checks_tone) = match app
+            .state
+            .project_root_design_check_status()
+        {
+            DesignCheckStatus::Current(receipt) => {
+                let summary = receipt.result.summary();
+                let errors = summary.critical + summary.errors;
+                let advisories = summary.warnings + summary.info;
+                (
+                    format!("checks {errors} err · {advisories} adv"),
+                    format!(
+                        "Project-root schematic checks: {errors} blocking errors and {advisories} advisories"
+                    ),
+                    if errors == 0 {
+                        tokens.color.ok
+                    } else {
+                        tokens.color.err
+                    },
+                )
+            }
+            DesignCheckStatus::NotRun => (
+                "checks not run".to_owned(),
+                "Run schematic checks for the project root".to_owned(),
+                tokens.color.warn,
+            ),
+            DesignCheckStatus::Stale(_) => (
+                "checks stale".to_owned(),
+                "Project-root inputs changed after the retained check".to_owned(),
+                tokens.color.warn,
+            ),
+            DesignCheckStatus::Unavailable { reason, .. } => {
+                ("checks unavailable".to_owned(), reason, tokens.color.err)
+            }
+        };
+        if project_status_chip(
+            ui,
+            "project-checks",
+            &checks_label,
+            &checks_description,
+            checks_tone,
+            true,
+        )
+        .clicked()
+        {
+            app.state.open_workspace_view(root);
+            Command::OpenWorkspace(Workspace::Design).execute(app);
+            if Command::RunChecks.is_enabled(app) {
+                Command::RunChecks.execute(app);
+            }
         }
     }
 
