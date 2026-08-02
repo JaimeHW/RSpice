@@ -1,6 +1,6 @@
 #![cfg(feature = "veriloga-builtins-base")]
 
-use rspice_core::device::veriloga_generated::builtins;
+use rspice_core::device::veriloga_builtins::builtins;
 
 #[cfg(feature = "veriloga-model-diode-cmc")]
 #[test]

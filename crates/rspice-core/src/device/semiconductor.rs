@@ -4,6 +4,7 @@
 
 mod bjt;
 mod diode;
+mod limiting;
 
 pub(crate) use bjt::{
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeBranch,

@@ -36,7 +36,7 @@ pub mod tristate;
 pub mod veriloga;
 
 // Generated Verilog-A runtime ABI; the built-in registry remains feature-gated inside the module.
-pub mod veriloga_generated;
+pub mod veriloga_builtins;
 
 // Re-export from subdirectories for backwards compatibility
 pub use mosfet::{

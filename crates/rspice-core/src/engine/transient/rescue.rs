@@ -193,7 +193,7 @@ impl Engine {
                     VbicCachedSnapshotReuse::NewtonBypass,
                     true,
                     extra_gmin,
-                    crate::device::veriloga_generated::GeneratedEvaluationMode::StaticProbe,
+                    crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
                 )?;
                 let base_merit = self
                     .residual_inf_norm(circuit, matrix, &iterate, rhs)
@@ -225,7 +225,7 @@ impl Engine {
                         VbicCachedSnapshotReuse::NewtonBypass,
                         true,
                         extra_gmin,
-                        crate::device::veriloga_generated::GeneratedEvaluationMode::StaticProbe,
+                        crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
                     )?;
                     let trial_merit = self
                         .residual_inf_norm(circuit, matrix, &trial, rhs)

@@ -1,11 +1,11 @@
 //! Hand-written harnesses that measure the generated Verilog-A built-ins.
 //!
-//! Everything here drives `rspice_core::device::veriloga_generated` from the outside and is
+//! Everything here drives `rspice_core::device::veriloga_builtins` from the outside and is
 //! maintained by hand. It lives in its own module for one reason: the generated
 //! tree is generator-owned output that is rewritten wholesale by
 //! `rspice-veriloga-gen`, and hand-written code sitting inside it cannot be
 //! told apart from emitted code by a reader, a reviewer, or a regeneration
-//! diff. The only hand-written file that belongs under `veriloga_generated/` is
+//! diff. The only hand-written file that belongs under `veriloga_builtins/` is
 //! its `mod.rs`, because that is the module root the generated folders attach
 //! to.
 //!

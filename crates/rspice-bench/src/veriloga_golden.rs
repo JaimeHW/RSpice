@@ -18,7 +18,7 @@ use std::process::ExitCode;
 use clap::Args;
 use rspice_conformance::suites::veriloga::fixture::{GoldenCase, GoldenFixture, GoldenPoint};
 use rspice_conformance::suites::veriloga::golden::GoldenHarness;
-use rspice_core::device::veriloga_generated::builtins;
+use rspice_core::device::veriloga_builtins::builtins;
 use serde::Serialize;
 
 use crate::error::BenchError;

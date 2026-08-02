@@ -95,7 +95,7 @@ pub struct RustTranspileOptions {
 impl Default for RustTranspileOptions {
     fn default() -> Self {
         Self {
-            runtime_path: "crate::device::veriloga_generated".to_string(),
+            runtime_path: "crate::device::veriloga_builtins".to_string(),
             performance_budget: PerformanceBudget::default(),
         }
     }

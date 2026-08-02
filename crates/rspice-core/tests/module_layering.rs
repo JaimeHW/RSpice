@@ -42,9 +42,17 @@
 //! dependency, so they are excluded. `use`, type positions, and paths all
 //! count equally: the metric tracks coupling, not import style.
 //!
-//! `device/veriloga_generated/` is excluded. It is machine output — 172 files
-//! and 49 MB — and generated code is not subject to architectural review; the
-//! generator is. Scanning it would also cost every run of this test.
+//! `device/veriloga_builtins/` is excluded, and no longer for the reason it was
+//! written. It held the generated corpus — 172 files, 49 MB — and generated code
+//! is the generator's business, not this ratchet's. The shard moved every one of
+//! those files into `rspice-veriloga-models`, leaving one hand-written file.
+//!
+//! It stays excluded because it would fail: the adapter names
+//! `crate::engine::SimulationError`, and `device` is rank 8 against `engine` at
+//! rank 12. That is a real upward edge, not an exemption this test has earned.
+//! Closing it means giving `instantiate_builtin` a device-level error and
+//! mapping it at the two `engine/builder` call sites; until then the exclusion
+//! is tracked debt, and should be deleted the moment that lands.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -217,7 +225,7 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
             if path.is_dir() {
                 if path
                     .file_name()
-                    .is_some_and(|name| name == "veriloga_generated")
+                    .is_some_and(|name| name == "veriloga_builtins")
                 {
                     continue;
                 }

@@ -23,7 +23,7 @@
 
 use crate::Value;
 use crate::circuit::CircuitData;
-use crate::device::veriloga_generated::{
+use crate::device::veriloga_builtins::{
     GENERATED_PERSISTENT_STATE_VERSION, GeneratedVerilogAInstanceCheckpoint,
     GeneratedVerilogAPersistentState,
 };

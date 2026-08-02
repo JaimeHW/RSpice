@@ -1,6 +1,6 @@
 #![cfg(feature = "veriloga-builtins")]
 
-use rspice_core::device::veriloga_generated::builtins;
+use rspice_core::device::veriloga_builtins::builtins;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 

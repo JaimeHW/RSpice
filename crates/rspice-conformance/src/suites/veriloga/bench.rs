@@ -21,7 +21,7 @@
 use std::time::Instant;
 
 use rspice_core::Value;
-use rspice_core::device::veriloga_generated::{
+use rspice_core::device::veriloga_builtins::{
     BuiltinVerilogAInstance, GeneratedAnalysisKind, GeneratedSimulationParameters, builtins,
 };
 use rspice_core::solver::StaticMatrix;

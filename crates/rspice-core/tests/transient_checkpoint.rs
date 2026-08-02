@@ -745,7 +745,7 @@ rload out 0 1k
 #[cfg(feature = "veriloga-builtins")]
 #[test]
 fn generated_veriloga_checkpoint_preserves_reactive_history_and_provenance() {
-    use rspice_core::device::veriloga_generated::builtins;
+    use rspice_core::device::veriloga_builtins::builtins;
 
     const STEP: f64 = 250.0e-12;
     const SPLIT_INDEX: usize = 80;

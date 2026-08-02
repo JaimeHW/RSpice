@@ -97,9 +97,9 @@ impl Engine {
     fn generated_noise_source(
         circuit: &CircuitData,
         instance_name: &str,
-        source: crate::device::veriloga_generated::BuiltinEvaluatedNoiseSource,
+        source: crate::device::veriloga_builtins::BuiltinEvaluatedNoiseSource,
     ) -> Result<NoiseSource, SimulationError> {
-        use crate::device::veriloga_generated::{GeneratedNoiseInjection, GeneratedNoiseKind};
+        use crate::device::veriloga_builtins::{GeneratedNoiseInjection, GeneratedNoiseKind};
 
         let descriptor = source.mapped.descriptor;
         let evaluation = source.evaluation;
@@ -2426,7 +2426,7 @@ R2 out 0 1k
     #[test]
     fn generated_noise_translation_preserves_identity_table_and_potential_axis() {
         use crate::analysis::{NoiseSourceIdentity, NoiseSourceType};
-        use crate::device::veriloga_generated::{
+        use crate::device::veriloga_builtins::{
             BuiltinEvaluatedNoiseSource, GeneratedMappedNoiseDescriptor, GeneratedNoiseDescriptor,
             GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseInjection,
             GeneratedNoiseKind,

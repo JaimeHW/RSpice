@@ -47,7 +47,7 @@
 //! adding a model never perturbs another model's points.
 
 use rspice_core::Value;
-use rspice_core::device::veriloga_generated::{
+use rspice_core::device::veriloga_builtins::{
     BuiltinVerilogAInstance, GeneratedAnalysisKind, GeneratedDdtCoefficients,
     GeneratedEvaluationError, GeneratedSimulationParameters, builtins,
 };

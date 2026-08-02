@@ -1,11 +1,11 @@
 #[cfg(feature = "veriloga-model-hicuml2va")]
-use rspice_core::device::veriloga_generated::builtins::hicuml2_v320__hicuml2va__25e676cf as hicuml2;
-use rspice_core::device::veriloga_generated::{
+use rspice_core::device::veriloga_builtins::builtins::hicuml2_v320__hicuml2va__25e676cf as hicuml2;
+use rspice_core::device::veriloga_builtins::{
     GeneratedAnalysisKind, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper,
     GeneratedStamper, GeneratedStaticStampCache,
 };
 #[cfg(feature = "veriloga-builtins")]
-use rspice_core::device::veriloga_generated::{builtins, instantiate_builtin};
+use rspice_core::device::veriloga_builtins::{builtins, instantiate_builtin};
 use rspice_core::solver::{ComplexMatrix, StaticMatrix};
 #[cfg(feature = "veriloga-builtins")]
 use rspice_core::{CircuitData, netlist::ParamContext};
@@ -111,7 +111,7 @@ fn generated_structured_cache_preserves_temperature_and_parameter_semantics() {
 fn generated_builtins_are_materialized_in_source_tree() {
     let generated_root =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-veriloga-models");
-    let registry_path = generated_root.join("registry.rs");
+    let registry_path = generated_root.join("src").join("registry.rs");
     let registry = std::fs::read_to_string(&registry_path)
         .unwrap_or_else(|error| panic!("read {}: {error}", registry_path.display()));
 
@@ -120,11 +120,14 @@ fn generated_builtins_are_materialized_in_source_tree() {
         "the core registry should consume precompiled model artifacts, not include model source"
     );
 
+    // `crate::`, not `rspice_veriloga_models::`: the registry is a module of the
+    // catalog crate now rather than text `include!`d into rspice-core, so it
+    // names its siblings from inside.
     let module_names: Vec<_> = registry
         .lines()
         .filter_map(|line| {
             line.trim()
-                .strip_prefix("pub use rspice_veriloga_models::")
+                .strip_prefix("pub use crate::")
                 .and_then(|rest| rest.strip_suffix(';'))
         })
         .collect();
@@ -231,9 +234,9 @@ fn generated_stamper_uses_linked_static_stamp_slots() {
 #[test]
 fn generated_runtime_snapshots_only_mutable_evaluation_state() {
     let manifest_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let generated_root = manifest_root.join("src/device/veriloga_generated");
+    let generated_root = manifest_root.join("src/device/veriloga_builtins");
     let runtime_path = generated_root.join("mod.rs");
-    let registry_path = manifest_root.join("../rspice-veriloga-models/registry.rs");
+    let registry_path = manifest_root.join("../rspice-veriloga-models/src/registry.rs");
     let nonlinear_path = manifest_root.join("src/circuit/nonlinear.rs");
 
     let runtime = std::fs::read_to_string(&runtime_path)
