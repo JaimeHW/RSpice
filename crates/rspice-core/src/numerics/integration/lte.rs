@@ -538,6 +538,11 @@ impl LteEstimator {
         if let Some((dt, prev_dt, prev_prev_dt, order)) = self.xyce_attempt_checkpoint.take() {
             self.xyce_attempt_dt = dt;
             self.xyce_attempt_prev_dt = if order >= 2 { prev_dt } else { dt };
+            // OneStep::restoreHistory shifts the order-2 coefficient history
+            // back one slot: psi0 <- psi1 and psi1 <- psi2. Because
+            // begin_xyce_attempt already performed the forward shift
+            // psi2 <- checkpoint psi1, the restored psi2 is the checkpoint's
+            // prev_dt. Order one does not touch psi2.
             self.xyce_attempt_prev_prev_dt = if order >= 2 { prev_dt } else { prev_prev_dt };
         }
     }
@@ -810,8 +815,16 @@ impl LteEstimator {
             } else {
                 self.accepted_reference_magnitude(i, accepted_point_global)
             };
-            let scale = self.lte_scale_denominator(reference);
-            let normalized_lte = lte / scale;
+            // Xyce's accepted-solution error weights are formed directly as
+            // `RELTOL * |x_ref| + ABSTOL`, and the resulting WRMS estimate is
+            // compared with `errTolAcceptance = 1`.  Keep the predictor-local
+            // metric on the legacy `(ABSTOL / RELTOL) + |x_ref|` scale.
+            let normalized_lte = if self.uses_accepted_solution_reference() {
+                lte / (self.reltol * reference + self.abstol).max(1.0e-30)
+            } else {
+                let scale = self.lte_scale_denominator(reference);
+                lte / scale
+            };
 
             if self.reference == TransientLteReference::PredictorLocal {
                 aggregate = aggregate.max(normalized_lte);
@@ -829,7 +842,11 @@ impl LteEstimator {
             (aggregate / len as Value).sqrt()
         };
         let lte = raw_lte * error_coefficient;
-        let accept = lte <= self.reltol;
+        let accept = if self.uses_accepted_solution_reference() {
+            lte <= 1.0
+        } else {
+            lte <= self.reltol
+        };
         (lte, accept)
     }
 
@@ -895,7 +912,11 @@ impl LteEstimator {
         if !lte.is_finite() || lte < 0.0 {
             return 0.25;
         }
-        let est_over_tol = lte / self.reltol.max(1.0e-30);
+        let est_over_tol = if self.uses_accepted_solution_reference() {
+            lte
+        } else {
+            lte / self.reltol.max(1.0e-30)
+        };
         (0.5 / (est_over_tol + 0.0001)).powf(1.0 / (method_order.max(1) as Value + 1.0))
     }
 
@@ -1423,21 +1444,71 @@ mod lte_estimator_tests {
             2.0
         );
         assert_eq!(
-            estimator.xyce_accepted_step_scale(0.01, IntegrationMethod::Trapezoidal, 2),
+            estimator.xyce_accepted_step_scale(0.1, IntegrationMethod::Trapezoidal, 2),
             1.0
         );
 
         let boundary_scale =
-            estimator.xyce_accepted_step_scale(0.1, IntegrationMethod::Trapezoidal, 2);
+            estimator.xyce_accepted_step_scale(1.0, IntegrationMethod::Trapezoidal, 2);
         let expected = (0.5f64 / 1.0001).powf(1.0 / 3.0);
         assert!((boundary_scale - expected).abs() <= 1.0e-15);
 
         let first_reject =
-            estimator.xyce_rejected_step_scale(0.2, IntegrationMethod::Trapezoidal, 2, true);
+            estimator.xyce_rejected_step_scale(1.0, IntegrationMethod::Trapezoidal, 2, true);
         assert!(first_reject > 0.25 && first_reject < 0.9);
         assert_eq!(
-            estimator.xyce_rejected_step_scale(0.2, IntegrationMethod::Trapezoidal, 2, false),
+            estimator.xyce_rejected_step_scale(1.0, IntegrationMethod::Trapezoidal, 2, false),
             0.25
+        );
+    }
+
+    #[test]
+    fn xyce_attempt_rollback_replays_one_step_restore_history_shift() {
+        let mut estimator = LteEstimator::with_tolerances_and_reference(
+            0.1,
+            1.0e-6,
+            TransientLteReference::PointGlobal,
+        );
+        estimator.xyce_attempt_dt = 3.0;
+        estimator.xyce_attempt_prev_dt = 2.0;
+        estimator.xyce_attempt_prev_prev_dt = 1.0;
+
+        estimator.begin_xyce_attempt(4.0, 2);
+        assert_eq!(
+            (
+                estimator.xyce_attempt_dt,
+                estimator.xyce_attempt_prev_dt,
+                estimator.xyce_attempt_prev_prev_dt,
+            ),
+            (4.0, 3.0, 2.0)
+        );
+        estimator.rollback_xyce_attempt();
+        assert_eq!(
+            (
+                estimator.xyce_attempt_dt,
+                estimator.xyce_attempt_prev_dt,
+                estimator.xyce_attempt_prev_prev_dt,
+            ),
+            (3.0, 2.0, 2.0)
+        );
+
+        estimator.begin_xyce_attempt(5.0, 1);
+        assert_eq!(
+            (
+                estimator.xyce_attempt_dt,
+                estimator.xyce_attempt_prev_dt,
+                estimator.xyce_attempt_prev_prev_dt,
+            ),
+            (5.0, 3.0, 2.0)
+        );
+        estimator.rollback_xyce_attempt();
+        assert_eq!(
+            (
+                estimator.xyce_attempt_dt,
+                estimator.xyce_attempt_prev_dt,
+                estimator.xyce_attempt_prev_prev_dt,
+            ),
+            (3.0, 3.0, 2.0)
         );
     }
 }
