@@ -27,7 +27,10 @@ impl Rng {
 }
 
 fn options(real_backend: RealSolverBackend) -> SolverOptions {
-    SolverOptions { real_backend }
+    SolverOptions {
+        real_backend,
+        ..SolverOptions::default()
+    }
 }
 
 fn componentwise_backward_error(dense: &[Vec<Value>], rhs: &[Value], solution: &[Value]) -> Value {

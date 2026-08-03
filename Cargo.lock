@@ -4780,7 +4780,6 @@ dependencies = [
  "faer",
  "log",
  "num-complex",
- "rustc-hash 2.1.3",
  "thiserror 2.0.18",
 ]
 

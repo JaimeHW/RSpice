@@ -9,14 +9,31 @@
 #![allow(clippy::needless_range_loop)]
 use crate::{RealSolverBackend, SolverError, SolverOptions, Value};
 use faer::dyn_stack::{MemBuffer, MemStack};
-use faer::linalg::solvers::Solve;
+use faer::sparse::linalg::LuError;
 use faer::sparse::linalg::lu as sparse_lu;
-use faer::sparse::linalg::solvers::{Lu, SymbolicLu};
-use faer::sparse::{SparseColMat, SparseColMatRef, SymbolicSparseColMat};
+use faer::sparse::{FaerError, SparseColMat, SparseColMatRef, SymbolicSparseColMat};
 use faer::{Conj, Mat, get_global_parallelism};
-use rustc_hash::FxHashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+#[inline]
+fn map_faer_error(error: FaerError) -> SolverError {
+    match error {
+        FaerError::OutOfMemory => SolverError::OutOfMemory,
+        FaerError::IndexOverflow => SolverError::InvalidCircuit(
+            "sparse matrix indices exceed the numeric backend's supported range".to_string(),
+        ),
+        _ => SolverError::InvalidCircuit("unsupported sparse factorization failure".to_string()),
+    }
+}
+
+#[inline]
+fn map_faer_lu_error(error: LuError) -> SolverError {
+    match error {
+        LuError::SymbolicSingular { .. } => SolverError::SingularMatrix,
+        LuError::Generic(error) => map_faer_error(error),
+    }
+}
 
 /// Reusable sparse-LU workspace for the Newton hot path.
 ///
@@ -30,6 +47,9 @@ struct LuWorkspace {
     numeric: sparse_lu::NumericLu<usize, Value>,
     factor_mem: MemBuffer,
     solve_mem: MemBuffer,
+    transpose_solve_mem: MemBuffer,
+    solve_rhs_capacity: usize,
+    transpose_rhs_capacity: usize,
     rhs: Mat<Value>,
     /// Numerically equilibrated CSC values for faer's factorization. Circuit
     /// matrices routinely mix conductances, ideal-source rows, and high-gain
@@ -39,7 +59,6 @@ struct LuWorkspace {
     scaled_rhs: Vec<Value>,
     row_scale: Vec<Value>,
     col_scale: Vec<Value>,
-    max_row_nnz: usize,
 }
 
 //=============================================================================
@@ -48,10 +67,11 @@ struct LuWorkspace {
 
 /// Pre-computed stamp location that maps directly to CSC values array
 #[derive(Debug, Clone, Copy)]
-pub struct CscIndex {
-    offset: usize,
-    pattern_id: u64,
-}
+pub struct CscIndex(
+    /// Numeric offset, public for compatibility with existing stamp code.
+    pub usize,
+    u64,
+);
 
 impl CscIndex {
     /// Numeric offset in the CSC value array.
@@ -61,7 +81,7 @@ impl CscIndex {
     /// complex method so the originating pattern can be validated.
     #[inline]
     pub const fn offset(self) -> usize {
-        self.offset
+        self.0
     }
 }
 
@@ -76,6 +96,19 @@ fn next_pattern_id() -> Result<u64, SolverError> {
         .map_err(|_| {
             SolverError::InvalidCircuit("matrix pattern identifier space exhausted".to_string())
         })
+}
+
+#[inline]
+fn find_csc_offset(csc: &SymbolicSparseColMat<usize>, row: usize, col: usize) -> Option<usize> {
+    if row >= csc.nrows() || col >= csc.ncols() {
+        return None;
+    }
+    let begin = csc.col_ptr()[col];
+    let end = csc.col_ptr()[col + 1];
+    csc.row_idx()[begin..end]
+        .binary_search(&row)
+        .ok()
+        .map(|offset| begin + offset)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -133,27 +166,22 @@ pub struct StaticMatrix {
     pub ncols: usize,
     /// Frozen CSC sparsity pattern, validated once at construction.
     /// Solves borrow it as a view — no per-iteration structure copies.
-    csc: SymbolicSparseColMat<usize>,
+    csc: Arc<SymbolicSparseColMat<usize>>,
     /// CSC values (mutable - updated each iteration)
     values: Vec<Value>,
     /// Identity shared by matrices cloned from this exact sparsity pattern.
     /// Precomputed stamp tokens carry the same identity, preventing a valid
     /// offset from one topology from silently corrupting another topology.
     pattern_id: u64,
-    /// Maximum structural nonzeros in any row, retained for scale-invariant
-    /// backward-error acceptance of every numeric backend.
-    max_row_nnz: usize,
-    /// Mapping from (row, col) to index in values array
-    /// This enables O(1) stamping during simulation. FxHash: stamp lookups
-    /// are integer pairs on the Newton hot path, and the map is never
-    /// iterated, so hasher choice is invisible beyond speed.
-    position_map: FxHashMap<(usize, usize), usize>,
     /// Reusable LU workspace (lazily initialized on first solve)
     lu: Option<LuWorkspace>,
     /// Default KLU-class real backend: refactors the frozen pattern with a
     /// stored pivot sequence instead of fully re-pivoting every Newton
     /// iteration. Lazily initialized; any failure falls back to the faer path.
     klu: Option<crate::KluSolver>,
+    /// Auto-policy decision retained for the frozen sparsity pattern after a
+    /// measured high-fill Circuit LU factorization.
+    klu_auto_rejected: bool,
     /// Explicit per-matrix backend policy. This avoids process-global solver
     /// state for commercial embedding while preserving an environment-aware
     /// compatibility constructor.
@@ -165,12 +193,31 @@ pub struct StaticMatrix {
     /// Scratch for the A*x product inside residual norms.
     residual_scratch: Vec<Value>,
     residual_gross_scratch: Vec<Value>,
+    residual_compensation_scratch: Vec<Value>,
+    residual_row_nnz_scratch: Vec<usize>,
     /// Retained KLU iterative-refinement correction. This path is uncommon,
     /// but keeping its buffer makes even ill-scaled repeated solves allocation
     /// free after the first accepted system.
     klu_correction_scratch: Vec<Value>,
     /// First attempted stamp outside the frozen sparsity pattern.
     stamping_error: Option<MatrixStampError>,
+}
+
+struct ProbeValuesGuard<'a> {
+    matrix: &'a mut StaticMatrix,
+    saved_values: Option<Vec<Value>>,
+    rhs: Option<Vec<Value>>,
+}
+
+impl Drop for ProbeValuesGuard<'_> {
+    fn drop(&mut self) {
+        let Some(mut saved_values) = self.saved_values.take() else {
+            return;
+        };
+        std::mem::swap(&mut self.matrix.values, &mut saved_values);
+        self.matrix.probe_values = Some(saved_values);
+        self.matrix.probe_rhs = self.rhs.take();
+    }
 }
 
 #[cold]
@@ -187,7 +234,20 @@ fn missing_matrix_position(method: &'static str, row: usize, col: usize) -> Miss
 /// (benchmarks/scoreboards/2026-06-11-faer-vs-klu-*.json).
 /// `RSPICE_SOLVER=faer` opts out.
 pub(crate) fn klu_backend_enabled() -> bool {
-    SolverOptions::from_env().real_backend == RealSolverBackend::Klu
+    SolverOptions::from_env().real_backend != RealSolverBackend::Faer
+}
+
+#[inline]
+fn auto_rejects_circuit_lu_fill(n: usize, a_nnz: usize, l_nnz: usize, u_nnz: usize) -> bool {
+    n >= 256 && l_nnz.saturating_add(u_nnz) > a_nnz.saturating_mul(8)
+}
+
+#[inline]
+fn auto_prefers_supernodal_from_pattern(n: usize, a_nnz: usize) -> bool {
+    // High-degree unsymmetric patterns are the regime where a supernodal
+    // backend amortizes dense frontal work and Circuit LU is likely to create
+    // large scalar fill. Avoid paying for a known-bad exploratory factor.
+    n >= 512 && a_nnz >= n.saturating_mul(8)
 }
 
 #[inline]
@@ -216,14 +276,13 @@ fn finite_reciprocal_scale(max_abs: Value) -> Value {
 fn equilibrate_sparse_system(
     csc: &SymbolicSparseColMat<usize>,
     values: &[Value],
-    rhs: &[Value],
     scaled_values: &mut Vec<Value>,
     row_scale: &mut Vec<Value>,
     col_scale: &mut Vec<Value>,
 ) -> Result<(), SolverError> {
     let nrows = csc.nrows();
     let ncols = csc.ncols();
-    if values.len() != csc.row_idx().len() || rhs.len() != nrows {
+    if values.len() != csc.row_idx().len() {
         return Err(SolverError::InvalidCircuit(
             "Sparse equilibration dimension mismatch".to_string(),
         ));
@@ -262,17 +321,10 @@ fn equilibrate_sparse_system(
         }
     }
     for row in 0..nrows {
-        let rhs_value = rhs[row];
-        if !rhs_value.is_finite() {
-            return Err(SolverError::Overflow);
-        }
         if row_scale[row] == 0.0 {
             return Err(SolverError::SingularMatrix);
         }
         row_scale[row] = finite_reciprocal_scale(row_scale[row]);
-        if !(rhs_value * row_scale[row]).is_finite() {
-            return Err(SolverError::Overflow);
-        }
     }
     for col in 0..ncols {
         for idx in col_ptr[col]..col_ptr[col + 1] {
@@ -287,8 +339,27 @@ fn equilibrate_sparse_system(
 }
 
 #[inline]
-fn faer_backward_error_tolerance(max_row_nnz: usize) -> Value {
-    64.0 * Value::EPSILON * (max_row_nnz.saturating_add(1) as Value)
+fn backward_error_tolerance(row_nnz: usize) -> Value {
+    64.0 * Value::EPSILON * (row_nnz.saturating_add(1) as Value)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BackwardError {
+    componentwise: Value,
+    acceptance_ratio: Value,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RealSolveOp {
+    Normal,
+    Transpose,
+}
+
+impl BackwardError {
+    #[inline]
+    fn accepted(self) -> bool {
+        self.acceptance_ratio <= 1.0
+    }
 }
 
 /// Compute componentwise backward error in the supplied coordinates.
@@ -303,6 +374,7 @@ fn faer_backward_error_tolerance(max_row_nnz: usize) -> Value {
 /// subnormal rounding bit into an order-one error and rejects otherwise exact
 /// sparse solves (notably the inactive tail of a large RC ladder).
 /// `residual` is retained as `b - A*x` for iterative refinement.
+#[allow(clippy::too_many_arguments)]
 fn componentwise_backward_error(
     csc: &SymbolicSparseColMat<usize>,
     values: &[Value],
@@ -310,8 +382,51 @@ fn componentwise_backward_error(
     rhs: &[Value],
     residual: &mut Vec<Value>,
     denominator: &mut Vec<Value>,
-    max_row_nnz: usize,
-) -> Result<Value, SolverError> {
+    compensation: &mut Vec<Value>,
+    row_nnz: &mut Vec<usize>,
+    operation: RealSolveOp,
+) -> Result<BackwardError, SolverError> {
+    let fast = fast_componentwise_backward_error(
+        csc,
+        values,
+        solution,
+        rhs,
+        residual,
+        denominator,
+        row_nnz,
+        operation,
+    )?;
+    if fast.accepted() {
+        return Ok(fast);
+    }
+    compensated_componentwise_backward_error(
+        csc,
+        values,
+        solution,
+        rhs,
+        residual,
+        denominator,
+        compensation,
+        row_nnz,
+        operation,
+    )
+}
+
+/// Fast, rigorously bounded first-pass residual. The ordinary accumulation is
+/// accepted only when its rounding-error upper bound still fits inside the
+/// shared backward-error tolerance; borderline systems fall through to the
+/// double-double implementation below.
+#[allow(clippy::too_many_arguments)]
+fn fast_componentwise_backward_error(
+    csc: &SymbolicSparseColMat<usize>,
+    values: &[Value],
+    solution: &[Value],
+    rhs: &[Value],
+    residual: &mut Vec<Value>,
+    denominator: &mut Vec<Value>,
+    row_nnz: &mut Vec<usize>,
+    operation: RealSolveOp,
+) -> Result<BackwardError, SolverError> {
     let nrows = csc.nrows();
     let ncols = csc.ncols();
     if values.len() != csc.row_idx().len() || solution.len() != ncols || rhs.len() != nrows {
@@ -322,6 +437,8 @@ fn componentwise_backward_error(
 
     residual.resize(nrows, 0.0);
     denominator.resize(nrows, 0.0);
+    row_nnz.resize(nrows, 0);
+    row_nnz.fill(0);
     for row in 0..nrows {
         if !rhs[row].is_finite() {
             return Err(SolverError::Overflow);
@@ -333,26 +450,110 @@ fn componentwise_backward_error(
     let col_ptr = csc.col_ptr();
     let row_idx = csc.row_idx();
     for col in 0..ncols {
-        let x = solution[col];
-        if !x.is_finite() {
-            return Err(SolverError::Overflow);
-        }
         for idx in col_ptr[col]..col_ptr[col + 1] {
             let value = values[idx];
+            let original_row = row_idx[idx];
+            let (equation, x_index) = match operation {
+                RealSolveOp::Normal => (original_row, col),
+                RealSolveOp::Transpose => (col, original_row),
+            };
+            let x = solution[x_index];
             let term = value * x;
             let magnitude = value.abs() * x.abs();
             if !term.is_finite() || !magnitude.is_finite() {
                 return Err(SolverError::Overflow);
             }
-            let row = row_idx[idx];
-            residual[row] -= term;
-            denominator[row] = (denominator[row] + magnitude).min(Value::MAX);
+            if value != 0.0 {
+                row_nnz[equation] = row_nnz[equation].saturating_add(1);
+            }
+            residual[equation] -= term;
+            denominator[equation] = (denominator[equation] + magnitude).min(Value::MAX);
         }
     }
 
-    let safe1 = (max_row_nnz.saturating_add(1) as Value) * Value::MIN_POSITIVE;
     let mut error: Value = 0.0;
+    let mut acceptance_ratio: Value = 0.0;
     for row in 0..nrows {
+        let safe1 = (row_nnz[row].saturating_add(1) as Value) * Value::MIN_POSITIVE;
+        let residual_abs = residual[row].abs();
+        let scale = denominator[row];
+        if !residual_abs.is_finite() || !scale.is_finite() {
+            return Err(SolverError::Overflow);
+        }
+        let rounding_bound = 4.0 * (row_nnz[row].saturating_add(1) as Value) * Value::EPSILON;
+        let row_error = residual_abs / scale.max(safe1);
+        let certified_error = row_error + rounding_bound;
+        error = error.max(row_error);
+        acceptance_ratio =
+            acceptance_ratio.max(certified_error / backward_error_tolerance(row_nnz[row]));
+    }
+    Ok(BackwardError {
+        componentwise: error,
+        acceptance_ratio,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compensated_componentwise_backward_error(
+    csc: &SymbolicSparseColMat<usize>,
+    values: &[Value],
+    solution: &[Value],
+    rhs: &[Value],
+    residual: &mut Vec<Value>,
+    denominator: &mut Vec<Value>,
+    compensation: &mut Vec<Value>,
+    row_nnz: &mut Vec<usize>,
+    operation: RealSolveOp,
+) -> Result<BackwardError, SolverError> {
+    let nrows = csc.nrows();
+    let ncols = csc.ncols();
+    residual.resize(nrows, 0.0);
+    denominator.resize(nrows, 0.0);
+    compensation.resize(nrows, 0.0);
+    compensation.fill(0.0);
+    row_nnz.resize(nrows, 0);
+    row_nnz.fill(0);
+    for row in 0..nrows {
+        residual[row] = rhs[row];
+        denominator[row] = rhs[row].abs();
+    }
+    let col_ptr = csc.col_ptr();
+    let row_idx = csc.row_idx();
+    for col in 0..ncols {
+        for idx in col_ptr[col]..col_ptr[col + 1] {
+            let value = values[idx];
+            let original_row = row_idx[idx];
+            let (equation, x_index) = match operation {
+                RealSolveOp::Normal => (original_row, col),
+                RealSolveOp::Transpose => (col, original_row),
+            };
+            let x = solution[x_index];
+            let term = value * x;
+            let magnitude = value.abs() * x.abs();
+            if !term.is_finite() || !magnitude.is_finite() {
+                return Err(SolverError::Overflow);
+            }
+            if value != 0.0 {
+                row_nnz[equation] = row_nnz[equation].saturating_add(1);
+            }
+            let product_hi = -term;
+            let product_lo = (-value).mul_add(x, -product_hi);
+            let sum = residual[equation] + product_hi;
+            let virtual_addend = sum - residual[equation];
+            let sum_error =
+                (residual[equation] - (sum - virtual_addend)) + (product_hi - virtual_addend);
+            let tail = compensation[equation] + product_lo + sum_error;
+            let refined = sum + tail;
+            compensation[equation] = tail - (refined - sum);
+            residual[equation] = refined;
+            denominator[equation] = (denominator[equation] + magnitude).min(Value::MAX);
+        }
+    }
+    let mut error: Value = 0.0;
+    let mut acceptance_ratio: Value = 0.0;
+    for row in 0..nrows {
+        residual[row] += compensation[row];
+        let safe1 = (row_nnz[row].saturating_add(1) as Value) * Value::MIN_POSITIVE;
         let residual_abs = residual[row].abs();
         let scale = denominator[row];
         if !residual_abs.is_finite() || !scale.is_finite() {
@@ -360,8 +561,12 @@ fn componentwise_backward_error(
         }
         let row_error = residual_abs / scale.max(safe1);
         error = error.max(row_error);
+        acceptance_ratio = acceptance_ratio.max(row_error / backward_error_tolerance(row_nnz[row]));
     }
-    Ok(error)
+    Ok(BackwardError {
+        componentwise: error,
+        acceptance_ratio,
+    })
 }
 
 impl StaticMatrix {
@@ -376,15 +581,16 @@ impl StaticMatrix {
             csc: self.csc.clone(),
             values: vec![0.0; self.values.len()],
             pattern_id: self.pattern_id,
-            max_row_nnz: self.max_row_nnz,
-            position_map: self.position_map.clone(),
             lu: None,
             klu: None,
+            klu_auto_rejected: self.klu_auto_rejected,
             solver_options: self.solver_options,
             probe_values: None,
             probe_rhs: None,
             residual_scratch: Vec::new(),
             residual_gross_scratch: Vec::new(),
+            residual_compensation_scratch: Vec::new(),
+            residual_row_nnz_scratch: Vec::new(),
             klu_correction_scratch: Vec::new(),
             stamping_error: None,
         }
@@ -394,7 +600,7 @@ impl StaticMatrix {
     /// in, restoring the live values afterwards.
     ///
     /// Residual probes need to stamp a trial linearization without disturbing
-    /// the in-flight Newton system. Since the structure, position map, and LU
+    /// the in-flight Newton system. Since the structure, CSC lookup, and LU
     /// workspace are all valid for any values array, swapping the values
     /// buffer gives the probe a free matrix: no structure clones, no
     /// position-map rehash, and probe solves reuse the cached symbolic
@@ -409,12 +615,16 @@ impl StaticMatrix {
         rhs.fill(0.0);
 
         std::mem::swap(&mut self.values, &mut scratch);
-        let result = f(self, &mut rhs);
-        std::mem::swap(&mut self.values, &mut scratch);
-
-        self.probe_values = Some(scratch);
-        self.probe_rhs = Some(rhs);
-        result
+        let mut guard = ProbeValuesGuard {
+            matrix: self,
+            saved_values: Some(scratch),
+            rhs: Some(rhs),
+        };
+        let rhs = guard
+            .rhs
+            .as_mut()
+            .expect("probe RHS is present for the guard lifetime");
+        f(guard.matrix, rhs)
     }
 
     fn to_dense_real(&self) -> Vec<Vec<Value>> {
@@ -449,6 +659,23 @@ impl StaticMatrix {
         if nrows == 0 || ncols == 0 {
             return Err(SolverError::InvalidCircuit("Empty matrix".to_string()));
         }
+        if !solver_options.pivot_tolerance.is_finite()
+            || solver_options.pivot_tolerance <= 0.0
+            || solver_options.pivot_tolerance > 1.0
+        {
+            return Err(SolverError::InvalidCircuit(format!(
+                "relative pivot tolerance must be finite and in (0, 1], got {}",
+                solver_options.pivot_tolerance
+            )));
+        }
+        if !solver_options.absolute_pivot_tolerance.is_finite()
+            || solver_options.absolute_pivot_tolerance < 0.0
+        {
+            return Err(SolverError::InvalidCircuit(format!(
+                "absolute pivot tolerance must be finite and non-negative, got {}",
+                solver_options.absolute_pivot_tolerance
+            )));
+        }
         for (idx, &(row, col, value)) in triplets.iter().enumerate() {
             if row >= nrows || col >= ncols {
                 return Err(SolverError::InvalidCircuit(format!(
@@ -465,10 +692,8 @@ impl StaticMatrix {
         let mut entries: Vec<(usize, usize, Value)> = triplets.to_vec();
         entries.sort_by_key(|&(r, c, _)| (c, r));
 
-        // Accumulate duplicates and build position map
+        // Accumulate duplicates while retaining strict CSC row ordering.
         let mut accumulated: Vec<(usize, usize, Value)> = Vec::with_capacity(entries.len());
-        let mut position_map = FxHashMap::default();
-
         for (r, c, v) in entries {
             if let Some(last) = accumulated.last_mut()
                 && last.0 == r
@@ -481,8 +706,6 @@ impl StaticMatrix {
                 last.2 = combined;
                 continue;
             }
-            let idx = accumulated.len();
-            position_map.insert((r, c), idx);
             accumulated.push((r, c, v));
         }
 
@@ -502,15 +725,15 @@ impl StaticMatrix {
             col_ptrs[i] += col_ptrs[i - 1];
         }
 
-        let mut row_nnz = vec![0_usize; nrows];
-        for &row in &row_indices {
-            row_nnz[row] = row_nnz[row].saturating_add(1);
-        }
-        let max_row_nnz = row_nnz.into_iter().max().unwrap_or(0);
-
         // Validate the pattern once here; every solve afterwards borrows it
         // without re-checking.
-        let csc = SymbolicSparseColMat::new_checked(nrows, ncols, col_ptrs, None, row_indices);
+        let csc = Arc::new(SymbolicSparseColMat::new_checked(
+            nrows,
+            ncols,
+            col_ptrs,
+            None,
+            row_indices,
+        ));
 
         Ok(Self {
             nrows,
@@ -518,15 +741,16 @@ impl StaticMatrix {
             csc,
             values,
             pattern_id: next_pattern_id()?,
-            max_row_nnz,
-            position_map,
             lu: None,
             klu: None,
+            klu_auto_rejected: false,
             solver_options,
             probe_values: None,
             probe_rhs: None,
             residual_scratch: Vec::new(),
             residual_gross_scratch: Vec::new(),
+            residual_compensation_scratch: Vec::new(),
+            residual_row_nnz_scratch: Vec::new(),
             klu_correction_scratch: Vec::new(),
             stamping_error: None,
         })
@@ -542,6 +766,12 @@ impl StaticMatrix {
     /// retained so switching back does not repeat symbolic setup.
     #[inline]
     pub fn set_solver_options(&mut self, solver_options: SolverOptions) {
+        if self.solver_options != solver_options {
+            // Auto's fill rejection is a policy decision, not a structural
+            // failure. In particular it must never prevent a later explicit
+            // Circuit-LU request from being honored.
+            self.klu_auto_rejected = false;
+        }
         self.solver_options = solver_options;
     }
 
@@ -554,11 +784,11 @@ impl StaticMatrix {
         self.values.fill(0.0);
     }
 
-    /// Add value at (row, col) - O(1) using position map
+    /// Add a value at `(row, col)` using a cache-local search of that column.
     #[inline]
     pub fn add(&mut self, row: usize, col: usize, value: Value) {
-        let idx = match self.position_map.get(&(row, col)) {
-            Some(&idx) => idx,
+        let idx = match find_csc_offset(&self.csc, row, col) {
+            Some(idx) => idx,
             None => {
                 self.record_missing_position("StaticMatrix::add", row, col);
                 return;
@@ -570,8 +800,8 @@ impl StaticMatrix {
     /// Checked add for callers that want an immediate structural error.
     #[inline]
     pub fn try_add(&mut self, row: usize, col: usize, value: Value) -> Result<(), SolverError> {
-        let idx = match self.position_map.get(&(row, col)) {
-            Some(&idx) => idx,
+        let idx = match find_csc_offset(&self.csc, row, col) {
+            Some(idx) => idx,
             None => {
                 let missing = missing_matrix_position("StaticMatrix::try_add", row, col);
                 self.stamping_error
@@ -606,10 +836,13 @@ impl StaticMatrix {
     /// structural suspects when factorization reports a singular system.
     pub fn deficient_rows(&self) -> Vec<usize> {
         let mut row_max = vec![0.0f64; self.nrows];
-        for (&(row, _col), &idx) in &self.position_map {
-            let magnitude = self.values[idx].abs();
-            if magnitude > row_max[row] {
-                row_max[row] = magnitude;
+        for col in 0..self.ncols {
+            for index in self.csc.col_ptr()[col]..self.csc.col_ptr()[col + 1] {
+                let row = self.csc.row_idx()[index];
+                let magnitude = self.values[index].abs();
+                if magnitude > row_max[row] {
+                    row_max[row] = magnitude;
+                }
             }
         }
         row_max
@@ -623,26 +856,23 @@ impl StaticMatrix {
     /// Get CSC index for (row, col) - for pre-indexed stamping
     #[inline]
     pub fn get_index(&self, row: usize, col: usize) -> Option<CscIndex> {
-        self.position_map.get(&(row, col)).map(|&offset| CscIndex {
-            offset,
-            pattern_id: self.pattern_id,
-        })
+        find_csc_offset(&self.csc, row, col).map(|offset| CscIndex(offset, self.pattern_id))
     }
 
     /// Direct write to values array using pre-computed index
     #[inline]
     pub fn stamp_direct(&mut self, idx: CscIndex, value: Value) {
-        if idx.pattern_id != self.pattern_id || idx.offset >= self.values.len() {
+        if idx.1 != self.pattern_id || idx.0 >= self.values.len() {
             self.stamping_error
                 .get_or_insert(MatrixStampError::InvalidIndex {
                     method: "StaticMatrix::stamp_direct",
-                    offset: idx.offset,
-                    index_pattern: idx.pattern_id,
+                    offset: idx.0,
+                    index_pattern: idx.1,
                     matrix_pattern: self.pattern_id,
                 });
             return;
         }
-        self.values[idx.offset] += value;
+        self.values[idx.0] += value;
     }
 
     /// Replace one existing row with an identity constraint.
@@ -657,22 +887,16 @@ impl StaticMatrix {
             )));
         }
 
-        let mut row_entries = Vec::new();
-        for (&(entry_row, entry_col), &idx) in &self.position_map {
-            if entry_row == row {
-                row_entries.push((entry_col, idx));
-            }
-        }
-
         let mut diagonal_found = false;
-        for (col, idx) in row_entries {
-            let value = if col == row {
-                diagonal_found = true;
-                1.0
-            } else {
-                0.0
-            };
-            self.values[idx] = value;
+        for col in 0..self.ncols {
+            if let Some(index) = find_csc_offset(&self.csc, row, col) {
+                self.values[index] = if col == row {
+                    diagonal_found = true;
+                    1.0
+                } else {
+                    0.0
+                };
+            }
         }
 
         if diagonal_found {
@@ -916,7 +1140,7 @@ impl StaticMatrix {
 
     /// Convert to an owned faer SparseColMat (legacy/test path; copies)
     fn to_sparse_col_mat(&self) -> SparseColMat<usize, Value> {
-        SparseColMat::new(self.csc.clone(), self.values.clone())
+        SparseColMat::new(self.csc.as_ref().clone(), self.values.clone())
     }
 
     /// Initialize the reusable LU workspace if it does not exist yet.
@@ -925,25 +1149,31 @@ impl StaticMatrix {
             return Ok(());
         }
         let par = get_global_parallelism();
-        let symbolic = sparse_lu::factorize_symbolic_lu(self.csc.as_ref(), Default::default())
-            .map_err(|_| SolverError::SingularMatrix)?;
+        let symbolic =
+            sparse_lu::factorize_symbolic_lu(self.csc.as_ref().as_ref(), Default::default())
+                .map_err(map_faer_error)?;
         let factor_mem = MemBuffer::try_new(
             symbolic.factorize_numeric_lu_scratch::<Value>(par, Default::default()),
         )
-        .map_err(|_| SolverError::SingularMatrix)?;
+        .map_err(|_| SolverError::OutOfMemory)?;
         let solve_mem = MemBuffer::try_new(symbolic.solve_in_place_scratch::<Value>(1, par))
-            .map_err(|_| SolverError::SingularMatrix)?;
+            .map_err(|_| SolverError::OutOfMemory)?;
+        let transpose_solve_mem =
+            MemBuffer::try_new(symbolic.solve_transpose_in_place_scratch::<Value>(1, par))
+                .map_err(|_| SolverError::OutOfMemory)?;
         self.lu = Some(LuWorkspace {
             symbolic: Arc::new(symbolic),
             numeric: sparse_lu::NumericLu::new(),
             factor_mem,
             solve_mem,
+            transpose_solve_mem,
+            solve_rhs_capacity: 1,
+            transpose_rhs_capacity: 1,
             rhs: Mat::zeros(self.nrows, 1),
             scaled_values: Vec::new(),
             scaled_rhs: Vec::new(),
             row_scale: Vec::new(),
             col_scale: Vec::new(),
-            max_row_nnz: self.max_row_nnz,
         });
         Ok(())
     }
@@ -959,6 +1189,321 @@ impl StaticMatrix {
         Ok(solution)
     }
 
+    /// Solve `A^T x = b` while reusing the matrix's symbolic and numeric
+    /// workspaces.
+    pub fn solve_transpose(&mut self, rhs: &[Value]) -> Result<Vec<Value>, SolverError> {
+        let mut solution = Vec::with_capacity(rhs.len());
+        self.solve_transpose_into(rhs, &mut solution)?;
+        Ok(solution)
+    }
+
+    /// Solve `A^T x = b` into caller-owned storage.
+    pub fn solve_transpose_into(
+        &mut self,
+        rhs: &[Value],
+        solution: &mut Vec<Value>,
+    ) -> Result<(), SolverError> {
+        let n = self.nrows;
+        self.check_stamping_error()?;
+        if n != rhs.len() || self.ncols != rhs.len() {
+            return Err(SolverError::InvalidCircuit(format!(
+                "Transpose solve requires a square matrix matching RHS size, got {}x{} with RHS {}",
+                n,
+                self.ncols,
+                rhs.len()
+            )));
+        }
+        if self.solver_options.real_backend != RealSolverBackend::Faer
+            && !self.klu_auto_rejected
+            && self.try_solve_klu_operation_into(rhs, solution, RealSolveOp::Transpose)
+        {
+            return Ok(());
+        }
+        self.solve_faer_operation_into(rhs, solution, RealSolveOp::Transpose)
+    }
+
+    /// Solve multiple real systems in one factorization/triangular pass.
+    /// Inputs and outputs are dense column-major blocks with `n` values per
+    /// right-hand side.
+    pub fn solve_many_into(
+        &mut self,
+        rhs: &[Value],
+        rhs_count: usize,
+        solution: &mut Vec<Value>,
+    ) -> Result<(), SolverError> {
+        self.solve_many_operation_into(rhs, rhs_count, solution, RealSolveOp::Normal)
+    }
+
+    /// Solve multiple `A^T X = B` systems in one factorization and batched
+    /// triangular pass. Inputs and outputs are column-major dense blocks.
+    pub fn solve_many_transpose_into(
+        &mut self,
+        rhs: &[Value],
+        rhs_count: usize,
+        solution: &mut Vec<Value>,
+    ) -> Result<(), SolverError> {
+        self.solve_many_operation_into(rhs, rhs_count, solution, RealSolveOp::Transpose)
+    }
+
+    fn solve_many_operation_into(
+        &mut self,
+        rhs: &[Value],
+        rhs_count: usize,
+        solution: &mut Vec<Value>,
+        operation: RealSolveOp,
+    ) -> Result<(), SolverError> {
+        self.check_stamping_error()?;
+        let n = self.nrows;
+        if self.solver_options.real_backend == RealSolverBackend::Auto
+            && auto_prefers_supernodal_from_pattern(n, self.values.len())
+        {
+            self.klu_auto_rejected = true;
+        }
+        let required = n.checked_mul(rhs_count).ok_or_else(|| {
+            SolverError::InvalidCircuit("Real batched RHS size overflow".to_string())
+        })?;
+        if self.ncols != n || rhs.len() != required {
+            return Err(SolverError::InvalidCircuit(format!(
+                "Real batched solve requires {}x{} values, got matrix {}x{} and RHS {}",
+                n,
+                rhs_count,
+                self.nrows,
+                self.ncols,
+                rhs.len()
+            )));
+        }
+        if rhs_count == 0 {
+            solution.clear();
+            return Ok(());
+        }
+
+        if self.solver_options.real_backend != RealSolverBackend::Faer && !self.klu_auto_rejected {
+            let klu_accepted = {
+                let Self {
+                    csc,
+                    values,
+                    klu,
+                    klu_auto_rejected,
+                    solver_options,
+                    residual_scratch,
+                    residual_gross_scratch,
+                    residual_compensation_scratch,
+                    residual_row_nnz_scratch,
+                    ..
+                } = self;
+                let backend = klu.get_or_insert_with(crate::KluSolver::new);
+                if backend
+                    .set_pivot_tolerance(solver_options.pivot_tolerance)
+                    .and_then(|()| {
+                        backend
+                            .set_absolute_pivot_tolerance(solver_options.absolute_pivot_tolerance)
+                    })
+                    .is_err()
+                {
+                    return Err(SolverError::InvalidCircuit(
+                        "invalid Circuit-LU pivot tolerance".to_string(),
+                    ));
+                }
+                let analyzed = backend.is_analyzed_for(n)
+                    || backend.analyze(n, csc.col_ptr(), csc.row_idx()).is_ok();
+                let factored = analyzed
+                    && match backend.refactor(values) {
+                        Ok(()) => true,
+                        Err(SolverError::PivotGrowth) => backend.factor(values).is_ok(),
+                        Err(_) => false,
+                    };
+                if !factored {
+                    if solver_options.real_backend == RealSolverBackend::Auto {
+                        *klu_auto_rejected = true;
+                    }
+                    false
+                } else {
+                    let excessive_fill = if solver_options.real_backend == RealSolverBackend::Auto {
+                        let (l_nnz, u_nnz) = backend.factor_nnz();
+                        auto_rejects_circuit_lu_fill(n, values.len(), l_nnz, u_nnz)
+                    } else {
+                        false
+                    };
+                    if excessive_fill {
+                        *klu_auto_rejected = true;
+                        backend.discard_numeric_factorization();
+                        false
+                    } else if match operation {
+                        RealSolveOp::Normal => backend.solve_many(rhs, rhs_count, solution),
+                        RealSolveOp::Transpose => {
+                            backend.solve_many_transpose(rhs, rhs_count, solution)
+                        }
+                    }
+                    .is_err()
+                    {
+                        false
+                    } else {
+                        let mut accepted = true;
+                        for rhs_index in 0..rhs_count {
+                            let error = componentwise_backward_error(
+                                csc,
+                                values,
+                                &solution[rhs_index * n..(rhs_index + 1) * n],
+                                &rhs[rhs_index * n..(rhs_index + 1) * n],
+                                residual_scratch,
+                                residual_gross_scratch,
+                                residual_compensation_scratch,
+                                residual_row_nnz_scratch,
+                                operation,
+                            );
+                            accepted &= error.is_ok_and(BackwardError::accepted);
+                        }
+                        accepted
+                    }
+                }
+            };
+            if klu_accepted {
+                return Ok(());
+            }
+        }
+        self.solve_many_faer_operation_into(rhs, rhs_count, solution, operation)
+    }
+
+    fn solve_many_faer_operation_into(
+        &mut self,
+        rhs: &[Value],
+        rhs_count: usize,
+        solution: &mut Vec<Value>,
+        operation: RealSolveOp,
+    ) -> Result<(), SolverError> {
+        let n = self.nrows;
+        let required = n * rhs_count;
+        self.ensure_lu_workspace()?;
+        let accepted = {
+            let par = get_global_parallelism();
+            let Self {
+                csc,
+                values,
+                lu,
+                residual_scratch,
+                residual_gross_scratch,
+                residual_compensation_scratch,
+                residual_row_nnz_scratch,
+                ..
+            } = self;
+            let Some(ws) = lu.as_mut() else {
+                return Err(SolverError::SingularMatrix);
+            };
+            equilibrate_sparse_system(
+                csc,
+                values,
+                &mut ws.scaled_values,
+                &mut ws.row_scale,
+                &mut ws.col_scale,
+            )?;
+            let mat = SparseColMatRef::new(csc.as_ref().as_ref(), ws.scaled_values.as_slice());
+            let lu_ref = ws
+                .symbolic
+                .factorize_numeric_lu(
+                    &mut ws.numeric,
+                    mat,
+                    par,
+                    MemStack::new(&mut ws.factor_mem),
+                    Default::default(),
+                )
+                .map_err(map_faer_lu_error)?;
+            match operation {
+                RealSolveOp::Normal if rhs_count > ws.solve_rhs_capacity => {
+                    ws.solve_mem = MemBuffer::try_new(
+                        ws.symbolic.solve_in_place_scratch::<Value>(rhs_count, par),
+                    )
+                    .map_err(|_| SolverError::OutOfMemory)?;
+                    ws.solve_rhs_capacity = rhs_count;
+                }
+                RealSolveOp::Transpose if rhs_count > ws.transpose_rhs_capacity => {
+                    ws.transpose_solve_mem = MemBuffer::try_new(
+                        ws.symbolic
+                            .solve_transpose_in_place_scratch::<Value>(rhs_count, par),
+                    )
+                    .map_err(|_| SolverError::OutOfMemory)?;
+                    ws.transpose_rhs_capacity = rhs_count;
+                }
+                _ => {}
+            }
+            ws.rhs.resize_with(n, rhs_count, |_, _| 0.0);
+            ws.scaled_rhs.resize(required, 0.0);
+            let rhs_scale = match operation {
+                RealSolveOp::Normal => &ws.row_scale,
+                RealSolveOp::Transpose => &ws.col_scale,
+            };
+            for rhs_index in 0..rhs_count {
+                for row in 0..n {
+                    let value = rhs[rhs_index * n + row] * rhs_scale[row];
+                    if !value.is_finite() {
+                        return Err(SolverError::Overflow);
+                    }
+                    ws.scaled_rhs[rhs_index * n + row] = value;
+                    ws.rhs[(row, rhs_index)] = value;
+                }
+            }
+            match operation {
+                RealSolveOp::Normal => lu_ref.solve_in_place_with_conj(
+                    Conj::No,
+                    ws.rhs.as_mut(),
+                    par,
+                    MemStack::new(&mut ws.solve_mem),
+                ),
+                RealSolveOp::Transpose => lu_ref.solve_transpose_in_place_with_conj(
+                    Conj::No,
+                    ws.rhs.as_mut(),
+                    par,
+                    MemStack::new(&mut ws.transpose_solve_mem),
+                ),
+            }
+            solution.resize(required, 0.0);
+            let mut all_accepted = true;
+            for rhs_index in 0..rhs_count {
+                for col in 0..n {
+                    solution[rhs_index * n + col] = ws.rhs[(col, rhs_index)];
+                }
+                let error = componentwise_backward_error(
+                    csc,
+                    &ws.scaled_values,
+                    &solution[rhs_index * n..(rhs_index + 1) * n],
+                    &ws.scaled_rhs[rhs_index * n..(rhs_index + 1) * n],
+                    residual_scratch,
+                    residual_gross_scratch,
+                    residual_compensation_scratch,
+                    residual_row_nnz_scratch,
+                    operation,
+                )?;
+                all_accepted &= error.accepted();
+                let solution_scale = match operation {
+                    RealSolveOp::Normal => &ws.col_scale,
+                    RealSolveOp::Transpose => &ws.row_scale,
+                };
+                for col in 0..n {
+                    let slot = rhs_index * n + col;
+                    solution[slot] *= solution_scale[col];
+                    if !solution[slot].is_finite() {
+                        return Err(SolverError::Overflow);
+                    }
+                }
+            }
+            all_accepted
+        };
+        if accepted {
+            return Ok(());
+        }
+        let mut refined = Vec::with_capacity(required);
+        let mut one = Vec::with_capacity(n);
+        for rhs_index in 0..rhs_count {
+            self.solve_faer_operation_into(
+                &rhs[rhs_index * n..(rhs_index + 1) * n],
+                &mut one,
+                operation,
+            )?;
+            refined.extend_from_slice(&one);
+        }
+        *solution = refined;
+        Ok(())
+    }
+
     /// Solve `A*x=b` into a caller-owned buffer.
     ///
     /// Reusing `solution` across Newton iterations removes the final allocation
@@ -972,6 +1517,12 @@ impl StaticMatrix {
         let n = self.nrows;
         self.check_stamping_error()?;
 
+        if self.solver_options.real_backend == RealSolverBackend::Auto
+            && auto_prefers_supernodal_from_pattern(n, self.values.len())
+        {
+            self.klu_auto_rejected = true;
+        }
+
         if n != rhs.len() || self.ncols != rhs.len() {
             return Err(SolverError::InvalidCircuit(format!(
                 "Matrix size {}x{} doesn't match RHS size {}",
@@ -981,7 +1532,8 @@ impl StaticMatrix {
             )));
         }
 
-        if self.solver_options.real_backend == RealSolverBackend::Klu
+        if self.solver_options.real_backend != RealSolverBackend::Faer
+            && !self.klu_auto_rejected
             && self.try_solve_klu_into(rhs, solution)
         {
             return if solution.iter().all(|value| value.is_finite()) {
@@ -1077,6 +1629,15 @@ impl StaticMatrix {
         rhs: &[Value],
         solution: &mut Vec<Value>,
     ) -> Result<(), SolverError> {
+        self.solve_faer_operation_into(rhs, solution, RealSolveOp::Normal)
+    }
+
+    fn solve_faer_operation_into(
+        &mut self,
+        rhs: &[Value],
+        solution: &mut Vec<Value>,
+        operation: RealSolveOp,
+    ) -> Result<(), SolverError> {
         self.ensure_lu_workspace()?;
 
         let par = get_global_parallelism();
@@ -1086,6 +1647,8 @@ impl StaticMatrix {
             lu,
             residual_scratch,
             residual_gross_scratch,
+            residual_compensation_scratch,
+            residual_row_nnz_scratch,
             ..
         } = self;
         let Some(ws) = lu.as_mut() else {
@@ -1095,13 +1658,12 @@ impl StaticMatrix {
         equilibrate_sparse_system(
             csc,
             values,
-            rhs,
             &mut ws.scaled_values,
             &mut ws.row_scale,
             &mut ws.col_scale,
         )?;
 
-        let mat = SparseColMatRef::new(csc.as_ref(), ws.scaled_values.as_slice());
+        let mat = SparseColMatRef::new(csc.as_ref().as_ref(), ws.scaled_values.as_slice());
 
         let lu_ref = ws
             .symbolic
@@ -1112,21 +1674,34 @@ impl StaticMatrix {
                 MemStack::new(&mut ws.factor_mem),
                 Default::default(),
             )
-            .map_err(|_| SolverError::SingularMatrix)?;
+            .map_err(map_faer_lu_error)?;
 
         ws.scaled_rhs.resize(rhs.len(), 0.0);
-        for ((scaled_rhs, &rhs_value), &row_scale) in
-            ws.scaled_rhs.iter_mut().zip(rhs).zip(&ws.row_scale)
-        {
-            *scaled_rhs = rhs_value * row_scale;
+        let rhs_scale = match operation {
+            RealSolveOp::Normal => &ws.row_scale,
+            RealSolveOp::Transpose => &ws.col_scale,
+        };
+        for ((scaled_rhs, &rhs_value), &scale) in ws.scaled_rhs.iter_mut().zip(rhs).zip(rhs_scale) {
+            *scaled_rhs = rhs_value * scale;
+            if !scaled_rhs.is_finite() {
+                return Err(SolverError::Overflow);
+            }
         }
         ws.rhs.col_as_slice_mut(0).copy_from_slice(&ws.scaled_rhs);
-        lu_ref.solve_in_place_with_conj(
-            Conj::No,
-            ws.rhs.as_mut(),
-            par,
-            MemStack::new(&mut ws.solve_mem),
-        );
+        match operation {
+            RealSolveOp::Normal => lu_ref.solve_in_place_with_conj(
+                Conj::No,
+                ws.rhs.as_mut(),
+                par,
+                MemStack::new(&mut ws.solve_mem),
+            ),
+            RealSolveOp::Transpose => lu_ref.solve_transpose_in_place_with_conj(
+                Conj::No,
+                ws.rhs.as_mut(),
+                par,
+                MemStack::new(&mut ws.transpose_solve_mem),
+            ),
+        }
 
         solution.clear();
         solution.extend_from_slice(ws.rhs.col_as_slice(0));
@@ -1134,7 +1709,6 @@ impl StaticMatrix {
             return Err(SolverError::SingularMatrix);
         }
 
-        let target_error = faer_backward_error_tolerance(ws.max_row_nnz);
         let mut backward_error = componentwise_backward_error(
             csc,
             &ws.scaled_values,
@@ -1142,11 +1716,17 @@ impl StaticMatrix {
             &ws.scaled_rhs,
             residual_scratch,
             residual_gross_scratch,
-            ws.max_row_nnz,
+            residual_compensation_scratch,
+            residual_row_nnz_scratch,
+            operation,
         )?;
-        if backward_error <= target_error {
-            for (value, &col_scale) in solution.iter_mut().zip(&ws.col_scale) {
-                *value *= col_scale;
+        if backward_error.accepted() {
+            let solution_scale = match operation {
+                RealSolveOp::Normal => &ws.col_scale,
+                RealSolveOp::Transpose => &ws.row_scale,
+            };
+            for (value, &scale) in solution.iter_mut().zip(solution_scale) {
+                *value *= scale;
                 if !value.is_finite() {
                     return Err(SolverError::Overflow);
                 }
@@ -1165,12 +1745,20 @@ impl StaticMatrix {
             {
                 *scaled_residual = residual;
             }
-            lu_ref.solve_in_place_with_conj(
-                Conj::No,
-                ws.rhs.as_mut(),
-                par,
-                MemStack::new(&mut ws.solve_mem),
-            );
+            match operation {
+                RealSolveOp::Normal => lu_ref.solve_in_place_with_conj(
+                    Conj::No,
+                    ws.rhs.as_mut(),
+                    par,
+                    MemStack::new(&mut ws.solve_mem),
+                ),
+                RealSolveOp::Transpose => lu_ref.solve_transpose_in_place_with_conj(
+                    Conj::No,
+                    ws.rhs.as_mut(),
+                    par,
+                    MemStack::new(&mut ws.transpose_solve_mem),
+                ),
+            }
 
             for (value, &scaled_correction) in solution.iter_mut().zip(ws.rhs.col_as_slice(0)) {
                 let refined = *value + scaled_correction;
@@ -1187,25 +1775,35 @@ impl StaticMatrix {
                 &ws.scaled_rhs,
                 residual_scratch,
                 residual_gross_scratch,
-                ws.max_row_nnz,
+                residual_compensation_scratch,
+                residual_row_nnz_scratch,
+                operation,
             )?;
-            if refined_error <= target_error {
-                for (value, &col_scale) in solution.iter_mut().zip(&ws.col_scale) {
-                    *value *= col_scale;
+            if refined_error.accepted() {
+                let solution_scale = match operation {
+                    RealSolveOp::Normal => &ws.col_scale,
+                    RealSolveOp::Transpose => &ws.row_scale,
+                };
+                for (value, &scale) in solution.iter_mut().zip(solution_scale) {
+                    *value *= scale;
                     if !value.is_finite() {
                         return Err(SolverError::Overflow);
                     }
                 }
                 return Ok(());
             }
-            if refined_error >= backward_error * MIN_IMPROVEMENT_FACTOR {
+            if refined_error.acceptance_ratio
+                >= backward_error.acceptance_ratio * MIN_IMPROVEMENT_FACTOR
+            {
                 backward_error = refined_error;
                 break;
             }
             backward_error = refined_error;
         }
 
-        Err(SolverError::InaccurateSolution(backward_error))
+        Err(SolverError::InaccurateSolution(
+            backward_error.componentwise,
+        ))
     }
 
     /// Default KLU-class real solve: values-only
@@ -1214,14 +1812,26 @@ impl StaticMatrix {
     /// on any backend failure so the caller falls through to faer —
     /// backend fallback can degrade performance but never a result.
     fn try_solve_klu_into(&mut self, rhs: &[Value], solution: &mut Vec<Value>) -> bool {
+        self.try_solve_klu_operation_into(rhs, solution, RealSolveOp::Normal)
+    }
+
+    fn try_solve_klu_operation_into(
+        &mut self,
+        rhs: &[Value],
+        solution: &mut Vec<Value>,
+        operation: RealSolveOp,
+    ) -> bool {
         let Self {
             nrows,
             csc,
             values,
             klu,
-            max_row_nnz,
+            klu_auto_rejected,
+            solver_options,
             residual_scratch,
             residual_gross_scratch,
+            residual_compensation_scratch,
+            residual_row_nnz_scratch,
             klu_correction_scratch,
             ..
         } = self;
@@ -1230,25 +1840,57 @@ impl StaticMatrix {
         let row_idx = csc.row_idx();
 
         let backend = klu.get_or_insert_with(crate::KluSolver::new);
+        if backend
+            .set_pivot_tolerance(solver_options.pivot_tolerance)
+            .and_then(|()| {
+                backend.set_absolute_pivot_tolerance(solver_options.absolute_pivot_tolerance)
+            })
+            .is_err()
+        {
+            return false;
+        }
         if !backend.is_analyzed_for(n) && backend.analyze(n, col_ptr, row_idx).is_err() {
             return false;
         }
         let factored = match backend.refactor(values) {
             Ok(()) => true,
             Err(SolverError::PivotGrowth) => backend.factor(values).is_ok(),
-            Err(_) => backend.factor(values).is_ok(),
+            Err(_) => false,
         };
         if !factored {
+            if solver_options.real_backend == RealSolverBackend::Auto {
+                *klu_auto_rejected = true;
+            }
             static FALLBACK_LOGGED: std::sync::Once = std::sync::Once::new();
             FALLBACK_LOGGED.call_once(|| {
                 log::warn!("klu backend could not factor this system; using faer fallback");
             });
             return false;
         }
-        if backend.solve(rhs, solution).is_err() {
+        if solver_options.real_backend == RealSolverBackend::Auto {
+            let (l_nnz, u_nnz) = backend.factor_nnz();
+            let factor_nnz = l_nnz.saturating_add(u_nnz);
+            let excessive_fill = auto_rejects_circuit_lu_fill(n, values.len(), l_nnz, u_nnz);
+            if excessive_fill {
+                *klu_auto_rejected = true;
+                backend.discard_numeric_factorization();
+                log::debug!(
+                    "auto backend retained faer for {}x{} pattern: Circuit LU fill {} / A nnz {}",
+                    n,
+                    n,
+                    factor_nnz,
+                    values.len()
+                );
+                return false;
+            }
+        }
+        let solve_result = match operation {
+            RealSolveOp::Normal => backend.solve(rhs, solution),
+            RealSolveOp::Transpose => backend.solve_transpose(rhs, solution),
+        };
+        if solve_result.is_err() {
             return false;
         }
-        let target_error = faer_backward_error_tolerance(*max_row_nnz);
         let mut backward_error = match componentwise_backward_error(
             csc,
             values,
@@ -1256,12 +1898,14 @@ impl StaticMatrix {
             rhs,
             residual_scratch,
             residual_gross_scratch,
-            *max_row_nnz,
+            residual_compensation_scratch,
+            residual_row_nnz_scratch,
+            operation,
         ) {
             Ok(error) => error,
             Err(_) => return false,
         };
-        if backward_error <= target_error {
+        if backward_error.accepted() {
             return true;
         }
 
@@ -1275,10 +1919,13 @@ impl StaticMatrix {
         const MAX_KLU_REFINEMENTS: usize = 5;
         const MIN_IMPROVEMENT_FACTOR: Value = 0.5;
         for _ in 0..MAX_KLU_REFINEMENTS {
-            if backend
-                .solve(residual_scratch, klu_correction_scratch)
-                .is_err()
-            {
+            let correction_result = match operation {
+                RealSolveOp::Normal => backend.solve(residual_scratch, klu_correction_scratch),
+                RealSolveOp::Transpose => {
+                    backend.solve_transpose(residual_scratch, klu_correction_scratch)
+                }
+            };
+            if correction_result.is_err() {
                 return false;
             }
             for (value, &delta) in solution.iter_mut().zip(klu_correction_scratch.iter()) {
@@ -1295,15 +1942,19 @@ impl StaticMatrix {
                 rhs,
                 residual_scratch,
                 residual_gross_scratch,
-                *max_row_nnz,
+                residual_compensation_scratch,
+                residual_row_nnz_scratch,
+                operation,
             ) {
                 Ok(error) => error,
                 Err(_) => return false,
             };
-            if refined_error <= target_error {
+            if refined_error.accepted() {
                 return true;
             }
-            if refined_error >= backward_error * MIN_IMPROVEMENT_FACTOR {
+            if refined_error.acceptance_ratio
+                >= backward_error.acceptance_ratio * MIN_IMPROVEMENT_FACTOR
+            {
                 break;
             }
             backward_error = refined_error;
@@ -1327,19 +1978,27 @@ impl StaticMatrix {
         }
 
         let solution = solve_gauss(self.to_dense_real(), rhs.to_vec())?;
+        let mut residual = Vec::new();
+        let mut denominator = Vec::new();
+        let mut compensation = Vec::new();
+        let mut row_nnz = Vec::new();
         let backward_error = componentwise_backward_error(
             &self.csc,
             &self.values,
             &solution,
             rhs,
-            &mut Vec::new(),
-            &mut Vec::new(),
-            self.max_row_nnz,
+            &mut residual,
+            &mut denominator,
+            &mut compensation,
+            &mut row_nnz,
+            RealSolveOp::Normal,
         )?;
-        if backward_error <= faer_backward_error_tolerance(self.max_row_nnz) {
+        if backward_error.accepted() {
             Ok(solution)
         } else {
-            Err(SolverError::InaccurateSolution(backward_error))
+            Err(SolverError::InaccurateSolution(
+                backward_error.componentwise,
+            ))
         }
     }
 }
@@ -1356,6 +2015,9 @@ struct ComplexLuWorkspace {
     numeric: sparse_lu::NumericLu<usize, Complex64>,
     factor_mem: MemBuffer,
     solve_mem: MemBuffer,
+    transpose_solve_mem: MemBuffer,
+    solve_rhs_capacity: usize,
+    transpose_rhs_capacity: usize,
     rhs: Mat<Complex64>,
     scaled_values: Vec<Complex64>,
     scaled_rhs: Vec<Complex64>,
@@ -1363,11 +2025,25 @@ struct ComplexLuWorkspace {
     col_scale: Vec<Value>,
     residual: Vec<Complex64>,
     denominator: Vec<Value>,
+    compensation: Vec<Complex64>,
+    row_nnz: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ComplexSolveOp {
+    Normal,
+    Transpose,
+    Adjoint,
 }
 
 #[inline]
 fn complex_is_finite(value: Complex64) -> bool {
     value.re.is_finite() && value.im.is_finite()
+}
+
+#[inline]
+fn complex_abs1(value: Complex64) -> Value {
+    (value.re.abs() + value.im.abs()).min(Value::MAX)
 }
 
 /// Build `D_r * A * D_c` for a complex matrix. Positive real diagonal
@@ -1401,7 +2077,7 @@ fn equilibrate_complex_matrix(
             if !complex_is_finite(value) {
                 return Err(SolverError::Overflow);
             }
-            max_abs = max_abs.max(value.norm());
+            max_abs = max_abs.max(complex_abs1(value));
         }
         if max_abs == 0.0 {
             return Err(SolverError::SingularMatrix);
@@ -1417,7 +2093,7 @@ fn equilibrate_complex_matrix(
     for col in 0..ncols {
         for idx in col_ptr[col]..col_ptr[col + 1] {
             let row = row_idx[idx];
-            row_scale[row] = row_scale[row].max(scaled_values[idx].norm());
+            row_scale[row] = row_scale[row].max(complex_abs1(scaled_values[idx]));
         }
     }
     for scale in row_scale.iter_mut() {
@@ -1464,6 +2140,59 @@ fn scale_complex_rhs(
     Ok(())
 }
 
+#[inline]
+fn dd_add(hi: &mut Value, lo: &mut Value, add_hi: Value, add_lo: Value) {
+    let sum = *hi + add_hi;
+    let virtual_addend = sum - *hi;
+    let sum_error = (*hi - (sum - virtual_addend)) + (add_hi - virtual_addend);
+    let tail = *lo + add_lo + sum_error;
+    let refined = sum + tail;
+    *lo = tail - (refined - sum);
+    *hi = refined;
+}
+
+#[inline]
+fn complex_dd_subtract(
+    residual: &mut Complex64,
+    compensation: &mut Complex64,
+    value: Complex64,
+    x: Complex64,
+) {
+    let product_re_1 = (-value.re) * x.re;
+    let product_re_1_lo = (-value.re).mul_add(x.re, -product_re_1);
+    let product_re_2 = value.im * x.im;
+    let product_re_2_lo = value.im.mul_add(x.im, -product_re_2);
+    let product_im_1 = (-value.re) * x.im;
+    let product_im_1_lo = (-value.re).mul_add(x.im, -product_im_1);
+    let product_im_2 = (-value.im) * x.re;
+    let product_im_2_lo = (-value.im).mul_add(x.re, -product_im_2);
+    dd_add(
+        &mut residual.re,
+        &mut compensation.re,
+        product_re_1,
+        product_re_1_lo,
+    );
+    dd_add(
+        &mut residual.re,
+        &mut compensation.re,
+        product_re_2,
+        product_re_2_lo,
+    );
+    dd_add(
+        &mut residual.im,
+        &mut compensation.im,
+        product_im_1,
+        product_im_1_lo,
+    );
+    dd_add(
+        &mut residual.im,
+        &mut compensation.im,
+        product_im_2,
+        product_im_2_lo,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
 fn complex_componentwise_backward_error(
     csc: &SymbolicSparseColMat<usize>,
     values: &[Complex64],
@@ -1471,8 +2200,126 @@ fn complex_componentwise_backward_error(
     rhs: &[Complex64],
     residual: &mut Vec<Complex64>,
     denominator: &mut Vec<Value>,
-    max_row_nnz: usize,
-) -> Result<Value, SolverError> {
+    compensation: &mut Vec<Complex64>,
+    row_nnz: &mut Vec<usize>,
+    operation: ComplexSolveOp,
+) -> Result<BackwardError, SolverError> {
+    let fast = fast_complex_componentwise_backward_error(
+        csc,
+        values,
+        solution,
+        rhs,
+        residual,
+        denominator,
+        row_nnz,
+        operation,
+    )?;
+    if fast.accepted() {
+        return Ok(fast);
+    }
+    compensated_complex_componentwise_backward_error(
+        csc,
+        values,
+        solution,
+        rhs,
+        residual,
+        denominator,
+        compensation,
+        row_nnz,
+        operation,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn fast_complex_componentwise_backward_error(
+    csc: &SymbolicSparseColMat<usize>,
+    values: &[Complex64],
+    solution: &[Complex64],
+    rhs: &[Complex64],
+    residual: &mut Vec<Complex64>,
+    denominator: &mut Vec<Value>,
+    row_nnz: &mut Vec<usize>,
+    operation: ComplexSolveOp,
+) -> Result<BackwardError, SolverError> {
+    let nrows = csc.nrows();
+    let ncols = csc.ncols();
+    if values.len() != csc.row_idx().len() || solution.len() != ncols || rhs.len() != nrows {
+        return Err(SolverError::InvalidCircuit(
+            "Complex sparse backward-error dimension mismatch".to_string(),
+        ));
+    }
+    residual.resize(nrows, Complex64::new(0.0, 0.0));
+    denominator.resize(nrows, 0.0);
+    row_nnz.resize(nrows, 0);
+    row_nnz.fill(0);
+    for row in 0..nrows {
+        if !complex_is_finite(rhs[row]) {
+            return Err(SolverError::Overflow);
+        }
+        residual[row] = rhs[row];
+        denominator[row] = complex_abs1(rhs[row]);
+    }
+    for col in 0..ncols {
+        for index in csc.col_ptr()[col]..csc.col_ptr()[col + 1] {
+            let original_row = csc.row_idx()[index];
+            let (equation, x_index, value) = match operation {
+                ComplexSolveOp::Normal => (original_row, col, values[index]),
+                ComplexSolveOp::Transpose => (col, original_row, values[index]),
+                ComplexSolveOp::Adjoint => (col, original_row, values[index].conj()),
+            };
+            let x = solution[x_index];
+            let product = value * x;
+            let magnitude = complex_abs1(value) * complex_abs1(x);
+            if !complex_is_finite(value)
+                || !complex_is_finite(x)
+                || !complex_is_finite(product)
+                || !magnitude.is_finite()
+            {
+                return Err(SolverError::Overflow);
+            }
+            residual[equation] -= product;
+            if value != Complex64::new(0.0, 0.0) {
+                row_nnz[equation] = row_nnz[equation].saturating_add(1);
+            }
+            denominator[equation] = (denominator[equation] + magnitude).min(Value::MAX);
+        }
+    }
+    let mut error: Value = 0.0;
+    let mut acceptance_ratio: Value = 0.0;
+    for row in 0..nrows {
+        let safe1 = (row_nnz[row].saturating_add(1) as Value) * Value::MIN_POSITIVE;
+        let residual_abs = complex_abs1(residual[row]);
+        let scale = denominator[row];
+        if !residual_abs.is_finite() || !scale.is_finite() {
+            return Err(SolverError::Overflow);
+        }
+        let row_error = residual_abs / scale.max(safe1);
+        // One complex multiply/subtract is bounded by several scalar
+        // roundings; sixteen epsilons per active term is conservative.
+        let certified_error =
+            row_error + 16.0 * (row_nnz[row].saturating_add(1) as Value) * Value::EPSILON;
+        error = error.max(row_error);
+        acceptance_ratio =
+            acceptance_ratio.max(certified_error / backward_error_tolerance(row_nnz[row]));
+    }
+    Ok(BackwardError {
+        componentwise: error,
+        acceptance_ratio,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compensated_complex_componentwise_backward_error(
+    csc: &SymbolicSparseColMat<usize>,
+    values: &[Complex64],
+    solution: &[Complex64],
+    rhs: &[Complex64],
+    residual: &mut Vec<Complex64>,
+    denominator: &mut Vec<Value>,
+    compensation: &mut Vec<Complex64>,
+    row_nnz: &mut Vec<usize>,
+    operation: ComplexSolveOp,
+) -> Result<BackwardError, SolverError> {
     let nrows = csc.nrows();
     let ncols = csc.ncols();
     if values.len() != csc.row_idx().len() || solution.len() != ncols || rhs.len() != nrows {
@@ -1483,46 +2330,64 @@ fn complex_componentwise_backward_error(
 
     residual.resize(nrows, Complex64::new(0.0, 0.0));
     denominator.resize(nrows, 0.0);
+    compensation.resize(nrows, Complex64::new(0.0, 0.0));
+    compensation.fill(Complex64::new(0.0, 0.0));
+    row_nnz.resize(nrows, 0);
+    row_nnz.fill(0);
     for row in 0..nrows {
         if !complex_is_finite(rhs[row]) {
             return Err(SolverError::Overflow);
         }
         residual[row] = rhs[row];
-        denominator[row] = rhs[row].norm();
+        denominator[row] = complex_abs1(rhs[row]);
     }
 
     let col_ptr = csc.col_ptr();
     let row_idx = csc.row_idx();
     for col in 0..ncols {
-        let x = solution[col];
-        if !complex_is_finite(x) {
-            return Err(SolverError::Overflow);
-        }
-        let x_abs = x.norm();
         for idx in col_ptr[col]..col_ptr[col + 1] {
-            let value = values[idx];
-            let term = value * x;
-            let magnitude = value.norm() * x_abs;
-            if !complex_is_finite(value) || !complex_is_finite(term) || !magnitude.is_finite() {
+            let original_row = row_idx[idx];
+            let (equation, x_index, value) = match operation {
+                ComplexSolveOp::Normal => (original_row, col, values[idx]),
+                ComplexSolveOp::Transpose => (col, original_row, values[idx]),
+                ComplexSolveOp::Adjoint => (col, original_row, values[idx].conj()),
+            };
+            let x = solution[x_index];
+            let magnitude = complex_abs1(value) * complex_abs1(x);
+            if !complex_is_finite(value) || !complex_is_finite(x) || !magnitude.is_finite() {
                 return Err(SolverError::Overflow);
             }
-            let row = row_idx[idx];
-            residual[row] -= term;
-            denominator[row] = (denominator[row] + magnitude).min(Value::MAX);
+            if value != Complex64::new(0.0, 0.0) {
+                row_nnz[equation] = row_nnz[equation].saturating_add(1);
+            }
+            complex_dd_subtract(
+                &mut residual[equation],
+                &mut compensation[equation],
+                value,
+                x,
+            );
+            denominator[equation] = (denominator[equation] + magnitude).min(Value::MAX);
         }
     }
 
-    let safe1 = (max_row_nnz.saturating_add(1) as Value) * Value::MIN_POSITIVE;
     let mut error: Value = 0.0;
+    let mut acceptance_ratio: Value = 0.0;
     for row in 0..nrows {
-        let residual_abs = residual[row].norm();
+        residual[row] += compensation[row];
+        let safe1 = (row_nnz[row].saturating_add(1) as Value) * Value::MIN_POSITIVE;
+        let residual_abs = complex_abs1(residual[row]);
         let scale = denominator[row];
         if !residual_abs.is_finite() || !scale.is_finite() {
             return Err(SolverError::Overflow);
         }
-        error = error.max(residual_abs / scale.max(safe1));
+        let row_error = residual_abs / scale.max(safe1);
+        error = error.max(row_error);
+        acceptance_ratio = acceptance_ratio.max(row_error / backward_error_tolerance(row_nnz[row]));
     }
-    Ok(error)
+    Ok(BackwardError {
+        componentwise: error,
+        acceptance_ratio,
+    })
 }
 
 /// ComplexMatrix for AC small-signal analysis
@@ -1535,16 +2400,11 @@ pub struct ComplexMatrix {
     /// Matrix column count.
     pub ncols: usize,
     /// Frozen CSC sparsity pattern (cloned from the real matrix once)
-    csc: SymbolicSparseColMat<usize>,
+    csc: Arc<SymbolicSparseColMat<usize>>,
     /// Complex values (updated for each frequency)
     values: Vec<Complex64>,
     /// Identity of the real sparsity pattern from which this matrix was made.
     pattern_id: u64,
-    /// Mapping from (row, col) to index in values array
-    position_map: FxHashMap<(usize, usize), usize>,
-    /// Maximum structural nonzeros in a row for the shared backward-error
-    /// tolerance used by real and complex solves.
-    max_row_nnz: usize,
     /// Reusable LU workspace; the symbolic part is shared with the real
     /// matrix when available (symbolic LU is scalar-type independent).
     lu: Option<ComplexLuWorkspace>,
@@ -1566,8 +2426,6 @@ impl ComplexMatrix {
             csc: real_matrix.csc.clone(),
             values: vec![Complex64::new(0.0, 0.0); nnz],
             pattern_id: real_matrix.pattern_id,
-            position_map: real_matrix.position_map.clone(),
-            max_row_nnz: real_matrix.max_row_nnz,
             lu: None,
             factorization_valid: false,
             stamping_error: None,
@@ -1589,14 +2447,20 @@ impl ComplexMatrix {
         let factor_mem = MemBuffer::try_new(
             symbolic.factorize_numeric_lu_scratch::<Complex64>(par, Default::default()),
         )
-        .map_err(|_| SolverError::SingularMatrix)?;
+        .map_err(|_| SolverError::OutOfMemory)?;
         let solve_mem = MemBuffer::try_new(symbolic.solve_in_place_scratch::<Complex64>(1, par))
-            .map_err(|_| SolverError::SingularMatrix)?;
+            .map_err(|_| SolverError::OutOfMemory)?;
+        let transpose_solve_mem =
+            MemBuffer::try_new(symbolic.solve_transpose_in_place_scratch::<Complex64>(1, par))
+                .map_err(|_| SolverError::OutOfMemory)?;
         Ok(ComplexLuWorkspace {
             symbolic,
             numeric: sparse_lu::NumericLu::new(),
             factor_mem,
             solve_mem,
+            transpose_solve_mem,
+            solve_rhs_capacity: 1,
+            transpose_rhs_capacity: 1,
             rhs: Mat::zeros(nrows, 1),
             scaled_values: Vec::new(),
             scaled_rhs: Vec::new(),
@@ -1604,6 +2468,8 @@ impl ComplexMatrix {
             col_scale: Vec::new(),
             residual: Vec::new(),
             denominator: Vec::new(),
+            compensation: Vec::new(),
+            row_nnz: Vec::new(),
         })
     }
 
@@ -1617,8 +2483,8 @@ impl ComplexMatrix {
     /// Add real value at (row, col)
     #[inline]
     pub fn add_real(&mut self, row: usize, col: usize, value: Value) {
-        let idx = match self.position_map.get(&(row, col)) {
-            Some(&idx) => idx,
+        let idx = match find_csc_offset(&self.csc, row, col) {
+            Some(idx) => idx,
             None => {
                 self.record_missing_position("ComplexMatrix::add_real", row, col);
                 return;
@@ -1631,8 +2497,8 @@ impl ComplexMatrix {
     /// Add complex value at (row, col)
     #[inline]
     pub fn add(&mut self, row: usize, col: usize, value: Complex64) {
-        let idx = match self.position_map.get(&(row, col)) {
-            Some(&idx) => idx,
+        let idx = match find_csc_offset(&self.csc, row, col) {
+            Some(idx) => idx,
             None => {
                 self.record_missing_position("ComplexMatrix::add", row, col);
                 return;
@@ -1645,8 +2511,8 @@ impl ComplexMatrix {
     /// Add imaginary value (for frequency-dependent terms like jwC)
     #[inline]
     pub fn add_imag(&mut self, row: usize, col: usize, value: Value) {
-        let idx = match self.position_map.get(&(row, col)) {
-            Some(&idx) => idx,
+        let idx = match find_csc_offset(&self.csc, row, col) {
+            Some(idx) => idx,
             None => {
                 self.record_missing_position("ComplexMatrix::add_imag", row, col);
                 return;
@@ -1662,7 +2528,7 @@ impl ComplexMatrix {
         if !self.validate_direct_index("ComplexMatrix::stamp_direct_real", idx) {
             return;
         }
-        self.values[idx.offset] += Complex64::new(value, 0.0);
+        self.values[idx.0] += Complex64::new(value, 0.0);
         self.factorization_valid = false;
     }
 
@@ -1672,7 +2538,7 @@ impl ComplexMatrix {
         if !self.validate_direct_index("ComplexMatrix::stamp_direct_imag", idx) {
             return;
         }
-        self.values[idx.offset] += Complex64::new(0.0, value);
+        self.values[idx.0] += Complex64::new(0.0, value);
         self.factorization_valid = false;
     }
 
@@ -1684,8 +2550,8 @@ impl ComplexMatrix {
         col: usize,
         value: Value,
     ) -> Result<(), SolverError> {
-        let idx = match self.position_map.get(&(row, col)) {
-            Some(&idx) => idx,
+        let idx = match find_csc_offset(&self.csc, row, col) {
+            Some(idx) => idx,
             None => {
                 let missing = missing_matrix_position("ComplexMatrix::try_add_real", row, col);
                 self.stamping_error
@@ -1705,8 +2571,8 @@ impl ComplexMatrix {
     /// Checked complex add for callers that want an immediate structural error.
     #[inline]
     pub fn try_add(&mut self, row: usize, col: usize, value: Complex64) -> Result<(), SolverError> {
-        let idx = match self.position_map.get(&(row, col)) {
-            Some(&idx) => idx,
+        let idx = match find_csc_offset(&self.csc, row, col) {
+            Some(idx) => idx,
             None => {
                 let missing = missing_matrix_position("ComplexMatrix::try_add", row, col);
                 self.stamping_error
@@ -1731,8 +2597,8 @@ impl ComplexMatrix {
         col: usize,
         value: Value,
     ) -> Result<(), SolverError> {
-        let idx = match self.position_map.get(&(row, col)) {
-            Some(&idx) => idx,
+        let idx = match find_csc_offset(&self.csc, row, col) {
+            Some(idx) => idx,
             None => {
                 let missing = missing_matrix_position("ComplexMatrix::try_add_imag", row, col);
                 self.stamping_error
@@ -1758,14 +2624,14 @@ impl ComplexMatrix {
 
     #[inline]
     fn validate_direct_index(&mut self, method: &'static str, idx: CscIndex) -> bool {
-        if idx.pattern_id == self.pattern_id && idx.offset < self.values.len() {
+        if idx.1 == self.pattern_id && idx.0 < self.values.len() {
             return true;
         }
         self.stamping_error
             .get_or_insert(MatrixStampError::InvalidIndex {
                 method,
-                offset: idx.offset,
-                index_pattern: idx.pattern_id,
+                offset: idx.0,
+                index_pattern: idx.1,
                 matrix_pattern: self.pattern_id,
             });
         false
@@ -1866,6 +2732,239 @@ impl ComplexMatrix {
         rhs: &[Complex64],
         solution: &mut Vec<Complex64>,
     ) -> Result<(), SolverError> {
+        self.solve_operation_into(rhs, solution, ComplexSolveOp::Normal)
+    }
+
+    /// Solve multiple complex systems with one cached factorization and one
+    /// batched triangular solve. Inputs and outputs are column-major with `n`
+    /// consecutive values per right-hand side.
+    pub fn solve_many_into(
+        &mut self,
+        rhs: &[Complex64],
+        rhs_count: usize,
+        solution: &mut Vec<Complex64>,
+    ) -> Result<(), SolverError> {
+        self.solve_many_operation_into(rhs, rhs_count, solution, ComplexSolveOp::Normal)
+    }
+
+    /// Solve multiple `A^T X = B` systems in one batched triangular pass.
+    pub fn solve_many_transpose_into(
+        &mut self,
+        rhs: &[Complex64],
+        rhs_count: usize,
+        solution: &mut Vec<Complex64>,
+    ) -> Result<(), SolverError> {
+        self.solve_many_operation_into(rhs, rhs_count, solution, ComplexSolveOp::Transpose)
+    }
+
+    /// Solve multiple `A^H X = B` systems in one batched triangular pass.
+    pub fn solve_many_adjoint_into(
+        &mut self,
+        rhs: &[Complex64],
+        rhs_count: usize,
+        solution: &mut Vec<Complex64>,
+    ) -> Result<(), SolverError> {
+        self.solve_many_operation_into(rhs, rhs_count, solution, ComplexSolveOp::Adjoint)
+    }
+
+    fn solve_many_operation_into(
+        &mut self,
+        rhs: &[Complex64],
+        rhs_count: usize,
+        solution: &mut Vec<Complex64>,
+        operation: ComplexSolveOp,
+    ) -> Result<(), SolverError> {
+        self.check_stamping_error()?;
+        let n = self.nrows;
+        let required = n.checked_mul(rhs_count).ok_or_else(|| {
+            SolverError::InvalidCircuit("Complex batched RHS size overflow".to_string())
+        })?;
+        if self.ncols != n || rhs.len() != required {
+            return Err(SolverError::InvalidCircuit(format!(
+                "Complex batched solve requires {}x{} values, got matrix {}x{} and RHS {}",
+                n,
+                rhs_count,
+                self.nrows,
+                self.ncols,
+                rhs.len()
+            )));
+        }
+        if rhs_count == 0 {
+            solution.clear();
+            return Ok(());
+        }
+        if self.lu.is_none() {
+            let symbolic =
+                sparse_lu::factorize_symbolic_lu(self.csc.as_ref().as_ref(), Default::default())
+                    .map_err(map_faer_error)?;
+            self.lu = Some(Self::workspace_from_symbolic(n, Arc::new(symbolic))?);
+            self.factorization_valid = false;
+        }
+
+        let accepted = {
+            let par = get_global_parallelism();
+            let Self {
+                csc,
+                values,
+                lu,
+                factorization_valid,
+                ..
+            } = self;
+            let Some(ws) = lu.as_mut() else {
+                return Err(SolverError::SingularMatrix);
+            };
+            if !*factorization_valid {
+                equilibrate_complex_matrix(
+                    csc,
+                    values,
+                    &mut ws.scaled_values,
+                    &mut ws.row_scale,
+                    &mut ws.col_scale,
+                )?;
+                let mat = SparseColMatRef::new(csc.as_ref().as_ref(), ws.scaled_values.as_slice());
+                ws.symbolic
+                    .factorize_numeric_lu(
+                        &mut ws.numeric,
+                        mat,
+                        par,
+                        MemStack::new(&mut ws.factor_mem),
+                        Default::default(),
+                    )
+                    .map_err(map_faer_lu_error)?;
+                *factorization_valid = true;
+            }
+            match operation {
+                ComplexSolveOp::Normal if rhs_count > ws.solve_rhs_capacity => {
+                    ws.solve_mem = MemBuffer::try_new(
+                        ws.symbolic
+                            .solve_in_place_scratch::<Complex64>(rhs_count, par),
+                    )
+                    .map_err(|_| SolverError::OutOfMemory)?;
+                    ws.solve_rhs_capacity = rhs_count;
+                }
+                ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint
+                    if rhs_count > ws.transpose_rhs_capacity =>
+                {
+                    ws.transpose_solve_mem = MemBuffer::try_new(
+                        ws.symbolic
+                            .solve_transpose_in_place_scratch::<Complex64>(rhs_count, par),
+                    )
+                    .map_err(|_| SolverError::OutOfMemory)?;
+                    ws.transpose_rhs_capacity = rhs_count;
+                }
+                _ => {}
+            }
+            let rhs_scale = match operation {
+                ComplexSolveOp::Normal => &ws.row_scale,
+                ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => &ws.col_scale,
+            };
+            ws.rhs
+                .resize_with(n, rhs_count, |_, _| Complex64::new(0.0, 0.0));
+            for rhs_index in 0..rhs_count {
+                for row in 0..n {
+                    let value = rhs[rhs_index * n + row] * rhs_scale[row];
+                    if !complex_is_finite(value) {
+                        return Err(SolverError::Overflow);
+                    }
+                    ws.rhs[(row, rhs_index)] = value;
+                }
+            }
+            let lu_ref = unsafe { sparse_lu::LuRef::new_unchecked(&ws.symbolic, &ws.numeric) };
+            match operation {
+                ComplexSolveOp::Normal => lu_ref.solve_in_place_with_conj(
+                    Conj::No,
+                    ws.rhs.as_mut(),
+                    par,
+                    MemStack::new(&mut ws.solve_mem),
+                ),
+                ComplexSolveOp::Transpose => lu_ref.solve_transpose_in_place_with_conj(
+                    Conj::No,
+                    ws.rhs.as_mut(),
+                    par,
+                    MemStack::new(&mut ws.transpose_solve_mem),
+                ),
+                ComplexSolveOp::Adjoint => lu_ref.solve_transpose_in_place_with_conj(
+                    Conj::Yes,
+                    ws.rhs.as_mut(),
+                    par,
+                    MemStack::new(&mut ws.transpose_solve_mem),
+                ),
+            }
+
+            solution.resize(required, Complex64::new(0.0, 0.0));
+            let solution_scale = match operation {
+                ComplexSolveOp::Normal => &ws.col_scale,
+                ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => &ws.row_scale,
+            };
+            let mut all_accepted = true;
+            for rhs_index in 0..rhs_count {
+                for col in 0..n {
+                    let value = ws.rhs[(col, rhs_index)] * solution_scale[col];
+                    if !complex_is_finite(value) {
+                        return Err(SolverError::SingularMatrix);
+                    }
+                    solution[rhs_index * n + col] = value;
+                }
+                let error = complex_componentwise_backward_error(
+                    csc,
+                    values,
+                    &solution[rhs_index * n..(rhs_index + 1) * n],
+                    &rhs[rhs_index * n..(rhs_index + 1) * n],
+                    &mut ws.residual,
+                    &mut ws.denominator,
+                    &mut ws.compensation,
+                    &mut ws.row_nnz,
+                    operation,
+                )?;
+                all_accepted &= error.accepted();
+            }
+            all_accepted
+        };
+        if accepted {
+            return Ok(());
+        }
+
+        // Rare ill-conditioned RHS: preserve the batched fast path for the
+        // common case, then use the fully refined scalar path only where the
+        // shared factor needs correction.
+        let mut refined = Vec::with_capacity(required);
+        let mut one = Vec::with_capacity(n);
+        for rhs_index in 0..rhs_count {
+            self.solve_operation_into(
+                &rhs[rhs_index * n..(rhs_index + 1) * n],
+                &mut one,
+                operation,
+            )?;
+            refined.extend_from_slice(&one);
+        }
+        *solution = refined;
+        Ok(())
+    }
+
+    /// Solve `A^T x = b` without rebuilding or refactorizing the matrix.
+    pub fn solve_transpose_into(
+        &mut self,
+        rhs: &[Complex64],
+        solution: &mut Vec<Complex64>,
+    ) -> Result<(), SolverError> {
+        self.solve_operation_into(rhs, solution, ComplexSolveOp::Transpose)
+    }
+
+    /// Solve `A^H x = b` without rebuilding or refactorizing the matrix.
+    pub fn solve_adjoint_into(
+        &mut self,
+        rhs: &[Complex64],
+        solution: &mut Vec<Complex64>,
+    ) -> Result<(), SolverError> {
+        self.solve_operation_into(rhs, solution, ComplexSolveOp::Adjoint)
+    }
+
+    fn solve_operation_into(
+        &mut self,
+        rhs: &[Complex64],
+        solution: &mut Vec<Complex64>,
+        operation: ComplexSolveOp,
+    ) -> Result<(), SolverError> {
         let n = self.nrows;
         self.check_stamping_error()?;
 
@@ -1879,8 +2978,9 @@ impl ComplexMatrix {
         }
 
         if self.lu.is_none() {
-            let symbolic = sparse_lu::factorize_symbolic_lu(self.csc.as_ref(), Default::default())
-                .map_err(|_| SolverError::SingularMatrix)?;
+            let symbolic =
+                sparse_lu::factorize_symbolic_lu(self.csc.as_ref().as_ref(), Default::default())
+                    .map_err(map_faer_error)?;
             self.lu = Some(Self::workspace_from_symbolic(n, Arc::new(symbolic))?);
             self.factorization_valid = false;
         }
@@ -1891,7 +2991,6 @@ impl ComplexMatrix {
             values,
             lu,
             factorization_valid,
-            max_row_nnz,
             ..
         } = self;
         let Some(ws) = lu.as_mut() else {
@@ -1906,7 +3005,7 @@ impl ComplexMatrix {
                 &mut ws.row_scale,
                 &mut ws.col_scale,
             )?;
-            let mat = SparseColMatRef::new(csc.as_ref(), ws.scaled_values.as_slice());
+            let mat = SparseColMatRef::new(csc.as_ref().as_ref(), ws.scaled_values.as_slice());
             ws.symbolic
                 .factorize_numeric_lu(
                     &mut ws.numeric,
@@ -1915,11 +3014,15 @@ impl ComplexMatrix {
                     MemStack::new(&mut ws.factor_mem),
                     Default::default(),
                 )
-                .map_err(|_| SolverError::SingularMatrix)?;
+                .map_err(map_faer_lu_error)?;
             *factorization_valid = true;
         }
 
-        scale_complex_rhs(rhs, &ws.row_scale, &mut ws.scaled_rhs)?;
+        let rhs_scale = match operation {
+            ComplexSolveOp::Normal => &ws.row_scale,
+            ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => &ws.col_scale,
+        };
+        scale_complex_rhs(rhs, rhs_scale, &mut ws.scaled_rhs)?;
 
         // SAFETY: `ws.numeric` was produced by `ws.symbolic.factorize_numeric_lu`
         // on this matrix's pattern, and `factorization_valid` guarantees the
@@ -1927,12 +3030,26 @@ impl ComplexMatrix {
         let lu_ref = unsafe { sparse_lu::LuRef::new_unchecked(&ws.symbolic, &ws.numeric) };
 
         ws.rhs.col_as_slice_mut(0).copy_from_slice(&ws.scaled_rhs);
-        lu_ref.solve_in_place_with_conj(
-            Conj::No,
-            ws.rhs.as_mut(),
-            par,
-            MemStack::new(&mut ws.solve_mem),
-        );
+        match operation {
+            ComplexSolveOp::Normal => lu_ref.solve_in_place_with_conj(
+                Conj::No,
+                ws.rhs.as_mut(),
+                par,
+                MemStack::new(&mut ws.solve_mem),
+            ),
+            ComplexSolveOp::Transpose => lu_ref.solve_transpose_in_place_with_conj(
+                Conj::No,
+                ws.rhs.as_mut(),
+                par,
+                MemStack::new(&mut ws.transpose_solve_mem),
+            ),
+            ComplexSolveOp::Adjoint => lu_ref.solve_transpose_in_place_with_conj(
+                Conj::Yes,
+                ws.rhs.as_mut(),
+                par,
+                MemStack::new(&mut ws.transpose_solve_mem),
+            ),
+        }
 
         solution.clear();
         solution.extend_from_slice(ws.rhs.col_as_slice(0));
@@ -1944,7 +3061,6 @@ impl ComplexMatrix {
             return Err(SolverError::SingularMatrix);
         }
 
-        let target_error = faer_backward_error_tolerance(*max_row_nnz);
         let mut backward_error = complex_componentwise_backward_error(
             csc,
             &ws.scaled_values,
@@ -1952,15 +3068,21 @@ impl ComplexMatrix {
             &ws.scaled_rhs,
             &mut ws.residual,
             &mut ws.denominator,
-            *max_row_nnz,
+            &mut ws.compensation,
+            &mut ws.row_nnz,
+            operation,
         )?;
 
         const MAX_COMPLEX_REFINEMENTS: usize = 5;
         const MIN_IMPROVEMENT_FACTOR: Value = 0.5;
         for _ in 0..MAX_COMPLEX_REFINEMENTS {
-            if backward_error <= target_error {
-                for (value, &col_scale) in solution.iter_mut().zip(&ws.col_scale) {
-                    *value *= col_scale;
+            if backward_error.accepted() {
+                let solution_scale = match operation {
+                    ComplexSolveOp::Normal => &ws.col_scale,
+                    ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => &ws.row_scale,
+                };
+                for (value, &scale) in solution.iter_mut().zip(solution_scale) {
+                    *value *= scale;
                     if !complex_is_finite(*value) {
                         return Err(SolverError::Overflow);
                     }
@@ -1969,12 +3091,26 @@ impl ComplexMatrix {
             }
 
             ws.rhs.col_as_slice_mut(0).copy_from_slice(&ws.residual);
-            lu_ref.solve_in_place_with_conj(
-                Conj::No,
-                ws.rhs.as_mut(),
-                par,
-                MemStack::new(&mut ws.solve_mem),
-            );
+            match operation {
+                ComplexSolveOp::Normal => lu_ref.solve_in_place_with_conj(
+                    Conj::No,
+                    ws.rhs.as_mut(),
+                    par,
+                    MemStack::new(&mut ws.solve_mem),
+                ),
+                ComplexSolveOp::Transpose => lu_ref.solve_transpose_in_place_with_conj(
+                    Conj::No,
+                    ws.rhs.as_mut(),
+                    par,
+                    MemStack::new(&mut ws.transpose_solve_mem),
+                ),
+                ComplexSolveOp::Adjoint => lu_ref.solve_transpose_in_place_with_conj(
+                    Conj::Yes,
+                    ws.rhs.as_mut(),
+                    par,
+                    MemStack::new(&mut ws.transpose_solve_mem),
+                ),
+            }
             for (value, &correction) in solution.iter_mut().zip(ws.rhs.col_as_slice(0)) {
                 let refined = *value + correction;
                 if !complex_is_finite(correction) || !complex_is_finite(refined) {
@@ -1989,25 +3125,35 @@ impl ComplexMatrix {
                 &ws.scaled_rhs,
                 &mut ws.residual,
                 &mut ws.denominator,
-                *max_row_nnz,
+                &mut ws.compensation,
+                &mut ws.row_nnz,
+                operation,
             )?;
-            if refined_error <= target_error {
-                for (value, &col_scale) in solution.iter_mut().zip(&ws.col_scale) {
-                    *value *= col_scale;
+            if refined_error.accepted() {
+                let solution_scale = match operation {
+                    ComplexSolveOp::Normal => &ws.col_scale,
+                    ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => &ws.row_scale,
+                };
+                for (value, &scale) in solution.iter_mut().zip(solution_scale) {
+                    *value *= scale;
                     if !complex_is_finite(*value) {
                         return Err(SolverError::Overflow);
                     }
                 }
                 return Ok(());
             }
-            if refined_error >= backward_error * MIN_IMPROVEMENT_FACTOR {
+            if refined_error.acceptance_ratio
+                >= backward_error.acceptance_ratio * MIN_IMPROVEMENT_FACTOR
+            {
                 backward_error = refined_error;
                 break;
             }
             backward_error = refined_error;
         }
 
-        Err(SolverError::InaccurateSolution(backward_error))
+        Err(SolverError::InaccurateSolution(
+            backward_error.componentwise,
+        ))
     }
 }
 
@@ -2122,16 +3268,22 @@ impl TripletMatrix {
 // Sparse LU Solver (high-level API)
 //=============================================================================
 
-/// High-performance sparse LU solver using faer
+/// High-performance sparse LU solver using faer.
+///
+/// The frozen pattern, symbolic analysis, numeric storage, scaling vectors,
+/// and solve scratch are retained across calls. A different input pattern is
+/// detected by exact CSC comparison and replaces the cache; stale symbolic
+/// data can therefore never be applied to a same-sized but different matrix.
 pub struct SparseLuSolver {
-    /// Cached symbolic LU factorization for reuse when structure doesn't change
-    symbolic_lu: Option<SymbolicLu<usize>>,
+    cached_matrix: Option<StaticMatrix>,
 }
 
 impl SparseLuSolver {
     /// Create a sparse LU facade with no cached symbolic pattern.
     pub fn new() -> Self {
-        Self { symbolic_lu: None }
+        Self {
+            cached_matrix: None,
+        }
     }
 
     /// Solve Ax = b using sparse LU decomposition
@@ -2141,50 +3293,75 @@ impl SparseLuSolver {
         rhs: &[Value],
     ) -> Result<Vec<Value>, SolverError> {
         let n = matrix.nrows();
+        let ncols = matrix.ncols();
 
         if n == 0 {
-            return Ok(Vec::new());
+            return if ncols == 0 && rhs.is_empty() {
+                Ok(Vec::new())
+            } else {
+                Err(SolverError::InvalidCircuit(format!(
+                    "Sparse LU requires a square matrix, got {n}x{ncols}"
+                )))
+            };
         }
 
-        if n != rhs.len() {
+        if n != ncols || n != rhs.len() {
             return Err(SolverError::InvalidCircuit(format!(
-                "Matrix size {} doesn't match RHS size {}",
+                "Sparse LU requires a square matrix matching RHS size, got {}x{} with RHS {}",
                 n,
+                ncols,
                 rhs.len()
             )));
         }
-
-        // Create symbolic factorization if not cached
-        let symbolic = match &self.symbolic_lu {
-            Some(s) => s.clone(),
-            None => {
-                let s = SymbolicLu::try_new(matrix.symbolic())
-                    .map_err(|_| SolverError::SingularMatrix)?;
-                self.symbolic_lu = Some(s.clone());
-                s
-            }
-        };
-
-        // Perform LU decomposition with the symbolic structure
-        let lu = Lu::try_new_with_symbolic(symbolic, matrix.as_ref())
-            .map_err(|_| SolverError::SingularMatrix)?;
-
-        // Create RHS as column vector
-        let mut b = Mat::<Value>::zeros(n, 1);
-        for (i, &val) in rhs.iter().enumerate() {
-            b[(i, 0)] = val;
+        if rhs
+            .iter()
+            .chain(matrix.val())
+            .any(|value| !value.is_finite())
+        {
+            return Err(SolverError::Overflow);
         }
 
-        // Solve in-place
-        lu.solve_in_place(b.as_mut());
+        let symbolic = matrix.symbolic();
+        let pattern_matches = self.cached_matrix.as_ref().is_some_and(|cached| {
+            cached.nrows == n
+                && cached.ncols == ncols
+                && cached.csc.col_ptr() == symbolic.col_ptr()
+                && cached.csc.row_idx() == symbolic.row_idx()
+        });
+        if !pattern_matches {
+            let mut triplets = Vec::new();
+            triplets
+                .try_reserve_exact(matrix.compute_nnz())
+                .map_err(|_| SolverError::OutOfMemory)?;
+            for col in 0..ncols {
+                for index in symbolic.col_ptr()[col]..symbolic.col_ptr()[col + 1] {
+                    triplets.push((symbolic.row_idx()[index], col, matrix.val()[index]));
+                }
+            }
+            self.cached_matrix = Some(StaticMatrix::from_triplets_with_options(
+                n,
+                ncols,
+                &triplets,
+                SolverOptions {
+                    real_backend: RealSolverBackend::Faer,
+                    ..SolverOptions::default()
+                },
+            )?);
+        } else if let Some(cached) = self.cached_matrix.as_mut() {
+            cached.values.copy_from_slice(matrix.val());
+        }
 
-        // Extract solution
-        finite_solution_or_singular((0..n).map(|i| b[(i, 0)]).collect())
+        self.cached_matrix
+            .as_mut()
+            .ok_or_else(|| {
+                SolverError::InvalidCircuit("sparse LU cache was not built".to_string())
+            })?
+            .solve(rhs)
     }
 
     /// Clear cached symbolic factorization (call when matrix structure changes)
     pub fn clear_cache(&mut self) {
-        self.symbolic_lu = None;
+        self.cached_matrix = None;
     }
 }
 
@@ -2338,7 +3515,6 @@ mod tests {
         equilibrate_sparse_system(
             &matrix.csc,
             &matrix.values,
-            &rhs,
             &mut scaled_values,
             &mut row_scale,
             &mut col_scale,
@@ -2376,6 +3552,8 @@ mod tests {
         let rhs = [6.0, 8.0];
         let mut residual = Vec::new();
         let mut denominator = Vec::new();
+        let mut compensation = Vec::new();
+        let mut row_nnz = Vec::new();
 
         let exact_error = componentwise_backward_error(
             &matrix.csc,
@@ -2384,10 +3562,12 @@ mod tests {
             &rhs,
             &mut residual,
             &mut denominator,
-            2,
+            &mut compensation,
+            &mut row_nnz,
+            RealSolveOp::Normal,
         )
         .unwrap();
-        assert_eq!(exact_error.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(exact_error.componentwise.to_bits(), 0.0_f64.to_bits());
         assert_eq!(residual, vec![0.0, 0.0]);
 
         let perturbed_error = componentwise_backward_error(
@@ -2397,10 +3577,12 @@ mod tests {
             &rhs,
             &mut residual,
             &mut denominator,
-            2,
+            &mut compensation,
+            &mut row_nnz,
+            RealSolveOp::Normal,
         )
         .unwrap();
-        assert!(perturbed_error > faer_backward_error_tolerance(2));
+        assert!(!perturbed_error.accepted());
 
         // A one-ulp subnormal tail is below the arithmetic noise floor. It
         // must not turn into an order-one backward error merely because both
@@ -2414,10 +3596,12 @@ mod tests {
             &[0.0],
             &mut residual,
             &mut denominator,
-            1,
+            &mut compensation,
+            &mut row_nnz,
+            RealSolveOp::Normal,
         )
         .unwrap();
-        assert!(subnormal_error <= faer_backward_error_tolerance(1));
+        assert!(subnormal_error.accepted());
 
         let zero_row = StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).unwrap();
         let zero_error = componentwise_backward_error(
@@ -2427,10 +3611,12 @@ mod tests {
             &[0.0],
             &mut residual,
             &mut denominator,
-            1,
+            &mut compensation,
+            &mut row_nnz,
+            RealSolveOp::Normal,
         )
         .unwrap();
-        assert_eq!(zero_error.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(zero_error.componentwise.to_bits(), 0.0_f64.to_bits());
     }
 
     #[test]
@@ -2527,6 +3713,8 @@ mod tests {
         assert_relative_solution(&first, &expected);
         let mut residual = Vec::new();
         let mut denominator = Vec::new();
+        let mut compensation = Vec::new();
+        let mut row_nnz = Vec::new();
         let backward_error = componentwise_backward_error(
             &matrix.csc,
             &matrix.values,
@@ -2534,10 +3722,12 @@ mod tests {
             &rhs,
             &mut residual,
             &mut denominator,
-            3,
+            &mut compensation,
+            &mut row_nnz,
+            RealSolveOp::Normal,
         )
         .unwrap();
-        assert!(backward_error <= faer_backward_error_tolerance(3));
+        assert!(backward_error.accepted());
         assert_eq!(
             first
                 .iter()
@@ -2580,10 +3770,12 @@ mod tests {
             &rhs,
             &mut Vec::new(),
             &mut Vec::new(),
-            matrix.max_row_nnz,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            RealSolveOp::Normal,
         )
         .unwrap();
-        assert!(backward_error <= faer_backward_error_tolerance(matrix.max_row_nnz));
+        assert!(backward_error.accepted());
     }
 
     #[test]
@@ -2688,28 +3880,168 @@ mod tests {
     fn explicit_real_backend_policy_produces_accepted_solutions() {
         let triplets = [(0, 0, 4.0), (0, 1, 1.0), (1, 0, 2.0), (1, 1, 3.0)];
         let rhs = [6.0, 8.0];
-        for real_backend in [RealSolverBackend::Klu, RealSolverBackend::Faer] {
+        for real_backend in [
+            RealSolverBackend::Auto,
+            RealSolverBackend::Klu,
+            RealSolverBackend::Faer,
+        ] {
             let mut matrix = StaticMatrix::from_triplets_with_options(
                 2,
                 2,
                 &triplets,
-                SolverOptions { real_backend },
+                SolverOptions {
+                    real_backend,
+                    ..SolverOptions::default()
+                },
             )
             .unwrap();
             assert_eq!(matrix.solver_options().real_backend, real_backend);
             assert_relative_solution(&matrix.solve(&rhs).unwrap(), &[1.0, 2.0]);
         }
+        assert!(!auto_rejects_circuit_lu_fill(255, 100, 0, 10_000));
+        assert!(!auto_rejects_circuit_lu_fill(1_000, 100, 400, 400));
+        assert!(auto_rejects_circuit_lu_fill(1_000, 100, 401, 400));
+        assert!(!auto_prefers_supernodal_from_pattern(511, 100_000));
+        assert!(!auto_prefers_supernodal_from_pattern(1_000, 7_999));
+        assert!(auto_prefers_supernodal_from_pattern(1_000, 8_000));
+    }
+
+    #[test]
+    fn real_transpose_solve_is_accepted_by_both_backends() {
+        let triplets = [
+            (0, 0, 4.0),
+            (0, 1, -1.0),
+            (1, 0, 2.0),
+            (1, 1, 5.0),
+            (1, 2, 0.75),
+            (2, 1, -0.5),
+            (2, 2, 3.0),
+        ];
+        let expected = [0.25, -1.0, 2.0];
+        let rhs = [
+            4.0 * expected[0] + 2.0 * expected[1],
+            -expected[0] + 5.0 * expected[1] - 0.5 * expected[2],
+            0.75 * expected[1] + 3.0 * expected[2],
+        ];
+        for real_backend in [
+            RealSolverBackend::Auto,
+            RealSolverBackend::Klu,
+            RealSolverBackend::Faer,
+        ] {
+            let mut matrix = StaticMatrix::from_triplets_with_options(
+                3,
+                3,
+                &triplets,
+                SolverOptions {
+                    real_backend,
+                    ..SolverOptions::default()
+                },
+            )
+            .unwrap();
+            let actual = matrix.solve_transpose(&rhs).unwrap();
+            assert_relative_solution(&actual, &expected);
+        }
+    }
+
+    #[test]
+    fn real_batched_solve_matches_scalar_solves_for_every_policy() {
+        let triplets = [(0, 0, 4.0), (0, 1, 1.0), (1, 0, 2.0), (1, 1, 3.0)];
+        let rhs = [6.0, 8.0, 12.0, 16.0, -2.0, 1.0];
+        for real_backend in [
+            RealSolverBackend::Auto,
+            RealSolverBackend::Klu,
+            RealSolverBackend::Faer,
+        ] {
+            let mut matrix = StaticMatrix::from_triplets_with_options(
+                2,
+                2,
+                &triplets,
+                SolverOptions {
+                    real_backend,
+                    ..SolverOptions::default()
+                },
+            )
+            .unwrap();
+            let mut actual = Vec::new();
+            matrix.solve_many_into(&rhs, 3, &mut actual).unwrap();
+            for rhs_index in 0..3 {
+                let expected = matrix
+                    .solve(&rhs[rhs_index * 2..rhs_index * 2 + 2])
+                    .unwrap();
+                assert_relative_solution(&actual[rhs_index * 2..rhs_index * 2 + 2], &expected);
+            }
+
+            matrix
+                .solve_many_transpose_into(&rhs, 3, &mut actual)
+                .unwrap();
+            for rhs_index in 0..3 {
+                let expected = matrix
+                    .solve_transpose(&rhs[rhs_index * 2..rhs_index * 2 + 2])
+                    .unwrap();
+                assert_relative_solution(&actual[rhs_index * 2..rhs_index * 2 + 2], &expected);
+            }
+        }
+    }
+
+    #[test]
+    fn sparse_lu_cache_is_replaced_for_a_same_size_different_pattern() {
+        let first = StaticMatrix::from_triplets(2, 2, &[(0, 0, 2.0), (0, 1, 1.0), (1, 1, 3.0)])
+            .unwrap()
+            .to_sparse_col_mat();
+        let second = StaticMatrix::from_triplets(2, 2, &[(0, 0, 4.0), (1, 0, -1.0), (1, 1, 2.0)])
+            .unwrap()
+            .to_sparse_col_mat();
+        let mut solver = SparseLuSolver::new();
+        assert_relative_solution(&solver.solve(&first, &[4.0, 6.0]).unwrap(), &[1.0, 2.0]);
+        assert_relative_solution(&solver.solve(&second, &[4.0, 3.0]).unwrap(), &[1.0, 2.0]);
+
+        let rectangular =
+            StaticMatrix::from_triplets(2, 3, &[(0, 0, 1.0), (1, 1, 1.0), (0, 2, 1.0)])
+                .unwrap()
+                .to_sparse_col_mat();
+        assert!(matches!(
+            solver.solve(&rectangular, &[1.0, 1.0]),
+            Err(SolverError::InvalidCircuit(_))
+        ));
+    }
+
+    #[test]
+    fn probe_values_restore_the_live_matrix_during_unwinding() {
+        let mut matrix = StaticMatrix::from_triplets(2, 2, &[(0, 0, 2.0), (1, 1, 4.0)]).unwrap();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            matrix.with_probe_values(|probe, rhs| {
+                probe.add(0, 0, 99.0);
+                rhs[0] = 42.0;
+                panic!("intentional probe unwind");
+            });
+        }));
+        assert!(result.is_err());
+        assert_relative_solution(&matrix.solve(&[2.0, 8.0]).unwrap(), &[1.0, 2.0]);
+    }
+
+    #[test]
+    fn complex_matrix_shares_the_immutable_real_pattern() {
+        let real = StaticMatrix::from_triplets(2, 2, &[(0, 0, 0.0), (1, 1, 0.0)]).unwrap();
+        let complex = ComplexMatrix::from_real_structure(&real);
+        assert!(Arc::ptr_eq(&real.csc, &complex.csc));
     }
 
     #[test]
     fn solve_into_reuses_the_callers_output_allocation() {
         let triplets = [(0, 0, 4.0), (0, 1, 1.0), (1, 0, 2.0), (1, 1, 3.0)];
-        for real_backend in [RealSolverBackend::Klu, RealSolverBackend::Faer] {
+        for real_backend in [
+            RealSolverBackend::Auto,
+            RealSolverBackend::Klu,
+            RealSolverBackend::Faer,
+        ] {
             let mut matrix = StaticMatrix::from_triplets_with_options(
                 2,
                 2,
                 &triplets,
-                SolverOptions { real_backend },
+                SolverOptions {
+                    real_backend,
+                    ..SolverOptions::default()
+                },
             )
             .unwrap();
             let mut solution = Vec::new();
@@ -2797,6 +4129,125 @@ mod tests {
                     relative_error <= 1.0e-10,
                     "complex solution[{index}] relative error {relative_error:.3e}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn complex_transpose_and_adjoint_solves_reuse_the_factorization() {
+        let real = StaticMatrix::from_triplets(
+            3,
+            3,
+            &[
+                (0, 0, 0.0),
+                (0, 1, 0.0),
+                (1, 0, 0.0),
+                (1, 1, 0.0),
+                (1, 2, 0.0),
+                (2, 1, 0.0),
+                (2, 2, 0.0),
+            ],
+        )
+        .unwrap();
+        let mut matrix = ComplexMatrix::from_real_structure(&real);
+        let a = [
+            [
+                Complex64::new(4.0, 1.0),
+                Complex64::new(-1.0, 0.5),
+                Complex64::new(0.0, 0.0),
+            ],
+            [
+                Complex64::new(2.0, -0.25),
+                Complex64::new(5.0, -2.0),
+                Complex64::new(0.75, 1.0),
+            ],
+            [
+                Complex64::new(0.0, 0.0),
+                Complex64::new(-0.5, 0.2),
+                Complex64::new(3.0, 0.5),
+            ],
+        ];
+        for row in 0..3 {
+            for col in 0..3 {
+                if a[row][col] != Complex64::new(0.0, 0.0) {
+                    matrix.add(row, col, a[row][col]);
+                }
+            }
+        }
+        let expected = [
+            Complex64::new(0.25, -0.5),
+            Complex64::new(-1.0, 0.75),
+            Complex64::new(2.0, 0.125),
+        ];
+        let mut transpose_rhs = [Complex64::new(0.0, 0.0); 3];
+        let mut adjoint_rhs = [Complex64::new(0.0, 0.0); 3];
+        for equation in 0..3 {
+            for variable in 0..3 {
+                transpose_rhs[equation] += a[variable][equation] * expected[variable];
+                adjoint_rhs[equation] += a[variable][equation].conj() * expected[variable];
+            }
+        }
+
+        let mut actual = Vec::new();
+        matrix
+            .solve_transpose_into(&transpose_rhs, &mut actual)
+            .unwrap();
+        for (&x, &want) in actual.iter().zip(&expected) {
+            assert!((x - want).norm() <= 1.0e-12);
+        }
+        matrix
+            .solve_adjoint_into(&adjoint_rhs, &mut actual)
+            .unwrap();
+        for (&x, &want) in actual.iter().zip(&expected) {
+            assert!((x - want).norm() <= 1.0e-12);
+        }
+        let mut batch_rhs = Vec::new();
+        batch_rhs.extend_from_slice(&transpose_rhs);
+        batch_rhs.extend(transpose_rhs.iter().map(|value| *value * 2.0));
+        matrix
+            .solve_many_transpose_into(&batch_rhs, 2, &mut actual)
+            .unwrap();
+        for (&x, &want) in actual[..3].iter().zip(&expected) {
+            assert!((x - want).norm() <= 1.0e-12);
+        }
+        for (&x, &want) in actual[3..].iter().zip(&expected) {
+            assert!((x - want * 2.0).norm() <= 2.0e-12);
+        }
+        assert!(matrix.factorization_valid);
+    }
+
+    #[test]
+    fn complex_batched_solve_matches_reused_scalar_solves() {
+        let real = StaticMatrix::from_triplets(
+            2,
+            2,
+            &[(0, 0, 0.0), (0, 1, 0.0), (1, 0, 0.0), (1, 1, 0.0)],
+        )
+        .unwrap();
+        let mut matrix = ComplexMatrix::from_real_structure(&real);
+        matrix.add(0, 0, Complex64::new(4.0, 1.0));
+        matrix.add(0, 1, Complex64::new(-1.0, 0.5));
+        matrix.add(1, 0, Complex64::new(2.0, -0.25));
+        matrix.add(1, 1, Complex64::new(5.0, -2.0));
+        let rhs = [
+            Complex64::new(1.0, 2.0),
+            Complex64::new(-0.5, 0.75),
+            Complex64::new(3.0, -1.0),
+            Complex64::new(0.25, 2.5),
+            Complex64::new(-2.0, 0.5),
+            Complex64::new(1.25, -0.75),
+        ];
+        let mut actual = Vec::new();
+        matrix.solve_many_into(&rhs, 3, &mut actual).unwrap();
+        for rhs_index in 0..3 {
+            let expected = matrix
+                .solve(&rhs[rhs_index * 2..rhs_index * 2 + 2])
+                .unwrap();
+            for (&x, &want) in actual[rhs_index * 2..rhs_index * 2 + 2]
+                .iter()
+                .zip(&expected)
+            {
+                assert!((x - want).norm() <= 1.0e-12);
             }
         }
     }

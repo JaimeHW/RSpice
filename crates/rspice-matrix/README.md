@@ -46,6 +46,7 @@ let mut matrix = StaticMatrix::from_triplets_with_options(
     &triplets,
     SolverOptions {
         real_backend: RealSolverBackend::Klu,
+        ..SolverOptions::default()
     },
 )?;
 
@@ -61,9 +62,9 @@ matrix.solve_into(&[1.0, 2.0], &mut solution)?;
 # Ok::<(), rspice_matrix::SolverError>(())
 ```
 
-`CscIndex` is deliberately opaque and bound to its originating topology. A
-token from another pattern is rejected at solve time instead of silently
-stamping a valid offset in the wrong matrix.
+`CscIndex` is bound to its originating topology. Its numeric offset remains
+public for source compatibility, while stamping validates the hidden pattern
+identity so a token from another topology cannot silently corrupt the matrix.
 
 `SolverOptions::default()` is deterministic and selects KLU. The compatibility
 constructor `StaticMatrix::from_triplets` reads `RSPICE_SOLVER=faer`; commercial

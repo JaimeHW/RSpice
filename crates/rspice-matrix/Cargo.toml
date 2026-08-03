@@ -18,7 +18,6 @@ faer-parallel = ["faer/rayon"]
 faer.workspace = true
 log.workspace = true
 num-complex.workspace = true
-rustc-hash.workspace = true
 thiserror.workspace = true
 
 [lints]
