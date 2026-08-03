@@ -189,6 +189,24 @@ impl XyceTransientDampedStatus {
         self.previous_residual_l2_norm = None;
     }
 
+    /// Start a solve and seed the residual reference with the predictor RHS.
+    ///
+    /// Xyce evaluates the predictor once before entering its Newton loop.  It
+    /// does not run the convergence tests at that point, but it does use that
+    /// RHS norm as both `normRHS_init_` and `normRHS_old_` for the first
+    /// corrected candidate.
+    pub(super) fn begin_solve_with_initial_residual(
+        &mut self,
+        max_iterations: usize,
+        initial_residual_l2_norm: Value,
+    ) {
+        self.begin_solve(max_iterations);
+        if initial_residual_l2_norm.is_finite() && initial_residual_l2_norm >= 0.0 {
+            self.initial_residual_l2_norm = Some(initial_residual_l2_norm);
+            self.previous_residual_l2_norm = Some(initial_residual_l2_norm);
+        }
+    }
+
     /// Evaluate one candidate using Xyce's ordered DampedNewton tests.
     pub(super) fn evaluate(
         &mut self,
@@ -207,10 +225,6 @@ impl XyceTransientDampedStatus {
             };
         }
 
-        if !sample.inner_device_converged {
-            return XyceDampedDecision::Continue;
-        }
-
         if !sample.device_converged {
             return if sample.newton_step < self.max_iterations {
                 XyceDampedDecision::Continue
@@ -222,9 +236,16 @@ impl XyceTransientDampedStatus {
             };
         }
 
+        if !sample.inner_device_converged {
+            return XyceDampedDecision::Continue;
+        }
+
         if !sample.residual_inf_norm.is_finite()
             || !sample.residual_l2_norm.is_finite()
             || !sample.weighted_update_norm.is_finite()
+            || sample.residual_inf_norm < 0.0
+            || sample.residual_l2_norm < 0.0
+            || sample.weighted_update_norm < 0.0
             || !delta_x_tolerance.is_finite()
             || !rhs_tolerance.is_finite()
             || delta_x_tolerance < 0.0
@@ -274,9 +295,16 @@ impl XyceTransientDampedStatus {
             && relative_rate <= XYCE_DAMPED_MIN_RESIDUAL_REDUCTION
             && convergence_rate <= 1.0
         {
-            return XyceDampedDecision::Failed {
-                test: 3,
-                return_code: self.return_codes.near_convergence,
+            return if self.return_codes.near_convergence > 0 {
+                XyceDampedDecision::Accepted {
+                    test: 3,
+                    return_code: self.return_codes.near_convergence,
+                }
+            } else {
+                XyceDampedDecision::Failed {
+                    test: 3,
+                    return_code: self.return_codes.near_convergence,
+                }
             };
         }
 
@@ -456,6 +484,25 @@ mod tests {
     }
 
     #[test]
+    fn configured_positive_near_convergence_is_accepted() {
+        let mut status = XyceTransientDampedStatus::with_return_codes(
+            2,
+            XyceDampedReturnCodes {
+                near_convergence: 3,
+                small_update: 4,
+            },
+        );
+        let _ = status.evaluate(sample(1, 1.0, 1.0, 1.0), 0.33, 1.0e-2);
+        assert_eq!(
+            status.evaluate(sample(2, 1.0, 0.8, 1.0), 0.33, 1.0e-2),
+            XyceDampedDecision::Accepted {
+                test: 3,
+                return_code: 3,
+            }
+        );
+    }
+
+    #[test]
     fn max_step_without_progress_reports_too_many_steps() {
         let mut status = XyceTransientDampedStatus::new(2);
         let _ = status.evaluate(sample(1, 1.0, 1.0, 1.0), 0.33, 1.0e-2);
@@ -506,6 +553,21 @@ mod tests {
     }
 
     #[test]
+    fn device_failure_precedes_inner_device_status() {
+        let mut status = XyceTransientDampedStatus::new(2);
+        let mut candidate = sample(2, 1.0, 1.0, 1.0);
+        candidate.device_converged = false;
+        candidate.inner_device_converged = false;
+        assert_eq!(
+            status.evaluate(candidate, 0.33, 1.0e-2),
+            XyceDampedDecision::Failed {
+                test: 8,
+                return_code: -1,
+            }
+        );
+    }
+
+    #[test]
     fn begin_solve_resets_residual_reference_not_stagnation_state() {
         let mut status = XyceTransientDampedStatus::new(20);
         let _ = status.evaluate(sample(1, 1.0, 100.0, 1.0), 0.33, 1.0e-2);
@@ -518,6 +580,23 @@ mod tests {
             XyceDampedDecision::Accepted {
                 test: 2,
                 return_code: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn predictor_residual_is_used_for_first_candidate_rate() {
+        let mut status = XyceTransientDampedStatus::new(2);
+        status.begin_solve_with_initial_residual(2, 100.0);
+        assert_eq!(
+            status.evaluate(sample(1, 1.0, 80.0, 1.0), 0.33, 1.0e-2),
+            XyceDampedDecision::Continue
+        );
+        assert_eq!(
+            status.evaluate(sample(2, 1.0, 80.0, 1.0), 0.33, 1.0e-2),
+            XyceDampedDecision::Failed {
+                test: 3,
+                return_code: -3,
             }
         );
     }
