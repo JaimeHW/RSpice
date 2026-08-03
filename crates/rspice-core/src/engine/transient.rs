@@ -42,6 +42,7 @@ mod companion_stamps;
 pub(self) use companion_stamps::TwoTerminalStampSlots;
 mod charge_stamper;
 pub(self) use charge_stamper::StaticMatrixChargeStamper;
+mod damped_status;
 mod globalization;
 mod noise;
 mod nox_status;
