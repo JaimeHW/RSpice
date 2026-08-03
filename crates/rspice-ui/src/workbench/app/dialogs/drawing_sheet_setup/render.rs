@@ -1,8 +1,8 @@
 //! Mockup-authored three-column drawing-sheet setup studio.
 
 use egui::{
-    Align, Align2, Context, Frame, Layout, Margin, Rect, ScrollArea, Sense, Stroke, TextEdit, Ui,
-    Vec2, vec2,
+    Align, Align2, Color32, Context, Frame, Layout, Margin, Rect, ScrollArea, Sense, Stroke,
+    TextEdit, Ui, Vec2, pos2, vec2,
 };
 
 use crate::state::{
@@ -185,10 +185,15 @@ fn drawing_sheet_setup_body(
         read_only_banner(ui, reason);
     }
     let available = ui.available_size();
-    // Validation belongs to the transaction, not to the editor column. Keep a
-    // dialog-wide slot so appearing feedback neither changes the three-column
-    // proportions nor moves the preview.
-    let validation_height = 48.0;
+    // Validation belongs to the transaction, not to the editor column. The
+    // strip exists only while there is something to report — the reference
+    // dialog hides its transaction strip entirely between reports, and a
+    // permanently reserved empty band reads as a designed-in gap.
+    let validation_height = if validation_notice_visible(state, problems) {
+        48.0
+    } else {
+        0.0
+    };
     let body_height = (available.y - validation_height).max(1.0);
     if available.x < 980.0 {
         stacked_body(
@@ -265,8 +270,6 @@ fn drawing_sheet_validation_strip(
 ) {
     if validation_notice_visible(state, problems) {
         validation_slot(ui, state, problems, height);
-    } else {
-        ui.allocate_space(vec2(ui.available_width(), height));
     }
 }
 
@@ -1186,31 +1189,28 @@ fn title_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fiel
 
 fn scope_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState) {
     let t = Tokens::get(ui.ctx());
-    ui.columns(3, |columns| {
-        fact_cell(
-            &mut columns[0],
-            "Authored format",
-            &format_summary(&state.baseline),
-        );
-        fact_cell(
-            &mut columns[1],
-            "Comes from",
-            match state.draft.inheritance {
-                crate::state::DrawingSheetInheritance::Explicit => "this sheet",
-                crate::state::DrawingSheetInheritance::ProjectDefault => "project default",
-                crate::state::DrawingSheetInheritance::UserDefault => "personal default",
-            },
-        );
-        let sheet_count = if state.draft.scope == PageSetupScope::Document {
-            format!(
-                "{} writable of {}",
-                state.writable_sheet_count, state.sheet_count
-            )
-        } else {
-            state.sheet_count.to_string()
-        };
-        fact_cell(&mut columns[2], "Sheets", &sheet_count);
-    });
+    let comes_from = match state.draft.inheritance {
+        crate::state::DrawingSheetInheritance::Explicit => "this sheet",
+        crate::state::DrawingSheetInheritance::ProjectDefault => "project default",
+        crate::state::DrawingSheetInheritance::UserDefault => "personal default",
+    };
+    let sheet_count = if state.draft.scope == PageSetupScope::Document {
+        format!(
+            "{} writable of {}",
+            state.writable_sheet_count, state.sheet_count
+        )
+    } else {
+        state.sheet_count.to_string()
+    };
+    let authored = format_summary(&state.baseline);
+    measurement_strip(
+        ui,
+        &[
+            ("Authored format", authored.as_str()),
+            ("Comes from", comes_from),
+            ("Sheets", sheet_count.as_str()),
+        ],
+    );
     ui.add_space(15.0);
     for scope in PageSetupScope::ALL {
         Frame::NONE
@@ -1300,26 +1300,62 @@ fn scope_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState) {
     });
 }
 
-fn fact_cell(ui: &mut Ui, label: &str, value: &str) {
+/// The reference's fused measurement readout: one bordered strip whose cells
+/// meet on 1 px seams, each an uppercase micro label over a mono value.
+fn measurement_strip(ui: &mut Ui, cells: &[(&str, &str)]) {
     let t = Tokens::get(ui.ctx());
-    Frame::NONE
-        .fill(t.color.bg_panel)
-        .stroke(Stroke::new(1.0, t.color.border))
-        .inner_margin(Margin::symmetric(10, 9))
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            ui.label(
-                egui::RichText::new(label.to_uppercase())
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_faint),
-            );
-            ui.add_space(3.0);
-            ui.label(
-                egui::RichText::new(value)
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text),
-            );
-        });
+    if cells.is_empty() {
+        return;
+    }
+    let width = ui.available_width().max(1.0);
+    let cell_h = 40.0;
+    let (rect, _) = ui.allocate_exact_size(vec2(width, cell_h + 2.0), Sense::hover());
+    ui.painter().rect_filled(rect, t.radius, t.color.border);
+    let count = cells.len() as f32;
+    let seams = count - 1.0;
+    let cell_w = ((width - 2.0 - seams) / count).max(1.0);
+    let value_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let mut x = rect.left() + 1.0;
+    for (index, (label, value)) in cells.iter().enumerate() {
+        let w = if index + 1 == cells.len() {
+            (rect.right() - 1.0 - x).max(1.0)
+        } else {
+            cell_w
+        };
+        let cell = Rect::from_min_size(pos2(x, rect.top() + 1.0), vec2(w, cell_h));
+        ui.painter().rect_filled(cell, 0.0, t.color.bg_panel_2);
+        ui.painter().text(
+            pos2(cell.left() + 10.0, cell.top() + 8.0),
+            Align2::LEFT_TOP,
+            label.to_uppercase(),
+            theme::sans(tokens::FS_MICRO, FontWeight::Regular),
+            t.color.text_faint,
+        );
+        let mut text = (*value).to_owned();
+        let max_width = w - 20.0;
+        while ui
+            .painter()
+            .layout_no_wrap(text.clone(), value_font.clone(), Color32::WHITE)
+            .size()
+            .x
+            > max_width
+            && text.chars().count() > 1
+        {
+            text.pop();
+            while !text.is_char_boundary(text.len()) {
+                text.pop();
+            }
+            text = format!("{}\u{2026}", text.trim_end_matches('\u{2026}').trim_end());
+        }
+        ui.painter().text(
+            pos2(cell.left() + 10.0, cell.top() + 22.0),
+            Align2::LEFT_TOP,
+            text,
+            value_font.clone(),
+            t.color.text,
+        );
+        x += w + 1.0;
+    }
 }
 
 fn validation_slot(
@@ -1412,8 +1448,10 @@ fn preview_column(
                 .fill(t.color.bg_inset)
                 .inner_margin(Margin::symmetric(12, 11))
                 .show(ui, |ui| {
-                    section_caption(ui, "WHAT APPLY DOES");
-                    ui.add_space(8.0);
+                    // The column stacks bottom-up to dock this summary at the
+                    // bottom edge, and the frame inherits that layout: the
+                    // first row added lands at the bottom. Add the reference's
+                    // reading order in reverse so it reads top-down on screen.
                     let sheets_written = match state.draft.scope {
                         PageSetupScope::CurrentSheet => {
                             format!("1 · {}", state.sheet_name)
@@ -1437,8 +1475,16 @@ fn preview_column(
                             format!("1 · {} plus project default", state.sheet_name)
                         }
                     };
-                    fact_row(ui, "Sheets written", &sheets_written);
-                    fact_row(ui, "Changes", &page_setup_change_summary(state));
+                    fact_row(
+                        ui,
+                        "Not affected",
+                        "input revision · generated netlist · schematic checks · result datasets · release evidence",
+                    );
+                    fact_row(
+                        ui,
+                        "Undo",
+                        "one entry, “Sheet format”; the previous format is restored exactly",
+                    );
                     fact_row(
                         ui,
                         "Content outside the page",
@@ -1455,16 +1501,10 @@ fn preview_column(
                             })
                             .as_str(),
                     );
-                    fact_row(
-                        ui,
-                        "Undo",
-                        "one entry, “Sheet format”; the previous format is restored exactly",
-                    );
-                    fact_row(
-                        ui,
-                        "Not affected",
-                        "input revision · generated netlist · schematic checks · result datasets · release evidence",
-                    );
+                    fact_row(ui, "Changes", &page_setup_change_summary(state));
+                    fact_row(ui, "Sheets written", &sheets_written);
+                    ui.add_space(8.0);
+                    section_caption(ui, "WHAT APPLY DOES");
                 });
                     let preview_height = (ui.available_height() - 8.0).max(140.0);
                     Frame::NONE
@@ -1799,9 +1839,14 @@ fn measurement_row(
             )
         },
     );
-    fact_row(ui, "Paper", &paper);
-    fact_row(ui, "Printable", &printable);
-    fact_row(ui, "Drawing area", &drawing);
+    measurement_strip(
+        ui,
+        &[
+            ("Paper", paper.as_str()),
+            ("Printable", printable.as_str()),
+            ("Drawing area", drawing.as_str()),
+        ],
+    );
 }
 
 fn format_summary(draft: &DrawingSheetDraft) -> String {
