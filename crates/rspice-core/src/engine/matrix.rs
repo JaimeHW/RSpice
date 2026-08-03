@@ -6,7 +6,7 @@
 
 use super::{Engine, SimulationError};
 use crate::device::mosfet::b3soi::common::B3SoiInstanceIc;
-use crate::solver::StaticMatrix;
+use crate::solver::{SolverOptions, StaticMatrix};
 use crate::{CircuitData, Value};
 
 impl Engine {
@@ -1659,7 +1659,14 @@ impl Engine {
             triplets.push((i, i, 1e-12)); // GMIN for numerical stability
         }
 
-        StaticMatrix::from_triplets(size, size, &triplets).map_err(SimulationError::Solver)
+        let mut solver_options = SolverOptions::from_env();
+        if let Some(backend) = self.config.matrix_solver {
+            solver_options.real_backend = backend;
+        }
+        solver_options.pivot_tolerance = self.config.matrix_pivot_tolerance;
+        solver_options.absolute_pivot_tolerance = self.config.matrix_absolute_pivot_tolerance;
+        StaticMatrix::from_triplets_with_options(size, size, &triplets, solver_options)
+            .map_err(SimulationError::Solver)
     }
 
     #[inline]

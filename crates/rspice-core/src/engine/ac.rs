@@ -1632,7 +1632,7 @@ impl Engine {
     /// workspace keeps its sparsity pattern and shared symbolic
     /// factorization across calls, so a sweep pays the structure cost once
     /// instead of once per point.
-    fn try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
+    pub(super) fn try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
         circuit: &CircuitData,
         ac_matrix: &mut ComplexMatrix,
         op_voltages: &[Value],

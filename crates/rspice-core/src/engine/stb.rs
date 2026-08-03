@@ -169,6 +169,11 @@ impl Engine {
 
         let frequencies = config.frequency_points();
         let mut loop_gains = Vec::with_capacity(frequencies.len());
+        let mut ac_matrix = rspice_matrix::ComplexMatrix::from_real_structure(&matrix);
+        let mut batched_rhs = vec![Complex64::new(0.0, 0.0); size.saturating_mul(2)];
+        batched_rhs[br - 1] = Complex64::new(1.0, 0.0);
+        batched_rhs[size + sense_node - 1] = Complex64::new(1.0, 0.0);
+        let mut batched_solution = Vec::with_capacity(size.saturating_mul(2));
 
         for (frequency_index, &freq) in frequencies.iter().enumerate() {
             if abort.is_aborted() {
@@ -176,22 +181,25 @@ impl Engine {
             }
             let omega = 2.0 * PI * freq;
             circuit.prepare_behavioral_small_signal_at_frequency(&dc_solution, freq);
-            let mut ac_matrix =
-                Self::try_build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, omega)?;
+            Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
+                &circuit,
+                &mut ac_matrix,
+                &dc_solution,
+                omega,
+                true,
+                true,
+            )?;
 
-            // Experiment 1: unit series voltage at the probe, all other
-            // sources dead.
-            let mut rhs_v = vec![Complex64::new(0.0, 0.0); size];
-            rhs_v[br - 1] = Complex64::new(1.0, 0.0);
-            let sol_v = ac_matrix.solve(&rhs_v).map_err(SimulationError::Solver)?;
+            // Both Tian experiments share the same factorization and run as
+            // one batched triangular solve.
+            ac_matrix
+                .solve_many_into(&batched_rhs, 2, &mut batched_solution)
+                .map_err(SimulationError::Solver)?;
+            let sol_v = &batched_solution[..size];
             let v1 = sol_v[sense_node - 1];
             let i1 = sol_v[br - 1];
 
-            // Experiment 2: unit current into the sense terminal, probe at
-            // 0 V (its branch row keeps enforcing V(+) - V(-) = 0).
-            let mut rhs_i = vec![Complex64::new(0.0, 0.0); size];
-            rhs_i[sense_node - 1] = Complex64::new(1.0, 0.0);
-            let sol_i = ac_matrix.solve(&rhs_i).map_err(SimulationError::Solver)?;
+            let sol_i = &batched_solution[size..];
             let v2 = sol_i[sense_node - 1];
             let i2 = sol_i[br - 1];
 

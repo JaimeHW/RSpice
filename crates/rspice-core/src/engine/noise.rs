@@ -81,6 +81,7 @@ impl Engine {
     }
 
     #[inline]
+    #[cfg(test)]
     fn stamp_unit_noise_current_rhs(rhs: &mut [Complex64], node_pos: usize, node_neg: usize) {
         // Noise current sources use one-based unified MNA unknown IDs. Ordinary
         // current noise references node-voltage IDs; generated potential noise
@@ -91,6 +92,25 @@ impl Engine {
         if node_neg > 0 && node_neg <= rhs.len() {
             rhs[node_neg - 1] -= Complex64::new(1.0, 0.0);
         }
+    }
+
+    #[inline]
+    fn noise_transfer_from_adjoint(
+        adjoint: &[Complex64],
+        node_pos: usize,
+        node_neg: usize,
+    ) -> Complex64 {
+        let positive = if node_pos > 0 && node_pos <= adjoint.len() {
+            adjoint[node_pos - 1]
+        } else {
+            Complex64::new(0.0, 0.0)
+        };
+        let negative = if node_neg > 0 && node_neg <= adjoint.len() {
+            adjoint[node_neg - 1]
+        } else {
+            Complex64::new(0.0, 0.0)
+        };
+        positive - negative
     }
 
     #[cfg(feature = "veriloga-builtins-base")]
@@ -1663,8 +1683,13 @@ impl Engine {
                 .saturating_add(1),
         )?;
         let zero = Complex64::new(0.0, 0.0);
-        let mut rhs = vec![zero; size];
         let mut results = Vec::with_capacity(frequencies.len());
+        let mut ac_matrix = rspice_matrix::ComplexMatrix::from_real_structure(&matrix);
+        let mut port_rhs = vec![zero; size.saturating_mul(num_ports)];
+        for (port, &branch_index) in branch_matrix_indices.iter().enumerate() {
+            port_rhs[port * size + branch_index] = Complex64::new(-1.0, 0.0);
+        }
+        let mut port_adjoint = Vec::with_capacity(port_rhs.len());
 
         for &frequency in frequencies {
             if abort.is_aborted() {
@@ -1672,32 +1697,35 @@ impl Engine {
             }
             let omega = 2.0 * PI * frequency;
             circuit.prepare_behavioral_small_signal_at_frequency(&dc_solution, frequency);
-            let mut ac_matrix =
-                Self::try_build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, omega)?;
+            Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
+                &circuit,
+                &mut ac_matrix,
+                &dc_solution,
+                omega,
+                true,
+                true,
+            )?;
             let mut covariance = vec![vec![zero; num_ports]; num_ports];
             let mut compensation = vec![vec![zero; num_ports]; num_ports];
 
-            let mut solve_transfer = |node_pos: usize,
-                                      node_neg: usize|
-             -> Result<Vec<Complex64>, SimulationError> {
-                rhs.fill(zero);
-                Self::stamp_unit_noise_current_rhs(&mut rhs, node_pos, node_neg);
-                let solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
-                branch_matrix_indices
-                    .iter()
-                    .map(|&index| {
-                        solution
-                            .get(index)
-                            .copied()
-                            .map(|current| -current)
-                            .ok_or_else(|| {
-                                SimulationError::Circuit(
-                                    "Port-noise branch-current solution is malformed".to_string(),
-                                )
-                            })
-                    })
-                    .collect()
-            };
+            // One adjoint solve per observed port replaces one forward solve
+            // per device-noise source. Port count is normally tiny while a
+            // transistor-level circuit can contain thousands of sources.
+            ac_matrix
+                .solve_many_transpose_into(&port_rhs, num_ports, &mut port_adjoint)
+                .map_err(SimulationError::Solver)?;
+
+            let solve_transfer =
+                |node_pos: usize, node_neg: usize| -> Result<Vec<Complex64>, SimulationError> {
+                    (0..num_ports)
+                        .map(|port| {
+                            let adjoint = &port_adjoint[port * size..(port + 1) * size];
+                            Ok(Self::noise_transfer_from_adjoint(
+                                adjoint, node_pos, node_neg,
+                            ))
+                        })
+                        .collect()
+                };
 
             for source in &noise_sources {
                 if abort.is_aborted() {
@@ -2119,6 +2147,9 @@ impl Engine {
 
         // One workspace reused across every noise-source transfer solve.
         let mut rhs = vec![Complex64::new(0.0, 0.0); size];
+        let mut ac_matrix = rspice_matrix::ComplexMatrix::from_real_structure(&matrix);
+        let mut ac_solution = Vec::with_capacity(size);
+        let mut transfer_solution = Vec::with_capacity(size);
         let results: Result<Vec<NoiseResult>, SimulationError> = frequencies
             .iter()
             .map(|&freq| {
@@ -2127,11 +2158,17 @@ impl Engine {
                 }
                 let omega = 2.0 * PI * freq;
                 circuit.prepare_behavioral_small_signal_at_frequency(&dc_solution, freq);
-                let mut ac_matrix =
-                    Self::try_build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, omega)?;
+                Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
+                    &circuit,
+                    &mut ac_matrix,
+                    &dc_solution,
+                    omega,
+                    true,
+                    true,
+                )?;
 
-                let ac_solution = ac_matrix
-                    .solve(&ac_excitation_rhs)
+                ac_matrix
+                    .solve_into(&ac_excitation_rhs, &mut ac_solution)
                     .map_err(SimulationError::Solver)?;
                 let input_gain_sq = if has_input_source {
                     let gain = Self::differential_noise_output(
@@ -2157,7 +2194,23 @@ impl Engine {
 
                 let mut total_noise_v2_hz = 0.0;
                 let mut contributions = Vec::new();
-                let mut transfer_solution = Vec::with_capacity(size);
+                // Adjoint noise analysis reduces one linear solve per noise
+                // source to one transpose solve per output/frequency:
+                // c^T A^-1 b = (A^-T c)^T b. This is exact for complex AC
+                // matrices (transpose, not conjugate transpose).
+                rhs.fill(Complex64::new(0.0, 0.0));
+                if output_pos > 0 && output_pos <= num_nodes {
+                    rhs[output_pos - 1] += Complex64::new(1.0, 0.0);
+                }
+                if let Some(node) = output_neg
+                    && node > 0
+                    && node <= num_nodes
+                {
+                    rhs[node - 1] -= Complex64::new(1.0, 0.0);
+                }
+                ac_matrix
+                    .solve_transpose_into(&rhs, &mut transfer_solution)
+                    .map_err(SimulationError::Solver)?;
 
                 for source in &noise_sources {
                     if abort.is_aborted() {
@@ -2165,23 +2218,12 @@ impl Engine {
                     }
                     let si = source.spectral_density(freq, temperature);
                     let output_v2 = if si.is_finite() && si > 0.0 {
-                        rhs.fill(Complex64::new(0.0, 0.0));
-                        Self::stamp_unit_noise_current_rhs(
-                            &mut rhs,
+                        let transfer = Self::noise_transfer_from_adjoint(
+                            &transfer_solution,
                             source.node_pos,
                             source.node_neg,
                         );
-
-                        ac_matrix
-                            .solve_into(&rhs, &mut transfer_solution)
-                            .map_err(SimulationError::Solver)?;
-                        let v_out = Self::differential_noise_output(
-                            &transfer_solution,
-                            output_pos,
-                            output_neg,
-                            num_nodes,
-                        );
-                        si * v_out * v_out
+                        si * transfer.norm_sqr()
                     } else {
                         0.0
                     };
@@ -2212,36 +2254,15 @@ impl Engine {
                         continue;
                     }
 
-                    rhs.fill(Complex64::new(0.0, 0.0));
-                    Self::stamp_unit_noise_current_rhs(
-                        &mut rhs,
+                    let first_gain = Self::noise_transfer_from_adjoint(
+                        &transfer_solution,
                         source.first.node_pos,
                         source.first.node_neg,
                     );
-                    ac_matrix
-                        .solve_into(&rhs, &mut transfer_solution)
-                        .map_err(SimulationError::Solver)?;
-                    let first_gain = Self::differential_noise_output_complex(
+                    let second_gain = Self::noise_transfer_from_adjoint(
                         &transfer_solution,
-                        output_pos,
-                        output_neg,
-                        num_nodes,
-                    );
-
-                    rhs.fill(Complex64::new(0.0, 0.0));
-                    Self::stamp_unit_noise_current_rhs(
-                        &mut rhs,
                         source.second.node_pos,
                         source.second.node_neg,
-                    );
-                    ac_matrix
-                        .solve_into(&rhs, &mut transfer_solution)
-                        .map_err(SimulationError::Solver)?;
-                    let second_gain = Self::differential_noise_output_complex(
-                        &transfer_solution,
-                        output_pos,
-                        output_neg,
-                        num_nodes,
                     );
 
                     let first_amp = first_gain * densities.first_psd.sqrt();

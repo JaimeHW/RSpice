@@ -2221,6 +2221,7 @@ impl Engine {
         let mut last_progress_log = crate::time_compat::Instant::now();
         let mut rhs = vec![0.0; size];
         let mut new_solution = solution.clone();
+        let mut linear_solution = Vec::with_capacity(size);
         // Newton phase accounting: cumulative stamp/solve time across the
         // whole run, reported once at completion so a single info-level run
         // splits assembly cost from linear-solve cost without a profiler.
@@ -3028,35 +3029,36 @@ impl Engine {
 
                 // Solve and check convergence
                 let newton_solve_start = crate::time_compat::Instant::now();
-                let solve_result = if uses_inductor_correction {
-                    matrix
-                        .correction_rhs(&rhs, &new_solution)
-                        .and_then(|mut correction_rhs| {
-                            circuit.stabilize_inductor_transient_correction_rhs(
-                                &mut correction_rhs,
-                                &new_solution,
-                                dt,
-                                &coeff,
-                            );
-                            let correction = if prefer_dense_solver {
-                                matrix.solve_dense(&correction_rhs)
-                            } else {
-                                matrix.solve(&correction_rhs)
-                            }?;
-                            Ok(correction
-                                .into_iter()
-                                .zip(&new_solution)
-                                .map(|(correction, iterate)| correction + iterate)
-                                .collect())
+                let solve_result: Result<(), rspice_matrix::SolverError> =
+                    if uses_inductor_correction {
+                        matrix
+                            .correction_rhs(&rhs, &new_solution)
+                            .and_then(|mut correction_rhs| {
+                                circuit.stabilize_inductor_transient_correction_rhs(
+                                    &mut correction_rhs,
+                                    &new_solution,
+                                    dt,
+                                    &coeff,
+                                );
+                                if prefer_dense_solver {
+                                    linear_solution = matrix.solve_dense(&correction_rhs)?;
+                                } else {
+                                    matrix.solve_into(&correction_rhs, &mut linear_solution)?;
+                                }
+                                for (correction, &iterate) in
+                                    linear_solution.iter_mut().zip(&new_solution)
+                                {
+                                    *correction += iterate;
+                                }
+                                Ok(())
+                            })
+                    } else if prefer_dense_solver {
+                        matrix.solve_dense(&rhs).map(|solution| {
+                            linear_solution = solution;
                         })
-                } else if prefer_dense_solver {
-                    // Keep the ordinary transient hot path allocation-free:
-                    // correction RHS ownership is needed only for inductive
-                    // rows, while direct solves can borrow the stamped RHS.
-                    matrix.solve_dense(&rhs)
-                } else {
-                    matrix.solve(&rhs)
-                };
+                    } else {
+                        matrix.solve_into(&rhs, &mut linear_solution)
+                    };
                 let newton_solve_elapsed = newton_solve_start.elapsed();
                 total_solve_nanos += newton_solve_elapsed.as_nanos();
                 static TRANSIENT_NEWTON_SOLVE_LOG_COUNT: std::sync::atomic::AtomicUsize =
@@ -3077,7 +3079,8 @@ impl Engine {
 
                 let postsolve_phase_start = crate::time_compat::Instant::now();
                 match solve_result {
-                    Ok(mut sol) => {
+                    Ok(()) => {
+                        let mut sol = &mut linear_solution;
                         had_solver_candidate = true;
                         // Sanity check: detect and handle NaN/Inf/excessive values.
                         // IMPORTANT: Preserve the newest valid candidate when possible.
@@ -3201,7 +3204,7 @@ impl Engine {
                                 ));
                                 total_merit_nanos += seed_start.elapsed().as_nanos();
                             }
-                            new_solution = sol;
+                            new_solution.copy_from_slice(sol);
                             nonlinear_state_matches_new_solution = false;
                             continue;
                         }
@@ -3212,7 +3215,7 @@ impl Engine {
                             // the normal fixed-point/status check so a second
                             // small correction can remove forward error from an
                             // ill-conditioned companion row.
-                            new_solution = sol;
+                            new_solution.copy_from_slice(sol);
                             converged = true;
                             break;
                         }
@@ -3222,7 +3225,7 @@ impl Engine {
                             // next status-test pass, after restamping its true
                             // nonlinear residual. This is nonlinear iteration
                             // `_iter + 1`, including the MAXSTEP candidate.
-                            new_solution = sol;
+                            new_solution.copy_from_slice(sol);
                             nonlinear_state_matches_new_solution = false;
                             xyce_weighted_update_norm = raw_weighted_update_norm;
                             total_postsolve_nanos += postsolve_phase_start.elapsed().as_nanos();
@@ -3260,7 +3263,7 @@ impl Engine {
                         }
                         // CRITICAL: Update new_solution BEFORE checking device convergence
                         // Otherwise, BJT vbe/vbc are based on old guess, not new solve
-                        new_solution = sol;
+                        new_solution.copy_from_slice(sol);
                         nonlinear_state_matches_new_solution = false;
 
                         // Update nonlinear device state to new solution for accurate convergence check
@@ -3947,9 +3950,8 @@ impl Engine {
                     if fixed_method.is_none() {
                         trapgear.update(&new_solution, dt);
                     }
-                    let capture_xyce_static_history = self.config.spice_dialect
-                        == SpiceDialect::Xyce
-                        && xyce_one_step_order2;
+                    let capture_xyce_static_history =
+                        self.config.spice_dialect == SpiceDialect::Xyce && xyce_one_step_order2;
                     let mut xyce_static_history_candidate = None;
                     if capture_xyce_static_history && !circuit.has_xspice_devices() {
                         xyce_static_history_candidate = Some(self.capture_xyce_static_residual(
@@ -4016,13 +4018,14 @@ impl Engine {
                             tstop,
                         );
                         if capture_xyce_static_history {
-                            xyce_static_history_candidate = Some(self.capture_xyce_static_residual(
-                                &mut circuit,
-                                &mut matrix,
-                                &new_solution,
-                                t,
-                                transient_baseline_diag_gmin,
-                            )?);
+                            xyce_static_history_candidate =
+                                Some(self.capture_xyce_static_residual(
+                                    &mut circuit,
+                                    &mut matrix,
+                                    &new_solution,
+                                    t,
+                                    transient_baseline_diag_gmin,
+                                )?);
                         }
                     }
                     #[cfg(feature = "veriloga")]
@@ -4979,13 +4982,14 @@ impl Engine {
                             tstop,
                         );
                         if capture_xyce_static_history {
-                            xyce_static_history_candidate = Some(self.capture_xyce_static_residual(
-                                &mut circuit,
-                                &mut matrix,
-                                &new_solution,
-                                t,
-                                transient_baseline_diag_gmin,
-                            )?);
+                            xyce_static_history_candidate =
+                                Some(self.capture_xyce_static_residual(
+                                    &mut circuit,
+                                    &mut matrix,
+                                    &new_solution,
+                                    t,
+                                    transient_baseline_diag_gmin,
+                                )?);
                         }
                     }
                     #[cfg(feature = "veriloga")]
