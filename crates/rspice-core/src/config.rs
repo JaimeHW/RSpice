@@ -272,6 +272,9 @@ pub struct SimulationConfig {
     /// `NONLIN-TRAN ENFORCEDEVICECONV=0` default in Xyce mode and preserves
     /// the native/ngspice enforced-device policy in other dialects.
     pub transient_enforce_device_convergence: Option<bool>,
+    /// Explicit Xyce transient nonlinear solver selection. `None` preserves
+    /// Xyce's default DampedNewton solver; `Some(true)` selects NOX.
+    pub transient_nonlinear_nox: Option<bool>,
     /// Reference magnitude policy for normalized transient LTE control.
     /// `None` selects the active [`SpiceDialect`]'s default policy.
     pub transient_lte_reference: Option<TransientLteReference>,
@@ -696,6 +699,7 @@ impl Default for SimulationConfig {
             transient_nonlinear_rhstol: None,
             transient_nonlinear_max_iterations: None,
             transient_enforce_device_convergence: None,
+            transient_nonlinear_nox: None,
             transient_lte_reference: None,
             transient_new_bp_stepping: true,
             transient_node_activity_bound: crate::constants::DEVICE_ACTIVITY_STEP_BOUND,

@@ -1332,6 +1332,10 @@ pub(super) fn parse_options_command(
                 options.nonlin_transient_enforce_device_convergence =
                     Some(parse_boolean_option(stream, line_num, params, has_equals)?);
             }
+            (Some("NONLIN-TRAN"), "NOX") | (Some("NONLIN-TRANSIENT"), "NOX") => {
+                options.nonlin_transient_nox =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+            }
             (Some("NONLIN-TRAN"), _) | (Some("NONLIN-TRANSIENT"), _) => {
                 let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
                 ignore_unknown_option(

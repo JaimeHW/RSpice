@@ -641,6 +641,11 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     );
     hash_field(
         &mut hasher,
+        "transient_nonlinear_nox",
+        config.transient_nonlinear_nox,
+    );
+    hash_field(
+        &mut hasher,
         "transient_lte_reference",
         config.transient_lte_reference,
     );

@@ -2696,6 +2696,10 @@ pub struct SimulationOptions {
     /// Xyce `.OPTIONS NONLIN-TRAN ENFORCEDEVICECONV` device-local
     /// convergence policy.
     pub nonlin_transient_enforce_device_convergence: Option<bool>,
+    /// Xyce `.OPTIONS NONLIN-TRAN NOX` transient nonlinear solver selection.
+    /// `None` preserves Xyce's default DampedNewton solver; `Some(true)`
+    /// explicitly selects the NOX status-test path.
+    pub nonlin_transient_nox: Option<bool>,
     /// Xyce transient LTE error-weight reference policy (`NEWLTE=0..3`).
     pub transient_lte_reference: Option<TransientLteReference>,
     /// Xyce breakpoint-step LTE policy (`NEWBPSTEPPING=0|1`).
@@ -2868,6 +2872,9 @@ impl SimulationOptions {
         if other.nonlin_transient_enforce_device_convergence.is_some() {
             self.nonlin_transient_enforce_device_convergence =
                 other.nonlin_transient_enforce_device_convergence;
+        }
+        if other.nonlin_transient_nox.is_some() {
+            self.nonlin_transient_nox = other.nonlin_transient_nox;
         }
         if other.transient_lte_reference.is_some() {
             self.transient_lte_reference = other.transient_lte_reference;

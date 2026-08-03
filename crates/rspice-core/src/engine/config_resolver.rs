@@ -62,6 +62,7 @@ pub struct SimulationConfigOverrides {
     pub transient_nonlinear_rhstol: Option<Value>,
     pub transient_nonlinear_max_iterations: Option<usize>,
     pub transient_enforce_device_convergence: Option<bool>,
+    pub transient_nonlinear_nox: Option<bool>,
     pub transient_lte_reference: Option<TransientLteReference>,
     pub transient_new_bp_stepping: Option<bool>,
     pub ramptime: Option<Value>,
@@ -108,6 +109,7 @@ pub fn resolve_simulation_config(
     let mut transient_nonlinear_rhstol = base.transient_nonlinear_rhstol;
     let mut transient_nonlinear_max_iterations = base.transient_nonlinear_max_iterations;
     let mut transient_enforce_device_convergence = base.transient_enforce_device_convergence;
+    let mut transient_nonlinear_nox = base.transient_nonlinear_nox;
     let mut transient_lte_reference = base
         .transient_lte_reference
         .unwrap_or_else(|| base.spice_dialect.default_transient_lte_reference());
@@ -178,6 +180,9 @@ pub fn resolve_simulation_config(
         }
         if let Some(enforce) = opts.nonlin_transient_enforce_device_convergence {
             transient_enforce_device_convergence = Some(enforce);
+        }
+        if let Some(nox) = opts.nonlin_transient_nox {
+            transient_nonlinear_nox = Some(nox);
         }
         if let Some(reference) = opts.transient_lte_reference {
             transient_lte_reference = reference;
@@ -271,6 +276,9 @@ pub fn resolve_simulation_config(
     if let Some(enforce) = overrides.transient_enforce_device_convergence {
         transient_enforce_device_convergence = Some(enforce);
     }
+    if let Some(nox) = overrides.transient_nonlinear_nox {
+        transient_nonlinear_nox = Some(nox);
+    }
     if let Some(value) = overrides.ramptime {
         ramptime = value;
     }
@@ -339,6 +347,7 @@ pub fn resolve_simulation_config(
     resolved.transient_nonlinear_rhstol = transient_nonlinear_rhstol;
     resolved.transient_nonlinear_max_iterations = transient_nonlinear_max_iterations;
     resolved.transient_enforce_device_convergence = transient_enforce_device_convergence;
+    resolved.transient_nonlinear_nox = transient_nonlinear_nox;
     resolved.transient_lte_reference = Some(transient_lte_reference);
     resolved.transient_new_bp_stepping = transient_new_bp_stepping;
     resolved.ramptime = ramptime;
