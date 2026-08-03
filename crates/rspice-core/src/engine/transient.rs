@@ -36,12 +36,6 @@ fn restore_transient_merit_rollback(
     vbic_snapshot_cache.clone_from_slice(&rollback.1);
 }
 
-/// Per-iteration Newton merit tracing (`RSPICE_NEWTON_DEBUG=1`), the
-/// transient-Newton sibling of `RSPICE_LTE_DEBUG`.
-fn newton_merit_debug_enabled() -> bool {
-    std::env::var_os("RSPICE_NEWTON_DEBUG").is_some()
-}
-
 mod breakpoints;
 mod checkpoint;
 mod companion_stamps;
@@ -2032,7 +2026,6 @@ impl Engine {
         // source breakpoint time use order 1, mirroring that behavior.
         let locked_edge_order = locked_grid.is_some()
             && std::env::var("RSPICE_GRID_LOCKED_EDGE_ORDER").as_deref() == Ok("1");
-
         // Initialize capacitor voltage history from DC solution
         for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
             let np = cap.pp.row;
@@ -2601,11 +2594,14 @@ impl Engine {
                         || locked_reference_order_restart,
                 )
             };
-            let xyce_one_step_order2 = self.config.spice_dialect == SpiceDialect::Xyce
+            let xyce_one_step = self.config.spice_dialect == SpiceDialect::Xyce
                 && !xyce_one_step_stateful_topology
-                && circuit.couplings.is_empty()
-                && circuit.tlines.is_empty()
-                && circuit.coupled_tlines.is_empty()
+                && matches!(
+                    current_method,
+                    IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear
+                )
+                && (circuit.couplings.is_empty() || circuit.has_only_xyce_core_inductors());
+            let xyce_one_step_order2 = xyce_one_step
                 && step_trap_order == 2
                 && matches!(
                     current_method,
@@ -2640,6 +2636,7 @@ impl Engine {
                 .then(|| circuit.nonlinear_state_snapshot());
             macro_rules! restore_rejected_transient_nonlinear_state {
                 () => {{
+                    lte_estimator.rollback_xyce_attempt();
                     if let Some(snapshot) = rejected_attempt_nonlinear_state.take() {
                         circuit.restore_nonlinear_state(snapshot);
                     }
@@ -2681,6 +2678,7 @@ impl Engine {
 
             total_top_nanos += attempt_top_start.elapsed().as_nanos();
             let setup_phase_start = crate::time_compat::Instant::now();
+            lte_estimator.begin_xyce_attempt(dt, step_trap_order);
             // Prepare for Newton iteration at this timestep by seeding the full
             // algebraic solution vector from accepted history when a predictor
             // state is available. ngspice's `NIpred()` predicts every solver
@@ -2771,7 +2769,6 @@ impl Engine {
             let mut last_stamped_iterate: Vec<Value> = Vec::new();
             let mut last_stamped_merit = Value::INFINITY;
             let mut last_stamped_rollback: Option<TransientMeritRollback> = None;
-            let xyce_core_stabilized_jacobian = circuit.has_xyce_core_shared_level2();
 
             // Newton-Raphson iteration for this timestep.
             // Classic SPICE transient analysis uses the transient-specific ITL4
@@ -2817,8 +2814,8 @@ impl Engine {
                 let newton_stamp_start = crate::time_compat::Instant::now();
                 let transient_system_context = residual::TransientSystemContext {
                     coeff: &coeff,
+                    xyce_one_step,
                     xyce_one_step_order2,
-                    xyce_core_stabilized_jacobian,
                     xyce_static_history: xyce_static_history.as_deref(),
                     bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                     bjt_history: &bjt_history,
@@ -2893,17 +2890,6 @@ impl Engine {
                     let current_merit = self
                         .residual_inf_norm(&circuit, &mut matrix, &new_solution, &rhs)
                         .unwrap_or(Value::INFINITY);
-                    if newton_merit_debug_enabled() {
-                        log::warn!(
-                            "NEWTON-MERIT t={:.6e} dt={:.3e} iter={} merit={:.6e} prev={:.6e} searching={}",
-                            t,
-                            dt,
-                            _iter.saturating_add(1),
-                            current_merit,
-                            last_stamped_merit,
-                            merit_backtrack.is_some(),
-                        );
-                    }
                     if let Some((mut search, rollback)) = merit_backtrack.take() {
                         match search.judge(current_merit) {
                             globalization::BacktrackAction::Trial(trial) => {
@@ -3247,7 +3233,7 @@ impl Engine {
                                 &new_solution,
                                 &sol,
                                 num_nodes,
-                                None,
+                                transient_newton_update_weights.as_deref(),
                                 _iter.saturating_add(1),
                             );
                         if _iter == 0 && globalization_active && !update_converged_for_acceptance {
@@ -3319,8 +3305,8 @@ impl Engine {
                                     dt,
                                     &residual::TransientSystemContext {
                                         coeff: &coeff,
+                                        xyce_one_step,
                                         xyce_one_step_order2,
-                                        xyce_core_stabilized_jacobian,
                                         xyce_static_history: xyce_static_history.as_deref(),
                                         bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                                         bjt_history: &bjt_history,
@@ -3439,13 +3425,21 @@ impl Engine {
                         &rhs,
                     );
                     let max_dv = Self::max_abs_delta_prefix(&solution, &new_solution, num_nodes);
+                    let update_norm = self
+                        .transient_newton_weighted_update_norm(
+                            &solution,
+                            &new_solution,
+                            transient_newton_update_weights.as_deref(),
+                        )
+                        .unwrap_or(Value::NAN);
                     log::warn!(
-                        "Newton non-converge at t={:.6e}, dt={:.3e}: voltage_conv={}, device_conv={}, residual_conv={}, max_dv={:.3e}, iter={}",
+                        "Newton non-converge at t={:.6e}, dt={:.3e}: voltage_conv={}, device_conv={}, residual_conv={}, update_norm={:.3e}, max_dv={:.3e}, iter={}",
                         t,
                         dt,
                         v_conv,
                         d_conv,
                         r_conv,
+                        update_norm,
                         max_dv,
                         total_iterations
                     );
@@ -3478,8 +3472,8 @@ impl Engine {
                         dt,
                         &residual::TransientSystemContext {
                             coeff: &coeff,
+                            xyce_one_step,
                             xyce_one_step_order2,
-                            xyce_core_stabilized_jacobian: false,
                             xyce_static_history: xyce_static_history.as_deref(),
                             bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                             bjt_history: &bjt_history,
@@ -3954,27 +3948,17 @@ impl Engine {
                     }
                     let capture_xyce_static_history = self.config.spice_dialect
                         == SpiceDialect::Xyce
-                        && (xyce_one_step_order2 || circuit.has_xyce_core_inductors());
-                    if capture_xyce_static_history && circuit.has_xspice_devices() {
-                        circuit.evaluate_xspice_transient_timestep_with_coefficients(
-                            t,
-                            dt,
-                            &new_solution,
-                            &coeff,
-                            xyce_one_step_order2,
-                        );
-                    }
-                    let xyce_static_history_candidate = if capture_xyce_static_history {
-                        Some(self.capture_xyce_static_residual(
+                        && xyce_one_step_order2;
+                    let mut xyce_static_history_candidate = None;
+                    if capture_xyce_static_history && !circuit.has_xspice_devices() {
+                        xyce_static_history_candidate = Some(self.capture_xyce_static_residual(
                             &mut circuit,
                             &mut matrix,
                             &new_solution,
                             t,
                             transient_baseline_diag_gmin,
-                        )?)
-                    } else {
-                        None
-                    };
+                        )?);
+                    }
                     Self::update_reactive_history(
                         &mut circuit,
                         &new_solution,
@@ -4007,6 +3991,13 @@ impl Engine {
                     );
                     if circuit.has_xspice_devices() {
                         if capture_xyce_static_history {
+                            circuit.evaluate_xspice_transient_timestep_with_coefficients(
+                                t,
+                                dt,
+                                &new_solution,
+                                &coeff,
+                                xyce_one_step_order2,
+                            );
                             circuit.accept_xspice_timestep();
                         } else {
                             circuit.accept_xspice_transient_timestep_with_coefficients(
@@ -4023,6 +4014,15 @@ impl Engine {
                             &mut breakpoints,
                             tstop,
                         );
+                        if capture_xyce_static_history {
+                            xyce_static_history_candidate = Some(self.capture_xyce_static_residual(
+                                &mut circuit,
+                                &mut matrix,
+                                &new_solution,
+                                t,
+                                transient_baseline_diag_gmin,
+                            )?);
+                        }
                     }
                     #[cfg(feature = "veriloga")]
                     if circuit.has_veriloga_devices() {
@@ -4495,6 +4495,11 @@ impl Engine {
                 );
             let xyce_promotes_order_two =
                 xyce_order_two_trial_eligible && lte_estimator.xyce_should_promote_order_two(lte);
+            let xyce_history_order = if xyce_promotes_order_two {
+                2
+            } else {
+                step_trap_order
+            };
             let xyce_accepted_ratio_order = if xyce_order_two_trial_eligible {
                 2
             } else {
@@ -4906,29 +4911,17 @@ impl Engine {
                     }
                     let capture_xyce_static_history = self.config.spice_dialect
                         == SpiceDialect::Xyce
-                        && (xyce_one_step_order2
-                            || xyce_promotes_order_two
-                            || circuit.has_xyce_core_inductors());
-                    if capture_xyce_static_history && circuit.has_xspice_devices() {
-                        circuit.evaluate_xspice_transient_timestep_with_coefficients(
-                            t,
-                            dt,
-                            &new_solution,
-                            &coeff,
-                            xyce_one_step_order2,
-                        );
-                    }
-                    let xyce_static_history_candidate = if capture_xyce_static_history {
-                        Some(self.capture_xyce_static_residual(
+                        && (xyce_one_step_order2 || xyce_promotes_order_two);
+                    let mut xyce_static_history_candidate = None;
+                    if capture_xyce_static_history && !circuit.has_xspice_devices() {
+                        xyce_static_history_candidate = Some(self.capture_xyce_static_residual(
                             &mut circuit,
                             &mut matrix,
                             &new_solution,
                             t,
                             transient_baseline_diag_gmin,
-                        )?)
-                    } else {
-                        None
-                    };
+                        )?);
+                    }
                     Self::update_reactive_history(
                         &mut circuit,
                         &new_solution,
@@ -4961,6 +4954,13 @@ impl Engine {
                     );
                     if circuit.has_xspice_devices() {
                         if capture_xyce_static_history {
+                            circuit.evaluate_xspice_transient_timestep_with_coefficients(
+                                t,
+                                dt,
+                                &new_solution,
+                                &coeff,
+                                xyce_one_step_order2,
+                            );
                             circuit.accept_xspice_timestep();
                         } else {
                             circuit.accept_xspice_transient_timestep_with_coefficients(
@@ -4977,6 +4977,15 @@ impl Engine {
                             &mut breakpoints,
                             tstop,
                         );
+                        if capture_xyce_static_history {
+                            xyce_static_history_candidate = Some(self.capture_xyce_static_residual(
+                                &mut circuit,
+                                &mut matrix,
+                                &new_solution,
+                                t,
+                                transient_baseline_diag_gmin,
+                            )?);
+                        }
                     }
                     #[cfg(feature = "veriloga")]
                     if circuit.has_veriloga_devices() {
@@ -5183,29 +5192,17 @@ impl Engine {
             total_trap_trial_nanos += trap_trial_phase_start.elapsed().as_nanos();
 
             let capture_xyce_static_history = self.config.spice_dialect == SpiceDialect::Xyce
-                && (xyce_one_step_order2
-                    || xyce_promotes_order_two
-                    || circuit.has_xyce_core_inductors());
-            if capture_xyce_static_history && circuit.has_xspice_devices() {
-                circuit.evaluate_xspice_transient_timestep_with_coefficients(
-                    t,
-                    dt,
-                    &new_solution,
-                    &coeff,
-                    xyce_one_step_order2,
-                );
-            }
-            let xyce_static_history_candidate = if capture_xyce_static_history {
-                Some(self.capture_xyce_static_residual(
+                && (xyce_one_step_order2 || xyce_promotes_order_two);
+            let mut xyce_static_history_candidate = None;
+            if capture_xyce_static_history && !circuit.has_xspice_devices() {
+                xyce_static_history_candidate = Some(self.capture_xyce_static_residual(
                     &mut circuit,
                     &mut matrix,
                     &new_solution,
                     t,
                     transient_baseline_diag_gmin,
-                )?)
-            } else {
-                None
-            };
+                )?);
+            }
             let history_phase_start = crate::time_compat::Instant::now();
             Self::update_reactive_history(
                 &mut circuit,
@@ -5242,6 +5239,13 @@ impl Engine {
             // Accept XSPICE timestep (commit state changes)
             if circuit.has_xspice_devices() {
                 if capture_xyce_static_history {
+                    circuit.evaluate_xspice_transient_timestep_with_coefficients(
+                        t,
+                        dt,
+                        &new_solution,
+                        &coeff,
+                        xyce_one_step_order2,
+                    );
                     circuit.accept_xspice_timestep();
                 } else {
                     circuit.accept_xspice_transient_timestep_with_coefficients(
@@ -5254,6 +5258,15 @@ impl Engine {
                 }
                 circuit.project_xspice_voltage_outputs(&mut new_solution, num_nodes);
                 Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop);
+                if capture_xyce_static_history {
+                    xyce_static_history_candidate = Some(self.capture_xyce_static_residual(
+                        &mut circuit,
+                        &mut matrix,
+                        &new_solution,
+                        t,
+                        transient_baseline_diag_gmin,
+                    )?);
+                }
             }
             #[cfg(feature = "veriloga")]
             let veriloga_discontinuity = if circuit.has_veriloga_devices() {
@@ -5267,7 +5280,12 @@ impl Engine {
             }
 
             if lte_estimator.uses_accepted_solution_reference() {
-                lte_estimator.record(&new_solution, dt);
+                lte_estimator.record_with_order(
+                    &new_solution,
+                    new_solution.len(),
+                    dt,
+                    xyce_history_order,
+                );
                 if hit_breakpoint {
                     lte_estimator.restart_history_from(&new_solution);
                     xyce_lte_restart_first_step = true;

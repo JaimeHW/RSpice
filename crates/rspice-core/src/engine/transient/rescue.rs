@@ -93,7 +93,6 @@ impl Engine {
         let mut levels = self.gmin_nonlinear_schedule();
         levels.push(0.0);
 
-        let debug = std::env::var_os("RSPICE_NEWTON_DEBUG").is_some();
         let mut iterate = seed.to_vec();
         for &extra_gmin in &levels {
             // ngspice gmin stepping moves `CKTgmin` itself, so the junction
@@ -104,7 +103,6 @@ impl Engine {
             circuit
                 .set_semiconductor_junction_gmin(self.effective_device_junction_gmin(extra_gmin));
             let mut level_converged = false;
-            let mut last_failure = (false, false, false);
             for level_iter in 0..budget {
                 self.stamp_transient_system(
                     circuit,
@@ -127,13 +125,6 @@ impl Engine {
                 let line_search_vbic_cache = vbic_snapshot_cache.to_vec();
 
                 let Ok(mut sol) = matrix.solve(rhs) else {
-                    if debug {
-                        log::warn!(
-                            "GMIN-RESCUE solve failed at gmin={:.1e} iter={}",
-                            extra_gmin,
-                            level_iter
-                        );
-                    }
                     return Ok(None);
                 };
 
@@ -274,16 +265,6 @@ impl Engine {
                 // committed Newton stamp may be affine-limited and therefore
                 // cannot replace the physical residual as an acceptance test.
                 let residual_converged = accepted_merit <= 1.0;
-                if debug && level_iter >= budget.saturating_sub(6) {
-                    let max_dv = Self::max_abs_delta_prefix(&iterate, &accepted, num_nodes);
-                    log::warn!(
-                        "GMIN-RESCUE walk gmin={:.1e} iter={} max_dv={:.3e} merit={:.3e}",
-                        extra_gmin,
-                        level_iter,
-                        max_dv,
-                        accepted_merit
-                    );
-                }
                 iterate = accepted;
                 if circuit.has_nonlinear_devices() {
                     circuit.update_nonlinear(&iterate);
@@ -295,19 +276,9 @@ impl Engine {
                     level_converged = true;
                     break;
                 }
-                last_failure = (voltage_converged, device_converged, residual_converged);
             }
 
             if !level_converged {
-                if debug {
-                    log::warn!(
-                        "GMIN-RESCUE level failed at gmin={:.1e}: voltage_conv={} device_conv={} residual_conv={}",
-                        extra_gmin,
-                        last_failure.0,
-                        last_failure.1,
-                        last_failure.2
-                    );
-                }
                 return Ok(None);
             }
         }
@@ -327,9 +298,6 @@ impl Engine {
             ctx,
             vbic_snapshot_cache,
         )? {
-            if debug {
-                log::warn!("GMIN-RESCUE final restamp proof failed at t={:.6e}", time);
-            }
             return Ok(None);
         }
 

@@ -13,6 +13,10 @@ use super::*;
 /// mutated when a step is accepted) and dropped before the commit walks.
 pub(super) struct TransientSystemContext<'a> {
     pub(super) coeff: &'a CompanionCoefficients,
+    /// Xyce's OneStep method uses a backward-Euler reactive companion for
+    /// both order-one and order-two steps. Order two additionally splits the
+    /// static DAE contribution, represented by `xyce_one_step_order2` below.
+    pub(super) xyce_one_step: bool,
     /// Xyce's OneStep order-2 residual uses a backward-Euler Q difference
     /// together with a trapezoid-weighted static F term.  The accepted
     /// previous static residual is carried separately because it is not part
@@ -21,7 +25,6 @@ pub(super) struct TransientSystemContext<'a> {
     /// Use the bounded Picard form for shared Xyce LEVEL=2 cores. The
     /// residual and physical constitutive endpoint remain unchanged; only
     /// the local Jacobian is stabilized for this coupled topology.
-    pub(super) xyce_core_stabilized_jacobian: bool,
     pub(super) xyce_static_history: Option<&'a [Value]>,
     pub(super) bsim4_trnqs_coeff: &'a CompanionCoefficients,
     pub(super) bjt_history: &'a BjtTransientHistory,
@@ -161,12 +164,12 @@ impl Engine {
             }
         }
 
-        let companion_coeff = if ctx.xyce_one_step_order2 {
+        let companion_coeff = if ctx.xyce_one_step {
             CompanionCoefficients::backward_euler()
         } else {
             *ctx.coeff
         };
-        let bsim4_companion_coeff = if ctx.xyce_one_step_order2 {
+        let bsim4_companion_coeff = if ctx.xyce_one_step {
             companion_coeff
         } else {
             *ctx.bsim4_trnqs_coeff
@@ -219,7 +222,9 @@ impl Engine {
             dt,
             &companion_coeff,
             ctx.xyce_one_step_order2,
-            ctx.xyce_core_stabilized_jacobian,
+            evaluation_mode
+                == crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited
+                && refresh_nonlinear,
         );
         circuit.stamp_coupled_inductor_pairs_transient(matrix, rhs, dt, &companion_coeff);
         circuit.stamp_multi_winding_transformers_transient(matrix, rhs, dt, &companion_coeff);
@@ -486,9 +491,10 @@ impl Engine {
                 // event-driven models at the breakpoint.
                 circuit.stamp_xspice_static_residual(solution, probe_rhs);
             }
-            probe
+            let residual = probe
                 .residual_vector(solution, probe_rhs)
-                .map_err(|error| SimulationError::Circuit(error.to_string()))
+                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+            Ok(residual)
         })
     }
 
@@ -717,8 +723,8 @@ Q1 C B E 0 QN
         let vdmos_companion_slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
         let ctx = TransientSystemContext {
             coeff: &coeff,
+            xyce_one_step: false,
             xyce_one_step_order2: false,
-            xyce_core_stabilized_jacobian: false,
             xyce_static_history: None,
             bsim4_trnqs_coeff: &coeff,
             bjt_history: &bjt_history,
@@ -1156,8 +1162,8 @@ Q1 C B E 0 QN
             let vdmos_companion_slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
             let ctx = TransientSystemContext {
                 coeff: &coeff,
+                xyce_one_step: false,
                 xyce_one_step_order2: false,
-                xyce_core_stabilized_jacobian: false,
                 xyce_static_history: None,
                 bsim4_trnqs_coeff: &coeff,
                 bjt_history: &bjt_history,

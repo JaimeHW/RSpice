@@ -3772,18 +3772,12 @@ impl XyceTestRunner {
                 );
             }
         };
-        // A printed Xyce grid contains only accepted breakpoints.  When a
-        // nonlinear candidate is rejected, Xyce retries it with a contracted
-        // step before accepting the next printed point; replaying only the
-        // target times loses that hidden attempt and can change history-
-        // dependent devices.  Carry the accepted interval sizes alongside the
-        // grid so locked fallbacks can reproduce the same retry schedule.
-        let reference_time_step_sizes = {
-            let mut step_sizes = Vec::with_capacity(reference_time_grid.len());
-            step_sizes.push(0.0);
-            step_sizes.extend(reference_time_grid.windows(2).map(|pair| pair[1] - pair[0]));
-            step_sizes
-        };
+        // A printed Xyce grid contains output breakpoints, not the solver's
+        // accepted internal timestep history.  The intervals between PRN
+        // rows may contain rejected candidates and hidden substeps, so they
+        // must not be replayed as fixed companion-history deltas.  Keep the
+        // grid as an output/comparison boundary and let the transient solver
+        // determine its own accepted steps inside each interval.
         let tran = Self::tran_analysis_for_reference_stop(
             plan.contract,
             plan.tran,
@@ -3839,14 +3833,7 @@ impl XyceTestRunner {
         } else {
             None
         };
-        let locked_time_step_sizes = locked_time_grid
-            .as_ref()
-            .map(|_| reference_time_step_sizes.clone());
-        let engine = self.create_xyce_static_tran_engine_with_step_sizes(
-            locked_time_grid,
-            locked_time_step_sizes,
-            initial_step,
-        );
+        let engine = self.create_xyce_static_tran_engine(locked_time_grid, initial_step);
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let mut best_mismatches = None;
         let mut simulation_error = None;
@@ -3953,11 +3940,8 @@ impl XyceTestRunner {
             )
         });
 
-        let locked_engine = self.create_xyce_static_tran_engine_with_step_sizes(
-            Some(reference_time_grid.clone()),
-            Some(reference_time_step_sizes.clone()),
-            initial_step,
-        );
+        let locked_engine =
+            self.create_xyce_static_tran_engine(Some(reference_time_grid.clone()), initial_step);
         match locked_engine.run_tran_with_abort(&netlist, tran.stop, locked_max_step, &abort) {
             Ok(locked_result) => {
                 match self.compare_tran_prn_reference(
@@ -4029,7 +4013,7 @@ impl XyceTestRunner {
             let backward_euler_engine = self
                 .create_xyce_static_tran_engine_with_step_sizes_and_integration_method(
                     Some(reference_time_grid.clone()),
-                    Some(reference_time_step_sizes.clone()),
+                    None,
                     initial_step,
                     rspice_core::numerics::integration::IntegrationMethod::BackwardEuler,
                 );
@@ -4109,7 +4093,7 @@ impl XyceTestRunner {
             let gear12_engine = self
                 .create_xyce_static_tran_engine_with_step_sizes_and_integration_method(
                     Some(reference_time_grid),
-                    Some(reference_time_step_sizes),
+                    None,
                     initial_step,
                     rspice_core::numerics::integration::IntegrationMethod::Gear2,
                 );
