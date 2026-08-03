@@ -7,7 +7,7 @@
 //! and allows updates to values only, avoiding O(N log N) rebuild.
 
 #![allow(clippy::needless_range_loop)]
-use crate::{SolverError, Value};
+use crate::{RealSolverBackend, SolverError, SolverOptions, Value};
 use faer::dyn_stack::{MemBuffer, MemStack};
 use faer::linalg::solvers::Solve;
 use faer::sparse::linalg::lu as sparse_lu;
@@ -16,6 +16,7 @@ use faer::sparse::{SparseColMat, SparseColMatRef, SymbolicSparseColMat};
 use faer::{Conj, Mat, get_global_parallelism};
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Reusable sparse-LU workspace for the Newton hot path.
 ///
@@ -47,13 +48,52 @@ struct LuWorkspace {
 
 /// Pre-computed stamp location that maps directly to CSC values array
 #[derive(Debug, Clone, Copy)]
-pub struct CscIndex(pub usize);
+pub struct CscIndex {
+    offset: usize,
+    pattern_id: u64,
+}
+
+impl CscIndex {
+    /// Numeric offset in the CSC value array.
+    ///
+    /// Exposed for read-only diagnostics. Stamping should pass the complete
+    /// token back to [`StaticMatrix::stamp_direct`] or the corresponding
+    /// complex method so the originating pattern can be validated.
+    #[inline]
+    pub const fn offset(self) -> usize {
+        self.offset
+    }
+}
+
+static NEXT_PATTERN_ID: AtomicU64 = AtomicU64::new(1);
+
+#[inline]
+fn next_pattern_id() -> Result<u64, SolverError> {
+    NEXT_PATTERN_ID
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            current.checked_add(1)
+        })
+        .map_err(|_| {
+            SolverError::InvalidCircuit("matrix pattern identifier space exhausted".to_string())
+        })
+}
 
 #[derive(Debug, Clone, Copy)]
 struct MissingMatrixPosition {
     method: &'static str,
     row: usize,
     col: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum MatrixStampError {
+    MissingPosition(MissingMatrixPosition),
+    InvalidIndex {
+        method: &'static str,
+        offset: usize,
+        index_pattern: u64,
+        matrix_pattern: u64,
+    },
 }
 
 impl MissingMatrixPosition {
@@ -65,20 +105,41 @@ impl MissingMatrixPosition {
     }
 }
 
+impl MatrixStampError {
+    fn into_solver_error(self) -> SolverError {
+        match self {
+            Self::MissingPosition(missing) => missing.into_solver_error(),
+            Self::InvalidIndex {
+                method,
+                offset,
+                index_pattern,
+                matrix_pattern,
+            } => SolverError::InvalidCircuit(format!(
+                "{method} received CSC offset {offset} for pattern {index_pattern}, but the matrix uses pattern {matrix_pattern}"
+            )),
+        }
+    }
+}
+
 /// Pre-built matrix structure with static topology
 ///
 /// This is the critical optimization: we build the structure once during
 /// circuit setup, then only update the values during Newton-Raphson iterations.
 /// This avoids the O(N log N) sort and memory allocation on every solve.
 pub struct StaticMatrix {
-    /// Matrix dimensions
+    /// Matrix row count.
     pub nrows: usize,
+    /// Matrix column count.
     pub ncols: usize,
     /// Frozen CSC sparsity pattern, validated once at construction.
     /// Solves borrow it as a view — no per-iteration structure copies.
     csc: SymbolicSparseColMat<usize>,
     /// CSC values (mutable - updated each iteration)
     values: Vec<Value>,
+    /// Identity shared by matrices cloned from this exact sparsity pattern.
+    /// Precomputed stamp tokens carry the same identity, preventing a valid
+    /// offset from one topology from silently corrupting another topology.
+    pattern_id: u64,
     /// Maximum structural nonzeros in any row, retained for scale-invariant
     /// backward-error acceptance of every numeric backend.
     max_row_nnz: usize,
@@ -93,6 +154,10 @@ pub struct StaticMatrix {
     /// stored pivot sequence instead of fully re-pivoting every Newton
     /// iteration. Lazily initialized; any failure falls back to the faer path.
     klu: Option<crate::KluSolver>,
+    /// Explicit per-matrix backend policy. This avoids process-global solver
+    /// state for commercial embedding while preserving an environment-aware
+    /// compatibility constructor.
+    solver_options: SolverOptions,
     /// Scratch values + RHS retained between residual probes (see
     /// [`StaticMatrix::with_probe_values`]).
     probe_values: Option<Vec<Value>>,
@@ -100,8 +165,12 @@ pub struct StaticMatrix {
     /// Scratch for the A*x product inside residual norms.
     residual_scratch: Vec<Value>,
     residual_gross_scratch: Vec<Value>,
+    /// Retained KLU iterative-refinement correction. This path is uncommon,
+    /// but keeping its buffer makes even ill-scaled repeated solves allocation
+    /// free after the first accepted system.
+    klu_correction_scratch: Vec<Value>,
     /// First attempted stamp outside the frozen sparsity pattern.
-    stamping_error: Option<MissingMatrixPosition>,
+    stamping_error: Option<MatrixStampError>,
 }
 
 #[cold]
@@ -118,10 +187,7 @@ fn missing_matrix_position(method: &'static str, row: usize, col: usize) -> Miss
 /// (benchmarks/scoreboards/2026-06-11-faer-vs-klu-*.json).
 /// `RSPICE_SOLVER=faer` opts out.
 pub(crate) fn klu_backend_enabled() -> bool {
-    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        !std::env::var("RSPICE_SOLVER").is_ok_and(|v| v.eq_ignore_ascii_case("faer"))
-    })
+    SolverOptions::from_env().real_backend == RealSolverBackend::Klu
 }
 
 #[inline]
@@ -309,14 +375,17 @@ impl StaticMatrix {
             ncols: self.ncols,
             csc: self.csc.clone(),
             values: vec![0.0; self.values.len()],
+            pattern_id: self.pattern_id,
             max_row_nnz: self.max_row_nnz,
             position_map: self.position_map.clone(),
             lu: None,
             klu: None,
+            solver_options: self.solver_options,
             probe_values: None,
             probe_rhs: None,
             residual_scratch: Vec::new(),
             residual_gross_scratch: Vec::new(),
+            klu_correction_scratch: Vec::new(),
             stamping_error: None,
         }
     }
@@ -367,15 +436,28 @@ impl StaticMatrix {
         ncols: usize,
         triplets: &[(usize, usize, Value)],
     ) -> Result<Self, SolverError> {
+        Self::from_triplets_with_options(nrows, ncols, triplets, SolverOptions::from_env())
+    }
+
+    /// Build a static matrix with an explicit backend policy.
+    pub fn from_triplets_with_options(
+        nrows: usize,
+        ncols: usize,
+        triplets: &[(usize, usize, Value)],
+        solver_options: SolverOptions,
+    ) -> Result<Self, SolverError> {
         if nrows == 0 || ncols == 0 {
             return Err(SolverError::InvalidCircuit("Empty matrix".to_string()));
         }
-        for (idx, &(row, col, _)) in triplets.iter().enumerate() {
+        for (idx, &(row, col, value)) in triplets.iter().enumerate() {
             if row >= nrows || col >= ncols {
                 return Err(SolverError::InvalidCircuit(format!(
                     "Triplet {} index out of bounds: ({}, {}) for matrix {}x{}",
                     idx, row, col, nrows, ncols
                 )));
+            }
+            if !value.is_finite() {
+                return Err(SolverError::Overflow);
             }
         }
 
@@ -392,7 +474,11 @@ impl StaticMatrix {
                 && last.0 == r
                 && last.1 == c
             {
-                last.2 += v;
+                let combined = last.2 + v;
+                if !combined.is_finite() {
+                    return Err(SolverError::Overflow);
+                }
+                last.2 = combined;
                 continue;
             }
             let idx = accumulated.len();
@@ -431,16 +517,32 @@ impl StaticMatrix {
             ncols,
             csc,
             values,
+            pattern_id: next_pattern_id()?,
             max_row_nnz,
             position_map,
             lu: None,
             klu: None,
+            solver_options,
             probe_values: None,
             probe_rhs: None,
             residual_scratch: Vec::new(),
             residual_gross_scratch: Vec::new(),
+            klu_correction_scratch: Vec::new(),
             stamping_error: None,
         })
+    }
+
+    /// Current per-matrix solver policy.
+    #[inline]
+    pub const fn solver_options(&self) -> SolverOptions {
+        self.solver_options
+    }
+
+    /// Change the backend used by subsequent solves. Existing workspaces are
+    /// retained so switching back does not repeat symbolic setup.
+    #[inline]
+    pub fn set_solver_options(&mut self, solver_options: SolverOptions) {
+        self.solver_options = solver_options;
     }
 
     /// Zero all values (call before each Newton iteration)
@@ -472,18 +574,24 @@ impl StaticMatrix {
             Some(&idx) => idx,
             None => {
                 let missing = missing_matrix_position("StaticMatrix::try_add", row, col);
-                self.stamping_error.get_or_insert(missing);
+                self.stamping_error
+                    .get_or_insert(MatrixStampError::MissingPosition(missing));
                 return Err(missing.into_solver_error());
             }
         };
-        self.values[idx] += value;
+        let combined = self.values[idx] + value;
+        if !value.is_finite() || !combined.is_finite() {
+            return Err(SolverError::Overflow);
+        }
+        self.values[idx] = combined;
         Ok(())
     }
 
     #[inline]
     fn record_missing_position(&mut self, method: &'static str, row: usize, col: usize) {
-        self.stamping_error
-            .get_or_insert_with(|| missing_matrix_position(method, row, col));
+        self.stamping_error.get_or_insert_with(|| {
+            MatrixStampError::MissingPosition(missing_matrix_position(method, row, col))
+        });
     }
 
     #[inline]
@@ -515,13 +623,26 @@ impl StaticMatrix {
     /// Get CSC index for (row, col) - for pre-indexed stamping
     #[inline]
     pub fn get_index(&self, row: usize, col: usize) -> Option<CscIndex> {
-        self.position_map.get(&(row, col)).map(|&i| CscIndex(i))
+        self.position_map.get(&(row, col)).map(|&offset| CscIndex {
+            offset,
+            pattern_id: self.pattern_id,
+        })
     }
 
     /// Direct write to values array using pre-computed index
     #[inline]
     pub fn stamp_direct(&mut self, idx: CscIndex, value: Value) {
-        self.values[idx.0] += value;
+        if idx.pattern_id != self.pattern_id || idx.offset >= self.values.len() {
+            self.stamping_error
+                .get_or_insert(MatrixStampError::InvalidIndex {
+                    method: "StaticMatrix::stamp_direct",
+                    offset: idx.offset,
+                    index_pattern: idx.pattern_id,
+                    matrix_pattern: self.pattern_id,
+                });
+            return;
+        }
+        self.values[idx.offset] += value;
     }
 
     /// Replace one existing row with an identity constraint.
@@ -829,10 +950,25 @@ impl StaticMatrix {
 
     /// Solve Ax = b using cached structure.
     ///
-    /// Hot path: borrows the frozen pattern and live values as a view and
-    /// refactorizes into a persistent numeric workspace — no structure
-    /// copies and no allocations after the first call.
+    /// Convenience ownership API over [`Self::solve_into`]. Internal symbolic
+    /// and numeric workspaces are reused; returning an owned vector requires
+    /// one output allocation per call.
     pub fn solve(&mut self, rhs: &[Value]) -> Result<Vec<Value>, SolverError> {
+        let mut solution = Vec::with_capacity(rhs.len());
+        self.solve_into(rhs, &mut solution)?;
+        Ok(solution)
+    }
+
+    /// Solve `A*x=b` into a caller-owned buffer.
+    ///
+    /// Reusing `solution` across Newton iterations removes the final allocation
+    /// that the convenience [`Self::solve`] API necessarily performs when it
+    /// transfers ownership of a fresh vector to its caller.
+    pub fn solve_into(
+        &mut self,
+        rhs: &[Value],
+        solution: &mut Vec<Value>,
+    ) -> Result<(), SolverError> {
         let n = self.nrows;
         self.check_stamping_error()?;
 
@@ -845,13 +981,17 @@ impl StaticMatrix {
             )));
         }
 
-        if klu_backend_enabled()
-            && let Some(result) = self.try_solve_klu(rhs)
+        if self.solver_options.real_backend == RealSolverBackend::Klu
+            && self.try_solve_klu_into(rhs, solution)
         {
-            return finite_solution_or_singular(result);
+            return if solution.iter().all(|value| value.is_finite()) {
+                Ok(())
+            } else {
+                Err(SolverError::SingularMatrix)
+            };
         }
 
-        self.solve_faer(rhs)
+        self.solve_faer_into(rhs, solution)
     }
 
     /// Form the Newton correction right-hand side `b - A*x` without changing
@@ -925,7 +1065,18 @@ impl StaticMatrix {
     ///
     /// Kept separate from backend selection so solver tests can exercise this
     /// path without mutating the process-wide `RSPICE_SOLVER` policy.
+    #[cfg(test)]
     fn solve_faer(&mut self, rhs: &[Value]) -> Result<Vec<Value>, SolverError> {
+        let mut solution = Vec::with_capacity(rhs.len());
+        self.solve_faer_into(rhs, &mut solution)?;
+        Ok(solution)
+    }
+
+    fn solve_faer_into(
+        &mut self,
+        rhs: &[Value],
+        solution: &mut Vec<Value>,
+    ) -> Result<(), SolverError> {
         self.ensure_lu_workspace()?;
 
         let par = get_global_parallelism();
@@ -937,7 +1088,9 @@ impl StaticMatrix {
             residual_gross_scratch,
             ..
         } = self;
-        let ws = lu.as_mut().expect("LU workspace initialized above");
+        let Some(ws) = lu.as_mut() else {
+            return Err(SolverError::SingularMatrix);
+        };
 
         equilibrate_sparse_system(
             csc,
@@ -975,8 +1128,9 @@ impl StaticMatrix {
             MemStack::new(&mut ws.solve_mem),
         );
 
-        let mut scaled_solution = ws.rhs.col_as_slice(0).to_vec();
-        if scaled_solution.iter().any(|value| !value.is_finite()) {
+        solution.clear();
+        solution.extend_from_slice(ws.rhs.col_as_slice(0));
+        if solution.iter().any(|value| !value.is_finite()) {
             return Err(SolverError::SingularMatrix);
         }
 
@@ -984,20 +1138,20 @@ impl StaticMatrix {
         let mut backward_error = componentwise_backward_error(
             csc,
             &ws.scaled_values,
-            &scaled_solution,
+            solution,
             &ws.scaled_rhs,
             residual_scratch,
             residual_gross_scratch,
             ws.max_row_nnz,
         )?;
         if backward_error <= target_error {
-            for (value, &col_scale) in scaled_solution.iter_mut().zip(&ws.col_scale) {
+            for (value, &col_scale) in solution.iter_mut().zip(&ws.col_scale) {
                 *value *= col_scale;
                 if !value.is_finite() {
                     return Err(SolverError::Overflow);
                 }
             }
-            return Ok(scaled_solution);
+            return Ok(());
         }
 
         const MAX_REFINEMENTS: usize = 5;
@@ -1018,9 +1172,7 @@ impl StaticMatrix {
                 MemStack::new(&mut ws.solve_mem),
             );
 
-            for (value, &scaled_correction) in
-                scaled_solution.iter_mut().zip(ws.rhs.col_as_slice(0))
-            {
+            for (value, &scaled_correction) in solution.iter_mut().zip(ws.rhs.col_as_slice(0)) {
                 let refined = *value + scaled_correction;
                 if !scaled_correction.is_finite() || !refined.is_finite() {
                     return Err(SolverError::Overflow);
@@ -1031,20 +1183,20 @@ impl StaticMatrix {
             let refined_error = componentwise_backward_error(
                 csc,
                 &ws.scaled_values,
-                &scaled_solution,
+                solution,
                 &ws.scaled_rhs,
                 residual_scratch,
                 residual_gross_scratch,
                 ws.max_row_nnz,
             )?;
             if refined_error <= target_error {
-                for (value, &col_scale) in scaled_solution.iter_mut().zip(&ws.col_scale) {
+                for (value, &col_scale) in solution.iter_mut().zip(&ws.col_scale) {
                     *value *= col_scale;
                     if !value.is_finite() {
                         return Err(SolverError::Overflow);
                     }
                 }
-                return Ok(scaled_solution);
+                return Ok(());
             }
             if refined_error >= backward_error * MIN_IMPROVEMENT_FACTOR {
                 backward_error = refined_error;
@@ -1058,10 +1210,10 @@ impl StaticMatrix {
 
     /// Default KLU-class real solve: values-only
     /// refactorization over the frozen pattern with a stored pivot
-    /// sequence; full re-pivoting only on a growth alarm. Returns `None`
+    /// sequence; full re-pivoting only on a growth alarm. Returns `false`
     /// on any backend failure so the caller falls through to faer —
     /// backend fallback can degrade performance but never a result.
-    fn try_solve_klu(&mut self, rhs: &[Value]) -> Option<Vec<Value>> {
+    fn try_solve_klu_into(&mut self, rhs: &[Value], solution: &mut Vec<Value>) -> bool {
         let Self {
             nrows,
             csc,
@@ -1070,6 +1222,7 @@ impl StaticMatrix {
             max_row_nnz,
             residual_scratch,
             residual_gross_scratch,
+            klu_correction_scratch,
             ..
         } = self;
         let n = *nrows;
@@ -1077,36 +1230,39 @@ impl StaticMatrix {
         let row_idx = csc.row_idx();
 
         let backend = klu.get_or_insert_with(crate::KluSolver::new);
-        if !backend.is_analyzed_for(n) {
-            backend.analyze(n, col_ptr, row_idx);
+        if !backend.is_analyzed_for(n) && backend.analyze(n, col_ptr, row_idx).is_err() {
+            return false;
         }
-        let factored = match backend.refactor(col_ptr, row_idx, values) {
+        let factored = match backend.refactor(values) {
             Ok(()) => true,
-            Err(SolverError::PivotGrowth) => backend.factor(col_ptr, row_idx, values).is_ok(),
-            Err(_) => backend.factor(col_ptr, row_idx, values).is_ok(),
+            Err(SolverError::PivotGrowth) => backend.factor(values).is_ok(),
+            Err(_) => backend.factor(values).is_ok(),
         };
         if !factored {
             static FALLBACK_LOGGED: std::sync::Once = std::sync::Once::new();
             FALLBACK_LOGGED.call_once(|| {
                 log::warn!("klu backend could not factor this system; using faer fallback");
             });
-            return None;
+            return false;
         }
-        let mut out = Vec::new();
-        backend.solve(rhs, &mut out).ok()?;
+        if backend.solve(rhs, solution).is_err() {
+            return false;
+        }
         let target_error = faer_backward_error_tolerance(*max_row_nnz);
-        let mut backward_error = componentwise_backward_error(
+        let mut backward_error = match componentwise_backward_error(
             csc,
             values,
-            &out,
+            solution,
             rhs,
             residual_scratch,
             residual_gross_scratch,
             *max_row_nnz,
-        )
-        .ok()?;
+        ) {
+            Ok(error) => error,
+            Err(_) => return false,
+        };
         if backward_error <= target_error {
-            return Some(out);
+            return true;
         }
 
         // KLU's unscaled factors are substantially faster on the ordinary
@@ -1118,35 +1274,41 @@ impl StaticMatrix {
         // finite-but-inaccurate circuit state.
         const MAX_KLU_REFINEMENTS: usize = 5;
         const MIN_IMPROVEMENT_FACTOR: Value = 0.5;
-        let mut correction = Vec::new();
         for _ in 0..MAX_KLU_REFINEMENTS {
-            backend.solve(residual_scratch, &mut correction).ok()?;
-            for (value, &delta) in out.iter_mut().zip(&correction) {
+            if backend
+                .solve(residual_scratch, klu_correction_scratch)
+                .is_err()
+            {
+                return false;
+            }
+            for (value, &delta) in solution.iter_mut().zip(klu_correction_scratch.iter()) {
                 let refined = *value + delta;
                 if !delta.is_finite() || !refined.is_finite() {
-                    return None;
+                    return false;
                 }
                 *value = refined;
             }
-            let refined_error = componentwise_backward_error(
+            let refined_error = match componentwise_backward_error(
                 csc,
                 values,
-                &out,
+                solution,
                 rhs,
                 residual_scratch,
                 residual_gross_scratch,
                 *max_row_nnz,
-            )
-            .ok()?;
+            ) {
+                Ok(error) => error,
+                Err(_) => return false,
+            };
             if refined_error <= target_error {
-                return Some(out);
+                return true;
             }
             if refined_error >= backward_error * MIN_IMPROVEMENT_FACTOR {
                 break;
             }
             backward_error = refined_error;
         }
-        None
+        false
     }
 
     /// Solve Ax = b via dense Gaussian elimination.
@@ -1164,7 +1326,21 @@ impl StaticMatrix {
             )));
         }
 
-        solve_gauss(self.to_dense_real(), rhs.to_vec())
+        let solution = solve_gauss(self.to_dense_real(), rhs.to_vec())?;
+        let backward_error = componentwise_backward_error(
+            &self.csc,
+            &self.values,
+            &solution,
+            rhs,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            self.max_row_nnz,
+        )?;
+        if backward_error <= faer_backward_error_tolerance(self.max_row_nnz) {
+            Ok(solution)
+        } else {
+            Err(SolverError::InaccurateSolution(backward_error))
+        }
     }
 }
 
@@ -1181,6 +1357,172 @@ struct ComplexLuWorkspace {
     factor_mem: MemBuffer,
     solve_mem: MemBuffer,
     rhs: Mat<Complex64>,
+    scaled_values: Vec<Complex64>,
+    scaled_rhs: Vec<Complex64>,
+    row_scale: Vec<Value>,
+    col_scale: Vec<Value>,
+    residual: Vec<Complex64>,
+    denominator: Vec<Value>,
+}
+
+#[inline]
+fn complex_is_finite(value: Complex64) -> bool {
+    value.re.is_finite() && value.im.is_finite()
+}
+
+/// Build `D_r * A * D_c` for a complex matrix. Positive real diagonal
+/// scalings preserve phase while bringing both axes into a numerically safe
+/// range for sparse pivoting.
+fn equilibrate_complex_matrix(
+    csc: &SymbolicSparseColMat<usize>,
+    values: &[Complex64],
+    scaled_values: &mut Vec<Complex64>,
+    row_scale: &mut Vec<Value>,
+    col_scale: &mut Vec<Value>,
+) -> Result<(), SolverError> {
+    let nrows = csc.nrows();
+    let ncols = csc.ncols();
+    if values.len() != csc.row_idx().len() {
+        return Err(SolverError::InvalidCircuit(
+            "Complex sparse equilibration dimension mismatch".to_string(),
+        ));
+    }
+
+    scaled_values.resize(values.len(), Complex64::new(0.0, 0.0));
+    row_scale.resize(nrows, 1.0);
+    col_scale.resize(ncols, 1.0);
+
+    let col_ptr = csc.col_ptr();
+    let row_idx = csc.row_idx();
+    for col in 0..ncols {
+        let mut max_abs: Value = 0.0;
+        for idx in col_ptr[col]..col_ptr[col + 1] {
+            let value = values[idx];
+            if !complex_is_finite(value) {
+                return Err(SolverError::Overflow);
+            }
+            max_abs = max_abs.max(value.norm());
+        }
+        if max_abs == 0.0 {
+            return Err(SolverError::SingularMatrix);
+        }
+        let scale = finite_reciprocal_scale(max_abs);
+        col_scale[col] = scale;
+        for idx in col_ptr[col]..col_ptr[col + 1] {
+            scaled_values[idx] = values[idx] * scale;
+        }
+    }
+
+    row_scale.fill(0.0);
+    for col in 0..ncols {
+        for idx in col_ptr[col]..col_ptr[col + 1] {
+            let row = row_idx[idx];
+            row_scale[row] = row_scale[row].max(scaled_values[idx].norm());
+        }
+    }
+    for scale in row_scale.iter_mut() {
+        if *scale == 0.0 {
+            return Err(SolverError::SingularMatrix);
+        }
+        *scale = finite_reciprocal_scale(*scale);
+    }
+    for col in 0..ncols {
+        for idx in col_ptr[col]..col_ptr[col + 1] {
+            scaled_values[idx] *= row_scale[row_idx[idx]];
+        }
+    }
+    if scaled_values
+        .iter()
+        .copied()
+        .any(|value| !complex_is_finite(value))
+    {
+        return Err(SolverError::Overflow);
+    }
+    Ok(())
+}
+
+fn scale_complex_rhs(
+    rhs: &[Complex64],
+    row_scale: &[Value],
+    scaled_rhs: &mut Vec<Complex64>,
+) -> Result<(), SolverError> {
+    if rhs.len() != row_scale.len() {
+        return Err(SolverError::InvalidCircuit(
+            "Complex RHS scaling dimension mismatch".to_string(),
+        ));
+    }
+    scaled_rhs.resize(rhs.len(), Complex64::new(0.0, 0.0));
+    for ((scaled, &value), &scale) in scaled_rhs.iter_mut().zip(rhs).zip(row_scale) {
+        if !complex_is_finite(value) {
+            return Err(SolverError::Overflow);
+        }
+        *scaled = value * scale;
+        if !complex_is_finite(*scaled) {
+            return Err(SolverError::Overflow);
+        }
+    }
+    Ok(())
+}
+
+fn complex_componentwise_backward_error(
+    csc: &SymbolicSparseColMat<usize>,
+    values: &[Complex64],
+    solution: &[Complex64],
+    rhs: &[Complex64],
+    residual: &mut Vec<Complex64>,
+    denominator: &mut Vec<Value>,
+    max_row_nnz: usize,
+) -> Result<Value, SolverError> {
+    let nrows = csc.nrows();
+    let ncols = csc.ncols();
+    if values.len() != csc.row_idx().len() || solution.len() != ncols || rhs.len() != nrows {
+        return Err(SolverError::InvalidCircuit(
+            "Complex sparse backward-error dimension mismatch".to_string(),
+        ));
+    }
+
+    residual.resize(nrows, Complex64::new(0.0, 0.0));
+    denominator.resize(nrows, 0.0);
+    for row in 0..nrows {
+        if !complex_is_finite(rhs[row]) {
+            return Err(SolverError::Overflow);
+        }
+        residual[row] = rhs[row];
+        denominator[row] = rhs[row].norm();
+    }
+
+    let col_ptr = csc.col_ptr();
+    let row_idx = csc.row_idx();
+    for col in 0..ncols {
+        let x = solution[col];
+        if !complex_is_finite(x) {
+            return Err(SolverError::Overflow);
+        }
+        let x_abs = x.norm();
+        for idx in col_ptr[col]..col_ptr[col + 1] {
+            let value = values[idx];
+            let term = value * x;
+            let magnitude = value.norm() * x_abs;
+            if !complex_is_finite(value) || !complex_is_finite(term) || !magnitude.is_finite() {
+                return Err(SolverError::Overflow);
+            }
+            let row = row_idx[idx];
+            residual[row] -= term;
+            denominator[row] = (denominator[row] + magnitude).min(Value::MAX);
+        }
+    }
+
+    let safe1 = (max_row_nnz.saturating_add(1) as Value) * Value::MIN_POSITIVE;
+    let mut error: Value = 0.0;
+    for row in 0..nrows {
+        let residual_abs = residual[row].norm();
+        let scale = denominator[row];
+        if !residual_abs.is_finite() || !scale.is_finite() {
+            return Err(SolverError::Overflow);
+        }
+        error = error.max(residual_abs / scale.max(safe1));
+    }
+    Ok(error)
 }
 
 /// ComplexMatrix for AC small-signal analysis
@@ -1188,15 +1530,21 @@ struct ComplexLuWorkspace {
 /// Shares the same sparsity structure as a StaticMatrix but uses Complex64 values.
 /// This enables AC analysis at different frequencies without rebuilding topology.
 pub struct ComplexMatrix {
-    /// Matrix dimensions
+    /// Matrix row count.
     pub nrows: usize,
+    /// Matrix column count.
     pub ncols: usize,
     /// Frozen CSC sparsity pattern (cloned from the real matrix once)
     csc: SymbolicSparseColMat<usize>,
     /// Complex values (updated for each frequency)
     values: Vec<Complex64>,
+    /// Identity of the real sparsity pattern from which this matrix was made.
+    pattern_id: u64,
     /// Mapping from (row, col) to index in values array
     position_map: FxHashMap<(usize, usize), usize>,
+    /// Maximum structural nonzeros in a row for the shared backward-error
+    /// tolerance used by real and complex solves.
+    max_row_nnz: usize,
     /// Reusable LU workspace; the symbolic part is shared with the real
     /// matrix when available (symbolic LU is scalar-type independent).
     lu: Option<ComplexLuWorkspace>,
@@ -1205,7 +1553,7 @@ pub struct ComplexMatrix {
     /// solves one matrix against many excitation vectors) skip refactorizing.
     factorization_valid: bool,
     /// First attempted stamp outside the frozen sparsity pattern.
-    stamping_error: Option<MissingMatrixPosition>,
+    stamping_error: Option<MatrixStampError>,
 }
 
 impl ComplexMatrix {
@@ -1217,13 +1565,16 @@ impl ComplexMatrix {
             ncols: real_matrix.ncols,
             csc: real_matrix.csc.clone(),
             values: vec![Complex64::new(0.0, 0.0); nnz],
+            pattern_id: real_matrix.pattern_id,
             position_map: real_matrix.position_map.clone(),
+            max_row_nnz: real_matrix.max_row_nnz,
             lu: None,
             factorization_valid: false,
             stamping_error: None,
         };
-        // Reuse the real matrix's symbolic analysis when it has already been
-        // computed (any DC solve does so); AC sweeps then never repeat it.
+        // Reuse the real matrix's symbolic analysis when faer has already been
+        // selected or used as a fallback. A successful default KLU-only DC
+        // solve deliberately does not pay this independent symbolic cost.
         if let Some(symbolic) = real_matrix.lu.as_ref().map(|ws| ws.symbolic.clone()) {
             this.lu = Self::workspace_from_symbolic(this.nrows, symbolic).ok();
         }
@@ -1247,6 +1598,12 @@ impl ComplexMatrix {
             factor_mem,
             solve_mem,
             rhs: Mat::zeros(nrows, 1),
+            scaled_values: Vec::new(),
+            scaled_rhs: Vec::new(),
+            row_scale: Vec::new(),
+            col_scale: Vec::new(),
+            residual: Vec::new(),
+            denominator: Vec::new(),
         })
     }
 
@@ -1302,14 +1659,20 @@ impl ComplexMatrix {
     /// Direct real add using a precomputed CSC index.
     #[inline]
     pub fn stamp_direct_real(&mut self, idx: CscIndex, value: Value) {
-        self.values[idx.0] += Complex64::new(value, 0.0);
+        if !self.validate_direct_index("ComplexMatrix::stamp_direct_real", idx) {
+            return;
+        }
+        self.values[idx.offset] += Complex64::new(value, 0.0);
         self.factorization_valid = false;
     }
 
     /// Direct imaginary add using a precomputed CSC index.
     #[inline]
     pub fn stamp_direct_imag(&mut self, idx: CscIndex, value: Value) {
-        self.values[idx.0] += Complex64::new(0.0, value);
+        if !self.validate_direct_index("ComplexMatrix::stamp_direct_imag", idx) {
+            return;
+        }
+        self.values[idx.offset] += Complex64::new(0.0, value);
         self.factorization_valid = false;
     }
 
@@ -1325,11 +1688,16 @@ impl ComplexMatrix {
             Some(&idx) => idx,
             None => {
                 let missing = missing_matrix_position("ComplexMatrix::try_add_real", row, col);
-                self.stamping_error.get_or_insert(missing);
+                self.stamping_error
+                    .get_or_insert(MatrixStampError::MissingPosition(missing));
                 return Err(missing.into_solver_error());
             }
         };
-        self.values[idx] += Complex64::new(value, 0.0);
+        let combined = self.values[idx].re + value;
+        if !value.is_finite() || !combined.is_finite() {
+            return Err(SolverError::Overflow);
+        }
+        self.values[idx].re = combined;
         self.factorization_valid = false;
         Ok(())
     }
@@ -1341,11 +1709,16 @@ impl ComplexMatrix {
             Some(&idx) => idx,
             None => {
                 let missing = missing_matrix_position("ComplexMatrix::try_add", row, col);
-                self.stamping_error.get_or_insert(missing);
+                self.stamping_error
+                    .get_or_insert(MatrixStampError::MissingPosition(missing));
                 return Err(missing.into_solver_error());
             }
         };
-        self.values[idx] += value;
+        let combined = self.values[idx] + value;
+        if !complex_is_finite(value) || !complex_is_finite(combined) {
+            return Err(SolverError::Overflow);
+        }
+        self.values[idx] = combined;
         self.factorization_valid = false;
         Ok(())
     }
@@ -1362,19 +1735,40 @@ impl ComplexMatrix {
             Some(&idx) => idx,
             None => {
                 let missing = missing_matrix_position("ComplexMatrix::try_add_imag", row, col);
-                self.stamping_error.get_or_insert(missing);
+                self.stamping_error
+                    .get_or_insert(MatrixStampError::MissingPosition(missing));
                 return Err(missing.into_solver_error());
             }
         };
-        self.values[idx] += Complex64::new(0.0, value);
+        let combined = self.values[idx].im + value;
+        if !value.is_finite() || !combined.is_finite() {
+            return Err(SolverError::Overflow);
+        }
+        self.values[idx].im = combined;
         self.factorization_valid = false;
         Ok(())
     }
 
     #[inline]
     fn record_missing_position(&mut self, method: &'static str, row: usize, col: usize) {
+        self.stamping_error.get_or_insert_with(|| {
+            MatrixStampError::MissingPosition(missing_matrix_position(method, row, col))
+        });
+    }
+
+    #[inline]
+    fn validate_direct_index(&mut self, method: &'static str, idx: CscIndex) -> bool {
+        if idx.pattern_id == self.pattern_id && idx.offset < self.values.len() {
+            return true;
+        }
         self.stamping_error
-            .get_or_insert_with(|| missing_matrix_position(method, row, col));
+            .get_or_insert(MatrixStampError::InvalidIndex {
+                method,
+                offset: idx.offset,
+                index_pattern: idx.pattern_id,
+                matrix_pattern: self.pattern_id,
+            });
+        false
     }
 
     #[inline]
@@ -1434,11 +1828,21 @@ impl ComplexMatrix {
         let mut product = vec![Complex64::new(0.0, 0.0); self.nrows];
         for col in 0..self.ncols {
             let input = vector[col];
+            if !complex_is_finite(input) {
+                return Err(SolverError::Overflow);
+            }
             if input == Complex64::new(0.0, 0.0) {
                 continue;
             }
             for idx in col_ptr[col]..col_ptr[col + 1] {
-                product[row_idx[idx]] += self.values[idx] * input;
+                let term = self.values[idx] * input;
+                if !complex_is_finite(self.values[idx]) || !complex_is_finite(term) {
+                    return Err(SolverError::Overflow);
+                }
+                product[row_idx[idx]] += term;
+                if !complex_is_finite(product[row_idx[idx]]) {
+                    return Err(SolverError::Overflow);
+                }
             }
         }
         Ok(product)
@@ -1450,13 +1854,26 @@ impl ComplexMatrix {
     /// from the real matrix) and the numeric factorization is reused across
     /// consecutive solves with unchanged values.
     pub fn solve(&mut self, rhs: &[Complex64]) -> Result<Vec<Complex64>, SolverError> {
+        let mut solution = Vec::with_capacity(rhs.len());
+        self.solve_into(rhs, &mut solution)?;
+        Ok(solution)
+    }
+
+    /// Solve into a caller-owned complex output buffer, reusing its allocation
+    /// across frequency points or multiple noise excitations.
+    pub fn solve_into(
+        &mut self,
+        rhs: &[Complex64],
+        solution: &mut Vec<Complex64>,
+    ) -> Result<(), SolverError> {
         let n = self.nrows;
         self.check_stamping_error()?;
 
-        if n != rhs.len() {
+        if n != rhs.len() || self.ncols != rhs.len() {
             return Err(SolverError::InvalidCircuit(format!(
-                "Matrix size {} doesn't match RHS size {}",
+                "Complex solve requires a square matrix matching RHS size, got {}x{} with RHS {}",
                 n,
+                self.ncols,
                 rhs.len()
             )));
         }
@@ -1474,12 +1891,22 @@ impl ComplexMatrix {
             values,
             lu,
             factorization_valid,
+            max_row_nnz,
             ..
         } = self;
-        let ws = lu.as_mut().expect("LU workspace initialized above");
+        let Some(ws) = lu.as_mut() else {
+            return Err(SolverError::SingularMatrix);
+        };
 
         if !*factorization_valid {
-            let mat = SparseColMatRef::new(csc.as_ref(), values.as_slice());
+            equilibrate_complex_matrix(
+                csc,
+                values,
+                &mut ws.scaled_values,
+                &mut ws.row_scale,
+                &mut ws.col_scale,
+            )?;
+            let mat = SparseColMatRef::new(csc.as_ref(), ws.scaled_values.as_slice());
             ws.symbolic
                 .factorize_numeric_lu(
                     &mut ws.numeric,
@@ -1492,12 +1919,14 @@ impl ComplexMatrix {
             *factorization_valid = true;
         }
 
+        scale_complex_rhs(rhs, &ws.row_scale, &mut ws.scaled_rhs)?;
+
         // SAFETY: `ws.numeric` was produced by `ws.symbolic.factorize_numeric_lu`
         // on this matrix's pattern, and `factorization_valid` guarantees the
         // values have not been mutated since (every mutator clears the flag).
         let lu_ref = unsafe { sparse_lu::LuRef::new_unchecked(&ws.symbolic, &ws.numeric) };
 
-        ws.rhs.col_as_slice_mut(0).copy_from_slice(rhs);
+        ws.rhs.col_as_slice_mut(0).copy_from_slice(&ws.scaled_rhs);
         lu_ref.solve_in_place_with_conj(
             Conj::No,
             ws.rhs.as_mut(),
@@ -1505,7 +1934,80 @@ impl ComplexMatrix {
             MemStack::new(&mut ws.solve_mem),
         );
 
-        Ok(ws.rhs.col_as_slice(0).to_vec())
+        solution.clear();
+        solution.extend_from_slice(ws.rhs.col_as_slice(0));
+        if solution
+            .iter()
+            .copied()
+            .any(|value| !complex_is_finite(value))
+        {
+            return Err(SolverError::SingularMatrix);
+        }
+
+        let target_error = faer_backward_error_tolerance(*max_row_nnz);
+        let mut backward_error = complex_componentwise_backward_error(
+            csc,
+            &ws.scaled_values,
+            solution,
+            &ws.scaled_rhs,
+            &mut ws.residual,
+            &mut ws.denominator,
+            *max_row_nnz,
+        )?;
+
+        const MAX_COMPLEX_REFINEMENTS: usize = 5;
+        const MIN_IMPROVEMENT_FACTOR: Value = 0.5;
+        for _ in 0..MAX_COMPLEX_REFINEMENTS {
+            if backward_error <= target_error {
+                for (value, &col_scale) in solution.iter_mut().zip(&ws.col_scale) {
+                    *value *= col_scale;
+                    if !complex_is_finite(*value) {
+                        return Err(SolverError::Overflow);
+                    }
+                }
+                return Ok(());
+            }
+
+            ws.rhs.col_as_slice_mut(0).copy_from_slice(&ws.residual);
+            lu_ref.solve_in_place_with_conj(
+                Conj::No,
+                ws.rhs.as_mut(),
+                par,
+                MemStack::new(&mut ws.solve_mem),
+            );
+            for (value, &correction) in solution.iter_mut().zip(ws.rhs.col_as_slice(0)) {
+                let refined = *value + correction;
+                if !complex_is_finite(correction) || !complex_is_finite(refined) {
+                    return Err(SolverError::Overflow);
+                }
+                *value = refined;
+            }
+            let refined_error = complex_componentwise_backward_error(
+                csc,
+                &ws.scaled_values,
+                solution,
+                &ws.scaled_rhs,
+                &mut ws.residual,
+                &mut ws.denominator,
+                *max_row_nnz,
+            )?;
+            if refined_error <= target_error {
+                for (value, &col_scale) in solution.iter_mut().zip(&ws.col_scale) {
+                    *value *= col_scale;
+                    if !complex_is_finite(*value) {
+                        return Err(SolverError::Overflow);
+                    }
+                }
+                return Ok(());
+            }
+            if refined_error >= backward_error * MIN_IMPROVEMENT_FACTOR {
+                backward_error = refined_error;
+                break;
+            }
+            backward_error = refined_error;
+        }
+
+        Err(SolverError::InaccurateSolution(backward_error))
     }
 }
 
@@ -1516,11 +2018,11 @@ impl ComplexMatrix {
 /// Sparse matrix in triplet (COO) format for accumulating stamps
 #[derive(Debug, Clone)]
 pub struct TripletMatrix {
-    pub nrows: usize,
-    pub ncols: usize,
-    pub row_indices: Vec<usize>,
-    pub col_indices: Vec<usize>,
-    pub values: Vec<Value>,
+    nrows: usize,
+    ncols: usize,
+    row_indices: Vec<usize>,
+    col_indices: Vec<usize>,
+    values: Vec<Value>,
 }
 
 impl TripletMatrix {
@@ -1543,6 +2045,54 @@ impl TripletMatrix {
         self.values.push(value);
     }
 
+    /// Add a checked triplet, returning immediately when its coordinates are
+    /// outside the matrix. [`Self::push`] retains deferred validation for the
+    /// simulator's topology-building hot path.
+    #[inline]
+    pub fn try_push(&mut self, row: usize, col: usize, value: Value) -> Result<(), SolverError> {
+        if row >= self.nrows || col >= self.ncols {
+            return Err(SolverError::InvalidCircuit(format!(
+                "Triplet index ({row}, {col}) is outside {}x{} matrix",
+                self.nrows, self.ncols
+            )));
+        }
+        if !value.is_finite() {
+            return Err(SolverError::Overflow);
+        }
+        self.push(row, col, value);
+        Ok(())
+    }
+
+    /// Matrix dimensions.
+    #[inline]
+    pub const fn shape(&self) -> (usize, usize) {
+        (self.nrows, self.ncols)
+    }
+
+    /// Matrix row count.
+    #[inline]
+    pub const fn nrows(&self) -> usize {
+        self.nrows
+    }
+
+    /// Matrix column count.
+    #[inline]
+    pub const fn ncols(&self) -> usize {
+        self.ncols
+    }
+
+    /// Iterate over stored coordinates and values in insertion order.
+    pub fn entries(&self) -> impl ExactSizeIterator<Item = (usize, usize, Value)> + '_ {
+        debug_assert_eq!(self.row_indices.len(), self.col_indices.len());
+        debug_assert_eq!(self.row_indices.len(), self.values.len());
+        self.row_indices
+            .iter()
+            .copied()
+            .zip(self.col_indices.iter().copied())
+            .zip(self.values.iter().copied())
+            .map(|((row, col), value)| (row, col, value))
+    }
+
     /// Clear all entries for reuse
     pub fn clear(&mut self) {
         self.row_indices.clear();
@@ -1557,13 +2107,7 @@ impl TripletMatrix {
 
     /// Convert to StaticMatrix (freezes structure)
     pub fn to_static(&self) -> Result<StaticMatrix, SolverError> {
-        let triplets: Vec<_> = self
-            .row_indices
-            .iter()
-            .zip(self.col_indices.iter())
-            .zip(self.values.iter())
-            .map(|((&r, &c), &v)| (r, c, v))
-            .collect();
+        let triplets: Vec<_> = self.entries().collect();
 
         StaticMatrix::from_triplets(self.nrows, self.ncols, &triplets)
     }
@@ -1585,6 +2129,7 @@ pub struct SparseLuSolver {
 }
 
 impl SparseLuSolver {
+    /// Create a sparse LU facade with no cached symbolic pattern.
     pub fn new() -> Self {
         Self { symbolic_lu: None }
     }
@@ -1666,6 +2211,16 @@ pub(crate) fn solve_gauss(
     if n == 0 {
         return Ok(Vec::new());
     }
+    if a.len() != n || a.iter().any(|row| row.len() != n) {
+        return Err(SolverError::InvalidCircuit(format!(
+            "Dense solve requires an {n}x{n} coefficient matrix"
+        )));
+    }
+    if b.iter().any(|value| !value.is_finite())
+        || a.iter().flatten().any(|value| !value.is_finite())
+    {
+        return Err(SolverError::Overflow);
+    }
 
     // Forward elimination with partial pivoting
     for k in 0..n {
@@ -1680,7 +2235,7 @@ pub(crate) fn solve_gauss(
             }
         }
 
-        if max_val < 1e-15 {
+        if max_val == 0.0 || !max_val.is_finite() {
             return Err(SolverError::SingularMatrix);
         }
 
@@ -1693,10 +2248,19 @@ pub(crate) fn solve_gauss(
         // Eliminate column
         for i in (k + 1)..n {
             let factor = a[i][k] / a[k][k];
+            if !factor.is_finite() {
+                return Err(SolverError::Overflow);
+            }
             for j in k..n {
                 a[i][j] -= factor * a[k][j];
+                if !a[i][j].is_finite() {
+                    return Err(SolverError::Overflow);
+                }
             }
             b[i] -= factor * b[k];
+            if !b[i].is_finite() {
+                return Err(SolverError::Overflow);
+            }
         }
     }
 
@@ -2002,9 +2566,11 @@ mod tests {
             [1.0e20, 1.0e10, 1.0, 1.0e-10, 1.0e-20],
         );
         let mut matrix = StaticMatrix::from_triplets(5, 5, &triplets).unwrap();
-        let solution = matrix
-            .try_solve_klu(&rhs)
-            .expect("KLU refinement must recover this finite ill-scaled system");
+        let mut solution = Vec::new();
+        assert!(
+            matrix.try_solve_klu_into(&rhs, &mut solution),
+            "KLU refinement must recover this finite ill-scaled system"
+        );
         assert_relative_solution(&solution, &expected);
 
         let backward_error = componentwise_backward_error(
@@ -2039,8 +2605,8 @@ mod tests {
             Err(SolverError::SingularMatrix)
         ));
 
-        let mut nonfinite =
-            StaticMatrix::from_triplets(2, 2, &[(0, 0, Value::NAN), (1, 1, 1.0)]).unwrap();
+        let mut nonfinite = StaticMatrix::from_triplets(2, 2, &[(0, 0, 0.0), (1, 1, 1.0)]).unwrap();
+        nonfinite.add(0, 0, Value::NAN);
         assert!(matches!(
             nonfinite.solve_faer(&[0.0, 1.0]),
             Err(SolverError::Overflow)
@@ -2116,5 +2682,210 @@ mod tests {
                 && message.contains("(0, 1)"),
             "unexpected error: {message}"
         );
+    }
+
+    #[test]
+    fn explicit_real_backend_policy_produces_accepted_solutions() {
+        let triplets = [(0, 0, 4.0), (0, 1, 1.0), (1, 0, 2.0), (1, 1, 3.0)];
+        let rhs = [6.0, 8.0];
+        for real_backend in [RealSolverBackend::Klu, RealSolverBackend::Faer] {
+            let mut matrix = StaticMatrix::from_triplets_with_options(
+                2,
+                2,
+                &triplets,
+                SolverOptions { real_backend },
+            )
+            .unwrap();
+            assert_eq!(matrix.solver_options().real_backend, real_backend);
+            assert_relative_solution(&matrix.solve(&rhs).unwrap(), &[1.0, 2.0]);
+        }
+    }
+
+    #[test]
+    fn solve_into_reuses_the_callers_output_allocation() {
+        let triplets = [(0, 0, 4.0), (0, 1, 1.0), (1, 0, 2.0), (1, 1, 3.0)];
+        for real_backend in [RealSolverBackend::Klu, RealSolverBackend::Faer] {
+            let mut matrix = StaticMatrix::from_triplets_with_options(
+                2,
+                2,
+                &triplets,
+                SolverOptions { real_backend },
+            )
+            .unwrap();
+            let mut solution = Vec::new();
+            matrix.solve_into(&[6.0, 8.0], &mut solution).unwrap();
+            let allocation = solution.as_ptr();
+            let capacity = solution.capacity();
+            matrix.solve_into(&[12.0, 16.0], &mut solution).unwrap();
+            assert_eq!(solution.as_ptr(), allocation);
+            assert_eq!(solution.capacity(), capacity);
+            assert_relative_solution(&solution, &[2.0, 4.0]);
+        }
+    }
+
+    #[test]
+    fn direct_stamp_tokens_are_bound_to_their_originating_pattern() {
+        let first = StaticMatrix::from_triplets(2, 2, &[(0, 0, 0.0), (1, 1, 0.0)]).unwrap();
+        let index = first.get_index(0, 0).unwrap();
+        let second_index = first.get_index(1, 1).unwrap();
+
+        let mut unrelated = StaticMatrix::from_triplets(2, 2, &[(0, 0, 0.0), (1, 1, 0.0)]).unwrap();
+        unrelated.stamp_direct(index, 1.0);
+        let message = unrelated.solve(&[1.0, 1.0]).unwrap_err().to_string();
+        assert!(message.contains("StaticMatrix::stamp_direct"));
+        assert!(message.contains("pattern"));
+
+        let mut clone = first.clone_structure();
+        clone.stamp_direct(index, 2.0);
+        clone.stamp_direct(clone.get_index(1, 1).unwrap(), 4.0);
+        assert_relative_solution(&clone.solve(&[2.0, 4.0]).unwrap(), &[1.0, 1.0]);
+
+        let mut complex = ComplexMatrix::from_real_structure(&first);
+        complex.stamp_direct_real(index, 2.0);
+        complex.stamp_direct_real(second_index, 4.0);
+        let solution = complex
+            .solve(&[Complex64::new(2.0, 0.0), Complex64::new(4.0, 0.0)])
+            .unwrap();
+        assert!((solution[0] - Complex64::new(1.0, 0.0)).norm() <= 8.0 * Value::EPSILON);
+        assert!((solution[1] - Complex64::new(1.0, 0.0)).norm() <= 8.0 * Value::EPSILON);
+    }
+
+    #[test]
+    fn complex_solve_equilibrates_refines_and_reuses_factorization() {
+        let real = StaticMatrix::from_triplets(
+            2,
+            2,
+            &[(0, 0, 0.0), (0, 1, 0.0), (1, 0, 0.0), (1, 1, 0.0)],
+        )
+        .unwrap();
+        let mut matrix = ComplexMatrix::from_real_structure(&real);
+        let a = [
+            [Complex64::new(4.0, 1.0), Complex64::new(-1.0e-40, 0.5e-40)],
+            [Complex64::new(-1.0e40, -0.25e40), Complex64::new(3.0, -0.5)],
+        ];
+        for (row, row_values) in a.iter().enumerate() {
+            for (col, &value) in row_values.iter().enumerate() {
+                matrix.add(row, col, value);
+            }
+        }
+
+        let mut actual = Vec::new();
+        let mut allocation = None;
+        for expected in [
+            [
+                Complex64::new(1.0e-20, 0.5e-20),
+                Complex64::new(2.0e20, -1.0e20),
+            ],
+            [
+                Complex64::new(-2.0e-20, 1.0e-20),
+                Complex64::new(0.5e20, 0.75e20),
+            ],
+        ] {
+            let rhs = [
+                a[0][0] * expected[0] + a[0][1] * expected[1],
+                a[1][0] * expected[0] + a[1][1] * expected[1],
+            ];
+            matrix.solve_into(&rhs, &mut actual).unwrap();
+            if let Some(previous) = allocation {
+                assert_eq!(actual.as_ptr(), previous);
+            } else {
+                allocation = Some(actual.as_ptr());
+            }
+            for (index, (&actual, &expected)) in actual.iter().zip(&expected).enumerate() {
+                let relative_error = (actual - expected).norm() / expected.norm();
+                assert!(
+                    relative_error <= 1.0e-10,
+                    "complex solution[{index}] relative error {relative_error:.3e}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn complex_operations_reject_nonfinite_and_rectangular_systems() {
+        let real = StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).unwrap();
+        let mut matrix = ComplexMatrix::from_real_structure(&real);
+        matrix.add(0, 0, Complex64::new(Value::NAN, 0.0));
+        assert!(matches!(
+            matrix.solve(&[Complex64::new(1.0, 0.0)]),
+            Err(SolverError::Overflow)
+        ));
+
+        matrix.clear_values();
+        matrix.add_real(0, 0, 1.0);
+        assert!(matches!(
+            matrix.solve(&[Complex64::new(Value::INFINITY, 0.0)]),
+            Err(SolverError::Overflow)
+        ));
+        assert!(matches!(
+            matrix.multiply_vector(&[Complex64::new(0.0, Value::NAN)]),
+            Err(SolverError::Overflow)
+        ));
+
+        let rectangular = StaticMatrix::from_triplets(1, 2, &[(0, 0, 1.0), (0, 1, 1.0)]).unwrap();
+        let mut rectangular = ComplexMatrix::from_real_structure(&rectangular);
+        assert!(matches!(
+            rectangular.solve(&[Complex64::new(1.0, 0.0)]),
+            Err(SolverError::InvalidCircuit(_))
+        ));
+
+        let mut checked = ComplexMatrix::from_real_structure(&real);
+        checked.try_add_real(0, 0, 2.0).unwrap();
+        assert!(matches!(
+            checked.try_add(0, 0, Complex64::new(Value::NAN, 0.0)),
+            Err(SolverError::Overflow)
+        ));
+        assert_eq!(
+            checked.solve(&[Complex64::new(4.0, 0.0)]).unwrap()[0],
+            Complex64::new(2.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn checked_triplet_api_preserves_storage_invariants() {
+        let mut matrix = TripletMatrix::new(2);
+        matrix.try_push(0, 0, 1.0).unwrap();
+        matrix.try_push(1, 1, 2.0).unwrap();
+        assert!(matches!(
+            matrix.try_push(2, 0, 3.0),
+            Err(SolverError::InvalidCircuit(_))
+        ));
+        assert!(matches!(
+            matrix.try_push(0, 1, Value::NAN),
+            Err(SolverError::Overflow)
+        ));
+        assert_eq!(matrix.shape(), (2, 2));
+        assert_eq!(
+            matrix.entries().collect::<Vec<_>>(),
+            vec![(0, 0, 1.0), (1, 1, 2.0)]
+        );
+        assert_relative_solution(&solve_sparse(&matrix, &[1.0, 2.0]).unwrap(), &[1.0, 1.0]);
+
+        assert!(matches!(
+            StaticMatrix::from_triplets(1, 1, &[(0, 0, Value::NAN)]),
+            Err(SolverError::Overflow)
+        ));
+        let mut checked = StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).unwrap();
+        checked.try_add(0, 0, 2.0).unwrap();
+        assert!(matches!(
+            checked.try_add(0, 0, Value::INFINITY),
+            Err(SolverError::Overflow)
+        ));
+        assert_relative_solution(&checked.solve(&[4.0]).unwrap(), &[2.0]);
+    }
+
+    #[test]
+    fn dense_fallback_is_scale_invariant_and_validates_shape() {
+        let matrix = StaticMatrix::from_triplets(1, 1, &[(0, 0, 1.0e-300)]).unwrap();
+        assert_relative_solution(&matrix.solve_dense(&[2.0e-300]).unwrap(), &[2.0]);
+
+        assert!(matches!(
+            solve_gauss(vec![vec![1.0, 0.0]], vec![1.0]),
+            Err(SolverError::InvalidCircuit(_))
+        ));
+        assert!(matches!(
+            solve_gauss(vec![vec![Value::NAN]], vec![1.0]),
+            Err(SolverError::Overflow)
+        ));
     }
 }
