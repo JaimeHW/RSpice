@@ -148,6 +148,29 @@ jobs:
         run: cargo clean
       - name: Test non-UI crates (fast tier)
         run: cargo test --locked -p rspice-cli -p rspice-veriloga -p rspice-bench
+      - name: Gate KLU correctness, fill, and kernel latency
+        # Absolute per-factor-nonzero budgets are deliberately loose enough
+        # for shared hosted runners, but tight enough to catch an accidental
+        # return to allocating/refactoring symbolically on every Newton step.
+        # The benchmark validates componentwise backward error outside the
+        # timed region, so a faster but numerically rejected solve cannot pass.
+        run: >-
+          cargo run --locked --release -p rspice-bench -- klu
+          --samples 7
+          --refactors 300
+          --expander-size 500
+          --expander-refactors 10
+          --max-refactor-ns-per-lu-nnz 4.0
+          --max-solve-ns-per-lu-nnz 2.5
+          --max-fill-ratio 1.60
+          --out target/klu-ci-qualification.json
+      - name: Upload KLU qualification
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: klu-ci-qualification
+          path: target/klu-ci-qualification.json
+          if-no-files-found: error
       - name: Gate generated Verilog-A Rust resources
         # Ratchets, not targets. Every budget here is the measured tree plus
         # roughly 11% — enough headroom to add a model, not enough for a

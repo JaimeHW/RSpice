@@ -95,6 +95,8 @@ pub struct KluCase {
     pub lu_nnz: usize,
     /// `lu_nnz / a_nnz`.
     pub fill_ratio: f64,
+    /// Irreducible diagonal blocks found by KLU's BTF analysis.
+    pub btf_blocks: usize,
     /// Symbolic analysis, ns.
     pub analyze_ns: f64,
     /// First numeric factorization, ns.
@@ -107,8 +109,13 @@ pub struct KluCase {
     pub refactor_ns_per_lu_nnz: f64,
     /// Solve normalized by factor nonzeros -- the gated quantity.
     pub solve_ns_per_lu_nnz: f64,
+    /// Worst componentwise backward error observed after a timed solve.
+    pub backward_error: f64,
     /// Refactor and solve iterations behind each timed sample.
     pub refactors: usize,
+    /// Full numeric re-factorizations required after a refactor rejection.
+    /// Circuit-shaped qualification cases require this to remain zero.
+    pub refactor_fallbacks: usize,
     /// Pathological reference cases are measured but exempt from budgets.
     pub gated: bool,
     /// True when the case is ungated or met every budget.
@@ -243,6 +250,48 @@ fn expander_matrix(n: usize, rng: &mut Rng) -> Csc {
     from_couplings(n, couplings, rng)
 }
 
+/// A chain of irreducible local circuit blocks with one-way coupling between
+/// stages. This exposes whether BTF actually contains fill instead of merely
+/// adding symbolic-analysis machinery that the irreducible cases cannot see.
+fn btf_chain_matrix(n: usize, rng: &mut Rng) -> Csc {
+    const BLOCK_SIZE: usize = 8;
+    let mut columns = vec![Vec::<(usize, Value)>::new(); n];
+    for (col, entries) in columns.iter_mut().enumerate() {
+        let block_start = col / BLOCK_SIZE * BLOCK_SIZE;
+        let block_end = (block_start + BLOCK_SIZE).min(n);
+        entries.push((col, 4.0 + rng.unit()));
+        if col > block_start {
+            entries.push((col - 1, -(0.25 + 0.25 * rng.unit())));
+        }
+        if col + 1 < block_end {
+            entries.push((col + 1, -(0.25 + 0.25 * rng.unit())));
+        }
+        let next_block = block_end;
+        if col == block_start && next_block < n {
+            entries.push((next_block, -0.1));
+        }
+        entries.sort_by_key(|(row, _)| *row);
+    }
+
+    let mut col_ptr = Vec::with_capacity(n + 1);
+    let mut row_idx = Vec::new();
+    let mut values = Vec::new();
+    col_ptr.push(0);
+    for entries in columns {
+        for (row, value) in entries {
+            row_idx.push(row);
+            values.push(value);
+        }
+        col_ptr.push(row_idx.len());
+    }
+    Csc {
+        n,
+        col_ptr,
+        row_idx,
+        values,
+    }
+}
+
 /// Newton-style value drift between refactors.
 fn drift(values: &mut [Value], rng: &mut Rng) {
     for v in values.iter_mut() {
@@ -265,6 +314,37 @@ fn elapsed_ns(start: Instant) -> f64 {
     start.elapsed().as_secs_f64() * 1e9
 }
 
+/// Componentwise backward error `max |b-Ax| / (|b|+|A||x|)` used to ensure a
+/// fast kernel result is also an accepted numeric result. This runs outside
+/// every timed region.
+fn backward_error(matrix: &Csc, values: &[Value], rhs: &[Value], solution: &[Value]) -> f64 {
+    if values.len() != matrix.row_idx.len() || rhs.len() != matrix.n || solution.len() != matrix.n {
+        return f64::INFINITY;
+    }
+    let mut residual = rhs.to_vec();
+    let mut denominator: Vec<Value> = rhs.iter().map(|value| value.abs()).collect();
+    for (col, &x) in solution.iter().enumerate() {
+        if !x.is_finite() {
+            return f64::INFINITY;
+        }
+        let begin = matrix.col_ptr[col];
+        let end = matrix.col_ptr[col + 1];
+        for (&row, &value) in matrix.row_idx[begin..end].iter().zip(&values[begin..end]) {
+            let term = value * x;
+            if !value.is_finite() || !term.is_finite() {
+                return f64::INFINITY;
+            }
+            residual[row] -= term;
+            denominator[row] = (denominator[row] + value.abs() * x.abs()).min(Value::MAX);
+        }
+    }
+    residual
+        .iter()
+        .zip(denominator)
+        .map(|(residual, scale)| residual.abs() / scale.max(Value::MIN_POSITIVE))
+        .fold(0.0, Value::max)
+}
+
 /// One pattern at one size: `samples` independent repeats, each from the
 /// pristine values so accumulated drift cannot bias later samples.
 fn bench_case(
@@ -279,6 +359,9 @@ fn bench_case(
     let mut refactor = Vec::with_capacity(samples);
     let mut solve = Vec::with_capacity(samples);
     let mut lu_nnz = 0usize;
+    let mut btf_blocks = 0usize;
+    let mut worst_backward_error = 0.0_f64;
+    let mut refactor_fallbacks = 0usize;
 
     let rhs: Vec<Value> = (0..matrix.n).map(|i| ((i % 7) as Value) - 3.0).collect();
     let mut out = Vec::new();
@@ -289,14 +372,17 @@ fn bench_case(
         let mut klu = KluSolver::new();
 
         let start = Instant::now();
-        klu.analyze(matrix.n, &matrix.col_ptr, &matrix.row_idx);
+        klu.analyze(matrix.n, &matrix.col_ptr, &matrix.row_idx)
+            .map_err(|source| BenchError::Klu {
+                message: format!("{label} n={}: analysis failed: {source}", matrix.n),
+            })?;
+        btf_blocks = klu.block_count();
         analyze.push(elapsed_ns(start));
 
         let start = Instant::now();
-        klu.factor(&matrix.col_ptr, &matrix.row_idx, &values)
-            .map_err(|source| BenchError::Klu {
-                message: format!("{label} n={}: initial factor failed: {source}", matrix.n),
-            })?;
+        klu.factor(&values).map_err(|source| BenchError::Klu {
+            message: format!("{label} n={}: initial factor failed: {source}", matrix.n),
+        })?;
         factor.push(elapsed_ns(start));
 
         // Time the refactor calls only -- drift is test-fixture work, not
@@ -305,15 +391,15 @@ fn bench_case(
         for _ in 0..refactors {
             drift(&mut values, &mut rng);
             let start = Instant::now();
-            let outcome = klu.refactor(&matrix.col_ptr, &matrix.row_idx, &values);
+            let outcome = klu.refactor(&values);
             refactor_ns += elapsed_ns(start);
             if outcome.is_err() {
+                refactor_fallbacks += 1;
                 // A refactor that rejects the drifted values falls back to a
                 // full factor, outside the timed region.
-                klu.factor(&matrix.col_ptr, &matrix.row_idx, &values)
-                    .map_err(|source| BenchError::Klu {
-                        message: format!("{label} n={}: re-factor failed: {source}", matrix.n),
-                    })?;
+                klu.factor(&values).map_err(|source| BenchError::Klu {
+                    message: format!("{label} n={}: re-factor failed: {source}", matrix.n),
+                })?;
             }
         }
         refactor.push(refactor_ns / refactors as f64);
@@ -326,6 +412,23 @@ fn bench_case(
                 })?;
         }
         solve.push(elapsed_ns(start) / refactors as f64);
+
+        let error = backward_error(matrix, &values, &rhs, &out);
+        let mut row_nnz = vec![0usize; matrix.n];
+        for &row in &matrix.row_idx {
+            row_nnz[row] += 1;
+        }
+        let max_row_nnz = row_nnz.into_iter().max().unwrap_or(0);
+        let tolerance = 64.0 * Value::EPSILON * (max_row_nnz.saturating_add(1) as Value);
+        if error > tolerance {
+            return Err(BenchError::Klu {
+                message: format!(
+                    "{label} n={}: solve backward error {error:.3e} exceeds {tolerance:.3e}",
+                    matrix.n
+                ),
+            });
+        }
+        worst_backward_error = worst_backward_error.max(error);
 
         let (l_nnz, u_nnz) = klu.factor_nnz();
         lu_nnz = l_nnz + u_nnz;
@@ -346,13 +449,16 @@ fn bench_case(
         } else {
             lu_nnz as f64 / a_nnz as f64
         },
+        btf_blocks,
         analyze_ns: median(&mut analyze),
         factor_ns: median(&mut factor),
         refactor_ns_per_iter,
         solve_ns_per_iter,
         refactor_ns_per_lu_nnz: per_lu_nnz(refactor_ns_per_iter),
         solve_ns_per_lu_nnz: per_lu_nnz(solve_ns_per_iter),
+        backward_error: worst_backward_error,
         refactors,
+        refactor_fallbacks,
         gated,
         passed: true,
         failure: None,
@@ -364,7 +470,7 @@ fn apply_budgets(case: &mut KluCase, args: &KluArgs) {
     if !case.gated {
         return;
     }
-    let mut failures = Vec::new();
+    let mut failures: Vec<String> = case.failure.take().into_iter().collect();
     if let Some(budget) = args.max_refactor_ns_per_lu_nnz
         && case.refactor_ns_per_lu_nnz > budget
     {
@@ -406,6 +512,20 @@ pub fn run(args: &KluArgs) -> Result<ExitCode, BenchError> {
             message: "--refactors and --expander-refactors must be at least 1".into(),
         });
     }
+    for (name, budget) in [
+        (
+            "--max-refactor-ns-per-lu-nnz",
+            args.max_refactor_ns_per_lu_nnz,
+        ),
+        ("--max-solve-ns-per-lu-nnz", args.max_solve_ns_per_lu_nnz),
+        ("--max-fill-ratio", args.max_fill_ratio),
+    ] {
+        if budget.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+            return Err(BenchError::BenchmarkPolicy {
+                message: format!("{name} must be finite and greater than zero"),
+            });
+        }
+    }
     if let Some(&small) = args.sizes.iter().chain([&args.expander_size]).min()
         && small < 2
     {
@@ -422,6 +542,9 @@ pub fn run(args: &KluArgs) -> Result<ExitCode, BenchError> {
     for &n in &args.sizes {
         plan.push(("ring_osc", n, args.refactors, true));
     }
+    for &n in &args.sizes {
+        plan.push(("btf_chain", n, args.refactors, true));
+    }
     plan.push((
         "expander",
         args.expander_size,
@@ -435,10 +558,18 @@ pub fn run(args: &KluArgs) -> Result<ExitCode, BenchError> {
         let matrix = match label {
             "ladder" => ladder_matrix(n, &mut rng),
             "ring_osc" => ring_osc_matrix(n, &mut rng),
+            "btf_chain" => btf_chain_matrix(n, &mut rng),
             "expander" => expander_matrix(n, &mut rng),
             _ => return Err(BenchError::Internal("unknown KLU benchmark pattern")),
         };
         let mut case = bench_case(label, &matrix, refactors, args.samples, gated)?;
+        if gated && case.refactor_fallbacks != 0 {
+            case.passed = false;
+            case.failure = Some(format!(
+                "{} refactor calls required full numeric factorization",
+                case.refactor_fallbacks
+            ));
+        }
         apply_budgets(&mut case, args);
         cases.push(case);
     }
@@ -458,9 +589,10 @@ pub fn run(args: &KluArgs) -> Result<ExitCode, BenchError> {
     );
     for case in &report.cases {
         println!(
-            "  {name:<10} n={n:<6} a_nnz={a_nnz:<8} l+u_nnz={lu_nnz:<9} fill={fill:>6.2}x  analyze={analyze:>10.1} ns factor={factor:>10.1} ns  refactor={refactor:>10.1} ns/iter ({refactor_norm:>6.3} ns/nnz)  solve={solve:>10.1} ns/iter ({solve_norm:>6.3} ns/nnz)  [{status}]",
+            "  {name:<10} n={n:<6} blocks={blocks:<5} a_nnz={a_nnz:<8} l+u_nnz={lu_nnz:<9} fill={fill:>6.2}x  analyze={analyze:>10.1} ns factor={factor:>10.1} ns  refactor={refactor:>10.1} ns/iter ({refactor_norm:>6.3} ns/nnz, fallbacks={fallbacks})  solve={solve:>10.1} ns/iter ({solve_norm:>6.3} ns/nnz)  berr={backward_error:.2e}  [{status}]",
             name = case.name,
             n = case.n,
+            blocks = case.btf_blocks,
             a_nnz = case.a_nnz,
             lu_nnz = case.lu_nnz,
             fill = case.fill_ratio,
@@ -468,8 +600,10 @@ pub fn run(args: &KluArgs) -> Result<ExitCode, BenchError> {
             factor = case.factor_ns,
             refactor = case.refactor_ns_per_iter,
             refactor_norm = case.refactor_ns_per_lu_nnz,
+            fallbacks = case.refactor_fallbacks,
             solve = case.solve_ns_per_iter,
             solve_norm = case.solve_ns_per_lu_nnz,
+            backward_error = case.backward_error,
             status = if !case.gated {
                 "reference"
             } else if case.passed {
@@ -508,4 +642,47 @@ pub fn run(args: &KluArgs) -> Result<ExitCode, BenchError> {
     } else {
         ExitCode::FAILURE
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn minimal_args() -> KluArgs {
+        KluArgs {
+            sizes: vec![2],
+            refactors: 1,
+            expander_size: 2,
+            expander_refactors: 1,
+            samples: 1,
+            max_refactor_ns_per_lu_nnz: None,
+            max_solve_ns_per_lu_nnz: None,
+            max_fill_ratio: None,
+            out: None,
+        }
+    }
+
+    #[test]
+    fn qualification_budgets_must_be_positive_and_finite() {
+        let mut args = minimal_args();
+        args.max_refactor_ns_per_lu_nnz = Some(Value::NAN);
+        assert!(matches!(
+            run(&args),
+            Err(BenchError::BenchmarkPolicy { .. })
+        ));
+
+        args.max_refactor_ns_per_lu_nnz = None;
+        args.max_solve_ns_per_lu_nnz = Some(0.0);
+        assert!(matches!(
+            run(&args),
+            Err(BenchError::BenchmarkPolicy { .. })
+        ));
+
+        args.max_solve_ns_per_lu_nnz = None;
+        args.max_fill_ratio = Some(Value::INFINITY);
+        assert!(matches!(
+            run(&args),
+            Err(BenchError::BenchmarkPolicy { .. })
+        ));
+    }
 }
