@@ -42,6 +42,52 @@ pub struct SimulationOptions {
     pub save_internals: bool,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matrix_selection_and_pivrel_reach_core_configuration() {
+        for (solver, expected) in [
+            (
+                MatrixSolver::Lu,
+                rspice_core::solver::RealSolverBackend::Auto,
+            ),
+            (
+                MatrixSolver::SparseLu,
+                rspice_core::solver::RealSolverBackend::Faer,
+            ),
+            (
+                MatrixSolver::Klu,
+                rspice_core::solver::RealSolverBackend::Klu,
+            ),
+        ] {
+            let options = SimulationOptions {
+                solver,
+                pivrel: 0.125,
+                pivtol: 2.5e-14,
+                ..SimulationOptions::default()
+            };
+            let config = options.resolve_simulation_config(None);
+            assert_eq!(config.matrix_solver, Some(expected));
+            assert_eq!(config.matrix_pivot_tolerance, 0.125);
+            assert_eq!(config.matrix_absolute_pivot_tolerance, 2.5e-14);
+        }
+    }
+
+    #[test]
+    fn spice_export_preserves_nondefault_pivot_controls() {
+        let options = SimulationOptions {
+            pivrel: 0.25,
+            pivtol: 2.0e-14,
+            ..SimulationOptions::default()
+        };
+        let text = options.to_spice_options();
+        assert!(text.contains("PIVREL=2.50e-1"));
+        assert!(text.contains("PIVTOL=2.00e-14"));
+    }
+}
+
 impl Default for SimulationOptions {
     fn default() -> Self {
         Self {
@@ -235,6 +281,9 @@ impl SimulationOptions {
             .convergence_config
             .gmin_target
             .min(sim_config.convergence_config.gmin_initial);
+        sim_config.matrix_solver = Some(self.solver.core_backend());
+        sim_config.matrix_pivot_tolerance = self.pivrel;
+        sim_config.matrix_absolute_pivot_tolerance = self.pivtol;
 
         sim_config
     }
@@ -263,6 +312,12 @@ impl SimulationOptions {
         }
         if self.chgtol <= 0.0 {
             errors.push(ValidationError::InvalidTolerance("chgtol", self.chgtol));
+        }
+        if !self.pivrel.is_finite() || self.pivrel <= 0.0 || self.pivrel > 1.0 {
+            errors.push(ValidationError::InvalidTolerance("pivrel", self.pivrel));
+        }
+        if !self.pivtol.is_finite() || self.pivtol <= 0.0 {
+            errors.push(ValidationError::InvalidTolerance("pivtol", self.pivtol));
         }
 
         if self.itl1 == 0 {
@@ -321,6 +376,12 @@ impl SimulationOptions {
         }
         if (self.vntol - default.vntol).abs() > 1e-12 {
             lines.push(format!("+ VNTOL={:.2e}", self.vntol));
+        }
+        if self.pivrel.to_bits() != default.pivrel.to_bits() {
+            lines.push(format!("+ PIVREL={:.2e}", self.pivrel));
+        }
+        if self.pivtol.to_bits() != default.pivtol.to_bits() {
+            lines.push(format!("+ PIVTOL={:.2e}", self.pivtol));
         }
         if self.itl1 != default.itl1 {
             lines.push(format!("+ ITL1={}", self.itl1));

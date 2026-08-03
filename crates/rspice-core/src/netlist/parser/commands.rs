@@ -1457,6 +1457,10 @@ pub(super) fn parse_options_command(
                 let value = expect_value(stream, line_num, params)?;
                 options.pivtol = Some(parse_positive_real_option("PIVTOL", value, line_num)?);
             }
+            (_, "PIVREL") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.pivrel = Some(parse_positive_real_option("PIVREL", value, line_num)?);
+            }
             (_, "TEMP") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.temp = Some(parse_celsius_option("TEMP", value, line_num)?);

@@ -2729,6 +2729,8 @@ pub struct SimulationOptions {
     pub chgtol: Option<Value>,
     /// Pivot tolerance for matrix operations (default: 1e-13)
     pub pivtol: Option<Value>,
+    /// Relative sparse threshold-pivoting tolerance (default: 1e-3).
+    pub pivrel: Option<Value>,
     /// Temperature in Celsius (default: 27)
     pub temp: Option<Value>,
     /// Nominal temperature in Celsius (default: 27)
@@ -2908,6 +2910,9 @@ impl SimulationOptions {
         }
         if other.pivtol.is_some() {
             self.pivtol = other.pivtol;
+        }
+        if other.pivrel.is_some() {
+            self.pivrel = other.pivrel;
         }
         if other.temp.is_some() {
             self.temp = other.temp;

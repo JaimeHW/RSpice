@@ -129,6 +129,12 @@ pub fn resolve_simulation_config(
     let mut nonlinear_continuation = base.convergence_config.nonlinear_continuation;
 
     if let Some(opts) = netlist_options {
+        if let Some(pivrel) = opts.pivrel {
+            resolved.matrix_pivot_tolerance = pivrel;
+        }
+        if let Some(pivtol) = opts.pivtol {
+            resolved.matrix_absolute_pivot_tolerance = pivtol;
+        }
         if let Some(mode) = opts.nonlinear_continuation {
             nonlinear_continuation = Some(mode);
         }
@@ -616,6 +622,23 @@ mod tests {
             resolve_simulation_config(&base, Some(&options), &SimulationConfigOverrides::default());
 
         assert_eq!(resolved.digital_delay_type, Some(1));
+    }
+
+    #[test]
+    fn deck_pivot_controls_reach_the_sparse_matrix_policy() {
+        let options = NetlistSimulationOptions {
+            pivrel: Some(0.125),
+            pivtol: Some(2.5e-14),
+            ..Default::default()
+        };
+        let resolved = resolve_simulation_config(
+            &SimulationConfig::default(),
+            Some(&options),
+            &SimulationConfigOverrides::default(),
+        );
+        assert_eq!(resolved.matrix_pivot_tolerance, 0.125);
+        assert_eq!(resolved.matrix_absolute_pivot_tolerance, 2.5e-14);
+        assert!(resolved.validate().is_ok());
     }
 
     #[test]

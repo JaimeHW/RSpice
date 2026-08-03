@@ -231,6 +231,13 @@ pub struct SimulationConfig {
     pub xyce_tra_interpolation: XyceTraInterpolation,
     /// Internal evaluator used for `NJF`/`PJF LEVEL=2`.
     pub jfet_level2_model: JfetLevel2Model,
+    /// Explicit real sparse-matrix backend. `None` preserves the compatibility
+    /// environment selection used by command-line and embedded legacy callers.
+    pub matrix_solver: Option<rspice_matrix::RealSolverBackend>,
+    /// Relative threshold-pivoting tolerance used by Circuit LU.
+    pub matrix_pivot_tolerance: Value,
+    /// Absolute minimum pivot magnitude. Zero disables the threshold.
+    pub matrix_absolute_pivot_tolerance: Value,
     /// Xyce BSIMSOI3 terminal-GMIN policy. When true, B3SOI devices receive
     /// `GMIN * 1e-6`; when false, they receive the full device GMIN.
     pub b3soi_gmin_scaling: bool,
@@ -347,6 +354,25 @@ impl SimulationConfig {
             }
         }
         validate_positive("temperature", self.temperature)?;
+        if !self.matrix_pivot_tolerance.is_finite()
+            || self.matrix_pivot_tolerance <= 0.0
+            || self.matrix_pivot_tolerance > 1.0
+        {
+            return Err(SimulationConfigError::InvalidValue {
+                field: "matrix_pivot_tolerance",
+                value: self.matrix_pivot_tolerance,
+                requirement: "finite and in (0, 1]",
+            });
+        }
+        if !self.matrix_absolute_pivot_tolerance.is_finite()
+            || self.matrix_absolute_pivot_tolerance < 0.0
+        {
+            return Err(SimulationConfigError::InvalidValue {
+                field: "matrix_absolute_pivot_tolerance",
+                value: self.matrix_absolute_pivot_tolerance,
+                requirement: "finite and non-negative",
+            });
+        }
         validate_finite("ramptime", self.ramptime)?;
         if let Some(delay_type) = self.digital_delay_type
             && !(0..=3).contains(&delay_type)
@@ -687,6 +713,9 @@ impl Default for SimulationConfig {
             spice_dialect: SpiceDialect::BestAvailable,
             xyce_tra_interpolation: XyceTraInterpolation::default(),
             jfet_level2_model: JfetLevel2Model::DialectDefault,
+            matrix_solver: None,
+            matrix_pivot_tolerance: 1.0e-3,
+            matrix_absolute_pivot_tolerance: 0.0,
             b3soi_gmin_scaling: true,
             transient_trtol: crate::constants::TRTOL,
             transient_lte_reltol: None,

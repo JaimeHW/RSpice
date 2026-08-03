@@ -6,7 +6,8 @@ pub mod damping;
 mod newton;
 pub(crate) use rspice_matrix::klu_backend_enabled;
 pub use rspice_matrix::{
-    ComplexMatrix, CscIndex, SolverError, SparseLuSolver, StaticMatrix, TripletMatrix, solve_sparse,
+    ComplexMatrix, CscIndex, RealSolverBackend, SolverError, SolverOptions, SparseLuSolver,
+    StaticMatrix, TripletMatrix, solve_sparse,
 };
 
 /// Compatibility path for the solver benchmark and downstream diagnostics.

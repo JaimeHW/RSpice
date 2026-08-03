@@ -94,33 +94,36 @@ impl DampingStrategy {
 /// Matrix solver algorithm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum MatrixSolver {
-    /// LU decomposition with partial pivoting.
+    /// Automatic measured routing between circuit and supernodal sparse LU.
     #[default]
     Lu,
-    /// Sparse LU (for large circuits).
+    /// General supernodal sparse LU.
     SparseLu,
-    /// Iterative GMRES (for very large circuits).
+    /// Retired legacy serialized value; no longer presented by the UI.
     Gmres,
-    /// Direct KLU solver (SuiteSparse).
+    /// RSpice's circuit-specialized sparse LU solver.
     Klu,
 }
 
 impl MatrixSolver {
     pub fn display_name(&self) -> &'static str {
         match self {
-            MatrixSolver::Lu => "LU Decomposition",
-            MatrixSolver::SparseLu => "Sparse LU",
-            MatrixSolver::Gmres => "GMRES (Iterative)",
-            MatrixSolver::Klu => "KLU (SuiteSparse)",
+            MatrixSolver::Lu => "Automatic (Circuit/Supernodal LU)",
+            MatrixSolver::SparseLu => "Supernodal Sparse LU",
+            MatrixSolver::Gmres => "Automatic (legacy GMRES setting)",
+            MatrixSolver::Klu => "RSpice Circuit LU",
         }
     }
 
     pub fn all() -> &'static [MatrixSolver] {
-        &[
-            MatrixSolver::Lu,
-            MatrixSolver::SparseLu,
-            MatrixSolver::Gmres,
-            MatrixSolver::Klu,
-        ]
+        &[MatrixSolver::Lu, MatrixSolver::SparseLu, MatrixSolver::Klu]
+    }
+
+    pub fn core_backend(self) -> rspice_core::solver::RealSolverBackend {
+        match self {
+            MatrixSolver::Lu | MatrixSolver::Gmres => rspice_core::solver::RealSolverBackend::Auto,
+            MatrixSolver::SparseLu => rspice_core::solver::RealSolverBackend::Faer,
+            MatrixSolver::Klu => rspice_core::solver::RealSolverBackend::Klu,
+        }
     }
 }
