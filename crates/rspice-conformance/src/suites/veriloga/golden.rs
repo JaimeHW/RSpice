@@ -872,7 +872,7 @@ impl GoldenHarness {
         for row in 0..size {
             for col in 0..size {
                 if let Some(index) = self.matrix.get_index(row, col) {
-                    dense[row * size + col] = self.matrix.values_mut()[index.0];
+                    dense[row * size + col] = self.matrix.values_mut()[index.offset()];
                 }
             }
         }

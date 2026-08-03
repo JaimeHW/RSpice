@@ -593,10 +593,7 @@ impl CircuitData {
     /// Create a triplet matrix for this circuit
     pub fn create_matrix(&self) -> TripletMatrix {
         let size = self.matrix_size();
-        let mut m = TripletMatrix::new(size);
-        m.nrows = size;
-        m.ncols = size;
-        m
+        TripletMatrix::new(size)
     }
 
     /// Create RHS vector for this circuit

@@ -471,11 +471,8 @@ P1 n1 n2 0 f1 f2 0 m
 
     fn triplet_value(matrix: &crate::solver::TripletMatrix, row: usize, col: usize) -> f64 {
         matrix
-            .row_indices
-            .iter()
-            .zip(matrix.col_indices.iter())
-            .zip(matrix.values.iter())
-            .filter_map(|((&r, &c), &value)| (r == row && c == col).then_some(value))
+            .entries()
+            .filter_map(|(r, c, value)| (r == row && c == col).then_some(value))
             .sum()
     }
 
