@@ -64,6 +64,12 @@ pub(super) fn drawing_sheet_preview(
     drawing_sheet_preview_impl(ui, format, height, label, None, false, None);
 }
 
+/// The desk (backdrop) color the preview paints behind the paper, exposed so
+/// a fused surface can extend the same desk across its whole preview region.
+pub(super) fn sheet_desk_color(ctx: &egui::Context) -> Color32 {
+    SheetPreviewPalette::for_text_color(Tokens::get(ctx).color.text).desk
+}
+
 pub(super) fn drawing_sheet_preview_with_content(
     ui: &mut Ui,
     format: &SchematicSheetFormat,
