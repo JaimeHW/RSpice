@@ -147,7 +147,7 @@ jobs:
       - name: Clear core test artifacts
         run: cargo clean
       - name: Test non-UI crates (fast tier)
-        run: cargo test --locked -p rspice-cli -p rspice-veriloga -p rspice-bench
+        run: cargo test --locked -p rspice-matrix -p rspice-cli -p rspice-veriloga -p rspice-bench
       - name: Gate KLU correctness, fill, and kernel latency
         # Absolute per-factor-nonzero budgets are deliberately loose enough
         # for shared hosted runners, but tight enough to catch an accidental
