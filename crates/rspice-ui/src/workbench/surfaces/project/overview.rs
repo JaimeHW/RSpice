@@ -1293,7 +1293,18 @@ fn engineering_status_register(
     let width = ui.available_width().max(1.0);
     let mut requested = None;
     for (index, status) in statuses.iter().enumerate() {
-        let detail_offset = (width * 0.42).max(118.0).min((width - 64.0).max(1.0));
+        // The reference row is its own grid — `auto minmax(96px, auto)
+        // minmax(0, 1fr)` with 9px gaps — so the detail starts just after
+        // this row's name, never at a shared fraction of the panel width.
+        let name_font = theme::sans(tokens::FS_0, FontWeight::Medium);
+        let name_column = ui
+            .painter()
+            .layout_no_wrap(status.area.to_owned(), name_font.clone(), Color32::WHITE)
+            .size()
+            .x
+            .max(96.0)
+            .min(width * 0.5);
+        let detail_offset = (31.0 + name_column + 9.0).min((width - 64.0).max(1.0));
         let (rect, response) = ui.allocate_exact_size(
             vec2(width, STATUS_ROW_HEIGHT),
             if status.enabled {
@@ -1304,7 +1315,7 @@ fn engineering_status_register(
         );
         if status.enabled && (response.hovered() || response.has_focus()) {
             ui.painter()
-                .rect_filled(rect.shrink2(vec2(8.0, 2.0)), 3.0, tokens.color.bg_hover);
+                .rect_filled(rect.shrink2(vec2(8.0, 2.0)), 4.0, tokens.color.bg_panel_2);
         }
         let primary_color = if status.enabled {
             tokens.color.text
@@ -1318,16 +1329,16 @@ fn engineering_status_register(
         };
         ui.painter().circle_filled(
             pos2(rect.left() + 18.0, rect.center().y),
-            3.5,
+            4.0,
             status.tone.color(&tokens),
         );
         paint_elided(
             ui,
             pos2(rect.left() + 31.0, rect.center().y - tokens::FS_0 * 0.5),
             status.area,
-            theme::sans(tokens::FS_0, FontWeight::Medium),
+            name_font,
             primary_color,
-            (detail_offset - 37.0).max(1.0),
+            (detail_offset - 40.0).max(1.0),
         );
         paint_elided(
             ui,
@@ -1372,31 +1383,40 @@ fn engineering_status_register(
         rect.top(),
         Stroke::new(1.0, tokens.color.border),
     );
-    let code_width = 72.0_f32.min(width * 0.22);
+    // The strip's cells are `auto minmax(0, 1fr) auto` with 9px gaps inside
+    // the panel's 14px insets: the code takes its own width, the message the
+    // rest, and the path right-aligns against the far inset.
+    let code_font = theme::mono(tokens::FS_MICRO, FontWeight::Medium);
+    let code_width = ui
+        .painter()
+        .layout_no_wrap(problem.code.clone(), code_font.clone(), Color32::WHITE)
+        .size()
+        .x
+        .min(width * 0.22);
     let path_width = 128.0_f32.min(width * 0.34);
     paint_elided(
         ui,
-        pos2(rect.left() + 10.0, rect.center().y - tokens::FS_MICRO * 0.5),
+        pos2(rect.left() + 14.0, rect.center().y - tokens::FS_MICRO * 0.5),
         &problem.code,
-        theme::mono(tokens::FS_MICRO, FontWeight::Medium),
+        code_font,
         problem.tone.color(&tokens),
-        (code_width - 14.0).max(1.0),
+        code_width.max(1.0),
     );
     paint_elided(
         ui,
         pos2(
-            rect.left() + code_width,
+            rect.left() + 14.0 + code_width + 9.0,
             rect.center().y - tokens::FS_MICRO * 0.5,
         ),
         &problem.message,
         theme::sans(tokens::FS_MICRO, FontWeight::Regular),
         tokens.color.text_dim,
-        (width - code_width - path_width - 12.0).max(1.0),
+        (width - 14.0 - code_width - 9.0 - path_width - 9.0 - 14.0).max(1.0),
     );
     let path_font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
-    let path = elide_text(ui, &problem.path, &path_font, (path_width - 10.0).max(1.0));
+    let path = elide_text(ui, &problem.path, &path_font, path_width.max(1.0));
     ui.painter().text(
-        pos2(rect.right() - 10.0, rect.center().y),
+        pos2(rect.right() - 14.0, rect.center().y),
         Align2::RIGHT_CENTER,
         path,
         path_font,
@@ -1716,7 +1736,7 @@ fn design_summary_row(
         ui.painter()
             .rect_filled(rect.shrink2(vec2(8.0, 1.0)), 3.0, t.color.bg_hover);
     }
-    let name_width = (width * 0.30).max(92.0);
+    let name_width = (width * 0.30).max(110.0);
     let kind_width = (width * 0.28).max(96.0);
     paint_elided(
         ui,
@@ -1736,7 +1756,9 @@ fn design_summary_row(
         t.color.text,
         (name_width - 18.0 - indent).max(1.0),
     );
-    let kind_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    // The reference kind chip is an outline only — micro type, 3px radius,
+    // no fill — so it reads as an annotation, not a control.
+    let kind_font = theme::sans(tokens::FS_MICRO, FontWeight::Regular);
     let kind_text = elide_text(ui, kind, &kind_font, (kind_width - 18.0).max(1.0));
     let kind_text_width = ui
         .painter()
@@ -1746,17 +1768,16 @@ fn design_summary_row(
     let kind_rect = Rect::from_min_size(
         pos2(
             rect.left() + name_width,
-            rect.center().y - (tokens::FS_0 + 6.0) * 0.5,
+            rect.center().y - (tokens::FS_MICRO + 5.0) * 0.5,
         ),
         vec2(
             (kind_text_width + 10.0).min(kind_width - 4.0),
-            tokens::FS_0 + 6.0,
+            tokens::FS_MICRO + 5.0,
         ),
     );
-    ui.painter().rect_filled(kind_rect, 2.0, t.color.bg_panel_2);
     ui.painter().rect_stroke(
         kind_rect,
-        2.0,
+        3.0,
         Stroke::new(1.0, t.color.border),
         egui::StrokeKind::Inside,
     );
@@ -1767,6 +1788,12 @@ fn design_summary_row(
         kind_font,
         t.color.text_dim,
     );
+    // Detail is faint annotation text in the reference; only a genuine
+    // warning or error keeps its tone so real problems stay visible.
+    let detail_color = match tone {
+        Tone::Warn | Tone::Error => tone.color(&t),
+        _ => t.color.text_faint,
+    };
     paint_elided(
         ui,
         pos2(
@@ -1775,7 +1802,7 @@ fn design_summary_row(
         ),
         detail,
         theme::sans(tokens::FS_MICRO, FontWeight::Regular),
-        tone.color(&t),
+        detail_color,
         (width - name_width - kind_width - 10.0).max(1.0),
     );
     theme::paint_focus_ring_outset(ui, &response, rect);
@@ -1871,7 +1898,8 @@ fn activity_row(
         },
     );
     if interactive && (response.hovered() || response.has_focus()) {
-        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+        ui.painter()
+            .rect_filled(rect.shrink2(vec2(8.0, 1.0)), 4.0, t.color.bg_panel_2);
     }
     let time_width = 54.0_f32.min(width * 0.22);
     paint_elided(
