@@ -348,6 +348,7 @@ impl Engine {
         self.prime_operating_point_seed(circuit, &solution, 0.0, crate::xspice::AnalysisType::DcOp);
 
         let mut rhs = vec![0.0; size];
+        let mut new_solution = Vec::with_capacity(size);
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         let max_iterations = self.continuation_iteration_budget(1, 64);
 
@@ -363,7 +364,9 @@ impl Engine {
             self.try_stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution)?;
             Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_hints)?;
 
-            let mut new_solution = matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+            matrix
+                .solve_into(&rhs, &mut new_solution)
+                .map_err(SimulationError::Solver)?;
             Self::clamp_solution_to_physical_bounds(circuit, &mut new_solution, node_count);
             Self::enforce_node_voltage_hints(circuit, &mut new_solution, node_hints);
 
@@ -385,7 +388,7 @@ impl Engine {
                     node_hints,
                 )?;
 
-            solution = new_solution;
+            std::mem::swap(&mut solution, &mut new_solution);
             if voltage_converged && device_converged && nonlinear_residual_converged {
                 return Ok(solution);
             }
@@ -459,6 +462,7 @@ impl Engine {
             )));
         }
         let mut rhs = vec![0.0; size];
+        let mut raw_solution = Vec::with_capacity(size);
         // Newton-Raphson iteration
         let mut hit_voltage_limit = false;
         let mut limited_nodes: Vec<usize> = Vec::new();
@@ -524,32 +528,33 @@ impl Engine {
             // Update nonlinear/behavioral/XSPICE devices with current solution and stamp
             self.try_stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution)?;
             // Solve linearized system
-            let raw_solution = match matrix.solve(&rhs) {
-                Ok(solution) => solution,
+            match matrix.solve_into(&rhs, &mut raw_solution) {
+                Ok(()) => {}
                 Err(err) => {
                     direct_solver_error = Some(SimulationError::Solver(err));
                     break;
                 }
-            };
+            }
             // Voltage-limiting style damping is critical for strongly-coupled
             // semiconductor nonlinearities, but it can unnecessarily throttle
             // behavioral-only fixed-point updates (e.g., B-source macros that
             // legitimately require kilovolt-level solution jumps).
-            let mut new_solution =
-                if requires_conservative_nonlinear_limiting && !junction_owns_steps {
-                    self.apply_damping_strategy_for_circuit(
-                        circuit.has_b3soi_devices(),
-                        &circuit.non_electrical_state_mask(),
-                        &solution,
-                        &raw_solution,
-                        &mut damping_state,
-                        junction_owns_steps,
-                        |trial| self.nonlinear_merit(circuit, matrix, trial),
-                    )
-                } else {
-                    raw_solution
-                };
-            circuit.enforce_dc_ideal_voltage_constraints(&mut new_solution);
+            let mut damped_solution;
+            let new_solution = if requires_conservative_nonlinear_limiting && !junction_owns_steps {
+                damped_solution = self.apply_damping_strategy_for_circuit(
+                    circuit.has_b3soi_devices(),
+                    &circuit.non_electrical_state_mask(),
+                    &solution,
+                    &raw_solution,
+                    &mut damping_state,
+                    junction_owns_steps,
+                    |trial| self.nonlinear_merit(circuit, matrix, trial),
+                );
+                &mut damped_solution
+            } else {
+                &mut raw_solution
+            };
+            circuit.enforce_dc_ideal_voltage_constraints(new_solution);
             // Solution limiting: prevent numerical blow-up by clamping extreme values
             // This is a critical convergence aid for circuits with strong nonlinearities
             for (i, v) in new_solution.iter_mut().enumerate() {
@@ -587,15 +592,15 @@ impl Engine {
             // Check convergence (both voltage change and device convergence)
             let voltage_converged = self.dc_newton_update_convergence_met(
                 &solution,
-                &new_solution,
+                new_solution,
                 &startup_seed,
                 node_count,
                 iteration,
             );
             let linearized_residual_converged =
-                self.residual_convergence_met(circuit, matrix, &new_solution, &rhs);
+                self.residual_convergence_met(circuit, matrix, new_solution, &rhs);
             // Device convergence must be checked at the candidate iterate, not the prior iterate.
-            self.update_device_states_for_dc(circuit, &new_solution);
+            self.update_device_states_for_dc(circuit, new_solution);
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
             let legacy_bjt_limiter_engaged = circuit
                 .bjts
@@ -623,14 +628,14 @@ impl Engine {
                     .iter()
                     .filter(|bjt| bjt.legacy_junction_limited_for_trace())
                     .count();
-                let nl_res = self.nonlinear_merit(circuit, matrix, &new_solution);
+                let nl_res = self.nonlinear_merit(circuit, matrix, new_solution);
                 eprintln!(
                     "DCTRACE iter={iteration} max_dv={max_dv:.3e} vconv={voltage_converged} dconv={device_converged} linres={linearized_residual_converged} limited_bjts={limited} merit={nl_res:?}"
                 );
             }
             let nonlinear_residual_converged = voltage_converged
                 && device_converged
-                && self.try_nonlinear_residual_converged(circuit, matrix, &new_solution)?;
+                && self.try_nonlinear_residual_converged(circuit, matrix, new_solution)?;
             let repeats_prior_iterate = track_limit_cycles
                 && !voltage_converged
                 && recent_iterates
@@ -638,9 +643,9 @@ impl Engine {
                     .rev()
                     .skip(Self::DC_LIMIT_CYCLE_MIN_PERIOD - 1)
                     .any(|prior| {
-                        self.node_voltage_convergence_met(prior, &new_solution, node_count)
+                        self.node_voltage_convergence_met(prior, new_solution, node_count)
                     });
-            solution = new_solution;
+            std::mem::swap(&mut solution, new_solution);
             if voltage_converged && device_converged && nonlinear_residual_converged {
                 if hit_voltage_limit {
                     log::info!(
@@ -1222,6 +1227,7 @@ impl Engine {
         );
 
         let mut rhs = vec![0.0; size];
+        let mut new_solution = Vec::with_capacity(size);
         let max_iterations = self.continuation_iteration_budget(1, 64);
 
         for iteration in 0..max_iterations {
@@ -1246,7 +1252,9 @@ impl Engine {
             )?;
             Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_hints)?;
 
-            let mut new_solution = matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+            matrix
+                .solve_into(&rhs, &mut new_solution)
+                .map_err(SimulationError::Solver)?;
             Self::clamp_solution_to_physical_bounds(circuit, &mut new_solution, node_count);
             Self::enforce_node_voltage_hints(circuit, &mut new_solution, node_hints);
 
@@ -1270,7 +1278,7 @@ impl Engine {
                     node_hints,
                 )?;
 
-            solution = new_solution;
+            std::mem::swap(&mut solution, &mut new_solution);
             if voltage_converged && device_converged && nonlinear_residual_converged {
                 return Ok(solution);
             }
@@ -1443,6 +1451,7 @@ impl Engine {
         let requires_conservative_nonlinear_limiting =
             circuit.requires_conservative_solution_damping();
         let mut rhs = vec![0.0; size];
+        let mut raw_solution = Vec::with_capacity(size);
         let mut damping_state = NewtonDampingState::default();
         let junction_owns_steps = Self::junction_limiting_owns_newton_steps(circuit)
             || self.b3soi_limiter_owns_global_damping(circuit);
@@ -1483,8 +1492,8 @@ impl Engine {
                 junction_gmin,
             )?;
 
-            let raw_solution = match matrix.solve(&rhs) {
-                Ok(solution) => solution,
+            match matrix.solve_into(&rhs, &mut raw_solution) {
+                Ok(()) => {}
                 Err(err)
                     if !use_transient_current_seed
                         && self.config.spice_dialect == SpiceDialect::Xyce
@@ -1511,48 +1520,49 @@ impl Engine {
                     }
                     return Err(SimulationError::Solver(err));
                 }
+            }
+            let mut damped_solution;
+            let new_solution = if requires_conservative_nonlinear_limiting && !junction_owns_steps {
+                damped_solution = self.apply_damping_strategy_for_circuit(
+                    circuit.has_b3soi_devices(),
+                    &circuit.non_electrical_state_mask(),
+                    &solution,
+                    &raw_solution,
+                    &mut damping_state,
+                    junction_owns_steps,
+                    |trial| {
+                        self.nonlinear_merit_with_linear_stamp_for_operating_point(
+                            circuit,
+                            matrix,
+                            trial,
+                            time,
+                            crate::xspice::AnalysisType::Transient,
+                            junction_gmin,
+                            |circuit, matrix, rhs| {
+                                circuit.refresh_jiles_atherton_inductances(trial);
+                                Self::stamp_transient_operating_point_linear(
+                                    circuit, matrix, rhs, time, gmin_floor, false,
+                                );
+                            },
+                        )
+                    },
+                );
+                &mut damped_solution
+            } else {
+                &mut raw_solution
             };
-            let mut new_solution =
-                if requires_conservative_nonlinear_limiting && !junction_owns_steps {
-                    self.apply_damping_strategy_for_circuit(
-                        circuit.has_b3soi_devices(),
-                        &circuit.non_electrical_state_mask(),
-                        &solution,
-                        &raw_solution,
-                        &mut damping_state,
-                        junction_owns_steps,
-                        |trial| {
-                            self.nonlinear_merit_with_linear_stamp_for_operating_point(
-                                circuit,
-                                matrix,
-                                trial,
-                                time,
-                                crate::xspice::AnalysisType::Transient,
-                                junction_gmin,
-                                |circuit, matrix, rhs| {
-                                    circuit.refresh_jiles_atherton_inductances(trial);
-                                    Self::stamp_transient_operating_point_linear(
-                                        circuit, matrix, rhs, time, gmin_floor, false,
-                                    );
-                                },
-                            )
-                        },
-                    )
-                } else {
-                    raw_solution
-                };
-            circuit.enforce_ideal_voltage_constraints(&mut new_solution, time);
+            circuit.enforce_ideal_voltage_constraints(new_solution, time);
             Self::clamp_solution_to_physical_bounds(
                 circuit,
-                &mut new_solution,
+                new_solution,
                 circuit.num_nodes().min(size),
             );
 
             let voltage_converged =
-                self.node_voltage_convergence_met(&solution, &new_solution, circuit.num_nodes());
+                self.node_voltage_convergence_met(&solution, new_solution, circuit.num_nodes());
             self.update_device_states_for_operating_point(
                 circuit,
-                &new_solution,
+                new_solution,
                 time,
                 crate::xspice::AnalysisType::Transient,
                 junction_gmin,
@@ -1563,12 +1573,12 @@ impl Engine {
                 && self.nonlinear_residual_converged_with_linear_stamp_for_operating_point(
                     circuit,
                     matrix,
-                    &new_solution,
+                    new_solution,
                     time,
                     crate::xspice::AnalysisType::Transient,
                     junction_gmin,
                     |circuit, matrix, rhs| {
-                        circuit.refresh_jiles_atherton_inductances(&new_solution);
+                        circuit.refresh_jiles_atherton_inductances(new_solution);
                         if use_transient_current_seed {
                             Self::stamp_transient_current_seed_linear(
                                 circuit, matrix, rhs, time, gmin_floor,
@@ -1581,7 +1591,7 @@ impl Engine {
                     },
                 );
 
-            solution = new_solution;
+            std::mem::swap(&mut solution, new_solution);
             if voltage_converged && device_converged && nonlinear_residual_converged {
                 return Ok(solution);
             }

@@ -2157,6 +2157,7 @@ impl Engine {
 
                 let mut total_noise_v2_hz = 0.0;
                 let mut contributions = Vec::new();
+                let mut transfer_solution = Vec::with_capacity(size);
 
                 for source in &noise_sources {
                     if abort.is_aborted() {
@@ -2171,9 +2172,14 @@ impl Engine {
                             source.node_neg,
                         );
 
-                        let solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+                        ac_matrix
+                            .solve_into(&rhs, &mut transfer_solution)
+                            .map_err(SimulationError::Solver)?;
                         let v_out = Self::differential_noise_output(
-                            &solution, output_pos, output_neg, num_nodes,
+                            &transfer_solution,
+                            output_pos,
+                            output_neg,
+                            num_nodes,
                         );
                         si * v_out * v_out
                     } else {
@@ -2212,9 +2218,11 @@ impl Engine {
                         source.first.node_pos,
                         source.first.node_neg,
                     );
-                    let first_solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+                    ac_matrix
+                        .solve_into(&rhs, &mut transfer_solution)
+                        .map_err(SimulationError::Solver)?;
                     let first_gain = Self::differential_noise_output_complex(
-                        &first_solution,
+                        &transfer_solution,
                         output_pos,
                         output_neg,
                         num_nodes,
@@ -2226,9 +2234,11 @@ impl Engine {
                         source.second.node_pos,
                         source.second.node_neg,
                     );
-                    let second_solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+                    ac_matrix
+                        .solve_into(&rhs, &mut transfer_solution)
+                        .map_err(SimulationError::Solver)?;
                     let second_gain = Self::differential_noise_output_complex(
-                        &second_solution,
+                        &transfer_solution,
                         output_pos,
                         output_neg,
                         num_nodes,

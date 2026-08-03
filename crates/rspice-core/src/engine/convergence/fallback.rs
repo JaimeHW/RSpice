@@ -194,13 +194,15 @@ impl Engine {
         } else {
             Self::DC_RESIDUAL_STALL_LIMIT
         };
+        let mut rhs = vec![0.0; solution.len()];
+        let mut raw_solution = Vec::with_capacity(solution.len());
 
         for iter in 0..max_iterations {
             if Self::should_abort_iteration(abort, iter) {
                 return Err(SimulationError::Aborted);
             }
             used_iterations = iter + 1;
-            let mut rhs = vec![0.0; solution.len()];
+            rhs.fill(0.0);
             matrix.clear_values();
 
             Self::stamp_nodal_gmin(circuit, matrix, gmin_floor);
@@ -219,10 +221,10 @@ impl Engine {
                 self.try_stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution)?;
             }
 
-            let raw_solution = match matrix.solve(&rhs) {
-                Ok(sol) => sol,
+            match matrix.solve_into(&rhs, &mut raw_solution) {
+                Ok(()) => {}
                 Err(_) => return Ok((solution, false, used_iterations)),
-            };
+            }
 
             let junction_owns_steps = Self::junction_limiting_owns_newton_steps(circuit)
                 || self.b3soi_limiter_owns_global_damping(circuit);

@@ -190,29 +190,6 @@ impl Engine {
         Self::build_descending_schedule(start, end)
     }
 
-    /// Try solving with a specific GMIN value
-    pub(crate) fn try_solve_with_gmin(
-        &self,
-        circuit: &mut CircuitData,
-        matrix: &mut StaticMatrix,
-        gmin: Value,
-    ) -> Result<Vec<Value>, SolverError> {
-        let size = circuit.matrix_size();
-        let mut rhs = vec![0.0; size];
-
-        matrix.clear_values();
-        rhs.fill(0.0);
-
-        self.stamp_dc_direct(circuit, matrix, &mut rhs, gmin);
-        if !circuit.behavioral_sources.is_empty()
-            && !circuit.behavioral_sources.has_solution_dependent_sources()
-        {
-            let zero_solution = vec![0.0; size];
-            circuit.stamp_behavioral_sources(matrix, &mut rhs, &zero_solution, 0.0);
-        }
-        matrix.solve(&rhs)
-    }
-
     /// GMIN stepping: try progressively smaller GMIN values
     pub(crate) fn gmin_stepping(
         &self,
@@ -220,16 +197,30 @@ impl Engine {
         matrix: &mut StaticMatrix,
     ) -> Result<Vec<Value>, SolverError> {
         let gmin_values = self.gmin_linear_schedule();
-
-        let mut solution = None;
+        let size = circuit.matrix_size();
+        let mut solution = Vec::with_capacity(size);
+        let mut proposal = Vec::with_capacity(size);
+        let mut rhs = vec![0.0; size];
+        let mut solved = false;
+        let stamp_independent_behavioral = !circuit.behavioral_sources.is_empty()
+            && !circuit.behavioral_sources.has_solution_dependent_sources();
+        let zero_solution = stamp_independent_behavioral.then(|| vec![0.0; size]);
 
         for (idx, &gmin) in gmin_values.iter().enumerate() {
-            match self.try_solve_with_gmin(circuit, matrix, gmin) {
-                Ok(sol) => {
-                    solution = Some(sol);
+            matrix.clear_values();
+            rhs.fill(0.0);
+            self.stamp_dc_direct(circuit, matrix, &mut rhs, gmin);
+            if let Some(zero_solution) = zero_solution.as_deref() {
+                circuit.stamp_behavioral_sources(matrix, &mut rhs, zero_solution, 0.0);
+            }
+
+            match matrix.solve_into(&rhs, &mut proposal) {
+                Ok(()) => {
+                    std::mem::swap(&mut solution, &mut proposal);
+                    solved = true;
                     // Continue to try smaller GMIN for better accuracy
                 }
-                Err(_) if solution.is_some() => {
+                Err(_) if solved => {
                     // Can't solve with smaller GMIN, use the last successful one
                     break;
                 }
@@ -244,7 +235,11 @@ impl Engine {
             }
         }
 
-        solution.ok_or(SolverError::SingularMatrix)
+        if solved {
+            Ok(solution)
+        } else {
+            Err(SolverError::SingularMatrix)
+        }
     }
 
     /// Source stepping: ramp sources from 0 to 100%
@@ -259,24 +254,24 @@ impl Engine {
 
         let size = circuit.matrix_size();
         let mut solution = vec![0.0; size]; // Start from zero
+        let mut proposal = Vec::with_capacity(size);
+        let mut rhs = vec![0.0; size];
+        let stamp_independent_behavioral = !circuit.behavioral_sources.is_empty()
+            && !circuit.behavioral_sources.has_solution_dependent_sources();
+        let zero_solution = stamp_independent_behavioral.then(|| vec![0.0; size]);
 
         for &scale in SOURCE_SCALES {
-            let mut rhs = vec![0.0; size];
-
             matrix.clear_values();
             rhs.fill(0.0);
 
             self.stamp_dc_scaled(circuit, matrix, &mut rhs, gmin_floor, scale);
-            if !circuit.behavioral_sources.is_empty()
-                && !circuit.behavioral_sources.has_solution_dependent_sources()
-            {
-                let zero_solution = vec![0.0; size];
-                circuit.stamp_behavioral_sources(matrix, &mut rhs, &zero_solution, 0.0);
+            if let Some(zero_solution) = zero_solution.as_deref() {
+                circuit.stamp_behavioral_sources(matrix, &mut rhs, zero_solution, 0.0);
             }
 
-            match matrix.solve(&rhs) {
-                Ok(sol) => {
-                    solution = sol;
+            match matrix.solve_into(&rhs, &mut proposal) {
+                Ok(()) => {
+                    std::mem::swap(&mut solution, &mut proposal);
                 }
                 Err(e) if scale == 1.0 => {
                     return Err(e);
@@ -472,6 +467,8 @@ impl Engine {
         let mut pseudo = PseudoTransient::new();
         let mut damping_state = NewtonDampingState::default();
         let pseudo_iterations = self.continuation_iteration_budget(12, 16);
+        let mut rhs = vec![0.0; size];
+        let mut raw_solution = Vec::with_capacity(size);
 
         let mut stage = 0usize;
         while !pseudo.is_complete() {
@@ -485,7 +482,7 @@ impl Engine {
                 if Self::should_abort_iteration(abort, iteration) {
                     return Err(SimulationError::Aborted);
                 }
-                let mut rhs = vec![0.0; size];
+                rhs.fill(0.0);
                 matrix.clear_values();
 
                 for i in 0..size {
@@ -497,10 +494,10 @@ impl Engine {
                 circuit.stamp_dc_direct(matrix, &mut rhs);
                 self.try_stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution)?;
 
-                let raw_solution = match matrix.solve(&rhs) {
-                    Ok(sol) => sol,
+                match matrix.solve_into(&rhs, &mut raw_solution) {
+                    Ok(()) => {}
                     Err(_) => break,
-                };
+                }
 
                 let mut new_solution = self.apply_damping_strategy_for_circuit(
                     circuit.has_b3soi_devices(),
@@ -988,13 +985,15 @@ impl Engine {
         let junction_gmin = self.effective_device_junction_gmin(gmin);
         self.update_device_states_for_dc_with_junction_gmin(circuit, &solution, junction_gmin);
         let mut used_iterations = 0usize;
+        let mut rhs = vec![0.0; solution.len()];
+        let mut raw_solution = Vec::with_capacity(solution.len());
 
         for iteration in 0..max_iterations {
             if Self::should_abort_iteration(abort, iteration) {
                 return Err(SimulationError::Aborted);
             }
             used_iterations = iteration + 1;
-            let mut rhs = vec![0.0; solution.len()];
+            rhs.fill(0.0);
             matrix.clear_values();
 
             Self::stamp_nodal_gmin(circuit, matrix, gmin);
@@ -1009,10 +1008,10 @@ impl Engine {
                 junction_gmin,
             )?;
 
-            let raw_solution = match matrix.solve(&rhs) {
-                Ok(solution) => solution,
+            match matrix.solve_into(&rhs, &mut raw_solution) {
+                Ok(()) => {}
                 Err(_) => return Ok((solution, false, used_iterations)),
-            };
+            }
 
             let mut new_solution = self.apply_damping_strategy_for_circuit(
                 circuit.has_b3soi_devices(),

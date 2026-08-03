@@ -103,6 +103,7 @@ impl Engine {
         let size = circuit.matrix_size();
         let mut solution = seed.to_vec();
         let mut rhs = vec![0.0; size];
+        let mut proposal = Vec::with_capacity(size);
         let gmin_floor = self.startup_warmup_conditioning_gmin(circuit);
 
         for iteration in 0..self.startup_warmup_iteration_budget() {
@@ -136,7 +137,7 @@ impl Engine {
                     .map_err(SimulationError::Circuit)?;
             }
 
-            let Ok(mut proposal) = matrix.solve(&rhs) else {
+            let Ok(()) = matrix.solve_into(&rhs, &mut proposal) else {
                 break;
             };
 
@@ -161,10 +162,10 @@ impl Engine {
                 circuit.update_nonlinear(&proposal);
             }
             if self.node_voltage_convergence_met(&solution, &proposal, circuit.num_nodes()) {
-                solution = proposal;
+                std::mem::swap(&mut solution, &mut proposal);
                 break;
             }
-            solution = proposal;
+            std::mem::swap(&mut solution, &mut proposal);
         }
 
         // A warmup iterate is only a seed. Never expose it as an operating
@@ -184,6 +185,7 @@ impl Engine {
         let size = circuit.matrix_size();
         let mut solution = seed.to_vec();
         let mut rhs = vec![0.0; size];
+        let mut proposal = Vec::with_capacity(size);
         let gmin_floor = self.startup_warmup_conditioning_gmin(circuit);
 
         for iteration in 0..self.startup_warmup_iteration_budget() {
@@ -223,7 +225,7 @@ impl Engine {
                 circuit.stamp_xspice_transient_trial(matrix, &mut rhs, time, 0.0, &solution);
             }
 
-            let Ok(mut proposal) = matrix.solve(&rhs) else {
+            let Ok(()) = matrix.solve_into(&rhs, &mut proposal) else {
                 break;
             };
 
@@ -248,10 +250,10 @@ impl Engine {
                 circuit.update_nonlinear(&proposal);
             }
             if self.node_voltage_convergence_met(&solution, &proposal, circuit.num_nodes()) {
-                solution = proposal;
+                std::mem::swap(&mut solution, &mut proposal);
                 break;
             }
-            solution = proposal;
+            std::mem::swap(&mut solution, &mut proposal);
         }
 
         self.solve_nonlinear_transient_op_startup_with_guess_and_hints_abort(

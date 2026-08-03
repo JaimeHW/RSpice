@@ -1876,6 +1876,7 @@ impl Engine {
         let size = circuit.matrix_size();
         let mut new_solution = start.to_vec();
         let mut rhs = vec![0.0; size];
+        let mut proposal = Vec::with_capacity(size);
 
         for _iter in 0..self.config.max_iterations {
             if abort.is_aborted() {
@@ -1883,14 +1884,17 @@ impl Engine {
             }
             self.pss_stamp_system(circuit, matrix, &mut rhs, coeff, t_next, dt, &new_solution)?;
 
-            match matrix.solve(&rhs) {
-                Ok(sol) => {
-                    let voltage_converged =
-                        self.node_voltage_convergence_met(&new_solution, &sol, circuit.num_nodes());
+            match matrix.solve_into(&rhs, &mut proposal) {
+                Ok(()) => {
+                    let voltage_converged = self.node_voltage_convergence_met(
+                        &new_solution,
+                        &proposal,
+                        circuit.num_nodes(),
+                    );
                     let linearized_residual_converged =
-                        self.residual_convergence_met(circuit, matrix, &sol, &rhs);
+                        self.residual_convergence_met(circuit, matrix, &proposal, &rhs);
 
-                    new_solution = sol;
+                    std::mem::swap(&mut new_solution, &mut proposal);
 
                     if circuit.has_nonlinear_devices() {
                         circuit.update_nonlinear(&new_solution);
