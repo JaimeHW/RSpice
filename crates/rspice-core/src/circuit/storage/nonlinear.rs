@@ -634,6 +634,9 @@ impl Vdmoses {
 #[derive(Debug, Clone, Default)]
 pub struct Mosfets {
     pub devices: Vec<Mosfet>,
+    /// True only when every device's latest collection-wide update evaluated
+    /// its raw candidate without voltage limiting.
+    last_update_all_is_physical: bool,
 }
 
 impl Mosfets {
@@ -643,6 +646,7 @@ impl Mosfets {
 
     pub fn add(&mut self, mosfet: Mosfet) {
         self.devices.push(mosfet);
+        self.last_update_all_is_physical = false;
     }
 
     pub fn len(&self) -> usize {
@@ -682,14 +686,21 @@ impl Mosfets {
         for (device, state) in self.devices.iter_mut().zip(states) {
             device.restore_nonlinear_state(state);
         }
+        self.last_update_all_is_physical = self
+            .devices
+            .iter()
+            .all(Mosfet::cached_linearization_is_physical);
     }
 
     /// Update all MOSFETs with current solution
     pub fn update_all(&mut self, voltages: &[Value]) {
         use crate::device::NonlinearDevice;
+        let mut all_physical = true;
         for d in &mut self.devices {
             d.update(voltages);
+            all_physical &= d.cached_linearization_is_physical();
         }
+        self.last_update_all_is_physical = all_physical;
     }
 
     /// Evaluate independent classic MOS instances on the active bounded
@@ -706,9 +717,25 @@ impl Mosfets {
         // caps active workers without constructing another nested pool and
         // retains contiguous device traversal inside each task.
         let chunk_size = self.devices.len().div_ceil(worker_count.max(1)).max(1);
-        self.devices
+        self.last_update_all_is_physical = self
+            .devices
             .par_chunks_mut(chunk_size)
-            .for_each(|chunk| chunk.iter_mut().for_each(|device| device.update(voltages)));
+            .map(|chunk| {
+                let mut all_physical = true;
+                for device in chunk {
+                    device.update(voltages);
+                    all_physical &= device.cached_linearization_is_physical();
+                }
+                all_physical
+            })
+            .reduce(|| true, |left, right| left && right);
+    }
+
+    /// Whether the latest collection-wide update is also an exact physical
+    /// static-probe evaluation for every classic MOS instance.
+    #[inline]
+    pub(crate) fn last_update_all_is_physical(&self) -> bool {
+        self.last_update_all_is_physical
     }
 
     /// Stamp all MOSFETs into matrix for Newton iteration

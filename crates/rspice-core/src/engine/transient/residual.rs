@@ -183,6 +183,10 @@ impl Engine {
         if refresh_nonlinear {
             self.update_transient_nonlinear_devices(circuit, solution)?;
         }
+        let static_probe = evaluation_mode
+            == crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe;
+        let physical_cache_matches_probe =
+            static_probe && circuit.mosfets.last_update_all_is_physical();
         let companion_coeff = if ctx.xyce_one_step {
             CompanionCoefficients::backward_euler()
         } else {
@@ -197,13 +201,11 @@ impl Engine {
             dt,
             ctx.mosfet_history,
             ctx.suppress_gate_charge,
-            evaluation_mode
-                != crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+            !static_probe || physical_cache_matches_probe,
             ctx.mosfet_companion_slots,
             caps_cache_out,
         );
-        if evaluation_mode == crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe
-        {
+        if static_probe && !physical_cache_matches_probe {
             circuit
                 .mosfets
                 .stamp_all_static_probe_direct(matrix, rhs, solution);
@@ -836,6 +838,10 @@ M1 d g 0 0 NM W=10u L=1u
         solution[circuit.get_node_by_name("d").expect("drain node") - 1] = 2.7;
         circuit.update_nonlinear(&solution);
         circuit.update_nonlinear(&solution);
+        assert!(
+            circuit.mosfets.last_update_all_is_physical(),
+            "fixture must exercise exact physical-cache reuse"
+        );
 
         let tline_dc_refs = Engine::initialize_tline_history(&mut circuit, &solution, 0.0);
         let coupled_tline_refs =

@@ -501,6 +501,25 @@ impl Mosfet {
             && self.eval_vbs == eval_vbs
     }
 
+    /// Whether the latest nonlinear update evaluated the physical candidate
+    /// without any Newton voltage limiting.
+    ///
+    /// An exact-residual probe at that same candidate may reuse the cached
+    /// linearization because its raw and evaluated branch biases coincide.
+    #[inline]
+    pub(crate) fn cached_linearization_is_physical(&self) -> bool {
+        self.has_branch_history
+            && self.vgs.is_finite()
+            && self.vds.is_finite()
+            && self.vbs.is_finite()
+            && self.eval_vgs.is_finite()
+            && self.eval_vds.is_finite()
+            && self.eval_vbs.is_finite()
+            && self.vgs == self.eval_vgs
+            && self.vds == self.eval_vds
+            && self.vbs == self.eval_vbs
+    }
+
     /// Set model parameters from a DeviceModel
     pub fn with_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
         const EPS0: Value = 8.854_214_871e-12;
@@ -1249,6 +1268,22 @@ impl Mosfet {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn physical_cache_marker_tracks_newton_limiting_exactly() {
+        use crate::device::NonlinearDevice;
+
+        let mut mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4);
+        mos.update(&[0.0; 4]);
+        assert!(mos.cached_linearization_is_physical());
+
+        mos.update(&[10.0, 10.0, 0.0, 0.0]);
+        assert!(!mos.cached_linearization_is_physical());
+        assert_ne!(
+            (mos.vgs, mos.vds, mos.vbs),
+            (mos.eval_vgs, mos.eval_vds, mos.eval_vbs)
+        );
+    }
 
     #[test]
     fn default_mos_geometry_matches_classic_spice_device_options() {
