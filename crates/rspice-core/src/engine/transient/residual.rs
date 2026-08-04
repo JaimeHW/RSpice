@@ -77,6 +77,11 @@ pub(super) struct ClassicMosTransientStampCache {
     device_constants: Vec<crate::device::mosfet::ClassicMosTransientConstants>,
 }
 
+pub(super) struct ClassicMosCandidateEvaluation {
+    pub(super) truncation_limit: Option<Value>,
+    pub(super) all_devices_converged: bool,
+}
+
 impl ClassicMosTransientStampCache {
     #[inline]
     pub(super) fn device_constants(
@@ -438,7 +443,10 @@ impl Engine {
         charges: &mut Vec<MosfetGateCompanionCharges>,
         caps: &mut Vec<(Value, Value, Value)>,
         truncation: Option<&NgspiceChargeTruncationContext>,
-    ) -> Result<Option<Value>, SimulationError> {
+        convergence_criteria: Option<crate::device::NonlinearConvergenceCriteria>,
+    ) -> Result<ClassicMosCandidateEvaluation, SimulationError> {
+        use crate::device::NonlinearDevice;
+
         debug_assert!(circuit.has_cacheable_classic_mos_transient_base());
         let instance_count = circuit.mosfets.len();
         debug_assert_eq!(constants.len(), instance_count);
@@ -470,6 +478,7 @@ impl Engine {
                                 let base = chunk_idx * chunk_size;
                                 let mut chunk_physical = true;
                                 let mut chunk_limit = None;
+                                let mut chunk_converged = true;
                                 for (local, ((((device, constants), term), charge), cap)) in devices
                                     .iter_mut()
                                     .zip(constants)
@@ -508,30 +517,38 @@ impl Engine {
                                     chunk_limit =
                                         Self::min_truncation_limit(chunk_limit, device_limit);
                                     chunk_physical &= device.cached_linearization_is_physical();
+                                    chunk_converged &= convergence_criteria
+                                        .is_none_or(|criteria| device.is_converged(criteria));
                                 }
-                                (chunk_physical, chunk_limit)
+                                (chunk_physical, chunk_converged, chunk_limit)
                             },
                         )
                         .reduce(
-                            || (true, None),
-                            |(left_physical, left_limit), (right_physical, right_limit)| {
+                            || (true, true, None),
+                            |(left_physical, left_converged, left_limit),
+                             (right_physical, right_converged, right_limit)| {
                                 (
                                     left_physical && right_physical,
+                                    left_converged && right_converged,
                                     Self::min_truncation_limit(left_limit, right_limit),
                                 )
                             },
                         )
                 })?;
-                let (all_physical, cached_limit) = update_result;
+                let (all_physical, all_devices_converged, truncation_limit) = update_result;
                 circuit
                     .mosfets
                     .record_last_update_all_is_physical(all_physical);
-                return Ok(cached_limit);
+                return Ok(ClassicMosCandidateEvaluation {
+                    truncation_limit,
+                    all_devices_converged,
+                });
             }
         }
 
         let mut all_physical = true;
         let mut cached_limit = None;
+        let mut all_devices_converged = true;
         for (idx, ((((device, constants), term), charge), cap)) in circuit
             .mosfets
             .devices
@@ -563,11 +580,16 @@ impl Engine {
             });
             cached_limit = Self::min_truncation_limit(cached_limit, device_limit);
             all_physical &= device.cached_linearization_is_physical();
+            all_devices_converged &=
+                convergence_criteria.is_none_or(|criteria| device.is_converged(criteria));
         }
         circuit
             .mosfets
             .record_last_update_all_is_physical(all_physical);
-        Ok(cached_limit)
+        Ok(ClassicMosCandidateEvaluation {
+            truncation_limit: cached_limit,
+            all_devices_converged,
+        })
     }
 
     /// Test the nonlinear residual with the active transient solver's native
@@ -1297,7 +1319,7 @@ M1 d g 0 0 NM W=10u L=1u
         let mut companion_terms = Vec::new();
         let mut companion_charges = Vec::new();
         let mut companion_caps = Vec::new();
-        engine
+        let evaluation = engine
             .update_classic_mos_with_companion_terms(
                 &mut circuit,
                 &solution,
@@ -1310,8 +1332,14 @@ M1 d g 0 0 NM W=10u L=1u
                 &mut companion_charges,
                 &mut companion_caps,
                 None,
+                Some(engine.device_convergence_criteria()),
             )
             .expect("fused companion evaluation succeeds");
+        assert_eq!(
+            evaluation.all_devices_converged,
+            circuit.nonlinear_converged(engine.device_convergence_criteria()),
+            "fused convergence aggregate must match the canonical collection walk"
+        );
         assert!(circuit.mosfets.last_update_all_is_physical());
         assert_eq!(companion_terms.len(), circuit.mosfets.devices.len());
         assert_eq!(companion_charges.len(), circuit.mosfets.devices.len());

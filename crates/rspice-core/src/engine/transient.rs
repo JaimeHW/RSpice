@@ -3562,6 +3562,7 @@ impl Engine {
                         // Update nonlinear device state to new solution for accurate convergence check
                         let postsolve_update_start =
                             DiagnosticTimer::start(diagnostic_timing_enabled);
+                        let mut fused_classic_mos_device_converged = None;
                         if circuit.has_nonlinear_devices() && !nonlinear_state_matches_new_solution
                         {
                             if let Some(classic_mos_cache) = classic_mos_stamp_cache.as_ref()
@@ -3572,20 +3573,24 @@ impl Engine {
                                 } else {
                                     coeff
                                 };
-                                cached_mosfet_truncation_limit = self
-                                    .update_classic_mos_with_companion_terms(
-                                        &mut circuit,
-                                        &new_solution,
-                                        classic_mos_cache.device_constants(),
-                                        &postsolve_companion_coeff,
-                                        dt,
-                                        &mosfet_history,
-                                        suppress_gate_charge,
-                                        &mut mosfet_companion_terms_scratch,
-                                        &mut mosfet_companion_charges_scratch,
-                                        &mut mosfet_caps_scratch,
-                                        classic_mos_truncation_context.as_ref(),
-                                    )?;
+                                let evaluation = self.update_classic_mos_with_companion_terms(
+                                    &mut circuit,
+                                    &new_solution,
+                                    classic_mos_cache.device_constants(),
+                                    &postsolve_companion_coeff,
+                                    dt,
+                                    &mosfet_history,
+                                    suppress_gate_charge,
+                                    &mut mosfet_companion_terms_scratch,
+                                    &mut mosfet_companion_charges_scratch,
+                                    &mut mosfet_caps_scratch,
+                                    classic_mos_truncation_context.as_ref(),
+                                    enforce_device_convergence
+                                        .then(|| self.device_convergence_criteria()),
+                                )?;
+                                cached_mosfet_truncation_limit = evaluation.truncation_limit;
+                                fused_classic_mos_device_converged =
+                                    Some(evaluation.all_devices_converged);
                                 mosfet_companion_terms_valid = circuit
                                     .mosfets
                                     .last_update_all_is_physical()
@@ -3613,7 +3618,9 @@ impl Engine {
                         let mut device_converged = core_trial_converged(&circuit)
                             && (!enforce_device_convergence
                                 || !circuit.has_nonlinear_devices()
-                                || circuit.nonlinear_converged(self.device_convergence_criteria()));
+                                || fused_classic_mos_device_converged.unwrap_or_else(|| {
+                                    circuit.nonlinear_converged(self.device_convergence_criteria())
+                                }));
                         // This is RSpice's consistency check for its internal
                         // behavioral-expression linearization, not a device
                         // `isConverged` flag controlled by Xyce's
