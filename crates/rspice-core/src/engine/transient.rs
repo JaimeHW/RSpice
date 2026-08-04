@@ -2469,6 +2469,10 @@ impl Engine {
         > = Vec::new();
         let mut mosfet_companion_terms_valid;
         let mut mosfet_companion_charges_scratch: Vec<MosfetGateCompanionCharges> = Vec::new();
+        // Ordinary-capacitor candidate voltage/current pairs captured by the
+        // required CKTterr walk and consumed only by the matching accept path.
+        let mut capacitor_accepted_states_scratch: Vec<CapacitorAcceptedState> = Vec::new();
+        let mut capacitor_accepted_states_valid;
         let mut classic_mos_residual_scratch = classic_mos_stamp_cache
             .as_ref()
             .is_some_and(residual::ClassicMosTransientStampCache::supports_direct_residual_proof)
@@ -2566,6 +2570,7 @@ impl Engine {
         while t < tstop && total_iterations < max_total_iterations {
             let attempt_top_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             mosfet_caps_valid = false;
+            capacitor_accepted_states_valid = false;
             mosfet_companion_terms_valid = false;
             cached_mosfet_truncation_limit = None;
             cached_mosfet_truncation_limit_valid = false;
@@ -4201,6 +4206,7 @@ impl Engine {
                             self.current_abstol(),
                             self.charge_abstol(),
                             self.transient_trtol(),
+                            None,
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -4377,6 +4383,7 @@ impl Engine {
                         &mut ekv26_history,
                         xyce_one_step_order2,
                         Some(vbic_snapshot_cache.as_slice()),
+                        None,
                         None,
                         suppress_gate_charge,
                         &tline_dc_refs,
@@ -4560,7 +4567,7 @@ impl Engine {
                 && !first_accepted_transient_step
                 && !circuit.capacitors.is_empty()
             {
-                Self::capacitor_ngspice_truncation_limit(
+                let limit = Self::capacitor_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
                     current_method,
@@ -4572,8 +4579,11 @@ impl Engine {
                     self.current_abstol(),
                     self.charge_abstol(),
                     self.transient_trtol(),
-                )
-                .filter(|limit| limit.is_finite() && *limit > 0.0)
+                    Some(&mut capacitor_accepted_states_scratch),
+                );
+                capacitor_accepted_states_valid =
+                    capacitor_accepted_states_scratch.len() == circuit.capacitors.stamps.len();
+                limit.filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
                 None
             };
@@ -5179,6 +5189,7 @@ impl Engine {
                             self.current_abstol(),
                             self.charge_abstol(),
                             self.transient_trtol(),
+                            None,
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -5356,6 +5367,7 @@ impl Engine {
                         &mut ekv26_history,
                         xyce_one_step_order2,
                         Some(vbic_snapshot_cache.as_slice()),
+                        None,
                         None,
                         suppress_gate_charge,
                         &tline_dc_refs,
@@ -5651,6 +5663,8 @@ impl Engine {
                 &mut ekv26_history,
                 xyce_one_step_order2,
                 Some(vbic_snapshot_cache.as_slice()),
+                capacitor_accepted_states_valid
+                    .then_some(capacitor_accepted_states_scratch.as_slice()),
                 mosfet_caps_valid.then_some(mosfet_caps_scratch.as_slice()),
                 suppress_gate_charge,
                 &tline_dc_refs,

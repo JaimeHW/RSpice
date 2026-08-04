@@ -278,7 +278,12 @@ impl Engine {
         current_abstol: Value,
         charge_abstol: Value,
         trtol: Value,
+        mut accepted_states_out: Option<&mut Vec<CapacitorAcceptedState>>,
     ) -> Option<Value> {
+        if let Some(states) = accepted_states_out.as_deref_mut() {
+            states.clear();
+            states.reserve(circuit.capacitors.stamps.len());
+        }
         if !prev_dt.is_finite() || prev_dt <= 0.0 {
             return None;
         }
@@ -299,6 +304,7 @@ impl Engine {
         )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
+        let mut accepted_states_complete = true;
 
         for (idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
             if circuit
@@ -312,10 +318,12 @@ impl Engine {
                 // integrated from C(V) between accepted points. The legacy
                 // static C*V truncation walk is not valid for that law; the
                 // generic accepted-solution LTE estimator remains active.
+                accepted_states_complete = false;
                 continue;
             }
             let capacitance = circuit.capacitors.capacitances[idx];
             if !capacitance.is_finite() || capacitance <= 0.0 {
+                accepted_states_complete = false;
                 continue;
             }
 
@@ -334,6 +342,18 @@ impl Engine {
             );
             let cq_curr = geq * voltage - ieq;
             let cq_prev = circuit.capacitors.i_prev[idx];
+            if let Some(states) = accepted_states_out.as_deref_mut() {
+                let accepted_current =
+                    if let Some(branch_ordinal) = circuit.capacitors.ic_branch_indices[idx] {
+                        candidate_solution[circuit.num_nodes() + branch_ordinal - 1]
+                    } else {
+                        cq_curr
+                    };
+                states.push(CapacitorAcceptedState {
+                    voltage,
+                    current: accepted_current,
+                });
+            }
 
             let Some(branch_limit) = truncation.limit(
                 q_curr,
@@ -347,6 +367,10 @@ impl Engine {
             };
             found_branch = true;
             limit = limit.min(branch_limit);
+        }
+
+        if !accepted_states_complete && let Some(states) = accepted_states_out {
+            states.clear();
         }
 
         found_branch.then_some(limit)
@@ -1775,6 +1799,7 @@ impl Engine {
                 current_abstol,
                 charge_abstol,
                 trtol,
+                None,
             )
             .filter(|limit| limit.is_finite() && *limit > 0.0)
         } else {
@@ -2431,6 +2456,92 @@ mod tests {
 
         assert!(!Engine::uses_ngspice_charge_truncation(&xyce));
         assert!(Engine::uses_ngspice_charge_truncation(&native));
+    }
+
+    #[test]
+    fn capacitor_truncation_exports_canonical_accepted_state_and_fails_closed() {
+        let mut circuit = build_truncation_circuit(
+            "Capacitor accepted-state handoff\n\
+V1 n 0 0\n\
+C1 n 0 2p\n\
+.TRAN 1n 10n\n\
+.END\n",
+        );
+        circuit.capacitors.v_prev[0] = 0.25;
+        circuit.capacitors.v_prev_prev[0] = -0.1;
+        circuit.capacitors.v_prev_prev_prev[0] = -0.2;
+        circuit.capacitors.i_prev[0] = 3.0e-6;
+        let mut candidate = vec![0.0; circuit.matrix_size()];
+        let node = circuit.get_node_by_name("n").expect("node exists");
+        candidate[node - 1] = 0.8;
+        let dt = 0.7e-9;
+        let prev_dt = 0.9e-9;
+        let prev_prev_dt = 1.1e-9;
+        let method = IntegrationMethod::Trapezoidal;
+        let trap_order = 2;
+        let mut states = vec![CapacitorAcceptedState {
+            voltage: Value::NAN,
+            current: Value::NAN,
+        }];
+
+        let _ = Engine::capacitor_ngspice_truncation_limit(
+            &circuit,
+            &candidate,
+            method,
+            trap_order,
+            dt,
+            prev_dt,
+            prev_prev_dt,
+            1.0e-3,
+            1.0e-12,
+            1.0e-14,
+            7.0,
+            Some(&mut states),
+        );
+
+        let coeff = CompanionCoefficients::for_method_with_previous_step(method, dt, prev_dt);
+        let capacitance = circuit.capacitors.capacitances[0];
+        let voltage = Engine::differential_voltage(
+            &candidate,
+            circuit.capacitors.stamps[0].pp.row,
+            circuit.capacitors.stamps[0].nn.row,
+        );
+        let geq = coeff.capacitor_geq(capacitance, dt);
+        let ieq = coeff.capacitor_ieq(
+            capacitance,
+            dt,
+            circuit.capacitors.v_prev[0],
+            circuit.capacitors.v_prev_prev[0],
+            circuit.capacitors.i_prev[0],
+        );
+        assert_eq!(
+            states
+                .iter()
+                .map(|state| (state.voltage.to_bits(), state.current.to_bits()))
+                .collect::<Vec<_>>(),
+            vec![(voltage.to_bits(), (geq * voltage - ieq).to_bits())],
+        );
+
+        circuit.capacitors.capacitances[0] = 0.0;
+        states.push(CapacitorAcceptedState {
+            voltage: 1.0,
+            current: 2.0,
+        });
+        let _ = Engine::capacitor_ngspice_truncation_limit(
+            &circuit,
+            &candidate,
+            method,
+            trap_order,
+            dt,
+            prev_dt,
+            prev_prev_dt,
+            1.0e-3,
+            1.0e-12,
+            1.0e-14,
+            7.0,
+            Some(&mut states),
+        );
+        assert!(states.is_empty(), "an incomplete handoff must fail closed");
     }
 
     fn build_truncation_circuit(deck: &str) -> crate::circuit::CircuitData {

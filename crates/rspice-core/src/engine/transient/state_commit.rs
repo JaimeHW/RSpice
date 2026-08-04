@@ -23,6 +23,7 @@ impl Engine {
         ekv26_history: &mut Ekv26TransientHistory,
         xyce_one_step_order2: bool,
         vbic_snapshots: Option<&[Option<BjtChargeSnapshot>]>,
+        capacitor_accepted_states: Option<&[CapacitorAcceptedState]>,
         mosfet_caps: Option<&[(Value, Value, Value)]>,
         suppress_gate_charge_history: bool,
         tline_dc_refs: &[(Value, Value)],
@@ -36,6 +37,8 @@ impl Engine {
         warned_dynamic_breakpoint_cap: &mut bool,
     ) -> Result<(), SimulationError> {
         let num_nodes = circuit.num_nodes();
+        let capacitor_accepted_states = capacitor_accepted_states
+            .filter(|states| states.len() == circuit.capacitors.stamps.len());
         for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
             if circuit
                 .capacitors
@@ -46,27 +49,33 @@ impl Engine {
             {
                 continue;
             }
-            let np = cap.pp.row;
-            let nn = cap.nn.row;
-            let v_new = Self::differential_voltage(accepted_solution, np, nn);
-
-            // An IC capacitor's MNA branch is its physical lead current and is
-            // the numerically authoritative value. Ordinary Norton companions
-            // have no branch, so reconstruct those from OLD history before
-            // rotating it.
-            let i_new = if let Some(branch_ordinal) = circuit.capacitors.ic_branch_indices[cap_idx]
-            {
-                accepted_solution[num_nodes + branch_ordinal - 1]
+            let (v_new, i_new) = if let Some(states) = capacitor_accepted_states {
+                let state = states[cap_idx];
+                (state.voltage, state.current)
             } else {
-                let geq = coeff.capacitor_geq(circuit.capacitors.capacitances[cap_idx], dt);
-                let ieq = coeff.capacitor_ieq(
-                    circuit.capacitors.capacitances[cap_idx],
-                    dt,
-                    circuit.capacitors.v_prev[cap_idx],
-                    circuit.capacitors.v_prev_prev[cap_idx],
-                    circuit.capacitors.i_prev[cap_idx],
-                );
-                geq * v_new - ieq
+                let np = cap.pp.row;
+                let nn = cap.nn.row;
+                let v_new = Self::differential_voltage(accepted_solution, np, nn);
+
+                // An IC capacitor's MNA branch is its physical lead current
+                // and is numerically authoritative. Ordinary Norton
+                // companions have no branch, so reconstruct those from OLD
+                // history before rotating it.
+                let i_new =
+                    if let Some(branch_ordinal) = circuit.capacitors.ic_branch_indices[cap_idx] {
+                        accepted_solution[num_nodes + branch_ordinal - 1]
+                    } else {
+                        let geq = coeff.capacitor_geq(circuit.capacitors.capacitances[cap_idx], dt);
+                        let ieq = coeff.capacitor_ieq(
+                            circuit.capacitors.capacitances[cap_idx],
+                            dt,
+                            circuit.capacitors.v_prev[cap_idx],
+                            circuit.capacitors.v_prev_prev[cap_idx],
+                            circuit.capacitors.i_prev[cap_idx],
+                        );
+                        geq * v_new - ieq
+                    };
+                (v_new, i_new)
             };
 
             let v_old = circuit.capacitors.v_prev[cap_idx];

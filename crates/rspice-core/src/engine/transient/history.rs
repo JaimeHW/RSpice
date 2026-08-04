@@ -208,6 +208,14 @@ pub(super) enum VbicCachedSnapshotReuse {
     NewtonBypass,
 }
 
+/// Candidate state already evaluated by the ordinary-capacitor CKTterr walk
+/// and eligible for an exact accepted-history handoff.
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct CapacitorAcceptedState {
+    pub(super) voltage: Value,
+    pub(super) current: Value,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(super) struct MosfetTransientHistory {
     pub(super) vgs_prev: Vec<Value>,
