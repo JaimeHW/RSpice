@@ -2434,6 +2434,16 @@ impl Engine {
                 transient_baseline_diag_gmin,
             )
         });
+        let mut diode_stamp_cache = (self.config.spice_dialect != SpiceDialect::Xyce
+            && circuit.has_cacheable_diode_transient_base())
+        .then(|| {
+            self.initialize_diode_transient_stamp_cache(
+                &circuit,
+                &mut matrix,
+                &mut rhs,
+                transient_baseline_diag_gmin,
+            )
+        });
         let mut new_solution = solution.clone();
         let mut linear_solution = Vec::with_capacity(size);
         let mut correction_rhs = Vec::with_capacity(size);
@@ -2915,6 +2925,18 @@ impl Engine {
                     xyce_one_step,
                 );
             }
+            if let Some(cache) = diode_stamp_cache.as_mut() {
+                self.prepare_diode_transient_attempt(
+                    cache,
+                    &circuit,
+                    &mut matrix,
+                    &mut rhs,
+                    step_time,
+                    dt,
+                    &coeff,
+                    xyce_one_step,
+                );
+            }
             let mut rejected_attempt_nonlinear_state = if circuit.has_nonlinear_devices() {
                 if let Some(mut snapshot) = rejected_attempt_nonlinear_state_scratch.take() {
                     circuit.refresh_transient_trial_state_snapshot(&mut snapshot);
@@ -3113,6 +3135,7 @@ impl Engine {
                     jfet_history: &jfet_history,
                     diode_history: &diode_history,
                     diode_companion_slots: &diode_companion_slots,
+                    diode_attempt_cache: diode_stamp_cache.as_ref(),
                     mosfet_history: &mosfet_history,
                     mosfet_companion_slots: &mosfet_companion_slots,
                     vdmos_history: &vdmos_history,
@@ -3693,6 +3716,7 @@ impl Engine {
                                         jfet_history: &jfet_history,
                                         diode_history: &diode_history,
                                         diode_companion_slots: &diode_companion_slots,
+                                        diode_attempt_cache: diode_stamp_cache.as_ref(),
                                         mosfet_history: &mosfet_history,
                                         mosfet_companion_slots: &mosfet_companion_slots,
                                         vdmos_history: &vdmos_history,
@@ -3889,6 +3913,7 @@ impl Engine {
                             jfet_history: &jfet_history,
                             diode_history: &diode_history,
                             diode_companion_slots: &diode_companion_slots,
+                            diode_attempt_cache: diode_stamp_cache.as_ref(),
                             mosfet_history: &mosfet_history,
                             mosfet_companion_slots: &mosfet_companion_slots,
                             vdmos_history: &vdmos_history,

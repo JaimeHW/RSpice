@@ -185,6 +185,35 @@ mod tests {
     }
 
     #[test]
+    fn diode_only_transient_base_capability_is_fail_closed() {
+        let mut circuit = CircuitData::new();
+        assert!(!circuit.has_cacheable_diode_transient_base());
+
+        circuit
+            .diodes
+            .add(crate::device::Diode::new("d1".to_string(), 1, 0));
+        assert!(circuit.has_cacheable_diode_transient_base());
+
+        circuit.mosfets.add(crate::device::Mosfet::new_nmos(
+            "m1".to_string(),
+            1,
+            2,
+            0,
+            0,
+        ));
+        assert!(!circuit.has_cacheable_diode_transient_base());
+
+        let mut with_inductor = CircuitData::new();
+        with_inductor
+            .diodes
+            .add(crate::device::Diode::new("d1".to_string(), 1, 0));
+        with_inductor
+            .inductors
+            .add("l1".to_string(), 1, 0, 1, 1.0e-3);
+        assert!(!with_inductor.has_cacheable_diode_transient_base());
+    }
+
+    #[test]
     fn nonlinear_snapshot_restores_compact_diode_state() {
         let mut circuit = CircuitData::new();
         circuit
@@ -282,6 +311,54 @@ impl CircuitData {
             && self.couplings.is_empty()
             && self.coupled_inductor_pairs.is_empty()
             && self.multi_winding_transformers.is_empty()
+    }
+
+    /// Whether a diode/ordinary-RC transient can restore its invariant and
+    /// per-attempt linear base instead of rebuilding it for every Newton and
+    /// physical-residual stamp.
+    ///
+    /// The capability is intentionally fail-closed around every other
+    /// nonlinear, behavioral, event-driven, or stateful linear family.
+    pub(crate) fn has_cacheable_diode_transient_base(&self) -> bool {
+        #[cfg(feature = "veriloga-builtins-base")]
+        let has_generated_veriloga = self.has_generated_veriloga_devices();
+        #[cfg(not(feature = "veriloga-builtins-base"))]
+        let has_generated_veriloga = false;
+        #[cfg(feature = "veriloga")]
+        let has_dynamic_veriloga = self.has_veriloga_devices();
+        #[cfg(not(feature = "veriloga"))]
+        let has_dynamic_veriloga = false;
+
+        !self.diodes.is_empty()
+            && !self.capacitors.has_solution_dependent_values()
+            && self.mosfets.is_empty()
+            && self.bjts.is_empty()
+            && self.b3soi.is_empty()
+            && self.b3soi_fd.is_empty()
+            && self.b3soi_pd.is_empty()
+            && self.bsim3v3.is_empty()
+            && self.bsim4v8.is_empty()
+            && self.ekv26s.is_empty()
+            && self.ekv3s.is_empty()
+            && self.vdmoses.is_empty()
+            && self.jfets.is_empty()
+            && self.xyce_memristors.is_empty()
+            && self.vswitches.is_empty()
+            && self.iswitches.is_empty()
+            && self.generic_switches.is_empty()
+            && self.jiles_atherton_inductors.is_empty()
+            && self.xyce_core_groups.is_empty()
+            && self.behavioral_sources.is_empty()
+            && self.resistors.thermal.iter().all(Option::is_none)
+            && self.inductors.is_empty()
+            && self.tlines.is_empty()
+            && self.coupled_tlines.is_empty()
+            && self.couplings.is_empty()
+            && self.coupled_inductor_pairs.is_empty()
+            && self.multi_winding_transformers.is_empty()
+            && !self.has_xspice_devices()
+            && !has_generated_veriloga
+            && !has_dynamic_veriloga
     }
 
     fn has_non_xspice_nonlinear_devices(&self) -> bool {
