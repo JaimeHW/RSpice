@@ -2464,6 +2464,9 @@ impl Engine {
         let mut mosfet_caps_scratch: Vec<(Value, Value, Value)> = Vec::new();
         let mut mosfet_caps_valid;
         let mut mosfet_companion_terms_scratch: Vec<MosfetCompanionBranchTerms> = Vec::new();
+        let mut mosfet_static_terms_scratch: Vec<
+            crate::device::mosfet::ClassicMosCachedStaticTerms,
+        > = Vec::new();
         let mut mosfet_companion_terms_valid;
         let mut mosfet_companion_charges_scratch: Vec<MosfetGateCompanionCharges> = Vec::new();
         let mut classic_mos_residual_scratch = classic_mos_stamp_cache
@@ -3129,6 +3132,7 @@ impl Engine {
                         crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
                         None,
                         Some(&mut mosfet_companion_terms_scratch),
+                        Some(&mut mosfet_static_terms_scratch),
                         None,
                     )?;
                 } else {

@@ -79,6 +79,7 @@ pub(super) struct ClassicMosTransientStampCache {
     attempt_values: Vec<Value>,
     attempt_rhs: Vec<Value>,
     device_constants: Vec<crate::device::mosfet::ClassicMosTransientConstants>,
+    static_stamp_plans: Vec<crate::device::mosfet::ClassicMosStaticStampPlan>,
     direct_residual_has_bounded_row_fan_in: bool,
 }
 
@@ -181,6 +182,23 @@ impl Engine {
                 .iter()
                 .map(crate::device::Mosfet::classic_transient_constants),
         );
+        #[cfg(feature = "parallel")]
+        let use_compact_static_stamps = self
+            .classic_mos_parallel_worker_count(circuit.mosfets.len())
+            .is_none();
+        #[cfg(not(feature = "parallel"))]
+        let use_compact_static_stamps = true;
+        if use_compact_static_stamps {
+            let plans = circuit
+                .mosfets
+                .devices
+                .iter()
+                .map(|mosfet| mosfet.classic_static_stamp_plan(matrix))
+                .collect::<Option<Vec<_>>>();
+            if let Some(plans) = plans {
+                cache.static_stamp_plans = plans;
+            }
+        }
         let mut node_incidence = vec![0_usize; circuit.num_nodes().saturating_add(1)];
         cache.direct_residual_has_bounded_row_fan_in =
             circuit.mosfets.devices.iter().all(|mosfet| {
@@ -258,6 +276,7 @@ impl Engine {
         evaluation_mode: crate::device::veriloga_builtins::GeneratedEvaluationMode,
         companion_terms_cache: Option<&[MosfetCompanionBranchTerms]>,
         mut companion_terms_out: Option<&mut Vec<MosfetCompanionBranchTerms>>,
+        mut static_terms_out: Option<&mut Vec<crate::device::mosfet::ClassicMosCachedStaticTerms>>,
         mut caps_cache_out: Option<&mut Vec<(Value, Value, Value)>>,
     ) -> Result<(), SimulationError> {
         debug_assert!(circuit.has_cacheable_classic_mos_transient_base());
@@ -271,9 +290,14 @@ impl Engine {
         } else {
             *ctx.coeff
         };
+        let mut local_static_terms = Vec::new();
+        let mut fused_static_terms = None;
         let fused_companion_terms =
             if refresh_nonlinear && !static_probe && companion_terms_cache.is_none() {
                 if let Some(terms) = companion_terms_out.as_deref_mut() {
+                    let static_terms = static_terms_out
+                        .as_deref_mut()
+                        .unwrap_or(&mut local_static_terms);
                     self.update_classic_mos_with_companion_terms_only(
                         circuit,
                         solution,
@@ -283,7 +307,13 @@ impl Engine {
                         ctx.mosfet_history,
                         ctx.suppress_gate_charge,
                         terms,
+                        static_terms,
                     )?;
+                    if static_terms.len() == cache.static_stamp_plans.len()
+                        && !static_terms.is_empty()
+                    {
+                        fused_static_terms = Some(static_terms.as_slice());
+                    }
                     Some(terms.as_slice())
                 } else {
                     self.update_transient_nonlinear_devices(circuit, solution)?;
@@ -337,6 +367,11 @@ impl Engine {
             circuit
                 .mosfets
                 .stamp_all_static_probe_direct(matrix, rhs, solution);
+        } else if let Some(static_terms) = fused_static_terms {
+            debug_assert_eq!(static_terms.len(), cache.static_stamp_plans.len());
+            for (plan, terms) in cache.static_stamp_plans.iter().zip(static_terms) {
+                crate::device::Mosfet::stamp_classic_cached_static_terms(matrix, rhs, plan, terms);
+            }
         } else {
             circuit.mosfets.stamp_all_cached_direct(matrix, rhs);
         }
@@ -357,11 +392,13 @@ impl Engine {
         history: &MosfetTransientHistory,
         suppress_gate_charge: bool,
         terms: &mut Vec<MosfetCompanionBranchTerms>,
+        static_terms: &mut Vec<crate::device::mosfet::ClassicMosCachedStaticTerms>,
     ) -> Result<(), SimulationError> {
         debug_assert!(circuit.has_cacheable_classic_mos_transient_base());
         let instance_count = circuit.mosfets.len();
         debug_assert_eq!(constants.len(), instance_count);
         terms.resize(instance_count, [(0.0, 0.0); 5]);
+        static_terms.clear();
 
         #[cfg(feature = "parallel")]
         {
@@ -414,12 +451,14 @@ impl Engine {
         }
 
         let mut all_physical = true;
-        for (idx, ((device, constants), term)) in circuit
+        static_terms.resize(instance_count, Default::default());
+        for (idx, (((device, constants), term), static_terms)) in circuit
             .mosfets
             .devices
             .iter_mut()
             .zip(constants)
             .zip(terms)
+            .zip(static_terms)
             .enumerate()
         {
             device.update_with_classic_transient_constants(solution, constants);
@@ -435,6 +474,7 @@ impl Engine {
                 Some(constants),
             );
             *term = evaluated_terms;
+            *static_terms = device.classic_cached_static_terms();
             all_physical &= device.cached_linearization_is_physical();
         }
         circuit
@@ -1283,6 +1323,7 @@ impl Engine {
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
                 canonical_companion_terms,
                 None,
+                None,
                 classic_mos_caps_out,
             )?;
         } else {
@@ -1574,6 +1615,7 @@ M1 d g 0 0 NM W=10u L=1u
                 None,
                 None,
                 None,
+                None,
             )
             .expect("cached assembly succeeds");
 
@@ -1594,6 +1636,7 @@ M1 d g 0 0 NM W=10u L=1u
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
                 None,
                 Some(&mut newton_companion_terms),
+                None,
                 None,
             )
             .expect("fused Newton assembly succeeds");
@@ -1643,6 +1686,7 @@ M1 d g 0 0 NM W=10u L=1u
                 false,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
                 Some(&companion_terms),
+                None,
                 None,
                 Some(&mut companion_caps),
             )

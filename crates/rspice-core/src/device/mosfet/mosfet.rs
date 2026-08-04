@@ -83,6 +83,41 @@ pub(crate) struct ClassicMosTransientConstants {
     overlap_capacitances: (Value, Value, Value),
 }
 
+/// Compact Newton linearization consumed by the classic-MOS transient
+/// assembler. Keeping these eight scalars contiguous avoids revisiting the
+/// complete model-card-sized [`Mosfet`] object after its evaluation pass.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ClassicMosCachedStaticTerms {
+    gm: Value,
+    gds: Value,
+    gmb: Value,
+    id_eq: Value,
+    gbs: Value,
+    ieq_bs: Value,
+    gbd: Value,
+    ieq_bd: Value,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ClassicMosDiodeStampPlan {
+    anode: NodeId,
+    cathode: NodeId,
+    aa: Option<CscIndex>,
+    ac: Option<CscIndex>,
+    ca: Option<CscIndex>,
+    cc: Option<CscIndex>,
+}
+
+/// Run-invariant direct-stamp locations for a classic MOS instance.
+#[derive(Debug, Clone)]
+pub(crate) struct ClassicMosStaticStampPlan {
+    indices: MosfetIndices,
+    node_drain: NodeId,
+    node_source: NodeId,
+    body_source: ClassicMosDiodeStampPlan,
+    body_drain: ClassicMosDiodeStampPlan,
+}
+
 /// MOSFET device supporting native Berkeley MOS levels and related model paths.
 ///
 /// Terminal connections:

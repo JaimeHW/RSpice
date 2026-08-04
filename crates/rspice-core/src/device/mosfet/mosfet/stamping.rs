@@ -1,6 +1,161 @@
 use super::*;
 
 impl Mosfet {
+    #[inline]
+    fn classic_diode_stamp_plan(
+        matrix: &StaticMatrix,
+        anode: NodeId,
+        cathode: NodeId,
+    ) -> Option<ClassicMosDiodeStampPlan> {
+        let index = |row: NodeId, column: NodeId| {
+            (row > 0 && column > 0)
+                .then(|| matrix.get_index(row - 1, column - 1))
+                .flatten()
+        };
+        let plan = ClassicMosDiodeStampPlan {
+            anode,
+            cathode,
+            aa: index(anode, anode),
+            ac: index(anode, cathode),
+            ca: index(cathode, anode),
+            cc: index(cathode, cathode),
+        };
+        let complete = (anode == 0 || plan.aa.is_some())
+            && (anode == 0 || cathode == 0 || plan.ac.is_some())
+            && (cathode == 0 || anode == 0 || plan.ca.is_some())
+            && (cathode == 0 || plan.cc.is_some());
+        complete.then_some(plan)
+    }
+
+    /// Capture the immutable sparse locations used by the compact transient
+    /// linearization stream. This is performed once after the matrix pattern
+    /// is linked, never in a Newton iteration.
+    pub(crate) fn classic_static_stamp_plan(
+        &self,
+        matrix: &StaticMatrix,
+    ) -> Option<ClassicMosStaticStampPlan> {
+        let channel_complete = [
+            (self.node_drain, self.node_drain, self.indices.dd),
+            (self.node_drain, self.node_gate, self.indices.dg),
+            (self.node_drain, self.node_source, self.indices.ds),
+            (self.node_drain, self.node_bulk, self.indices.db),
+            (self.node_source, self.node_drain, self.indices.sd),
+            (self.node_source, self.node_gate, self.indices.sg),
+            (self.node_source, self.node_source, self.indices.ss),
+            (self.node_source, self.node_bulk, self.indices.sb),
+        ]
+        .into_iter()
+        .all(|(row, column, index)| row == 0 || column == 0 || index.is_some());
+        if !channel_complete {
+            return None;
+        }
+        let (bs_anode, bs_cathode) = self.body_source_diode_nodes();
+        let (bd_anode, bd_cathode) = self.body_drain_diode_nodes();
+        Some(ClassicMosStaticStampPlan {
+            indices: self.indices.clone(),
+            node_drain: self.node_drain,
+            node_source: self.node_source,
+            body_source: Self::classic_diode_stamp_plan(matrix, bs_anode, bs_cathode)?,
+            body_drain: Self::classic_diode_stamp_plan(matrix, bd_anode, bd_cathode)?,
+        })
+    }
+
+    /// Export the already-evaluated static terms without repeating any device
+    /// law. The arithmetic order matches `stamp_cached_direct` exactly.
+    #[inline]
+    pub(crate) fn classic_cached_static_terms(&self) -> ClassicMosCachedStaticTerms {
+        debug_assert!(self.has_branch_history);
+        let (_, _, gbs, ieq_bs) =
+            self.body_source_junction_linearization_cached(self.eval_vbs, true);
+        let (_, _, gbd, ieq_bd) =
+            self.body_drain_junction_linearization_cached(self.eval_vds, self.eval_vbs, true);
+        ClassicMosCachedStaticTerms {
+            gm: self.gm,
+            gds: self.gds,
+            gmb: self.gmb,
+            id_eq: self.id_eq,
+            gbs,
+            ieq_bs,
+            gbd,
+            ieq_bd,
+        }
+    }
+
+    #[inline]
+    fn stamp_classic_diode_plan(
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        plan: &ClassicMosDiodeStampPlan,
+        conductance: Value,
+        equivalent_current: Value,
+    ) {
+        if conductance == 0.0 && equivalent_current == 0.0 {
+            return;
+        }
+        if let Some(index) = plan.aa {
+            matrix.stamp_direct(index, conductance);
+        }
+        if let Some(index) = plan.ac {
+            matrix.stamp_direct(index, -conductance);
+        }
+        if plan.anode > 0 {
+            rhs[plan.anode - 1] -= equivalent_current;
+        }
+        if let Some(index) = plan.ca {
+            matrix.stamp_direct(index, -conductance);
+        }
+        if let Some(index) = plan.cc {
+            matrix.stamp_direct(index, conductance);
+        }
+        if plan.cathode > 0 {
+            rhs[plan.cathode - 1] += equivalent_current;
+        }
+    }
+
+    /// Stamp a compact cached linearization through its prelinked plan.
+    /// Contributions retain the canonical per-device ordering exactly.
+    #[inline]
+    pub(crate) fn stamp_classic_cached_static_terms(
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        plan: &ClassicMosStaticStampPlan,
+        terms: &ClassicMosCachedStaticTerms,
+    ) {
+        let source_diagonal = terms.gm + terms.gds + terms.gmb;
+        if let Some(index) = plan.indices.dd {
+            matrix.stamp_direct(index, terms.gds);
+        }
+        if let Some(index) = plan.indices.dg {
+            matrix.stamp_direct(index, terms.gm);
+        }
+        if let Some(index) = plan.indices.ds {
+            matrix.stamp_direct(index, -terms.gm - terms.gds - terms.gmb);
+        }
+        if let Some(index) = plan.indices.db {
+            matrix.stamp_direct(index, terms.gmb);
+        }
+        if let Some(index) = plan.indices.sd {
+            matrix.stamp_direct(index, -terms.gds);
+        }
+        if let Some(index) = plan.indices.sg {
+            matrix.stamp_direct(index, -terms.gm);
+        }
+        if let Some(index) = plan.indices.ss {
+            matrix.stamp_direct(index, source_diagonal);
+        }
+        if let Some(index) = plan.indices.sb {
+            matrix.stamp_direct(index, -terms.gmb);
+        }
+        if plan.node_drain > 0 {
+            rhs[plan.node_drain - 1] -= terms.id_eq;
+        }
+        if plan.node_source > 0 {
+            rhs[plan.node_source - 1] += terms.id_eq;
+        }
+        Self::stamp_classic_diode_plan(matrix, rhs, &plan.body_source, terms.gbs, terms.ieq_bs);
+        Self::stamp_classic_diode_plan(matrix, rhs, &plan.body_drain, terms.gbd, terms.ieq_bd);
+    }
+
     /// Link this device to a StaticMatrix for O(1) stamping
     pub fn link(&mut self, matrix: &StaticMatrix) {
         let d = self.node_drain;
