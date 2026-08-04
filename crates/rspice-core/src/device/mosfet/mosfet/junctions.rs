@@ -277,6 +277,21 @@ impl Mosfet {
         self.body_drain_diode_voltage(vds, vbs)
     }
 
+    /// Structural presence mask for the source/drain depletion-charge branches.
+    ///
+    /// Classic MOS models commonly omit CJ/CJSW and explicit CBD/CBS.  In
+    /// that case these branches are identically zero for every bias and can be
+    /// left out of the transient hot path.  Bit 0 denotes source-body charge;
+    /// bit 1 denotes drain-body charge.
+    #[inline]
+    pub(crate) fn body_junction_charge_mask(&self) -> u8 {
+        let source_active = self.source_zero_bias_bottom_junction_capacitance() > 0.0
+            || self.source_zero_bias_sidewall_junction_capacitance() > 0.0;
+        let drain_active = self.drain_zero_bias_bottom_junction_capacitance() > 0.0
+            || self.drain_zero_bias_sidewall_junction_capacitance() > 0.0;
+        u8::from(source_active) | (u8::from(drain_active) << 1)
+    }
+
     #[inline]
     pub(in crate::device::mosfet::mosfet) fn body_source_junction_current_and_conductance(
         &self,
@@ -493,5 +508,29 @@ mod tests {
             gmin,
             "ngspice reverse conductance",
         );
+    }
+
+    #[test]
+    fn body_junction_charge_mask_tracks_only_structurally_active_branches() {
+        let mut mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 0);
+        assert_eq!(mos.body_junction_charge_mask(), 0);
+
+        mos.cj = 2.0e-4;
+        mos.source_area = 1.0e-12;
+        assert_eq!(mos.body_junction_charge_mask(), 1);
+
+        mos.drain_area = 2.0e-12;
+        assert_eq!(mos.body_junction_charge_mask(), 3);
+
+        mos.cj = 0.0;
+        mos.source_area = 0.0;
+        mos.drain_area = 0.0;
+        mos.source_bulk_cap_zero_bias = Some(3.0e-15);
+        assert_eq!(mos.body_junction_charge_mask(), 1);
+
+        mos.source_bulk_cap_zero_bias = None;
+        mos.cjsw = 5.0e-10;
+        mos.drain_perimeter = 4.0e-6;
+        assert_eq!(mos.body_junction_charge_mask(), 2);
     }
 }

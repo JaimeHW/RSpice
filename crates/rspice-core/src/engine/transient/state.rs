@@ -1093,34 +1093,39 @@ impl Engine {
             terms[2] = (geq_gb, ieq_gb);
         }
 
-        let vbs_j = mos.body_source_charge_branch_voltage(vbs_eval);
-        let vbd_j = mos.body_drain_charge_branch_voltage(vds_eval, vbs_eval);
-        let (qbs_curr, cbs) = mos.body_source_junction_charge_and_capacitance_at(vbs_eval);
-        let (qbd_curr, cbd) = mos.body_drain_junction_charge_and_capacitance_at(vds_eval, vbs_eval);
+        let body_charge_mask = mos.body_junction_charge_mask();
+        if body_charge_mask & 1 != 0 {
+            let vbs_j = mos.body_source_charge_branch_voltage(vbs_eval);
+            let (qbs_curr, cbs) = mos.body_source_junction_charge_and_capacitance_at(vbs_eval);
+            let (geq_bs, ieq_bs, _q, _cq) = Self::nonlinear_charge_companion_terms(
+                coeff,
+                dt,
+                cbs,
+                vbs_j,
+                qbs_curr,
+                history.qbs_prev[idx],
+                history.qbs_prev_prev[idx],
+                history.cqbs_prev[idx],
+            );
+            terms[3] = (geq_bs, ieq_bs);
+        }
 
-        let (geq_bs, ieq_bs, _q, _cq) = Self::nonlinear_charge_companion_terms(
-            coeff,
-            dt,
-            cbs,
-            vbs_j,
-            qbs_curr,
-            history.qbs_prev[idx],
-            history.qbs_prev_prev[idx],
-            history.cqbs_prev[idx],
-        );
-        terms[3] = (geq_bs, ieq_bs);
-
-        let (geq_bd, ieq_bd, _q, _cq) = Self::nonlinear_charge_companion_terms(
-            coeff,
-            dt,
-            cbd,
-            vbd_j,
-            qbd_curr,
-            history.qbd_prev[idx],
-            history.qbd_prev_prev[idx],
-            history.cqbd_prev[idx],
-        );
-        terms[4] = (geq_bd, ieq_bd);
+        if body_charge_mask & 2 != 0 {
+            let vbd_j = mos.body_drain_charge_branch_voltage(vds_eval, vbs_eval);
+            let (qbd_curr, cbd) =
+                mos.body_drain_junction_charge_and_capacitance_at(vds_eval, vbs_eval);
+            let (geq_bd, ieq_bd, _q, _cq) = Self::nonlinear_charge_companion_terms(
+                coeff,
+                dt,
+                cbd,
+                vbd_j,
+                qbd_curr,
+                history.qbd_prev[idx],
+                history.qbd_prev_prev[idx],
+                history.cqbd_prev[idx],
+            );
+            terms[4] = (geq_bd, ieq_bd);
+        }
 
         terms
     }

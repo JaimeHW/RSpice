@@ -607,41 +607,48 @@ impl Engine {
                 mosfet_history.cqgb_prev[idx] = cqgb_curr;
             }
 
-            let vbs_j = mos.body_source_charge_branch_voltage(vbs);
-            let vbd_j = mos.body_drain_charge_branch_voltage(vds, vbs);
-            let (qbs_exact, cbs) = mos.body_source_junction_charge_and_capacitance_at(vbs);
-            let (_geq_bs, _ieq_bs, qbs_curr, cqbs_curr) = Self::nonlinear_charge_companion_terms(
-                coeff,
-                dt,
-                cbs,
-                vbs_j,
-                qbs_exact,
-                mosfet_history.qbs_prev[idx],
-                mosfet_history.qbs_prev_prev[idx],
-                mosfet_history.cqbs_prev[idx],
-            );
-            mosfet_history.vbs_j_prev_prev[idx] = mosfet_history.vbs_j_prev[idx];
-            mosfet_history.vbs_j_prev[idx] = vbs_j;
-            mosfet_history.qbs_prev_prev[idx] = mosfet_history.qbs_prev[idx];
-            mosfet_history.qbs_prev[idx] = qbs_curr;
-            mosfet_history.cqbs_prev[idx] = cqbs_curr;
+            let body_charge_mask = mos.body_junction_charge_mask();
+            if body_charge_mask & 1 != 0 {
+                let vbs_j = mos.body_source_charge_branch_voltage(vbs);
+                let (qbs_exact, cbs) = mos.body_source_junction_charge_and_capacitance_at(vbs);
+                let (_geq_bs, _ieq_bs, qbs_curr, cqbs_curr) =
+                    Self::nonlinear_charge_companion_terms(
+                        coeff,
+                        dt,
+                        cbs,
+                        vbs_j,
+                        qbs_exact,
+                        mosfet_history.qbs_prev[idx],
+                        mosfet_history.qbs_prev_prev[idx],
+                        mosfet_history.cqbs_prev[idx],
+                    );
+                mosfet_history.vbs_j_prev_prev[idx] = mosfet_history.vbs_j_prev[idx];
+                mosfet_history.vbs_j_prev[idx] = vbs_j;
+                mosfet_history.qbs_prev_prev[idx] = mosfet_history.qbs_prev[idx];
+                mosfet_history.qbs_prev[idx] = qbs_curr;
+                mosfet_history.cqbs_prev[idx] = cqbs_curr;
+            }
 
-            let (qbd_exact, cbd) = mos.body_drain_junction_charge_and_capacitance_at(vds, vbs);
-            let (_geq_bd, _ieq_bd, qbd_curr, cqbd_curr) = Self::nonlinear_charge_companion_terms(
-                coeff,
-                dt,
-                cbd,
-                vbd_j,
-                qbd_exact,
-                mosfet_history.qbd_prev[idx],
-                mosfet_history.qbd_prev_prev[idx],
-                mosfet_history.cqbd_prev[idx],
-            );
-            mosfet_history.vbd_j_prev_prev[idx] = mosfet_history.vbd_j_prev[idx];
-            mosfet_history.vbd_j_prev[idx] = vbd_j;
-            mosfet_history.qbd_prev_prev[idx] = mosfet_history.qbd_prev[idx];
-            mosfet_history.qbd_prev[idx] = qbd_curr;
-            mosfet_history.cqbd_prev[idx] = cqbd_curr;
+            if body_charge_mask & 2 != 0 {
+                let vbd_j = mos.body_drain_charge_branch_voltage(vds, vbs);
+                let (qbd_exact, cbd) = mos.body_drain_junction_charge_and_capacitance_at(vds, vbs);
+                let (_geq_bd, _ieq_bd, qbd_curr, cqbd_curr) =
+                    Self::nonlinear_charge_companion_terms(
+                        coeff,
+                        dt,
+                        cbd,
+                        vbd_j,
+                        qbd_exact,
+                        mosfet_history.qbd_prev[idx],
+                        mosfet_history.qbd_prev_prev[idx],
+                        mosfet_history.cqbd_prev[idx],
+                    );
+                mosfet_history.vbd_j_prev_prev[idx] = mosfet_history.vbd_j_prev[idx];
+                mosfet_history.vbd_j_prev[idx] = vbd_j;
+                mosfet_history.qbd_prev_prev[idx] = mosfet_history.qbd_prev[idx];
+                mosfet_history.qbd_prev[idx] = qbd_curr;
+                mosfet_history.cqbd_prev[idx] = cqbd_curr;
+            }
         }
         mosfet_history.accepted_dt_prev_prev = mosfet_history.accepted_dt_prev;
         mosfet_history.accepted_dt_prev = dt;
