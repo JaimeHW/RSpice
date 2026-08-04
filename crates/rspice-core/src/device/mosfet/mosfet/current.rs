@@ -145,6 +145,22 @@ impl Mosfet {
         vds: Value,
         vbs: Value,
     ) -> (Value, MosRegion, Value, Value, Value) {
+        let phi = self.phi.max(1.0e-12);
+        let sqrt_phi = phi.sqrt();
+        let effective_length = (self.l - 2.0 * self.ld).max(1.0e-12);
+        let beta = self.kp * self.w / effective_length;
+        self.level1_operating_point_with_constants(vgs, vds, vbs, sqrt_phi, beta)
+    }
+
+    #[inline]
+    pub(in crate::device::mosfet::mosfet) fn level1_operating_point_with_constants(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+        sqrt_phi: Value,
+        beta: Value,
+    ) -> (Value, MosRegion, Value, Value, Value) {
         if !vgs.is_finite() || !vds.is_finite() || !vbs.is_finite() {
             return (0.0, MosRegion::Cutoff, 0.0, 0.0, 0.0);
         }
@@ -162,8 +178,9 @@ impl Mosfet {
         let vg_active = if mode > 0.0 { vgs_m } else { vgd_m };
 
         let phi = self.phi.max(1.0e-12);
-        let sqrt_phi = phi.sqrt();
-        let sarg = if vbsvbd <= 0.0 {
+        let sarg = if vbsvbd == 0.0 {
+            sqrt_phi
+        } else if vbsvbd < 0.0 {
             (phi - vbsvbd).max(0.0).sqrt()
         } else {
             (sqrt_phi - vbsvbd / (sqrt_phi + sqrt_phi)).max(0.0)
@@ -180,8 +197,6 @@ impl Mosfet {
         } else {
             self.gamma / (sarg + sarg)
         };
-        let effective_length = (self.l - 2.0 * self.ld).max(1.0e-12);
-        let beta = self.kp * self.w / effective_length;
         let betap = beta * (1.0 + self.lambda * vdshere);
 
         let (cdrain, region, gm_model, gds_model, gmb_model) = if vgst <= vdshere {

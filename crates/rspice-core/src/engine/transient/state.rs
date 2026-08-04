@@ -1023,6 +1023,7 @@ impl Engine {
                 history,
                 suppress_gate_charge,
                 use_verified_cached_bias,
+                None,
             );
             if let Some(cache) = caps_cache.as_deref_mut() {
                 cache.push(caps);
@@ -1081,6 +1082,7 @@ impl Engine {
         history: &MosfetTransientHistory,
         suppress_gate_charge: bool,
         use_verified_cached_bias: bool,
+        constants: Option<&crate::device::mosfet::ClassicMosTransientConstants>,
     ) -> (
         MosfetCompanionBranchTerms,
         MosfetGateCompanionCharges,
@@ -1100,10 +1102,19 @@ impl Engine {
         };
 
         if !suppress_gate_charge {
-            let (cgs_half, cgd_half, cgb_half) =
-                mos.transient_capacitance_halves_at(vgs_eval, vds_eval, vbs_eval);
+            let (cgs_half, cgd_half, cgb_half) = if let Some(constants) = constants {
+                mos.transient_capacitance_halves_with_constants(
+                    vgs_eval, vds_eval, vbs_eval, constants,
+                )
+            } else {
+                mos.transient_capacitance_halves_at(vgs_eval, vds_eval, vbs_eval)
+            };
             caps = (cgs_half, cgd_half, cgb_half);
-            let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
+            let (cgs_ov, cgd_ov, cgb_ov) = if let Some(constants) = constants {
+                mos.overlap_capacitances_with_constants(constants)
+            } else {
+                mos.overlap_capacitances()
+            };
             let cgs = cgs_half + history.capgs_prev_half[idx] + cgs_ov;
             let cgd = cgd_half + history.capgd_prev_half[idx] + cgd_ov;
             let cgb = cgb_half + history.capgb_prev_half[idx] + cgb_ov;

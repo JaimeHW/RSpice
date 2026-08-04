@@ -1,7 +1,21 @@
 use super::*;
 
-impl NonlinearDevice for Mosfet {
-    fn update(&mut self, voltages: &[Value]) {
+impl Mosfet {
+    #[inline]
+    pub(crate) fn update_with_classic_transient_constants(
+        &mut self,
+        voltages: &[Value],
+        constants: &ClassicMosTransientConstants,
+    ) {
+        self.update_impl(voltages, Some(constants));
+    }
+
+    #[inline]
+    fn update_impl(
+        &mut self,
+        voltages: &[Value],
+        constants: Option<&ClassicMosTransientConstants>,
+    ) {
         self.vgs_prev = self.vgs;
         self.vds_prev = self.vds;
         self.vbs_prev = self.vbs;
@@ -27,7 +41,11 @@ impl NonlinearDevice for Mosfet {
         }
 
         let (vgs, vds, vbs) = self.branch_voltages(voltages);
-        let (eval_vgs, eval_vds, eval_vbs) = self.limited_branch_voltages_for_eval(vgs, vds, vbs);
+        let (eval_vgs, eval_vds, eval_vbs) = if let Some(constants) = constants {
+            self.limited_branch_voltages_for_transient_eval(vgs, vds, vbs, constants)
+        } else {
+            self.limited_branch_voltages_for_eval(vgs, vds, vbs)
+        };
         self.vgs = vgs;
         self.vds = vds;
         self.vbs = vbs;
@@ -35,8 +53,16 @@ impl NonlinearDevice for Mosfet {
         self.eval_vds = eval_vds;
         self.eval_vbs = eval_vbs;
 
-        let (id, region, gm, gds, gmb, id_eq) =
-            self.linearized_operating_point(self.eval_vgs, self.eval_vds, self.eval_vbs);
+        let (id, region, gm, gds, gmb, id_eq) = if let Some(constants) = constants {
+            self.linearized_transient_operating_point(
+                self.eval_vgs,
+                self.eval_vds,
+                self.eval_vbs,
+                constants,
+            )
+        } else {
+            self.linearized_operating_point(self.eval_vgs, self.eval_vds, self.eval_vbs)
+        };
         self.id = id;
         self.region = region;
         self.gm = gm;
@@ -47,6 +73,12 @@ impl NonlinearDevice for Mosfet {
         (self.ibd, self.gbd) =
             self.body_drain_junction_current_and_conductance(self.eval_vds, self.eval_vbs);
         self.has_branch_history = true;
+    }
+}
+
+impl NonlinearDevice for Mosfet {
+    fn update(&mut self, voltages: &[Value]) {
+        self.update_impl(voltages, None);
     }
 
     fn stamp_nonlinear(
@@ -161,5 +193,86 @@ impl NonlinearDevice for Mosfet {
             reltol * bulk_current.abs().max(bulk_current_hat.abs()) + current_tol;
 
         (bulk_current_hat - bulk_current).abs() < bulk_current_tol
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_tuple_bits_eq(
+        actual: (Value, Value, Value),
+        expected: (Value, Value, Value),
+        context: &str,
+    ) {
+        assert_eq!(
+            [actual.0.to_bits(), actual.1.to_bits(), actual.2.to_bits()],
+            [
+                expected.0.to_bits(),
+                expected.1.to_bits(),
+                expected.2.to_bits(),
+            ],
+            "{context}"
+        );
+    }
+
+    #[test]
+    fn classic_transient_constants_match_canonical_models_and_polarities() {
+        let candidates = [
+            [0.0, 0.0, 0.0, 0.0],
+            [0.25, 1.4, 0.0, -0.15],
+            [-0.4, 0.3, 0.1, 0.35],
+            [2.8, 3.1, -0.2, 0.6],
+        ];
+
+        for level in [1, 2, 3, 6] {
+            for mut canonical in [
+                Mosfet::new_nmos(format!("mn{level}"), 1, 2, 3, 4).with_level(level),
+                Mosfet::new_pmos(format!("mp{level}"), 1, 2, 3, 4).with_level(level),
+            ] {
+                canonical.l = 1.3e-6;
+                canonical.w = 7.1e-6;
+                canonical.ld = 0.08e-6;
+                canonical.kp = 93.0e-6;
+                canonical.gamma = 0.42;
+                canonical.phi = 0.67;
+                canonical.lambda = 0.025;
+                canonical.cox = 1.7e-3;
+                canonical.cgso = 0.23e-9;
+                canonical.cgdo = 0.31e-9;
+                canonical.cgbo = 0.11e-9;
+                canonical.is_bulk = 1.3e-14;
+                canonical.js_bulk = 2.1e-5;
+                canonical.source_area = 1.2e-12;
+                canonical.drain_area = 1.8e-12;
+
+                let mut prepared = canonical.clone();
+                let constants = prepared.classic_transient_constants();
+                assert_tuple_bits_eq(
+                    prepared.overlap_capacitances_with_constants(&constants),
+                    canonical.overlap_capacitances(),
+                    "cached overlap capacitances must match the canonical evaluator",
+                );
+
+                for candidate in candidates {
+                    canonical.update(&candidate);
+                    prepared.update_with_classic_transient_constants(&candidate, &constants);
+                    assert_eq!(
+                        prepared.nonlinear_state_snapshot(),
+                        canonical.nonlinear_state_snapshot(),
+                        "cached nonlinear state differs for level {level}, {:?}, candidate {candidate:?}",
+                        canonical.mos_type
+                    );
+
+                    let (vgs, vds, vbs) = canonical.cached_eval_branch_voltages().unwrap();
+                    assert_tuple_bits_eq(
+                        prepared
+                            .transient_capacitance_halves_with_constants(vgs, vds, vbs, &constants),
+                        canonical.transient_capacitance_halves_at(vgs, vds, vbs),
+                        "cached Meyer capacitances must match the canonical evaluator",
+                    );
+                }
+            }
+        }
     }
 }

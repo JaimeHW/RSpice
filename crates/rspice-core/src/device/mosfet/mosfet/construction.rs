@@ -293,6 +293,30 @@ impl Mosfet {
         vt * arg.ln()
     }
 
+    /// Prepare the immutable scalar subset shared by every transient Newton
+    /// evaluation of this classic MOS instance.  The arithmetic expressions
+    /// intentionally match the canonical helpers exactly so cached and
+    /// fallback evaluation remain bit-identical.
+    pub(crate) fn classic_transient_constants(&self) -> ClassicMosTransientConstants {
+        let phi = self.phi.max(1.0e-12);
+        let effective_length = (self.l - 2.0 * self.ld).max(1.0e-12);
+        let meyer_width = self.classic_meyer_effective_width();
+        let meyer_length = self.classic_meyer_effective_length();
+        ClassicMosTransientConstants {
+            sqrt_phi: self.phi.sqrt(),
+            level1_sqrt_phi: phi.sqrt(),
+            level1_beta: self.kp * self.w / effective_length,
+            source_body_vcrit: self.source_body_vcrit(),
+            drain_body_vcrit: self.drain_body_vcrit(),
+            oxide_capacitance_total: self.cox * meyer_width * meyer_length,
+            overlap_capacitances: (
+                self.cgso * meyer_width,
+                self.cgdo * meyer_width,
+                self.cgbo * meyer_length,
+            ),
+        }
+    }
+
     #[inline]
     pub(in crate::device::mosfet::mosfet) fn source_body_vcrit(&self) -> Value {
         let isat = self.effective_body_junction_saturation_current(self.source_area);
@@ -396,6 +420,28 @@ impl Mosfet {
         vds: Value,
         vbs: Value,
     ) -> (Value, Value, Value) {
+        self.limited_branch_voltages_for_eval_impl(vgs, vds, vbs, None)
+    }
+
+    #[inline]
+    pub(crate) fn limited_branch_voltages_for_transient_eval(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+        constants: &ClassicMosTransientConstants,
+    ) -> (Value, Value, Value) {
+        self.limited_branch_voltages_for_eval_impl(vgs, vds, vbs, Some(constants))
+    }
+
+    #[inline]
+    fn limited_branch_voltages_for_eval_impl(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+        constants: Option<&ClassicMosTransientConstants>,
+    ) -> (Value, Value, Value) {
         if !self.has_branch_history
             || !self.eval_vgs_prev.is_finite()
             || !self.eval_vds_prev.is_finite()
@@ -417,7 +463,25 @@ impl Mosfet {
         let mut vbd_m = vbs_m - vds_m;
         let vgd_initial_m = vgs_m - vds_m;
         let vgdo = vold_vgs - vold_vds;
-        let von = self.model_space_onset_voltage(old_vgs, old_vds, old_vbs);
+        let von = if self.level == 1 && self.legacy_bsim_sized.is_none() {
+            if let Some(constants) = constants {
+                let vbs_eff = p * old_vbs;
+                let vto_eff = match self.mos_type {
+                    MosType::Nmos => self.vto,
+                    MosType::Pmos => self.vto.abs(),
+                };
+                if vbs_eff == 0.0 {
+                    vto_eff
+                } else {
+                    let phi_vbs = (self.phi - vbs_eff).max(0.0);
+                    vto_eff + self.gamma * (phi_vbs.sqrt() - constants.sqrt_phi)
+                }
+            } else {
+                self.model_space_onset_voltage(old_vgs, old_vds, old_vbs)
+            }
+        } else {
+            self.model_space_onset_voltage(old_vgs, old_vds, old_vbs)
+        };
 
         if vold_vds >= 0.0 {
             vgs_m = Self::dev_fetlim(vgs_m, vold_vgs, von);
@@ -433,10 +497,16 @@ impl Mosfet {
 
         let vt = self.body_junction_thermal_voltage();
         if vds_m >= 0.0 {
-            vbs_m = Self::dev_pnjlim(vbs_m, vold_vbs, vt, self.source_body_vcrit());
+            let vcrit = constants
+                .map(|constants| constants.source_body_vcrit)
+                .unwrap_or_else(|| self.source_body_vcrit());
+            vbs_m = Self::dev_pnjlim(vbs_m, vold_vbs, vt, vcrit);
         } else {
             let vold_vbd = vold_vbs - vold_vds;
-            vbd_m = Self::dev_pnjlim(vbd_m, vold_vbd, vt, self.drain_body_vcrit());
+            let vcrit = constants
+                .map(|constants| constants.drain_body_vcrit)
+                .unwrap_or_else(|| self.drain_body_vcrit());
+            vbd_m = Self::dev_pnjlim(vbd_m, vold_vbd, vt, vcrit);
             vbs_m = vbd_m + vds_m;
         }
 
@@ -477,6 +547,28 @@ impl Mosfet {
 
         let (id, region) = self.calculate_id(vgs, vds, vbs);
         let (gm, gds, gmb) = self.small_signal(vgs, vds, vbs);
+        let id_eq = id - gm * vgs - gds * vds - gmb * vbs;
+        (id, region, gm, gds, gmb, id_eq)
+    }
+
+    #[inline]
+    pub(crate) fn linearized_transient_operating_point(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+        constants: &ClassicMosTransientConstants,
+    ) -> (Value, MosRegion, Value, Value, Value, Value) {
+        if self.level != 1 || self.legacy_bsim_sized.is_some() {
+            return self.linearized_operating_point(vgs, vds, vbs);
+        }
+        let (id, region, gm, gds, gmb) = self.level1_operating_point_with_constants(
+            vgs,
+            vds,
+            vbs,
+            constants.level1_sqrt_phi,
+            constants.level1_beta,
+        );
         let id_eq = id - gm * vgs - gds * vds - gmb * vbs;
         (id, region, gm, gds, gmb, id_eq)
     }

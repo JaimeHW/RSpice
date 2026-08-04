@@ -23,6 +23,9 @@ impl Mosfet {
             let conductance = isat / nvt + gmin;
             return (conductance * v, conductance);
         }
+        if v == 0.0 {
+            return (0.0, isat / nvt + gmin);
+        }
         if v <= -3.0 * nvt {
             return (gmin * v - isat, gmin);
         }

@@ -68,6 +68,21 @@ pub struct MosfetIndices {
     pub sb: Option<CscIndex>,
 }
 
+/// Bias-invariant constants used by the classic-MOS transient evaluation
+/// kernel.  They live in the engine's compact topology cache rather than in
+/// every [`Mosfet`], preserving the hot instance layout for DC/AC and for
+/// model families that do not use this fast path.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ClassicMosTransientConstants {
+    sqrt_phi: Value,
+    level1_sqrt_phi: Value,
+    level1_beta: Value,
+    source_body_vcrit: Value,
+    drain_body_vcrit: Value,
+    oxide_capacitance_total: Value,
+    overlap_capacitances: (Value, Value, Value),
+}
+
 /// MOSFET device supporting native Berkeley MOS levels and related model paths.
 ///
 /// Terminal connections:

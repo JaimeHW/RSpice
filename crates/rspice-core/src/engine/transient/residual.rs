@@ -74,9 +74,17 @@ pub(super) struct ClassicMosTransientStampCache {
     static_rhs: Vec<Value>,
     attempt_values: Vec<Value>,
     attempt_rhs: Vec<Value>,
+    device_constants: Vec<crate::device::mosfet::ClassicMosTransientConstants>,
 }
 
 impl ClassicMosTransientStampCache {
+    #[inline]
+    pub(super) fn device_constants(
+        &self,
+    ) -> &[crate::device::mosfet::ClassicMosTransientConstants] {
+        &self.device_constants
+    }
+
     #[inline]
     fn capture_static(&mut self, matrix: &mut crate::solver::StaticMatrix, rhs: &[Value]) {
         self.static_values.clear();
@@ -141,6 +149,13 @@ impl Engine {
         circuit.stamp_transient_linear_direct(matrix, rhs);
 
         let mut cache = ClassicMosTransientStampCache::default();
+        cache.device_constants.extend(
+            circuit
+                .mosfets
+                .devices
+                .iter()
+                .map(crate::device::Mosfet::classic_transient_constants),
+        );
         cache.capture_static(matrix, rhs);
         cache
     }
@@ -214,6 +229,7 @@ impl Engine {
                     self.update_classic_mos_with_companion_terms_only(
                         circuit,
                         solution,
+                        &cache.device_constants,
                         &companion_coeff,
                         dt,
                         ctx.mosfet_history,
@@ -287,16 +303,16 @@ impl Engine {
         &self,
         circuit: &mut crate::circuit::CircuitData,
         solution: &[Value],
+        constants: &[crate::device::mosfet::ClassicMosTransientConstants],
         coeff: &CompanionCoefficients,
         dt: Value,
         history: &MosfetTransientHistory,
         suppress_gate_charge: bool,
         terms: &mut Vec<MosfetCompanionBranchTerms>,
     ) -> Result<(), SimulationError> {
-        use crate::device::NonlinearDevice;
-
         debug_assert!(circuit.has_cacheable_classic_mos_transient_base());
         let instance_count = circuit.mosfets.len();
+        debug_assert_eq!(constants.len(), instance_count);
         terms.resize(instance_count, [(0.0, 0.0); 5]);
 
         #[cfg(feature = "parallel")]
@@ -310,15 +326,19 @@ impl Engine {
                         .mosfets
                         .devices
                         .par_chunks_mut(chunk_size)
+                        .zip(constants.par_chunks(chunk_size))
                         .zip(terms.par_chunks_mut(chunk_size))
                         .enumerate()
-                        .map(|(chunk_idx, (devices, term_chunk))| {
+                        .map(|(chunk_idx, ((devices, constants), term_chunk))| {
                             let base = chunk_idx * chunk_size;
                             let mut chunk_physical = true;
-                            for (local, (device, term)) in
-                                devices.iter_mut().zip(term_chunk).enumerate()
+                            for (local, ((device, constants), term)) in devices
+                                .iter_mut()
+                                .zip(constants)
+                                .zip(term_chunk)
+                                .enumerate()
                             {
-                                device.update(solution);
+                                device.update_with_classic_transient_constants(solution, constants);
                                 let (evaluated_terms, _charges, _caps) =
                                     Self::mosfet_companion_branch_terms::<false>(
                                         device,
@@ -329,6 +349,7 @@ impl Engine {
                                         history,
                                         suppress_gate_charge,
                                         true,
+                                        Some(constants),
                                     );
                                 *term = evaluated_terms;
                                 chunk_physical &= device.cached_linearization_is_physical();
@@ -345,8 +366,15 @@ impl Engine {
         }
 
         let mut all_physical = true;
-        for (idx, (device, term)) in circuit.mosfets.devices.iter_mut().zip(terms).enumerate() {
-            device.update(solution);
+        for (idx, ((device, constants), term)) in circuit
+            .mosfets
+            .devices
+            .iter_mut()
+            .zip(constants)
+            .zip(terms)
+            .enumerate()
+        {
+            device.update_with_classic_transient_constants(solution, constants);
             let (evaluated_terms, _charges, _caps) = Self::mosfet_companion_branch_terms::<false>(
                 device,
                 idx,
@@ -356,6 +384,7 @@ impl Engine {
                 history,
                 suppress_gate_charge,
                 true,
+                Some(constants),
             );
             *term = evaluated_terms;
             all_physical &= device.cached_linearization_is_physical();
@@ -400,6 +429,7 @@ impl Engine {
         &self,
         circuit: &mut crate::circuit::CircuitData,
         solution: &[Value],
+        constants: &[crate::device::mosfet::ClassicMosTransientConstants],
         coeff: &CompanionCoefficients,
         dt: Value,
         history: &MosfetTransientHistory,
@@ -409,10 +439,9 @@ impl Engine {
         caps: &mut Vec<(Value, Value, Value)>,
         truncation: Option<&NgspiceChargeTruncationContext>,
     ) -> Result<Option<Value>, SimulationError> {
-        use crate::device::NonlinearDevice;
-
         debug_assert!(circuit.has_cacheable_classic_mos_transient_base());
         let instance_count = circuit.mosfets.len();
+        debug_assert_eq!(constants.len(), instance_count);
         terms.resize(instance_count, [(0.0, 0.0); 5]);
         charges.resize(instance_count, [(0.0, 0.0); 3]);
         caps.resize(instance_count, (0.0, 0.0, 0.0));
@@ -428,23 +457,30 @@ impl Engine {
                         .mosfets
                         .devices
                         .par_chunks_mut(chunk_size)
+                        .zip(constants.par_chunks(chunk_size))
                         .zip(terms.par_chunks_mut(chunk_size))
                         .zip(charges.par_chunks_mut(chunk_size))
                         .zip(caps.par_chunks_mut(chunk_size))
                         .enumerate()
                         .map(
-                            |(chunk_idx, (((devices, term_chunk), charge_chunk), cap_chunk))| {
+                            |(
+                                chunk_idx,
+                                ((((devices, constants), term_chunk), charge_chunk), cap_chunk),
+                            )| {
                                 let base = chunk_idx * chunk_size;
                                 let mut chunk_physical = true;
                                 let mut chunk_limit = None;
-                                for (local, (((device, term), charge), cap)) in devices
+                                for (local, ((((device, constants), term), charge), cap)) in devices
                                     .iter_mut()
+                                    .zip(constants)
                                     .zip(term_chunk)
                                     .zip(charge_chunk)
                                     .zip(cap_chunk)
                                     .enumerate()
                                 {
-                                    device.update(solution);
+                                    device.update_with_classic_transient_constants(
+                                        solution, constants,
+                                    );
                                     let (evaluated_terms, evaluated_charges, evaluated_caps) =
                                         Self::mosfet_companion_branch_terms::<true>(
                                             device,
@@ -455,6 +491,7 @@ impl Engine {
                                             history,
                                             suppress_gate_charge,
                                             true,
+                                            Some(constants),
                                         );
                                     *term = evaluated_terms;
                                     *charge = evaluated_charges;
@@ -495,16 +532,17 @@ impl Engine {
 
         let mut all_physical = true;
         let mut cached_limit = None;
-        for (idx, (((device, term), charge), cap)) in circuit
+        for (idx, ((((device, constants), term), charge), cap)) in circuit
             .mosfets
             .devices
             .iter_mut()
+            .zip(constants)
             .zip(terms)
             .zip(charges)
             .zip(caps)
             .enumerate()
         {
-            device.update(solution);
+            device.update_with_classic_transient_constants(solution, constants);
             let (evaluated_terms, evaluated_charges, evaluated_caps) =
                 Self::mosfet_companion_branch_terms::<true>(
                     device,
@@ -515,6 +553,7 @@ impl Engine {
                     history,
                     suppress_gate_charge,
                     true,
+                    Some(constants),
                 );
             *term = evaluated_terms;
             *charge = evaluated_charges;
@@ -1262,6 +1301,7 @@ M1 d g 0 0 NM W=10u L=1u
             .update_classic_mos_with_companion_terms(
                 &mut circuit,
                 &solution,
+                cache.device_constants(),
                 &coeff,
                 dt,
                 &mosfet_history,

@@ -3564,7 +3564,8 @@ impl Engine {
                             DiagnosticTimer::start(diagnostic_timing_enabled);
                         if circuit.has_nonlinear_devices() && !nonlinear_state_matches_new_solution
                         {
-                            if classic_mos_stamp_cache.is_some() && update_converged_for_acceptance
+                            if let Some(classic_mos_cache) = classic_mos_stamp_cache.as_ref()
+                                && update_converged_for_acceptance
                             {
                                 let postsolve_companion_coeff = if xyce_one_step {
                                     CompanionCoefficients::backward_euler()
@@ -3575,6 +3576,7 @@ impl Engine {
                                     .update_classic_mos_with_companion_terms(
                                         &mut circuit,
                                         &new_solution,
+                                        classic_mos_cache.device_constants(),
                                         &postsolve_companion_coeff,
                                         dt,
                                         &mosfet_history,

@@ -2559,6 +2559,7 @@ M1 d g s 0 NM W=10u L=1u
             &history,
             false,
             false,
+            None,
         );
         let context = NgspiceChargeTruncationContext::new(
             dt,

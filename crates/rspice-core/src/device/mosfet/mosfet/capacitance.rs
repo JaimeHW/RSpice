@@ -19,7 +19,11 @@ impl Mosfet {
 
         // Base body effect: Vth = Vto + gamma * (sqrt(phi - Vbs) - sqrt(phi))
         let phi_vbs = (self.phi - vbs_eff).max(0.0);
-        let vth_base = vto_eff + self.gamma * (phi_vbs.sqrt() - self.phi.sqrt());
+        let vth_base = if vbs_eff == 0.0 {
+            vto_eff
+        } else {
+            vto_eff + self.gamma * (phi_vbs.sqrt() - self.phi.sqrt())
+        };
 
         if self.level < 3 || self.level == 6 {
             // Level 1 and Level 6 use simple body effect
@@ -262,6 +266,100 @@ impl Mosfet {
         };
 
         (cgs_int, cgd_int, cgb_int)
+    }
+
+    /// Level-1 Meyer capacitances using the transient topology cache for
+    /// setup-invariant geometry and surface-potential terms. Other levels
+    /// retain the canonical evaluator because their onset laws carry
+    /// additional model-specific state.
+    pub(crate) fn transient_capacitance_halves_with_constants(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+        constants: &ClassicMosTransientConstants,
+    ) -> (Value, Value, Value) {
+        if self.level != 1 || self.legacy_bsim_sized.is_some() {
+            return self.transient_capacitance_halves_at(vgs, vds, vbs);
+        }
+
+        let phi = self.phi.max(1e-12);
+        let p = self.polarity();
+        let vgs_m = p * vgs;
+        let vds_m = p * vds;
+        let vbs_m = p * vbs;
+        let vgd_m = vgs_m - vds_m;
+        let vgb_m = vgs_m - vbs_m;
+        let mode = if vds_m >= 0.0 { 1.0 } else { -1.0 };
+        let vg_active = if mode > 0.0 { vgs_m } else { vgd_m };
+        let vto_eff = match self.mos_type {
+            MosType::Nmos => self.vto,
+            MosType::Pmos => self.vto.abs(),
+        };
+        let von = if vbs_m == 0.0 {
+            vto_eff
+        } else {
+            let phi_vbs = (self.phi - vbs_m).max(0.0);
+            vto_eff + self.gamma * (phi_vbs.sqrt() - constants.sqrt_phi)
+        };
+        let vdsat = (vg_active - von).max(0.0);
+
+        let use_xyce_meyer =
+            self.body_junction_model == MosBodyJunctionModel::XyceClassicLinearizedReverse;
+        if mode > 0.0 {
+            if use_xyce_meyer {
+                Self::xyce_meyer_intrinsic_capacitances(
+                    vgs_m,
+                    vgd_m,
+                    vgb_m,
+                    von,
+                    vdsat,
+                    phi,
+                    constants.oxide_capacitance_total,
+                )
+            } else {
+                Self::meyer_intrinsic_capacitances(
+                    vgs_m,
+                    vgd_m,
+                    vgb_m,
+                    von,
+                    vdsat,
+                    phi,
+                    constants.oxide_capacitance_total,
+                )
+            }
+        } else {
+            let (capgd_int, capgs_int, capgb_int) = if use_xyce_meyer {
+                Self::xyce_meyer_intrinsic_capacitances(
+                    vgd_m,
+                    vgs_m,
+                    vgb_m,
+                    von,
+                    vdsat,
+                    phi,
+                    constants.oxide_capacitance_total,
+                )
+            } else {
+                Self::meyer_intrinsic_capacitances(
+                    vgd_m,
+                    vgs_m,
+                    vgb_m,
+                    von,
+                    vdsat,
+                    phi,
+                    constants.oxide_capacitance_total,
+                )
+            };
+            (capgs_int, capgd_int, capgb_int)
+        }
+    }
+
+    #[inline]
+    pub(crate) fn overlap_capacitances_with_constants(
+        &self,
+        constants: &ClassicMosTransientConstants,
+    ) -> (Value, Value, Value) {
+        constants.overlap_capacitances
     }
 
     /// Calculate overlap capacitances for AC analysis
