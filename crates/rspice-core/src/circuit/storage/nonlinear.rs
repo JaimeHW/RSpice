@@ -749,6 +749,14 @@ impl Mosfets {
         }
     }
 
+    /// Stamp device linearizations whose cached biases are already known to
+    /// match the active Newton iterate.
+    pub fn stamp_all_cached_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
+        for device in &self.devices {
+            device.stamp_cached_direct(matrix, rhs);
+        }
+    }
+
     /// Stamp exact candidate equations for residual and line-search probes.
     pub fn stamp_all_static_probe_direct(
         &self,

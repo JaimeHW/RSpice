@@ -206,7 +206,7 @@ impl Engine {
                 .mosfets
                 .stamp_all_static_probe_direct(matrix, rhs, solution);
         } else {
-            circuit.mosfets.stamp_all_direct(matrix, rhs, solution);
+            circuit.mosfets.stamp_all_cached_direct(matrix, rhs);
         }
         Ok(())
     }

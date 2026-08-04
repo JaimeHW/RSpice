@@ -119,6 +119,26 @@ impl Mosfet {
         );
     }
 
+    /// Stamp the Newton linearization already cached by [`NonlinearDevice::update`].
+    ///
+    /// The transient classic-MOS fast path proves that device state matches
+    /// its current iterate before calling this, so reloading terminal voltages,
+    /// rerunning limiting, and comparing the cached bias is redundant.
+    pub(crate) fn stamp_cached_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
+        debug_assert!(self.has_branch_history);
+        self.stamp_direct_operating_point(
+            matrix,
+            rhs,
+            self.eval_vds,
+            self.eval_vbs,
+            self.gm,
+            self.gds,
+            self.gmb,
+            self.id_eq,
+            true,
+        );
+    }
+
     /// Stamp the physical equations directly at a static candidate.
     ///
     /// Newton voltage limiting is iteration history, not part of the device
@@ -199,5 +219,25 @@ mod tests {
         assert_ne!(limited_rhs, static_rhs, "test bias must exercise limiting");
         assert_eq!(static_rhs, expected_rhs);
         assert_eq!(static_matrix.values_mut(), expected_matrix.values_mut());
+    }
+
+    #[test]
+    fn cached_direct_stamp_matches_verified_cached_bias_exactly() {
+        let candidate = [1.2, 1.8, 0.2, -0.1];
+        let mut mos = Mosfet::new_nmos("mn".to_string(), 1, 2, 3, 4);
+        mos.update(&candidate);
+
+        let mut verified_matrix = full_matrix(4);
+        mos.link(&verified_matrix);
+        let mut verified_rhs = vec![0.0; 4];
+        mos.stamp_direct(&mut verified_matrix, &mut verified_rhs, &candidate);
+
+        let mut cached_matrix = full_matrix(4);
+        mos.link(&cached_matrix);
+        let mut cached_rhs = vec![0.0; 4];
+        mos.stamp_cached_direct(&mut cached_matrix, &mut cached_rhs);
+
+        assert_eq!(cached_rhs, verified_rhs);
+        assert_eq!(cached_matrix.values_mut(), verified_matrix.values_mut());
     }
 }
