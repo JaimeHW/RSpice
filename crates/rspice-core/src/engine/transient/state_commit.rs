@@ -537,6 +537,13 @@ impl Engine {
         diode_history.accepted_dt_prev_prev = diode_history.accepted_dt_prev;
         diode_history.accepted_dt_prev = dt;
 
+        // Rotate whole accepted-state generations once, as ngspice rotates
+        // CKTstate pointers, instead of copying two history levels for every
+        // instance and branch. The old `prev_prev` buffers become scratch for
+        // the new accepted values; arithmetic below still reads the identical
+        // old `prev` and `prev_prev` generations.
+        mosfet_history.rotate_gate_generations(suppress_gate_charge_history);
+
         for (idx, mos) in circuit.mosfets.devices.iter().enumerate() {
             let (vgs, vds, vbs) = mos.eval_branch_voltages_at(accepted_solution);
             let vgd = vgs - vds;
@@ -551,13 +558,10 @@ impl Engine {
             let cgs = cgs_half + mosfet_history.capgs_prev_half[idx] + cgs_ov;
             let cgd = cgd_half + mosfet_history.capgd_prev_half[idx] + cgd_ov;
             let cgb = cgb_half + mosfet_history.capgb_prev_half[idx] + cgb_ov;
-            mosfet_history.vgs_prev_prev[idx] = mosfet_history.vgs_prev[idx];
             mosfet_history.vgs_prev[idx] = vgs;
             mosfet_history.capgs_prev_half[idx] = cgs_half;
-            mosfet_history.vgd_prev_prev[idx] = mosfet_history.vgd_prev[idx];
             mosfet_history.vgd_prev[idx] = vgd;
             mosfet_history.capgd_prev_half[idx] = cgd_half;
-            mosfet_history.vgb_prev_prev[idx] = mosfet_history.vgb_prev[idx];
             mosfet_history.vgb_prev[idx] = vgb;
             mosfet_history.capgb_prev_half[idx] = cgb_half;
             if !suppress_gate_charge_history {
@@ -567,12 +571,10 @@ impl Engine {
                     cgs,
                     vgs,
                     mosfet_history.vgs_prev_prev[idx],
-                    mosfet_history.qgs_prev[idx],
                     mosfet_history.qgs_prev_prev[idx],
+                    mosfet_history.qgs_prev_prev_prev[idx],
                     mosfet_history.cqgs_prev[idx],
                 );
-                mosfet_history.qgs_prev_prev_prev[idx] = mosfet_history.qgs_prev_prev[idx];
-                mosfet_history.qgs_prev_prev[idx] = mosfet_history.qgs_prev[idx];
                 mosfet_history.qgs_prev[idx] = qgs_curr;
                 mosfet_history.cqgs_prev[idx] = cqgs_curr;
 
@@ -582,12 +584,10 @@ impl Engine {
                     cgd,
                     vgd,
                     mosfet_history.vgd_prev_prev[idx],
-                    mosfet_history.qgd_prev[idx],
                     mosfet_history.qgd_prev_prev[idx],
+                    mosfet_history.qgd_prev_prev_prev[idx],
                     mosfet_history.cqgd_prev[idx],
                 );
-                mosfet_history.qgd_prev_prev_prev[idx] = mosfet_history.qgd_prev_prev[idx];
-                mosfet_history.qgd_prev_prev[idx] = mosfet_history.qgd_prev[idx];
                 mosfet_history.qgd_prev[idx] = qgd_curr;
                 mosfet_history.cqgd_prev[idx] = cqgd_curr;
 
@@ -597,12 +597,10 @@ impl Engine {
                     cgb,
                     vgb,
                     mosfet_history.vgb_prev_prev[idx],
-                    mosfet_history.qgb_prev[idx],
                     mosfet_history.qgb_prev_prev[idx],
+                    mosfet_history.qgb_prev_prev_prev[idx],
                     mosfet_history.cqgb_prev[idx],
                 );
-                mosfet_history.qgb_prev_prev_prev[idx] = mosfet_history.qgb_prev_prev[idx];
-                mosfet_history.qgb_prev_prev[idx] = mosfet_history.qgb_prev[idx];
                 mosfet_history.qgb_prev[idx] = qgb_curr;
                 mosfet_history.cqgb_prev[idx] = cqgb_curr;
             }

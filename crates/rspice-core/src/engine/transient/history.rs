@@ -245,6 +245,27 @@ pub(super) struct MosfetTransientHistory {
     pub(super) accepted_dt_prev_prev: Value,
 }
 
+impl MosfetTransientHistory {
+    /// Rotate accepted classic-MOS gate state generations in O(1). The old
+    /// oldest buffers become scratch for the caller's new accepted values.
+    #[inline]
+    pub(super) fn rotate_gate_generations(&mut self, suppress_gate_charge_history: bool) {
+        std::mem::swap(&mut self.vgs_prev, &mut self.vgs_prev_prev);
+        std::mem::swap(&mut self.vgd_prev, &mut self.vgd_prev_prev);
+        std::mem::swap(&mut self.vgb_prev, &mut self.vgb_prev_prev);
+        if suppress_gate_charge_history {
+            return;
+        }
+
+        std::mem::swap(&mut self.qgs_prev_prev, &mut self.qgs_prev_prev_prev);
+        std::mem::swap(&mut self.qgs_prev, &mut self.qgs_prev_prev);
+        std::mem::swap(&mut self.qgd_prev_prev, &mut self.qgd_prev_prev_prev);
+        std::mem::swap(&mut self.qgd_prev, &mut self.qgd_prev_prev);
+        std::mem::swap(&mut self.qgb_prev_prev, &mut self.qgb_prev_prev_prev);
+        std::mem::swap(&mut self.qgb_prev, &mut self.qgb_prev_prev);
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(super) struct VdmosTransientHistory {
     pub(super) vgs_prev: Vec<Value>,
@@ -420,4 +441,66 @@ pub(super) struct Ekv26TransientHistory {
 pub(super) struct CoupledTlineReferenceState {
     pub(super) near_modal: Vec<Value>,
     pub(super) far_modal: Vec<Value>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mosfet_gate_generation_rotation_preserves_all_three_accepted_levels() {
+        let mut history = MosfetTransientHistory {
+            vgs_prev: vec![1.0],
+            vgs_prev_prev: vec![2.0],
+            vgd_prev: vec![3.0],
+            vgd_prev_prev: vec![4.0],
+            vgb_prev: vec![5.0],
+            vgb_prev_prev: vec![6.0],
+            qgs_prev: vec![10.0],
+            qgs_prev_prev: vec![20.0],
+            qgs_prev_prev_prev: vec![30.0],
+            qgd_prev: vec![40.0],
+            qgd_prev_prev: vec![50.0],
+            qgd_prev_prev_prev: vec![60.0],
+            qgb_prev: vec![70.0],
+            qgb_prev_prev: vec![80.0],
+            qgb_prev_prev_prev: vec![90.0],
+            ..Default::default()
+        };
+
+        history.rotate_gate_generations(false);
+
+        assert_eq!((history.vgs_prev[0], history.vgs_prev_prev[0]), (2.0, 1.0));
+        assert_eq!((history.vgd_prev[0], history.vgd_prev_prev[0]), (4.0, 3.0));
+        assert_eq!((history.vgb_prev[0], history.vgb_prev_prev[0]), (6.0, 5.0));
+        assert_eq!(
+            (
+                history.qgs_prev[0],
+                history.qgs_prev_prev[0],
+                history.qgs_prev_prev_prev[0],
+            ),
+            (30.0, 10.0, 20.0),
+        );
+        assert_eq!(
+            (
+                history.qgd_prev[0],
+                history.qgd_prev_prev[0],
+                history.qgd_prev_prev_prev[0],
+            ),
+            (60.0, 40.0, 50.0),
+        );
+        assert_eq!(
+            (
+                history.qgb_prev[0],
+                history.qgb_prev_prev[0],
+                history.qgb_prev_prev_prev[0],
+            ),
+            (90.0, 70.0, 80.0),
+        );
+
+        let frozen_charge = history.qgs_prev.clone();
+        history.rotate_gate_generations(true);
+        assert_eq!(history.qgs_prev, frozen_charge);
+        assert_eq!((history.vgs_prev[0], history.vgs_prev_prev[0]), (1.0, 2.0));
+    }
 }
