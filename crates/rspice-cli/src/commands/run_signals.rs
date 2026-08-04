@@ -317,6 +317,7 @@ pub(crate) fn transient_voltage_signals(result: &TransientResult) -> Vec<ScalarS
         .voltages
         .iter()
         .enumerate()
+        .filter(|(_, waveform)| result.time.is_empty() || !waveform.is_empty())
         .map(|(index, waveform)| {
             let raw_name = result.node_names.get(index).map_or_else(
                 || (index + 1).to_string(),
@@ -332,6 +333,7 @@ pub(crate) fn transient_current_signals(result: &TransientResult) -> Vec<ScalarS
         .branch_currents
         .iter()
         .enumerate()
+        .filter(|(_, waveform)| result.time.is_empty() || !waveform.is_empty())
         .map(|(index, waveform)| {
             let raw_name = result.branch_names.get(index).map_or_else(
                 || (index + 1).to_string(),

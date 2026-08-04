@@ -57,6 +57,28 @@ pub(super) struct TransientSystemContext<'a> {
 }
 
 impl Engine {
+    /// Refresh nonlinear trial state, parallelizing the model-batched classic
+    /// MOS family only when its population amortizes bounded-pool dispatch.
+    pub(super) fn update_transient_nonlinear_devices(
+        &self,
+        circuit: &mut crate::circuit::CircuitData,
+        solution: &[Value],
+    ) -> Result<(), SimulationError> {
+        #[cfg(feature = "parallel")]
+        {
+            const PARALLEL_CLASSIC_MOS_THRESHOLD: usize = 2_048;
+            if circuit.mosfets.len() >= PARALLEL_CLASSIC_MOS_THRESHOLD
+                && self.parallel_worker_count(circuit.mosfets.len()) > 1
+            {
+                return self.install_parallel(|| {
+                    circuit.update_nonlinear_parallel_classic_mos(solution);
+                });
+            }
+        }
+        circuit.update_nonlinear(solution);
+        Ok(())
+    }
+
     /// Test the nonlinear residual with the active transient solver's native
     /// norm. Xyce 7.10 transient Newton uses an unscaled infinity norm of the
     /// assembled RHS with an independent `RHSTOL` (default `1e-2`).
@@ -179,7 +201,7 @@ impl Engine {
         circuit.set_b3soi_operating_point_mode(false);
         circuit.set_xyce_memristor_operating_point_mode(false);
         if refresh_nonlinear && circuit.has_nonlinear_devices() {
-            circuit.update_nonlinear(solution);
+            self.update_transient_nonlinear_devices(circuit, solution)?;
             if evaluation_mode
                 == crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe
             {
@@ -450,7 +472,7 @@ impl Engine {
         time: Value,
         baseline_diag_gmin: Value,
     ) -> Result<Vec<Value>, SimulationError> {
-        circuit.update_nonlinear(solution);
+        self.update_transient_nonlinear_devices(circuit, solution)?;
         circuit.update_bjt_static_linearizations(solution);
         circuit.update_b3soi_static_linearizations(solution);
         circuit.update_jfet_static_linearizations(solution);
@@ -516,6 +538,7 @@ impl Engine {
             return Ok(false);
         }
 
+        let refresh_nonlinear = !circuit.has_classic_mos_only_transient_nonlinearity();
         self.stamp_transient_system_with_generated_mode(
             circuit,
             matrix,
@@ -526,7 +549,7 @@ impl Engine {
             ctx,
             vbic_snapshot_cache,
             VbicCachedSnapshotReuse::SeedOnly,
-            true,
+            refresh_nonlinear,
             0.0,
             crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
         )?;
@@ -537,11 +560,15 @@ impl Engine {
     pub(super) fn should_prefer_dense_transient_solver(
         is_strictly_linear_transient: bool,
         size: usize,
-        has_transformer_or_coupled_inductor: bool,
         has_xspice_devices: bool,
     ) -> bool {
+        // Linear transformer companion matrices can be severely ill-scaled as
+        // the integration timestep changes. The equilibrated sparse path both
+        // solves them faster and satisfies the componentwise backward-error
+        // gate where unscaled dense Gaussian elimination can reject an
+        // otherwise finite linear point.
         if is_strictly_linear_transient {
-            return size <= 160 && has_transformer_or_coupled_inductor;
+            return false;
         }
 
         // Small nonlinear systems used to route to dense LU because the
@@ -549,8 +576,7 @@ impl Engine {
         // values-only refactorization has no such overhead — measured on
         // ring51 (~60 unknowns), the dense path costs ~100 us per Newton
         // solve against single-digit microseconds for the refactor — so
-        // dense remains only for the transformer-coupling stability case
-        // above and for explicit `RSPICE_SOLVER=faer` runs.
+        // Dense remains only for explicit `RSPICE_SOLVER=faer` runs.
         !has_xspice_devices && size <= 64 && !crate::solver::klu_backend_enabled()
     }
 }

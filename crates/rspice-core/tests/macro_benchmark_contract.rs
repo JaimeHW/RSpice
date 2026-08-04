@@ -35,7 +35,17 @@ fn assert_linear_ladder_runs(source: &str) {
         .run_tran(&netlist, smoke_stop, step)
         .expect("linear benchmark transient completes");
     assert!(result.time.len() > 2, "benchmark retained transient points");
-    assert_eq!(result.time.len(), result.voltages[0].len());
+    let retained_voltages = result
+        .voltages
+        .iter()
+        .filter(|waveform| !waveform.is_empty())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        retained_voltages.len(),
+        1,
+        "a voltage-only .PRINT must retain only its requested node waveform"
+    );
+    assert_eq!(result.time.len(), retained_voltages[0].len());
     assert!(
         result
             .branch_names

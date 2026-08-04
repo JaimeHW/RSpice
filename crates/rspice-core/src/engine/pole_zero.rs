@@ -9,6 +9,244 @@ use crate::device::semiconductor::{
 use crate::{CircuitData, Netlist, Value};
 
 impl Engine {
+    /// Reduce a sparse `G + sC` descriptor to a dense state-space model whose
+    /// dimension is the number of dynamic states, not the full MNA size.
+    ///
+    /// Algebraic variables are eliminated with the production sparse LU:
+    /// `G_eff = Gdd - Gda * Gaa^-1 * Gad`. The same factorization reduces the
+    /// input/output vectors, then `Cdd` is solved in one batched operation for
+    /// both `A` and `B`. A singular partition returns `None` and the caller
+    /// retains the generalized dense descriptor fallback.
+    fn try_sparse_pz_state_space(
+        g_descriptor: &crate::solver::ComplexMatrix,
+        c_descriptor: &crate::solver::ComplexMatrix,
+        config: &PoleZeroConfig,
+    ) -> Result<Option<PoleZeroResult>, SimulationError> {
+        let n = g_descriptor.nrows;
+        if n == 0 || g_descriptor.ncols != n || c_descriptor.nrows != n || c_descriptor.ncols != n {
+            return Ok(None);
+        }
+
+        let mut dynamic_mask = vec![false; n];
+        c_descriptor.for_each_stored(|row, col, value| {
+            if value.im.abs() > 1.0e-15 {
+                dynamic_mask[row] = true;
+                dynamic_mask[col] = true;
+            }
+        });
+        let dynamic = dynamic_mask
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &is_dynamic)| is_dynamic.then_some(index))
+            .collect::<Vec<_>>();
+        if dynamic.is_empty() {
+            return Ok(None);
+        }
+        let algebraic = dynamic_mask
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &is_dynamic)| (!is_dynamic).then_some(index))
+            .collect::<Vec<_>>();
+        let dynamic_count = dynamic.len();
+        let algebraic_count = algebraic.len();
+        let mut dynamic_map = vec![usize::MAX; n];
+        let mut algebraic_map = vec![usize::MAX; n];
+        for (reduced, &original) in dynamic.iter().enumerate() {
+            dynamic_map[original] = reduced;
+        }
+        for (reduced, &original) in algebraic.iter().enumerate() {
+            algebraic_map[original] = reduced;
+        }
+
+        let mut input = vec![0.0; n];
+        if config.input_is_current {
+            if config.input_pos >= n {
+                return Ok(None);
+            }
+            input[config.input_pos] += 1.0;
+            if let Some(negative) = config.input_neg {
+                if negative >= n {
+                    return Ok(None);
+                }
+                input[negative] -= 1.0;
+            }
+        } else if let Some(branch) = config.input_voltage_branch {
+            if branch >= n {
+                return Ok(None);
+            }
+            input[branch] = config.input_voltage_gain;
+        } else {
+            // A synthesized voltage-source branch changes the descriptor
+            // topology; the ordinary analyzer owns that exact augmentation.
+            return Ok(None);
+        }
+        let mut output = vec![0.0; n];
+        if config.output_pos >= n {
+            return Ok(None);
+        }
+        output[config.output_pos] += 1.0;
+        if let Some(negative) = config.output_neg {
+            if negative >= n {
+                return Ok(None);
+            }
+            output[negative] -= 1.0;
+        }
+
+        let mut c_dd = Matrix::zeros(dynamic_count, dynamic_count);
+        c_descriptor.for_each_stored(|row, col, value| {
+            let reduced_row = dynamic_map[row];
+            let reduced_col = dynamic_map[col];
+            if reduced_row != usize::MAX && reduced_col != usize::MAX && value.im != 0.0 {
+                c_dd.add(reduced_row, reduced_col, value.im);
+            }
+        });
+
+        let mut g_dd = Matrix::zeros(dynamic_count, dynamic_count);
+        let mut g_da = vec![Vec::<(usize, Value)>::new(); dynamic_count];
+        let mut g_ad = vec![0.0; algebraic_count.saturating_mul(dynamic_count)];
+        let mut g_aa_triplets = Vec::new();
+        g_descriptor.for_each_stored(|row, col, value| {
+            let value = value.re;
+            if value == 0.0 {
+                return;
+            }
+            match (dynamic_map[row], dynamic_map[col]) {
+                (reduced_row, reduced_col)
+                    if reduced_row != usize::MAX && reduced_col != usize::MAX =>
+                {
+                    g_dd.add(reduced_row, reduced_col, value);
+                }
+                (reduced_row, _) if reduced_row != usize::MAX => {
+                    g_da[reduced_row].push((algebraic_map[col], value));
+                }
+                (_, reduced_col) if reduced_col != usize::MAX => {
+                    let reduced_row = algebraic_map[row];
+                    g_ad[reduced_col * algebraic_count + reduced_row] += value;
+                }
+                _ => g_aa_triplets.push((algebraic_map[row], algebraic_map[col], value)),
+            }
+        });
+
+        let b_d = dynamic
+            .iter()
+            .map(|&index| input[index])
+            .collect::<Vec<_>>();
+        let b_a = algebraic
+            .iter()
+            .map(|&index| input[index])
+            .collect::<Vec<_>>();
+        let l_d = dynamic
+            .iter()
+            .map(|&index| output[index])
+            .collect::<Vec<_>>();
+        let l_a = algebraic
+            .iter()
+            .map(|&index| output[index])
+            .collect::<Vec<_>>();
+
+        let (g_aa_inv_g_ad, g_aa_inv_b_a) = if algebraic_count == 0 {
+            (Vec::new(), Vec::new())
+        } else {
+            for index in 0..algebraic_count {
+                g_aa_triplets.push((index, index, 0.0));
+            }
+            let mut g_aa = match crate::solver::StaticMatrix::from_triplets(
+                algebraic_count,
+                algebraic_count,
+                &g_aa_triplets,
+            ) {
+                Ok(matrix) => matrix,
+                Err(_) => return Ok(None),
+            };
+            let mut rhs = g_ad;
+            rhs.extend_from_slice(&b_a);
+            let mut solved = Vec::new();
+            if g_aa
+                .solve_many_into(&rhs, dynamic_count + 1, &mut solved)
+                .is_err()
+            {
+                return Ok(None);
+            }
+            let b_offset = dynamic_count * algebraic_count;
+            (solved[..b_offset].to_vec(), solved[b_offset..].to_vec())
+        };
+
+        let mut g_eff = g_dd;
+        let mut b_eff = b_d;
+        let mut c_eff = l_d;
+        let mut d_eff = 0.0;
+        if algebraic_count > 0 {
+            for row in 0..dynamic_count {
+                for &(algebraic_index, conductance) in &g_da[row] {
+                    b_eff[row] -= conductance * g_aa_inv_b_a[algebraic_index];
+                    for col in 0..dynamic_count {
+                        let correction =
+                            conductance * g_aa_inv_g_ad[col * algebraic_count + algebraic_index];
+                        g_eff.add(row, col, -correction);
+                    }
+                }
+            }
+            for (algebraic_index, &weight) in l_a.iter().enumerate() {
+                if weight == 0.0 {
+                    continue;
+                }
+                d_eff += weight * g_aa_inv_b_a[algebraic_index];
+                for col in 0..dynamic_count {
+                    c_eff[col] -= weight * g_aa_inv_g_ad[col * algebraic_count + algebraic_index];
+                }
+            }
+        }
+
+        let mut c_triplets = Vec::new();
+        for row in 0..dynamic_count {
+            for col in 0..dynamic_count {
+                let value = c_dd.get(row, col);
+                if value != 0.0 || row == col {
+                    c_triplets.push((row, col, value));
+                }
+            }
+        }
+        let mut c_sparse = match crate::solver::StaticMatrix::from_triplets(
+            dynamic_count,
+            dynamic_count,
+            &c_triplets,
+        ) {
+            Ok(matrix) => matrix,
+            Err(_) => return Ok(None),
+        };
+        let mut rhs = Vec::with_capacity(dynamic_count * (dynamic_count + 1));
+        for col in 0..dynamic_count {
+            for row in 0..dynamic_count {
+                rhs.push(g_eff.get(row, col));
+            }
+        }
+        rhs.extend_from_slice(&b_eff);
+        let mut solved = Vec::new();
+        if c_sparse
+            .solve_many_into(&rhs, dynamic_count + 1, &mut solved)
+            .is_err()
+        {
+            return Ok(None);
+        }
+
+        let mut a = Matrix::zeros(dynamic_count, dynamic_count);
+        for col in 0..dynamic_count {
+            for row in 0..dynamic_count {
+                a.set(row, col, -solved[col * dynamic_count + row]);
+            }
+        }
+        let b = solved[dynamic_count * dynamic_count..].to_vec();
+        Ok(PoleZeroAnalyzer::analyze_state_space(
+            a,
+            b,
+            c_eff,
+            d_eff,
+            config,
+            &format!("node{}", config.input_pos),
+            &format!("node{}", config.output_pos),
+        ))
+    }
+
     #[inline]
     pub(in crate::engine) fn optional_system_index(node_id: usize) -> Option<usize> {
         if node_id == 0 {
@@ -398,10 +636,6 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
         abort.observe_progress(0.5);
-        let mut g_matrix = Matrix::from_dense(g_descriptor.to_dense_real());
-        let mut c_matrix = Matrix::from_dense(c_descriptor.to_dense_imag());
-        Self::stamp_vbic_pz_descriptor_states(&circuit, &dc_solution, &mut g_matrix, &mut c_matrix);
-
         let input_neg_node = input_neg.unwrap_or(0);
         let matches_input_voltage_port = |np: usize, nn: usize| {
             !input_is_current
@@ -436,8 +670,6 @@ impl Engine {
             }
         }
 
-        // Create analyzer and run
-        let analyzer = PoleZeroAnalyzer::new(g_matrix, c_matrix);
         let mut config = PoleZeroConfig::poles_and_zeros(input_pos - 1, output_pos - 1);
         config.input_neg = input_neg.and_then(|n| if n == 0 { None } else { Some(n - 1) });
         config.output_neg = output_neg.and_then(|n| if n == 0 { None } else { Some(n - 1) });
@@ -446,6 +678,39 @@ impl Engine {
         config.input_voltage_gain = input_voltage_gain;
         config.compute_poles = compute_poles;
         config.compute_zeros = compute_zeros;
+
+        // VBIC can introduce descriptor states that are not represented in
+        // the frozen AC matrix. All other native small-signal devices expose
+        // their complete G/C topology there and are eligible for sparse
+        // algebraic elimination before dense eigenvalue work.
+        let has_external_vbic_descriptor_states = circuit
+            .bjts
+            .devices
+            .iter()
+            .any(|bjt| bjt.uses_vbic_dynamic_charges());
+        if !has_external_vbic_descriptor_states
+            && let Some(result) =
+                Self::try_sparse_pz_state_space(&g_descriptor, &c_descriptor, &config)?
+        {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            self.ensure_result_values(
+                result
+                    .poles
+                    .len()
+                    .saturating_add(result.zeros.len())
+                    .saturating_mul(2)
+                    .saturating_add(2),
+            )?;
+            abort.observe_progress(1.0);
+            return Ok(result);
+        }
+
+        let mut g_matrix = Matrix::from_dense(g_descriptor.to_dense_real());
+        let mut c_matrix = Matrix::from_dense(c_descriptor.to_dense_imag());
+        Self::stamp_vbic_pz_descriptor_states(&circuit, &dc_solution, &mut g_matrix, &mut c_matrix);
+        let analyzer = PoleZeroAnalyzer::new(g_matrix, c_matrix);
 
         let result = analyzer.analyze(&config);
         if abort.is_aborted() {
@@ -461,5 +726,101 @@ impl Engine {
         )?;
         abort.observe_progress(1.0);
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_roots_close(
+        actual: &[crate::analysis::pole_zero::Complex],
+        expected: &[crate::analysis::pole_zero::Complex],
+    ) {
+        assert_eq!(
+            actual.len(),
+            expected.len(),
+            "actual={actual:#?}, expected={expected:#?}"
+        );
+        for (actual, expected) in actual.iter().zip(expected) {
+            let scale = actual.magnitude().max(expected.magnitude()).max(1.0);
+            assert!(
+                (actual.re - expected.re).abs() <= 1.0e-8 * scale
+                    && (actual.im - expected.im).abs() <= 1.0e-8 * scale,
+                "actual={actual}, expected={expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn sparse_pz_reduction_eliminates_algebraic_mna_nodes() {
+        let netlist = Netlist::parse(
+            "Sparse PZ algebraic reduction\n\
+             R1 in out 1k\n\
+             R2 in 0 1k\n\
+             C1 out 0 1u\n\
+             .END\n",
+        )
+        .expect("PZ deck parses");
+        let result = Engine::default()
+            .run_pz(&netlist, 1, 2)
+            .expect("sparse PZ succeeds");
+
+        assert_eq!(result.poles.len(), 1, "{:#?}", result.poles);
+        let pole = result.poles[0];
+        assert!(pole.im.abs() <= 1.0e-10, "unexpected complex pole {pole}");
+        assert!(
+            (pole.re + 500.0).abs() <= 1.0e-8,
+            "expected -500 rad/s, got {pole}"
+        );
+        assert!(
+            result.zeros.is_empty(),
+            "unexpected zeros: {:#?}",
+            result.zeros
+        );
+        assert!(
+            (result.dc_gain - 1_000.0).abs() <= 1.0e-8,
+            "expected 1 kohm DC transimpedance, got {}",
+            result.dc_gain
+        );
+    }
+
+    #[test]
+    fn sparse_pz_state_space_matches_dense_descriptor_poles_zeros_and_gain() {
+        let structure = crate::solver::StaticMatrix::from_triplets(
+            2,
+            2,
+            &[(0, 0, 0.0), (0, 1, 0.0), (1, 0, 0.0), (1, 1, 0.0)],
+        )
+        .expect("full two-state structure");
+        let mut g_sparse = crate::solver::ComplexMatrix::from_real_structure(&structure);
+        let mut c_sparse = crate::solver::ComplexMatrix::from_real_structure(&structure);
+        let g = [[1.5e-3, -1.0e-3], [-1.0e-3, 4.0e-3 / 3.0]];
+        let c = [[1.2e-6, -1.0e-6], [-1.0e-6, 1.4e-6]];
+        for row in 0..2 {
+            for col in 0..2 {
+                g_sparse.add_real(row, col, g[row][col]);
+                c_sparse.add_imag(row, col, c[row][col]);
+            }
+        }
+        let config = PoleZeroConfig::poles_and_zeros(0, 1);
+        let sparse = Engine::try_sparse_pz_state_space(&g_sparse, &c_sparse, &config)
+            .expect("sparse reduction does not error")
+            .expect("descriptor is reducible");
+        let dense = PoleZeroAnalyzer::new(
+            Matrix::from_dense(g.iter().map(|row| row.to_vec()).collect()),
+            Matrix::from_dense(c.iter().map(|row| row.to_vec()).collect()),
+        )
+        .analyze(&config);
+
+        assert_roots_close(&sparse.poles, &dense.poles);
+        assert_roots_close(&sparse.zeros, &dense.zeros);
+        assert!(
+            (sparse.dc_gain - dense.dc_gain).abs()
+                <= 1.0e-10 * sparse.dc_gain.abs().max(dense.dc_gain.abs()).max(1.0),
+            "sparse gain={}, dense gain={}",
+            sparse.dc_gain,
+            dense.dc_gain
+        );
     }
 }

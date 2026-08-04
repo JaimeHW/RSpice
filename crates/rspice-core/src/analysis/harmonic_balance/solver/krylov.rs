@@ -154,6 +154,14 @@ pub(super) struct BlockJacobiPreconditioner {
     factors: Vec<LuFactors>,
 }
 
+/// Right-preconditioner interface used by the shared restarted-GMRES core.
+/// Keeping this operator-based lets HB, PAC, and PNoise use sparse/matrix-free
+/// Jacobians without first materializing a dense matrix solely to construct a
+/// preconditioner.
+pub(super) trait KrylovPreconditioner {
+    fn apply(&self, r: &[Complex64]) -> Vec<Complex64>;
+}
+
 impl BlockJacobiPreconditioner {
     /// Extract and factorize the per-harmonic diagonal blocks of `jac`.
     pub(super) fn build(jac: &[Vec<Complex64>], num_nodes: usize, num_components: usize) -> Self {
@@ -191,7 +199,7 @@ impl BlockJacobiPreconditioner {
     }
 
     /// Apply M⁻¹ to a flattened residual vector.
-    pub(super) fn apply(&self, r: &[Complex64]) -> Vec<Complex64> {
+    fn apply_impl(&self, r: &[Complex64]) -> Vec<Complex64> {
         let n = self.num_nodes;
         let h = self.num_components;
         let mut out = r.to_vec();
@@ -207,6 +215,12 @@ impl BlockJacobiPreconditioner {
             }
         }
         out
+    }
+}
+
+impl KrylovPreconditioner for BlockJacobiPreconditioner {
+    fn apply(&self, r: &[Complex64]) -> Vec<Complex64> {
+        self.apply_impl(r)
     }
 }
 
@@ -256,7 +270,7 @@ fn givens(a: Complex64, b: Complex64) -> (f64, Complex64) {
 /// to fall back to the exact dense solve.
 pub(super) fn gmres(
     matvec: &dyn Fn(&[Complex64]) -> Vec<Complex64>,
-    precond: &BlockJacobiPreconditioner,
+    precond: &dyn KrylovPreconditioner,
     b: &[Complex64],
     restart: usize,
     max_outer: usize,

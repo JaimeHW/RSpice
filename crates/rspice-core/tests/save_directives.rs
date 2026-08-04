@@ -66,6 +66,9 @@ r2 out 0 1k
     assert!(!netlist.saves.signals.iter().any(
         |signal| matches!(signal, SaveSignal::Raw(name) if name.eq_ignore_ascii_case("tran"))
     ));
+    assert!(netlist.saves.retains_voltage_operand("in"));
+    assert!(netlist.saves.retains_voltage_operand("out"));
+    assert!(!netlist.saves.retains_voltage_operand("unrelated"));
 }
 
 #[test]

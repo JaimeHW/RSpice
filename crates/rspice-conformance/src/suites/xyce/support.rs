@@ -2171,6 +2171,7 @@ impl XyceTestRunner {
             nonlin_transient_rhstol,
             nonlin_transient_maxstep,
             nonlin_transient_enforce_device_convergence,
+            nonlin_transient_nox,
             transient_lte_reference,
             transient_new_bp_stepping,
             ramptime,
@@ -2182,6 +2183,7 @@ impl XyceTestRunner {
             itl6,
             chgtol,
             pivtol,
+            pivrel,
             temp,
             tnom,
             seed,
@@ -2213,6 +2215,7 @@ impl XyceTestRunner {
             && nonlin_transient_rhstol.is_none()
             && nonlin_transient_maxstep.is_none()
             && nonlin_transient_enforce_device_convergence.is_none()
+            && nonlin_transient_nox.is_none()
             && *transient_lte_reference == lte_reference
             && transient_new_bp_stepping.is_none()
             && vntol.is_none()
@@ -2230,6 +2233,7 @@ impl XyceTestRunner {
             && itl6.is_none()
             && chgtol.is_none()
             && pivtol.is_none()
+            && pivrel.is_none()
             && temp.is_none()
             && tnom.is_none()
             && seed.is_none()

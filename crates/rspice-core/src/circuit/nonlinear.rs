@@ -12,8 +12,14 @@ use super::*;
 
 #[derive(Debug, Clone)]
 pub(crate) struct NonlinearDeviceStateSnapshot {
-    capacitors: Capacitors,
-    inductors: Inductors,
+    // Fixed-value reactive devices are immutable during Newton/residual
+    // probes.  Keeping them out of the rollback image avoids copying their
+    // topology and accepted history once per attempted timestep.  The full
+    // containers remain necessary for solution-dependent capacitances and
+    // nonlinear magnetic devices because their evaluators/linearizations are
+    // mutated while a trial point is assembled.
+    capacitors: Option<Capacitors>,
+    inductors: Option<Inductors>,
     jiles_atherton_inductors: Vec<JilesAthertonBinding>,
     xyce_core_groups: Vec<XyceCoreGroupBinding>,
     diodes: Vec<crate::device::semiconductor::DiodeNonlinearState>,
@@ -143,6 +149,26 @@ mod tests {
     }
 
     #[test]
+    fn classic_mos_only_transient_capability_is_fail_closed() {
+        let mut circuit = CircuitData::new();
+        assert!(!circuit.has_classic_mos_only_transient_nonlinearity());
+
+        circuit.mosfets.add(crate::device::Mosfet::new_nmos(
+            "m1".to_string(),
+            1,
+            2,
+            0,
+            0,
+        ));
+        assert!(circuit.has_classic_mos_only_transient_nonlinearity());
+
+        circuit
+            .diodes
+            .add(crate::device::Diode::new("d1".to_string(), 1, 0));
+        assert!(!circuit.has_classic_mos_only_transient_nonlinearity());
+    }
+
+    #[test]
     fn nonlinear_snapshot_restores_compact_diode_state() {
         let mut circuit = CircuitData::new();
         circuit
@@ -185,6 +211,45 @@ mod tests {
 }
 
 impl CircuitData {
+    /// Whether transient nonlinear trial state consists solely of classic
+    /// MOS devices. Their physical residual stamp and charge companions are
+    /// pure functions of the candidate solution, so a proof restamp can
+    /// reuse the candidate update instead of evaluating the family twice.
+    pub(crate) fn has_classic_mos_only_transient_nonlinearity(&self) -> bool {
+        #[cfg(feature = "veriloga-builtins-base")]
+        let has_generated_veriloga = self.has_generated_veriloga_devices();
+        #[cfg(not(feature = "veriloga-builtins-base"))]
+        let has_generated_veriloga = false;
+        #[cfg(feature = "veriloga")]
+        let has_dynamic_veriloga = self.has_veriloga_devices();
+        #[cfg(not(feature = "veriloga"))]
+        let has_dynamic_veriloga = false;
+
+        !self.mosfets.is_empty()
+            && !self.capacitors.has_solution_dependent_values()
+            && self.diodes.is_empty()
+            && self.bjts.is_empty()
+            && self.b3soi.is_empty()
+            && self.b3soi_fd.is_empty()
+            && self.b3soi_pd.is_empty()
+            && self.bsim3v3.is_empty()
+            && self.bsim4v8.is_empty()
+            && self.ekv26s.is_empty()
+            && self.ekv3s.is_empty()
+            && self.vdmoses.is_empty()
+            && self.jfets.is_empty()
+            && self.xyce_memristors.is_empty()
+            && self.vswitches.is_empty()
+            && self.iswitches.is_empty()
+            && self.generic_switches.is_empty()
+            && self.jiles_atherton_inductors.is_empty()
+            && self.xyce_core_groups.is_empty()
+            && self.behavioral_sources.is_empty()
+            && !self.has_xspice_devices()
+            && !has_generated_veriloga
+            && !has_dynamic_veriloga
+    }
+
     fn has_non_xspice_nonlinear_devices(&self) -> bool {
         self.capacitors.has_solution_dependent_values()
             || !self.diodes.is_empty()
@@ -566,9 +631,21 @@ impl CircuitData {
     /// points. Those probes must not commit device limiter caches, previous
     /// voltages, behavioral-source linearization scratch, or code-model context.
     pub(crate) fn nonlinear_state_snapshot(&self) -> NonlinearDeviceStateSnapshot {
+        self.nonlinear_state_snapshot_impl(true)
+    }
+
+    fn nonlinear_state_snapshot_impl(
+        &self,
+        include_fixed_reactive_stores: bool,
+    ) -> NonlinearDeviceStateSnapshot {
         NonlinearDeviceStateSnapshot {
-            capacitors: self.capacitors.clone(),
-            inductors: self.inductors.clone(),
+            capacitors: (include_fixed_reactive_stores
+                || self.capacitors.has_solution_dependent_values())
+            .then(|| self.capacitors.clone()),
+            inductors: (include_fixed_reactive_stores
+                || !self.jiles_atherton_inductors.is_empty()
+                || !self.xyce_core_groups.is_empty())
+            .then(|| self.inductors.clone()),
             jiles_atherton_inductors: self.jiles_atherton_inductors.clone(),
             xyce_core_groups: self.xyce_core_groups.clone(),
             diodes: self.diodes.nonlinear_state_snapshot(),
@@ -603,10 +680,121 @@ impl CircuitData {
         }
     }
 
+    /// Capture the mutable state touched while assembling a transient trial.
+    ///
+    /// Fixed-value capacitors and ordinary inductors retain accepted history
+    /// until the step-commit phase, so copying their topology-sized stores at
+    /// every attempted timestep is unnecessary.  Solution-dependent
+    /// capacitor evaluators and nonlinear magnetic devices do mutate during
+    /// trial assembly and therefore retain the exact full rollback behavior.
+    pub(crate) fn transient_trial_state_snapshot(&self) -> NonlinearDeviceStateSnapshot {
+        self.nonlinear_state_snapshot_impl(false)
+    }
+
+    /// Refresh an existing rollback snapshot without reallocating its
+    /// topology-sized buffers.
+    ///
+    /// Transient integration takes these snapshots at every attempted step
+    /// and merit checkpoint. Circuit topology is immutable during an
+    /// analysis, so `clone_from` and the compact state-vector writers retain
+    /// all backing allocations after the first capture.
+    fn refresh_nonlinear_state_snapshot_impl(
+        &self,
+        snapshot: &mut NonlinearDeviceStateSnapshot,
+        include_fixed_reactive_stores: bool,
+    ) {
+        if include_fixed_reactive_stores || self.capacitors.has_solution_dependent_values() {
+            if let Some(capacitors) = snapshot.capacitors.as_mut() {
+                capacitors.clone_from(&self.capacitors);
+            } else {
+                snapshot.capacitors = Some(self.capacitors.clone());
+            }
+        } else {
+            snapshot.capacitors = None;
+        }
+        if include_fixed_reactive_stores
+            || !self.jiles_atherton_inductors.is_empty()
+            || !self.xyce_core_groups.is_empty()
+        {
+            if let Some(inductors) = snapshot.inductors.as_mut() {
+                inductors.clone_from(&self.inductors);
+            } else {
+                snapshot.inductors = Some(self.inductors.clone());
+            }
+        } else {
+            snapshot.inductors = None;
+        }
+        snapshot
+            .jiles_atherton_inductors
+            .clone_from(&self.jiles_atherton_inductors);
+        snapshot.xyce_core_groups.clone_from(&self.xyce_core_groups);
+        self.diodes
+            .nonlinear_state_snapshot_into(&mut snapshot.diodes);
+        snapshot.bjts.clone_from(&self.bjts);
+        self.mosfets
+            .nonlinear_state_snapshot_into(&mut snapshot.mosfets);
+        snapshot.b3soi.clone_from(&self.b3soi);
+        snapshot.b3soi_fd.clone_from(&self.b3soi_fd);
+        snapshot.b3soi_pd.clone_from(&self.b3soi_pd);
+        snapshot.bsim3v3.clone_from(&self.bsim3v3);
+        snapshot.bsim4v8.clone_from(&self.bsim4v8);
+        snapshot.ekv26s.clone_from(&self.ekv26s);
+        snapshot.ekv3s.clone_from(&self.ekv3s);
+        snapshot.vdmoses.clone_from(&self.vdmoses);
+        snapshot.jfets.clone_from(&self.jfets);
+        snapshot.xyce_memristors.clone_from(&self.xyce_memristors);
+        snapshot.vswitches.clone_from(&self.vswitches);
+        snapshot.iswitches.clone_from(&self.iswitches);
+        snapshot.generic_switches.clone_from(&self.generic_switches);
+        snapshot
+            .behavioral_sources
+            .clone_from(&self.behavioral_sources);
+        snapshot.xspice_instances.clone_from(&self.xspice_instances);
+        snapshot
+            .xspice_digital_values
+            .clone_from(&self.xspice_digital_values);
+        snapshot
+            .xspice_digital_drivers
+            .clone_from(&self.xspice_digital_drivers);
+        snapshot
+            .xspice_digital_event_times
+            .clone_from(&self.xspice_digital_event_times);
+        snapshot
+            .xspice_real_values
+            .clone_from(&self.xspice_real_values);
+        snapshot
+            .xspice_real_drivers
+            .clone_from(&self.xspice_real_drivers);
+        snapshot
+            .xspice_real_event_times
+            .clone_from(&self.xspice_real_event_times);
+        snapshot
+            .xspice_event_queue
+            .clone_from(&self.xspice_event_queue);
+        #[cfg(feature = "veriloga")]
+        snapshot.veriloga_devices.clone_from(&self.veriloga_devices);
+        #[cfg(feature = "veriloga-builtins-base")]
+        self.generated_veriloga_devices
+            .capture_rollback_state_into(&mut snapshot.generated_veriloga_devices);
+    }
+
+    /// Refresh a reusable transient-trial snapshot while preserving the
+    /// elision of immutable fixed-value reactive-device stores.
+    pub(crate) fn refresh_transient_trial_state_snapshot(
+        &self,
+        snapshot: &mut NonlinearDeviceStateSnapshot,
+    ) {
+        self.refresh_nonlinear_state_snapshot_impl(snapshot, false);
+    }
+
     /// Restore mutable nonlinear evaluation state after a trial residual probe.
     pub(crate) fn restore_nonlinear_state(&mut self, snapshot: NonlinearDeviceStateSnapshot) {
-        self.capacitors = snapshot.capacitors;
-        self.inductors = snapshot.inductors;
+        if let Some(capacitors) = snapshot.capacitors {
+            self.capacitors = capacitors;
+        }
+        if let Some(inductors) = snapshot.inductors {
+            self.inductors = inductors;
+        }
         self.jiles_atherton_inductors = snapshot.jiles_atherton_inductors;
         self.xyce_core_groups = snapshot.xyce_core_groups;
         self.diodes.restore_nonlinear_state(snapshot.diodes);
@@ -647,10 +835,29 @@ impl CircuitData {
 
     /// Update all nonlinear devices with current solution
     pub fn update_nonlinear(&mut self, voltages: &[Value]) {
+        self.update_nonlinear_impl(voltages, false);
+    }
+
+    #[cfg(feature = "parallel")]
+    pub(crate) fn update_nonlinear_parallel_classic_mos(&mut self, voltages: &[Value]) {
+        self.update_nonlinear_impl(voltages, true);
+    }
+
+    fn update_nonlinear_impl(&mut self, voltages: &[Value], parallel_classic_mos: bool) {
         use crate::device::NonlinearDevice;
         self.diodes.update_all(voltages);
         self.bjts.update_all(voltages);
-        self.mosfets.update_all(voltages);
+        #[cfg(feature = "parallel")]
+        if parallel_classic_mos {
+            self.mosfets.update_all_parallel(voltages);
+        } else {
+            self.mosfets.update_all(voltages);
+        }
+        #[cfg(not(feature = "parallel"))]
+        {
+            let _ = parallel_classic_mos;
+            self.mosfets.update_all(voltages);
+        }
         self.b3soi.update_all(voltages);
         self.b3soi_fd.update_all(voltages);
         self.b3soi_pd.update_all(voltages);

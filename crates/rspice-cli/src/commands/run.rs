@@ -1617,6 +1617,7 @@ fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> Simul
         transient_nonlinear_deltaxtol: None,
         transient_nonlinear_rhstol: None,
         transient_nonlinear_max_iterations: None,
+        transient_nonlinear_nox: None,
         transient_enforce_device_convergence: None,
         transient_lte_reference: None,
         transient_new_bp_stepping: None,

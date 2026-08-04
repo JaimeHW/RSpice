@@ -98,13 +98,17 @@ pub struct TransientResult {
 impl TransientResult {
     /// Append one accepted device operating-point snapshot. Missing parameters
     /// are padded with NaN so every stored trace remains aligned with `time`.
-    pub(crate) fn record_device_op_sample(&mut self, report: crate::circuit::DeviceOpReport) {
+    pub(crate) fn record_device_op_sample(
+        &mut self,
+        report: crate::circuit::DeviceOpReport,
+    ) -> usize {
         if self.time.is_empty() {
-            return;
+            return 0;
         }
 
         let sample_index = self.time.len() - 1;
         let mut seen = vec![false; self.device_op_traces.len()];
+        let mut added_values = 0usize;
 
         for entry in report.entries {
             for (parameter, value) in entry.params {
@@ -122,16 +126,19 @@ impl TransientResult {
                             parameter: parameter.to_string(),
                             values: vec![Value::NAN; sample_index],
                         });
+                        added_values = added_values.saturating_add(sample_index);
                         seen.push(false);
                         trace_index
                     });
 
                 let trace = &mut self.device_op_traces[trace_index];
                 if trace.values.len() < sample_index {
+                    added_values = added_values.saturating_add(sample_index - trace.values.len());
                     trace.values.resize(sample_index, Value::NAN);
                 }
                 if trace.values.len() == sample_index {
                     trace.values.push(value);
+                    added_values = added_values.saturating_add(1);
                 } else if let Some(slot) = trace.values.get_mut(sample_index) {
                     *slot = value;
                 }
@@ -144,12 +151,15 @@ impl TransientResult {
                 continue;
             }
             if trace.values.len() < sample_index {
+                added_values = added_values.saturating_add(sample_index - trace.values.len());
                 trace.values.resize(sample_index, Value::NAN);
             }
             if trace.values.len() == sample_index {
                 trace.values.push(Value::NAN);
+                added_values = added_values.saturating_add(1);
             }
         }
+        added_values
     }
 
     /// Append committed XSPICE digital values at an accepted transient time.
@@ -158,12 +168,17 @@ impl TransientResult {
         time: Value,
         snapshot: &[(NodeId, DigitalValue)],
         trace_indices: &mut HashMap<NodeId, usize>,
-    ) {
+        retained_nodes: &[bool],
+    ) -> usize {
+        let mut added_values = 0usize;
         for &(node_id, value) in snapshot {
-            let Some(node_name) = node_id
-                .checked_sub(1)
-                .and_then(|index| self.node_names.get(index))
-            else {
+            let Some(node_index) = node_id.checked_sub(1) else {
+                continue;
+            };
+            if !retained_nodes.get(node_index).copied().unwrap_or(false) {
+                continue;
+            }
+            let Some(node_name) = self.node_names.get(node_index) else {
                 continue;
             };
             let trace_idx = match trace_indices.get(&node_id).copied() {
@@ -195,7 +210,9 @@ impl TransientResult {
                 continue;
             }
             trace.points.push(DigitalTracePoint { time, value });
+            added_values = added_values.saturating_add(2);
         }
+        added_values
     }
 
     /// Get the complete digital event trace for a named XSPICE digital node.
@@ -212,12 +229,17 @@ impl TransientResult {
         time: Value,
         snapshot: &[(NodeId, Value)],
         trace_indices: &mut HashMap<NodeId, usize>,
-    ) {
+        retained_nodes: &[bool],
+    ) -> usize {
+        let mut added_values = 0usize;
         for &(node_id, value) in snapshot {
-            let Some(node_name) = node_id
-                .checked_sub(1)
-                .and_then(|index| self.node_names.get(index))
-            else {
+            let Some(node_index) = node_id.checked_sub(1) else {
+                continue;
+            };
+            if !retained_nodes.get(node_index).copied().unwrap_or(false) {
+                continue;
+            }
+            let Some(node_name) = self.node_names.get(node_index) else {
                 continue;
             };
             let trace_idx = match trace_indices.get(&node_id).copied() {
@@ -249,7 +271,9 @@ impl TransientResult {
                 continue;
             }
             trace.points.push(RealTracePoint { time, value });
+            added_values = added_values.saturating_add(2);
         }
+        added_values
     }
 
     /// Get the complete real-valued event trace for a named XSPICE real node.

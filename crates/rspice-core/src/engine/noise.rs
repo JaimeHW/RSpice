@@ -2145,179 +2145,238 @@ impl Engine {
         // excitation: all independent sources, magnitudes, and phases.
         let ac_excitation_rhs = Self::build_ac_excitation_rhs(&circuit);
 
-        // One workspace reused across every noise-source transfer solve.
+        // Solve one frequency using caller-owned workspaces. Keeping every
+        // mutable cache/work vector explicit lets the sequential path reuse a
+        // single set and the parallel path reuse one set per contiguous
+        // worker chunk, with no per-point allocation or synchronization.
+        let solve_at_frequency = |circuit: &mut CircuitData,
+                                  ac_matrix: &mut rspice_matrix::ComplexMatrix,
+                                  rhs: &mut Vec<Complex64>,
+                                  ac_solution: &mut Vec<Complex64>,
+                                  transfer_solution: &mut Vec<Complex64>,
+                                  freq: Value|
+         -> Result<NoiseResult, SimulationError> {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let omega = 2.0 * PI * freq;
+            circuit.prepare_behavioral_small_signal_at_frequency(&dc_solution, freq);
+            Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
+                circuit,
+                ac_matrix,
+                &dc_solution,
+                omega,
+                true,
+                true,
+            )?;
+
+            ac_matrix
+                .solve_into(&ac_excitation_rhs, ac_solution)
+                .map_err(SimulationError::Solver)?;
+            let input_gain_sq = if has_input_source {
+                let gain =
+                    Self::differential_noise_output(ac_solution, output_pos, output_neg, num_nodes);
+                let gain_sq = gain * gain;
+                if !gain_sq.is_finite() {
+                    return Err(SimulationError::Circuit(format!(
+                        "Input-referred noise gain is non-finite for source '{}' at {} Hz",
+                        input_source.unwrap_or("<unknown>"),
+                        freq
+                    )));
+                }
+                // Xyce N_ANP_NOISE.C uses N_MINGAIN=1e-20 to retain a
+                // finite input-referred spectrum at transfer nulls.
+                gain_sq.max(1.0e-20)
+            } else {
+                1.0
+            };
+
+            let mut total_noise_v2_hz = 0.0;
+            let mut contributions = Vec::new();
+            // Adjoint noise analysis reduces one linear solve per noise
+            // source to one transpose solve per output/frequency:
+            // c^T A^-1 b = (A^-T c)^T b. This is exact for complex AC
+            // matrices (transpose, not conjugate transpose).
+            rhs.fill(Complex64::new(0.0, 0.0));
+            if output_pos > 0 && output_pos <= num_nodes {
+                rhs[output_pos - 1] += Complex64::new(1.0, 0.0);
+            }
+            if let Some(node) = output_neg
+                && node > 0
+                && node <= num_nodes
+            {
+                rhs[node - 1] -= Complex64::new(1.0, 0.0);
+            }
+            ac_matrix
+                .solve_transpose_into(rhs, transfer_solution)
+                .map_err(SimulationError::Solver)?;
+
+            for source in &noise_sources {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                let si = source.spectral_density(freq, temperature);
+                let output_v2 = if si.is_finite() && si > 0.0 {
+                    let transfer = Self::noise_transfer_from_adjoint(
+                        transfer_solution,
+                        source.node_pos,
+                        source.node_neg,
+                    );
+                    si * transfer.norm_sqr()
+                } else {
+                    0.0
+                };
+                if output_v2.is_finite() && output_v2 > 0.0 {
+                    total_noise_v2_hz += output_v2;
+                }
+                contributions.push(NoiseContribution {
+                    identity: source.identity.clone(),
+                    noise_type: source.noise_type,
+                    output_contribution: output_v2.max(0.0),
+                    input_contribution: output_v2.max(0.0) / input_gain_sq,
+                    percentage: 0.0,
+                });
+            }
+
+            for source in &correlated_noise_sources {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                let Some(densities) = source.spectral_densities(freq, temperature) else {
+                    continue;
+                };
+                if !densities.first_psd.is_finite()
+                    || !densities.second_psd.is_finite()
+                    || densities.first_psd < 0.0
+                    || densities.second_psd < 0.0
+                {
+                    continue;
+                }
+
+                let first_gain = Self::noise_transfer_from_adjoint(
+                    transfer_solution,
+                    source.first.node_pos,
+                    source.first.node_neg,
+                );
+                let second_gain = Self::noise_transfer_from_adjoint(
+                    transfer_solution,
+                    source.second.node_pos,
+                    source.second.node_neg,
+                );
+
+                let first_amp = first_gain * densities.first_psd.sqrt();
+                let second_amp = second_gain
+                    * Complex64::from_polar(densities.second_psd.sqrt(), densities.phase_rad);
+                let output_v2 = (first_amp + second_amp).norm_sqr();
+                if output_v2.is_finite() && output_v2 > 0.0 {
+                    total_noise_v2_hz += output_v2;
+                    contributions.push(NoiseContribution {
+                        identity: crate::analysis::NoiseSourceIdentity::device(
+                            source.device_name.clone(),
+                        ),
+                        noise_type: source.noise_type,
+                        output_contribution: output_v2,
+                        input_contribution: output_v2 / input_gain_sq,
+                        percentage: 0.0,
+                    });
+                }
+            }
+
+            for contrib in &mut contributions {
+                contrib.percentage = if total_noise_v2_hz > 0.0 {
+                    100.0 * contrib.output_contribution / total_noise_v2_hz
+                } else {
+                    0.0
+                };
+            }
+
+            let mut branch_currents = ac_solution[num_nodes..].to_vec();
+            circuit.capacitors.project_complex_ic_branch_currents(
+                ac_solution,
+                &mut branch_currents,
+                omega,
+            );
+
+            Ok(NoiseResult {
+                frequency: freq,
+                node_names: node_names.clone(),
+                branch_names: branch_names.clone(),
+                voltages: ac_solution[..num_nodes].to_vec(),
+                currents: branch_currents,
+                output_noise_density: total_noise_v2_hz,
+                input_referred_density: if has_input_source {
+                    total_noise_v2_hz / input_gain_sq
+                } else {
+                    total_noise_v2_hz
+                },
+                input_gain_squared: input_gain_sq,
+                contribution_catalog: unique_catalog.clone(),
+                contributions,
+            })
+        };
+
+        // Frequency points are independent after the operating point. Match
+        // AC's deterministic chunk scheduler: each worker owns a CircuitData
+        // clone (behavioral/model caches are mutable), a matrix factorization
+        // workspace, and all solve vectors. Contiguous chunks preserve sweep
+        // order when flattened and avoid a clone/allocation per frequency.
+        #[cfg(feature = "parallel")]
+        if frequencies.len() >= 10 {
+            use rayon::prelude::*;
+
+            let workers = self.parallel_worker_count(frequencies.len());
+            if workers > 1 {
+                let chunk_len = frequencies.len().div_ceil(workers);
+                let work: Vec<(CircuitData, &[Value])> = frequencies
+                    .chunks(chunk_len)
+                    .map(|chunk| (circuit.clone(), chunk))
+                    .collect();
+                let chunk_results: Result<Vec<Vec<NoiseResult>>, SimulationError> = self
+                    .install_parallel(|| {
+                        work.into_par_iter()
+                            .map(|(mut worker_circuit, chunk)| {
+                                let mut worker_matrix =
+                                    rspice_matrix::ComplexMatrix::from_real_structure(&matrix);
+                                let mut worker_rhs = vec![Complex64::new(0.0, 0.0); size];
+                                let mut worker_ac_solution = Vec::with_capacity(size);
+                                let mut worker_transfer_solution = Vec::with_capacity(size);
+                                chunk
+                                    .iter()
+                                    .map(|&frequency| {
+                                        solve_at_frequency(
+                                            &mut worker_circuit,
+                                            &mut worker_matrix,
+                                            &mut worker_rhs,
+                                            &mut worker_ac_solution,
+                                            &mut worker_transfer_solution,
+                                            frequency,
+                                        )
+                                    })
+                                    .collect()
+                            })
+                            .collect()
+                    })?;
+                return chunk_results.map(|chunks| chunks.into_iter().flatten().collect());
+            }
+        }
+
         let mut rhs = vec![Complex64::new(0.0, 0.0); size];
         let mut ac_matrix = rspice_matrix::ComplexMatrix::from_real_structure(&matrix);
         let mut ac_solution = Vec::with_capacity(size);
         let mut transfer_solution = Vec::with_capacity(size);
-        let results: Result<Vec<NoiseResult>, SimulationError> = frequencies
+        frequencies
             .iter()
-            .map(|&freq| {
-                if abort.is_aborted() {
-                    return Err(SimulationError::Aborted);
-                }
-                let omega = 2.0 * PI * freq;
-                circuit.prepare_behavioral_small_signal_at_frequency(&dc_solution, freq);
-                Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
-                    &circuit,
+            .map(|&frequency| {
+                solve_at_frequency(
+                    &mut circuit,
                     &mut ac_matrix,
-                    &dc_solution,
-                    omega,
-                    true,
-                    true,
-                )?;
-
-                ac_matrix
-                    .solve_into(&ac_excitation_rhs, &mut ac_solution)
-                    .map_err(SimulationError::Solver)?;
-                let input_gain_sq = if has_input_source {
-                    let gain = Self::differential_noise_output(
-                        &ac_solution,
-                        output_pos,
-                        output_neg,
-                        num_nodes,
-                    );
-                    let gain_sq = gain * gain;
-                    if !gain_sq.is_finite() {
-                        return Err(SimulationError::Circuit(format!(
-                            "Input-referred noise gain is non-finite for source '{}' at {} Hz",
-                            input_source.unwrap_or("<unknown>"),
-                            freq
-                        )));
-                    }
-                    // Xyce N_ANP_NOISE.C uses N_MINGAIN=1e-20 to retain a
-                    // finite input-referred spectrum at transfer nulls.
-                    gain_sq.max(1.0e-20)
-                } else {
-                    1.0
-                };
-
-                let mut total_noise_v2_hz = 0.0;
-                let mut contributions = Vec::new();
-                // Adjoint noise analysis reduces one linear solve per noise
-                // source to one transpose solve per output/frequency:
-                // c^T A^-1 b = (A^-T c)^T b. This is exact for complex AC
-                // matrices (transpose, not conjugate transpose).
-                rhs.fill(Complex64::new(0.0, 0.0));
-                if output_pos > 0 && output_pos <= num_nodes {
-                    rhs[output_pos - 1] += Complex64::new(1.0, 0.0);
-                }
-                if let Some(node) = output_neg
-                    && node > 0
-                    && node <= num_nodes
-                {
-                    rhs[node - 1] -= Complex64::new(1.0, 0.0);
-                }
-                ac_matrix
-                    .solve_transpose_into(&rhs, &mut transfer_solution)
-                    .map_err(SimulationError::Solver)?;
-
-                for source in &noise_sources {
-                    if abort.is_aborted() {
-                        return Err(SimulationError::Aborted);
-                    }
-                    let si = source.spectral_density(freq, temperature);
-                    let output_v2 = if si.is_finite() && si > 0.0 {
-                        let transfer = Self::noise_transfer_from_adjoint(
-                            &transfer_solution,
-                            source.node_pos,
-                            source.node_neg,
-                        );
-                        si * transfer.norm_sqr()
-                    } else {
-                        0.0
-                    };
-                    if output_v2.is_finite() && output_v2 > 0.0 {
-                        total_noise_v2_hz += output_v2;
-                    }
-                    contributions.push(NoiseContribution {
-                        identity: source.identity.clone(),
-                        noise_type: source.noise_type,
-                        output_contribution: output_v2.max(0.0),
-                        input_contribution: output_v2.max(0.0) / input_gain_sq,
-                        percentage: 0.0,
-                    });
-                }
-
-                for source in &correlated_noise_sources {
-                    if abort.is_aborted() {
-                        return Err(SimulationError::Aborted);
-                    }
-                    let Some(densities) = source.spectral_densities(freq, temperature) else {
-                        continue;
-                    };
-                    if !densities.first_psd.is_finite()
-                        || !densities.second_psd.is_finite()
-                        || densities.first_psd < 0.0
-                        || densities.second_psd < 0.0
-                    {
-                        continue;
-                    }
-
-                    let first_gain = Self::noise_transfer_from_adjoint(
-                        &transfer_solution,
-                        source.first.node_pos,
-                        source.first.node_neg,
-                    );
-                    let second_gain = Self::noise_transfer_from_adjoint(
-                        &transfer_solution,
-                        source.second.node_pos,
-                        source.second.node_neg,
-                    );
-
-                    let first_amp = first_gain * densities.first_psd.sqrt();
-                    let second_amp = second_gain
-                        * Complex64::from_polar(densities.second_psd.sqrt(), densities.phase_rad);
-                    let output_v2 = (first_amp + second_amp).norm_sqr();
-                    if output_v2.is_finite() && output_v2 > 0.0 {
-                        total_noise_v2_hz += output_v2;
-                        contributions.push(NoiseContribution {
-                            identity: crate::analysis::NoiseSourceIdentity::device(
-                                source.device_name.clone(),
-                            ),
-                            noise_type: source.noise_type,
-                            output_contribution: output_v2,
-                            input_contribution: output_v2 / input_gain_sq,
-                            percentage: 0.0,
-                        });
-                    }
-                }
-
-                for contrib in &mut contributions {
-                    contrib.percentage = if total_noise_v2_hz > 0.0 {
-                        100.0 * contrib.output_contribution / total_noise_v2_hz
-                    } else {
-                        0.0
-                    };
-                }
-
-                let mut branch_currents = ac_solution[num_nodes..].to_vec();
-                circuit.capacitors.project_complex_ic_branch_currents(
-                    &ac_solution,
-                    &mut branch_currents,
-                    omega,
-                );
-
-                Ok(NoiseResult {
-                    frequency: freq,
-                    node_names: node_names.clone(),
-                    branch_names: branch_names.clone(),
-                    voltages: ac_solution[..num_nodes].to_vec(),
-                    currents: branch_currents,
-                    output_noise_density: total_noise_v2_hz,
-                    input_referred_density: if has_input_source {
-                        total_noise_v2_hz / input_gain_sq
-                    } else {
-                        total_noise_v2_hz
-                    },
-                    input_gain_squared: input_gain_sq,
-                    contribution_catalog: unique_catalog.clone(),
-                    contributions,
-                })
+                    &mut rhs,
+                    &mut ac_solution,
+                    &mut transfer_solution,
+                    frequency,
+                )
             })
-            .collect();
-
-        results
+            .collect()
     }
 }
 
@@ -2342,6 +2401,35 @@ mod tests {
             crate::engine::SimulationConfig::default()
                 .with_spice_dialect(crate::engine::SpiceDialect::Xyce),
         )
+    }
+
+    #[test]
+    fn chunk_parallel_noise_sweep_is_bit_identical_to_single_worker() {
+        let netlist = Netlist::parse(
+            "Parallel noise determinism\n\
+             V1 in 0 DC 0 AC 1\n\
+             R1 in out 1k\n\
+             R2 out 0 2k\n\
+             .END\n",
+        )
+        .expect("noise deck parses");
+        let frequencies = (0..32)
+            .map(|index| 10.0_f64.powf(1.0 + index as f64 / 8.0))
+            .collect::<Vec<_>>();
+
+        let mut single = Engine::default();
+        single.config.resource_limits.max_parallel_workers = 1;
+        let expected = single
+            .run_noise_named_with_input_source(&netlist, "out", None, "V1", &frequencies, 300.15)
+            .expect("single-worker noise succeeds");
+
+        let mut parallel = Engine::default();
+        parallel.config.resource_limits.max_parallel_workers = 4;
+        let actual = parallel
+            .run_noise_named_with_input_source(&netlist, "out", None, "V1", &frequencies, 300.15)
+            .expect("parallel noise succeeds");
+
+        assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
     }
 
     #[test]

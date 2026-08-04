@@ -157,6 +157,10 @@ impl Mosfet {
             gds: 0.0,
             gmb: 0.0,
             id_eq: 0.0,
+            ibs: 0.0,
+            gbs: 0.0,
+            ibd: 0.0,
+            gbd: 0.0,
             region: MosRegion::Cutoff,
 
             vgs_prev: 0.0,

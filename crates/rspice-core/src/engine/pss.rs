@@ -74,6 +74,216 @@ impl PssAcceptedStepHistory {
     }
 }
 
+const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
+const PSS_KRYLOV_REL_TOL: Value = 1e-9;
+
+/// Dense LU of the most recently formed shooting Jacobian.  Newton-Krylov
+/// uses it only as a right preconditioner; a singular factor disables the
+/// matrix-free attempt and sends the caller to the established full-Jacobian
+/// path.
+struct PssDenseLu {
+    n: usize,
+    lu: Vec<Value>,
+    pivots: Vec<usize>,
+}
+
+impl PssDenseLu {
+    fn factor(matrix: &[Vec<Value>]) -> Option<Self> {
+        let n = matrix.len();
+        if matrix.iter().any(|row| row.len() != n) {
+            return None;
+        }
+        let mut lu = matrix.iter().flatten().copied().collect::<Vec<_>>();
+        let mut pivots = vec![0; n];
+        for k in 0..n {
+            let mut pivot_row = k;
+            let mut pivot_abs = lu[k * n + k].abs();
+            for row in (k + 1)..n {
+                let candidate = lu[row * n + k].abs();
+                if candidate > pivot_abs {
+                    pivot_abs = candidate;
+                    pivot_row = row;
+                }
+            }
+            if !pivot_abs.is_finite() || pivot_abs <= 1e-15 {
+                return None;
+            }
+            pivots[k] = pivot_row;
+            if pivot_row != k {
+                for column in 0..n {
+                    lu.swap(k * n + column, pivot_row * n + column);
+                }
+            }
+            let pivot = lu[k * n + k];
+            for row in (k + 1)..n {
+                let multiplier = lu[row * n + k] / pivot;
+                lu[row * n + k] = multiplier;
+                for column in (k + 1)..n {
+                    lu[row * n + column] -= multiplier * lu[k * n + column];
+                }
+            }
+        }
+        Some(Self { n, lu, pivots })
+    }
+
+    fn solve(&self, rhs: &[Value]) -> Vec<Value> {
+        debug_assert_eq!(rhs.len(), self.n);
+        let mut solution = rhs.to_vec();
+        for k in 0..self.n {
+            if self.pivots[k] != k {
+                solution.swap(k, self.pivots[k]);
+            }
+        }
+        for row in 1..self.n {
+            let mut value = solution[row];
+            for column in 0..row {
+                value -= self.lu[row * self.n + column] * solution[column];
+            }
+            solution[row] = value;
+        }
+        for row in (0..self.n).rev() {
+            let mut value = solution[row];
+            for column in (row + 1)..self.n {
+                value -= self.lu[row * self.n + column] * solution[column];
+            }
+            solution[row] = value / self.lu[row * self.n + row];
+        }
+        solution
+    }
+}
+
+#[inline]
+fn pss_dot(left: &[Value], right: &[Value]) -> Value {
+    left.iter().zip(right).map(|(a, b)| a * b).sum()
+}
+
+#[inline]
+fn pss_norm(vector: &[Value]) -> Value {
+    pss_dot(vector, vector).sqrt()
+}
+
+/// Restarted, right-preconditioned real GMRES for shooting Newton systems.
+/// The product is fallible because every J*v evaluates two complete period
+/// maps.  A non-converged outcome is `None`, which is a correctness-preserving
+/// request for the caller to rebuild and directly solve the dense Jacobian.
+fn pss_gmres(
+    matvec: &mut dyn FnMut(&[Value]) -> Result<Vec<Value>, SimulationError>,
+    preconditioner: &PssDenseLu,
+    rhs: &[Value],
+    restart: usize,
+    max_outer: usize,
+) -> Result<Option<Vec<Value>>, SimulationError> {
+    let size = rhs.len();
+    let rhs_norm = pss_norm(rhs);
+    if rhs_norm == 0.0 {
+        return Ok(Some(vec![0.0; size]));
+    }
+    let restart = restart.clamp(1, size);
+    let mut solution = vec![0.0; size];
+    let mut residual = rhs.to_vec();
+    let mut beta = rhs_norm;
+
+    for _ in 0..max_outer {
+        let mut basis = Vec::with_capacity(restart + 1);
+        basis.push(
+            residual
+                .iter()
+                .map(|value| value / beta)
+                .collect::<Vec<_>>(),
+        );
+        let mut hessenberg: Vec<Vec<Value>> = Vec::with_capacity(restart);
+        let mut cosines: Vec<Value> = Vec::with_capacity(restart);
+        let mut sines: Vec<Value> = Vec::with_capacity(restart);
+        let mut projected_rhs = vec![0.0; restart + 1];
+        projected_rhs[0] = beta;
+        let mut used = 0;
+        let mut breakdown = false;
+
+        for column in 0..restart {
+            used = column + 1;
+            let z = preconditioner.solve(&basis[column]);
+            let mut image = matvec(&z)?;
+            let mut h_column = vec![0.0; column + 2];
+            for row in 0..=column {
+                let projection = pss_dot(&basis[row], &image);
+                h_column[row] = projection;
+                for (value, basis_value) in image.iter_mut().zip(&basis[row]) {
+                    *value -= projection * basis_value;
+                }
+            }
+            let image_norm = pss_norm(&image);
+            h_column[column + 1] = image_norm;
+            for row in 0..column {
+                let rotated = cosines[row] * h_column[row] + sines[row] * h_column[row + 1];
+                h_column[row + 1] = -sines[row] * h_column[row] + cosines[row] * h_column[row + 1];
+                h_column[row] = rotated;
+            }
+            let diagonal_norm = h_column[column].hypot(h_column[column + 1]);
+            let (cosine, sine) = if diagonal_norm > 0.0 {
+                (
+                    h_column[column] / diagonal_norm,
+                    h_column[column + 1] / diagonal_norm,
+                )
+            } else {
+                (1.0, 0.0)
+            };
+            h_column[column] = diagonal_norm;
+            h_column[column + 1] = 0.0;
+            let projected = projected_rhs[column];
+            projected_rhs[column] = cosine * projected;
+            projected_rhs[column + 1] = -sine * projected;
+            cosines.push(cosine);
+            sines.push(sine);
+            hessenberg.push(h_column);
+
+            if projected_rhs[column + 1].abs() / rhs_norm < PSS_KRYLOV_REL_TOL
+                || image_norm <= 1e-300
+            {
+                breakdown = true;
+                break;
+            }
+            basis.push(image.into_iter().map(|value| value / image_norm).collect());
+        }
+
+        let mut coefficients = vec![0.0; used];
+        for row in (0..used).rev() {
+            let mut value = projected_rhs[row];
+            for column in (row + 1)..used {
+                value -= hessenberg[column][row] * coefficients[column];
+            }
+            let diagonal = hessenberg[row][row];
+            if !diagonal.is_finite() || diagonal.abs() <= 1e-300 {
+                return Ok(None);
+            }
+            coefficients[row] = value / diagonal;
+        }
+        let mut update = vec![0.0; size];
+        for (column, coefficient) in coefficients.iter().enumerate() {
+            for (value, basis_value) in update.iter_mut().zip(&basis[column]) {
+                *value += coefficient * basis_value;
+            }
+        }
+        let update = preconditioner.solve(&update);
+        for (value, step) in solution.iter_mut().zip(update) {
+            *value += step;
+        }
+
+        let image = matvec(&solution)?;
+        for ((value, rhs_value), image_value) in residual.iter_mut().zip(rhs).zip(image) {
+            *value = rhs_value - image_value;
+        }
+        let next_beta = pss_norm(&residual);
+        if next_beta / rhs_norm < PSS_KRYLOV_REL_TOL {
+            return Ok(Some(solution));
+        }
+        if breakdown || next_beta >= 0.99 * beta {
+            return Ok(None);
+        }
+        beta = next_beta;
+    }
+    Ok(None)
+}
+
 /// Recover the monodromy matrix from a converged shooting Jacobian:
 /// the shooting residual is F(x0) = x(T) - x0, so J = dF/dx0 = M - I and
 /// M = J + I. Reusing the Jacobian saves N+1 full period integrations.
@@ -1155,6 +1365,10 @@ impl Engine {
         // The most recent shooting Jacobian (J = M - I). At convergence it
         // doubles as the monodromy source, saving N+1 period integrations.
         let mut last_jacobian: Option<Vec<Vec<Value>>> = None;
+        // A previously materialized Jacobian remains useful as a right
+        // preconditioner even after a matrix-free step makes it too stale for
+        // Floquet reporting.
+        let mut preconditioner_jacobian: Option<Vec<Vec<Value>>> = None;
 
         while iteration < config.max_iterations {
             if abort.is_aborted() {
@@ -1194,29 +1408,85 @@ impl Engine {
             if config.is_autonomous() {
                 // Oscillators: the period is a Newton unknown alongside the
                 // state, closed by a Poincare phase condition.
-                let (delta, delta_t, jacobian) = self.pss_compute_autonomous_newton_step(
-                    &circuit,
-                    &shooting_state,
-                    detected_period,
-                    &config,
-                    FD_STEP,
-                    abort,
-                )?;
-                last_jacobian = Some(jacobian);
+                let krylov_step = if shooting_state.dimension() >= PSS_KRYLOV_STATE_THRESHOLD {
+                    if let Some(jacobian) = preconditioner_jacobian.as_deref() {
+                        self.pss_compute_autonomous_newton_step_krylov(
+                            &circuit,
+                            &shooting_state,
+                            detected_period,
+                            &config,
+                            FD_STEP,
+                            jacobian,
+                            abort,
+                        )?
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                let (delta, delta_t) = if let Some(step) = krylov_step {
+                    // The materialized Jacobian predates this step and cannot
+                    // be recycled as the converged monodromy.
+                    last_jacobian = None;
+                    if config.verbose {
+                        log::debug!("PSS autonomous Newton-Krylov step accepted");
+                    }
+                    step
+                } else {
+                    let (delta, delta_t, jacobian) = self.pss_compute_autonomous_newton_step(
+                        &circuit,
+                        &shooting_state,
+                        detected_period,
+                        &config,
+                        FD_STEP,
+                        abort,
+                    )?;
+                    preconditioner_jacobian = Some(jacobian.clone());
+                    last_jacobian = Some(jacobian);
+                    (delta, delta_t)
+                };
                 shooting_state.update_x0(&delta, solver.damping);
                 let max_dt = config.max_period_change * detected_period;
                 detected_period += (solver.damping * delta_t).clamp(-max_dt, max_dt);
                 shooting_state.period = detected_period;
             } else {
-                let (delta, jacobian) = self.pss_compute_newton_step(
-                    &circuit,
-                    &shooting_state,
-                    detected_period,
-                    &config,
-                    FD_STEP,
-                    abort,
-                )?;
-                last_jacobian = Some(jacobian);
+                let krylov_step = if shooting_state.dimension() >= PSS_KRYLOV_STATE_THRESHOLD {
+                    if let Some(jacobian) = preconditioner_jacobian.as_deref() {
+                        self.pss_compute_newton_step_krylov(
+                            &circuit,
+                            &shooting_state,
+                            detected_period,
+                            &config,
+                            FD_STEP,
+                            jacobian,
+                            abort,
+                        )?
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                let delta = if let Some(delta) = krylov_step {
+                    last_jacobian = None;
+                    if config.verbose {
+                        log::debug!("PSS driven Newton-Krylov step accepted");
+                    }
+                    delta
+                } else {
+                    let (delta, jacobian) = self.pss_compute_newton_step(
+                        &circuit,
+                        &shooting_state,
+                        detected_period,
+                        &config,
+                        FD_STEP,
+                        abort,
+                    )?;
+                    preconditioner_jacobian = Some(jacobian.clone());
+                    last_jacobian = Some(jacobian);
+                    delta
+                };
                 shooting_state.update_x0(&delta, solver.damping);
             }
             final_waveform = Some(waveform);
@@ -1660,6 +1930,180 @@ impl Engine {
         (0..n)
             .map(|j| column(&mut worker_circuit, &mut worker_matrix, j))
             .collect()
+    }
+
+    /// Matrix-free directional derivative of the fixed-grid shooting map.
+    /// The perturbation is scaled so its largest normalized state component
+    /// matches the same central-difference step used by explicit columns.
+    fn pss_directional_jacobian_product(
+        &self,
+        worker_circuit: &mut CircuitData,
+        worker_matrix: &mut StaticMatrix,
+        x0: &[Value],
+        period: Value,
+        config: &PssConfig,
+        fd_step: Value,
+        direction: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        let scaled_direction = direction
+            .iter()
+            .zip(x0)
+            .map(|(value, state)| value.abs() / (1.0 + state.abs()))
+            .fold(0.0_f64, Value::max);
+        if scaled_direction == 0.0 {
+            return Ok(vec![0.0; x0.len()]);
+        }
+        let epsilon = fd_step / scaled_direction;
+        if !epsilon.is_finite() || epsilon <= 0.0 {
+            return Err(SimulationError::Circuit(
+                "PSS Newton-Krylov produced an invalid directional perturbation".to_string(),
+            ));
+        }
+
+        let x_plus = x0
+            .iter()
+            .zip(direction)
+            .map(|(state, vector)| state + epsilon * vector)
+            .collect::<Vec<_>>();
+        self.pss_set_reactive_state(worker_circuit, &x_plus);
+        let (phi_plus, _) =
+            self.pss_simulate_one_period(worker_circuit, worker_matrix, period, config, abort)?;
+
+        let x_minus = x0
+            .iter()
+            .zip(direction)
+            .map(|(state, vector)| state - epsilon * vector)
+            .collect::<Vec<_>>();
+        self.pss_set_reactive_state(worker_circuit, &x_minus);
+        let (phi_minus, _) =
+            self.pss_simulate_one_period(worker_circuit, worker_matrix, period, config, abort)?;
+
+        Ok(phi_plus
+            .iter()
+            .zip(phi_minus)
+            .zip(direction)
+            .map(|((plus, minus), vector)| (plus - minus) / (2.0 * epsilon) - vector)
+            .collect())
+    }
+
+    /// Try a preconditioned Newton-Krylov shooting step.  The exact Jacobian
+    /// from the previous Newton point is an excellent local preconditioner;
+    /// failure to meet the true inner residual returns `None` for a full
+    /// central-column rebuild and direct solve.
+    fn pss_compute_newton_step_krylov(
+        &self,
+        circuit: &CircuitData,
+        state: &ShootingState,
+        period: Value,
+        config: &PssConfig,
+        fd_step: Value,
+        preconditioner_jacobian: &[Vec<Value>],
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Vec<Value>>, SimulationError> {
+        let Some(preconditioner) = PssDenseLu::factor(preconditioner_jacobian) else {
+            return Ok(None);
+        };
+        let mut worker = circuit.clone();
+        let worker_matrix = self.build_matrix(&worker)?;
+        worker.link_indices(&worker_matrix);
+        let mut worker_matrix = worker_matrix;
+        let rhs = state
+            .residual
+            .iter()
+            .map(|value| -value)
+            .collect::<Vec<_>>();
+        let mut matvec = |direction: &[Value]| {
+            self.pss_directional_jacobian_product(
+                &mut worker,
+                &mut worker_matrix,
+                &state.x0,
+                period,
+                config,
+                fd_step,
+                direction,
+                abort,
+            )
+        };
+        pss_gmres(
+            &mut matvec,
+            &preconditioner,
+            &rhs,
+            state.dimension().min(24),
+            4,
+        )
+    }
+
+    /// Autonomous counterpart of the matrix-free shooting step.  The period
+    /// column and Poincare phase row are formed once; only the state block is
+    /// evaluated through directional period-map products.
+    fn pss_compute_autonomous_newton_step_krylov(
+        &self,
+        circuit: &CircuitData,
+        state: &ShootingState,
+        period: Value,
+        config: &PssConfig,
+        fd_step: Value,
+        preconditioner_jacobian: &[Vec<Value>],
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<(Vec<Value>, Value)>, SimulationError> {
+        let n = state.dimension();
+        let h_t = period * 1e-7;
+        let mut worker = circuit.clone();
+        let worker_matrix = self.build_matrix(&worker)?;
+        worker.link_indices(&worker_matrix);
+        let mut worker_matrix = worker_matrix;
+        self.pss_set_reactive_state(&mut worker, &state.x0);
+        let (phi_plus_t, _) = self.pss_simulate_one_period(
+            &mut worker,
+            &mut worker_matrix,
+            period + h_t,
+            config,
+            abort,
+        )?;
+        let dphi_dt = (0..n)
+            .map(|index| (phi_plus_t[index] - state.x_t[index]) / h_t)
+            .collect::<Vec<_>>();
+
+        let mut augmented = vec![vec![0.0; n + 1]; n + 1];
+        for row in 0..n {
+            for column in 0..n {
+                augmented[row][column] = preconditioner_jacobian[row][column];
+            }
+            augmented[row][n] = dphi_dt[row];
+            augmented[n][row] = dphi_dt[row];
+        }
+        let Some(preconditioner) = PssDenseLu::factor(&augmented) else {
+            return Ok(None);
+        };
+        let mut rhs = state
+            .residual
+            .iter()
+            .map(|value| -value)
+            .collect::<Vec<_>>();
+        rhs.push(0.0);
+        let mut matvec = |direction: &[Value]| {
+            let state_direction = &direction[..n];
+            let mut image = self.pss_directional_jacobian_product(
+                &mut worker,
+                &mut worker_matrix,
+                &state.x0,
+                period,
+                config,
+                fd_step,
+                state_direction,
+                abort,
+            )?;
+            for row in 0..n {
+                image[row] += dphi_dt[row] * direction[n];
+            }
+            image.push(pss_dot(&dphi_dt, state_direction));
+            Ok(image)
+        };
+        Ok(
+            pss_gmres(&mut matvec, &preconditioner, &rhs, (n + 1).min(24), 4)?
+                .map(|solution| (solution[..n].to_vec(), solution[n])),
+        )
     }
 
     /// Compute Newton step using a finite-difference shooting Jacobian.
@@ -2294,6 +2738,44 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shooting_gmres_matches_direct_lu_with_stale_jacobian_preconditioner() {
+        let n = 20;
+        let mut current = vec![vec![0.0; n]; n];
+        let mut previous = vec![vec![0.0; n]; n];
+        for row in 0..n {
+            current[row][row] = 3.0 + row as Value * 0.02;
+            previous[row][row] = current[row][row] * 0.98;
+            if row > 0 {
+                current[row][row - 1] = -0.35;
+                previous[row][row - 1] = -0.34;
+            }
+            if row + 1 < n {
+                current[row][row + 1] = 0.2;
+                previous[row][row + 1] = 0.19;
+            }
+        }
+        let preconditioner = PssDenseLu::factor(&previous).unwrap();
+        let rhs = (0..n)
+            .map(|index| 0.4 - index as Value * 0.013)
+            .collect::<Vec<_>>();
+        let mut product = |vector: &[Value]| {
+            Ok(current
+                .iter()
+                .map(|row| row.iter().zip(vector).map(|(a, b)| a * b).sum())
+                .collect())
+        };
+        let iterative = pss_gmres(&mut product, &preconditioner, &rhs, 12, 4)
+            .unwrap()
+            .expect("preconditioned shooting GMRES should converge");
+        let direct_factor = PssDenseLu::factor(&current).unwrap();
+        let direct = direct_factor.solve(&rhs);
+        for (actual, expected) in iterative.into_iter().zip(direct) {
+            let scale = actual.abs().max(expected.abs()).max(1.0);
+            assert!((actual - expected).abs() <= 2e-9 * scale);
+        }
+    }
 
     fn retained_parts() -> (PssConfig, PssAnalysisResult, Vec<Value>) {
         let config = PssConfig::new(1.0)

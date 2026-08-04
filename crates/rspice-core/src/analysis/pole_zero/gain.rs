@@ -1,6 +1,65 @@
 use super::*;
 
 impl PoleZeroAnalyzer {
+    /// Analyze an already reduced continuous-time SISO state-space model.
+    ///
+    /// Engine-level sparse descriptor reduction uses this entry point after
+    /// eliminating algebraic MNA variables with sparse LU. Dense eigen work is
+    /// then proportional only to the number of dynamic states, while root
+    /// filtering, canonical ordering, gain, and zero extraction remain shared
+    /// with the ordinary descriptor analyzer.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn analyze_state_space(
+        a: Matrix,
+        b: Vec<Value>,
+        c: Vec<Value>,
+        d: Value,
+        config: &PoleZeroConfig,
+        input_label: &str,
+        output_label: &str,
+    ) -> Option<PoleZeroResult> {
+        let n = a.dims().0;
+        if n == 0 || a.dims().1 != n || b.len() != n || c.len() != n || !d.is_finite() {
+            return None;
+        }
+        let helper = Self::new(Matrix::identity(n), Matrix::identity(n));
+        let model = StateSpaceModel { a, b, c, d };
+        let mut model_poles = helper
+            .eigenvalues_from_matrix(&model.a)
+            .unwrap_or_else(|| helper.qr_eigenvalues(&model.a));
+        helper.canonicalize_real_roots(&mut model_poles);
+        model_poles.retain(|pole| {
+            pole.re.is_finite()
+                && pole.im.is_finite()
+                && pole.magnitude() < config.max_pole_freq * 2.0 * PI
+        });
+        model_poles.sort_by(|left, right| left.magnitude().total_cmp(&right.magnitude()));
+
+        let mut result = PoleZeroResult::new(input_label, output_label);
+        if config.compute_poles {
+            result.poles = model_poles.clone();
+        }
+        if config.compute_zeros {
+            result.zeros = helper.zeros_from_state_space(&model, &model_poles, config);
+        }
+        if let Some(a_inv_b) = helper.solve_linear(&model.a, &model.b) {
+            let correction = model
+                .c
+                .iter()
+                .zip(a_inv_b)
+                .map(|(weight, state)| weight * state)
+                .sum::<Value>();
+            let gain = model.d - correction;
+            if gain.is_finite() {
+                result.dc_gain = gain;
+            }
+        }
+        result.hf_gain = model.d.is_finite().then_some(model.d);
+        result.sort_poles_by_magnitude();
+        result.sort_zeros_by_magnitude();
+        Some(result)
+    }
+
     /// Compute DC gain H(0)
     pub fn dc_gain(&self, input_node: usize, output_node: usize) -> Option<Value> {
         // At DC (s=0), Y = G

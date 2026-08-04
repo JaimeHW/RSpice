@@ -12,10 +12,19 @@ impl NonlinearDevice for Mosfet {
         self.gm_prev = self.gm;
         self.gds_prev = self.gds;
         self.gmb_prev = self.gmb;
-        (self.ibs_prev, self.gbs_prev) =
-            self.body_source_junction_current_and_conductance(self.eval_vbs_prev);
-        (self.ibd_prev, self.gbd_prev) = self
-            .body_drain_junction_current_and_conductance(self.eval_vds_prev, self.eval_vbs_prev);
+        if self.has_branch_history {
+            self.ibs_prev = self.ibs;
+            self.gbs_prev = self.gbs;
+            self.ibd_prev = self.ibd;
+            self.gbd_prev = self.gbd;
+        } else {
+            (self.ibs_prev, self.gbs_prev) =
+                self.body_source_junction_current_and_conductance(self.eval_vbs_prev);
+            (self.ibd_prev, self.gbd_prev) = self.body_drain_junction_current_and_conductance(
+                self.eval_vds_prev,
+                self.eval_vbs_prev,
+            );
+        }
 
         let (vgs, vds, vbs) = self.branch_voltages(voltages);
         let (eval_vgs, eval_vds, eval_vbs) = self.limited_branch_voltages_for_eval(vgs, vds, vbs);
@@ -34,6 +43,9 @@ impl NonlinearDevice for Mosfet {
         self.gds = gds;
         self.gmb = gmb;
         self.id_eq = id_eq;
+        (self.ibs, self.gbs) = self.body_source_junction_current_and_conductance(self.eval_vbs);
+        (self.ibd, self.gbd) =
+            self.body_drain_junction_current_and_conductance(self.eval_vds, self.eval_vbs);
         self.has_branch_history = true;
     }
 
@@ -71,11 +83,13 @@ impl NonlinearDevice for Mosfet {
         matrix.stamp_rhs(self.node_drain, -id_eq);
         matrix.stamp_rhs(self.node_source, id_eq);
 
-        let (bs_anode, bs_cathode, gbs, ieq_bs) = self.body_source_junction_linearization(eval_vbs);
+        let cache_matches = self.cached_linearization_matches_eval(eval_vgs, eval_vds, eval_vbs);
+        let (bs_anode, bs_cathode, gbs, ieq_bs) =
+            self.body_source_junction_linearization_cached(eval_vbs, cache_matches);
         Self::stamp_diode_linearization(matrix, bs_anode, bs_cathode, gbs, ieq_bs);
 
         let (bd_anode, bd_cathode, gbd, ieq_bd) =
-            self.body_drain_junction_linearization(eval_vds, eval_vbs);
+            self.body_drain_junction_linearization_cached(eval_vds, eval_vbs, cache_matches);
         Self::stamp_diode_linearization(matrix, bd_anode, bd_cathode, gbd, ieq_bd);
     }
 
@@ -97,6 +111,10 @@ impl NonlinearDevice for Mosfet {
             || !self.gm_prev.is_finite()
             || !self.gds_prev.is_finite()
             || !self.gmb_prev.is_finite()
+            || !self.ibs.is_finite()
+            || !self.gbs.is_finite()
+            || !self.ibd.is_finite()
+            || !self.gbd.is_finite()
             || !self.ibs_prev.is_finite()
             || !self.gbs_prev.is_finite()
             || !self.ibd_prev.is_finite()
@@ -130,14 +148,11 @@ impl NonlinearDevice for Mosfet {
             return false;
         }
 
-        let (ibs, _) = self.body_source_junction_current_and_conductance(self.eval_vbs);
-        let (ibd, _) =
-            self.body_drain_junction_current_and_conductance(self.eval_vds, self.eval_vbs);
         let body_source_delta = self.body_source_diode_voltage(self.eval_vbs)
             - self.body_source_diode_voltage(self.eval_vbs_prev);
         let body_drain_delta = self.body_drain_diode_voltage(self.eval_vds, self.eval_vbs)
             - self.body_drain_diode_voltage(self.eval_vds_prev, self.eval_vbs_prev);
-        let bulk_current = ibs + ibd;
+        let bulk_current = self.ibs + self.ibd;
         let bulk_current_hat = self.ibs_prev
             + self.ibd_prev
             + self.gbs_prev * body_source_delta

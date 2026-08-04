@@ -59,6 +59,10 @@ struct LuWorkspace {
     scaled_rhs: Vec<Value>,
     row_scale: Vec<Value>,
     col_scale: Vec<Value>,
+    /// Exact matrix values represented by `numeric`. Repeated RHS solves and
+    /// constant-coefficient transient steps reuse the numeric factors when the
+    /// freshly stamped CSC values are unchanged.
+    factored_values: Vec<Value>,
 }
 
 //=============================================================================
@@ -179,6 +183,10 @@ pub struct StaticMatrix {
     /// stored pivot sequence instead of fully re-pivoting every Newton
     /// iteration. Lazily initialized; any failure falls back to the faer path.
     klu: Option<crate::KluSolver>,
+    /// Exact matrix values represented by the current Circuit-LU factors.
+    /// Comparing one compact CSC value array is far cheaper than replaying a
+    /// numeric factorization for constant-coefficient timesteps.
+    klu_factored_values: Vec<Value>,
     /// Auto-policy decision retained for the frozen sparsity pattern after a
     /// measured high-fill Circuit LU factorization.
     klu_auto_rejected: bool,
@@ -199,6 +207,9 @@ pub struct StaticMatrix {
     /// but keeping its buffer makes even ill-scaled repeated solves allocation
     /// free after the first accepted system.
     klu_correction_scratch: Vec<Value>,
+    /// Low component of the double-double Newton correction RHS. The high
+    /// component is written directly into the caller-owned output buffer.
+    correction_rhs_lo_scratch: Vec<Value>,
     /// First attempted stamp outside the frozen sparsity pattern.
     stamping_error: Option<MatrixStampError>,
 }
@@ -569,6 +580,64 @@ fn compensated_componentwise_backward_error(
     })
 }
 
+fn fill_correction_rhs(
+    csc: &SymbolicSparseColMat<usize>,
+    values: &[Value],
+    nrows: usize,
+    ncols: usize,
+    rhs: &[Value],
+    iterate: &[Value],
+    correction: &mut Vec<Value>,
+    correction_lo: &mut Vec<Value>,
+) -> Result<(), SolverError> {
+    if rhs.len() != nrows || iterate.len() != ncols {
+        return Err(SolverError::InvalidCircuit(format!(
+            "Correction system requires RHS/iterate dimensions {} and {}, got {} and {}",
+            nrows,
+            ncols,
+            rhs.len(),
+            iterate.len()
+        )));
+    }
+    if rhs.iter().chain(iterate).any(|value| !value.is_finite()) {
+        return Err(SolverError::Overflow);
+    }
+
+    correction.clear();
+    correction.extend_from_slice(rhs);
+    correction_lo.resize(nrows, 0.0);
+    correction_lo.fill(0.0);
+    let col_ptr = csc.col_ptr();
+    let row_idx = csc.row_idx();
+    for col in 0..ncols {
+        let x = iterate[col];
+        for index in col_ptr[col]..col_ptr[col + 1] {
+            let value = values[index];
+            if !value.is_finite() {
+                return Err(SolverError::Overflow);
+            }
+            let row = row_idx[index];
+            let product_hi = (-value) * x;
+            let product_lo = (-value).mul_add(x, -product_hi);
+            let sum = correction[row] + product_hi;
+            let virtual_addend = sum - correction[row];
+            let sum_error =
+                (correction[row] - (sum - virtual_addend)) + (product_hi - virtual_addend);
+            let tail = correction_lo[row] + product_lo + sum_error;
+            let refined = sum + tail;
+            correction_lo[row] = tail - (refined - sum);
+            correction[row] = refined;
+        }
+    }
+    for (hi, &lo) in correction.iter_mut().zip(correction_lo.iter()) {
+        *hi += lo;
+    }
+    if correction.iter().any(|value| !value.is_finite()) {
+        return Err(SolverError::Overflow);
+    }
+    Ok(())
+}
+
 impl StaticMatrix {
     /// Create a zero-valued matrix with the same sparsity structure.
     ///
@@ -583,6 +652,7 @@ impl StaticMatrix {
             pattern_id: self.pattern_id,
             lu: None,
             klu: None,
+            klu_factored_values: Vec::new(),
             klu_auto_rejected: self.klu_auto_rejected,
             solver_options: self.solver_options,
             probe_values: None,
@@ -592,6 +662,7 @@ impl StaticMatrix {
             residual_compensation_scratch: Vec::new(),
             residual_row_nnz_scratch: Vec::new(),
             klu_correction_scratch: Vec::new(),
+            correction_rhs_lo_scratch: Vec::new(),
             stamping_error: None,
         }
     }
@@ -743,6 +814,7 @@ impl StaticMatrix {
             pattern_id: next_pattern_id()?,
             lu: None,
             klu: None,
+            klu_factored_values: Vec::new(),
             klu_auto_rejected: false,
             solver_options,
             probe_values: None,
@@ -752,6 +824,7 @@ impl StaticMatrix {
             residual_compensation_scratch: Vec::new(),
             residual_row_nnz_scratch: Vec::new(),
             klu_correction_scratch: Vec::new(),
+            correction_rhs_lo_scratch: Vec::new(),
             stamping_error: None,
         })
     }
@@ -771,6 +844,7 @@ impl StaticMatrix {
             // failure. In particular it must never prevent a later explicit
             // Circuit-LU request from being honored.
             self.klu_auto_rejected = false;
+            self.klu_factored_values.clear();
         }
         self.solver_options = solver_options;
     }
@@ -1174,6 +1248,7 @@ impl StaticMatrix {
             scaled_rhs: Vec::new(),
             row_scale: Vec::new(),
             col_scale: Vec::new(),
+            factored_values: Vec::new(),
         });
         Ok(())
     }
@@ -1283,6 +1358,7 @@ impl StaticMatrix {
                     csc,
                     values,
                     klu,
+                    klu_factored_values,
                     klu_auto_rejected,
                     solver_options,
                     residual_scratch,
@@ -1306,18 +1382,25 @@ impl StaticMatrix {
                 }
                 let analyzed = backend.is_analyzed_for(n)
                     || backend.analyze(n, csc.col_ptr(), csc.row_idx()).is_ok();
+                let values_current = klu_factored_values.as_slice() == values.as_slice();
                 let factored = analyzed
-                    && match backend.refactor(values) {
-                        Ok(()) => true,
-                        Err(SolverError::PivotGrowth) => backend.factor(values).is_ok(),
-                        Err(_) => false,
-                    };
+                    && (values_current
+                        || match backend.refactor(values) {
+                            Ok(()) => true,
+                            Err(SolverError::PivotGrowth) => backend.factor(values).is_ok(),
+                            Err(_) => false,
+                        });
                 if !factored {
+                    klu_factored_values.clear();
                     if solver_options.real_backend == RealSolverBackend::Auto {
                         *klu_auto_rejected = true;
                     }
                     false
                 } else {
+                    if !values_current {
+                        klu_factored_values.resize(values.len(), 0.0);
+                        klu_factored_values.copy_from_slice(values);
+                    }
                     let excessive_fill = if solver_options.real_backend == RealSolverBackend::Auto {
                         let (l_nnz, u_nnz) = backend.factor_nnz();
                         auto_rejects_circuit_lu_fill(n, values.len(), l_nnz, u_nnz)
@@ -1327,6 +1410,7 @@ impl StaticMatrix {
                     if excessive_fill {
                         *klu_auto_rejected = true;
                         backend.discard_numeric_factorization();
+                        klu_factored_values.clear();
                         false
                     } else if match operation {
                         RealSolveOp::Normal => backend.solve_many(rhs, rhs_count, solution),
@@ -1389,24 +1473,31 @@ impl StaticMatrix {
             let Some(ws) = lu.as_mut() else {
                 return Err(SolverError::SingularMatrix);
             };
-            equilibrate_sparse_system(
-                csc,
-                values,
-                &mut ws.scaled_values,
-                &mut ws.row_scale,
-                &mut ws.col_scale,
-            )?;
-            let mat = SparseColMatRef::new(csc.as_ref().as_ref(), ws.scaled_values.as_slice());
-            let lu_ref = ws
-                .symbolic
-                .factorize_numeric_lu(
-                    &mut ws.numeric,
-                    mat,
-                    par,
-                    MemStack::new(&mut ws.factor_mem),
-                    Default::default(),
-                )
-                .map_err(map_faer_lu_error)?;
+            if ws.factored_values.as_slice() != values.as_slice() {
+                equilibrate_sparse_system(
+                    csc,
+                    values,
+                    &mut ws.scaled_values,
+                    &mut ws.row_scale,
+                    &mut ws.col_scale,
+                )?;
+                let mat = SparseColMatRef::new(csc.as_ref().as_ref(), ws.scaled_values.as_slice());
+                ws.symbolic
+                    .factorize_numeric_lu(
+                        &mut ws.numeric,
+                        mat,
+                        par,
+                        MemStack::new(&mut ws.factor_mem),
+                        Default::default(),
+                    )
+                    .map_err(map_faer_lu_error)?;
+                ws.factored_values.resize(values.len(), 0.0);
+                ws.factored_values.copy_from_slice(values);
+            }
+            // SAFETY: `numeric` was produced by this exact symbolic object.
+            // The value cache is empty until the first successful numeric
+            // factorization and changes only after another successful one.
+            let lu_ref = unsafe { sparse_lu::LuRef::new_unchecked(&ws.symbolic, &ws.numeric) };
             match operation {
                 RealSolveOp::Normal if rhs_count > ws.solve_rhs_capacity => {
                     ws.solve_mem = MemBuffer::try_new(
@@ -1561,56 +1652,46 @@ impl StaticMatrix {
         iterate: &[Value],
     ) -> Result<Vec<Value>, SolverError> {
         self.check_stamping_error()?;
-        if rhs.len() != self.nrows || iterate.len() != self.ncols {
-            return Err(SolverError::InvalidCircuit(format!(
-                "Correction system requires RHS/iterate dimensions {} and {}, got {} and {}",
-                self.nrows,
-                self.ncols,
-                rhs.len(),
-                iterate.len()
-            )));
-        }
-        if rhs.iter().chain(iterate).any(|value| !value.is_finite()) {
-            return Err(SolverError::Overflow);
-        }
+        let mut correction = Vec::with_capacity(self.nrows);
+        let mut correction_lo = Vec::with_capacity(self.nrows);
+        fill_correction_rhs(
+            self.csc.as_ref(),
+            &self.values,
+            self.nrows,
+            self.ncols,
+            rhs,
+            iterate,
+            &mut correction,
+            &mut correction_lo,
+        )?;
+        Ok(correction)
+    }
 
+    /// Allocation-free form of [`Self::correction_rhs`].
+    ///
+    /// `correction` and the matrix-owned double-double low component retain
+    /// their capacity across Newton iterations.
+    pub fn correction_rhs_into(
+        &mut self,
+        rhs: &[Value],
+        iterate: &[Value],
+        correction: &mut Vec<Value>,
+    ) -> Result<(), SolverError> {
+        self.check_stamping_error()?;
         // Accumulate every row as a double-double expansion. Newton
         // corrections are most valuable precisely when large KCL terms nearly
         // cancel; ordinary f64 accumulation would round that small residual to
         // the same scale as the forward error we are trying to remove.
-        let mut correction_hi = rhs.to_vec();
-        let mut correction_lo = vec![0.0; self.nrows];
-        let col_ptr = self.csc.col_ptr();
-        let row_idx = self.csc.row_idx();
-        for col in 0..self.ncols {
-            let x = iterate[col];
-            for index in col_ptr[col]..col_ptr[col + 1] {
-                let value = self.values[index];
-                if !value.is_finite() {
-                    return Err(SolverError::Overflow);
-                }
-                let row = row_idx[index];
-                let product_hi = (-value) * x;
-                let product_lo = (-value).mul_add(x, -product_hi);
-                let sum = correction_hi[row] + product_hi;
-                let virtual_addend = sum - correction_hi[row];
-                let sum_error =
-                    (correction_hi[row] - (sum - virtual_addend)) + (product_hi - virtual_addend);
-                let tail = correction_lo[row] + product_lo + sum_error;
-                let refined = sum + tail;
-                correction_lo[row] = tail - (refined - sum);
-                correction_hi[row] = refined;
-            }
-        }
-        let correction = correction_hi
-            .into_iter()
-            .zip(correction_lo)
-            .map(|(hi, lo)| hi + lo)
-            .collect::<Vec<_>>();
-        if correction.iter().any(|value| !value.is_finite()) {
-            return Err(SolverError::Overflow);
-        }
-        Ok(correction)
+        fill_correction_rhs(
+            self.csc.as_ref(),
+            &self.values,
+            self.nrows,
+            self.ncols,
+            rhs,
+            iterate,
+            correction,
+            &mut self.correction_rhs_lo_scratch,
+        )
     }
 
     /// Solve through faer's sparse LU in equilibrated coordinates.
@@ -1655,26 +1736,32 @@ impl StaticMatrix {
             return Err(SolverError::SingularMatrix);
         };
 
-        equilibrate_sparse_system(
-            csc,
-            values,
-            &mut ws.scaled_values,
-            &mut ws.row_scale,
-            &mut ws.col_scale,
-        )?;
+        if ws.factored_values.as_slice() != values.as_slice() {
+            equilibrate_sparse_system(
+                csc,
+                values,
+                &mut ws.scaled_values,
+                &mut ws.row_scale,
+                &mut ws.col_scale,
+            )?;
 
-        let mat = SparseColMatRef::new(csc.as_ref().as_ref(), ws.scaled_values.as_slice());
+            let mat = SparseColMatRef::new(csc.as_ref().as_ref(), ws.scaled_values.as_slice());
+            ws.symbolic
+                .factorize_numeric_lu(
+                    &mut ws.numeric,
+                    mat,
+                    par,
+                    MemStack::new(&mut ws.factor_mem),
+                    Default::default(),
+                )
+                .map_err(map_faer_lu_error)?;
+            ws.factored_values.resize(values.len(), 0.0);
+            ws.factored_values.copy_from_slice(values);
+        }
 
-        let lu_ref = ws
-            .symbolic
-            .factorize_numeric_lu(
-                &mut ws.numeric,
-                mat,
-                par,
-                MemStack::new(&mut ws.factor_mem),
-                Default::default(),
-            )
-            .map_err(map_faer_lu_error)?;
+        // SAFETY: see the batched path above. A non-empty value cache proves
+        // this workspace contains a successful factorization for these values.
+        let lu_ref = unsafe { sparse_lu::LuRef::new_unchecked(&ws.symbolic, &ws.numeric) };
 
         ws.scaled_rhs.resize(rhs.len(), 0.0);
         let rhs_scale = match operation {
@@ -1826,6 +1913,7 @@ impl StaticMatrix {
             csc,
             values,
             klu,
+            klu_factored_values,
             klu_auto_rejected,
             solver_options,
             residual_scratch,
@@ -1852,12 +1940,15 @@ impl StaticMatrix {
         if !backend.is_analyzed_for(n) && backend.analyze(n, col_ptr, row_idx).is_err() {
             return false;
         }
-        let factored = match backend.refactor(values) {
-            Ok(()) => true,
-            Err(SolverError::PivotGrowth) => backend.factor(values).is_ok(),
-            Err(_) => false,
-        };
+        let values_current = klu_factored_values.as_slice() == values.as_slice();
+        let factored = values_current
+            || match backend.refactor(values) {
+                Ok(()) => true,
+                Err(SolverError::PivotGrowth) => backend.factor(values).is_ok(),
+                Err(_) => false,
+            };
         if !factored {
+            klu_factored_values.clear();
             if solver_options.real_backend == RealSolverBackend::Auto {
                 *klu_auto_rejected = true;
             }
@@ -1867,6 +1958,10 @@ impl StaticMatrix {
             });
             return false;
         }
+        if !values_current {
+            klu_factored_values.resize(values.len(), 0.0);
+            klu_factored_values.copy_from_slice(values);
+        }
         if solver_options.real_backend == RealSolverBackend::Auto {
             let (l_nnz, u_nnz) = backend.factor_nnz();
             let factor_nnz = l_nnz.saturating_add(u_nnz);
@@ -1874,6 +1969,7 @@ impl StaticMatrix {
             if excessive_fill {
                 *klu_auto_rejected = true;
                 backend.discard_numeric_factorization();
+                klu_factored_values.clear();
                 log::debug!(
                     "auto backend retained faer for {}x{} pattern: Circuit LU fill {} / A nnz {}",
                     n,
@@ -2671,6 +2767,21 @@ impl ComplexMatrix {
             }
         }
         dense
+    }
+
+    /// Visit the frozen CSC entries without materializing a dense matrix.
+    /// Entries are yielded in deterministic column-major order, including
+    /// structural zeros. Descriptor and diagnostic algorithms can filter the
+    /// numeric values they need while preserving the production matrix's
+    /// sparse memory footprint.
+    pub fn for_each_stored(&self, mut visitor: impl FnMut(usize, usize, Complex64)) {
+        let col_ptr = self.csc.col_ptr();
+        let row_idx = self.csc.row_idx();
+        for col in 0..self.ncols {
+            for index in col_ptr[col]..col_ptr[col + 1] {
+                visitor(row_idx[index], col, self.values[index]);
+            }
+        }
     }
 
     /// Multiply the current sparse matrix by a complex vector without
@@ -3655,6 +3766,31 @@ mod tests {
     }
 
     #[test]
+    fn correction_rhs_into_reuses_both_double_double_buffers() {
+        let mut matrix = StaticMatrix::from_triplets(
+            2,
+            2,
+            &[(0, 0, 4.0), (0, 1, 1.0), (1, 0, 2.0), (1, 1, 3.0)],
+        )
+        .unwrap();
+        let mut correction = Vec::new();
+
+        matrix
+            .correction_rhs_into(&[6.0, 8.0], &[0.75, 2.25], &mut correction)
+            .unwrap();
+        assert_eq!(correction, vec![0.75, -0.25]);
+        let output_capacity = correction.capacity();
+        let low_capacity = matrix.correction_rhs_lo_scratch.capacity();
+
+        matrix
+            .correction_rhs_into(&[12.0, 16.0], &[1.5, 4.5], &mut correction)
+            .unwrap();
+        assert_eq!(correction, vec![1.5, -0.5]);
+        assert_eq!(correction.capacity(), output_capacity);
+        assert_eq!(matrix.correction_rhs_lo_scratch.capacity(), low_capacity);
+    }
+
+    #[test]
     fn raw_residual_inf_norm_is_exact_and_reuses_workspace() {
         let mut matrix = StaticMatrix::from_triplets(
             2,
@@ -4056,6 +4192,61 @@ mod tests {
     }
 
     #[test]
+    fn unchanged_real_matrix_reuses_numeric_factorization_cache() {
+        let triplets = [(0, 0, 4.0), (0, 1, 1.0), (1, 0, 2.0), (1, 1, 3.0)];
+        for real_backend in [RealSolverBackend::Klu, RealSolverBackend::Faer] {
+            let mut matrix = StaticMatrix::from_triplets_with_options(
+                2,
+                2,
+                &triplets,
+                SolverOptions {
+                    real_backend,
+                    ..SolverOptions::default()
+                },
+            )
+            .unwrap();
+            let mut solution = Vec::new();
+            matrix.solve_into(&[6.0, 8.0], &mut solution).unwrap();
+
+            let (cache_ptr, cache_capacity) = match real_backend {
+                RealSolverBackend::Klu => (
+                    matrix.klu_factored_values.as_ptr(),
+                    matrix.klu_factored_values.capacity(),
+                ),
+                RealSolverBackend::Faer => {
+                    let cached = &matrix.lu.as_ref().unwrap().factored_values;
+                    (cached.as_ptr(), cached.capacity())
+                }
+                RealSolverBackend::Auto => unreachable!(),
+            };
+
+            // Transient stamping clears and reconstructs the numeric values at
+            // every Newton pass. Reconstruct the identical system here and
+            // verify that only the RHS changes while cache storage is reused.
+            matrix.clear_values();
+            for &(row, col, value) in &triplets {
+                matrix.add(row, col, value);
+            }
+            matrix.solve_into(&[12.0, 16.0], &mut solution).unwrap();
+            assert_relative_solution(&solution, &[2.0, 4.0]);
+
+            let (reused_ptr, reused_capacity) = match real_backend {
+                RealSolverBackend::Klu => (
+                    matrix.klu_factored_values.as_ptr(),
+                    matrix.klu_factored_values.capacity(),
+                ),
+                RealSolverBackend::Faer => {
+                    let cached = &matrix.lu.as_ref().unwrap().factored_values;
+                    (cached.as_ptr(), cached.capacity())
+                }
+                RealSolverBackend::Auto => unreachable!(),
+            };
+            assert_eq!(reused_ptr, cache_ptr);
+            assert_eq!(reused_capacity, cache_capacity);
+        }
+    }
+
+    #[test]
     fn direct_stamp_tokens_are_bound_to_their_originating_pattern() {
         let first = StaticMatrix::from_triplets(2, 2, &[(0, 0, 0.0), (1, 1, 0.0)]).unwrap();
         let index = first.get_index(0, 0).unwrap();
@@ -4323,6 +4514,31 @@ mod tests {
             Err(SolverError::Overflow)
         ));
         assert_relative_solution(&checked.solve(&[4.0]).unwrap(), &[2.0]);
+    }
+
+    #[test]
+    fn complex_stored_entry_visitor_is_deterministic_and_keeps_structural_zeros() {
+        let real = StaticMatrix::from_triplets(
+            3,
+            3,
+            &[(2, 0, 0.0), (0, 0, 0.0), (1, 1, 0.0), (0, 2, 0.0)],
+        )
+        .unwrap();
+        let mut matrix = ComplexMatrix::from_real_structure(&real);
+        matrix.add(2, 0, Complex64::new(2.0, -1.0));
+        matrix.add(0, 2, Complex64::new(-3.0, 0.5));
+
+        let mut visited = Vec::new();
+        matrix.for_each_stored(|row, column, value| visited.push((row, column, value)));
+        assert_eq!(
+            visited,
+            vec![
+                (0, 0, Complex64::new(0.0, 0.0)),
+                (2, 0, Complex64::new(2.0, -1.0)),
+                (1, 1, Complex64::new(0.0, 0.0)),
+                (0, 2, Complex64::new(-3.0, 0.5)),
+            ]
+        );
     }
 
     #[test]

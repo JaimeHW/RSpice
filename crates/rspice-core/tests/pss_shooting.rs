@@ -32,6 +32,42 @@ c1 out 0 {C}
 }
 
 #[test]
+fn multi_state_driven_pss_exercises_preconditioned_newton_krylov() {
+    let mut deck = format!("* twelve-state driven PSS\nVdrive in 0 SIN(0 1 {F0})\n");
+    for index in 1..=12 {
+        deck.push_str(&format!(
+            "R{index} in n{index} {}\nC{index} n{index} 0 {}\n",
+            R * (1.0 + index as f64 * 0.03),
+            C * (1.0 + index as f64 * 0.02)
+        ));
+    }
+    deck.push_str(".end\n");
+    let netlist = Netlist::parse(&deck).expect("multi-state deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_pss(
+            &netlist,
+            PssConfig::new(F0)
+                .with_points_per_period(32)
+                .with_max_iterations(30)
+                .with_damping(0.5)
+                .with_tolerance(1e-6),
+        )
+        .expect("matrix-free shooting converges");
+
+    assert!(
+        result.iterations >= 2,
+        "damping must require a Krylov-era step"
+    );
+    assert!(
+        result.final_residual < 1e-5,
+        "residual={}",
+        result.final_residual
+    );
+    assert_eq!(result.monodromy.len(), 12);
+    assert!(result.monodromy.iter().all(|row| row.len() == 12));
+}
+
+#[test]
 fn adaptive_stabilization_with_nonzero_tstab_completes_for_linear_rc_and_rl() {
     let period = 1.0 / F0;
     let inductance = R / (std::f64::consts::TAU * F0);

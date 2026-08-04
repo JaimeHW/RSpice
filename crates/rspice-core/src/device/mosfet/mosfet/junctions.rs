@@ -350,6 +350,20 @@ impl Mosfet {
     }
 
     #[inline]
+    pub(in crate::device::mosfet::mosfet) fn body_source_junction_linearization_cached(
+        &self,
+        vbs: Value,
+        cache_matches: bool,
+    ) -> (NodeId, NodeId, Value, Value) {
+        if !cache_matches {
+            return self.body_source_junction_linearization(vbs);
+        }
+        let (anode, cathode) = self.body_source_diode_nodes();
+        let vd = self.body_source_diode_voltage(vbs);
+        (anode, cathode, self.gbs, self.ibs - self.gbs * vd)
+    }
+
+    #[inline]
     pub(in crate::device::mosfet::mosfet) fn body_drain_junction_linearization(
         &self,
         vds: Value,
@@ -360,6 +374,21 @@ impl Mosfet {
         let (id, gd) = self.body_drain_junction_current_and_conductance(vds, vbs);
         let ieq = id - gd * vd;
         (anode, cathode, gd, ieq)
+    }
+
+    #[inline]
+    pub(in crate::device::mosfet::mosfet) fn body_drain_junction_linearization_cached(
+        &self,
+        vds: Value,
+        vbs: Value,
+        cache_matches: bool,
+    ) -> (NodeId, NodeId, Value, Value) {
+        if !cache_matches {
+            return self.body_drain_junction_linearization(vds, vbs);
+        }
+        let (anode, cathode) = self.body_drain_diode_nodes();
+        let vd = self.body_drain_diode_voltage(vds, vbs);
+        (anode, cathode, self.gbd, self.ibd - self.gbd * vd)
     }
 
     #[inline]

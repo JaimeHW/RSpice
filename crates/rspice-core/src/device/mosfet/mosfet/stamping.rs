@@ -46,6 +46,7 @@ impl Mosfet {
         gds: Value,
         gmb: Value,
         id_eq: Value,
+        cache_matches: bool,
     ) {
         // Stamp matrix using direct indexing
         // Drain row
@@ -83,11 +84,12 @@ impl Mosfet {
             rhs[self.node_source - 1] += id_eq;
         }
 
-        let (bs_anode, bs_cathode, gbs, ieq_bs) = self.body_source_junction_linearization(eval_vbs);
+        let (bs_anode, bs_cathode, gbs, ieq_bs) =
+            self.body_source_junction_linearization_cached(eval_vbs, cache_matches);
         Self::stamp_diode_linearization_direct(matrix, rhs, bs_anode, bs_cathode, gbs, ieq_bs);
 
         let (bd_anode, bd_cathode, gbd, ieq_bd) =
-            self.body_drain_junction_linearization(eval_vds, eval_vbs);
+            self.body_drain_junction_linearization_cached(eval_vds, eval_vbs, cache_matches);
         Self::stamp_diode_linearization_direct(matrix, rhs, bd_anode, bd_cathode, gbd, ieq_bd);
     }
 
@@ -95,16 +97,26 @@ impl Mosfet {
     pub fn stamp_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value], voltages: &[Value]) {
         let (vgs, vds, vbs) = self.branch_voltages(voltages);
         let (eval_vgs, eval_vds, eval_vbs) = self.limited_branch_voltages_for_eval(vgs, vds, vbs);
-        let (gm, gds, gmb, id_eq) =
-            if self.cached_linearization_matches_eval(eval_vgs, eval_vds, eval_vbs) {
-                (self.gm, self.gds, self.gmb, self.id_eq)
-            } else {
-                let (_, _, gm, gds, gmb, id_eq) =
-                    self.linearized_operating_point(eval_vgs, eval_vds, eval_vbs);
-                (gm, gds, gmb, id_eq)
-            };
+        let cache_matches = self.cached_linearization_matches_eval(eval_vgs, eval_vds, eval_vbs);
+        let (gm, gds, gmb, id_eq) = if cache_matches {
+            (self.gm, self.gds, self.gmb, self.id_eq)
+        } else {
+            let (_, _, gm, gds, gmb, id_eq) =
+                self.linearized_operating_point(eval_vgs, eval_vds, eval_vbs);
+            (gm, gds, gmb, id_eq)
+        };
 
-        self.stamp_direct_operating_point(matrix, rhs, eval_vds, eval_vbs, gm, gds, gmb, id_eq);
+        self.stamp_direct_operating_point(
+            matrix,
+            rhs,
+            eval_vds,
+            eval_vbs,
+            gm,
+            gds,
+            gmb,
+            id_eq,
+            cache_matches,
+        );
     }
 
     /// Stamp the physical equations directly at a static candidate.
@@ -120,8 +132,24 @@ impl Mosfet {
         voltages: &[Value],
     ) {
         let (vgs, vds, vbs) = self.branch_voltages(voltages);
-        let (_, _, gm, gds, gmb, id_eq) = self.linearized_operating_point(vgs, vds, vbs);
-        self.stamp_direct_operating_point(matrix, rhs, vds, vbs, gm, gds, gmb, id_eq);
+        let cache_matches = self.cached_linearization_matches_eval(vgs, vds, vbs);
+        let (gm, gds, gmb, id_eq) = if cache_matches {
+            (self.gm, self.gds, self.gmb, self.id_eq)
+        } else {
+            let (_, _, gm, gds, gmb, id_eq) = self.linearized_operating_point(vgs, vds, vbs);
+            (gm, gds, gmb, id_eq)
+        };
+        self.stamp_direct_operating_point(
+            matrix,
+            rhs,
+            vds,
+            vbs,
+            gm,
+            gds,
+            gmb,
+            id_eq,
+            cache_matches,
+        );
     }
 
     /// Get polarity multiplier (+1 for NMOS, -1 for PMOS)

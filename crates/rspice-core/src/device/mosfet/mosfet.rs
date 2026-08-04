@@ -291,6 +291,10 @@ pub struct Mosfet {
     gds: Value,
     gmb: Value,
     id_eq: Value,
+    ibs: Value,
+    gbs: Value,
+    ibd: Value,
+    gbd: Value,
     region: MosRegion,
 
     // Previous iteration values
@@ -335,6 +339,10 @@ pub(crate) struct MosfetNonlinearState {
     gds: Value,
     gmb: Value,
     id_eq: Value,
+    ibs: Value,
+    gbs: Value,
+    ibd: Value,
+    gbd: Value,
     region: MosRegion,
     vgs_prev: Value,
     vds_prev: Value,
@@ -369,6 +377,10 @@ impl Mosfet {
             gds: self.gds,
             gmb: self.gmb,
             id_eq: self.id_eq,
+            ibs: self.ibs,
+            gbs: self.gbs,
+            ibd: self.ibd,
+            gbd: self.gbd,
             region: self.region,
             vgs_prev: self.vgs_prev,
             vds_prev: self.vds_prev,
@@ -402,6 +414,10 @@ impl Mosfet {
         self.gds = state.gds;
         self.gmb = state.gmb;
         self.id_eq = state.id_eq;
+        self.ibs = state.ibs;
+        self.gbs = state.gbs;
+        self.ibd = state.ibd;
+        self.gbd = state.gbd;
         self.region = state.region;
         self.vgs_prev = state.vgs_prev;
         self.vds_prev = state.vds_prev;

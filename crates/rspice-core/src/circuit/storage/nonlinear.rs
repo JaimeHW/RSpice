@@ -42,6 +42,14 @@ impl Diodes {
             .collect()
     }
 
+    pub(crate) fn nonlinear_state_snapshot_into(
+        &self,
+        states: &mut Vec<crate::device::semiconductor::DiodeNonlinearState>,
+    ) {
+        states.clear();
+        states.extend(self.devices.iter().map(Diode::nonlinear_state_snapshot));
+    }
+
     pub(crate) fn restore_nonlinear_state(
         &mut self,
         states: Vec<crate::device::semiconductor::DiodeNonlinearState>,
@@ -654,6 +662,14 @@ impl Mosfets {
             .collect()
     }
 
+    pub(crate) fn nonlinear_state_snapshot_into(
+        &self,
+        states: &mut Vec<crate::device::mosfet::MosfetNonlinearState>,
+    ) {
+        states.clear();
+        states.extend(self.devices.iter().map(Mosfet::nonlinear_state_snapshot));
+    }
+
     pub(crate) fn restore_nonlinear_state(
         &mut self,
         states: Vec<crate::device::mosfet::MosfetNonlinearState>,
@@ -674,6 +690,18 @@ impl Mosfets {
         for d in &mut self.devices {
             d.update(voltages);
         }
+    }
+
+    /// Evaluate independent classic MOS instances on the active bounded
+    /// Rayon pool. The caller owns the threshold and worker policy so small
+    /// circuits never pay parallel dispatch overhead.
+    #[cfg(feature = "parallel")]
+    pub(crate) fn update_all_parallel(&mut self, voltages: &[Value]) {
+        use crate::device::NonlinearDevice;
+        use rayon::prelude::*;
+        self.devices
+            .par_iter_mut()
+            .for_each(|device| device.update(voltages));
     }
 
     /// Stamp all MOSFETs into matrix for Newton iteration

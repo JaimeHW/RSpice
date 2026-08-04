@@ -5,6 +5,505 @@ use crate::solver::convergence::{PseudoTransient, SourceStepper};
 use crate::solver::limit_pn_voltage;
 use std::f64::consts::PI;
 
+type PeriodicSpectrum = (usize, usize, Vec<Complex64>);
+
+/// Exact real-split HB Jacobian as an operator.  Storage is proportional to
+/// the sparse linear stamps plus the device coupling spectra; the global
+/// `(nodes * harmonics)^2` matrix is never materialized.
+struct ExactHbOperator<'a> {
+    num_nodes: usize,
+    num_components: usize,
+    real_width: usize,
+    omega0: Value,
+    gmin: Value,
+    g_matrix: &'a [(usize, usize, Value)],
+    c_matrix: &'a [(usize, usize, Value)],
+    l_matrix: &'a [(usize, usize, Value)],
+    g_spectra: &'a [PeriodicSpectrum],
+    c_spectra: &'a [PeriodicSpectrum],
+}
+
+#[cfg(test)]
+mod exact_matrix_free_tests {
+    use super::*;
+
+    fn fixture<'a>(
+        g: &'a [(usize, usize, Value)],
+        c: &'a [(usize, usize, Value)],
+        g_spectra: &'a [PeriodicSpectrum],
+        c_spectra: &'a [PeriodicSpectrum],
+    ) -> ExactHbOperator<'a> {
+        ExactHbOperator {
+            num_nodes: 2,
+            num_components: 3,
+            real_width: 5,
+            omega0: 2.0 * PI * 1.0e6,
+            gmin: 1e-12,
+            g_matrix: g,
+            c_matrix: c,
+            l_matrix: &[],
+            g_spectra,
+            c_spectra,
+        }
+    }
+
+    fn assert_close(actual: Complex64, expected: Complex64) {
+        let scale = actual.norm().max(expected.norm()).max(1.0);
+        assert!(
+            (actual - expected).norm() <= 3e-12 * scale,
+            "actual={actual:?}, expected={expected:?}"
+        );
+    }
+
+    #[test]
+    fn exact_real_split_operator_matches_toeplitz_plus_hankel_definition() {
+        let g = vec![(0, 0, 7.0), (0, 1, -0.8), (1, 0, -0.3), (1, 1, 6.0)];
+        let c = vec![(0, 0, 2e-12), (1, 1, 1e-12)];
+        let g_spectra = vec![
+            (
+                0,
+                0,
+                vec![
+                    Complex64::new(0.5, 0.0),
+                    Complex64::new(0.04, -0.02),
+                    Complex64::new(-0.01, 0.006),
+                    Complex64::new(0.004, -0.002),
+                    Complex64::new(0.001, 0.0005),
+                ],
+            ),
+            (
+                1,
+                0,
+                vec![
+                    Complex64::new(-0.1, 0.0),
+                    Complex64::new(0.02, 0.01),
+                    Complex64::new(0.005, -0.003),
+                    Complex64::new(0.001, 0.002),
+                    Complex64::new(-0.0005, 0.0),
+                ],
+            ),
+        ];
+        let c_spectra = vec![(
+            1,
+            1,
+            vec![
+                Complex64::new(1e-12, 0.0),
+                Complex64::new(0.1e-12, 0.04e-12),
+                Complex64::new(0.03e-12, -0.01e-12),
+                Complex64::new(0.01e-12, 0.0),
+                Complex64::new(0.002e-12, 0.001e-12),
+            ],
+        )];
+        let operator = fixture(&g, &c, &g_spectra, &c_spectra);
+        let input = (0..10)
+            .map(|index| Complex64::new(index as Value * 0.11 - 0.35, 0.0))
+            .collect::<Vec<_>>();
+        let actual = operator.apply(&input);
+
+        let n = operator.num_nodes;
+        let h = operator.num_components;
+        let mut x = vec![Complex64::new(0.0, 0.0); n * h];
+        for node in 0..n {
+            x[node * h] = Complex64::new(input[node * 5].re, 0.0);
+            for k in 1..h {
+                x[node * h + k] =
+                    Complex64::new(input[node * 5 + 2 * k - 1].re, input[node * 5 + 2 * k].re);
+            }
+        }
+        let mut toeplitz = vec![vec![Complex64::new(0.0, 0.0); n * h]; n * h];
+        let mut hankel = vec![vec![Complex64::new(0.0, 0.0); n * h]; n * h];
+        for k in 0..h {
+            let jw = Complex64::new(0.0, k as Value * operator.omega0);
+            for &(i, j, value) in &g {
+                toeplitz[i * h + k][j * h + k] -= value;
+            }
+            for &(i, j, value) in &c {
+                toeplitz[i * h + k][j * h + k] -= jw * value;
+            }
+            for node in 0..n {
+                toeplitz[node * h + k][node * h + k] -= operator.gmin;
+            }
+        }
+        for &(i, j, ref spectrum) in &g_spectra {
+            for k in 0..h {
+                for l in 0..h {
+                    let d = k as isize - l as isize;
+                    let coefficient = spectrum[d.unsigned_abs()];
+                    toeplitz[i * h + k][j * h + l] -= if d >= 0 {
+                        coefficient
+                    } else {
+                        coefficient.conj()
+                    };
+                }
+                for m in 1..h {
+                    hankel[i * h + k][j * h + m] -= spectrum[k + m];
+                }
+            }
+        }
+        for &(i, j, ref spectrum) in &c_spectra {
+            for k in 0..h {
+                let jw = Complex64::new(0.0, k as Value * operator.omega0);
+                for l in 0..h {
+                    let d = k as isize - l as isize;
+                    let coefficient = spectrum[d.unsigned_abs()];
+                    toeplitz[i * h + k][j * h + l] -= jw
+                        * if d >= 0 {
+                            coefficient
+                        } else {
+                            coefficient.conj()
+                        };
+                }
+                for m in 1..h {
+                    hankel[i * h + k][j * h + m] -= jw * spectrum[k + m];
+                }
+            }
+        }
+        let mut expected_complex = vec![Complex64::new(0.0, 0.0); n * h];
+        for row in 0..n * h {
+            for col in 0..n * h {
+                expected_complex[row] +=
+                    toeplitz[row][col] * x[col] + hankel[row][col] * x[col].conj();
+            }
+        }
+        for node in 0..n {
+            assert_close(
+                actual[node * 5],
+                Complex64::new(expected_complex[node * h].re, 0.0),
+            );
+            for k in 1..h {
+                assert_close(
+                    actual[node * 5 + 2 * k - 1],
+                    Complex64::new(expected_complex[node * h + k].re, 0.0),
+                );
+                assert_close(
+                    actual[node * 5 + 2 * k],
+                    Complex64::new(expected_complex[node * h + k].im, 0.0),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn exact_matrix_free_gmres_matches_direct_real_lu() {
+        let g = vec![(0, 0, 9.0), (0, 1, -0.5), (1, 0, -0.25), (1, 1, 8.0)];
+        let g_spectra = vec![(
+            0,
+            0,
+            vec![
+                Complex64::new(0.4, 0.0),
+                Complex64::new(0.008, -0.003),
+                Complex64::new(0.002, 0.001),
+                Complex64::new(0.0005, 0.0),
+                Complex64::new(0.0001, 0.0),
+            ],
+        )];
+        let operator = fixture(&g, &[], &g_spectra, &[]);
+        let preconditioner = ExactHbPreconditioner::build(&operator);
+        let rhs = (0..10)
+            .map(|index| Complex64::new(0.2 - index as Value * 0.017, 0.0))
+            .collect::<Vec<_>>();
+        let outcome = super::super::krylov::gmres(
+            &|input| operator.apply(input),
+            &preconditioner,
+            &rhs,
+            10,
+            6,
+        );
+        assert!(outcome.converged, "relative={}", outcome.relative_residual);
+
+        let size = rhs.len();
+        let mut dense = vec![Complex64::new(0.0, 0.0); size * size];
+        let mut basis = vec![Complex64::new(0.0, 0.0); size];
+        for column in 0..size {
+            basis[column] = Complex64::new(1.0, 0.0);
+            let image = operator.apply(&basis);
+            for row in 0..size {
+                dense[row * size + column] = image[row];
+            }
+            basis[column] = Complex64::new(0.0, 0.0);
+        }
+        let factors = super::super::krylov::LuFactors::factor(dense, size);
+        let mut direct = rhs.clone();
+        factors.solve_in_place(&mut direct);
+        for (actual, expected) in outcome.solution.into_iter().zip(direct) {
+            assert_close(actual, expected);
+        }
+    }
+}
+
+impl ExactHbOperator<'_> {
+    #[inline]
+    fn re_idx(&self, node: usize, harmonic: usize) -> usize {
+        if harmonic == 0 {
+            node * self.real_width
+        } else {
+            node * self.real_width + 2 * harmonic - 1
+        }
+    }
+
+    #[inline]
+    fn im_idx(&self, node: usize, harmonic: usize) -> usize {
+        node * self.real_width + 2 * harmonic
+    }
+
+    fn apply(&self, input: &[Complex64]) -> Vec<Complex64> {
+        let n = self.num_nodes;
+        let h = self.num_components;
+        debug_assert_eq!(input.len(), n * self.real_width);
+
+        let mut x = vec![Complex64::new(0.0, 0.0); n * h];
+        for node in 0..n {
+            for k in 0..h {
+                let re = input[self.re_idx(node, k)].re;
+                let im = if k == 0 {
+                    0.0
+                } else {
+                    input[self.im_idx(node, k)].re
+                };
+                x[node * h + k] = Complex64::new(re, im);
+            }
+        }
+
+        let mut y = vec![Complex64::new(0.0, 0.0); n * h];
+        for k in 0..h {
+            let omega_k = (k as Value) * self.omega0;
+            for &(i, j, g) in self.g_matrix {
+                if i < n && j < n {
+                    y[i * h + k] -= g * x[j * h + k];
+                }
+            }
+            for &(i, j, c) in self.c_matrix {
+                if i < n && j < n {
+                    y[i * h + k] -= Complex64::new(0.0, omega_k) * c * x[j * h + k];
+                }
+            }
+            for &(i, j, l) in self.l_matrix {
+                if i < n && j < n && l.abs() > 1e-30 {
+                    let admittance = if k == 0 {
+                        Complex64::new(DC_SHORT_CONDUCTANCE, 0.0)
+                    } else {
+                        Complex64::new(0.0, -1.0 / (omega_k * l))
+                    };
+                    y[i * h + k] -= admittance * x[j * h + k];
+                }
+            }
+            for node in 0..n {
+                y[node * h + k] -= self.gmin * x[node * h + k];
+            }
+        }
+
+        // Toeplitz coupling from the periodic conductance and charge
+        // Jacobians.
+        for &(i, j, ref spectrum) in self.g_spectra {
+            for k in 0..h {
+                for l in 0..h {
+                    let diff = k as isize - l as isize;
+                    let index = diff.unsigned_abs();
+                    if let Some(&coefficient) = spectrum.get(index) {
+                        let coefficient = if diff >= 0 {
+                            coefficient
+                        } else {
+                            coefficient.conj()
+                        };
+                        y[i * h + k] -= coefficient * x[j * h + l];
+                    }
+                }
+            }
+        }
+        for &(i, j, ref spectrum) in self.c_spectra {
+            for k in 0..h {
+                let jw = Complex64::new(0.0, (k as Value) * self.omega0);
+                for l in 0..h {
+                    let diff = k as isize - l as isize;
+                    let index = diff.unsigned_abs();
+                    if let Some(&coefficient) = spectrum.get(index) {
+                        let coefficient = if diff >= 0 {
+                            coefficient
+                        } else {
+                            coefficient.conj()
+                        };
+                        y[i * h + k] -= jw * coefficient * x[j * h + l];
+                    }
+                }
+            }
+        }
+
+        // The one-sided spectrum implies conjugate negative-frequency
+        // coefficients.  Their exact derivative is the Hankel/antilinear
+        // term H * conj(x), sampled through harmonic 2H.
+        for &(i, j, ref spectrum) in self.g_spectra {
+            for k in 0..h {
+                for m in 1..h {
+                    if let Some(&coefficient) = spectrum.get(k + m) {
+                        y[i * h + k] -= coefficient * x[j * h + m].conj();
+                    }
+                }
+            }
+        }
+        for &(i, j, ref spectrum) in self.c_spectra {
+            for k in 0..h {
+                let jw = Complex64::new(0.0, (k as Value) * self.omega0);
+                for m in 1..h {
+                    if let Some(&coefficient) = spectrum.get(k + m) {
+                        y[i * h + k] -= jw * coefficient * x[j * h + m].conj();
+                    }
+                }
+            }
+        }
+
+        let mut output = vec![Complex64::new(0.0, 0.0); n * self.real_width];
+        for node in 0..n {
+            for k in 0..h {
+                output[self.re_idx(node, k)] = Complex64::new(y[node * h + k].re, 0.0);
+                if k > 0 {
+                    output[self.im_idx(node, k)] = Complex64::new(y[node * h + k].im, 0.0);
+                }
+            }
+        }
+        output
+    }
+
+    /// Assemble only the independent per-harmonic diagonal blocks used by
+    /// the block-Jacobi preconditioner.  This costs O(H*N^2), not
+    /// O((H*N)^2), and includes the exact same-harmonic Hankel coupling.
+    fn harmonic_blocks(&self) -> Vec<Vec<Complex64>> {
+        let n = self.num_nodes;
+        let h = self.num_components;
+        let mut blocks = Vec::with_capacity(h);
+        for k in 0..h {
+            let omega_k = (k as Value) * self.omega0;
+            let jw = Complex64::new(0.0, omega_k);
+            let mut toeplitz = vec![Complex64::new(0.0, 0.0); n * n];
+            let mut hankel = vec![Complex64::new(0.0, 0.0); n * n];
+            for &(i, j, g) in self.g_matrix {
+                if i < n && j < n {
+                    toeplitz[i * n + j] -= g;
+                }
+            }
+            for &(i, j, c) in self.c_matrix {
+                if i < n && j < n {
+                    toeplitz[i * n + j] -= jw * c;
+                }
+            }
+            for &(i, j, l) in self.l_matrix {
+                if i < n && j < n && l.abs() > 1e-30 {
+                    let admittance = if k == 0 {
+                        Complex64::new(DC_SHORT_CONDUCTANCE, 0.0)
+                    } else {
+                        Complex64::new(0.0, -1.0 / (omega_k * l))
+                    };
+                    toeplitz[i * n + j] -= admittance;
+                }
+            }
+            for node in 0..n {
+                toeplitz[node * n + node] -= self.gmin;
+            }
+            for &(i, j, ref spectrum) in self.g_spectra {
+                if let Some(&coefficient) = spectrum.first() {
+                    toeplitz[i * n + j] -= coefficient;
+                }
+                if k > 0
+                    && let Some(&coefficient) = spectrum.get(2 * k)
+                {
+                    hankel[i * n + j] -= coefficient;
+                }
+            }
+            for &(i, j, ref spectrum) in self.c_spectra {
+                if let Some(&coefficient) = spectrum.first() {
+                    toeplitz[i * n + j] -= jw * coefficient;
+                }
+                if k > 0
+                    && let Some(&coefficient) = spectrum.get(2 * k)
+                {
+                    hankel[i * n + j] -= jw * coefficient;
+                }
+            }
+
+            if k == 0 {
+                blocks.push(
+                    toeplitz
+                        .into_iter()
+                        .map(|value| Complex64::new(value.re, 0.0))
+                        .collect(),
+                );
+                continue;
+            }
+
+            let block_size = 2 * n;
+            let mut block = vec![Complex64::new(0.0, 0.0); block_size * block_size];
+            for i in 0..n {
+                for j in 0..n {
+                    let t = toeplitz[i * n + j];
+                    let a = hankel[i * n + j];
+                    block[(2 * i) * block_size + 2 * j] = Complex64::new(t.re + a.re, 0.0);
+                    block[(2 * i) * block_size + 2 * j + 1] = Complex64::new(-t.im + a.im, 0.0);
+                    block[(2 * i + 1) * block_size + 2 * j] = Complex64::new(t.im + a.im, 0.0);
+                    block[(2 * i + 1) * block_size + 2 * j + 1] = Complex64::new(t.re - a.re, 0.0);
+                }
+            }
+            blocks.push(block);
+        }
+        blocks
+    }
+}
+
+struct ExactHbPreconditioner {
+    num_nodes: usize,
+    num_components: usize,
+    real_width: usize,
+    factors: Vec<super::krylov::LuFactors>,
+}
+
+impl ExactHbPreconditioner {
+    fn build(operator: &ExactHbOperator<'_>) -> Self {
+        let factors = operator
+            .harmonic_blocks()
+            .into_iter()
+            .enumerate()
+            .map(|(k, block)| {
+                let size = if k == 0 {
+                    operator.num_nodes
+                } else {
+                    2 * operator.num_nodes
+                };
+                super::krylov::LuFactors::factor(block, size)
+            })
+            .collect();
+        Self {
+            num_nodes: operator.num_nodes,
+            num_components: operator.num_components,
+            real_width: operator.real_width,
+            factors,
+        }
+    }
+}
+
+impl super::krylov::KrylovPreconditioner for ExactHbPreconditioner {
+    fn apply(&self, r: &[Complex64]) -> Vec<Complex64> {
+        let mut output = vec![Complex64::new(0.0, 0.0); r.len()];
+        let mut dc = (0..self.num_nodes)
+            .map(|node| r[node * self.real_width])
+            .collect::<Vec<_>>();
+        self.factors[0].solve_in_place(&mut dc);
+        for (node, &value) in dc.iter().enumerate() {
+            output[node * self.real_width] = value;
+        }
+        for k in 1..self.num_components {
+            let mut block = vec![Complex64::new(0.0, 0.0); 2 * self.num_nodes];
+            for node in 0..self.num_nodes {
+                block[2 * node] = r[node * self.real_width + 2 * k - 1];
+                block[2 * node + 1] = r[node * self.real_width + 2 * k];
+            }
+            self.factors[k].solve_in_place(&mut block);
+            for node in 0..self.num_nodes {
+                output[node * self.real_width + 2 * k - 1] = block[2 * node];
+                output[node * self.real_width + 2 * k] = block[2 * node + 1];
+            }
+        }
+        output
+    }
+}
+
 impl HbSolver {
     /// Full nonlinear HB solve with cooperative cancellation.
     pub fn solve_newton_with_abort(
@@ -814,6 +1313,89 @@ impl HbSolver {
         };
         let im_idx = |node: usize, k: usize| -> usize { node * w + 2 * k };
 
+        // Realified RHS: -residual, DC keeps only its real equation.
+        let mut rhs = vec![0.0; size];
+        for node in 0..n {
+            for k in 0..h {
+                let r = state.residual[node][k];
+                rhs[re_idx(node, k)] = -r.re;
+                if k > 0 {
+                    rhs[im_idx(node, k)] = -r.im;
+                }
+            }
+        }
+
+        // Large exact systems take the matrix-free route first.  A failed or
+        // stagnated inner solve falls through to the established dense
+        // elimination below, preserving the convergence policy exactly.
+        let try_krylov = self.config.use_krylov || size >= super::krylov::KRYLOV_AUTO_THRESHOLD;
+        if try_krylov && n > 0 {
+            let extended = 2 * self.num_harmonics;
+            let g_spectra = if self.has_nonlinear_devices() {
+                self.conductance_spectra(state, extended)?
+            } else {
+                Vec::new()
+            };
+            let c_spectra = if self.has_nonlinear_devices() {
+                self.capacitance_spectra(state, extended)
+            } else {
+                Vec::new()
+            };
+            let operator = ExactHbOperator {
+                num_nodes: n,
+                num_components: h,
+                real_width: w,
+                omega0,
+                gmin,
+                g_matrix: &self.g_matrix,
+                c_matrix: &self.c_matrix,
+                l_matrix: &self.l_matrix,
+                g_spectra: &g_spectra,
+                c_spectra: &c_spectra,
+            };
+            let preconditioner = ExactHbPreconditioner::build(&operator);
+            let rhs_complex = rhs
+                .iter()
+                .map(|&value| Complex64::new(value, 0.0))
+                .collect::<Vec<_>>();
+            let restart = self.config.gmres_restart.clamp(8, size.max(8));
+            let outcome = super::krylov::gmres(
+                &|input| operator.apply(input),
+                &preconditioner,
+                &rhs_complex,
+                restart,
+                6,
+            );
+            if outcome.converged {
+                if self.config.verbose {
+                    log::debug!(
+                        "HB exact matrix-free solve: {} iterations, relative residual {:.2e}",
+                        outcome.iterations,
+                        outcome.relative_residual
+                    );
+                }
+                let mut delta_x = vec![vec![Complex64::new(0.0, 0.0); h]; n];
+                for node in 0..n {
+                    for k in 0..h {
+                        let re = outcome.solution[re_idx(node, k)].re;
+                        let im = if k > 0 {
+                            outcome.solution[im_idx(node, k)].re
+                        } else {
+                            0.0
+                        };
+                        delta_x[node][k] = Complex64::new(re, im);
+                    }
+                }
+                return Ok(delta_x);
+            }
+            log::debug!(
+                "HB exact matrix-free solve stagnated after {} iterations (relative residual \
+                 {:.2e}); falling back to dense elimination",
+                outcome.iterations,
+                outcome.relative_residual
+            );
+        }
+
         // Toeplitz part (linear + GMIN + nonlinear G and charge), expanded
         // from the existing complex assembly.
         let jac_c = self.build_full_jacobian_with_gmin(state, gmin)?;
@@ -878,18 +1460,6 @@ impl HbSolver {
                             add_hankel(*i, *j, k, m, -(jw * c));
                         }
                     }
-                }
-            }
-        }
-
-        // Realified RHS: -residual, DC keeps only its real equation.
-        let mut rhs = vec![0.0; size];
-        for node in 0..n {
-            for k in 0..h {
-                let r = state.residual[node][k];
-                rhs[re_idx(node, k)] = -r.re;
-                if k > 0 {
-                    rhs[im_idx(node, k)] = -r.im;
                 }
             }
         }

@@ -399,6 +399,33 @@ impl SensitivityAnalyzer {
         }
     }
 
+    /// Create an analyzer from an adjoint vector solved by an external sparse
+    /// backend. This keeps the element-derivative implementation shared while
+    /// allowing production callers to avoid materializing and eliminating a
+    /// dense copy of a sparse MNA matrix.
+    pub fn with_precomputed_adjoint(
+        solution: Vec<Value>,
+        adjoint: Vec<Value>,
+        elements: Vec<ElementDesc>,
+    ) -> Option<Self> {
+        if solution.is_empty()
+            || solution.len() != adjoint.len()
+            || solution
+                .iter()
+                .chain(adjoint.iter())
+                .any(|value| !value.is_finite())
+        {
+            return None;
+        }
+        Some(Self {
+            system_size: solution.len(),
+            g_matrix: Vec::new(),
+            solution,
+            adjoint,
+            elements,
+        })
+    }
+
     fn solve_adjoint_transposed(&mut self, output_node: usize) -> bool {
         if output_node >= self.system_size {
             return false;
@@ -531,6 +558,11 @@ impl SensitivityAnalyzer {
         output_node: usize,
         output_ref: Option<usize>,
     ) -> Option<SensitivityResult> {
+        if output_node >= self.system_size
+            || output_ref.is_some_and(|reference| reference >= self.system_size)
+        {
+            return None;
+        }
         // Get output value
         let output_value = match output_ref {
             Some(r) if r < self.system_size => self.solution[output_node] - self.solution[r],
@@ -560,6 +592,30 @@ impl SensitivityAnalyzer {
             }
         }
 
+        Some(self.build_result(output_node, output_value))
+    }
+
+    /// Assemble sensitivities from the adjoint supplied to
+    /// [`Self::with_precomputed_adjoint`]. `output_ref` affects only the
+    /// reported nominal output; its `-1` observation coefficient must already
+    /// be present in the supplied adjoint RHS.
+    pub fn analyze_precomputed(
+        &self,
+        output_node: usize,
+        output_ref: Option<usize>,
+    ) -> Option<SensitivityResult> {
+        if output_node >= self.system_size
+            || output_ref.is_some_and(|reference| reference >= self.system_size)
+        {
+            return None;
+        }
+        let output_value = output_ref
+            .map(|reference| self.solution[output_node] - self.solution[reference])
+            .unwrap_or(self.solution[output_node]);
+        Some(self.build_result(output_node, output_value))
+    }
+
+    fn build_result(&self, output_node: usize, output_value: Value) -> SensitivityResult {
         let mut result = SensitivityResult::new(&format!("V({})", output_node + 1), output_value);
 
         // Compute sensitivity for each element
@@ -598,7 +654,7 @@ impl SensitivityAnalyzer {
             result.add(sensitivity);
         }
 
-        Some(result)
+        result
     }
 }
 

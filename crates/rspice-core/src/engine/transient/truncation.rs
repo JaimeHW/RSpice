@@ -4,6 +4,12 @@
 
 use super::*;
 
+#[inline]
+fn lte_debug_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("RSPICE_LTE_DEBUG").is_some())
+}
+
 impl Engine {
     /// Whether ngspice's device-local CKTterr charge walks own transient
     /// timestep control for this integration front.
@@ -201,6 +207,7 @@ impl Engine {
         charge_abstol: Value,
         trtol: Value,
     ) -> Option<Value> {
+        let lte_debug = lte_debug_enabled();
         let effective_method = Self::effective_companion_method(method, trap_order);
         let coeff = CompanionCoefficients::for_method_with_previous_step(
             effective_method,
@@ -248,7 +255,7 @@ impl Engine {
                 ) else {
                     continue;
                 };
-                if branch_limit < dt && std::env::var_os("RSPICE_LTE_DEBUG").is_some() {
+                if branch_limit < dt && lte_debug {
                     log::warn!(
                         "BJT LTE bind: dev={idx} branch={branch_idx} q=[{q_curr:.6e},{q_prev:.6e},{q_prev_prev:.6e},{q_prev_prev_prev:.6e}] cq=[{cq_curr:.4e},{cq_prev:.4e}] dts=[{:.4e},{:.4e},{:.4e}] limit={branch_limit:.4e}",
                         dt,
@@ -279,6 +286,7 @@ impl Engine {
         charge_abstol: Value,
         trtol: Value,
     ) -> Option<Value> {
+        let lte_debug = lte_debug_enabled();
         let effective_method = Self::effective_companion_method(method, trap_order);
         let coeff = CompanionCoefficients::for_method_with_previous_step(
             effective_method,
@@ -363,7 +371,7 @@ impl Engine {
                 ) else {
                     continue;
                 };
-                if branch_limit < dt && std::env::var_os("RSPICE_LTE_DEBUG").is_some() {
+                if branch_limit < dt && lte_debug {
                     log::warn!(
                         "legacy BJT LTE bind: dev={idx} branch={branch_idx} q=[{q_curr:.6e},{q_prev:.6e},{q_prev_prev:.6e},{q_prev_prev_prev:.6e}] cq=[{cq_curr:.4e},{cq_prev:.4e}] dts=[{:.4e},{:.4e},{:.4e}] limit={branch_limit:.4e}",
                         dt,
@@ -679,6 +687,7 @@ impl Engine {
         if history.accepted_dt_prev <= 0.0 || !history.accepted_dt_prev.is_finite() {
             return None;
         }
+        let lte_debug = lte_debug_enabled();
 
         // The Meyer capacitance halves computed here are exactly what the
         // acceptance-path history rotation re-derives on the same candidate
@@ -782,7 +791,7 @@ impl Engine {
                 ) else {
                     continue;
                 };
-                if branch_limit < dt && std::env::var_os("RSPICE_LTE_DEBUG").is_some() {
+                if branch_limit < dt && lte_debug {
                     log::warn!(
                         "MOS LTE bind: dev={idx} branch={_branch} cap={capacitance:.4e} v=[{voltage:.4e},{voltage_prev:.4e}] q=[{q_curr:.6e},{q_prev:.6e},{q_prev_prev:.6e},{q_prev_prev_prev:.6e}] cq=[{cq_curr:.4e},{cq_prev:.4e}] dts=[{:.4e},{:.4e},{:.4e}] limit={branch_limit:.4e}",
                         dt,

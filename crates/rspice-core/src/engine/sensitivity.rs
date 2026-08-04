@@ -219,8 +219,8 @@ impl Engine {
         }
         circuit.prepare_behavioral_small_signal(&dc_solution);
 
-        let dense_g = Self::try_build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, 0.0)?
-            .to_dense_real();
+        let mut small_signal =
+            Self::try_build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, 0.0)?;
         let elements = Self::collect_sensitivity_elements(&circuit);
         if elements.is_empty() {
             return Err(SimulationError::Circuit(
@@ -230,12 +230,34 @@ impl Engine {
         }
         engine.ensure_result_values(elements.len().saturating_mul(3).saturating_add(1))?;
 
-        let mut analyzer = SensitivityAnalyzer::new(dense_g, dc_solution, elements);
-        analyzer
-            .analyze(
-                output_pos - 1,
-                output_neg.and_then(Self::optional_system_index),
-            )
+        let output_index = output_pos - 1;
+        let reference_index = output_neg.and_then(Self::optional_system_index);
+        let mut observation = vec![Complex64::new(0.0, 0.0); matrix_size];
+        observation[output_index] = Complex64::new(1.0, 0.0);
+        if let Some(reference) = reference_index {
+            observation[reference] -= Complex64::new(1.0, 0.0);
+        }
+        let mut complex_adjoint = Vec::with_capacity(matrix_size);
+        small_signal
+            .solve_transpose_into(&observation, &mut complex_adjoint)
+            .map_err(SimulationError::Solver)?;
+        let mut adjoint = Vec::with_capacity(matrix_size);
+        for value in complex_adjoint {
+            let imaginary_tolerance = 64.0 * Value::EPSILON * value.re.abs().max(1.0);
+            if !value.re.is_finite()
+                || !value.im.is_finite()
+                || value.im.abs() > imaginary_tolerance
+            {
+                return Err(SimulationError::Circuit(
+                    "DC sensitivity sparse adjoint produced a non-real or non-finite value"
+                        .to_string(),
+                ));
+            }
+            adjoint.push(value.re);
+        }
+
+        SensitivityAnalyzer::with_precomputed_adjoint(dc_solution, adjoint, elements)
+            .and_then(|analyzer| analyzer.analyze_precomputed(output_index, reference_index))
             .ok_or(SimulationError::Solver(
                 crate::solver::SolverError::SingularMatrix,
             ))
@@ -3035,6 +3057,44 @@ R2 out 0 1k\n\
         assert!(
             msg.contains("Sensitivity output node") && msg.contains("999"),
             "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
+    fn sparse_linearized_sensitivity_matches_divider_closed_form() {
+        let netlist = Netlist::parse(
+            "Sparse adjoint divider\n\
+             V1 in 0 10\n\
+             R1 in out 1k\n\
+             R2 out 0 1k\n\
+             .END\n",
+        )
+        .expect("divider parses");
+        let result = Engine::default()
+            .run_sensitivity_linearized(&netlist, 2, None)
+            .expect("sparse sensitivity succeeds");
+
+        let close = |actual: f64, expected: f64| {
+            assert!(
+                (actual - expected).abs() <= 1.0e-12 * expected.abs().max(1.0),
+                "actual={actual:.16e}, expected={expected:.16e}"
+            );
+        };
+        close(result.output_value, 5.0);
+        close(result.get("R1").expect("R1 sensitivity").absolute, -2.5e-3);
+        close(result.get("R2").expect("R2 sensitivity").absolute, 2.5e-3);
+        close(result.get("V1").expect("V1 sensitivity").absolute, 0.5);
+
+        let differential = Engine::default()
+            .run_sensitivity_linearized(&netlist, 2, Some(1))
+            .expect("differential sparse sensitivity succeeds");
+        close(differential.output_value, -5.0);
+        close(
+            differential
+                .get("V1")
+                .expect("differential V1 sensitivity")
+                .absolute,
+            -0.5,
         );
     }
 

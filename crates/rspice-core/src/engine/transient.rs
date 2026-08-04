@@ -36,6 +36,23 @@ fn restore_transient_merit_rollback(
     vbic_snapshot_cache.clone_from_slice(&rollback.1);
 }
 
+fn capture_transient_merit_rollback(
+    circuit: &crate::circuit::CircuitData,
+    vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
+    rollback: &mut Option<TransientMeritRollback>,
+) {
+    if let Some((state, cached_vbic)) = rollback.as_mut() {
+        circuit.refresh_transient_trial_state_snapshot(state);
+        cached_vbic.clear();
+        cached_vbic.extend_from_slice(vbic_snapshot_cache);
+    } else {
+        *rollback = Some((
+            circuit.transient_trial_state_snapshot(),
+            vbic_snapshot_cache.to_vec(),
+        ));
+    }
+}
+
 mod breakpoints;
 mod checkpoint;
 mod companion_stamps;
@@ -80,6 +97,99 @@ enum DerivedTransientBranchCurrentKind {
     VoltageSwitch,
     CurrentSwitch,
     GenericSwitch,
+}
+
+/// Immutable storage projection compiled once before transient integration.
+///
+/// `TransientResult` retains its topology-aligned outer vectors so public node
+/// and branch indices remain stable. An unselected channel is represented by
+/// an empty inner vector and therefore costs no per-point memory or append
+/// traffic.
+#[derive(Debug)]
+struct TransientCapturePlan {
+    voltages: Vec<bool>,
+    branch_currents: Vec<bool>,
+    event_nodes: Vec<bool>,
+}
+
+/// Wall-clock timer used exclusively for transient diagnostics.
+///
+/// A production run must not pay for operating-system clock queries at every
+/// Newton phase when debug timing is disabled. Keeping the optionality inside
+/// this tiny wrapper makes the hot-loop call sites explicit while compiling
+/// down to a predictable branch and zero clock reads in the disabled case.
+#[derive(Debug)]
+struct DiagnosticTimer(Option<crate::time_compat::Instant>);
+
+impl DiagnosticTimer {
+    #[inline]
+    fn start(enabled: bool) -> Self {
+        Self(enabled.then(crate::time_compat::Instant::now))
+    }
+
+    #[inline]
+    fn elapsed(&self) -> std::time::Duration {
+        self.0
+            .as_ref()
+            .map(crate::time_compat::Instant::elapsed)
+            .unwrap_or_default()
+    }
+}
+
+impl TransientCapturePlan {
+    fn compile(netlist: &Netlist, node_names: &[String], branch_names: &[String]) -> Self {
+        // Measurement evaluation currently happens after integration. Until
+        // measurements become online reducers, retain all analog operands for
+        // measurement decks so output projection cannot change their result.
+        let retain_all = netlist.saves.keeps_everything() || !netlist.measurements.is_empty();
+        let voltages = node_names
+            .iter()
+            .map(|name| {
+                retain_all
+                    || netlist.saves.retains_voltage_operand(name)
+                    || netlist
+                        .output_requests
+                        .iter()
+                        .any(|request| request.selects_transient_node_voltage(name))
+            })
+            .collect();
+        let branch_currents = branch_names
+            .iter()
+            .map(|name| {
+                retain_all
+                    || netlist.saves.selects(&format!("I({name})"))
+                    || netlist
+                        .output_requests
+                        .iter()
+                        .any(|request| request.selects_transient_device_current(name))
+            })
+            .collect();
+        // XSPICE event vectors occupy a distinct result namespace. Bare/raw
+        // saves select them, while a typed V(node) request must not do so.
+        // Measurements remain conservative until their reducers are online.
+        let event_nodes = node_names
+            .iter()
+            .map(|name| retain_all || netlist.saves.selects_raw_name(name))
+            .collect();
+        Self {
+            voltages,
+            branch_currents,
+            event_nodes,
+        }
+    }
+
+    fn analog_values_per_sample(&self) -> usize {
+        self.voltages
+            .iter()
+            .filter(|&&retain| retain)
+            .count()
+            .saturating_add(
+                self.branch_currents
+                    .iter()
+                    .filter(|&&retain| retain)
+                    .count(),
+            )
+    }
 }
 
 impl Engine {
@@ -626,9 +736,47 @@ impl Engine {
     fn ensure_transient_result_limits(
         &self,
         result: &TransientResult,
+        retained_values: usize,
     ) -> Result<(), SimulationError> {
         self.ensure_analysis_points(result.time.len())?;
-        self.ensure_result_values(Self::transient_result_value_count(result))
+        self.ensure_result_values(retained_values)
+    }
+
+    fn transient_initial_trace_capacity(
+        &self,
+        duration: Value,
+        max_step: Value,
+        values_per_sample: usize,
+    ) -> usize {
+        const MAX_EAGER_TRACE_POINTS: usize = 65_536;
+        let requested =
+            if duration.is_finite() && duration > 0.0 && max_step.is_finite() && max_step > 0.0 {
+                (duration / max_step).ceil() as usize
+            } else {
+                1
+            };
+        let with_headroom = requested
+            .saturating_add(requested / 8)
+            .saturating_add(4)
+            .max(1);
+        let value_bound = if values_per_sample == 0 {
+            self.config.resource_limits.max_analysis_points
+        } else {
+            self.config.resource_limits.max_result_values / values_per_sample
+        };
+        with_headroom
+            .min(self.config.resource_limits.max_analysis_points)
+            .min(value_bound.max(1))
+            .min(MAX_EAGER_TRACE_POINTS)
+    }
+
+    fn seeded_transient_trace(value: Value, retain: bool, capacity: usize) -> Vec<Value> {
+        if !retain {
+            return Vec::new();
+        }
+        let mut trace = Vec::with_capacity(capacity.max(1));
+        trace.push(value);
+        trace
     }
 
     fn ensure_transient_request_floor(
@@ -653,22 +801,31 @@ impl Engine {
         step_size: Value,
         derived_branches: &[DerivedTransientBranchCurrent],
         record_device_op_traces: bool,
-    ) -> Result<(), SimulationError> {
+        capture: &TransientCapturePlan,
+    ) -> Result<usize, SimulationError> {
         let next_point_count = result.time.len().saturating_add(1);
         self.ensure_analysis_points(next_point_count)?;
         self.ensure_result_shape(
             next_point_count,
-            result
-                .voltages
-                .len()
-                .saturating_add(result.branch_currents.len())
+            capture
+                .analog_values_per_sample()
                 .saturating_add(result.store_traces.len())
                 .saturating_add(1),
         )?;
+        let mut added_values = 1usize;
         result.time.push(time);
         result.step_sizes.push(step_size);
-        for (i, voltages) in result.voltages.iter_mut().take(num_nodes).enumerate() {
-            voltages.push(solution.get(i).copied().unwrap_or(0.0));
+        for (i, (voltages, &retain)) in result
+            .voltages
+            .iter_mut()
+            .zip(&capture.voltages)
+            .take(num_nodes)
+            .enumerate()
+        {
+            if retain {
+                voltages.push(solution.get(i).copied().unwrap_or(0.0));
+                added_values = added_values.saturating_add(1);
+            }
         }
         for (index, binding) in circuit.xyce_memristors.iter_mut().enumerate() {
             let trace = result.store_traces.get_mut(index).ok_or_else(|| {
@@ -682,33 +839,43 @@ impl Engine {
                 binding.resistance_store = resistance;
             }
             trace.values.push(binding.resistance_store);
+            added_values = added_values.saturating_add(1);
         }
 
         let solved_branch_count = circuit.num_branches();
-        for (i, currents) in result
+        for (i, (currents, &retain)) in result
             .branch_currents
             .iter_mut()
+            .zip(&capture.branch_currents)
             .take(solved_branch_count)
             .enumerate()
         {
-            currents.push(solution.get(num_nodes + i).copied().unwrap_or(0.0));
+            if retain {
+                currents.push(solution.get(num_nodes + i).copied().unwrap_or(0.0));
+                added_values = added_values.saturating_add(1);
+            }
         }
         // Solved branch unknowns are recorded verbatim. In particular, a
         // Xyce IC capacitor's branch is now its physical terminal-KCL current,
         // so post-solving reconstruction would only discard precision.
-        for (branch, currents) in derived_branches
+        for ((branch, currents), &retain) in derived_branches
             .iter()
             .zip(result.branch_currents.iter_mut().skip(solved_branch_count))
+            .zip(capture.branch_currents.iter().skip(solved_branch_count))
         {
-            currents.push(Self::derived_transient_branch_current(
-                circuit, solution, time, *branch,
-            )?);
+            if retain {
+                currents.push(Self::derived_transient_branch_current(
+                    circuit, solution, time, *branch,
+                )?);
+                added_values = added_values.saturating_add(1);
+            }
         }
         if record_device_op_traces {
-            result.record_device_op_sample(circuit.device_op_report());
+            added_values = added_values
+                .saturating_add(result.record_device_op_sample(circuit.device_op_report()));
         }
         circuit.accept_generic_switch_transient_step();
-        self.ensure_transient_result_limits(result)
+        Ok(added_values)
     }
 
     fn backfill_initial_linear_capacitor_branch_currents(
@@ -1541,7 +1708,7 @@ impl Engine {
                 self.dc_nodal_gmin_floor(&circuit)
             };
         if circuit.has_nonlinear_devices() {
-            circuit.update_nonlinear(&solution);
+            self.update_transient_nonlinear_devices(&mut circuit, &solution)?;
         }
         circuit.refresh_jiles_atherton_inductances(&solution);
 
@@ -1610,8 +1777,6 @@ impl Engine {
         let prefer_dense_solver = Self::should_prefer_dense_transient_solver(
             is_strictly_linear_transient,
             size,
-            !circuit.multi_winding_transformers.is_empty()
-                || !circuit.coupled_inductor_pairs.is_empty(),
             circuit.has_xspice_devices(),
         );
 
@@ -1823,25 +1988,60 @@ impl Engine {
                 .iter()
                 .map(|&branch| Self::derived_transient_branch_name(&circuit, branch)),
         );
+        let capture_plan = TransientCapturePlan::compile(netlist, &node_names, &branch_names);
+        let trace_capacity = self.transient_initial_trace_capacity(
+            (tstop - resume_time).max(0.0),
+            hinted_max_step,
+            capture_plan
+                .analog_values_per_sample()
+                .saturating_add(store_traces.len())
+                .saturating_add(1),
+        );
+        for trace in &mut store_traces {
+            trace
+                .values
+                .reserve(trace_capacity.saturating_sub(trace.values.len()));
+        }
         if resume.is_none() {
             circuit
                 .behavioral_sources
                 .accept_transient_step(&solution, resume_time);
         }
+        let mut time = Vec::with_capacity(trace_capacity);
+        time.push(resume_time);
+        let mut step_sizes = Vec::with_capacity(trace_capacity);
+        step_sizes.push(0.0);
+        let mut branch_currents = Self::initial_transient_branch_currents(
+            &mut circuit,
+            &solution,
+            num_nodes,
+            resume_time,
+            uic_requested,
+            &derived_branch_currents,
+        )?;
+        for (trace, &retain) in branch_currents
+            .iter_mut()
+            .zip(&capture_plan.branch_currents)
+        {
+            if retain {
+                trace.reserve(trace_capacity.saturating_sub(trace.len()));
+            } else {
+                trace.clear();
+            }
+        }
         let mut result = TransientResult {
-            time: vec![resume_time],
-            step_sizes: vec![0.0],
+            time,
+            step_sizes,
             voltages: (0..num_nodes)
-                .map(|i| vec![solution.get(i).copied().unwrap_or(0.0)])
+                .map(|i| {
+                    Self::seeded_transient_trace(
+                        solution.get(i).copied().unwrap_or(0.0),
+                        capture_plan.voltages[i],
+                        trace_capacity,
+                    )
+                })
                 .collect(),
-            branch_currents: Self::initial_transient_branch_currents(
-                &mut circuit,
-                &solution,
-                num_nodes,
-                resume_time,
-                uic_requested,
-                &derived_branch_currents,
-            )?,
+            branch_currents,
             num_nodes,
             node_names,
             branch_names,
@@ -1863,11 +2063,18 @@ impl Engine {
                 resume_time,
                 &digital_snapshot,
                 &mut digital_trace_indices,
+                &capture_plan.event_nodes,
             );
             circuit.fill_xspice_real_snapshot(&mut real_snapshot);
-            result.record_real_snapshot(resume_time, &real_snapshot, &mut real_trace_indices);
+            result.record_real_snapshot(
+                resume_time,
+                &real_snapshot,
+                &mut real_trace_indices,
+                &capture_plan.event_nodes,
+            );
         }
-        self.ensure_transient_result_limits(&result)?;
+        let mut retained_result_values = Self::transient_result_value_count(&result);
+        self.ensure_transient_result_limits(&result, retained_result_values)?;
         let mut t = resume_time;
         let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
         let mut voltage_lte_excluded_nodes = circuit.xspice_transient_voltage_lte_excluded_nodes();
@@ -2051,7 +2258,9 @@ impl Engine {
             // The initial report is created before capacitor histories are
             // initialized. Refresh its sample so solution-dependent C probes
             // expose the DC-evaluated capacitance at t=0.
-            result.record_device_op_sample(circuit.device_op_report());
+            retained_result_values = retained_result_values
+                .saturating_add(result.record_device_op_sample(circuit.device_op_report()));
+            self.ensure_transient_result_limits(&result, retained_result_values)?;
         }
 
         // Initialize inductor current and voltage history from DC solution
@@ -2218,14 +2427,16 @@ impl Engine {
                 initial_remaining_breakpoints.saturating_mul(MAX_ATTEMPTS_PER_SCHEDULED_BREAKPOINT),
             )
             .max(50_000);
-        let mut last_progress_log = crate::time_compat::Instant::now();
+        let progress_logging_enabled = log::log_enabled!(log::Level::Info);
+        let mut last_progress_log = progress_logging_enabled.then(crate::time_compat::Instant::now);
         let mut rhs = vec![0.0; size];
         let mut new_solution = solution.clone();
         let mut linear_solution = Vec::with_capacity(size);
-        // Newton phase accounting: cumulative stamp/solve time across the
-        // whole run, reported once at completion so a single info-level run
-        // splits assembly cost from linear-solve cost without a profiler.
-        let transient_wall_start = crate::time_compat::Instant::now();
+        let mut correction_rhs = Vec::with_capacity(size);
+        // Newton phase accounting is debug-only. In normal production runs
+        // every DiagnosticTimer below avoids the underlying clock query.
+        let diagnostic_timing_enabled = log::log_enabled!(log::Level::Debug);
+        let transient_wall_start = DiagnosticTimer::start(diagnostic_timing_enabled);
         let mut total_stamp_nanos: u128 = 0;
         let mut total_solve_nanos: u128 = 0;
         let mut total_trunc_nanos: u128 = 0;
@@ -2233,6 +2444,9 @@ impl Engine {
         let mut total_history_nanos: u128 = 0;
         let mut total_merit_nanos: u128 = 0;
         let mut total_postsolve_nanos: u128 = 0;
+        let mut total_postsolve_update_nanos: u128 = 0;
+        let mut total_postsolve_convergence_nanos: u128 = 0;
+        let mut total_postsolve_residual_nanos: u128 = 0;
         let mut total_setup_nanos: u128 = 0;
         let mut total_postloop_nanos: u128 = 0;
         let mut total_top_nanos: u128 = 0;
@@ -2248,6 +2462,7 @@ impl Engine {
         let mut failed_voltage_conv: usize = 0;
         let mut failed_device_conv: usize = 0;
         let mut failed_residual_only: usize = 0;
+        let mut rejected_attempt_nonlinear_state_scratch = None;
 
         // Runs after every accepted point (all acceptance paths): counts the
         // floor-dt streak and performs the livelock restart when it trips.
@@ -2329,7 +2544,7 @@ impl Engine {
         }
 
         while t < tstop && total_iterations < max_total_iterations {
-            let attempt_top_start = crate::time_compat::Instant::now();
+            let attempt_top_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             mosfet_caps_valid = false;
             if self.config.spice_dialect == SpiceDialect::Xyce {
                 // Xyce 7.10 updates its machine-precision recovery floor from
@@ -2340,7 +2555,10 @@ impl Engine {
                 timestep.set_hard_min_dt(Self::xyce_hard_min_timestep(t));
             }
             // Progress logging every 2 seconds
-            if last_progress_log.elapsed().as_secs() >= 2 {
+            if last_progress_log
+                .as_ref()
+                .is_some_and(|started| started.elapsed().as_secs() >= 2)
+            {
                 log::info!(
                     "Transient progress: t={:.12e}s / {:.3e}s ({:.1}%), dt={:.3e}, retries={}, order={}, {} iterations",
                     t,
@@ -2351,7 +2569,7 @@ impl Engine {
                     trap_order,
                     total_iterations
                 );
-                last_progress_log = crate::time_compat::Instant::now();
+                last_progress_log = Some(crate::time_compat::Instant::now());
             }
 
             // Abort check - check every ABORT_CHECK_INTERVAL iterations for minimal overhead
@@ -2633,9 +2851,16 @@ impl Engine {
                 coeff
             };
             let suppress_gate_charge = false;
-            let mut rejected_attempt_nonlinear_state = circuit
-                .has_nonlinear_devices()
-                .then(|| circuit.nonlinear_state_snapshot());
+            let mut rejected_attempt_nonlinear_state = if circuit.has_nonlinear_devices() {
+                if let Some(mut snapshot) = rejected_attempt_nonlinear_state_scratch.take() {
+                    circuit.refresh_transient_trial_state_snapshot(&mut snapshot);
+                    Some(snapshot)
+                } else {
+                    Some(circuit.transient_trial_state_snapshot())
+                }
+            } else {
+                None
+            };
             macro_rules! restore_rejected_transient_nonlinear_state {
                 () => {{
                     lte_estimator.rollback_xyce_attempt();
@@ -2679,7 +2904,7 @@ impl Engine {
                 && (startup_recovery || retry_count >= CONSERVATIVE_LIMITING_RETRY_THRESHOLD);
 
             total_top_nanos += attempt_top_start.elapsed().as_nanos();
-            let setup_phase_start = crate::time_compat::Instant::now();
+            let setup_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             lte_estimator.begin_xyce_attempt(dt, step_trap_order);
             // Prepare for Newton iteration at this timestep by seeding the full
             // algebraic solution vector from accepted history when a predictor
@@ -2813,7 +3038,7 @@ impl Engine {
                 }
                 let iteration_delta_limit =
                     Self::adaptive_transient_newton_delta_limit(newton_step_delta_limit, _iter);
-                let newton_stamp_start = crate::time_compat::Instant::now();
+                let newton_stamp_start = DiagnosticTimer::start(diagnostic_timing_enabled);
                 let transient_system_context = residual::TransientSystemContext {
                     coeff: &coeff,
                     xyce_one_step,
@@ -2887,8 +3112,13 @@ impl Engine {
                         && circuit.has_nonlinear_devices())
                         || (self.config.spice_dialect == SpiceDialect::Xyce
                             && circuit.has_xyce_core_inductors()));
-                if globalization_active {
-                    let merit_phase_start = crate::time_compat::Instant::now();
+                // Iteration zero has no preceding Newton step to judge. Defer
+                // its merit product and rollback capture until the post-solve
+                // checks prove that a second iteration is actually needed.
+                // The overwhelmingly common one-solve timestep therefore
+                // performs neither globalization matrix-vector product.
+                if globalization_active && _iter > 0 {
+                    let merit_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
                     let current_merit = self
                         .residual_inf_norm(&circuit, &mut matrix, &new_solution, &rhs)
                         .unwrap_or(Value::INFINITY);
@@ -2957,10 +3187,11 @@ impl Engine {
                     }
                     last_stamped_iterate.clone_from(&new_solution);
                     last_stamped_merit = current_merit;
-                    last_stamped_rollback = Some((
-                        circuit.nonlinear_state_snapshot(),
-                        vbic_snapshot_cache.to_vec(),
-                    ));
+                    capture_transient_merit_rollback(
+                        &circuit,
+                        &vbic_snapshot_cache,
+                        &mut last_stamped_rollback,
+                    );
                     total_merit_nanos += merit_phase_start.elapsed().as_nanos();
                 }
 
@@ -3028,12 +3259,12 @@ impl Engine {
                 }
 
                 // Solve and check convergence
-                let newton_solve_start = crate::time_compat::Instant::now();
+                let newton_solve_start = DiagnosticTimer::start(diagnostic_timing_enabled);
                 let solve_result: Result<(), rspice_matrix::SolverError> =
                     if uses_inductor_correction {
                         matrix
-                            .correction_rhs(&rhs, &new_solution)
-                            .and_then(|mut correction_rhs| {
+                            .correction_rhs_into(&rhs, &new_solution, &mut correction_rhs)
+                            .and_then(|()| {
                                 circuit.stabilize_inductor_transient_correction_rhs(
                                     &mut correction_rhs,
                                     &new_solution,
@@ -3077,10 +3308,10 @@ impl Engine {
                     }
                 }
 
-                let postsolve_phase_start = crate::time_compat::Instant::now();
+                let postsolve_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
                 match solve_result {
                     Ok(()) => {
-                        let mut sol = &mut linear_solution;
+                        let sol = &mut linear_solution;
                         had_solver_candidate = true;
                         // Sanity check: detect and handle NaN/Inf/excessive values.
                         // IMPORTANT: Preserve the newest valid candidate when possible.
@@ -3157,7 +3388,7 @@ impl Engine {
                         // therefore nonlinear iteration one.
                         let raw_weighted_update_norm = self.transient_newton_weighted_update_norm(
                             &new_solution,
-                            &sol,
+                            sol,
                             transient_newton_update_weights.as_deref(),
                         );
 
@@ -3167,18 +3398,18 @@ impl Engine {
                             // break ideal voltage-source equations by independently clipping
                             // their driven output nodes after each linear solve.
                             let damped = Self::limit_transient_node_voltage_updates(
-                                &mut sol,
+                                sol,
                                 &new_solution,
                                 num_nodes,
                                 iteration_delta_limit,
                                 &force_accept_protected_nodes,
                             );
                             if damped {
-                                circuit.enforce_ideal_voltage_constraints(&mut sol, t + dt);
+                                circuit.enforce_ideal_voltage_constraints(sol, t + dt);
                             }
                             Self::clip_ideal_output_common_modes(
                                 &solution,
-                                &mut sol,
+                                sol,
                                 iteration_delta_limit,
                                 &ideal_output_pairs,
                             );
@@ -3188,7 +3419,7 @@ impl Engine {
                         // candidate and continue Newton iterations.
                         if has_bad_values {
                             if _iter == 0 && globalization_active {
-                                let seed_start = crate::time_compat::Instant::now();
+                                let seed_start = DiagnosticTimer::start(diagnostic_timing_enabled);
                                 last_stamped_iterate.clone_from(&new_solution);
                                 last_stamped_merit = self
                                     .residual_inf_norm(
@@ -3198,10 +3429,11 @@ impl Engine {
                                         &rhs,
                                     )
                                     .unwrap_or(Value::INFINITY);
-                                last_stamped_rollback = Some((
-                                    circuit.nonlinear_state_snapshot(),
-                                    vbic_snapshot_cache.to_vec(),
-                                ));
+                                capture_transient_merit_rollback(
+                                    &circuit,
+                                    &vbic_snapshot_cache,
+                                    &mut last_stamped_rollback,
+                                );
                                 total_merit_nanos += seed_start.elapsed().as_nanos();
                             }
                             new_solution.copy_from_slice(sol);
@@ -3235,7 +3467,7 @@ impl Engine {
                         let update_converged_for_acceptance = self
                             .transient_newton_update_convergence_met(
                                 &new_solution,
-                                &sol,
+                                sol,
                                 num_nodes,
                                 transient_newton_update_weights.as_deref(),
                                 _iter.saturating_add(1),
@@ -3245,7 +3477,7 @@ impl Engine {
                             // iterate here. Capture its rollback state only
                             // after the solve proves that another Newton step
                             // is required.
-                            let seed_start = crate::time_compat::Instant::now();
+                            let seed_start = DiagnosticTimer::start(diagnostic_timing_enabled);
                             last_stamped_iterate.clone_from(&new_solution);
                             last_stamped_merit = self
                                 .residual_inf_norm(
@@ -3255,10 +3487,11 @@ impl Engine {
                                     &rhs,
                                 )
                                 .unwrap_or(Value::INFINITY);
-                            last_stamped_rollback = Some((
-                                circuit.nonlinear_state_snapshot(),
-                                vbic_snapshot_cache.to_vec(),
-                            ));
+                            capture_transient_merit_rollback(
+                                &circuit,
+                                &vbic_snapshot_cache,
+                                &mut last_stamped_rollback,
+                            );
                             total_merit_nanos += seed_start.elapsed().as_nanos();
                         }
                         // CRITICAL: Update new_solution BEFORE checking device convergence
@@ -3267,12 +3500,17 @@ impl Engine {
                         nonlinear_state_matches_new_solution = false;
 
                         // Update nonlinear device state to new solution for accurate convergence check
+                        let postsolve_update_start =
+                            DiagnosticTimer::start(diagnostic_timing_enabled);
                         if circuit.has_nonlinear_devices() && !nonlinear_state_matches_new_solution
                         {
-                            circuit.update_nonlinear(&new_solution);
+                            self.update_transient_nonlinear_devices(&mut circuit, &new_solution)?;
                             nonlinear_state_matches_new_solution = true;
                         }
+                        total_postsolve_update_nanos += postsolve_update_start.elapsed().as_nanos();
 
+                        let postsolve_convergence_start =
+                            DiagnosticTimer::start(diagnostic_timing_enabled);
                         let mut device_converged = core_trial_converged(&circuit)
                             && (!enforce_device_convergence
                                 || !circuit.has_nonlinear_devices()
@@ -3289,16 +3527,22 @@ impl Engine {
                             self.current_abstol(),
                         );
                         let mut residual_converged_for_acceptance = false;
+                        total_postsolve_convergence_nanos +=
+                            postsolve_convergence_start.elapsed().as_nanos();
                         if update_converged_for_acceptance
                             && device_converged
                             && behavioral_converged
                         {
+                            let residual_proof_preserves_device_state =
+                                circuit.has_classic_mos_only_transient_nonlinearity();
                             // A direct solve only makes the candidate satisfy
                             // the system linearized at the previous iterate.
                             // Acceptance must use the true nonlinear residual:
                             // restamp every otherwise-converged candidate at
                             // its own state before applying the solver's
                             // residual criterion.
+                            let postsolve_residual_start =
+                                DiagnosticTimer::start(diagnostic_timing_enabled);
                             residual_converged_for_acceptance = self
                                 .transient_nonlinear_residual_converged(
                                     &mut circuit,
@@ -3338,23 +3582,30 @@ impl Engine {
                                     },
                                     &mut vbic_snapshot_cache,
                                 )?;
+                            total_postsolve_residual_nanos +=
+                                postsolve_residual_start.elapsed().as_nanos();
                             // The proof restamp refreshes nonlinear, generated,
                             // behavioral, and XSPICE trial state at the exact
                             // candidate. Re-evaluate convergence afterward so
                             // limiter state advanced by that refresh cannot be
                             // accepted through stale pre-restamp booleans.
-                            device_converged = core_trial_converged(&circuit)
-                                && (!enforce_device_convergence
-                                    || !circuit.has_nonlinear_devices()
-                                    || circuit
-                                        .nonlinear_converged(self.device_convergence_criteria()));
-                            behavioral_converged = circuit.behavioral_linearizations_converged(
-                                &new_solution,
-                                t + dt,
-                                self.voltage_reltol(),
-                                self.voltage_abstol(),
-                                self.current_abstol(),
-                            );
+                            let postsolve_convergence_start =
+                                DiagnosticTimer::start(diagnostic_timing_enabled);
+                            if !residual_proof_preserves_device_state {
+                                device_converged = core_trial_converged(&circuit)
+                                    && (!enforce_device_convergence
+                                        || !circuit.has_nonlinear_devices()
+                                        || circuit.nonlinear_converged(
+                                            self.device_convergence_criteria(),
+                                        ));
+                                behavioral_converged = circuit.behavioral_linearizations_converged(
+                                    &new_solution,
+                                    t + dt,
+                                    self.voltage_reltol(),
+                                    self.voltage_abstol(),
+                                    self.current_abstol(),
+                                );
+                            }
                             if _iter == 0
                                 && globalization_active
                                 && !residual_converged_for_acceptance
@@ -3374,11 +3625,14 @@ impl Engine {
                                         &rhs,
                                     )
                                     .unwrap_or(Value::INFINITY);
-                                last_stamped_rollback = Some((
-                                    circuit.nonlinear_state_snapshot(),
-                                    vbic_snapshot_cache.to_vec(),
-                                ));
+                                capture_transient_merit_rollback(
+                                    &circuit,
+                                    &vbic_snapshot_cache,
+                                    &mut last_stamped_rollback,
+                                );
                             }
+                            total_postsolve_convergence_nanos +=
+                                postsolve_convergence_start.elapsed().as_nanos();
                         }
                         total_postsolve_nanos += postsolve_phase_start.elapsed().as_nanos();
 
@@ -3404,7 +3658,7 @@ impl Engine {
                 }
             }
 
-            let postloop_phase_start = crate::time_compat::Instant::now();
+            let postloop_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             if !converged {
                 retry_count += 1;
                 self.record_convergence(|quality| quality.record_timestep_reduction());
@@ -3743,7 +3997,7 @@ impl Engine {
                     new_solution = bounded_force_candidate;
 
                     if circuit.has_nonlinear_devices() {
-                        circuit.update_nonlinear(&new_solution);
+                        self.update_transient_nonlinear_devices(&mut circuit, &new_solution)?;
                     }
 
                     let method_after_step = current_integration_method(&trapgear);
@@ -4050,27 +4304,38 @@ impl Engine {
                         &circuit,
                         &derived_branch_currents,
                     );
-                    self.record_transient_solution_sample(
-                        &mut result,
-                        &mut circuit,
-                        &solution,
-                        num_nodes,
-                        t,
-                        dt,
-                        &derived_branch_currents,
-                        record_device_op_traces,
-                    )?;
+                    retained_result_values = retained_result_values.saturating_add(
+                        self.record_transient_solution_sample(
+                            &mut result,
+                            &mut circuit,
+                            &solution,
+                            num_nodes,
+                            t,
+                            dt,
+                            &derived_branch_currents,
+                            record_device_op_traces,
+                            &capture_plan,
+                        )?,
+                    );
                     if record_xspice_event_traces {
                         circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
-                        result.record_digital_snapshot(
-                            t,
-                            &digital_snapshot,
-                            &mut digital_trace_indices,
-                        );
+                        retained_result_values =
+                            retained_result_values.saturating_add(result.record_digital_snapshot(
+                                t,
+                                &digital_snapshot,
+                                &mut digital_trace_indices,
+                                &capture_plan.event_nodes,
+                            ));
                         circuit.fill_xspice_real_snapshot(&mut real_snapshot);
-                        result.record_real_snapshot(t, &real_snapshot, &mut real_trace_indices);
+                        retained_result_values =
+                            retained_result_values.saturating_add(result.record_real_snapshot(
+                                t,
+                                &real_snapshot,
+                                &mut real_trace_indices,
+                                &capture_plan.event_nodes,
+                            ));
                     }
-                    self.ensure_transient_result_limits(&result)?;
+                    self.ensure_transient_result_limits(&result, retained_result_values)?;
 
                     let next_force_dt = Self::force_accept_recovery_timestep(
                         dt,
@@ -4103,12 +4368,13 @@ impl Engine {
                 if !force_accepted_rejected_newton_step {
                     restore_rejected_transient_nonlinear_state!();
                 }
+                rejected_attempt_nonlinear_state_scratch = rejected_attempt_nonlinear_state.take();
                 total_postloop_nanos += postloop_phase_start.elapsed().as_nanos();
                 continue;
             }
 
             total_postloop_nanos += postloop_phase_start.elapsed().as_nanos();
-            let truncation_phase_start = crate::time_compat::Instant::now();
+            let truncation_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             let first_accepted_transient_step =
                 Self::should_skip_post_accept_timestep_control_on_first_step(result.time.len())
                     // Post-livelock-restart warmup: the re-seeded histories
@@ -4359,7 +4625,7 @@ impl Engine {
                 activity_limit,
             );
             total_trunc_nanos += truncation_phase_start.elapsed().as_nanos();
-            let middle_phase_start = crate::time_compat::Instant::now();
+            let middle_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
 
             if locked_grid.is_none()
                 && let Some(limit) = candidate_truncation_limit
@@ -4706,7 +4972,7 @@ impl Engine {
                     new_solution = bounded_force_candidate;
 
                     if circuit.has_nonlinear_devices() {
-                        circuit.update_nonlinear(&new_solution);
+                        self.update_transient_nonlinear_devices(&mut circuit, &new_solution)?;
                     }
 
                     let method_after_step = current_integration_method(&trapgear);
@@ -5014,27 +5280,38 @@ impl Engine {
                         &circuit,
                         &derived_branch_currents,
                     );
-                    self.record_transient_solution_sample(
-                        &mut result,
-                        &mut circuit,
-                        &solution,
-                        num_nodes,
-                        t,
-                        dt,
-                        &derived_branch_currents,
-                        record_device_op_traces,
-                    )?;
+                    retained_result_values = retained_result_values.saturating_add(
+                        self.record_transient_solution_sample(
+                            &mut result,
+                            &mut circuit,
+                            &solution,
+                            num_nodes,
+                            t,
+                            dt,
+                            &derived_branch_currents,
+                            record_device_op_traces,
+                            &capture_plan,
+                        )?,
+                    );
                     if record_xspice_event_traces {
                         circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
-                        result.record_digital_snapshot(
-                            t,
-                            &digital_snapshot,
-                            &mut digital_trace_indices,
-                        );
+                        retained_result_values =
+                            retained_result_values.saturating_add(result.record_digital_snapshot(
+                                t,
+                                &digital_snapshot,
+                                &mut digital_trace_indices,
+                                &capture_plan.event_nodes,
+                            ));
                         circuit.fill_xspice_real_snapshot(&mut real_snapshot);
-                        result.record_real_snapshot(t, &real_snapshot, &mut real_trace_indices);
+                        retained_result_values =
+                            retained_result_values.saturating_add(result.record_real_snapshot(
+                                t,
+                                &real_snapshot,
+                                &mut real_trace_indices,
+                                &capture_plan.event_nodes,
+                            ));
                     }
-                    self.ensure_transient_result_limits(&result)?;
+                    self.ensure_transient_result_limits(&result, retained_result_values)?;
                     let next_force_dt = Self::force_accept_recovery_timestep(
                         dt,
                         timestep.preferred_min_dt(),
@@ -5063,6 +5340,7 @@ impl Engine {
                 if !force_accepted_rejected_lte_step {
                     restore_rejected_transient_nonlinear_state!();
                 }
+                rejected_attempt_nonlinear_state_scratch = rejected_attempt_nonlinear_state.take();
                 total_middle_nanos += middle_phase_start.elapsed().as_nanos();
                 continue;
             }
@@ -5140,11 +5418,11 @@ impl Engine {
             }
 
             if circuit.has_nonlinear_devices() && !nonlinear_state_matches_new_solution {
-                circuit.update_nonlinear(&new_solution);
+                self.update_transient_nonlinear_devices(&mut circuit, &new_solution)?;
             }
 
             total_middle_nanos += middle_phase_start.elapsed().as_nanos();
-            let trap_trial_phase_start = crate::time_compat::Instant::now();
+            let trap_trial_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             let trapezoidal_order_trial = if !first_accepted_transient_step
                 && !linearized_startup_recovery_points
                 && !lte_estimator.uses_accepted_solution_reference()
@@ -5208,7 +5486,7 @@ impl Engine {
                     transient_baseline_diag_gmin,
                 )?);
             }
-            let history_phase_start = crate::time_compat::Instant::now();
+            let history_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             Self::update_reactive_history(
                 &mut circuit,
                 &new_solution,
@@ -5240,7 +5518,7 @@ impl Engine {
                 &mut warned_dynamic_tline_breakpoint_cap,
             );
             total_history_nanos += history_phase_start.elapsed().as_nanos();
-            let tail_phase_start = crate::time_compat::Instant::now();
+            let tail_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             // Accept XSPICE timestep (commit state changes)
             if circuit.has_xspice_devices() {
                 if capture_xyce_static_history {
@@ -5314,23 +5592,37 @@ impl Engine {
                 &circuit,
                 &derived_branch_currents,
             );
-            self.record_transient_solution_sample(
-                &mut result,
-                &mut circuit,
-                &solution,
-                num_nodes,
-                t,
-                dt,
-                &derived_branch_currents,
-                record_device_op_traces,
-            )?;
+            retained_result_values =
+                retained_result_values.saturating_add(self.record_transient_solution_sample(
+                    &mut result,
+                    &mut circuit,
+                    &solution,
+                    num_nodes,
+                    t,
+                    dt,
+                    &derived_branch_currents,
+                    record_device_op_traces,
+                    &capture_plan,
+                )?);
             if record_xspice_event_traces {
                 circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
-                result.record_digital_snapshot(t, &digital_snapshot, &mut digital_trace_indices);
+                retained_result_values =
+                    retained_result_values.saturating_add(result.record_digital_snapshot(
+                        t,
+                        &digital_snapshot,
+                        &mut digital_trace_indices,
+                        &capture_plan.event_nodes,
+                    ));
                 circuit.fill_xspice_real_snapshot(&mut real_snapshot);
-                result.record_real_snapshot(t, &real_snapshot, &mut real_trace_indices);
+                retained_result_values =
+                    retained_result_values.saturating_add(result.record_real_snapshot(
+                        t,
+                        &real_snapshot,
+                        &mut real_trace_indices,
+                        &capture_plan.event_nodes,
+                    ));
             }
-            self.ensure_transient_result_limits(&result)?;
+            self.ensure_transient_result_limits(&result, retained_result_values)?;
             if first_accepted_transient_step {
                 let accepted_max_step =
                     self.transient_device_max_timestep(&circuit, t, hinted_max_step);
@@ -5453,6 +5745,7 @@ impl Engine {
 
             lte_warmup_skips = lte_warmup_skips.saturating_sub(1);
             livelock_check!(dt);
+            rejected_attempt_nonlinear_state_scratch = rejected_attempt_nonlinear_state.take();
             total_tail_nanos += tail_phase_start.elapsed().as_nanos();
         }
 
@@ -5512,6 +5805,12 @@ impl Engine {
             )) as f64
                 * 1e-9,
             transient_wall.as_secs_f64(),
+        );
+        log::debug!(
+            "Transient postsolve detail: update {:.3}s, convergence {:.3}s, residual-proof {:.3}s",
+            total_postsolve_update_nanos as f64 * 1e-9,
+            total_postsolve_convergence_nanos as f64 * 1e-9,
+            total_postsolve_residual_nanos as f64 * 1e-9,
         );
 
         if log::log_enabled!(log::Level::Debug)
@@ -5615,7 +5914,7 @@ fn compress_transient_result(
         || result
             .voltages
             .iter()
-            .any(|waveform| waveform.len() != point_count)
+            .any(|waveform| !waveform.is_empty() && waveform.len() != point_count)
         || result
             .store_traces
             .iter()
@@ -5695,6 +5994,7 @@ fn compress_transient_result(
                 for waveform in result
                     .voltages
                     .iter()
+                    .filter(|waveform| !waveform.is_empty())
                     .chain(result.store_traces.iter().map(|trace| &trace.values))
                 {
                     let actual = waveform[point];
@@ -5738,7 +6038,13 @@ fn compress_transient_result(
         voltages: result
             .voltages
             .iter()
-            .map(|waveform| indices.iter().map(|&index| waveform[index]).collect())
+            .map(|waveform| {
+                if waveform.is_empty() {
+                    Vec::new()
+                } else {
+                    indices.iter().map(|&index| waveform[index]).collect()
+                }
+            })
             .collect(),
         num_nodes: result.num_nodes,
         node_names: result.node_names.clone(),

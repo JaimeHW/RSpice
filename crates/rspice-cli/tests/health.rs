@@ -41,7 +41,12 @@ fn readiness_json_exercises_parser_and_solver() {
     assert_eq!(json["checks"]["solver"]["branch_count"], 1);
     assert_eq!(json["checks"]["solver"]["output_voltage"], 1.0);
     assert!(json["run_id"].is_string());
-    assert_eq!(json["tool"]["profile"], "debug");
+    let expected_profile = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
+    assert_eq!(json["tool"]["profile"], expected_profile);
     assert_eq!(json["tool"]["commit"], env!("RSPICE_BUILD_COMMIT"));
     assert!(valid_build_commit(json["tool"]["commit"].as_str().unwrap()));
 
