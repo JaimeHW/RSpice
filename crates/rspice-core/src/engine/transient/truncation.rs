@@ -10,6 +10,132 @@ fn lte_debug_enabled() -> bool {
     *ENABLED.get_or_init(|| std::env::var_os("RSPICE_LTE_DEBUG").is_some())
 }
 
+/// Per-device-family invariants for ngspice's `CKTterr` divided-difference
+/// charge test. One family evaluates this same timestep/tolerance geometry for
+/// every charge branch, so validate and precompute it once outside hot loops.
+#[derive(Clone, Copy)]
+struct NgspiceChargeTruncationContext {
+    dt: Value,
+    prev_dt: Value,
+    prev_prev_dt: Value,
+    first_span: Value,
+    second_span: Value,
+    total_span: Value,
+    order: u8,
+    factor: Value,
+    reltol: Value,
+    current_abstol: Value,
+    charge_abstol: Value,
+    trtol: Value,
+}
+
+impl NgspiceChargeTruncationContext {
+    #[allow(clippy::too_many_arguments)]
+    #[inline]
+    fn new(
+        dt: Value,
+        prev_dt: Value,
+        prev_prev_dt: Value,
+        method: IntegrationMethod,
+        trap_order: u8,
+        reltol: Value,
+        current_abstol: Value,
+        charge_abstol: Value,
+        trtol: Value,
+    ) -> Option<Self> {
+        if !dt.is_finite()
+            || dt <= 0.0
+            || !prev_dt.is_finite()
+            || prev_dt <= 0.0
+            || !trtol.is_finite()
+            || trtol <= 0.0
+        {
+            return None;
+        }
+
+        let mut order = trap_order.clamp(1, 2);
+        if order >= 2 && (!prev_prev_dt.is_finite() || prev_prev_dt <= 0.0) {
+            order = 1;
+        }
+        let first_span = dt + prev_dt;
+        if !first_span.is_finite() || first_span <= 0.0 {
+            return None;
+        }
+        let (second_span, total_span) = if order >= 2 {
+            let second_span = prev_dt + prev_prev_dt;
+            let total_span = dt + second_span;
+            if !second_span.is_finite()
+                || second_span <= 0.0
+                || !total_span.is_finite()
+                || total_span <= 0.0
+            {
+                return None;
+            }
+            (second_span, total_span)
+        } else {
+            (0.0, first_span)
+        };
+
+        Some(Self {
+            dt,
+            prev_dt,
+            prev_prev_dt,
+            first_span,
+            second_span,
+            total_span,
+            order,
+            factor: Engine::ngspice_vbic_truncation_factor(method, order),
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        })
+    }
+
+    #[inline]
+    fn limit(
+        &self,
+        q_curr: Value,
+        q_prev: Value,
+        q_prev_prev: Value,
+        q_prev_prev_prev: Value,
+        cq_curr: Value,
+        cq_prev: Value,
+    ) -> Option<Value> {
+        let volttol = self.current_abstol + self.reltol * cq_curr.abs().max(cq_prev.abs());
+        let chargetol =
+            self.reltol * q_curr.abs().max(q_prev.abs()).max(self.charge_abstol) / self.dt;
+        let tol = volttol.max(chargetol);
+        if !tol.is_finite() || tol <= 0.0 {
+            return None;
+        }
+
+        // This is the scalar expansion of ngspice's in-place divided-
+        // difference triangle. Preserve its operation order so the optimized
+        // family path remains bit-identical to the reference helper.
+        let d01 = (q_curr - q_prev) / self.dt;
+        let d12 = (q_prev - q_prev_prev) / self.prev_dt;
+        let diff = if self.order >= 2 {
+            let d23 = (q_prev_prev - q_prev_prev_prev) / self.prev_prev_dt;
+            let dd01 = (d01 - d12) / self.first_span;
+            let dd12 = (d12 - d23) / self.second_span;
+            (dd01 - dd12) / self.total_span
+        } else {
+            (d01 - d12) / self.first_span
+        };
+        let denom = self.current_abstol.max(self.factor * diff.abs());
+        if !denom.is_finite() || denom <= 0.0 {
+            return None;
+        }
+
+        let mut limit = self.trtol * tol / denom;
+        if self.order >= 2 {
+            limit = limit.sqrt();
+        }
+        (limit.is_finite() && limit > 0.0).then_some(limit)
+    }
+}
+
 impl Engine {
     /// Whether ngspice's device-local CKTterr charge walks own transient
     /// timestep control for this integration front.
@@ -35,6 +161,7 @@ impl Engine {
     }
 
     #[inline]
+    #[cfg(test)]
     pub(super) fn ngspice_charge_truncation_limit(
         q_curr: Value,
         q_prev: Value,
@@ -52,61 +179,25 @@ impl Engine {
         charge_abstol: Value,
         trtol: Value,
     ) -> Option<Value> {
-        if !dt.is_finite() || dt <= 0.0 {
-            return None;
-        }
-
-        let mut order = trap_order.clamp(1, 2);
-        if !prev_dt.is_finite() || prev_dt <= 0.0 {
-            return None;
-        }
-        if order >= 2 && (!prev_prev_dt.is_finite() || prev_prev_dt <= 0.0) {
-            order = 1;
-        }
-
-        let volttol = current_abstol + reltol * cq_curr.abs().max(cq_prev.abs());
-        let chargetol = reltol * q_curr.abs().max(q_prev.abs()).max(charge_abstol) / dt;
-        let tol = volttol.max(chargetol);
-        if !tol.is_finite() || tol <= 0.0 {
-            return None;
-        }
-
-        let mut diff = [q_curr, q_prev, q_prev_prev, q_prev_prev_prev];
-        let delta_old = [dt, prev_dt, prev_prev_dt];
-        let mut deltmp = delta_old;
-        let mut j = usize::from(order);
-        loop {
-            for i in 0..=j {
-                let denom = deltmp[i];
-                if !denom.is_finite() || denom <= 0.0 {
-                    return None;
-                }
-                diff[i] = (diff[i] - diff[i + 1]) / denom;
-            }
-            if j == 0 {
-                break;
-            }
-            j -= 1;
-            for i in 0..=j {
-                deltmp[i] = deltmp[i + 1] + delta_old[i];
-            }
-        }
-
-        let factor = Self::ngspice_vbic_truncation_factor(method, order);
-        let denom = current_abstol.max(factor * diff[0].abs());
-        if !denom.is_finite() || denom <= 0.0 {
-            return None;
-        }
-
-        if !trtol.is_finite() || trtol <= 0.0 {
-            return None;
-        }
-
-        let mut limit = trtol * tol / denom;
-        if order >= 2 {
-            limit = limit.sqrt();
-        }
-        (limit.is_finite() && limit > 0.0).then_some(limit)
+        NgspiceChargeTruncationContext::new(
+            dt,
+            prev_dt,
+            prev_prev_dt,
+            method,
+            trap_order,
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        )?
+        .limit(
+            q_curr,
+            q_prev,
+            q_prev_prev,
+            q_prev_prev_prev,
+            cq_curr,
+            cq_prev,
+        )
     }
 
     #[inline]
@@ -130,6 +221,17 @@ impl Engine {
         let effective_method = Self::effective_companion_method(method, trap_order);
         let coeff =
             CompanionCoefficients::for_method_with_previous_step(effective_method, dt, prev_dt);
+        let truncation = NgspiceChargeTruncationContext::new(
+            dt,
+            prev_dt,
+            prev_prev_dt,
+            effective_method,
+            trap_order,
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -168,22 +270,13 @@ impl Engine {
             let cq_curr = geq * voltage - ieq;
             let cq_prev = circuit.capacitors.i_prev[idx];
 
-            let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
+            let Some(branch_limit) = truncation.limit(
                 q_curr,
                 q_prev,
                 q_prev_prev,
                 q_prev_prev_prev,
                 cq_curr,
                 cq_prev,
-                dt,
-                prev_dt,
-                prev_prev_dt,
-                effective_method,
-                trap_order,
-                reltol,
-                current_abstol,
-                charge_abstol,
-                trtol,
             ) else {
                 continue;
             };
@@ -214,6 +307,17 @@ impl Engine {
             dt,
             history.accepted_dt_prev,
         );
+        let truncation = NgspiceChargeTruncationContext::new(
+            dt,
+            history.accepted_dt_prev,
+            history.accepted_dt_prev_prev,
+            effective_method,
+            trap_order,
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -236,22 +340,13 @@ impl Engine {
                 let cq_curr =
                     Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
 
-                let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
+                let Some(branch_limit) = truncation.limit(
                     q_curr,
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
                     cq_curr,
                     cq_prev,
-                    dt,
-                    history.accepted_dt_prev,
-                    history.accepted_dt_prev_prev,
-                    effective_method,
-                    trap_order,
-                    reltol,
-                    current_abstol,
-                    charge_abstol,
-                    trtol,
                 ) else {
                     continue;
                 };
@@ -293,6 +388,17 @@ impl Engine {
             dt,
             history.accepted_dt_prev,
         );
+        let truncation = NgspiceChargeTruncationContext::new(
+            dt,
+            history.accepted_dt_prev,
+            history.accepted_dt_prev_prev,
+            effective_method,
+            trap_order,
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -352,22 +458,13 @@ impl Engine {
                 let cq_curr =
                     Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
 
-                let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
+                let Some(branch_limit) = truncation.limit(
                     q_curr,
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
                     cq_curr,
                     cq_prev,
-                    dt,
-                    history.accepted_dt_prev,
-                    history.accepted_dt_prev_prev,
-                    effective_method,
-                    trap_order,
-                    reltol,
-                    current_abstol,
-                    charge_abstol,
-                    trtol,
                 ) else {
                     continue;
                 };
@@ -466,6 +563,17 @@ impl Engine {
             dt,
             history.accepted_dt_prev,
         );
+        let truncation = NgspiceChargeTruncationContext::new(
+            dt,
+            history.accepted_dt_prev,
+            history.accepted_dt_prev_prev,
+            effective_method,
+            trap_order,
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -567,22 +675,13 @@ impl Engine {
                         cq_prev,
                     )
                 };
-                let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
+                let Some(branch_limit) = truncation.limit(
                     q_curr,
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
                     cq_curr,
                     cq_prev,
-                    dt,
-                    history.accepted_dt_prev,
-                    history.accepted_dt_prev_prev,
-                    effective_method,
-                    trap_order,
-                    reltol,
-                    current_abstol,
-                    charge_abstol,
-                    trtol,
                 ) else {
                     continue;
                 };
@@ -620,6 +719,17 @@ impl Engine {
             dt,
             history.accepted_dt_prev,
         );
+        let truncation = NgspiceChargeTruncationContext::new(
+            dt,
+            history.accepted_dt_prev,
+            history.accepted_dt_prev_prev,
+            effective_method,
+            trap_order,
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -644,22 +754,13 @@ impl Engine {
                 history.qd_prev_prev[idx],
                 history.cqd_prev[idx],
             );
-            let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
+            let Some(branch_limit) = truncation.limit(
                 q_curr,
                 history.qd_prev[idx],
                 history.qd_prev_prev[idx],
                 history.qd_prev_prev_prev[idx],
                 cq_curr,
                 history.cqd_prev[idx],
-                dt,
-                history.accepted_dt_prev,
-                history.accepted_dt_prev_prev,
-                effective_method,
-                trap_order,
-                reltol,
-                current_abstol,
-                charge_abstol,
-                trtol,
             ) else {
                 continue;
             };
@@ -704,6 +805,17 @@ impl Engine {
             dt,
             history.accepted_dt_prev,
         );
+        let truncation = NgspiceChargeTruncationContext::new(
+            dt,
+            history.accepted_dt_prev,
+            history.accepted_dt_prev_prev,
+            effective_method,
+            trap_order,
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -772,22 +884,13 @@ impl Engine {
                     q_prev_prev,
                     cq_prev,
                 );
-                let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
+                let Some(branch_limit) = truncation.limit(
                     q_curr,
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
                     cq_curr,
                     cq_prev,
-                    dt,
-                    history.accepted_dt_prev,
-                    history.accepted_dt_prev_prev,
-                    effective_method,
-                    trap_order,
-                    reltol,
-                    current_abstol,
-                    charge_abstol,
-                    trtol,
                 ) else {
                     continue;
                 };
@@ -830,6 +933,17 @@ impl Engine {
             dt,
             history.accepted_dt_prev,
         );
+        let truncation = NgspiceChargeTruncationContext::new(
+            dt,
+            history.accepted_dt_prev,
+            history.accepted_dt_prev_prev,
+            effective_method,
+            trap_order,
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -904,22 +1018,13 @@ impl Engine {
                     q_prev_prev,
                     cq_prev,
                 );
-                let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
+                let Some(branch_limit) = truncation.limit(
                     q_curr,
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
                     cq_curr,
                     cq_prev,
-                    dt,
-                    history.accepted_dt_prev,
-                    history.accepted_dt_prev_prev,
-                    effective_method,
-                    trap_order,
-                    reltol,
-                    current_abstol,
-                    charge_abstol,
-                    trtol,
                 ) else {
                     continue;
                 };
@@ -978,22 +1083,13 @@ impl Engine {
                     q_prev_prev,
                     cq_prev,
                 );
-                let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
+                let Some(branch_limit) = truncation.limit(
                     q_curr,
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
                     cq_curr,
                     cq_prev,
-                    dt,
-                    history.accepted_dt_prev,
-                    history.accepted_dt_prev_prev,
-                    effective_method,
-                    trap_order,
-                    reltol,
-                    current_abstol,
-                    charge_abstol,
-                    trtol,
                 ) else {
                     continue;
                 };
@@ -1034,6 +1130,17 @@ impl Engine {
             dt,
             history.accepted_dt_prev,
         );
+        let truncation = NgspiceChargeTruncationContext::new(
+            dt,
+            history.accepted_dt_prev,
+            history.accepted_dt_prev_prev,
+            effective_method,
+            trap_order,
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -1099,22 +1206,13 @@ impl Engine {
                 // Integrated charge current at the candidate point.
                 let cq_curr =
                     Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
-                let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
+                let Some(branch_limit) = truncation.limit(
                     q_curr,
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
                     cq_curr,
                     cq_prev,
-                    dt,
-                    history.accepted_dt_prev,
-                    history.accepted_dt_prev_prev,
-                    effective_method,
-                    trap_order,
-                    reltol,
-                    current_abstol,
-                    charge_abstol,
-                    trtol,
                 ) else {
                     continue;
                 };
@@ -1155,6 +1253,17 @@ impl Engine {
             dt,
             history.accepted_dt_prev,
         );
+        let truncation = NgspiceChargeTruncationContext::new(
+            dt,
+            history.accepted_dt_prev,
+            history.accepted_dt_prev_prev,
+            effective_method,
+            trap_order,
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -1186,22 +1295,13 @@ impl Engine {
                 // Integrated charge current at the candidate point.
                 let cq_curr =
                     Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
-                let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
+                let Some(branch_limit) = truncation.limit(
                     q_curr,
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
                     cq_curr,
                     cq_prev,
-                    dt,
-                    history.accepted_dt_prev,
-                    history.accepted_dt_prev_prev,
-                    effective_method,
-                    trap_order,
-                    reltol,
-                    current_abstol,
-                    charge_abstol,
-                    trtol,
                 ) else {
                     continue;
                 };
@@ -1242,6 +1342,17 @@ impl Engine {
             dt,
             history.accepted_dt_prev,
         );
+        let truncation = NgspiceChargeTruncationContext::new(
+            dt,
+            history.accepted_dt_prev,
+            history.accepted_dt_prev_prev,
+            effective_method,
+            trap_order,
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -1268,22 +1379,13 @@ impl Engine {
                 // Integrated charge current at the candidate point.
                 let cq_curr =
                     Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
-                let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
+                let Some(branch_limit) = truncation.limit(
                     q_curr,
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
                     cq_curr,
                     cq_prev,
-                    dt,
-                    history.accepted_dt_prev,
-                    history.accepted_dt_prev_prev,
-                    effective_method,
-                    trap_order,
-                    reltol,
-                    current_abstol,
-                    charge_abstol,
-                    trtol,
                 ) else {
                     return;
                 };
@@ -1385,6 +1487,17 @@ impl Engine {
             dt,
             history.accepted_dt_prev,
         );
+        let truncation = NgspiceChargeTruncationContext::new(
+            dt,
+            history.accepted_dt_prev,
+            history.accepted_dt_prev_prev,
+            effective_method,
+            trap_order,
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -1403,22 +1516,13 @@ impl Engine {
                     q_prev_prev,
                     cq_prev,
                 );
-                let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
+                let Some(branch_limit) = truncation.limit(
                     q_curr[row],
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
                     cq_curr,
                     cq_prev,
-                    dt,
-                    history.accepted_dt_prev,
-                    history.accepted_dt_prev_prev,
-                    effective_method,
-                    trap_order,
-                    reltol,
-                    current_abstol,
-                    charge_abstol,
-                    trtol,
                 ) else {
                     continue;
                 };
@@ -2078,6 +2182,144 @@ mod tests {
     use super::*;
     use crate::Netlist;
     use crate::numerics::integration::TransientLteReference;
+
+    #[allow(clippy::too_many_arguments)]
+    fn reference_charge_truncation_limit(
+        q_curr: Value,
+        q_prev: Value,
+        q_prev_prev: Value,
+        q_prev_prev_prev: Value,
+        cq_curr: Value,
+        cq_prev: Value,
+        dt: Value,
+        prev_dt: Value,
+        prev_prev_dt: Value,
+        method: IntegrationMethod,
+        trap_order: u8,
+        reltol: Value,
+        current_abstol: Value,
+        charge_abstol: Value,
+        trtol: Value,
+    ) -> Option<Value> {
+        if !dt.is_finite() || dt <= 0.0 {
+            return None;
+        }
+        let mut order = trap_order.clamp(1, 2);
+        if !prev_dt.is_finite() || prev_dt <= 0.0 {
+            return None;
+        }
+        if order >= 2 && (!prev_prev_dt.is_finite() || prev_prev_dt <= 0.0) {
+            order = 1;
+        }
+
+        let volttol = current_abstol + reltol * cq_curr.abs().max(cq_prev.abs());
+        let chargetol = reltol * q_curr.abs().max(q_prev.abs()).max(charge_abstol) / dt;
+        let tol = volttol.max(chargetol);
+        if !tol.is_finite() || tol <= 0.0 {
+            return None;
+        }
+
+        let mut diff = [q_curr, q_prev, q_prev_prev, q_prev_prev_prev];
+        let delta_old = [dt, prev_dt, prev_prev_dt];
+        let mut deltmp = delta_old;
+        let mut j = usize::from(order);
+        loop {
+            for i in 0..=j {
+                let denom = deltmp[i];
+                if !denom.is_finite() || denom <= 0.0 {
+                    return None;
+                }
+                diff[i] = (diff[i] - diff[i + 1]) / denom;
+            }
+            if j == 0 {
+                break;
+            }
+            j -= 1;
+            for i in 0..=j {
+                deltmp[i] = deltmp[i + 1] + delta_old[i];
+            }
+        }
+
+        let factor = Engine::ngspice_vbic_truncation_factor(method, order);
+        let denom = current_abstol.max(factor * diff[0].abs());
+        if !denom.is_finite() || denom <= 0.0 || !trtol.is_finite() || trtol <= 0.0 {
+            return None;
+        }
+        let mut limit = trtol * tol / denom;
+        if order >= 2 {
+            limit = limit.sqrt();
+        }
+        (limit.is_finite() && limit > 0.0).then_some(limit)
+    }
+
+    #[test]
+    fn precomputed_charge_truncation_matches_reference_bit_exactly() {
+        let methods = [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+            IntegrationMethod::TrapGear,
+        ];
+        let timesteps = [
+            (1.0e-9, 0.8e-9, 1.2e-9),
+            (1.0e-30, 2.0e-30, 3.0e-30),
+            (1.0e9, 2.0e9, 3.0e9),
+            (1.0e-9, 2.0e-9, Value::NAN),
+        ];
+        let states = [
+            (2.1e-15, 1.8e-15, 1.1e-15, 0.4e-15, 2.2e-6, 1.7e-6),
+            (-3.0e-12, -2.7e-12, -2.0e-12, -1.2e-12, -4.0e-3, -3.5e-3),
+            (0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        ];
+
+        for method in methods {
+            for trap_order in 0..=3 {
+                for (dt, prev_dt, prev_prev_dt) in timesteps {
+                    for (q0, q1, q2, q3, cq0, cq1) in states {
+                        let expected = reference_charge_truncation_limit(
+                            q0,
+                            q1,
+                            q2,
+                            q3,
+                            cq0,
+                            cq1,
+                            dt,
+                            prev_dt,
+                            prev_prev_dt,
+                            method,
+                            trap_order,
+                            1.0e-3,
+                            1.0e-12,
+                            1.0e-14,
+                            7.0,
+                        );
+                        let actual = Engine::ngspice_charge_truncation_limit(
+                            q0,
+                            q1,
+                            q2,
+                            q3,
+                            cq0,
+                            cq1,
+                            dt,
+                            prev_dt,
+                            prev_prev_dt,
+                            method,
+                            trap_order,
+                            1.0e-3,
+                            1.0e-12,
+                            1.0e-14,
+                            7.0,
+                        );
+                        assert_eq!(
+                            actual.map(Value::to_bits),
+                            expected.map(Value::to_bits),
+                            "method={method:?} order={trap_order} dts=({dt},{prev_dt},{prev_prev_dt}) state=({q0},{q1},{q2},{q3},{cq0},{cq1})",
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn accepted_solution_lte_excludes_ngspice_device_charge_truncation() {
