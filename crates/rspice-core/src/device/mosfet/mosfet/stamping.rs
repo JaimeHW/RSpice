@@ -153,8 +153,14 @@ impl Mosfet {
         row_rhs: &mut [Value],
     ) {
         let (vgs, vds, vbs) = self.branch_voltages(solution);
-        let (_, _, gm, gds, gmb, id_eq) =
-            self.linearized_transient_operating_point(vgs, vds, vbs, constants);
+        let cache_matches = self.cached_linearization_matches_eval(vgs, vds, vbs);
+        let (gm, gds, gmb, id_eq) = if cache_matches {
+            (self.gm, self.gds, self.gmb, self.id_eq)
+        } else {
+            let (_, _, gm, gds, gmb, id_eq) =
+                self.linearized_transient_operating_point(vgs, vds, vbs, constants);
+            (gm, gds, gmb, id_eq)
+        };
         let vd = Self::terminal_voltage(solution, self.node_drain);
         let vg = Self::terminal_voltage(solution, self.node_gate);
         let vs = Self::terminal_voltage(solution, self.node_source);
@@ -190,11 +196,13 @@ impl Mosfet {
             row_rhs[row] += id_eq;
         }
 
-        let (bs_anode, bs_cathode, gbs, ieq_bs) = self.body_source_junction_linearization(vbs);
+        let (bs_anode, bs_cathode, gbs, ieq_bs) =
+            self.body_source_junction_linearization_cached(vbs, cache_matches);
         Self::add_diode_residual_row_terms(
             solution, row_ax, row_rhs, bs_anode, bs_cathode, gbs, ieq_bs,
         );
-        let (bd_anode, bd_cathode, gbd, ieq_bd) = self.body_drain_junction_linearization(vds, vbs);
+        let (bd_anode, bd_cathode, gbd, ieq_bd) =
+            self.body_drain_junction_linearization_cached(vds, vbs, cache_matches);
         Self::add_diode_residual_row_terms(
             solution, row_ax, row_rhs, bd_anode, bd_cathode, gbd, ieq_bd,
         );
@@ -333,5 +341,36 @@ mod tests {
 
         assert_eq!(cached_rhs, verified_rhs);
         assert_eq!(cached_matrix.values_mut(), verified_matrix.values_mut());
+    }
+
+    #[test]
+    fn physical_residual_rows_reuse_matching_device_cache_exactly() {
+        let candidate = [1.2, 1.8, 0.2, -0.1];
+        let mut cached_mos = Mosfet::new_nmos("cached".to_string(), 1, 2, 3, 4);
+        let constants = cached_mos.classic_transient_constants();
+        cached_mos.update_with_classic_transient_constants(&candidate, &constants);
+        assert!(cached_mos.cached_linearization_is_physical());
+
+        let mut cached_ax = vec![0.0; 4];
+        let mut cached_rhs = vec![0.0; 4];
+        cached_mos.add_physical_static_residual_row_terms_at(
+            &candidate,
+            &constants,
+            &mut cached_ax,
+            &mut cached_rhs,
+        );
+
+        let fresh_mos = Mosfet::new_nmos("fresh".to_string(), 1, 2, 3, 4);
+        let mut evaluated_ax = vec![0.0; 4];
+        let mut evaluated_rhs = vec![0.0; 4];
+        fresh_mos.add_physical_static_residual_row_terms_at(
+            &candidate,
+            &constants,
+            &mut evaluated_ax,
+            &mut evaluated_rhs,
+        );
+
+        assert_eq!(cached_ax, evaluated_ax);
+        assert_eq!(cached_rhs, evaluated_rhs);
     }
 }
