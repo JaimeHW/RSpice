@@ -2473,6 +2473,10 @@ impl Engine {
             .as_ref()
             .is_some_and(residual::ClassicMosTransientStampCache::supports_direct_residual_proof)
             .then(|| (Vec::with_capacity(size), Vec::with_capacity(size)));
+        let capture_classic_mos_candidate_static_terms =
+            classic_mos_stamp_cache.as_ref().is_some_and(
+                residual::ClassicMosTransientStampCache::supports_compact_candidate_static_stamps,
+            );
         let mut cached_mosfet_truncation_limit;
         let mut cached_mosfet_truncation_limit_valid;
         let mut failed_voltage_conv: usize = 0;
@@ -3131,6 +3135,7 @@ impl Engine {
                         !nonlinear_state_matches_new_solution,
                         crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
                         None,
+                        None,
                         Some(&mut mosfet_companion_terms_scratch),
                         Some(&mut mosfet_static_terms_scratch),
                         None,
@@ -3594,6 +3599,8 @@ impl Engine {
                                     &mut mosfet_companion_terms_scratch,
                                     &mut mosfet_companion_charges_scratch,
                                     &mut mosfet_caps_scratch,
+                                    capture_classic_mos_candidate_static_terms
+                                        .then_some(&mut mosfet_static_terms_scratch),
                                     classic_mos_truncation_context.as_ref(),
                                     enforce_device_convergence
                                         .then(|| self.device_convergence_criteria()),
@@ -3701,6 +3708,8 @@ impl Engine {
                                     &mut vbic_snapshot_cache,
                                     mosfet_companion_terms_valid
                                         .then_some(mosfet_companion_terms_scratch.as_slice()),
+                                    capture_classic_mos_candidate_static_terms
+                                        .then_some(mosfet_static_terms_scratch.as_slice()),
                                     if classic_mos_stamp_cache.is_some() && !suppress_gate_charge {
                                         Some(&mut mosfet_caps_scratch)
                                     } else {

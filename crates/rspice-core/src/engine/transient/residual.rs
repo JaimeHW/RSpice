@@ -95,6 +95,13 @@ impl ClassicMosTransientStampCache {
     }
 
     #[inline]
+    pub(super) fn supports_compact_candidate_static_stamps(&self) -> bool {
+        !self.direct_residual_has_bounded_row_fan_in
+            && self.static_stamp_plans.len() == self.device_constants.len()
+            && !self.static_stamp_plans.is_empty()
+    }
+
+    #[inline]
     pub(super) fn device_constants(
         &self,
     ) -> &[crate::device::mosfet::ClassicMosTransientConstants] {
@@ -182,23 +189,6 @@ impl Engine {
                 .iter()
                 .map(crate::device::Mosfet::classic_transient_constants),
         );
-        #[cfg(feature = "parallel")]
-        let use_compact_static_stamps = self
-            .classic_mos_parallel_worker_count(circuit.mosfets.len())
-            .is_none();
-        #[cfg(not(feature = "parallel"))]
-        let use_compact_static_stamps = true;
-        if use_compact_static_stamps {
-            let plans = circuit
-                .mosfets
-                .devices
-                .iter()
-                .map(|mosfet| mosfet.classic_static_stamp_plan(matrix))
-                .collect::<Option<Vec<_>>>();
-            if let Some(plans) = plans {
-                cache.static_stamp_plans = plans;
-            }
-        }
         let mut node_incidence = vec![0_usize; circuit.num_nodes().saturating_add(1)];
         cache.direct_residual_has_bounded_row_fan_in =
             circuit.mosfets.devices.iter().all(|mosfet| {
@@ -222,6 +212,24 @@ impl Engine {
                 }
                 true
             });
+        #[cfg(feature = "parallel")]
+        let use_compact_static_stamps = self
+            .classic_mos_parallel_worker_count(circuit.mosfets.len())
+            .is_none()
+            || !cache.direct_residual_has_bounded_row_fan_in;
+        #[cfg(not(feature = "parallel"))]
+        let use_compact_static_stamps = true;
+        if use_compact_static_stamps {
+            let plans = circuit
+                .mosfets
+                .devices
+                .iter()
+                .map(|mosfet| mosfet.classic_static_stamp_plan(matrix))
+                .collect::<Option<Vec<_>>>();
+            if let Some(plans) = plans {
+                cache.static_stamp_plans = plans;
+            }
+        }
         cache.capture_static(matrix, rhs);
         cache
     }
@@ -275,6 +283,7 @@ impl Engine {
         refresh_nonlinear: bool,
         evaluation_mode: crate::device::veriloga_builtins::GeneratedEvaluationMode,
         companion_terms_cache: Option<&[MosfetCompanionBranchTerms]>,
+        static_terms_cache: Option<&[crate::device::mosfet::ClassicMosCachedStaticTerms]>,
         mut companion_terms_out: Option<&mut Vec<MosfetCompanionBranchTerms>>,
         mut static_terms_out: Option<&mut Vec<crate::device::mosfet::ClassicMosCachedStaticTerms>>,
         mut caps_cache_out: Option<&mut Vec<(Value, Value, Value)>>,
@@ -294,10 +303,8 @@ impl Engine {
         let mut fused_static_terms = None;
         let fused_companion_terms =
             if refresh_nonlinear && !static_probe && companion_terms_cache.is_none() {
-                if let Some(terms) = companion_terms_out.as_deref_mut() {
-                    let static_terms = static_terms_out
-                        .as_deref_mut()
-                        .unwrap_or(&mut local_static_terms);
+                if let Some(terms) = companion_terms_out.take() {
+                    let static_terms = static_terms_out.take().unwrap_or(&mut local_static_terms);
                     self.update_classic_mos_with_companion_terms_only(
                         circuit,
                         solution,
@@ -363,10 +370,17 @@ impl Engine {
                 caps_cache_out.take(),
             );
         }
+        let cached_static_terms = static_terms_cache.filter(|terms| {
+            physical_cache_matches_probe && terms.len() == cache.static_stamp_plans.len()
+        });
         if static_probe && !physical_cache_matches_probe {
             circuit
                 .mosfets
                 .stamp_all_static_probe_direct(matrix, rhs, solution);
+        } else if let Some(static_terms) = cached_static_terms {
+            for (plan, terms) in cache.static_stamp_plans.iter().zip(static_terms) {
+                crate::device::Mosfet::stamp_classic_cached_static_terms(matrix, rhs, plan, terms);
+            }
         } else if let Some(static_terms) = fused_static_terms {
             debug_assert_eq!(static_terms.len(), cache.static_stamp_plans.len());
             for (plan, terms) in cache.static_stamp_plans.iter().zip(static_terms) {
@@ -507,11 +521,88 @@ impl Engine {
         Ok(())
     }
 
+    /// Evaluate one contiguous candidate batch without sparse writes. Optional
+    /// compact static terms are emitted in the same per-device walk.
     /// Update a classic-MOS-only candidate and evaluate its transient
     /// companion and CKTterr state in the same device walk. The expensive pure
     /// arithmetic shares the bounded MOS worker dispatch; sparse writes remain
     /// serial and the returned LTE limit is a reduction over exact branch
     /// candidates.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_classic_mos_candidate_chunk(
+        devices: &mut [crate::device::Mosfet],
+        constants: &[crate::device::mosfet::ClassicMosTransientConstants],
+        terms: &mut [MosfetCompanionBranchTerms],
+        charges: &mut [MosfetGateCompanionCharges],
+        caps: &mut [(Value, Value, Value)],
+        mut static_terms: Option<&mut [crate::device::mosfet::ClassicMosCachedStaticTerms]>,
+        base: usize,
+        solution: &[Value],
+        coeff: &CompanionCoefficients,
+        dt: Value,
+        history: &MosfetTransientHistory,
+        suppress_gate_charge: bool,
+        truncation: Option<&NgspiceChargeTruncationContext>,
+        convergence_criteria: Option<crate::device::NonlinearConvergenceCriteria>,
+    ) -> (bool, bool, Option<Value>) {
+        use crate::device::NonlinearDevice;
+
+        debug_assert_eq!(devices.len(), constants.len());
+        debug_assert_eq!(devices.len(), terms.len());
+        debug_assert_eq!(devices.len(), charges.len());
+        debug_assert_eq!(devices.len(), caps.len());
+        debug_assert!(
+            static_terms
+                .as_deref()
+                .is_none_or(|static_terms| static_terms.len() == devices.len())
+        );
+
+        let mut all_physical = true;
+        let mut all_devices_converged = true;
+        let mut truncation_limit = None;
+        for local in 0..devices.len() {
+            let device = &mut devices[local];
+            let constants = &constants[local];
+            device.update_with_classic_transient_constants(solution, constants);
+            // Candidate caches feed accepted-state residual and LTE walks.
+            // Form raw gate branches in canonical node-difference order; the
+            // evaluated Meyer bias may still reuse this update's verified
+            // limiter state.
+            let (evaluated_terms, evaluated_charges, evaluated_caps) =
+                Self::mosfet_companion_branch_terms::<true>(
+                    device,
+                    base + local,
+                    solution,
+                    coeff,
+                    dt,
+                    history,
+                    suppress_gate_charge,
+                    false,
+                    Some(constants),
+                );
+            terms[local] = evaluated_terms;
+            charges[local] = evaluated_charges;
+            caps[local] = evaluated_caps;
+            if let Some(static_terms) = static_terms.as_deref_mut() {
+                static_terms[local] = device.classic_cached_static_terms();
+            }
+            let device_limit = truncation.and_then(|context| {
+                context.mosfet_gate_limit_from_cached_charges(
+                    device,
+                    base + local,
+                    &charges[local],
+                    caps[local],
+                    history,
+                )
+            });
+            truncation_limit = Self::min_truncation_limit(truncation_limit, device_limit);
+            all_physical &= device.cached_linearization_is_physical();
+            all_devices_converged &=
+                convergence_criteria.is_none_or(|criteria| device.is_converged(criteria));
+        }
+        (all_physical, all_devices_converged, truncation_limit)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(super) fn update_classic_mos_with_companion_terms(
         &self,
@@ -525,17 +616,19 @@ impl Engine {
         terms: &mut Vec<MosfetCompanionBranchTerms>,
         charges: &mut Vec<MosfetGateCompanionCharges>,
         caps: &mut Vec<(Value, Value, Value)>,
+        mut static_terms: Option<&mut Vec<crate::device::mosfet::ClassicMosCachedStaticTerms>>,
         truncation: Option<&NgspiceChargeTruncationContext>,
         convergence_criteria: Option<crate::device::NonlinearConvergenceCriteria>,
     ) -> Result<ClassicMosCandidateEvaluation, SimulationError> {
-        use crate::device::NonlinearDevice;
-
         debug_assert!(circuit.has_cacheable_classic_mos_transient_base());
         let instance_count = circuit.mosfets.len();
         debug_assert_eq!(constants.len(), instance_count);
         terms.resize(instance_count, [(0.0, 0.0); 5]);
         charges.resize(instance_count, [(0.0, 0.0); 3]);
         caps.resize(instance_count, (0.0, 0.0, 0.0));
+        if let Some(static_terms) = static_terms.as_deref_mut() {
+            static_terms.resize(instance_count, Default::default());
+        }
 
         #[cfg(feature = "parallel")]
         {
@@ -543,85 +636,88 @@ impl Engine {
 
             if let Some(worker_count) = self.classic_mos_parallel_worker_count(instance_count) {
                 let chunk_size = instance_count.div_ceil(worker_count).max(1);
-                let update_result = self.install_classic_mos_parallel(|| {
-                    circuit
-                        .mosfets
-                        .devices
-                        .par_chunks_mut(chunk_size)
-                        .zip(constants.par_chunks(chunk_size))
-                        .zip(terms.par_chunks_mut(chunk_size))
-                        .zip(charges.par_chunks_mut(chunk_size))
-                        .zip(caps.par_chunks_mut(chunk_size))
-                        .enumerate()
-                        .map(
-                            |(
-                                chunk_idx,
-                                ((((devices, constants), term_chunk), charge_chunk), cap_chunk),
-                            )| {
-                                let base = chunk_idx * chunk_size;
-                                let mut chunk_physical = true;
-                                let mut chunk_limit = None;
-                                let mut chunk_converged = true;
-                                for (local, ((((device, constants), term), charge), cap)) in devices
-                                    .iter_mut()
-                                    .zip(constants)
-                                    .zip(term_chunk)
-                                    .zip(charge_chunk)
-                                    .zip(cap_chunk)
-                                    .enumerate()
-                                {
-                                    device.update_with_classic_transient_constants(
-                                        solution, constants,
-                                    );
-                                    // Candidate caches feed accepted-state residual and LTE
-                                    // walks. Form raw gate branches in their canonical node-
-                                    // difference order; the evaluated Meyer bias may still
-                                    // reuse this update's verified limiter state.
-                                    let (evaluated_terms, evaluated_charges, evaluated_caps) =
-                                        Self::mosfet_companion_branch_terms::<true>(
-                                            device,
-                                            base + local,
-                                            solution,
-                                            coeff,
-                                            dt,
-                                            history,
-                                            suppress_gate_charge,
-                                            false,
-                                            Some(constants),
-                                        );
-                                    *term = evaluated_terms;
-                                    *charge = evaluated_charges;
-                                    *cap = evaluated_caps;
-                                    let device_limit = truncation.and_then(|context| {
-                                        context.mosfet_gate_limit_from_cached_charges(
-                                            device,
-                                            base + local,
-                                            charge,
-                                            *cap,
-                                            history,
-                                        )
-                                    });
-                                    chunk_limit =
-                                        Self::min_truncation_limit(chunk_limit, device_limit);
-                                    chunk_physical &= device.cached_linearization_is_physical();
-                                    chunk_converged &= convergence_criteria
-                                        .is_none_or(|criteria| device.is_converged(criteria));
-                                }
-                                (chunk_physical, chunk_converged, chunk_limit)
-                            },
+                let reduce_chunks =
+                    |left: (bool, bool, Option<Value>), right: (bool, bool, Option<Value>)| {
+                        (
+                            left.0 && right.0,
+                            left.1 && right.1,
+                            Self::min_truncation_limit(left.2, right.2),
                         )
-                        .reduce(
-                            || (true, true, None),
-                            |(left_physical, left_converged, left_limit),
-                             (right_physical, right_converged, right_limit)| {
-                                (
-                                    left_physical && right_physical,
-                                    left_converged && right_converged,
-                                    Self::min_truncation_limit(left_limit, right_limit),
-                                )
-                            },
-                        )
-                })?;
+                    };
+                let update_result = if let Some(static_terms) = static_terms.as_deref_mut() {
+                    self.install_classic_mos_parallel(|| {
+                        circuit
+                            .mosfets
+                            .devices
+                            .par_chunks_mut(chunk_size)
+                            .zip(constants.par_chunks(chunk_size))
+                            .zip(terms.par_chunks_mut(chunk_size))
+                            .zip(charges.par_chunks_mut(chunk_size))
+                            .zip(caps.par_chunks_mut(chunk_size))
+                            .zip(static_terms.par_chunks_mut(chunk_size))
+                            .enumerate()
+                            .map(
+                                |(
+                                    chunk_idx,
+                                    (
+                                        ((((devices, constants), terms), charges), caps),
+                                        static_terms,
+                                    ),
+                                )| {
+                                    Self::evaluate_classic_mos_candidate_chunk(
+                                        devices,
+                                        constants,
+                                        terms,
+                                        charges,
+                                        caps,
+                                        Some(static_terms),
+                                        chunk_idx * chunk_size,
+                                        solution,
+                                        coeff,
+                                        dt,
+                                        history,
+                                        suppress_gate_charge,
+                                        truncation,
+                                        convergence_criteria,
+                                    )
+                                },
+                            )
+                            .reduce(|| (true, true, None), reduce_chunks)
+                    })?
+                } else {
+                    self.install_classic_mos_parallel(|| {
+                        circuit
+                            .mosfets
+                            .devices
+                            .par_chunks_mut(chunk_size)
+                            .zip(constants.par_chunks(chunk_size))
+                            .zip(terms.par_chunks_mut(chunk_size))
+                            .zip(charges.par_chunks_mut(chunk_size))
+                            .zip(caps.par_chunks_mut(chunk_size))
+                            .enumerate()
+                            .map(
+                                |(chunk_idx, ((((devices, constants), terms), charges), caps))| {
+                                    Self::evaluate_classic_mos_candidate_chunk(
+                                        devices,
+                                        constants,
+                                        terms,
+                                        charges,
+                                        caps,
+                                        None,
+                                        chunk_idx * chunk_size,
+                                        solution,
+                                        coeff,
+                                        dt,
+                                        history,
+                                        suppress_gate_charge,
+                                        truncation,
+                                        convergence_criteria,
+                                    )
+                                },
+                            )
+                            .reduce(|| (true, true, None), reduce_chunks)
+                    })?
+                };
                 let (all_physical, all_devices_converged, truncation_limit) = update_result;
                 circuit
                     .mosfets
@@ -633,45 +729,23 @@ impl Engine {
             }
         }
 
-        let mut all_physical = true;
-        let mut cached_limit = None;
-        let mut all_devices_converged = true;
-        for (idx, ((((device, constants), term), charge), cap)) in circuit
-            .mosfets
-            .devices
-            .iter_mut()
-            .zip(constants)
-            .zip(terms)
-            .zip(charges)
-            .zip(caps)
-            .enumerate()
-        {
-            device.update_with_classic_transient_constants(solution, constants);
-            // Match the canonical accepted-state branch operation order. Static
-            // limiter validity is tracked independently below.
-            let (evaluated_terms, evaluated_charges, evaluated_caps) =
-                Self::mosfet_companion_branch_terms::<true>(
-                    device,
-                    idx,
-                    solution,
-                    coeff,
-                    dt,
-                    history,
-                    suppress_gate_charge,
-                    false,
-                    Some(constants),
-                );
-            *term = evaluated_terms;
-            *charge = evaluated_charges;
-            *cap = evaluated_caps;
-            let device_limit = truncation.and_then(|context| {
-                context.mosfet_gate_limit_from_cached_charges(device, idx, charge, *cap, history)
-            });
-            cached_limit = Self::min_truncation_limit(cached_limit, device_limit);
-            all_physical &= device.cached_linearization_is_physical();
-            all_devices_converged &=
-                convergence_criteria.is_none_or(|criteria| device.is_converged(criteria));
-        }
+        let (all_physical, all_devices_converged, cached_limit) =
+            Self::evaluate_classic_mos_candidate_chunk(
+                &mut circuit.mosfets.devices,
+                constants,
+                terms,
+                charges,
+                caps,
+                static_terms.map(Vec::as_mut_slice),
+                0,
+                solution,
+                coeff,
+                dt,
+                history,
+                suppress_gate_charge,
+                truncation,
+                convergence_criteria,
+            );
         circuit
             .mosfets
             .record_last_update_all_is_physical(all_physical);
@@ -1278,6 +1352,7 @@ impl Engine {
         classic_mos_cache: Option<&ClassicMosTransientStampCache>,
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
         classic_mos_companion_terms: Option<&[MosfetCompanionBranchTerms]>,
+        classic_mos_static_terms: Option<&[crate::device::mosfet::ClassicMosCachedStaticTerms]>,
         mut classic_mos_caps_out: Option<&mut Vec<(Value, Value, Value)>>,
         classic_mos_residual_scratch: Option<(&mut Vec<Value>, &mut Vec<Value>)>,
     ) -> Result<bool, SimulationError> {
@@ -1311,6 +1386,10 @@ impl Engine {
             }
             let canonical_companion_terms = classic_mos_companion_terms
                 .filter(|_| circuit.mosfets.last_update_all_is_physical());
+            let canonical_static_terms = classic_mos_static_terms.filter(|terms| {
+                circuit.mosfets.last_update_all_is_physical()
+                    && terms.len() == cache.static_stamp_plans.len()
+            });
             self.stamp_classic_mos_transient_system_from_cache(
                 cache,
                 circuit,
@@ -1322,6 +1401,7 @@ impl Engine {
                 refresh_nonlinear,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
                 canonical_companion_terms,
+                canonical_static_terms,
                 None,
                 None,
                 classic_mos_caps_out,
@@ -1616,6 +1696,7 @@ M1 d g 0 0 NM W=10u L=1u
                 None,
                 None,
                 None,
+                None,
             )
             .expect("cached assembly succeeds");
 
@@ -1635,6 +1716,7 @@ M1 d g 0 0 NM W=10u L=1u
                 true,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
                 None,
+                None,
                 Some(&mut newton_companion_terms),
                 None,
                 None,
@@ -1648,6 +1730,7 @@ M1 d g 0 0 NM W=10u L=1u
         let mut companion_terms = Vec::new();
         let mut companion_charges = Vec::new();
         let mut companion_caps = Vec::new();
+        let mut candidate_static_terms = Vec::new();
         let evaluation = engine
             .update_classic_mos_with_companion_terms(
                 &mut circuit,
@@ -1660,6 +1743,7 @@ M1 d g 0 0 NM W=10u L=1u
                 &mut companion_terms,
                 &mut companion_charges,
                 &mut companion_caps,
+                Some(&mut candidate_static_terms),
                 None,
                 Some(engine.device_convergence_criteria()),
             )
@@ -1673,6 +1757,7 @@ M1 d g 0 0 NM W=10u L=1u
         assert_eq!(companion_terms.len(), circuit.mosfets.devices.len());
         assert_eq!(companion_charges.len(), circuit.mosfets.devices.len());
         assert_eq!(companion_caps.len(), circuit.mosfets.devices.len());
+        assert_eq!(candidate_static_terms.len(), circuit.mosfets.devices.len());
 
         engine
             .stamp_classic_mos_transient_system_from_cache(
@@ -1686,6 +1771,7 @@ M1 d g 0 0 NM W=10u L=1u
                 false,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
                 Some(&companion_terms),
+                Some(&candidate_static_terms),
                 None,
                 None,
                 Some(&mut companion_caps),
@@ -1735,6 +1821,7 @@ M1 d g 0 0 NM W=10u L=1u
                 &mut companion_terms,
                 &mut companion_charges,
                 &mut companion_caps,
+                None,
                 Some(&truncation),
                 Some(engine.device_convergence_criteria()),
             )
