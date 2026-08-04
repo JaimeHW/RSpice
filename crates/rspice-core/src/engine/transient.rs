@@ -2473,6 +2473,9 @@ impl Engine {
         // required CKTterr walk and consumed only by the matching accept path.
         let mut capacitor_accepted_states_scratch: Vec<CapacitorAcceptedState> = Vec::new();
         let mut capacitor_accepted_states_valid;
+        #[cfg(feature = "parallel")]
+        let capacitor_truncation_parallel_workers =
+            self.capacitor_truncation_parallel_worker_count(&circuit);
         let mut classic_mos_residual_scratch = classic_mos_stamp_cache
             .as_ref()
             .is_some_and(residual::ClassicMosTransientStampCache::supports_direct_residual_proof)
@@ -4567,6 +4570,40 @@ impl Engine {
                 && !first_accepted_transient_step
                 && !circuit.capacitors.is_empty()
             {
+                #[cfg(feature = "parallel")]
+                let limit = if let Some(worker_count) = capacitor_truncation_parallel_workers {
+                    self.capacitor_ngspice_truncation_limit_parallel(
+                        &circuit,
+                        &new_solution,
+                        current_method,
+                        step_trap_order,
+                        dt,
+                        mosfet_history.accepted_dt_prev,
+                        mosfet_history.accepted_dt_prev_prev,
+                        transient_lte_reltol,
+                        self.current_abstol(),
+                        self.charge_abstol(),
+                        self.transient_trtol(),
+                        worker_count,
+                        &mut capacitor_accepted_states_scratch,
+                    )
+                } else {
+                    Self::capacitor_ngspice_truncation_limit(
+                        &circuit,
+                        &new_solution,
+                        current_method,
+                        step_trap_order,
+                        dt,
+                        mosfet_history.accepted_dt_prev,
+                        mosfet_history.accepted_dt_prev_prev,
+                        transient_lte_reltol,
+                        self.current_abstol(),
+                        self.charge_abstol(),
+                        self.transient_trtol(),
+                        Some(&mut capacitor_accepted_states_scratch),
+                    )
+                };
+                #[cfg(not(feature = "parallel"))]
                 let limit = Self::capacitor_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,

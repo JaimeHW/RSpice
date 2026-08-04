@@ -4,6 +4,11 @@
 
 use super::*;
 
+#[cfg(feature = "parallel")]
+const CAPACITOR_TRUNCATION_ITEMS_PER_WORKER: usize = 1_024;
+#[cfg(feature = "parallel")]
+const CAPACITOR_TRUNCATION_MAX_WORKERS: usize = 8;
+
 #[inline]
 pub(super) fn lte_debug_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -374,6 +379,195 @@ impl Engine {
         }
 
         found_branch.then_some(limit)
+    }
+
+    /// Choose a bounded parallel width only when the complete capacitor SoA
+    /// is a fixed, positive charge law. This is a topology/invariant proof,
+    /// not a numerical shortcut: mixed or malformed storage stays on the
+    /// canonical serial path.
+    #[cfg(feature = "parallel")]
+    pub(super) fn capacitor_truncation_parallel_worker_count(
+        &self,
+        circuit: &crate::circuit::CircuitData,
+    ) -> Option<usize> {
+        let count = circuit.capacitors.stamps.len();
+        if count <= CAPACITOR_TRUNCATION_ITEMS_PER_WORKER
+            || count != circuit.capacitors.capacitances.len()
+            || count != circuit.capacitors.value_expressions.len()
+            || count != circuit.capacitors.ic_branch_indices.len()
+            || circuit
+                .capacitors
+                .value_expressions
+                .iter()
+                .any(Option::is_some)
+            || circuit
+                .capacitors
+                .capacitances
+                .iter()
+                .any(|capacitance| !capacitance.is_finite() || *capacitance <= 0.0)
+        {
+            return None;
+        }
+
+        let useful_workers = count.div_ceil(CAPACITOR_TRUNCATION_ITEMS_PER_WORKER);
+        let worker_count = self
+            .parallel_worker_count(count)
+            .min(CAPACITOR_TRUNCATION_MAX_WORKERS)
+            .min(useful_workers.max(1));
+        (worker_count > 1).then_some(worker_count)
+    }
+
+    /// Deterministic parallel form of the ordinary-capacitor CKTterr walk.
+    /// Every branch executes the exact scalar arithmetic used by the serial
+    /// reference. The only reduction is `min` over finite positive limits, so
+    /// task completion order cannot change the selected timestep.
+    #[cfg(feature = "parallel")]
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn capacitor_ngspice_truncation_limit_parallel(
+        &self,
+        circuit: &crate::circuit::CircuitData,
+        candidate_solution: &[Value],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        prev_dt: Value,
+        prev_prev_dt: Value,
+        reltol: Value,
+        current_abstol: Value,
+        charge_abstol: Value,
+        trtol: Value,
+        worker_count: usize,
+        accepted_states_out: &mut Vec<CapacitorAcceptedState>,
+    ) -> Option<Value> {
+        use rayon::prelude::*;
+
+        accepted_states_out.clear();
+        if !prev_dt.is_finite() || prev_dt <= 0.0 {
+            return None;
+        }
+
+        let effective_method = Self::effective_companion_method(method, trap_order);
+        let coeff =
+            CompanionCoefficients::for_method_with_previous_step(effective_method, dt, prev_dt);
+        let truncation = NgspiceChargeTruncationContext::new(
+            dt,
+            prev_dt,
+            prev_prev_dt,
+            effective_method,
+            trap_order,
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        )?;
+        let count = circuit.capacitors.stamps.len();
+        debug_assert!(worker_count > 1);
+        debug_assert_eq!(count, circuit.capacitors.capacitances.len());
+        debug_assert_eq!(count, circuit.capacitors.value_expressions.len());
+        debug_assert_eq!(count, circuit.capacitors.ic_branch_indices.len());
+        debug_assert!(
+            circuit
+                .capacitors
+                .value_expressions
+                .iter()
+                .all(Option::is_none)
+        );
+        debug_assert!(
+            circuit
+                .capacitors
+                .capacitances
+                .iter()
+                .all(|capacitance| capacitance.is_finite() && *capacitance > 0.0)
+        );
+
+        accepted_states_out.resize(count, CapacitorAcceptedState::default());
+        let chunk_size = count.div_ceil(worker_count).max(1);
+        let num_nodes = circuit.num_nodes();
+        // Capture only the immutable capacitor SoA slices. `CircuitData` also
+        // owns unrelated interior-mutable devices, so borrowing the whole
+        // circuit would unnecessarily make this independent kernel non-Sync.
+        let stamps = circuit.capacitors.stamps.as_slice();
+        let capacitances = circuit.capacitors.capacitances.as_slice();
+        let v_prev = circuit.capacitors.v_prev.as_slice();
+        let v_prev_prev = circuit.capacitors.v_prev_prev.as_slice();
+        let v_prev_prev_prev = circuit.capacitors.v_prev_prev_prev.as_slice();
+        let i_prev = circuit.capacitors.i_prev.as_slice();
+        let ic_branch_indices = circuit.capacitors.ic_branch_indices.as_slice();
+        // Reuse the engine's existing bounded per-device pool. These kernels
+        // execute at disjoint phases, so sharing it preserves the global
+        // no-oversubscription contract without creating another worker set.
+        let parallel_limit = self.install_classic_mos_parallel(|| {
+            accepted_states_out
+                .par_chunks_mut(chunk_size)
+                .enumerate()
+                .map(|(chunk_index, states)| {
+                    let start = chunk_index * chunk_size;
+                    let mut chunk_limit = None;
+                    for (offset, state) in states.iter_mut().enumerate() {
+                        let idx = start + offset;
+                        let cap = stamps[idx];
+                        let capacitance = capacitances[idx];
+                        let voltage =
+                            Self::differential_voltage(candidate_solution, cap.pp.row, cap.nn.row);
+                        let q_curr = capacitance * voltage;
+                        let q_prev = capacitance * v_prev[idx];
+                        let q_prev_prev = capacitance * v_prev_prev[idx];
+                        let q_prev_prev_prev = capacitance * v_prev_prev_prev[idx];
+                        let geq = coeff.capacitor_geq(capacitance, dt);
+                        let ieq = coeff.capacitor_ieq(
+                            capacitance,
+                            dt,
+                            v_prev[idx],
+                            v_prev_prev[idx],
+                            i_prev[idx],
+                        );
+                        let cq_curr = geq * voltage - ieq;
+                        let cq_prev = i_prev[idx];
+                        let accepted_current = if let Some(branch_ordinal) = ic_branch_indices[idx]
+                        {
+                            candidate_solution[num_nodes + branch_ordinal - 1]
+                        } else {
+                            cq_curr
+                        };
+                        *state = CapacitorAcceptedState {
+                            voltage,
+                            current: accepted_current,
+                        };
+
+                        if let Some(branch_limit) = truncation.limit(
+                            q_curr,
+                            q_prev,
+                            q_prev_prev,
+                            q_prev_prev_prev,
+                            cq_curr,
+                            cq_prev,
+                        ) {
+                            chunk_limit =
+                                Self::min_truncation_limit(chunk_limit, Some(branch_limit));
+                        }
+                    }
+                    chunk_limit
+                })
+                .reduce(|| None, Self::min_truncation_limit)
+        });
+
+        match parallel_limit {
+            Ok(limit) => limit.map(|limit| (2.0 * dt).min(limit)),
+            Err(_) => Self::capacitor_ngspice_truncation_limit(
+                circuit,
+                candidate_solution,
+                method,
+                trap_order,
+                dt,
+                prev_dt,
+                prev_prev_dt,
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+                Some(accepted_states_out),
+            ),
+        }
     }
 
     #[inline]
@@ -2542,6 +2736,83 @@ C1 n 0 2p\n\
             Some(&mut states),
         );
         assert!(states.is_empty(), "an incomplete handoff must fail closed");
+    }
+
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn parallel_capacitor_truncation_is_bit_identical_and_state_ordered() {
+        let mut deck = String::from("Parallel capacitor truncation\nV1 n 0 0\n");
+        for index in 0..64 {
+            deck.push_str(&format!(
+                "C{} n 0 {:.17e}\n",
+                index + 1,
+                (index + 1) as Value * 1.0e-12
+            ));
+        }
+        deck.push_str(".TRAN 1n 10n\n.END\n");
+        let mut circuit = build_truncation_circuit(&deck);
+        for index in 0..circuit.capacitors.len() {
+            let scale = (index + 1) as Value;
+            circuit.capacitors.v_prev[index] = 0.25 + scale * 1.0e-4;
+            circuit.capacitors.v_prev_prev[index] = -0.1 + scale * 2.0e-4;
+            circuit.capacitors.v_prev_prev_prev[index] = -0.2 - scale * 1.0e-4;
+            circuit.capacitors.i_prev[index] = scale * 3.0e-9;
+        }
+        let mut candidate = vec![0.0; circuit.matrix_size()];
+        let node = circuit.get_node_by_name("n").expect("node exists");
+        candidate[node - 1] = 0.8;
+        let dt = 0.7e-9;
+        let prev_dt = 0.9e-9;
+        let prev_prev_dt = 1.1e-9;
+        let method = IntegrationMethod::Trapezoidal;
+        let trap_order = 2;
+        let mut serial_states = Vec::new();
+        let serial_limit = Engine::capacitor_ngspice_truncation_limit(
+            &circuit,
+            &candidate,
+            method,
+            trap_order,
+            dt,
+            prev_dt,
+            prev_prev_dt,
+            1.0e-3,
+            1.0e-12,
+            1.0e-14,
+            7.0,
+            Some(&mut serial_states),
+        );
+        let engine = Engine::default();
+        let mut parallel_states = Vec::new();
+        let parallel_limit = engine.capacitor_ngspice_truncation_limit_parallel(
+            &circuit,
+            &candidate,
+            method,
+            trap_order,
+            dt,
+            prev_dt,
+            prev_prev_dt,
+            1.0e-3,
+            1.0e-12,
+            1.0e-14,
+            7.0,
+            4,
+            &mut parallel_states,
+        );
+
+        assert_eq!(
+            parallel_limit.map(Value::to_bits),
+            serial_limit.map(Value::to_bits)
+        );
+        assert_eq!(parallel_states.len(), serial_states.len());
+        assert!(
+            parallel_states
+                .iter()
+                .zip(&serial_states)
+                .all(|(parallel, serial)| {
+                    parallel.voltage.to_bits() == serial.voltage.to_bits()
+                        && parallel.current.to_bits() == serial.current.to_bits()
+                })
+        );
     }
 
     fn build_truncation_circuit(deck: &str) -> crate::circuit::CircuitData {
