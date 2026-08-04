@@ -1219,10 +1219,10 @@ impl StaticMatrix {
     /// `abstol + reltol * max(|A*x|, |b|)`.
     /// Returns `inf` when input vectors contain non-finite values.
     ///
-    /// Takes `&mut self` to reuse the internal A*x scratch buffer; this is
-    /// evaluated once or twice per Newton iteration (merit + convergence).
+    /// The immutable row layout keeps each equation local and allocation-free;
+    /// this is evaluated once or twice per Newton iteration.
     pub fn scaled_residual_inf_norm(
-        &mut self,
+        &self,
         solution: &[Value],
         rhs: &[Value],
         abstol: Value,
@@ -1234,7 +1234,7 @@ impl StaticMatrix {
     /// Compute infinity norm of the scaled residual `A*x-b` with row-specific
     /// absolute tolerances.
     pub fn scaled_residual_inf_norm_by_row<F>(
-        &mut self,
+        &self,
         solution: &[Value],
         rhs: &[Value],
         reltol: Value,
@@ -1265,30 +1265,22 @@ impl StaticMatrix {
             1e-3
         };
 
-        let col_ptr = self.csc.col_ptr();
-        let row_idx = self.csc.row_idx();
-        self.residual_scratch.resize(self.nrows, 0.0);
-        self.residual_scratch.fill(0.0);
-        self.residual_gross_scratch.resize(self.nrows, 0.0);
-        self.residual_gross_scratch.fill(0.0);
-        let (ax, ax_gross) = (&mut self.residual_scratch, &mut self.residual_gross_scratch);
-        for col in 0..self.ncols {
-            let x = solution[col];
-            if !x.is_finite() {
-                return Ok(Value::INFINITY);
-            }
-            for idx in col_ptr[col]..col_ptr[col + 1] {
-                let row = row_idx[idx];
-                let term = self.values[idx] * x;
-                ax[row] += term;
-                ax_gross[row] += term.abs();
-            }
+        if solution.iter().any(|value| !value.is_finite()) {
+            return Ok(Value::INFINITY);
         }
 
         let mut residual_inf: Value = 0.0;
         for row in 0..self.nrows {
+            let mut row_ax = 0.0;
+            let mut row_ax_gross = 0.0;
+            for position in self.residual_layout.row_ptr[row]..self.residual_layout.row_ptr[row + 1]
+            {
+                let term = self.values[self.residual_layout.csc_idx[position]]
+                    * solution[self.residual_layout.col_idx[position]];
+                row_ax += term;
+                row_ax_gross += term.abs();
+            }
             let row_rhs = rhs[row];
-            let row_ax = ax[row];
             if !row_rhs.is_finite() || !row_ax.is_finite() {
                 return Ok(Value::INFINITY);
             }
@@ -1313,7 +1305,7 @@ impl StaticMatrix {
             // wrong-basin operating point), so the relative part stays on
             // the net.
             const CANCELLATION_NOISE_TERMS: Value = 256.0;
-            let noise_floor = CANCELLATION_NOISE_TERMS * Value::EPSILON * ax_gross[row];
+            let noise_floor = CANCELLATION_NOISE_TERMS * Value::EPSILON * row_ax_gross;
             let scale = safe_abstol + noise_floor + safe_reltol * row_ax.abs().max(row_rhs.abs());
             let normalized = residual / scale.max(safe_abstol);
             residual_inf = residual_inf.max(normalized);
@@ -1324,7 +1316,7 @@ impl StaticMatrix {
 
     /// Compute the unscaled infinity norm of `A*x-b` without allocating.
     pub fn raw_residual_inf_norm(
-        &mut self,
+        &self,
         solution: &[Value],
         rhs: &[Value],
     ) -> Result<Value, SolverError> {
@@ -1340,7 +1332,7 @@ impl StaticMatrix {
     /// otherwise finite norm. Xyce's transient NOX status tests use both norms
     /// at every nonlinear iterate.
     pub fn raw_residual_norms(
-        &mut self,
+        &self,
         solution: &[Value],
         rhs: &[Value],
     ) -> Result<(Value, Value), SolverError> {
@@ -1355,27 +1347,22 @@ impl StaticMatrix {
             )));
         }
 
-        self.residual_scratch.resize(self.nrows, 0.0);
-        self.residual_scratch.fill(0.0);
-        let col_ptr = self.csc.col_ptr();
-        let row_idx = self.csc.row_idx();
-        for col in 0..self.ncols {
-            let x = solution[col];
-            if !x.is_finite() {
-                return Ok((Value::INFINITY, Value::INFINITY));
-            }
-            if x == 0.0 {
-                continue;
-            }
-            for idx in col_ptr[col]..col_ptr[col + 1] {
-                self.residual_scratch[row_idx[idx]] += self.values[idx] * x;
-            }
+        if solution.iter().any(|value| !value.is_finite()) {
+            return Ok((Value::INFINITY, Value::INFINITY));
         }
 
         let mut inf_norm = 0.0_f64;
         let mut l2_scale = 0.0_f64;
         let mut l2_sum_squares = 1.0_f64;
-        for (row_ax, row_rhs) in self.residual_scratch.iter().zip(rhs) {
+        for (row, &row_rhs) in rhs.iter().enumerate() {
+            let mut row_ax = 0.0;
+            for position in self.residual_layout.row_ptr[row]..self.residual_layout.row_ptr[row + 1]
+            {
+                let x = solution[self.residual_layout.col_idx[position]];
+                if x != 0.0 {
+                    row_ax += self.values[self.residual_layout.csc_idx[position]] * x;
+                }
+            }
             let residual = row_ax - row_rhs;
             if !residual.is_finite() {
                 return Ok((Value::INFINITY, Value::INFINITY));
@@ -1414,22 +1401,16 @@ impl StaticMatrix {
             ));
         }
 
-        let col_ptr = self.csc.col_ptr();
-        let row_idx = self.csc.row_idx();
         let mut ax = vec![0.0; self.nrows];
-        for col in 0..self.ncols {
-            let x = solution[col];
-            if x == 0.0 {
-                continue;
+        for (row, row_ax) in ax.iter_mut().enumerate() {
+            for position in self.residual_layout.row_ptr[row]..self.residual_layout.row_ptr[row + 1]
+            {
+                let x = solution[self.residual_layout.col_idx[position]];
+                if x != 0.0 {
+                    *row_ax += self.values[self.residual_layout.csc_idx[position]] * x;
+                }
             }
-            for idx in col_ptr[col]..col_ptr[col + 1] {
-                let row = row_idx[idx];
-                ax[row] += self.values[idx] * x;
-            }
-        }
-
-        for row in 0..self.nrows {
-            ax[row] -= rhs[row];
+            *row_ax -= rhs[row];
         }
 
         Ok(ax)
@@ -4058,8 +4039,8 @@ mod tests {
     }
 
     #[test]
-    fn raw_residual_inf_norm_is_exact_and_reuses_workspace() {
-        let mut matrix = StaticMatrix::from_triplets(
+    fn raw_residual_norms_are_exact_and_allocation_free() {
+        let matrix = StaticMatrix::from_triplets(
             2,
             2,
             &[(0, 0, 2.0), (0, 1, -1.0), (1, 0, 1.0), (1, 1, 3.0)],
@@ -4092,8 +4073,54 @@ mod tests {
     }
 
     #[test]
+    fn row_layout_scaled_residual_matches_csc_scatter_bit_exactly() {
+        let matrix = StaticMatrix::from_triplets(
+            3,
+            3,
+            &[
+                (0, 0, 1.0e8),
+                (0, 1, -1.0e8),
+                (0, 2, 3.0),
+                (1, 0, -2.0),
+                (1, 1, 5.0),
+                (2, 1, -7.0),
+                (2, 2, 11.0),
+            ],
+        )
+        .unwrap();
+        let solution = [1.0 + Value::EPSILON, 1.0, 2.0];
+        let rhs = [6.0, 3.0, 15.0];
+        let abstols = [1.0e-12, 1.0e-9, 1.0e-15];
+        let reltol = 1.0e-6;
+
+        let mut ax = vec![0.0; matrix.nrows];
+        let mut gross = vec![0.0; matrix.nrows];
+        for col in 0..matrix.ncols {
+            let x = solution[col];
+            for index in matrix.csc.col_ptr()[col]..matrix.csc.col_ptr()[col + 1] {
+                let row = matrix.csc.row_idx()[index];
+                let term = matrix.values[index] * x;
+                ax[row] += term;
+                gross[row] += term.abs();
+            }
+        }
+        let mut expected = 0.0_f64;
+        for row in 0..matrix.nrows {
+            let residual = (ax[row] - rhs[row]).abs();
+            let noise_floor = 256.0 * Value::EPSILON * gross[row];
+            let scale = abstols[row] + noise_floor + reltol * ax[row].abs().max(rhs[row].abs());
+            expected = expected.max(residual / scale.max(abstols[row]));
+        }
+
+        let actual = matrix
+            .scaled_residual_inf_norm_by_row(&solution, &rhs, reltol, |row| abstols[row])
+            .unwrap();
+        assert_eq!(actual.to_bits(), expected.to_bits());
+    }
+
+    #[test]
     fn raw_residual_l2_norm_is_stable_across_extreme_magnitudes() {
-        let mut matrix = StaticMatrix::from_triplets(2, 2, &[(0, 0, 1.0), (1, 1, 1.0)]).unwrap();
+        let matrix = StaticMatrix::from_triplets(2, 2, &[(0, 0, 1.0), (1, 1, 1.0)]).unwrap();
 
         let (inf_norm, l2_norm) = matrix
             .raw_residual_norms(&[1.0e300, 1.0e-300], &[0.0, 0.0])
