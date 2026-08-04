@@ -27,6 +27,10 @@ pub struct Engine {
     config_is_resolved: bool,
     #[cfg(feature = "parallel")]
     parallel_pool: std::sync::OnceLock<Result<rayon::ThreadPool, String>>,
+    /// Reusable narrow pool for the short, memory-bound classic-MOS kernel.
+    /// Frequency/corner parallelism keeps the general host-wide pool above.
+    #[cfg(feature = "parallel")]
+    classic_mos_parallel_pool: std::sync::OnceLock<Result<rayon::ThreadPool, String>>,
     /// Convergence-quality metrics for the most recent analysis.
     ///
     /// Behind a lock rather than threaded through the solve chain because the
@@ -68,6 +72,8 @@ impl Engine {
             config_is_resolved: false,
             #[cfg(feature = "parallel")]
             parallel_pool: std::sync::OnceLock::new(),
+            #[cfg(feature = "parallel")]
+            classic_mos_parallel_pool: std::sync::OnceLock::new(),
             convergence: std::sync::Arc::new(std::sync::Mutex::new(ConvergenceQuality::new())),
         }
     }
@@ -86,6 +92,8 @@ impl Engine {
             config_is_resolved: false,
             #[cfg(feature = "parallel")]
             parallel_pool: std::sync::OnceLock::new(),
+            #[cfg(feature = "parallel")]
+            classic_mos_parallel_pool: std::sync::OnceLock::new(),
             convergence: std::sync::Arc::new(std::sync::Mutex::new(ConvergenceQuality::new())),
         })
     }
@@ -104,6 +112,8 @@ impl Engine {
             config_is_resolved: true,
             #[cfg(feature = "parallel")]
             parallel_pool: std::sync::OnceLock::new(),
+            #[cfg(feature = "parallel")]
+            classic_mos_parallel_pool: std::sync::OnceLock::new(),
             convergence: std::sync::Arc::new(std::sync::Mutex::new(ConvergenceQuality::new())),
         }
     }
@@ -119,6 +129,8 @@ impl Engine {
             config_is_resolved: true,
             #[cfg(feature = "parallel")]
             parallel_pool: std::sync::OnceLock::new(),
+            #[cfg(feature = "parallel")]
+            classic_mos_parallel_pool: std::sync::OnceLock::new(),
             convergence: std::sync::Arc::new(std::sync::Mutex::new(ConvergenceQuality::new())),
         })
     }
@@ -255,6 +267,39 @@ impl Engine {
                 .thread_name(|index| format!("rspice-core-{index}"))
                 .build()
                 .map_err(|error| format!("failed to create bounded analysis worker pool: {error}"))
+        });
+        let pool = pool.as_ref().map_err(|message| {
+            SimulationError::Solver(crate::solver::SolverError::InvalidCircuit(message.clone()))
+        })?;
+        Ok(pool.install(operation))
+    }
+
+    /// Execute the memory-bound classic-MOS update on its measured efficient
+    /// width without constraining host-wide frequency or corner parallelism.
+    ///
+    /// When an outer frontend pool already owns this engine, reuse it to
+    /// preserve the no-oversubscription contract for parallel run plans.
+    #[cfg(feature = "parallel")]
+    pub(crate) fn install_classic_mos_parallel<R: Send>(
+        &self,
+        operation: impl FnOnce() -> R + Send,
+    ) -> Result<R, SimulationError> {
+        if rayon::current_thread_index().is_some() {
+            return Ok(operation());
+        }
+
+        const MAX_CLASSIC_MOS_WORKERS: usize = 8;
+        let pool = self.classic_mos_parallel_pool.get_or_init(|| {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(
+                    self.parallel_worker_count(usize::MAX)
+                        .min(MAX_CLASSIC_MOS_WORKERS),
+                )
+                .thread_name(|index| format!("rspice-classic-mos-{index}"))
+                .build()
+                .map_err(|error| {
+                    format!("failed to create classic-MOS analysis worker pool: {error}")
+                })
         });
         let pool = pool.as_ref().map_err(|message| {
             SimulationError::Solver(crate::solver::SolverError::InvalidCircuit(message.clone()))

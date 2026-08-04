@@ -696,12 +696,19 @@ impl Mosfets {
     /// Rayon pool. The caller owns the threshold and worker policy so small
     /// circuits never pay parallel dispatch overhead.
     #[cfg(feature = "parallel")]
-    pub(crate) fn update_all_parallel(&mut self, voltages: &[Value]) {
+    pub(crate) fn update_all_parallel(&mut self, voltages: &[Value], worker_count: usize) {
         use crate::device::NonlinearDevice;
         use rayon::prelude::*;
+
+        // One Rayon item per very small classic-MOS evaluation lets every
+        // thread in a large host pool contend for this memory-bound array.
+        // Submit only the independently useful number of coarse tasks. This
+        // caps active workers without constructing another nested pool and
+        // retains contiguous device traversal inside each task.
+        let chunk_size = self.devices.len().div_ceil(worker_count.max(1)).max(1);
         self.devices
-            .par_iter_mut()
-            .for_each(|device| device.update(voltages));
+            .par_chunks_mut(chunk_size)
+            .for_each(|chunk| chunk.iter_mut().for_each(|device| device.update(voltages)));
     }
 
     /// Stamp all MOSFETs into matrix for Newton iteration

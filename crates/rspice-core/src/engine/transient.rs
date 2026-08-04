@@ -14,13 +14,13 @@ use crate::device::semiconductor::{
     BjtChargeSnapshot,
 };
 use crate::engine::waveform::{CompressionConfig, TransientResultCompressed};
-use crate::netlist::{AnalysisCommand, SaveSignal};
+use crate::netlist::{AnalysisCommand, OutputAnalysisKind, OutputSymbolKind, SaveSignal};
 use crate::numerics::integration::{
     BreakpointManager, BreakpointStepPolicy, LteEstimator, TimestepController, TrapGearController,
 };
 use crate::numerics::integration::{CompanionCoefficients, IntegrationMethod};
 use crate::{Netlist, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 type TransientMeritRollback = (
     crate::circuit::NonlinearDeviceStateSnapshot,
@@ -350,70 +350,107 @@ impl Engine {
     }
 
     fn derived_transient_branch_currents(
+        netlist: &Netlist,
         circuit: &crate::circuit::CircuitData,
         existing_branch_names: &[String],
     ) -> Vec<DerivedTransientBranchCurrent> {
-        let mut derived = Vec::new();
-        for (index, name) in circuit.resistors.names.iter().enumerate() {
-            if existing_branch_names
-                .iter()
-                .any(|existing| existing.eq_ignore_ascii_case(name))
-            {
-                continue;
-            }
-            derived.push(DerivedTransientBranchCurrent {
-                kind: DerivedTransientBranchCurrentKind::LinearResistor,
-                index,
+        // An empty save set means the public engine API retains every vector.
+        // Measurements are evaluated after integration and may reference a
+        // current absent from .PRINT/.SAVE, so remain conservative for them.
+        let retain_all = netlist.saves.keeps_everything() || !netlist.measurements.is_empty();
+        let requests_derived_current = netlist
+            .saves
+            .signals
+            .iter()
+            .any(|signal| matches!(signal, SaveSignal::Current(_)))
+            || netlist.output_requests.iter().any(|request| {
+                request
+                    .analysis
+                    .is_none_or(|analysis| analysis == OutputAnalysisKind::Tran)
+                    && request.dependencies.iter().any(|dependency| {
+                        dependency.kind == OutputSymbolKind::Device
+                            && matches!(dependency.operator.as_str(), "I" | "P" | "W")
+                    })
             });
+        if !retain_all && !requests_derived_current {
+            return Vec::new();
+        }
+
+        // Real MNA branches take precedence over synthesized lead currents,
+        // and the first derived device with a duplicate name wins.  The old
+        // implementation preserved that rule by linearly scanning both the
+        // MNA names and every branch already appended for every candidate.
+        // Large passive decks therefore spent O(devices^2) time here before
+        // the first transient step, only to discard unrequested currents in a
+        // second pass.  Track canonical names once and apply output selection
+        // before materializing a branch instead.
+        let mut seen_names = HashSet::with_capacity(
+            existing_branch_names
+                .len()
+                .saturating_add(circuit.resistors.names.len())
+                .saturating_add(circuit.capacitors.names.len())
+                .saturating_add(circuit.current_sources.names.len()),
+        );
+        seen_names.extend(
+            existing_branch_names
+                .iter()
+                .map(|name| name.to_ascii_lowercase()),
+        );
+
+        let mut derived = Vec::new();
+        let mut consider = |name: &str, branch: DerivedTransientBranchCurrent| {
+            if !seen_names.insert(name.to_ascii_lowercase()) {
+                return;
+            }
+            if retain_all
+                || netlist.saves.selects(&format!("I({name})"))
+                || netlist
+                    .output_requests
+                    .iter()
+                    .any(|request| request.selects_transient_device_current(name))
+            {
+                derived.push(branch);
+            }
+        };
+
+        for (index, name) in circuit.resistors.names.iter().enumerate() {
+            consider(
+                name,
+                DerivedTransientBranchCurrent {
+                    kind: DerivedTransientBranchCurrentKind::LinearResistor,
+                    index,
+                },
+            );
         }
         for (index, name) in circuit.capacitors.names.iter().enumerate() {
             if circuit.capacitors.is_internal(index) {
                 continue;
             }
-            if existing_branch_names
-                .iter()
-                .any(|existing| existing.eq_ignore_ascii_case(name))
-                || derived.iter().any(|&branch| {
-                    Self::derived_transient_branch_name(circuit, branch).eq_ignore_ascii_case(name)
-                })
-            {
-                continue;
-            }
-            derived.push(DerivedTransientBranchCurrent {
-                kind: DerivedTransientBranchCurrentKind::LinearCapacitor,
-                index,
-            });
+            consider(
+                name,
+                DerivedTransientBranchCurrent {
+                    kind: DerivedTransientBranchCurrentKind::LinearCapacitor,
+                    index,
+                },
+            );
         }
         for (index, name) in circuit.current_sources.names.iter().enumerate() {
-            if existing_branch_names
-                .iter()
-                .any(|existing| existing.eq_ignore_ascii_case(name))
-                || derived.iter().any(|&branch| {
-                    Self::derived_transient_branch_name(circuit, branch).eq_ignore_ascii_case(name)
-                })
-            {
-                continue;
-            }
-            derived.push(DerivedTransientBranchCurrent {
-                kind: DerivedTransientBranchCurrentKind::IndependentCurrentSource,
-                index,
-            });
+            consider(
+                name,
+                DerivedTransientBranchCurrent {
+                    kind: DerivedTransientBranchCurrentKind::IndependentCurrentSource,
+                    index,
+                },
+            );
         }
         for (index, binding) in circuit.xyce_memristors.iter().enumerate() {
-            if existing_branch_names
-                .iter()
-                .any(|existing| existing.eq_ignore_ascii_case(&binding.name))
-                || derived.iter().any(|&branch| {
-                    Self::derived_transient_branch_name(circuit, branch)
-                        .eq_ignore_ascii_case(&binding.name)
-                })
-            {
-                continue;
-            }
-            derived.push(DerivedTransientBranchCurrent {
-                kind: DerivedTransientBranchCurrentKind::XyceMemristor,
-                index,
-            });
+            consider(
+                &binding.name,
+                DerivedTransientBranchCurrent {
+                    kind: DerivedTransientBranchCurrentKind::XyceMemristor,
+                    index,
+                },
+            );
         }
         for (index, source) in circuit
             .behavioral_sources
@@ -421,127 +458,82 @@ impl Engine {
             .iter()
             .enumerate()
         {
-            if existing_branch_names
-                .iter()
-                .any(|existing| existing.eq_ignore_ascii_case(&source.name))
-                || derived.iter().any(|&branch| {
-                    Self::derived_transient_branch_name(circuit, branch)
-                        .eq_ignore_ascii_case(&source.name)
-                })
-            {
-                continue;
-            }
-            derived.push(DerivedTransientBranchCurrent {
-                kind: DerivedTransientBranchCurrentKind::BehavioralCurrentSource,
-                index,
-            });
+            consider(
+                &source.name,
+                DerivedTransientBranchCurrent {
+                    kind: DerivedTransientBranchCurrentKind::BehavioralCurrentSource,
+                    index,
+                },
+            );
         }
         for (index, switch) in circuit.vswitches.iter().enumerate() {
-            if existing_branch_names
-                .iter()
-                .any(|existing| existing.eq_ignore_ascii_case(&switch.name))
-                || derived.iter().any(|&branch| {
-                    Self::derived_transient_branch_name(circuit, branch)
-                        .eq_ignore_ascii_case(&switch.name)
-                })
-            {
-                continue;
-            }
-            derived.push(DerivedTransientBranchCurrent {
-                kind: DerivedTransientBranchCurrentKind::VoltageSwitch,
-                index,
-            });
+            consider(
+                &switch.name,
+                DerivedTransientBranchCurrent {
+                    kind: DerivedTransientBranchCurrentKind::VoltageSwitch,
+                    index,
+                },
+            );
         }
         for (index, switch) in circuit.iswitches.iter().enumerate() {
-            if existing_branch_names
-                .iter()
-                .any(|existing| existing.eq_ignore_ascii_case(&switch.name))
-                || derived.iter().any(|&branch| {
-                    Self::derived_transient_branch_name(circuit, branch)
-                        .eq_ignore_ascii_case(&switch.name)
-                })
-            {
-                continue;
-            }
-            derived.push(DerivedTransientBranchCurrent {
-                kind: DerivedTransientBranchCurrentKind::CurrentSwitch,
-                index,
-            });
+            consider(
+                &switch.name,
+                DerivedTransientBranchCurrent {
+                    kind: DerivedTransientBranchCurrentKind::CurrentSwitch,
+                    index,
+                },
+            );
         }
         for (index, switch) in circuit.generic_switches.iter().enumerate() {
-            if existing_branch_names
-                .iter()
-                .any(|existing| existing.eq_ignore_ascii_case(&switch.name))
-                || derived.iter().any(|&branch| {
-                    Self::derived_transient_branch_name(circuit, branch)
-                        .eq_ignore_ascii_case(&switch.name)
-                })
-            {
-                continue;
-            }
-            derived.push(DerivedTransientBranchCurrent {
-                kind: DerivedTransientBranchCurrentKind::GenericSwitch,
-                index,
-            });
+            consider(
+                &switch.name,
+                DerivedTransientBranchCurrent {
+                    kind: DerivedTransientBranchCurrentKind::GenericSwitch,
+                    index,
+                },
+            );
         }
         derived
+    }
+
+    #[inline]
+    fn derived_transient_branch_name_ref(
+        circuit: &crate::circuit::CircuitData,
+        branch: DerivedTransientBranchCurrent,
+    ) -> &str {
+        match branch.kind {
+            DerivedTransientBranchCurrentKind::LinearResistor => {
+                &circuit.resistors.names[branch.index]
+            }
+            DerivedTransientBranchCurrentKind::LinearCapacitor => {
+                &circuit.capacitors.names[branch.index]
+            }
+            DerivedTransientBranchCurrentKind::IndependentCurrentSource => {
+                &circuit.current_sources.names[branch.index]
+            }
+            DerivedTransientBranchCurrentKind::XyceMemristor => {
+                &circuit.xyce_memristors[branch.index].name
+            }
+            DerivedTransientBranchCurrentKind::BehavioralCurrentSource => {
+                &circuit.behavioral_sources.current_sources[branch.index].name
+            }
+            DerivedTransientBranchCurrentKind::VoltageSwitch => {
+                &circuit.vswitches[branch.index].name
+            }
+            DerivedTransientBranchCurrentKind::CurrentSwitch => {
+                &circuit.iswitches[branch.index].name
+            }
+            DerivedTransientBranchCurrentKind::GenericSwitch => {
+                &circuit.generic_switches[branch.index].name
+            }
+        }
     }
 
     fn derived_transient_branch_name(
         circuit: &crate::circuit::CircuitData,
         branch: DerivedTransientBranchCurrent,
     ) -> String {
-        match branch.kind {
-            DerivedTransientBranchCurrentKind::LinearResistor => {
-                circuit.resistors.names[branch.index].clone()
-            }
-            DerivedTransientBranchCurrentKind::LinearCapacitor => {
-                circuit.capacitors.names[branch.index].clone()
-            }
-            DerivedTransientBranchCurrentKind::IndependentCurrentSource => {
-                circuit.current_sources.names[branch.index].clone()
-            }
-            DerivedTransientBranchCurrentKind::XyceMemristor => {
-                circuit.xyce_memristors[branch.index].name.clone()
-            }
-            DerivedTransientBranchCurrentKind::BehavioralCurrentSource => {
-                circuit.behavioral_sources.current_sources[branch.index]
-                    .name
-                    .clone()
-            }
-            DerivedTransientBranchCurrentKind::VoltageSwitch => {
-                circuit.vswitches[branch.index].name.clone()
-            }
-            DerivedTransientBranchCurrentKind::CurrentSwitch => {
-                circuit.iswitches[branch.index].name.clone()
-            }
-            DerivedTransientBranchCurrentKind::GenericSwitch => {
-                circuit.generic_switches[branch.index].name.clone()
-            }
-        }
-    }
-
-    fn retain_requested_derived_transient_branches(
-        netlist: &Netlist,
-        circuit: &crate::circuit::CircuitData,
-        branches: &mut Vec<DerivedTransientBranchCurrent>,
-    ) {
-        // An empty save set means the public engine API retains every vector.
-        // Measurements are evaluated after integration and may reference a
-        // current that was not also named on a .PRINT/.SAVE card, so retain
-        // the complete derived-current set for those decks as well.
-        if netlist.saves.keeps_everything() || !netlist.measurements.is_empty() {
-            return;
-        }
-
-        branches.retain(|&branch| {
-            let name = Self::derived_transient_branch_name(circuit, branch);
-            netlist.saves.selects(&format!("I({name})"))
-                || netlist
-                    .output_requests
-                    .iter()
-                    .any(|request| request.selects_transient_device_current(&name))
-        });
+        Self::derived_transient_branch_name_ref(circuit, branch).to_owned()
     }
 
     fn solution_node_voltage(solution: &[Value], node: usize) -> Value {
@@ -1976,13 +1968,8 @@ impl Engine {
         }
 
         let mut branch_names = circuit.branch_names_sorted();
-        let mut derived_branch_currents =
-            Self::derived_transient_branch_currents(&circuit, &branch_names);
-        Self::retain_requested_derived_transient_branches(
-            netlist,
-            &circuit,
-            &mut derived_branch_currents,
-        );
+        let derived_branch_currents =
+            Self::derived_transient_branch_currents(netlist, &circuit, &branch_names);
         branch_names.extend(
             derived_branch_currents
                 .iter()

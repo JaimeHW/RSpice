@@ -67,11 +67,19 @@ impl Engine {
         #[cfg(feature = "parallel")]
         {
             const PARALLEL_CLASSIC_MOS_THRESHOLD: usize = 2_048;
-            if circuit.mosfets.len() >= PARALLEL_CLASSIC_MOS_THRESHOLD
-                && self.parallel_worker_count(circuit.mosfets.len()) > 1
-            {
-                return self.install_parallel(|| {
-                    circuit.update_nonlinear_parallel_classic_mos(solution);
+            // Level-1/2/3 MOS evaluation is a short, memory-bound kernel.
+            // Host-wide task fanout regressed MOS4096 on a 28-thread machine;
+            // one coarse task per 512 contiguous instances reached the best
+            // measured width while still scaling larger arrays upward.
+            const CLASSIC_MOS_INSTANCES_PER_WORKER: usize = 512;
+            let instance_count = circuit.mosfets.len();
+            let useful_workers = instance_count.div_ceil(CLASSIC_MOS_INSTANCES_PER_WORKER);
+            let worker_count = self
+                .parallel_worker_count(instance_count)
+                .min(useful_workers.max(1));
+            if instance_count >= PARALLEL_CLASSIC_MOS_THRESHOLD && worker_count > 1 {
+                return self.install_classic_mos_parallel(|| {
+                    circuit.update_nonlinear_parallel_classic_mos(solution, worker_count);
                 });
             }
         }

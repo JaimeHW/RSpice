@@ -835,27 +835,35 @@ impl CircuitData {
 
     /// Update all nonlinear devices with current solution
     pub fn update_nonlinear(&mut self, voltages: &[Value]) {
-        self.update_nonlinear_impl(voltages, false);
+        self.update_nonlinear_impl(voltages, None);
     }
 
     #[cfg(feature = "parallel")]
-    pub(crate) fn update_nonlinear_parallel_classic_mos(&mut self, voltages: &[Value]) {
-        self.update_nonlinear_impl(voltages, true);
+    pub(crate) fn update_nonlinear_parallel_classic_mos(
+        &mut self,
+        voltages: &[Value],
+        worker_count: usize,
+    ) {
+        self.update_nonlinear_impl(voltages, Some(worker_count));
     }
 
-    fn update_nonlinear_impl(&mut self, voltages: &[Value], parallel_classic_mos: bool) {
+    fn update_nonlinear_impl(
+        &mut self,
+        voltages: &[Value],
+        parallel_classic_mos_workers: Option<usize>,
+    ) {
         use crate::device::NonlinearDevice;
         self.diodes.update_all(voltages);
         self.bjts.update_all(voltages);
         #[cfg(feature = "parallel")]
-        if parallel_classic_mos {
-            self.mosfets.update_all_parallel(voltages);
+        if let Some(worker_count) = parallel_classic_mos_workers {
+            self.mosfets.update_all_parallel(voltages, worker_count);
         } else {
             self.mosfets.update_all(voltages);
         }
         #[cfg(not(feature = "parallel"))]
         {
-            let _ = parallel_classic_mos;
+            let _ = parallel_classic_mos_workers;
             self.mosfets.update_all(voltages);
         }
         self.b3soi.update_all(voltages);
