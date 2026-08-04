@@ -67,13 +67,14 @@ mod rescue;
 mod residual;
 mod startup;
 mod state;
-pub(self) use state::MosfetCompanionBranchTerms;
+pub(self) use state::{MosfetCompanionBranchTerms, MosfetGateCompanionCharges};
 mod state_advanced_mos;
 mod state_commit;
 mod state_recovery;
 mod state_transmission_lines;
 mod step_control;
 mod truncation;
+pub(self) use truncation::NgspiceChargeTruncationContext;
 mod vbic;
 
 pub use checkpoint::{TransientCheckpoint, netlist_fingerprint};
@@ -2462,6 +2463,9 @@ impl Engine {
         let mut mosfet_caps_valid;
         let mut mosfet_companion_terms_scratch: Vec<MosfetCompanionBranchTerms> = Vec::new();
         let mut mosfet_companion_terms_valid;
+        let mut mosfet_companion_charges_scratch: Vec<MosfetGateCompanionCharges> = Vec::new();
+        let mut cached_mosfet_truncation_limit;
+        let mut cached_mosfet_truncation_limit_valid;
         let mut failed_voltage_conv: usize = 0;
         let mut failed_device_conv: usize = 0;
         let mut failed_residual_only: usize = 0;
@@ -2550,6 +2554,8 @@ impl Engine {
             let attempt_top_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             mosfet_caps_valid = false;
             mosfet_companion_terms_valid = false;
+            cached_mosfet_truncation_limit = None;
+            cached_mosfet_truncation_limit_valid = false;
             if self.config.spice_dialect == SpiceDialect::Xyce {
                 // Xyce 7.10 updates its machine-precision recovery floor from
                 // the current accepted time before every transient advance.
@@ -2855,6 +2861,27 @@ impl Engine {
                 coeff
             };
             let suppress_gate_charge = false;
+            let classic_mos_truncation_context = if classic_mos_stamp_cache.is_some()
+                && Self::uses_ngspice_charge_truncation(&lte_estimator)
+                && !Self::should_skip_post_accept_timestep_control_on_first_step(result.time.len())
+                && lte_warmup_skips == 0
+                && !suppress_gate_charge
+                && !truncation::lte_debug_enabled()
+            {
+                NgspiceChargeTruncationContext::new(
+                    dt,
+                    mosfet_history.accepted_dt_prev,
+                    mosfet_history.accepted_dt_prev_prev,
+                    effective_companion_method,
+                    step_trap_order,
+                    transient_lte_reltol,
+                    self.current_abstol(),
+                    self.charge_abstol(),
+                    self.transient_trtol(),
+                )
+            } else {
+                None
+            };
             if let Some(cache) = classic_mos_stamp_cache.as_mut() {
                 self.prepare_classic_mos_transient_attempt(
                     cache,
@@ -3543,28 +3570,36 @@ impl Engine {
                                 } else {
                                     coeff
                                 };
-                                self.update_classic_mos_with_companion_terms(
-                                    &mut circuit,
-                                    &new_solution,
-                                    &postsolve_companion_coeff,
-                                    dt,
-                                    &mosfet_history,
-                                    suppress_gate_charge,
-                                    &mut mosfet_companion_terms_scratch,
-                                    &mut mosfet_caps_scratch,
-                                )?;
+                                cached_mosfet_truncation_limit = self
+                                    .update_classic_mos_with_companion_terms(
+                                        &mut circuit,
+                                        &new_solution,
+                                        &postsolve_companion_coeff,
+                                        dt,
+                                        &mosfet_history,
+                                        suppress_gate_charge,
+                                        &mut mosfet_companion_terms_scratch,
+                                        &mut mosfet_companion_charges_scratch,
+                                        &mut mosfet_caps_scratch,
+                                        classic_mos_truncation_context.as_ref(),
+                                    )?;
                                 mosfet_companion_terms_valid = circuit
                                     .mosfets
                                     .last_update_all_is_physical()
                                     && mosfet_companion_terms_scratch.len()
                                         == circuit.mosfets.devices.len()
+                                    && mosfet_companion_charges_scratch.len()
+                                        == circuit.mosfets.devices.len()
                                     && mosfet_caps_scratch.len() == circuit.mosfets.devices.len();
+                                cached_mosfet_truncation_limit_valid = mosfet_companion_terms_valid
+                                    && classic_mos_truncation_context.is_some();
                             } else {
                                 self.update_transient_nonlinear_devices(
                                     &mut circuit,
                                     &new_solution,
                                 )?;
                                 mosfet_companion_terms_valid = false;
+                                cached_mosfet_truncation_limit_valid = false;
                             }
                             nonlinear_state_matches_new_solution = true;
                         }
@@ -3654,6 +3689,9 @@ impl Engine {
                             mosfet_caps_valid = residual_converged_for_acceptance
                                 && classic_mos_stamp_cache.is_some()
                                 && mosfet_caps_scratch.len() == circuit.mosfets.devices.len();
+                            mosfet_companion_terms_valid &= residual_converged_for_acceptance;
+                            cached_mosfet_truncation_limit_valid &=
+                                residual_converged_for_acceptance;
                             total_postsolve_residual_nanos +=
                                 postsolve_residual_start.elapsed().as_nanos();
                             // The proof restamp refreshes nonlinear, generated,
@@ -4552,19 +4590,23 @@ impl Engine {
                 && !suppress_gate_charge
                 && !circuit.mosfets.is_empty()
             {
-                let limit = Self::mosfet_ngspice_truncation_limit(
-                    &circuit,
-                    &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
-                    &mosfet_history,
-                    transient_lte_reltol,
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
-                    Some((&mut mosfet_caps_scratch, mosfet_caps_valid)),
-                )
+                let limit = if cached_mosfet_truncation_limit_valid {
+                    cached_mosfet_truncation_limit
+                } else {
+                    Self::mosfet_ngspice_truncation_limit(
+                        &circuit,
+                        &new_solution,
+                        current_method,
+                        step_trap_order,
+                        dt,
+                        &mosfet_history,
+                        transient_lte_reltol,
+                        self.current_abstol(),
+                        self.charge_abstol(),
+                        self.transient_trtol(),
+                        Some((&mut mosfet_caps_scratch, mosfet_caps_valid)),
+                    )
+                }
                 .filter(|limit| limit.is_finite() && *limit > 0.0);
                 mosfet_caps_valid = mosfet_caps_scratch.len() == circuit.mosfets.devices.len();
                 limit

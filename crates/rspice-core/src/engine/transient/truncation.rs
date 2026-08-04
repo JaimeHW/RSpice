@@ -5,7 +5,7 @@
 use super::*;
 
 #[inline]
-fn lte_debug_enabled() -> bool {
+pub(super) fn lte_debug_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ENABLED.get_or_init(|| std::env::var_os("RSPICE_LTE_DEBUG").is_some())
 }
@@ -14,7 +14,7 @@ fn lte_debug_enabled() -> bool {
 /// charge test. One family evaluates this same timestep/tolerance geometry for
 /// every charge branch, so validate and precompute it once outside hot loops.
 #[derive(Clone, Copy)]
-struct NgspiceChargeTruncationContext {
+pub(super) struct NgspiceChargeTruncationContext {
     dt: Value,
     prev_dt: Value,
     prev_prev_dt: Value,
@@ -32,7 +32,7 @@ struct NgspiceChargeTruncationContext {
 impl NgspiceChargeTruncationContext {
     #[allow(clippy::too_many_arguments)]
     #[inline]
-    fn new(
+    pub(super) fn new(
         dt: Value,
         prev_dt: Value,
         prev_prev_dt: Value,
@@ -133,6 +133,71 @@ impl NgspiceChargeTruncationContext {
             limit = limit.sqrt();
         }
         (limit.is_finite() && limit > 0.0).then_some(limit)
+    }
+
+    /// Apply the MOS1 gate-charge CKTterr walk to q/cq values already
+    /// evaluated by the accepted candidate's companion kernel. Capacitance
+    /// eligibility is reconstructed exactly so even subnormal/underflow edge
+    /// cases retain the canonical branch-selection semantics.
+    #[inline]
+    pub(super) fn mosfet_gate_limit_from_cached_charges(
+        &self,
+        mos: &crate::device::Mosfet,
+        idx: usize,
+        charges: &MosfetGateCompanionCharges,
+        caps: (Value, Value, Value),
+        history: &MosfetTransientHistory,
+    ) -> Option<Value> {
+        let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
+        let capacitances = [
+            caps.0 + history.capgs_prev_half[idx] + cgs_ov,
+            caps.1 + history.capgd_prev_half[idx] + cgd_ov,
+            caps.2 + history.capgb_prev_half[idx] + cgb_ov,
+        ];
+        let histories = [
+            (
+                history.qgs_prev[idx],
+                history.qgs_prev_prev[idx],
+                history.qgs_prev_prev_prev[idx],
+                history.cqgs_prev[idx],
+            ),
+            (
+                history.qgd_prev[idx],
+                history.qgd_prev_prev[idx],
+                history.qgd_prev_prev_prev[idx],
+                history.cqgd_prev[idx],
+            ),
+            (
+                history.qgb_prev[idx],
+                history.qgb_prev_prev[idx],
+                history.qgb_prev_prev_prev[idx],
+                history.cqgb_prev[idx],
+            ),
+        ];
+
+        let mut limit = 2.0 * self.dt;
+        let mut found_branch = false;
+        for branch in 0..3 {
+            let capacitance = capacitances[branch];
+            if !capacitance.is_finite() || capacitance <= 0.0 {
+                continue;
+            }
+            let (q_curr, cq_curr) = charges[branch];
+            let (q_prev, q_prev_prev, q_prev_prev_prev, cq_prev) = histories[branch];
+            let Some(branch_limit) = self.limit(
+                q_curr,
+                q_prev,
+                q_prev_prev,
+                q_prev_prev_prev,
+                cq_curr,
+                cq_prev,
+            ) else {
+                continue;
+            };
+            found_branch = true;
+            limit = limit.min(branch_limit);
+        }
+        found_branch.then_some(limit)
     }
 }
 
@@ -2479,6 +2544,42 @@ M1 d g s 0 NM W=10u L=1u
 
         assert_eq!(reused.map(Value::to_bits), direct.map(Value::to_bits));
         assert_eq!(cache, captured, "reuse must not rewrite the cache");
+
+        let coeff = CompanionCoefficients::for_method_with_previous_step(
+            IntegrationMethod::Trapezoidal,
+            dt,
+            history.accepted_dt_prev,
+        );
+        let (_terms, charges, caps) = Engine::mosfet_companion_branch_terms::<true>(
+            &circuit.mosfets.devices[0],
+            0,
+            &candidate,
+            &coeff,
+            dt,
+            &history,
+            false,
+            false,
+        );
+        let context = NgspiceChargeTruncationContext::new(
+            dt,
+            history.accepted_dt_prev,
+            history.accepted_dt_prev_prev,
+            IntegrationMethod::Trapezoidal,
+            1,
+            1.0e-3,
+            1.0e-12,
+            1.0e-14,
+            7.0,
+        )
+        .expect("valid truncation context");
+        let fused = context.mosfet_gate_limit_from_cached_charges(
+            &circuit.mosfets.devices[0],
+            0,
+            &charges,
+            caps,
+            &history,
+        );
+        assert_eq!(fused.map(Value::to_bits), direct.map(Value::to_bits));
     }
 
     #[test]

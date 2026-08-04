@@ -261,8 +261,10 @@ impl Engine {
     }
 
     /// Update a classic-MOS-only candidate and evaluate its transient
-    /// companion terms in the same device walk. The expensive pure arithmetic
-    /// shares the bounded MOS worker dispatch; sparse writes remain serial.
+    /// companion and CKTterr state in the same device walk. The expensive pure
+    /// arithmetic shares the bounded MOS worker dispatch; sparse writes remain
+    /// serial and the returned LTE limit is a reduction over exact branch
+    /// candidates.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn update_classic_mos_with_companion_terms(
         &self,
@@ -273,13 +275,16 @@ impl Engine {
         history: &MosfetTransientHistory,
         suppress_gate_charge: bool,
         terms: &mut Vec<MosfetCompanionBranchTerms>,
+        charges: &mut Vec<MosfetGateCompanionCharges>,
         caps: &mut Vec<(Value, Value, Value)>,
-    ) -> Result<(), SimulationError> {
+        truncation: Option<&NgspiceChargeTruncationContext>,
+    ) -> Result<Option<Value>, SimulationError> {
         use crate::device::NonlinearDevice;
 
         debug_assert!(circuit.has_cacheable_classic_mos_transient_base());
         let instance_count = circuit.mosfets.len();
         terms.resize(instance_count, [(0.0, 0.0); 5]);
+        charges.resize(instance_count, [(0.0, 0.0); 3]);
         caps.resize(instance_count, (0.0, 0.0, 0.0));
 
         #[cfg(feature = "parallel")]
@@ -294,73 +299,112 @@ impl Engine {
                 .min(useful_workers.max(1));
             if instance_count >= PARALLEL_CLASSIC_MOS_THRESHOLD && worker_count > 1 {
                 let chunk_size = instance_count.div_ceil(worker_count).max(1);
-                let all_physical = self.install_classic_mos_parallel(|| {
+                let update_result = self.install_classic_mos_parallel(|| {
                     circuit
                         .mosfets
                         .devices
                         .par_chunks_mut(chunk_size)
                         .zip(terms.par_chunks_mut(chunk_size))
+                        .zip(charges.par_chunks_mut(chunk_size))
                         .zip(caps.par_chunks_mut(chunk_size))
                         .enumerate()
-                        .map(|(chunk_idx, ((devices, term_chunk), cap_chunk))| {
-                            let base = chunk_idx * chunk_size;
-                            let mut chunk_physical = true;
-                            for (local, ((device, term), cap)) in devices
-                                .iter_mut()
-                                .zip(term_chunk)
-                                .zip(cap_chunk)
-                                .enumerate()
-                            {
-                                device.update(solution);
-                                (*term, *cap) = Self::mosfet_companion_branch_terms(
-                                    device,
-                                    base + local,
-                                    solution,
-                                    coeff,
-                                    dt,
-                                    history,
-                                    suppress_gate_charge,
-                                    true,
-                                );
-                                chunk_physical &= device.cached_linearization_is_physical();
-                            }
-                            chunk_physical
-                        })
-                        .reduce(|| true, |left, right| left && right)
+                        .map(
+                            |(chunk_idx, (((devices, term_chunk), charge_chunk), cap_chunk))| {
+                                let base = chunk_idx * chunk_size;
+                                let mut chunk_physical = true;
+                                let mut chunk_limit = None;
+                                for (local, (((device, term), charge), cap)) in devices
+                                    .iter_mut()
+                                    .zip(term_chunk)
+                                    .zip(charge_chunk)
+                                    .zip(cap_chunk)
+                                    .enumerate()
+                                {
+                                    device.update(solution);
+                                    let (evaluated_terms, evaluated_charges, evaluated_caps) =
+                                        Self::mosfet_companion_branch_terms::<true>(
+                                            device,
+                                            base + local,
+                                            solution,
+                                            coeff,
+                                            dt,
+                                            history,
+                                            suppress_gate_charge,
+                                            true,
+                                        );
+                                    *term = evaluated_terms;
+                                    *charge = evaluated_charges;
+                                    *cap = evaluated_caps;
+                                    let device_limit = truncation.and_then(|context| {
+                                        context.mosfet_gate_limit_from_cached_charges(
+                                            device,
+                                            base + local,
+                                            charge,
+                                            *cap,
+                                            history,
+                                        )
+                                    });
+                                    chunk_limit =
+                                        Self::min_truncation_limit(chunk_limit, device_limit);
+                                    chunk_physical &= device.cached_linearization_is_physical();
+                                }
+                                (chunk_physical, chunk_limit)
+                            },
+                        )
+                        .reduce(
+                            || (true, None),
+                            |(left_physical, left_limit), (right_physical, right_limit)| {
+                                (
+                                    left_physical && right_physical,
+                                    Self::min_truncation_limit(left_limit, right_limit),
+                                )
+                            },
+                        )
                 })?;
+                let (all_physical, cached_limit) = update_result;
                 circuit
                     .mosfets
                     .record_last_update_all_is_physical(all_physical);
-                return Ok(());
+                return Ok(cached_limit);
             }
         }
 
         let mut all_physical = true;
-        for (idx, ((device, term), cap)) in circuit
+        let mut cached_limit = None;
+        for (idx, (((device, term), charge), cap)) in circuit
             .mosfets
             .devices
             .iter_mut()
             .zip(terms)
+            .zip(charges)
             .zip(caps)
             .enumerate()
         {
             device.update(solution);
-            (*term, *cap) = Self::mosfet_companion_branch_terms(
-                device,
-                idx,
-                solution,
-                coeff,
-                dt,
-                history,
-                suppress_gate_charge,
-                true,
-            );
+            let (evaluated_terms, evaluated_charges, evaluated_caps) =
+                Self::mosfet_companion_branch_terms::<true>(
+                    device,
+                    idx,
+                    solution,
+                    coeff,
+                    dt,
+                    history,
+                    suppress_gate_charge,
+                    true,
+                );
+            *term = evaluated_terms;
+            *charge = evaluated_charges;
+            *cap = evaluated_caps;
+            let device_limit = truncation.and_then(|context| {
+                context.mosfet_gate_limit_from_cached_charges(device, idx, charge, *cap, history)
+            });
+            cached_limit = Self::min_truncation_limit(cached_limit, device_limit);
             all_physical &= device.cached_linearization_is_physical();
         }
         circuit
             .mosfets
             .record_last_update_all_is_physical(all_physical);
-        Ok(())
+        Ok(cached_limit)
     }
 
     /// Test the nonlinear residual with the active transient solver's native
@@ -1064,6 +1108,7 @@ M1 d g 0 0 NM W=10u L=1u
         assert_eq!(rhs, canonical_rhs);
 
         let mut companion_terms = Vec::new();
+        let mut companion_charges = Vec::new();
         let mut companion_caps = Vec::new();
         engine
             .update_classic_mos_with_companion_terms(
@@ -1074,11 +1119,14 @@ M1 d g 0 0 NM W=10u L=1u
                 &mosfet_history,
                 false,
                 &mut companion_terms,
+                &mut companion_charges,
                 &mut companion_caps,
+                None,
             )
             .expect("fused companion evaluation succeeds");
         assert!(circuit.mosfets.last_update_all_is_physical());
         assert_eq!(companion_terms.len(), circuit.mosfets.devices.len());
+        assert_eq!(companion_charges.len(), circuit.mosfets.devices.len());
         assert_eq!(companion_caps.len(), circuit.mosfets.devices.len());
 
         engine

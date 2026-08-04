@@ -1014,7 +1014,7 @@ impl Engine {
             cache.reserve(circuit.mosfets.devices.len());
         }
         for (idx, mos) in circuit.mosfets.devices.iter().enumerate() {
-            let (device_terms, caps) = Self::mosfet_companion_branch_terms(
+            let (device_terms, _charges, caps) = Self::mosfet_companion_branch_terms::<false>(
                 mos,
                 idx,
                 voltages,
@@ -1072,7 +1072,7 @@ impl Engine {
     /// given iterate. Pure: no engine or device state is touched, which is
     /// what lets the transient assembly evaluate devices on the thread pool.
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn mosfet_companion_branch_terms(
+    pub(super) fn mosfet_companion_branch_terms<const CAPTURE_CHARGES: bool>(
         mos: &crate::device::Mosfet,
         idx: usize,
         voltages: &[Value],
@@ -1081,8 +1081,13 @@ impl Engine {
         history: &MosfetTransientHistory,
         suppress_gate_charge: bool,
         use_verified_cached_bias: bool,
-    ) -> ([(Value, Value); 5], (Value, Value, Value)) {
+    ) -> (
+        MosfetCompanionBranchTerms,
+        MosfetGateCompanionCharges,
+        (Value, Value, Value),
+    ) {
         let mut terms = [(0.0, 0.0); 5];
+        let mut charges = [(0.0, 0.0); 3];
         let mut caps = (0.0, 0.0, 0.0);
         let ((vgs, vgd, vgb), (vgs_eval, vds_eval, vbs_eval)) = if use_verified_cached_bias {
             let ((vgs, vds, vbs), evaluated) = mos.verified_cached_transient_branch_voltages();
@@ -1103,7 +1108,7 @@ impl Engine {
             let cgd = cgd_half + history.capgd_prev_half[idx] + cgd_ov;
             let cgb = cgb_half + history.capgb_prev_half[idx] + cgb_ov;
 
-            let (geq_gs, ieq_gs, _q, _cq) = Self::jfet_companion_terms(
+            let (geq_gs, ieq_gs, qgs, cqgs) = Self::jfet_companion_terms(
                 coeff,
                 dt,
                 cgs,
@@ -1114,8 +1119,11 @@ impl Engine {
                 history.cqgs_prev[idx],
             );
             terms[0] = (geq_gs, ieq_gs);
+            if CAPTURE_CHARGES {
+                charges[0] = (qgs, cqgs);
+            }
 
-            let (geq_gd, ieq_gd, _q, _cq) = Self::jfet_companion_terms(
+            let (geq_gd, ieq_gd, qgd, cqgd) = Self::jfet_companion_terms(
                 coeff,
                 dt,
                 cgd,
@@ -1126,8 +1134,11 @@ impl Engine {
                 history.cqgd_prev[idx],
             );
             terms[1] = (geq_gd, ieq_gd);
+            if CAPTURE_CHARGES {
+                charges[1] = (qgd, cqgd);
+            }
 
-            let (geq_gb, ieq_gb, _q, _cq) = Self::jfet_companion_terms(
+            let (geq_gb, ieq_gb, qgb, cqgb) = Self::jfet_companion_terms(
                 coeff,
                 dt,
                 cgb,
@@ -1138,6 +1149,9 @@ impl Engine {
                 history.cqgb_prev[idx],
             );
             terms[2] = (geq_gb, ieq_gb);
+            if CAPTURE_CHARGES {
+                charges[2] = (qgb, cqgb);
+            }
         }
 
         let body_charge_mask = mos.body_junction_charge_mask();
@@ -1174,7 +1188,7 @@ impl Engine {
             terms[4] = (geq_bd, ieq_bd);
         }
 
-        (terms, caps)
+        (terms, charges, caps)
     }
 
     #[inline]
@@ -1312,6 +1326,7 @@ impl Engine {
 }
 
 pub(super) type MosfetCompanionBranchTerms = [(Value, Value); 5];
+pub(super) type MosfetGateCompanionCharges = [(Value, Value); 3];
 
 #[cfg(test)]
 mod tests {
