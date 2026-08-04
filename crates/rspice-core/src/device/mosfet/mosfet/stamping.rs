@@ -139,6 +139,100 @@ impl Mosfet {
         );
     }
 
+    /// Evaluate the true, unlimited static device at `solution` and add its
+    /// linearized `A*x` and RHS contributions directly to row accumulators.
+    ///
+    /// Residual acceptance needs physical currents, not the Newton Jacobian.
+    /// Keeping this pure avoids mutating limiter history while also avoiding
+    /// sparse writes that would only be multiplied back by the same candidate.
+    pub(crate) fn add_physical_static_residual_row_terms_at(
+        &self,
+        solution: &[Value],
+        constants: &ClassicMosTransientConstants,
+        row_ax: &mut [Value],
+        row_rhs: &mut [Value],
+    ) {
+        let (vgs, vds, vbs) = self.branch_voltages(solution);
+        let (_, _, gm, gds, gmb, id_eq) =
+            self.linearized_transient_operating_point(vgs, vds, vbs, constants);
+        let vd = Self::terminal_voltage(solution, self.node_drain);
+        let vg = Self::terminal_voltage(solution, self.node_gate);
+        let vs = Self::terminal_voltage(solution, self.node_source);
+        let vb = Self::terminal_voltage(solution, self.node_bulk);
+        let source_diagonal = gm + gds + gmb;
+
+        if self.node_drain > 0 {
+            let row = self.node_drain - 1;
+            row_ax[row] += gds * vd;
+            if self.node_gate > 0 {
+                row_ax[row] += gm * vg;
+            }
+            if self.node_source > 0 {
+                row_ax[row] -= source_diagonal * vs;
+            }
+            if self.node_bulk > 0 {
+                row_ax[row] += gmb * vb;
+            }
+            row_rhs[row] -= id_eq;
+        }
+        if self.node_source > 0 {
+            let row = self.node_source - 1;
+            if self.node_drain > 0 {
+                row_ax[row] -= gds * vd;
+            }
+            if self.node_gate > 0 {
+                row_ax[row] -= gm * vg;
+            }
+            row_ax[row] += source_diagonal * vs;
+            if self.node_bulk > 0 {
+                row_ax[row] -= gmb * vb;
+            }
+            row_rhs[row] += id_eq;
+        }
+
+        let (bs_anode, bs_cathode, gbs, ieq_bs) = self.body_source_junction_linearization(vbs);
+        Self::add_diode_residual_row_terms(
+            solution, row_ax, row_rhs, bs_anode, bs_cathode, gbs, ieq_bs,
+        );
+        let (bd_anode, bd_cathode, gbd, ieq_bd) = self.body_drain_junction_linearization(vds, vbs);
+        Self::add_diode_residual_row_terms(
+            solution, row_ax, row_rhs, bd_anode, bd_cathode, gbd, ieq_bd,
+        );
+    }
+
+    #[inline]
+    fn add_diode_residual_row_terms(
+        solution: &[Value],
+        row_ax: &mut [Value],
+        row_rhs: &mut [Value],
+        anode: NodeId,
+        cathode: NodeId,
+        conductance: Value,
+        equivalent_current: Value,
+    ) {
+        if conductance == 0.0 && equivalent_current == 0.0 {
+            return;
+        }
+        let va = Self::terminal_voltage(solution, anode);
+        let vc = Self::terminal_voltage(solution, cathode);
+        if anode > 0 {
+            let row = anode - 1;
+            row_ax[row] += conductance * va;
+            if cathode > 0 {
+                row_ax[row] -= conductance * vc;
+            }
+            row_rhs[row] -= equivalent_current;
+        }
+        if cathode > 0 {
+            let row = cathode - 1;
+            if anode > 0 {
+                row_ax[row] -= conductance * va;
+            }
+            row_ax[row] += conductance * vc;
+            row_rhs[row] += equivalent_current;
+        }
+    }
+
     /// Stamp the physical equations directly at a static candidate.
     ///
     /// Newton voltage limiting is iteration history, not part of the device

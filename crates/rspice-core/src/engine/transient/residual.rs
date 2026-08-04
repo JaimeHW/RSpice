@@ -11,6 +11,10 @@ use super::*;
 const PARALLEL_CLASSIC_MOS_THRESHOLD: usize = 2_048;
 #[cfg(feature = "parallel")]
 const CLASSIC_MOS_INSTANCES_PER_WORKER: usize = 512;
+// The direct proof omits the canonical sparse norm's 256-epsilon gross-term
+// cancellation allowance. Reserving three quarters of that budget for sparse
+// coefficient aggregation keeps its 2x acceptance margin conservative.
+const DIRECT_RESIDUAL_MAX_MOS_ROW_INCIDENCE: usize = 64;
 
 /// Per-step invariants of the transient system assembly. Holds borrows of
 /// the integration coefficients and the per-device-family histories, so a
@@ -75,6 +79,7 @@ pub(super) struct ClassicMosTransientStampCache {
     attempt_values: Vec<Value>,
     attempt_rhs: Vec<Value>,
     device_constants: Vec<crate::device::mosfet::ClassicMosTransientConstants>,
+    direct_residual_has_bounded_row_fan_in: bool,
 }
 
 pub(super) struct ClassicMosCandidateEvaluation {
@@ -83,6 +88,11 @@ pub(super) struct ClassicMosCandidateEvaluation {
 }
 
 impl ClassicMosTransientStampCache {
+    #[inline]
+    pub(super) fn supports_direct_residual_proof(&self) -> bool {
+        self.direct_residual_has_bounded_row_fan_in
+    }
+
     #[inline]
     pub(super) fn device_constants(
         &self,
@@ -120,6 +130,16 @@ impl ClassicMosTransientStampCache {
         debug_assert_eq!(rhs.len(), self.attempt_rhs.len());
         matrix.values_mut().copy_from_slice(&self.attempt_values);
         rhs.copy_from_slice(&self.attempt_rhs);
+    }
+
+    #[inline]
+    fn attempt_ax_into(
+        &self,
+        matrix: &crate::solver::StaticMatrix,
+        solution: &[Value],
+        row_ax: &mut Vec<Value>,
+    ) -> Result<(), crate::solver::SolverError> {
+        matrix.matrix_vector_product_with_values_into(&self.attempt_values, solution, row_ax)
     }
 }
 
@@ -161,6 +181,29 @@ impl Engine {
                 .iter()
                 .map(crate::device::Mosfet::classic_transient_constants),
         );
+        let mut node_incidence = vec![0_usize; circuit.num_nodes().saturating_add(1)];
+        cache.direct_residual_has_bounded_row_fan_in =
+            circuit.mosfets.devices.iter().all(|mosfet| {
+                let nodes = [
+                    mosfet.node_drain,
+                    mosfet.node_gate,
+                    mosfet.node_source,
+                    mosfet.node_bulk,
+                ];
+                for (index, &node) in nodes.iter().enumerate() {
+                    if node == 0 || nodes[..index].contains(&node) {
+                        continue;
+                    }
+                    let Some(incidence) = node_incidence.get_mut(node) else {
+                        return false;
+                    };
+                    *incidence += 1;
+                    if *incidence > DIRECT_RESIDUAL_MAX_MOS_ROW_INCIDENCE {
+                        return false;
+                    }
+                }
+                true
+            });
         cache.capture_static(matrix, rhs);
         cache
     }
@@ -975,6 +1018,129 @@ impl Engine {
         Ok(())
     }
 
+    /// Prove a clearly converged classic-MOS candidate from its true physical
+    /// linearization without materializing a sparse Jacobian that will not be
+    /// solved. The direct row scaling omits the canonical norm's non-negative
+    /// cancellation-noise allowance and requires a 2x margin; every marginal
+    /// candidate falls back to the canonical exact restamp below.
+    #[allow(clippy::too_many_arguments)]
+    fn classic_mos_physical_residual_clearly_converged(
+        &self,
+        cache: &ClassicMosTransientStampCache,
+        circuit: &crate::circuit::CircuitData,
+        matrix: &crate::solver::StaticMatrix,
+        solution: &[Value],
+        dt: Value,
+        ctx: &TransientSystemContext<'_>,
+        row_ax: &mut Vec<Value>,
+        row_rhs: &mut Vec<Value>,
+        mut caps_out: Option<&mut Vec<(Value, Value, Value)>>,
+    ) -> bool {
+        if cache.device_constants.len() != circuit.mosfets.devices.len()
+            || ctx.mosfet_companion_slots.len() != circuit.mosfets.devices.len()
+            || cache.attempt_ax_into(matrix, solution, row_ax).is_err()
+        {
+            return false;
+        }
+        row_rhs.clear();
+        row_rhs.extend_from_slice(&cache.attempt_rhs);
+
+        if let Some(caps) = caps_out.as_deref_mut() {
+            caps.clear();
+            caps.reserve(circuit.mosfets.devices.len());
+        }
+        let companion_coeff = if ctx.xyce_one_step {
+            CompanionCoefficients::backward_euler()
+        } else {
+            *ctx.coeff
+        };
+        for (idx, ((mosfet, constants), slots)) in circuit
+            .mosfets
+            .devices
+            .iter()
+            .zip(&cache.device_constants)
+            .zip(ctx.mosfet_companion_slots)
+            .enumerate()
+        {
+            let (terms, _, caps) = Self::mosfet_companion_branch_terms::<false>(
+                mosfet,
+                idx,
+                solution,
+                &companion_coeff,
+                dt,
+                ctx.mosfet_history,
+                ctx.suppress_gate_charge,
+                false,
+                Some(constants),
+            );
+            if let Some(caps_out) = caps_out.as_deref_mut() {
+                caps_out.push(caps);
+            }
+            for (slots, &(conductance, equivalent_current)) in slots.iter().zip(&terms) {
+                if conductance <= 0.0 {
+                    continue;
+                }
+                let vp = if slots.pos == 0 {
+                    0.0
+                } else {
+                    solution[slots.pos - 1]
+                };
+                let vn = if slots.neg == 0 {
+                    0.0
+                } else {
+                    solution[slots.neg - 1]
+                };
+                if slots.pos > 0 {
+                    let row = slots.pos - 1;
+                    row_ax[row] += conductance * vp;
+                    if slots.neg > 0 {
+                        row_ax[row] -= conductance * vn;
+                    }
+                    row_rhs[row] += equivalent_current;
+                }
+                if slots.neg > 0 {
+                    let row = slots.neg - 1;
+                    if slots.pos > 0 {
+                        row_ax[row] -= conductance * vp;
+                    }
+                    row_ax[row] += conductance * vn;
+                    row_rhs[row] -= equivalent_current;
+                }
+            }
+            mosfet.add_physical_static_residual_row_terms_at(solution, constants, row_ax, row_rhs);
+        }
+
+        let node_rows = circuit.num_nodes().min(row_rhs.len());
+        let configured_reltol = self.residual_reltol();
+        let reltol = if configured_reltol.is_finite() && configured_reltol > 0.0 {
+            configured_reltol
+        } else {
+            1.0e-3
+        };
+        const CLEAR_ACCEPT_MARGIN: Value = 0.5;
+        row_ax
+            .iter()
+            .zip(row_rhs.iter())
+            .enumerate()
+            .all(|(row, (&ax, &rhs))| {
+                if !ax.is_finite() || !rhs.is_finite() {
+                    return false;
+                }
+                let configured_abstol = if row < node_rows {
+                    self.current_abstol()
+                } else {
+                    self.voltage_abstol()
+                };
+                let abstol = if configured_abstol.is_finite() && configured_abstol > 0.0 {
+                    configured_abstol
+                } else {
+                    1.0e-12
+                };
+                let scale = abstol + reltol * ax.abs().max(rhs.abs());
+                (ax - rhs).abs() <= CLEAR_ACCEPT_MARGIN * scale.max(abstol)
+            })
+    }
+
     /// Capture the accepted physical static residual F(x)-B(t) used by
     /// Xyce's OneStep order-2 history term.  The transient companion matrix
     /// is deliberately omitted: it is represented by the per-device Q
@@ -1050,7 +1216,8 @@ impl Engine {
         classic_mos_cache: Option<&ClassicMosTransientStampCache>,
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
         classic_mos_companion_terms: Option<&[MosfetCompanionBranchTerms]>,
-        classic_mos_caps_out: Option<&mut Vec<(Value, Value, Value)>>,
+        mut classic_mos_caps_out: Option<&mut Vec<(Value, Value, Value)>>,
+        classic_mos_residual_scratch: Option<(&mut Vec<Value>, &mut Vec<Value>)>,
     ) -> Result<bool, SimulationError> {
         if solution.iter().any(|value| !value.is_finite()) {
             return Ok(false);
@@ -1058,6 +1225,21 @@ impl Engine {
 
         let refresh_nonlinear = !circuit.has_classic_mos_only_transient_nonlinearity();
         if let Some(cache) = classic_mos_cache {
+            if let Some((row_ax, row_rhs)) = classic_mos_residual_scratch
+                && self.classic_mos_physical_residual_clearly_converged(
+                    cache,
+                    circuit,
+                    matrix,
+                    solution,
+                    dt,
+                    ctx,
+                    row_ax,
+                    row_rhs,
+                    classic_mos_caps_out.as_deref_mut(),
+                )
+            {
+                return Ok(true);
+            }
             self.stamp_classic_mos_transient_system_from_cache(
                 cache,
                 circuit,
@@ -1155,6 +1337,44 @@ mod tests {
         assert!(
             !engine.transient_residual_convergence_met(&circuit, &mut matrix, &[0.0], &[0.25],)
         );
+    }
+
+    #[test]
+    fn direct_classic_mos_residual_proof_is_bounded_by_row_incidence() {
+        use std::fmt::Write as _;
+
+        fn supports_direct_proof(instance_count: usize) -> bool {
+            let mut deck = String::from(
+                "Classic MOS residual fan-in capability\nVDD d 0 1\nVG g 0 0\nR1 d 0 1k\n",
+            );
+            for index in 0..instance_count {
+                writeln!(&mut deck, "M{index} d g 0 0 NM W=1u L=1u").unwrap();
+            }
+            deck.push_str(".MODEL NM NMOS LEVEL=1 VTO=0.7 KP=100u\n.END\n");
+
+            let netlist = Netlist::parse(&deck).expect("fan-in deck parses");
+            let engine = Engine::default().resolved_for_netlist(&netlist);
+            let mut circuit = engine
+                .build_circuit(&netlist)
+                .expect("fan-in circuit builds");
+            assert!(circuit.has_cacheable_classic_mos_transient_base());
+            let mut matrix = engine.build_matrix(&circuit).expect("fan-in matrix builds");
+            circuit.link_indices(&matrix);
+            let mut rhs = vec![0.0; circuit.matrix_size()];
+            engine
+                .initialize_classic_mos_transient_stamp_cache(
+                    &circuit,
+                    &mut matrix,
+                    &mut rhs,
+                    engine.config.convergence_config.gmin_target.max(0.0),
+                )
+                .supports_direct_residual_proof()
+        }
+
+        assert!(supports_direct_proof(DIRECT_RESIDUAL_MAX_MOS_ROW_INCIDENCE));
+        assert!(!supports_direct_proof(
+            DIRECT_RESIDUAL_MAX_MOS_ROW_INCIDENCE + 1
+        ));
     }
 
     #[test]
@@ -1274,6 +1494,40 @@ M1 d g 0 0 NM W=10u L=1u
             &coeff,
             false,
         );
+        assert!(cache.supports_direct_residual_proof());
+        let mut direct_ax = Vec::new();
+        let mut direct_rhs = Vec::new();
+        let mut direct_caps = Vec::new();
+        let _ = engine.classic_mos_physical_residual_clearly_converged(
+            &cache,
+            &circuit,
+            &matrix,
+            &solution,
+            dt,
+            &ctx,
+            &mut direct_ax,
+            &mut direct_rhs,
+            Some(&mut direct_caps),
+        );
+        let mut canonical_ax = Vec::new();
+        matrix
+            .matrix_vector_product_with_values_into(&canonical_values, &solution, &mut canonical_ax)
+            .expect("canonical A*x succeeds");
+        for (row, (&direct, &canonical)) in direct_ax.iter().zip(&canonical_ax).enumerate() {
+            let tolerance = 128.0 * Value::EPSILON * direct.abs().max(canonical.abs()) + 1.0e-24;
+            assert!(
+                (direct - canonical).abs() <= tolerance,
+                "direct A*x row {row} differs: direct={direct:.17e}, canonical={canonical:.17e}"
+            );
+        }
+        for (row, (&direct, &canonical)) in direct_rhs.iter().zip(&canonical_rhs).enumerate() {
+            let tolerance = 128.0 * Value::EPSILON * direct.abs().max(canonical.abs()) + 1.0e-24;
+            assert!(
+                (direct - canonical).abs() <= tolerance,
+                "direct RHS row {row} differs: direct={direct:.17e}, canonical={canonical:.17e}"
+            );
+        }
+        assert_eq!(direct_caps.len(), circuit.mosfets.devices.len());
         engine
             .stamp_classic_mos_transient_system_from_cache(
                 &cache,

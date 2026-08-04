@@ -2466,6 +2466,10 @@ impl Engine {
         let mut mosfet_companion_terms_scratch: Vec<MosfetCompanionBranchTerms> = Vec::new();
         let mut mosfet_companion_terms_valid;
         let mut mosfet_companion_charges_scratch: Vec<MosfetGateCompanionCharges> = Vec::new();
+        let mut classic_mos_residual_scratch = classic_mos_stamp_cache
+            .as_ref()
+            .is_some_and(residual::ClassicMosTransientStampCache::supports_direct_residual_proof)
+            .then(|| (Vec::with_capacity(size), Vec::with_capacity(size)));
         let mut cached_mosfet_truncation_limit;
         let mut cached_mosfet_truncation_limit_valid;
         let mut failed_voltage_conv: usize = 0;
@@ -3697,6 +3701,9 @@ impl Engine {
                                     } else {
                                         None
                                     },
+                                    classic_mos_residual_scratch
+                                        .as_mut()
+                                        .map(|(row_ax, row_rhs)| (row_ax, row_rhs)),
                                 )?;
                             mosfet_caps_valid = residual_converged_for_acceptance
                                 && classic_mos_stamp_cache.is_some()

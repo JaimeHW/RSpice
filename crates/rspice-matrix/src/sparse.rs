@@ -1416,6 +1416,43 @@ impl StaticMatrix {
         Ok(ax)
     }
 
+    /// Compute `A*x` from a saved numeric snapshot into caller-owned storage.
+    ///
+    /// The sparsity layout remains owned by this matrix. Numeric caches use
+    /// this to inspect an earlier values-only state without copying it into
+    /// the active factorization buffer or allocating a result per probe.
+    pub fn matrix_vector_product_with_values_into(
+        &self,
+        values: &[Value],
+        solution: &[Value],
+        product: &mut Vec<Value>,
+    ) -> Result<(), SolverError> {
+        self.check_stamping_error()?;
+        if solution.len() != self.ncols || values.len() != self.values.len() {
+            return Err(SolverError::InvalidCircuit(format!(
+                "Matrix-vector size mismatch: matrix is {}x{} with {} values, solution has {}, snapshot has {}",
+                self.nrows,
+                self.ncols,
+                self.values.len(),
+                solution.len(),
+                values.len(),
+            )));
+        }
+
+        product.clear();
+        product.resize(self.nrows, 0.0);
+        for (row, row_ax) in product.iter_mut().enumerate() {
+            for position in self.residual_layout.row_ptr[row]..self.residual_layout.row_ptr[row + 1]
+            {
+                let x = solution[self.residual_layout.col_idx[position]];
+                if x != 0.0 {
+                    *row_ax += values[self.residual_layout.csc_idx[position]] * x;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Convert to an owned faer SparseColMat (legacy/test path; copies)
     fn to_sparse_col_mat(&self) -> SparseColMat<usize, Value> {
         SparseColMat::new(self.csc.as_ref().clone(), self.values.clone())
@@ -4116,6 +4153,40 @@ mod tests {
             .scaled_residual_inf_norm_by_row(&solution, &rhs, reltol, |row| abstols[row])
             .unwrap();
         assert_eq!(actual.to_bits(), expected.to_bits());
+    }
+
+    #[test]
+    fn matrix_vector_product_uses_external_values_without_mutating_matrix() {
+        let mut matrix = StaticMatrix::from_triplets(
+            2,
+            2,
+            &[(0, 0, 2.0), (0, 1, -1.0), (1, 0, 4.0), (1, 1, 5.0)],
+        )
+        .unwrap();
+        let snapshot = matrix.values_mut().to_vec();
+        matrix.clear_values();
+
+        let mut product = Vec::with_capacity(2);
+        matrix
+            .matrix_vector_product_with_values_into(&snapshot, &[2.0, 3.0], &mut product)
+            .unwrap();
+        assert_eq!(product, vec![1.0, 23.0]);
+        assert!(matrix.values_mut().iter().all(|value| *value == 0.0));
+
+        let capacity = product.capacity();
+        matrix
+            .matrix_vector_product_with_values_into(&snapshot, &[1.0, -1.0], &mut product)
+            .unwrap();
+        assert_eq!(product, vec![3.0, -1.0]);
+        assert_eq!(product.capacity(), capacity);
+        assert!(matches!(
+            matrix.matrix_vector_product_with_values_into(
+                &snapshot[..3],
+                &[1.0, 1.0],
+                &mut product
+            ),
+            Err(SolverError::InvalidCircuit(_))
+        ));
     }
 
     #[test]
