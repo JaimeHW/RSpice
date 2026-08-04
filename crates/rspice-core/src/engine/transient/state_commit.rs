@@ -5,6 +5,7 @@ use super::*;
 impl Engine {
     #[inline]
     pub(super) fn update_reactive_history(
+        &self,
         circuit: &mut crate::circuit::CircuitData,
         accepted_solution: &[Value],
         accepted_time: Value,
@@ -33,7 +34,7 @@ impl Engine {
         current_abstol: Value,
         dynamic_breakpoints_added: &mut usize,
         warned_dynamic_breakpoint_cap: &mut bool,
-    ) {
+    ) -> Result<(), SimulationError> {
         let num_nodes = circuit.num_nodes();
         for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
             if circuit
@@ -544,7 +545,259 @@ impl Engine {
         // old `prev` and `prev_prev` generations.
         mosfet_history.rotate_gate_generations(suppress_gate_charge_history);
 
-        for (idx, mos) in circuit.mosfets.devices.iter().enumerate() {
+        // Every instance owns one disjoint element in each history vector, so
+        // the model arithmetic can run in parallel without reductions or a
+        // change in floating-point operation order. Rayon MultiZip stops at
+        // the shortest input; reject a broken internal shape explicitly so a
+        // release build can never commit only a prefix of device history.
+        #[cfg(feature = "parallel")]
+        let mosfet_history_updated_in_parallel = {
+            use rayon::prelude::*;
+
+            let instance_count = circuit.mosfets.devices.len();
+            if let Some(worker_count) = self.classic_mos_parallel_worker_count(instance_count) {
+                let history_shapes_match = [
+                    &mosfet_history.vgs_prev,
+                    &mosfet_history.vgs_prev_prev,
+                    &mosfet_history.capgs_prev_half,
+                    &mosfet_history.qgs_prev,
+                    &mosfet_history.qgs_prev_prev,
+                    &mosfet_history.qgs_prev_prev_prev,
+                    &mosfet_history.cqgs_prev,
+                    &mosfet_history.vgd_prev,
+                    &mosfet_history.vgd_prev_prev,
+                    &mosfet_history.capgd_prev_half,
+                    &mosfet_history.qgd_prev,
+                    &mosfet_history.qgd_prev_prev,
+                    &mosfet_history.qgd_prev_prev_prev,
+                    &mosfet_history.cqgd_prev,
+                    &mosfet_history.vgb_prev,
+                    &mosfet_history.vgb_prev_prev,
+                    &mosfet_history.capgb_prev_half,
+                    &mosfet_history.qgb_prev,
+                    &mosfet_history.qgb_prev_prev,
+                    &mosfet_history.qgb_prev_prev_prev,
+                    &mosfet_history.cqgb_prev,
+                    &mosfet_history.vbs_j_prev,
+                    &mosfet_history.vbs_j_prev_prev,
+                    &mosfet_history.qbs_prev,
+                    &mosfet_history.qbs_prev_prev,
+                    &mosfet_history.cqbs_prev,
+                    &mosfet_history.vbd_j_prev,
+                    &mosfet_history.vbd_j_prev_prev,
+                    &mosfet_history.qbd_prev,
+                    &mosfet_history.qbd_prev_prev,
+                    &mosfet_history.cqbd_prev,
+                ]
+                .into_iter()
+                .all(|history| history.len() == instance_count);
+                let caps_shape_matches =
+                    mosfet_caps.is_none_or(|capacitances| capacitances.len() == instance_count);
+                if !history_shapes_match || !caps_shape_matches {
+                    return Err(SimulationError::Circuit(
+                        "classic-MOS transient history shape does not match the device population"
+                            .to_string(),
+                    ));
+                }
+                let chunk_size = instance_count.div_ceil(worker_count).max(1);
+                let devices = circuit.mosfets.devices.as_slice();
+                let vgs_prev_prev = mosfet_history.vgs_prev_prev.as_slice();
+                let qgs_prev_prev = mosfet_history.qgs_prev_prev.as_slice();
+                let qgs_prev_prev_prev = mosfet_history.qgs_prev_prev_prev.as_slice();
+                let vgd_prev_prev = mosfet_history.vgd_prev_prev.as_slice();
+                let qgd_prev_prev = mosfet_history.qgd_prev_prev.as_slice();
+                let qgd_prev_prev_prev = mosfet_history.qgd_prev_prev_prev.as_slice();
+                let vgb_prev_prev = mosfet_history.vgb_prev_prev.as_slice();
+                let qgb_prev_prev = mosfet_history.qgb_prev_prev.as_slice();
+                let qgb_prev_prev_prev = mosfet_history.qgb_prev_prev_prev.as_slice();
+
+                let gate_outputs = (
+                    mosfet_history.vgs_prev.as_mut_slice(),
+                    mosfet_history.capgs_prev_half.as_mut_slice(),
+                    mosfet_history.qgs_prev.as_mut_slice(),
+                    mosfet_history.cqgs_prev.as_mut_slice(),
+                    mosfet_history.vgd_prev.as_mut_slice(),
+                    mosfet_history.capgd_prev_half.as_mut_slice(),
+                    mosfet_history.qgd_prev.as_mut_slice(),
+                    mosfet_history.cqgd_prev.as_mut_slice(),
+                    mosfet_history.vgb_prev.as_mut_slice(),
+                    mosfet_history.capgb_prev_half.as_mut_slice(),
+                    mosfet_history.qgb_prev.as_mut_slice(),
+                    mosfet_history.cqgb_prev.as_mut_slice(),
+                )
+                    .into_par_iter();
+                let body_outputs = (
+                    mosfet_history.vbs_j_prev.as_mut_slice(),
+                    mosfet_history.vbs_j_prev_prev.as_mut_slice(),
+                    mosfet_history.qbs_prev.as_mut_slice(),
+                    mosfet_history.qbs_prev_prev.as_mut_slice(),
+                    mosfet_history.cqbs_prev.as_mut_slice(),
+                    mosfet_history.vbd_j_prev.as_mut_slice(),
+                    mosfet_history.vbd_j_prev_prev.as_mut_slice(),
+                    mosfet_history.qbd_prev.as_mut_slice(),
+                    mosfet_history.qbd_prev_prev.as_mut_slice(),
+                    mosfet_history.cqbd_prev.as_mut_slice(),
+                )
+                    .into_par_iter();
+
+                self.install_classic_mos_parallel(|| {
+                    gate_outputs
+                        .zip(body_outputs)
+                        .with_min_len(chunk_size)
+                        .enumerate()
+                        .for_each(
+                            |(
+                                idx,
+                                (
+                                    (
+                                        vgs_out,
+                                        capgs_out,
+                                        qgs_out,
+                                        cqgs_out,
+                                        vgd_out,
+                                        capgd_out,
+                                        qgd_out,
+                                        cqgd_out,
+                                        vgb_out,
+                                        capgb_out,
+                                        qgb_out,
+                                        cqgb_out,
+                                    ),
+                                    (
+                                        vbs_j_out,
+                                        vbs_j_prev_out,
+                                        qbs_out,
+                                        qbs_prev_out,
+                                        cqbs_out,
+                                        vbd_j_out,
+                                        vbd_j_prev_out,
+                                        qbd_out,
+                                        qbd_prev_out,
+                                        cqbd_out,
+                                    ),
+                                ),
+                            )| {
+                                let mos = &devices[idx];
+                                let (vgs, vds, vbs) =
+                                    mos.eval_branch_voltages_at(accepted_solution);
+                                let vgd = vgs - vds;
+                                let vgb = vgs - vbs;
+                                let (cgs_half, cgd_half, cgb_half) = match mosfet_caps {
+                                    Some(cache) => cache[idx],
+                                    None => mos.transient_capacitance_halves_at(vgs, vds, vbs),
+                                };
+                                let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
+                                let cgs = cgs_half + *capgs_out + cgs_ov;
+                                let cgd = cgd_half + *capgd_out + cgd_ov;
+                                let cgb = cgb_half + *capgb_out + cgb_ov;
+                                *vgs_out = vgs;
+                                *capgs_out = cgs_half;
+                                *vgd_out = vgd;
+                                *capgd_out = cgd_half;
+                                *vgb_out = vgb;
+                                *capgb_out = cgb_half;
+                                if !suppress_gate_charge_history {
+                                    let (_geq, _ieq, q_curr, cq_curr) = Self::jfet_companion_terms(
+                                        coeff,
+                                        dt,
+                                        cgs,
+                                        vgs,
+                                        vgs_prev_prev[idx],
+                                        qgs_prev_prev[idx],
+                                        qgs_prev_prev_prev[idx],
+                                        *cqgs_out,
+                                    );
+                                    *qgs_out = q_curr;
+                                    *cqgs_out = cq_curr;
+
+                                    let (_geq, _ieq, q_curr, cq_curr) = Self::jfet_companion_terms(
+                                        coeff,
+                                        dt,
+                                        cgd,
+                                        vgd,
+                                        vgd_prev_prev[idx],
+                                        qgd_prev_prev[idx],
+                                        qgd_prev_prev_prev[idx],
+                                        *cqgd_out,
+                                    );
+                                    *qgd_out = q_curr;
+                                    *cqgd_out = cq_curr;
+
+                                    let (_geq, _ieq, q_curr, cq_curr) = Self::jfet_companion_terms(
+                                        coeff,
+                                        dt,
+                                        cgb,
+                                        vgb,
+                                        vgb_prev_prev[idx],
+                                        qgb_prev_prev[idx],
+                                        qgb_prev_prev_prev[idx],
+                                        *cqgb_out,
+                                    );
+                                    *qgb_out = q_curr;
+                                    *cqgb_out = cq_curr;
+                                }
+
+                                let body_charge_mask = mos.body_junction_charge_mask();
+                                if body_charge_mask & 1 != 0 {
+                                    let vbs_j = mos.body_source_charge_branch_voltage(vbs);
+                                    let (q_exact, capacitance) =
+                                        mos.body_source_junction_charge_and_capacitance_at(vbs);
+                                    let (_geq, _ieq, q_curr, cq_curr) =
+                                        Self::nonlinear_charge_companion_terms(
+                                            coeff,
+                                            dt,
+                                            capacitance,
+                                            vbs_j,
+                                            q_exact,
+                                            *qbs_out,
+                                            *qbs_prev_out,
+                                            *cqbs_out,
+                                        );
+                                    *vbs_j_prev_out = *vbs_j_out;
+                                    *vbs_j_out = vbs_j;
+                                    *qbs_prev_out = *qbs_out;
+                                    *qbs_out = q_curr;
+                                    *cqbs_out = cq_curr;
+                                }
+
+                                if body_charge_mask & 2 != 0 {
+                                    let vbd_j = mos.body_drain_charge_branch_voltage(vds, vbs);
+                                    let (q_exact, capacitance) =
+                                        mos.body_drain_junction_charge_and_capacitance_at(vds, vbs);
+                                    let (_geq, _ieq, q_curr, cq_curr) =
+                                        Self::nonlinear_charge_companion_terms(
+                                            coeff,
+                                            dt,
+                                            capacitance,
+                                            vbd_j,
+                                            q_exact,
+                                            *qbd_out,
+                                            *qbd_prev_out,
+                                            *cqbd_out,
+                                        );
+                                    *vbd_j_prev_out = *vbd_j_out;
+                                    *vbd_j_out = vbd_j;
+                                    *qbd_prev_out = *qbd_out;
+                                    *qbd_out = q_curr;
+                                    *cqbd_out = cq_curr;
+                                }
+                            },
+                        );
+                })?;
+                true
+            } else {
+                false
+            }
+        };
+        #[cfg(not(feature = "parallel"))]
+        let mosfet_history_updated_in_parallel = false;
+
+        let serial_mosfet_devices = if mosfet_history_updated_in_parallel {
+            &[][..]
+        } else {
+            circuit.mosfets.devices.as_slice()
+        };
+        for (idx, mos) in serial_mosfet_devices.iter().enumerate() {
             let (vgs, vds, vbs) = mos.eval_branch_voltages_at(accepted_solution);
             let vgd = vgs - vds;
             let vgb = vgs - vbs;
@@ -794,5 +1047,6 @@ impl Engine {
             bsim4_history,
         );
         Self::update_ekv26_history(circuit, accepted_solution, coeff, dt, ekv26_history);
+        Ok(())
     }
 }

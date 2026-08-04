@@ -4327,7 +4327,7 @@ impl Engine {
                             transient_baseline_diag_gmin,
                         )?);
                     }
-                    Self::update_reactive_history(
+                    self.update_reactive_history(
                         &mut circuit,
                         &new_solution,
                         t,
@@ -4356,7 +4356,7 @@ impl Engine {
                         self.current_abstol(),
                         &mut dynamic_tline_breakpoints_added,
                         &mut warned_dynamic_tline_breakpoint_cap,
-                    );
+                    )?;
                     if circuit.has_xspice_devices() {
                         if capture_xyce_static_history {
                             circuit.evaluate_xspice_transient_timestep_with_coefficients(
@@ -5307,7 +5307,7 @@ impl Engine {
                             transient_baseline_diag_gmin,
                         )?);
                     }
-                    Self::update_reactive_history(
+                    self.update_reactive_history(
                         &mut circuit,
                         &new_solution,
                         t,
@@ -5336,7 +5336,7 @@ impl Engine {
                         self.current_abstol(),
                         &mut dynamic_tline_breakpoints_added,
                         &mut warned_dynamic_tline_breakpoint_cap,
-                    );
+                    )?;
                     if circuit.has_xspice_devices() {
                         if capture_xyce_static_history {
                             circuit.evaluate_xspice_transient_timestep_with_coefficients(
@@ -5602,7 +5602,7 @@ impl Engine {
                 )?);
             }
             let history_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
-            Self::update_reactive_history(
+            self.update_reactive_history(
                 &mut circuit,
                 &new_solution,
                 t,
@@ -5631,7 +5631,7 @@ impl Engine {
                 self.current_abstol(),
                 &mut dynamic_tline_breakpoints_added,
                 &mut warned_dynamic_tline_breakpoint_cap,
-            );
+            )?;
             total_history_nanos += history_phase_start.elapsed().as_nanos();
             let tail_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             // Accept XSPICE timestep (commit state changes)

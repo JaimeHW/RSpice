@@ -116,7 +116,7 @@ impl Engine {
     /// while allowing larger model populations to scale upward.
     #[cfg(feature = "parallel")]
     #[inline]
-    fn classic_mos_parallel_worker_count(&self, instance_count: usize) -> Option<usize> {
+    pub(super) fn classic_mos_parallel_worker_count(&self, instance_count: usize) -> Option<usize> {
         let useful_workers = instance_count.div_ceil(CLASSIC_MOS_INSTANCES_PER_WORKER);
         let worker_count = self
             .parallel_worker_count(instance_count)
