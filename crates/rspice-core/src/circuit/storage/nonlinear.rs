@@ -738,6 +738,13 @@ impl Mosfets {
         self.last_update_all_is_physical
     }
 
+    /// Record the aggregate result of a collection-wide update performed by
+    /// a fused transient kernel.
+    #[inline]
+    pub(crate) fn record_last_update_all_is_physical(&mut self, physical: bool) {
+        self.last_update_all_is_physical = physical;
+    }
+
     /// Stamp all MOSFETs into matrix for Newton iteration
     pub fn stamp_all(
         &self,

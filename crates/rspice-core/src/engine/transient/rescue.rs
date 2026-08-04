@@ -299,6 +299,7 @@ impl Engine {
             None,
             vbic_snapshot_cache,
             None,
+            None,
         )? {
             return Ok(None);
         }

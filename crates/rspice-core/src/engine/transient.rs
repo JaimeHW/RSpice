@@ -67,6 +67,7 @@ mod rescue;
 mod residual;
 mod startup;
 mod state;
+pub(self) use state::MosfetCompanionBranchTerms;
 mod state_advanced_mos;
 mod state_commit;
 mod state_recovery;
@@ -2459,6 +2460,8 @@ impl Engine {
         // accept path of the same loop pass (reset every attempt).
         let mut mosfet_caps_scratch: Vec<(Value, Value, Value)> = Vec::new();
         let mut mosfet_caps_valid;
+        let mut mosfet_companion_terms_scratch: Vec<MosfetCompanionBranchTerms> = Vec::new();
+        let mut mosfet_companion_terms_valid;
         let mut failed_voltage_conv: usize = 0;
         let mut failed_device_conv: usize = 0;
         let mut failed_residual_only: usize = 0;
@@ -2546,6 +2549,7 @@ impl Engine {
         while t < tstop && total_iterations < max_total_iterations {
             let attempt_top_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             mosfet_caps_valid = false;
+            mosfet_companion_terms_valid = false;
             if self.config.spice_dialect == SpiceDialect::Xyce {
                 // Xyce 7.10 updates its machine-precision recovery floor from
                 // the current accepted time before every transient advance.
@@ -3091,6 +3095,7 @@ impl Engine {
                         !nonlinear_state_matches_new_solution,
                         crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
                         None,
+                        None,
                     )?;
                 } else {
                     self.stamp_transient_system(
@@ -3531,7 +3536,36 @@ impl Engine {
                             DiagnosticTimer::start(diagnostic_timing_enabled);
                         if circuit.has_nonlinear_devices() && !nonlinear_state_matches_new_solution
                         {
-                            self.update_transient_nonlinear_devices(&mut circuit, &new_solution)?;
+                            if classic_mos_stamp_cache.is_some() && update_converged_for_acceptance
+                            {
+                                let postsolve_companion_coeff = if xyce_one_step {
+                                    CompanionCoefficients::backward_euler()
+                                } else {
+                                    coeff
+                                };
+                                self.update_classic_mos_with_companion_terms(
+                                    &mut circuit,
+                                    &new_solution,
+                                    &postsolve_companion_coeff,
+                                    dt,
+                                    &mosfet_history,
+                                    suppress_gate_charge,
+                                    &mut mosfet_companion_terms_scratch,
+                                    &mut mosfet_caps_scratch,
+                                )?;
+                                mosfet_companion_terms_valid = circuit
+                                    .mosfets
+                                    .last_update_all_is_physical()
+                                    && mosfet_companion_terms_scratch.len()
+                                        == circuit.mosfets.devices.len()
+                                    && mosfet_caps_scratch.len() == circuit.mosfets.devices.len();
+                            } else {
+                                self.update_transient_nonlinear_devices(
+                                    &mut circuit,
+                                    &new_solution,
+                                )?;
+                                mosfet_companion_terms_valid = false;
+                            }
                             nonlinear_state_matches_new_solution = true;
                         }
                         total_postsolve_update_nanos += postsolve_update_start.elapsed().as_nanos();
@@ -3609,6 +3643,8 @@ impl Engine {
                                     },
                                     classic_mos_stamp_cache.as_ref(),
                                     &mut vbic_snapshot_cache,
+                                    mosfet_companion_terms_valid
+                                        .then_some(mosfet_companion_terms_scratch.as_slice()),
                                     if classic_mos_stamp_cache.is_some() && !suppress_gate_charge {
                                         Some(&mut mosfet_caps_scratch)
                                     } else {
