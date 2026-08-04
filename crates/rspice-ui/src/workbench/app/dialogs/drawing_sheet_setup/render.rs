@@ -31,6 +31,7 @@ const DESCRIPTION: &str = "Author the permanent physical drawing sheet independe
 const PRIMARY: &str = "Apply sheet setup";
 const NAV_WIDTH: f32 = 230.0;
 const COLUMN_GAP: f32 = 0.0;
+const FACT_ROW_GAP: f32 = 12.0;
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_drawing_sheet_setup_dialog(&mut self, ctx: &Context) {
@@ -1331,21 +1332,19 @@ fn measurement_strip(ui: &mut Ui, cells: &[(&str, &str)]) {
             theme::sans(tokens::FS_MICRO, FontWeight::Regular),
             t.color.text_faint,
         );
-        let mut text = (*value).to_owned();
-        let max_width = w - 20.0;
-        while ui
-            .painter()
-            .layout_no_wrap(text.clone(), value_font.clone(), Color32::WHITE)
-            .size()
-            .x
-            > max_width
-            && text.chars().count() > 1
-        {
-            text.pop();
-            while !text.is_char_boundary(text.len()) {
-                text.pop();
-            }
-            text = format!("{}\u{2026}", text.trim_end_matches('\u{2026}').trim_end());
+        let text = elide_to_width(value, w - 20.0, |text| {
+            ui.painter()
+                .layout_no_wrap(text.to_owned(), value_font.clone(), Color32::WHITE)
+                .size()
+                .x
+        });
+        if text != **value {
+            ui.interact(
+                cell,
+                ui.id().with(("measurement-strip", index)),
+                Sense::hover(),
+            )
+            .on_hover_text(*value);
         }
         ui.painter().text(
             pos2(cell.left() + 10.0, cell.top() + 22.0),
@@ -1356,6 +1355,32 @@ fn measurement_strip(ui: &mut Ui, cells: &[(&str, &str)]) {
         );
         x += w + 1.0;
     }
+}
+
+/// Shorten `value` until `width_of` reports it within `max_width`, marking the
+/// cut with an ellipsis.
+///
+/// Every step removes one character from the *content* and rebuilds the
+/// candidate from scratch. Shrinking a string that already carries the
+/// ellipsis by popping its last character removes the ellipsis instead of any
+/// content, so re-appending it reproduces the same string: that is a fixed
+/// point, and a loop that reaches it never terminates.
+fn elide_to_width(value: &str, max_width: f32, width_of: impl Fn(&str) -> f32) -> String {
+    if width_of(value) <= max_width {
+        return value.to_owned();
+    }
+    let mut kept = value.to_owned();
+    while kept.pop().is_some() {
+        let trimmed = kept.trim_end();
+        if trimmed.is_empty() {
+            break;
+        }
+        let candidate = format!("{trimmed}\u{2026}");
+        if width_of(&candidate) <= max_width {
+            return candidate;
+        }
+    }
+    "\u{2026}".to_owned()
 }
 
 fn validation_slot(
@@ -1443,82 +1468,89 @@ fn preview_column(
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.set_min_height(height);
-                ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-                    Frame::NONE
-                .fill(t.color.bg_inset)
-                .inner_margin(Margin::symmetric(12, 11))
-                .show(ui, |ui| {
-                    // The column stacks bottom-up to dock this summary at the
-                    // bottom edge, and the frame inherits that layout: the
-                    // first row added lands at the bottom. Add the reference's
-                    // reading order in reverse so it reads top-down on screen.
-                    let sheets_written = match state.draft.scope {
-                        PageSetupScope::CurrentSheet => {
-                            format!("1 · {}", state.sheet_name)
+                let sheets_written = match state.draft.scope {
+                    PageSetupScope::CurrentSheet => format!("1 · {}", state.sheet_name),
+                    PageSetupScope::Document => {
+                        if state.managed_sheet_names.is_empty() {
+                            format!(
+                                "{} writable · {}",
+                                state.writable_sheet_count, state.document_name
+                            )
+                        } else {
+                            format!(
+                                "{} writable of {} · managed sheets skipped: {}",
+                                state.writable_sheet_count,
+                                state.sheet_count,
+                                state.managed_sheet_names.join(", ")
+                            )
                         }
-                        PageSetupScope::Document => {
-                            if state.managed_sheet_names.is_empty() {
-                                format!(
-                                    "{} writable · {}",
-                                    state.writable_sheet_count, state.document_name
-                                )
-                            } else {
-                                format!(
-                                    "{} writable of {} · managed sheets skipped: {}",
-                                    state.writable_sheet_count,
-                                    state.sheet_count,
-                                    state.managed_sheet_names.join(", ")
-                                )
-                            }
-                        }
-                        PageSetupScope::CurrentSheetAndDefault => {
-                            format!("1 · {} plus project default", state.sheet_name)
-                        }
-                    };
-                    fact_row(
-                        ui,
-                        "Not affected",
-                        "input revision · generated netlist · schematic checks · result datasets · release evidence",
-                    );
-                    fact_row(
-                        ui,
+                    }
+                    PageSetupScope::CurrentSheetAndDefault => {
+                        format!("1 · {} plus project default", state.sheet_name)
+                    }
+                };
+                let overflow = prospective_overflow.map_or("unavailable".to_owned(), |count| {
+                    if count == 0 {
+                        "none · everything stays inside".to_owned()
+                    } else {
+                        format!(
+                            "{count} {} would be outside the drawing area",
+                            if count == 1 { "object" } else { "objects" }
+                        )
+                    }
+                });
+                let changes = page_setup_change_summary(state);
+                let facts = [
+                    ("Sheets written", sheets_written.as_str()),
+                    ("Changes", changes.as_str()),
+                    ("Content outside the page", overflow.as_str()),
+                    (
                         "Undo",
                         "one entry, “Sheet format”; the previous format is restored exactly",
-                    );
-                    fact_row(
-                        ui,
-                        "Content outside the page",
-                        prospective_overflow
-                            .map_or("unavailable".to_owned(), |count| {
-                                if count == 0 {
-                                    "none · everything stays inside".to_owned()
-                                } else {
-                                    format!(
-                                        "{count} {} would be outside the drawing area",
-                                        if count == 1 { "object" } else { "objects" }
-                                    )
-                                }
-                            })
-                            .as_str(),
-                    );
-                    fact_row(ui, "Changes", &page_setup_change_summary(state));
-                    fact_row(ui, "Sheets written", &sheets_written);
-                    ui.add_space(8.0);
-                    section_caption(ui, "WHAT APPLY DOES");
-                });
-                    let preview_height = (ui.available_height() - 8.0).max(140.0);
-                    Frame::NONE
-                        .inner_margin(Margin::symmetric(12, 12))
-                        .show(ui, |ui| {
-                            draw_sheet_preview(
-                                ui,
-                                &state.draft,
-                                &state.last_valid_format,
-                                preview_content,
-                                preview_height - 24.0,
-                            );
-                        });
-                });
+                    ),
+                    (
+                        "Not affected",
+                        "input revision · generated netlist · schematic checks · result datasets · release evidence",
+                    ),
+                ];
+                let summary_height = effect_summary_height(ui, ui.available_width(), &facts);
+                let preview_height = (height - summary_height).max(140.0);
+
+                // The preview and effect summary are ordinary top-down rows.
+                // A previous bottom-up layout leaked into the summary's nested
+                // rows; zero-height child allocations then shared one baseline
+                // and painted every fact on top of the others.
+                ui.allocate_ui_with_layout(
+                    vec2(ui.available_width(), preview_height),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        Frame::NONE
+                            .inner_margin(Margin::symmetric(12, 12))
+                            .show(ui, |ui| {
+                                draw_sheet_preview(
+                                    ui,
+                                    &state.draft,
+                                    &state.last_valid_format,
+                                    preview_content,
+                                    preview_height - 24.0,
+                                );
+                            });
+                    },
+                );
+                Frame::NONE
+                    .fill(t.color.bg_inset)
+                    .inner_margin(Margin::symmetric(12, 11))
+                    .show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
+                        section_caption(ui, "WHAT APPLY DOES");
+                        ui.add_space(8.0);
+                        for (index, (label, value)) in facts.iter().enumerate() {
+                            fact_row(ui, label, value);
+                            if index + 1 < facts.len() {
+                                ui.add_space(6.0);
+                            }
+                        }
+                    });
             });
     });
 }
@@ -2227,26 +2259,94 @@ fn section_caption(ui: &mut Ui, label: &str) {
     );
 }
 
+fn fact_row_widths(width: f32) -> (f32, f32) {
+    let label_width = (width * 0.36).clamp(64.0, 150.0);
+    let value_width = (width - label_width - FACT_ROW_GAP).max(1.0);
+    (label_width, value_width)
+}
+
+fn fact_row_height(ui: &Ui, label: &str, value: &str, width: f32) -> f32 {
+    let t = Tokens::get(ui.ctx());
+    let (label_width, value_width) = fact_row_widths(width);
+    let label = ui.painter().layout(
+        label.to_uppercase(),
+        theme::sans(tokens::FS_MICRO, FontWeight::Regular),
+        t.color.text_faint,
+        label_width,
+    );
+    let value = ui.painter().layout(
+        value.to_owned(),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+        value_width,
+    );
+    label.size().y.max(value.size().y).max(13.0)
+}
+
+fn effect_summary_height(ui: &Ui, width: f32, facts: &[(&str, &str)]) -> f32 {
+    let caption_height = ui
+        .painter()
+        .layout_no_wrap(
+            "WHAT APPLY DOES".to_owned(),
+            theme::mono(tokens::FS_0, FontWeight::SemiBold),
+            Color32::WHITE,
+        )
+        .size()
+        .y;
+    let inner_width = (width - 24.0).max(1.0);
+    let rows = facts
+        .iter()
+        .map(|(label, value)| fact_row_height(ui, label, value, inner_width))
+        .sum::<f32>();
+    22.0 + caption_height + 8.0 + rows + 6.0 * facts.len().saturating_sub(1) as f32
+}
+
+/// One measured `label — value` line of the Apply summary.
+///
+/// Painting pre-wrapped galleys into an explicitly allocated row keeps the
+/// two columns stable under every parent layout and gives the docked summary
+/// an exact height before the preview consumes the remaining track.
 fn fact_row(ui: &mut Ui, label: &str, value: &str) {
     let t = Tokens::get(ui.ctx());
-    ui.horizontal(|ui| {
-        ui.set_min_height(25.0);
-        ui.label(
-            egui::RichText::new(label)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
-        );
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(value)
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text),
-                )
-                .wrap(),
-            );
-        });
+    let width = ui.available_width().max(1.0);
+    let (label_width, value_width) = fact_row_widths(width);
+    let label_galley = ui.painter().layout(
+        label.to_uppercase(),
+        theme::sans(tokens::FS_MICRO, FontWeight::Regular),
+        t.color.text_faint,
+        label_width,
+    );
+    let value_galley = ui.painter().layout(
+        value.to_owned(),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+        value_width,
+    );
+    let row_height = label_galley.size().y.max(value_galley.size().y).max(13.0);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, row_height), Sense::hover());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Label,
+            ui.is_enabled(),
+            format!("{label}: {value}"),
+        )
     });
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    let label_rect = Rect::from_min_size(rect.min, vec2(label_width, row_height));
+    let value_rect = Rect::from_min_size(
+        pos2(label_rect.right() + FACT_ROW_GAP, rect.top()),
+        vec2(value_width, row_height),
+    );
+    ui.painter().with_clip_rect(label_rect).galley(
+        label_rect.min,
+        label_galley,
+        t.color.text_faint,
+    );
+    ui.painter()
+        .with_clip_rect(value_rect)
+        .galley(value_rect.min, value_galley, t.color.text_dim);
 }
 
 fn muted(ui: &mut Ui, text: &str) {
@@ -2269,12 +2369,30 @@ const fn page_setup_primary_enabled(
 
 #[cfg(test)]
 mod tests {
-    use super::page_setup_primary_enabled;
+    use super::{elide_to_width, page_setup_primary_enabled};
 
     #[test]
     fn initial_governed_sheet_can_be_created_without_artificial_edits() {
         assert!(page_setup_primary_enabled(false, true, false, true));
         assert!(!page_setup_primary_enabled(false, true, false, false));
         assert!(!page_setup_primary_enabled(false, false, false, true));
+    }
+
+    /// A measurement cell narrower than its value used to spin forever, which
+    /// froze the whole application on the Scope & inheritance section.
+    #[test]
+    fn measurement_values_elide_instead_of_looping() {
+        let width_of = |text: &str| text.chars().count() as f32 * 7.0;
+        let value = "ISO A4 · landscape · 297 × 210 mm";
+        for max_width in [0.0, 1.0, 12.0, 40.0, 90.0, 160.0] {
+            let elided = elide_to_width(value, max_width, width_of);
+            assert!(elided.ends_with('\u{2026}'), "{max_width} → {elided:?}");
+            assert!(
+                width_of(&elided) <= max_width.max(width_of("\u{2026}")),
+                "{max_width} → {elided:?}"
+            );
+            assert!(value.starts_with(elided.trim_end_matches('\u{2026}')));
+        }
+        assert_eq!(elide_to_width(value, 4000.0, width_of), value);
     }
 }

@@ -6,7 +6,10 @@
 
 use std::collections::BTreeMap;
 
-use egui::{Context, Frame, Grid, Margin, RichText, ScrollArea, Stroke, TextEdit, Ui, vec2};
+use egui::{
+    Align, Context, Frame, Grid, Layout, Margin, RichText, ScrollArea, Stroke, TextEdit, Ui, vec2,
+};
+use egui_extras::{Column, TableBuilder};
 
 use crate::diagnostics::ConsoleMessage;
 use crate::state::{
@@ -584,109 +587,183 @@ fn title_block_fields_body(
         format.title_block.template
             == crate::state::DrawingSheetTitleBlockTemplate::OrganizationManaged
     });
-    ui.group(|ui| {
-        ui.label(
-            RichText::new(if managed {
-                "The organization owns the template and field order."
-            } else {
-                "Field provenance remains visible in the printed block."
-            })
-            .strong(),
-        );
-        ui.weak(if managed {
-            "Authorized sheet and project values remain editable; managed labels, required fields, order, and organization-policy values are locked."
-        } else {
-            "Automatic fields update from their named source. Editable fields are saved with the sheet or project and never silently replaced by a generated value."
+    Frame::NONE
+        .fill(t.color.bg_panel)
+        .stroke(Stroke::new(1.0, t.color.border))
+        .corner_radius(t.radius)
+        .inner_margin(Margin::symmetric(10, 9))
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.label(
+                RichText::new(if managed {
+                    "The organization owns the template and field order."
+                } else {
+                    "Field provenance remains visible in the printed block."
+                })
+                .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
+                .color(t.color.text),
+            );
+            ui.add_space(3.0);
+            ui.add(
+                egui::Label::new(
+                    RichText::new(if managed {
+                        "Authorized sheet and project values remain editable; managed labels, required fields, order, and organization-policy values are locked."
+                    } else {
+                        "Automatic fields update from their named source. Editable fields are saved with the sheet or project and never silently replaced by a generated value."
+                    })
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_dim),
+                )
+                .wrap(),
+            );
         });
-    });
     ui.add_space(10.0);
     title_field_summary(ui, state);
     ui.add_space(10.0);
-    Grid::new("title-block-fields-grid")
-        .striped(true)
-        .min_col_width(110.0)
-        .spacing(vec2(14.0, 8.0))
-        .show(ui, |ui| {
-            for heading in ["Field", "Value", "Owner", "State"] {
-                ui.label(
-                    RichText::new(heading)
-                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                        .color(t.color.text_dim),
-                );
-            }
-            ui.end_row();
-            for id in DrawingSheetTitleFieldId::ALL {
-                let policy = id.policy();
-                ui.horizontal(|ui| {
-                    let field = state.draft.entry(id).or_default();
-                    if policy.required_visible {
-                        field.visible = true;
-                        let mut visible = true;
-                        ui.add_enabled(false, egui::Checkbox::without_text(&mut visible));
-                    } else {
-                        ui.checkbox(&mut field.visible, "");
-                    }
-                    ui.label(title_field_label(id));
-                });
-                match policy.value_authority {
-                    DrawingSheetTitleFieldValueAuthority::Automatic => {
-                        automatic_field_readout(ui, state.automatic_values.entry(id).or_default());
-                        state.draft.entry(id).or_default().value.clear();
-                    }
-                    DrawingSheetTitleFieldValueAuthority::Authored => {
-                        let policy_locked =
-                            managed && id == DrawingSheetTitleFieldId::Classification;
-                        if id.is_project_owned() {
-                            ui.add_enabled(
-                                !policy_locked,
-                                TextEdit::singleline(state.draft_project.entry(id).or_default())
-                                    .desired_width(260.0)
-                                    .char_limit(256),
-                            );
-                        } else {
-                            ui.add(
-                                TextEdit::singleline(&mut state.draft.entry(id).or_default().value)
-                                    .desired_width(260.0)
-                                    .char_limit(256),
-                            );
-                        }
-                    }
-                }
-                ui.label(title_field_owner(id));
-                let (status, color) =
-                    if policy.value_authority == DrawingSheetTitleFieldValueAuthority::Automatic {
-                        ("automatic", t.color.ok)
-                    } else if policy.required_visible {
-                        ("required", t.color.warn)
-                    } else {
-                        ("editable", t.color.text_dim)
-                    };
-                field_state_badge(ui, status, color);
-                ui.end_row();
-            }
-        });
+    title_field_table(ui, state, managed);
     ui.add_space(10.0);
     if let Some(error) = authority_error.or(state.error.as_deref()) {
         ui.colored_label(t.color.err, error);
     }
     ui.add_space(8.0);
-    ui.columns(3, |columns| {
-        note(
-            &mut columns[0],
+    let notes = [
+        (
             "Overflow",
             "Long values keep their full saved text. The printed cell truncates with an ellipsis and Page Setup reports the exact field; RSpice never shrinks one field below the template's type size.",
-        );
-        note(
-            &mut columns[1],
+        ),
+        (
             "Localization",
             "Labels come from the selected title-block template. Engineering identifiers and revision values preserve their source spelling and direction.",
-        );
-        note(
-            &mut columns[2],
+        ),
+        (
             "Revision history",
             "Saving these values is one presentation transaction and does not change connectivity, checks, simulations, or retained results.",
-        );
-    });
+        ),
+    ];
+    if ui.available_width() < 720.0 {
+        for (index, (heading, body)) in notes.iter().enumerate() {
+            note(ui, heading, body);
+            if index + 1 < notes.len() {
+                ui.add_space(8.0);
+            }
+        }
+    } else {
+        ui.columns(3, |columns| {
+            for (column, (heading, body)) in columns.iter_mut().zip(notes) {
+                note(column, heading, body);
+            }
+        });
+    }
+}
+
+const TITLE_FIELD_TABLE_MIN_WIDTH: f32 = 760.0;
+const TITLE_FIELD_HEADER_HEIGHT: f32 = 28.0;
+const TITLE_FIELD_ROW_HEIGHT: f32 = 40.0;
+
+fn title_field_table(ui: &mut Ui, state: &mut TitleBlockFieldsState, managed: bool) {
+    let t = Tokens::get(ui.ctx());
+    let table_width = ui.available_width().max(TITLE_FIELD_TABLE_MIN_WIDTH);
+    ScrollArea::horizontal()
+        .id_salt("title-block-fields-table-horizontal")
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            ui.set_min_width(table_width);
+            let field_width = (table_width * 0.24).clamp(180.0, 280.0);
+            let owner_width = (table_width * 0.16).clamp(120.0, 180.0);
+            let state_width = (table_width * 0.11).clamp(92.0, 122.0);
+            TableBuilder::new(ui)
+                .id_salt("title-block-fields-table")
+                .striped(true)
+                .vscroll(false)
+                .cell_layout(Layout::left_to_right(Align::Center))
+                .column(Column::initial(field_width).at_least(180.0))
+                .column(Column::remainder().at_least(300.0))
+                .column(Column::initial(owner_width).at_least(120.0))
+                .column(Column::initial(state_width).at_least(92.0))
+                .header(TITLE_FIELD_HEADER_HEIGHT, |mut header| {
+                    for heading in ["Field", "Value", "Owner", "State"] {
+                        header.col(|ui| {
+                            ui.painter()
+                                .rect_filled(ui.max_rect(), 0.0, t.color.bg_panel_2);
+                            ui.label(
+                                RichText::new(heading)
+                                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                                    .color(t.color.text_dim),
+                            );
+                        });
+                    }
+                })
+                .body(|mut body| {
+                    for id in DrawingSheetTitleFieldId::ALL {
+                        let policy = id.policy();
+                        body.row(TITLE_FIELD_ROW_HEIGHT, |mut row| {
+                            row.col(|ui| {
+                                ui.horizontal(|ui| {
+                                    let field = state.draft.entry(id).or_default();
+                                    if policy.required_visible {
+                                        field.visible = true;
+                                        let mut visible = true;
+                                        ui.add_enabled(
+                                            false,
+                                            egui::Checkbox::without_text(&mut visible),
+                                        );
+                                    } else {
+                                        ui.checkbox(&mut field.visible, "");
+                                    }
+                                    ui.label(title_field_label(id));
+                                });
+                            });
+                            row.col(|ui| match policy.value_authority {
+                                DrawingSheetTitleFieldValueAuthority::Automatic => {
+                                    automatic_field_readout(
+                                        ui,
+                                        state.automatic_values.entry(id).or_default(),
+                                    );
+                                    state.draft.entry(id).or_default().value.clear();
+                                }
+                                DrawingSheetTitleFieldValueAuthority::Authored => {
+                                    let policy_locked =
+                                        managed && id == DrawingSheetTitleFieldId::Classification;
+                                    let width = ui.available_width();
+                                    if id.is_project_owned() {
+                                        ui.add_enabled(
+                                            !policy_locked,
+                                            TextEdit::singleline(
+                                                state.draft_project.entry(id).or_default(),
+                                            )
+                                            .desired_width(width)
+                                            .char_limit(256),
+                                        );
+                                    } else {
+                                        ui.add_sized(
+                                            vec2(width, 28.0),
+                                            TextEdit::singleline(
+                                                &mut state.draft.entry(id).or_default().value,
+                                            )
+                                            .char_limit(256),
+                                        );
+                                    }
+                                }
+                            });
+                            row.col(|ui| {
+                                ui.label(title_field_owner(id));
+                            });
+                            row.col(|ui| {
+                                let (status, color) = if policy.value_authority
+                                    == DrawingSheetTitleFieldValueAuthority::Automatic
+                                {
+                                    ("automatic", t.color.ok)
+                                } else if policy.required_visible {
+                                    ("required", t.color.warn)
+                                } else {
+                                    ("editable", t.color.text_dim)
+                                };
+                                field_state_badge(ui, status, color);
+                            });
+                        });
+                    }
+                });
+        });
 }
 
 fn automatic_field_readout(ui: &mut Ui, value: &str) {
@@ -696,7 +773,7 @@ fn automatic_field_readout(ui: &mut Ui, value: &str) {
         .stroke(Stroke::new(1.0, t.color.border))
         .inner_margin(Margin::symmetric(8, 5))
         .show(ui, |ui| {
-            ui.set_min_width(244.0);
+            ui.set_min_width(ui.available_width());
             ui.horizontal(|ui| {
                 let (rect, _) = ui.allocate_exact_size(vec2(16.0, 14.0), egui::Sense::hover());
                 let left = rect.center() + vec2(-3.0, 0.0);
@@ -1238,43 +1315,97 @@ fn title_field_summary(ui: &mut Ui, state: &TitleBlockFieldsState) {
     let Some(format) = &state.format else {
         return;
     };
-    let total_width = ui.available_width();
-    let preview_width = total_width * (0.72 / 2.0);
-    ui.horizontal(|ui| {
-        ui.allocate_ui_with_layout(
-            vec2(preview_width, 176.0),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
+    let t = Tokens::get(ui.ctx());
+    let automatic = DrawingSheetTitleFieldId::ALL
+        .into_iter()
+        .filter(|id| id.policy().value_authority == DrawingSheetTitleFieldValueAuthority::Automatic)
+        .count();
+    Frame::NONE
+        .fill(super::drawing_sheet_preview::sheet_desk_color(ui.ctx()))
+        .stroke(Stroke::new(1.0, t.color.border))
+        .corner_radius(t.radius)
+        .inner_margin(Margin::same(11))
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            let total_width = ui.available_width();
+            let gap = 13.0;
+            if total_width < 940.0 {
                 drawing_sheet_preview(ui, format, 142.0, &format_label_with_dimensions(format));
-            },
-        );
-        ui.allocate_ui_with_layout(
-            vec2((total_width - preview_width - 8.0).max(280.0), 176.0),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                ui.label(format!(
-                    "Template  {}",
-                    title_template_label(format.title_block.template)
-                ));
-                ui.label(format!(
-                    "Placement  {}",
-                    title_anchor_label(format.title_block.anchor)
-                ));
-                let automatic = DrawingSheetTitleFieldId::ALL
-                    .into_iter()
-                    .filter(|id| {
-                        id.policy().value_authority
-                            == DrawingSheetTitleFieldValueAuthority::Automatic
-                    })
-                    .count();
-                ui.label(format!("Automatic fields  {automatic} linked"));
-                ui.label(format!(
-                    "Editable fields  {} governed values",
-                    DrawingSheetTitleFieldId::ALL.len() - automatic
-                ));
-            },
-        );
-    });
+                ui.add_space(gap);
+                title_field_summary_facts(ui, format, automatic, total_width, 0.0);
+            } else {
+                let preview_width = (total_width - gap) * 0.36;
+                let facts_width = (total_width - preview_width - gap).max(280.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    ui.allocate_ui_with_layout(
+                        vec2(preview_width, 142.0),
+                        Layout::top_down(Align::Min),
+                        |ui| {
+                            drawing_sheet_preview(
+                                ui,
+                                format,
+                                142.0,
+                                &format_label_with_dimensions(format),
+                            );
+                        },
+                    );
+                    title_field_summary_facts(ui, format, automatic, facts_width, 122.0);
+                });
+            }
+        });
+}
+
+fn title_field_summary_facts(
+    ui: &mut Ui,
+    format: &SchematicSheetFormat,
+    automatic: usize,
+    width: f32,
+    min_height: f32,
+) {
+    let t = Tokens::get(ui.ctx());
+    Frame::NONE
+        .fill(t.color.bg_panel)
+        .stroke(Stroke::new(1.0, t.color.border))
+        .inner_margin(Margin::symmetric(10, 9))
+        .show(ui, |ui| {
+            ui.set_min_size(vec2((width - 2.0).max(1.0), min_height));
+            Grid::new("title-block-field-summary-facts")
+                .num_columns(2)
+                .spacing(vec2(12.0, 7.0))
+                .show(ui, |ui| {
+                    for (label, value) in [
+                        (
+                            "Template",
+                            title_template_label(format.title_block.template).to_owned(),
+                        ),
+                        (
+                            "Placement",
+                            title_anchor_label(format.title_block.anchor).to_owned(),
+                        ),
+                        ("Automatic fields", format!("{automatic} linked to source")),
+                        (
+                            "Editable fields",
+                            format!(
+                                "{} governed values",
+                                DrawingSheetTitleFieldId::ALL.len() - automatic
+                            ),
+                        ),
+                    ] {
+                        ui.label(
+                            RichText::new(label)
+                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                .color(t.color.text_dim),
+                        );
+                        ui.label(
+                            RichText::new(value)
+                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                .color(t.color.text),
+                        );
+                        ui.end_row();
+                    }
+                });
+        });
 }
 
 fn manager_source_label(state: &SheetFormatManagerState) -> String {
@@ -1308,8 +1439,9 @@ fn format_label_with_dimensions(format: &SchematicSheetFormat) -> String {
 
 fn note(ui: &mut Ui, heading: &str, body: &str) {
     ui.group(|ui| {
+        ui.set_min_width(ui.available_width());
         ui.label(RichText::new(heading).strong());
-        ui.weak(body);
+        ui.add(egui::Label::new(RichText::new(body).weak()).wrap());
     });
 }
 

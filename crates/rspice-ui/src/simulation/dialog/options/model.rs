@@ -233,6 +233,7 @@ impl SimulationOptions {
             transient_nonlinear_rhstol: None,
             transient_nonlinear_max_iterations: None,
             transient_enforce_device_convergence: None,
+            transient_nonlinear_nox: None,
             transient_lte_reference: None,
             transient_new_bp_stepping: None,
             convergence_preset: None,
