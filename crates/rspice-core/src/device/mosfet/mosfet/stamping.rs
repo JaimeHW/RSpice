@@ -86,11 +86,11 @@ impl Mosfet {
 
         let (bs_anode, bs_cathode, gbs, ieq_bs) =
             self.body_source_junction_linearization_cached(eval_vbs, cache_matches);
-        Self::stamp_diode_linearization_direct(matrix, rhs, bs_anode, bs_cathode, gbs, ieq_bs);
+        self.stamp_body_source_linearization_direct(matrix, rhs, bs_anode, bs_cathode, gbs, ieq_bs);
 
         let (bd_anode, bd_cathode, gbd, ieq_bd) =
             self.body_drain_junction_linearization_cached(eval_vds, eval_vbs, cache_matches);
-        Self::stamp_diode_linearization_direct(matrix, rhs, bd_anode, bd_cathode, gbd, ieq_bd);
+        self.stamp_body_drain_linearization_direct(matrix, rhs, bd_anode, bd_cathode, gbd, ieq_bd);
     }
 
     /// Stamp using O(1) direct indexing (call after link).

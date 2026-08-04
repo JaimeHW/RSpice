@@ -454,6 +454,66 @@ impl Mosfet {
             rhs[cathode - 1] += ieq;
         }
     }
+
+    /// Stamp a source-body junction through its prelinked diagonal when the
+    /// bulk is ground. Non-grounded bulks retain the general sparse path.
+    #[inline]
+    pub(in crate::device::mosfet::mosfet) fn stamp_body_source_linearization_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        anode: NodeId,
+        cathode: NodeId,
+        gd: Value,
+        ieq: Value,
+    ) {
+        if self.node_bulk != 0 {
+            Self::stamp_diode_linearization_direct(matrix, rhs, anode, cathode, gd, ieq);
+            return;
+        }
+        if gd == 0.0 && ieq == 0.0 {
+            return;
+        }
+        if let Some(index) = self.indices.ss {
+            matrix.stamp_direct(index, gd);
+        }
+        if anode > 0 {
+            rhs[anode - 1] -= ieq;
+        }
+        if cathode > 0 {
+            rhs[cathode - 1] += ieq;
+        }
+    }
+
+    /// Stamp a drain-body junction through its prelinked diagonal when the
+    /// bulk is ground. Non-grounded bulks retain the general sparse path.
+    #[inline]
+    pub(in crate::device::mosfet::mosfet) fn stamp_body_drain_linearization_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        anode: NodeId,
+        cathode: NodeId,
+        gd: Value,
+        ieq: Value,
+    ) {
+        if self.node_bulk != 0 {
+            Self::stamp_diode_linearization_direct(matrix, rhs, anode, cathode, gd, ieq);
+            return;
+        }
+        if gd == 0.0 && ieq == 0.0 {
+            return;
+        }
+        if let Some(index) = self.indices.dd {
+            matrix.stamp_direct(index, gd);
+        }
+        if anode > 0 {
+            rhs[anode - 1] -= ieq;
+        }
+        if cathode > 0 {
+            rhs[cathode - 1] += ieq;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -532,5 +592,66 @@ mod tests {
         mos.cjsw = 5.0e-10;
         mos.drain_perimeter = 4.0e-6;
         assert_eq!(mos.body_junction_charge_mask(), 2);
+    }
+
+    #[test]
+    fn grounded_bulk_linked_junction_stamps_match_general_path_exactly() {
+        use crate::device::NonlinearDevice;
+
+        let candidate = [1.2, 1.8];
+        for mut mos in [
+            Mosfet::new_nmos("mn".to_string(), 1, 2, 0, 0),
+            Mosfet::new_pmos("mp".to_string(), 1, 2, 0, 0),
+        ] {
+            let triplets: Vec<_> = (0..2)
+                .flat_map(|row| (0..2).map(move |col| (row, col, 0.0)))
+                .collect();
+            let mut linked = StaticMatrix::from_triplets(2, 2, &triplets).expect("linked matrix");
+            let mut general = StaticMatrix::from_triplets(2, 2, &triplets).expect("general matrix");
+            mos.link(&linked);
+            mos.update(&candidate);
+            let (source_anode, source_cathode, gbs, ieq_bs) =
+                mos.body_source_junction_linearization_cached(mos.eval_vbs, true);
+            let (drain_anode, drain_cathode, gbd, ieq_bd) =
+                mos.body_drain_junction_linearization_cached(mos.eval_vds, mos.eval_vbs, true);
+            let mut linked_rhs = vec![0.0; 2];
+            let mut general_rhs = vec![0.0; 2];
+
+            mos.stamp_body_source_linearization_direct(
+                &mut linked,
+                &mut linked_rhs,
+                source_anode,
+                source_cathode,
+                gbs,
+                ieq_bs,
+            );
+            mos.stamp_body_drain_linearization_direct(
+                &mut linked,
+                &mut linked_rhs,
+                drain_anode,
+                drain_cathode,
+                gbd,
+                ieq_bd,
+            );
+            Mosfet::stamp_diode_linearization_direct(
+                &mut general,
+                &mut general_rhs,
+                source_anode,
+                source_cathode,
+                gbs,
+                ieq_bs,
+            );
+            Mosfet::stamp_diode_linearization_direct(
+                &mut general,
+                &mut general_rhs,
+                drain_anode,
+                drain_cathode,
+                gbd,
+                ieq_bd,
+            );
+
+            assert_eq!(linked_rhs, general_rhs);
+            assert_eq!(linked.values_mut(), general.values_mut());
+        }
     }
 }
