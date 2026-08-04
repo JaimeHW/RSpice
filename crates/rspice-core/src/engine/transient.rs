@@ -4413,6 +4413,7 @@ impl Engine {
                         Some(vbic_snapshot_cache.as_slice()),
                         None,
                         None,
+                        None,
                         suppress_gate_charge,
                         &tline_dc_refs,
                         &coupled_tline_refs,
@@ -5431,6 +5432,7 @@ impl Engine {
                         Some(vbic_snapshot_cache.as_slice()),
                         None,
                         None,
+                        None,
                         suppress_gate_charge,
                         &tline_dc_refs,
                         &coupled_tline_refs,
@@ -5707,6 +5709,9 @@ impl Engine {
                 )?);
             }
             let history_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
+            let cached_mosfet_gate_companion_charges = (mosfet_companion_terms_valid
+                && mosfet_companion_charges_scratch.len() == circuit.mosfets.devices.len())
+            .then_some(mosfet_companion_charges_scratch.as_slice());
             self.update_reactive_history(
                 &mut circuit,
                 &new_solution,
@@ -5728,6 +5733,7 @@ impl Engine {
                 capacitor_accepted_states_valid
                     .then_some(capacitor_accepted_states_scratch.as_slice()),
                 mosfet_caps_valid.then_some(mosfet_caps_scratch.as_slice()),
+                cached_mosfet_gate_companion_charges,
                 suppress_gate_charge,
                 &tline_dc_refs,
                 &coupled_tline_refs,

@@ -4,6 +4,21 @@ use super::*;
 
 impl Engine {
     #[inline]
+    fn install_cached_mosfet_gate_companion_charges(
+        charges: &MosfetGateCompanionCharges,
+        qgs: &mut Value,
+        cqgs: &mut Value,
+        qgd: &mut Value,
+        cqgd: &mut Value,
+        qgb: &mut Value,
+        cqgb: &mut Value,
+    ) {
+        (*qgs, *cqgs) = charges[0];
+        (*qgd, *cqgd) = charges[1];
+        (*qgb, *cqgb) = charges[2];
+    }
+
+    #[inline]
     pub(super) fn update_reactive_history(
         &self,
         circuit: &mut crate::circuit::CircuitData,
@@ -25,6 +40,7 @@ impl Engine {
         vbic_snapshots: Option<&[Option<BjtChargeSnapshot>]>,
         capacitor_accepted_states: Option<&[CapacitorAcceptedState]>,
         mosfet_caps: Option<&[(Value, Value, Value)]>,
+        mosfet_gate_companion_charges: Option<&[MosfetGateCompanionCharges]>,
         suppress_gate_charge_history: bool,
         tline_dc_refs: &[(Value, Value)],
         coupled_tline_refs: &[CoupledTlineReferenceState],
@@ -553,6 +569,8 @@ impl Engine {
         // the new accepted values; arithmetic below still reads the identical
         // old `prev` and `prev_prev` generations.
         mosfet_history.rotate_gate_generations(suppress_gate_charge_history);
+        let mosfet_gate_companion_charges = mosfet_gate_companion_charges
+            .filter(|charges| charges.len() == circuit.mosfets.devices.len());
 
         // Every instance owns one disjoint element in each history vector, so
         // the model arithmetic can run in parallel without reductions or a
@@ -602,7 +620,9 @@ impl Engine {
                 .all(|history| history.len() == instance_count);
                 let caps_shape_matches =
                     mosfet_caps.is_none_or(|capacitances| capacitances.len() == instance_count);
-                if !history_shapes_match || !caps_shape_matches {
+                let gate_charges_shape_matches = mosfet_gate_companion_charges
+                    .is_none_or(|charges| charges.len() == instance_count);
+                if !history_shapes_match || !caps_shape_matches || !gate_charges_shape_matches {
                     return Err(SimulationError::Circuit(
                         "classic-MOS transient history shape does not match the device population"
                             .to_string(),
@@ -695,10 +715,7 @@ impl Engine {
                                     Some(cache) => cache[idx],
                                     None => mos.transient_capacitance_halves_at(vgs, vds, vbs),
                                 };
-                                let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
-                                let cgs = cgs_half + *capgs_out + cgs_ov;
-                                let cgd = cgd_half + *capgd_out + cgd_ov;
-                                let cgb = cgb_half + *capgb_out + cgb_ov;
+                                let previous_cap_halves = (*capgs_out, *capgd_out, *capgb_out);
                                 *vgs_out = vgs;
                                 *capgs_out = cgs_half;
                                 *vgd_out = vgd;
@@ -706,44 +723,63 @@ impl Engine {
                                 *vgb_out = vgb;
                                 *capgb_out = cgb_half;
                                 if !suppress_gate_charge_history {
-                                    let (_geq, _ieq, q_curr, cq_curr) = Self::jfet_companion_terms(
-                                        coeff,
-                                        dt,
-                                        cgs,
-                                        vgs,
-                                        vgs_prev_prev[idx],
-                                        qgs_prev_prev[idx],
-                                        qgs_prev_prev_prev[idx],
-                                        *cqgs_out,
-                                    );
-                                    *qgs_out = q_curr;
-                                    *cqgs_out = cq_curr;
+                                    if let Some(charges) = mosfet_gate_companion_charges {
+                                        Self::install_cached_mosfet_gate_companion_charges(
+                                            &charges[idx],
+                                            qgs_out,
+                                            cqgs_out,
+                                            qgd_out,
+                                            cqgd_out,
+                                            qgb_out,
+                                            cqgb_out,
+                                        );
+                                    } else {
+                                        let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
+                                        let cgs = cgs_half + previous_cap_halves.0 + cgs_ov;
+                                        let cgd = cgd_half + previous_cap_halves.1 + cgd_ov;
+                                        let cgb = cgb_half + previous_cap_halves.2 + cgb_ov;
+                                        let (_geq, _ieq, q_curr, cq_curr) =
+                                            Self::jfet_companion_terms(
+                                                coeff,
+                                                dt,
+                                                cgs,
+                                                vgs,
+                                                vgs_prev_prev[idx],
+                                                qgs_prev_prev[idx],
+                                                qgs_prev_prev_prev[idx],
+                                                *cqgs_out,
+                                            );
+                                        *qgs_out = q_curr;
+                                        *cqgs_out = cq_curr;
 
-                                    let (_geq, _ieq, q_curr, cq_curr) = Self::jfet_companion_terms(
-                                        coeff,
-                                        dt,
-                                        cgd,
-                                        vgd,
-                                        vgd_prev_prev[idx],
-                                        qgd_prev_prev[idx],
-                                        qgd_prev_prev_prev[idx],
-                                        *cqgd_out,
-                                    );
-                                    *qgd_out = q_curr;
-                                    *cqgd_out = cq_curr;
+                                        let (_geq, _ieq, q_curr, cq_curr) =
+                                            Self::jfet_companion_terms(
+                                                coeff,
+                                                dt,
+                                                cgd,
+                                                vgd,
+                                                vgd_prev_prev[idx],
+                                                qgd_prev_prev[idx],
+                                                qgd_prev_prev_prev[idx],
+                                                *cqgd_out,
+                                            );
+                                        *qgd_out = q_curr;
+                                        *cqgd_out = cq_curr;
 
-                                    let (_geq, _ieq, q_curr, cq_curr) = Self::jfet_companion_terms(
-                                        coeff,
-                                        dt,
-                                        cgb,
-                                        vgb,
-                                        vgb_prev_prev[idx],
-                                        qgb_prev_prev[idx],
-                                        qgb_prev_prev_prev[idx],
-                                        *cqgb_out,
-                                    );
-                                    *qgb_out = q_curr;
-                                    *cqgb_out = cq_curr;
+                                        let (_geq, _ieq, q_curr, cq_curr) =
+                                            Self::jfet_companion_terms(
+                                                coeff,
+                                                dt,
+                                                cgb,
+                                                vgb,
+                                                vgb_prev_prev[idx],
+                                                qgb_prev_prev[idx],
+                                                qgb_prev_prev_prev[idx],
+                                                *cqgb_out,
+                                            );
+                                        *qgb_out = q_curr;
+                                        *cqgb_out = cq_curr;
+                                    }
                                 }
 
                                 let body_charge_mask = mos.body_junction_charge_mask();
@@ -816,10 +852,11 @@ impl Engine {
                 Some(cache) => cache[idx],
                 None => mos.transient_capacitance_halves_at(vgs, vds, vbs),
             };
-            let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
-            let cgs = cgs_half + mosfet_history.capgs_prev_half[idx] + cgs_ov;
-            let cgd = cgd_half + mosfet_history.capgd_prev_half[idx] + cgd_ov;
-            let cgb = cgb_half + mosfet_history.capgb_prev_half[idx] + cgb_ov;
+            let previous_cap_halves = (
+                mosfet_history.capgs_prev_half[idx],
+                mosfet_history.capgd_prev_half[idx],
+                mosfet_history.capgb_prev_half[idx],
+            );
             mosfet_history.vgs_prev[idx] = vgs;
             mosfet_history.capgs_prev_half[idx] = cgs_half;
             mosfet_history.vgd_prev[idx] = vgd;
@@ -827,44 +864,60 @@ impl Engine {
             mosfet_history.vgb_prev[idx] = vgb;
             mosfet_history.capgb_prev_half[idx] = cgb_half;
             if !suppress_gate_charge_history {
-                let (_geq_gs, _ieq_gs, qgs_curr, cqgs_curr) = Self::jfet_companion_terms(
-                    coeff,
-                    dt,
-                    cgs,
-                    vgs,
-                    mosfet_history.vgs_prev_prev[idx],
-                    mosfet_history.qgs_prev_prev[idx],
-                    mosfet_history.qgs_prev_prev_prev[idx],
-                    mosfet_history.cqgs_prev[idx],
-                );
-                mosfet_history.qgs_prev[idx] = qgs_curr;
-                mosfet_history.cqgs_prev[idx] = cqgs_curr;
+                if let Some(charges) = mosfet_gate_companion_charges {
+                    Self::install_cached_mosfet_gate_companion_charges(
+                        &charges[idx],
+                        &mut mosfet_history.qgs_prev[idx],
+                        &mut mosfet_history.cqgs_prev[idx],
+                        &mut mosfet_history.qgd_prev[idx],
+                        &mut mosfet_history.cqgd_prev[idx],
+                        &mut mosfet_history.qgb_prev[idx],
+                        &mut mosfet_history.cqgb_prev[idx],
+                    );
+                } else {
+                    let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
+                    let cgs = cgs_half + previous_cap_halves.0 + cgs_ov;
+                    let cgd = cgd_half + previous_cap_halves.1 + cgd_ov;
+                    let cgb = cgb_half + previous_cap_halves.2 + cgb_ov;
+                    let (_geq_gs, _ieq_gs, qgs_curr, cqgs_curr) = Self::jfet_companion_terms(
+                        coeff,
+                        dt,
+                        cgs,
+                        vgs,
+                        mosfet_history.vgs_prev_prev[idx],
+                        mosfet_history.qgs_prev_prev[idx],
+                        mosfet_history.qgs_prev_prev_prev[idx],
+                        mosfet_history.cqgs_prev[idx],
+                    );
+                    mosfet_history.qgs_prev[idx] = qgs_curr;
+                    mosfet_history.cqgs_prev[idx] = cqgs_curr;
 
-                let (_geq_gd, _ieq_gd, qgd_curr, cqgd_curr) = Self::jfet_companion_terms(
-                    coeff,
-                    dt,
-                    cgd,
-                    vgd,
-                    mosfet_history.vgd_prev_prev[idx],
-                    mosfet_history.qgd_prev_prev[idx],
-                    mosfet_history.qgd_prev_prev_prev[idx],
-                    mosfet_history.cqgd_prev[idx],
-                );
-                mosfet_history.qgd_prev[idx] = qgd_curr;
-                mosfet_history.cqgd_prev[idx] = cqgd_curr;
+                    let (_geq_gd, _ieq_gd, qgd_curr, cqgd_curr) = Self::jfet_companion_terms(
+                        coeff,
+                        dt,
+                        cgd,
+                        vgd,
+                        mosfet_history.vgd_prev_prev[idx],
+                        mosfet_history.qgd_prev_prev[idx],
+                        mosfet_history.qgd_prev_prev_prev[idx],
+                        mosfet_history.cqgd_prev[idx],
+                    );
+                    mosfet_history.qgd_prev[idx] = qgd_curr;
+                    mosfet_history.cqgd_prev[idx] = cqgd_curr;
 
-                let (_geq_gb, _ieq_gb, qgb_curr, cqgb_curr) = Self::jfet_companion_terms(
-                    coeff,
-                    dt,
-                    cgb,
-                    vgb,
-                    mosfet_history.vgb_prev_prev[idx],
-                    mosfet_history.qgb_prev_prev[idx],
-                    mosfet_history.qgb_prev_prev_prev[idx],
-                    mosfet_history.cqgb_prev[idx],
-                );
-                mosfet_history.qgb_prev[idx] = qgb_curr;
-                mosfet_history.cqgb_prev[idx] = cqgb_curr;
+                    let (_geq_gb, _ieq_gb, qgb_curr, cqgb_curr) = Self::jfet_companion_terms(
+                        coeff,
+                        dt,
+                        cgb,
+                        vgb,
+                        mosfet_history.vgb_prev_prev[idx],
+                        mosfet_history.qgb_prev_prev[idx],
+                        mosfet_history.qgb_prev_prev_prev[idx],
+                        mosfet_history.cqgb_prev[idx],
+                    );
+                    mosfet_history.qgb_prev[idx] = qgb_curr;
+                    mosfet_history.cqgb_prev[idx] = cqgb_curr;
+                }
             }
 
             let body_charge_mask = mos.body_junction_charge_mask();
@@ -1057,5 +1110,42 @@ impl Engine {
         );
         Self::update_ekv26_history(circuit, accepted_solution, coeff, dt, ekv26_history);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cached_mosfet_gate_companion_charges_install_bit_exactly() {
+        let charges = [
+            (1.25e-15, -2.5e-6),
+            (-3.75e-15, 4.5e-6),
+            (5.5e-15, -6.25e-6),
+        ];
+        let mut qgs = Value::NAN;
+        let mut cqgs = Value::NAN;
+        let mut qgd = Value::NAN;
+        let mut cqgd = Value::NAN;
+        let mut qgb = Value::NAN;
+        let mut cqgb = Value::NAN;
+
+        Engine::install_cached_mosfet_gate_companion_charges(
+            &charges, &mut qgs, &mut cqgs, &mut qgd, &mut cqgd, &mut qgb, &mut cqgb,
+        );
+
+        assert_eq!(
+            [qgs, cqgs, qgd, cqgd, qgb, cqgb].map(Value::to_bits),
+            [
+                charges[0].0,
+                charges[0].1,
+                charges[1].0,
+                charges[1].1,
+                charges[2].0,
+                charges[2].1,
+            ]
+            .map(Value::to_bits)
+        );
     }
 }
