@@ -154,6 +154,24 @@ impl OutputRequest {
         })
     }
 
+    /// Whether this request retains a transient node-voltage operand for the
+    /// named node.  Node dependencies are recorded for direct voltage probes
+    /// and for voltage operands nested inside expressions; device-current
+    /// dependencies are intentionally excluded.
+    pub(crate) fn selects_transient_node_voltage(&self, node: &str) -> bool {
+        if self
+            .analysis
+            .is_some_and(|analysis| analysis != OutputAnalysisKind::Tran)
+        {
+            return false;
+        }
+        let node = canonical_symbol(node);
+        self.dependencies.iter().any(|dependency| {
+            dependency.kind == OutputSymbolKind::Node
+                && hierarchy_pattern_matches(&canonical_symbol(&dependency.symbol), &node)
+        })
+    }
+
     pub(crate) fn from_source(
         directive: OutputDirectiveKind,
         origin: NetlistSourceLocation,

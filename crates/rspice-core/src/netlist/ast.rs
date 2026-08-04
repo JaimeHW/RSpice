@@ -631,6 +631,14 @@ impl SaveSet {
         self.is_empty() || self.signals.iter().any(|s| matches!(s, SaveSignal::All))
     }
 
+    /// Whether the saved-vector contract retains the voltage operand for a
+    /// node.  Transient result projection uses this typed query so a current
+    /// or device-parameter save cannot accidentally retain unrelated node
+    /// waveforms.
+    pub(crate) fn retains_voltage_operand(&self, node: &str) -> bool {
+        self.selects(&format!("V({node})"))
+    }
+
     /// Whether an output vector named `variable` is selected.
     ///
     /// `variable` follows raw-file conventions: `v(out)`, `V(OUT)`, `i(v1)`,
