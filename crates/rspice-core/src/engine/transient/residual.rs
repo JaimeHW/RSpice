@@ -56,7 +56,159 @@ pub(super) struct TransientSystemContext<'a> {
     pub(super) analysis_final_step: bool,
 }
 
+/// Two-level numeric cache for the classic-MOS transient fast path.
+///
+/// `static_*` contains the run-invariant linear network and nodal GMIN.
+/// `attempt_*` additionally contains sources evaluated at the trial time and
+/// ordinary capacitor companions for the current integration coefficients.
+/// Each Newton/proof stamp restores the latter with contiguous copies, then
+/// adds only MOS charge and conduction terms.
+#[derive(Default)]
+pub(super) struct ClassicMosTransientStampCache {
+    static_values: Vec<Value>,
+    static_rhs: Vec<Value>,
+    attempt_values: Vec<Value>,
+    attempt_rhs: Vec<Value>,
+}
+
+impl ClassicMosTransientStampCache {
+    #[inline]
+    fn capture_static(&mut self, matrix: &mut crate::solver::StaticMatrix, rhs: &[Value]) {
+        self.static_values.clear();
+        self.static_values.extend_from_slice(matrix.values_mut());
+        self.static_rhs.clear();
+        self.static_rhs.extend_from_slice(rhs);
+    }
+
+    #[inline]
+    fn restore_static(&self, matrix: &mut crate::solver::StaticMatrix, rhs: &mut [Value]) {
+        debug_assert_eq!(matrix.values_mut().len(), self.static_values.len());
+        debug_assert_eq!(rhs.len(), self.static_rhs.len());
+        matrix.values_mut().copy_from_slice(&self.static_values);
+        rhs.copy_from_slice(&self.static_rhs);
+    }
+
+    #[inline]
+    fn capture_attempt(&mut self, matrix: &mut crate::solver::StaticMatrix, rhs: &[Value]) {
+        self.attempt_values.clear();
+        self.attempt_values.extend_from_slice(matrix.values_mut());
+        self.attempt_rhs.clear();
+        self.attempt_rhs.extend_from_slice(rhs);
+    }
+
+    #[inline]
+    fn restore_attempt(&self, matrix: &mut crate::solver::StaticMatrix, rhs: &mut [Value]) {
+        debug_assert_eq!(matrix.values_mut().len(), self.attempt_values.len());
+        debug_assert_eq!(rhs.len(), self.attempt_rhs.len());
+        matrix.values_mut().copy_from_slice(&self.attempt_values);
+        rhs.copy_from_slice(&self.attempt_rhs);
+    }
+}
+
 impl Engine {
+    /// Capture the run-invariant part of the restricted classic-MOS transient
+    /// topology. The caller has already checked the fail-closed capability.
+    pub(super) fn initialize_classic_mos_transient_stamp_cache(
+        &self,
+        circuit: &crate::circuit::CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        baseline_diag_gmin: Value,
+    ) -> ClassicMosTransientStampCache {
+        debug_assert!(circuit.has_cacheable_classic_mos_transient_base());
+        matrix.clear_values();
+        rhs.fill(0.0);
+        Self::stamp_nodal_gmin(circuit, matrix, baseline_diag_gmin.max(0.0));
+        circuit.stamp_transient_linear_direct(matrix, rhs);
+
+        let mut cache = ClassicMosTransientStampCache::default();
+        cache.capture_static(matrix, rhs);
+        cache
+    }
+
+    /// Extend the static cache with the solution-independent terms that are
+    /// fixed for one attempted timepoint.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn prepare_classic_mos_transient_attempt(
+        &self,
+        cache: &mut ClassicMosTransientStampCache,
+        circuit: &crate::circuit::CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        time: Value,
+        dt: Value,
+        coeff: &CompanionCoefficients,
+        xyce_one_step: bool,
+    ) {
+        debug_assert!(circuit.has_cacheable_classic_mos_transient_base());
+        cache.restore_static(matrix, rhs);
+
+        let num_nodes = circuit.num_nodes();
+        circuit
+            .voltage_sources
+            .update_transient_rhs(rhs, time, |br_ordinal| num_nodes + br_ordinal);
+        circuit.current_sources.update_transient_rhs(rhs, time);
+        let companion_coeff = if xyce_one_step {
+            CompanionCoefficients::backward_euler()
+        } else {
+            *coeff
+        };
+        circuit
+            .capacitors
+            .stamp_transient_companion(matrix, rhs, dt, &companion_coeff, num_nodes);
+        cache.capture_attempt(matrix, rhs);
+    }
+
+    /// Assemble one classic-MOS Newton or exact-candidate residual system from
+    /// the prepared base. This is equation-for-equation equivalent to the
+    /// general assembler for the guarded topology.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn stamp_classic_mos_transient_system_from_cache(
+        &self,
+        cache: &ClassicMosTransientStampCache,
+        circuit: &mut crate::circuit::CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+        dt: Value,
+        ctx: &TransientSystemContext<'_>,
+        refresh_nonlinear: bool,
+        evaluation_mode: crate::device::veriloga_builtins::GeneratedEvaluationMode,
+    ) -> Result<(), SimulationError> {
+        debug_assert!(circuit.has_cacheable_classic_mos_transient_base());
+        debug_assert!(!ctx.xyce_one_step_order2);
+        cache.restore_attempt(matrix, rhs);
+
+        if refresh_nonlinear {
+            self.update_transient_nonlinear_devices(circuit, solution)?;
+        }
+        let companion_coeff = if ctx.xyce_one_step {
+            CompanionCoefficients::backward_euler()
+        } else {
+            *ctx.coeff
+        };
+        Self::stamp_mosfet_transient_companions(
+            circuit,
+            matrix,
+            rhs,
+            solution,
+            &companion_coeff,
+            dt,
+            ctx.mosfet_history,
+            ctx.suppress_gate_charge,
+            ctx.mosfet_companion_slots,
+        );
+        if evaluation_mode == crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe
+        {
+            circuit
+                .mosfets
+                .stamp_all_static_probe_direct(matrix, rhs, solution);
+        } else {
+            circuit.mosfets.stamp_all_direct(matrix, rhs, solution);
+        }
+        Ok(())
+    }
+
     /// Refresh nonlinear trial state, parallelizing the model-batched classic
     /// MOS family only when its population amortizes bounded-pool dispatch.
     pub(super) fn update_transient_nonlinear_devices(
@@ -540,6 +692,7 @@ impl Engine {
         time: Value,
         dt: Value,
         ctx: &TransientSystemContext<'_>,
+        classic_mos_cache: Option<&ClassicMosTransientStampCache>,
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
     ) -> Result<bool, SimulationError> {
         if solution.iter().any(|value| !value.is_finite()) {
@@ -547,20 +700,34 @@ impl Engine {
         }
 
         let refresh_nonlinear = !circuit.has_classic_mos_only_transient_nonlinearity();
-        self.stamp_transient_system_with_generated_mode(
-            circuit,
-            matrix,
-            rhs,
-            solution,
-            time,
-            dt,
-            ctx,
-            vbic_snapshot_cache,
-            VbicCachedSnapshotReuse::SeedOnly,
-            refresh_nonlinear,
-            0.0,
-            crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
-        )?;
+        if let Some(cache) = classic_mos_cache {
+            self.stamp_classic_mos_transient_system_from_cache(
+                cache,
+                circuit,
+                matrix,
+                rhs,
+                solution,
+                dt,
+                ctx,
+                refresh_nonlinear,
+                crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+            )?;
+        } else {
+            self.stamp_transient_system_with_generated_mode(
+                circuit,
+                matrix,
+                rhs,
+                solution,
+                time,
+                dt,
+                ctx,
+                vbic_snapshot_cache,
+                VbicCachedSnapshotReuse::SeedOnly,
+                refresh_nonlinear,
+                0.0,
+                crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+            )?;
+        }
         Ok(self.transient_residual_convergence_met(circuit, matrix, solution, rhs))
     }
 
@@ -628,6 +795,137 @@ mod tests {
         assert!(
             !engine.transient_residual_convergence_met(&circuit, &mut matrix, &[0.0], &[0.25],)
         );
+    }
+
+    #[test]
+    fn cached_classic_mos_assembly_matches_canonical_static_probe_exactly() {
+        const DECK: &str = "\
+Classic MOS transient cache equivalence
+VDD vdd 0 5
+VIN g 0 DC 0 PULSE(0 2 1n 100p 100p 4n 10n)
+IBIAS d 0 DC 0 PULSE(0 10u 1.1n 100p 100p 4n 10n)
+R1 vdd d 2k
+C1 d 0 2p
+M1 d g 0 0 NM W=10u L=1u
+.MODEL NM NMOS LEVEL=1 VTO=0.7 KP=100u LAMBDA=0.02 CGSO=2e-10 CGDO=1e-10
+.END
+";
+        let netlist = Netlist::parse(DECK).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        assert!(circuit.has_cacheable_classic_mos_transient_base());
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+
+        let dt = 2.0e-10;
+        let time = 1.3e-9;
+        circuit.voltage_sources.set_transient_context(dt, 20.0e-9);
+        circuit.current_sources.set_transient_context(dt, 20.0e-9);
+        let mut solution = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("operating point converges");
+        solution[circuit.get_node_by_name("g").expect("gate node") - 1] = 1.4;
+        solution[circuit.get_node_by_name("d").expect("drain node") - 1] = 2.7;
+        circuit.update_nonlinear(&solution);
+        circuit.update_nonlinear(&solution);
+
+        let tline_dc_refs = Engine::initialize_tline_history(&mut circuit, &solution, 0.0);
+        let coupled_tline_refs =
+            Engine::initialize_coupled_tline_history(&mut circuit, &solution, 0.0);
+        let bjt_history = Engine::initialize_bjt_history(&circuit, &solution);
+        let jfet_history = Engine::initialize_jfet_history(&circuit, &solution);
+        let diode_history = Engine::initialize_diode_history(&circuit, &solution);
+        let mosfet_history = Engine::initialize_mosfet_history(&circuit, &solution);
+        let vdmos_history = Engine::initialize_vdmos_history(&circuit, &solution);
+        let b3soi_history = Engine::initialize_b3soi_history(&circuit, &solution);
+        let bsim3_history = Engine::initialize_bsim3_history(&circuit, &solution);
+        let bsim4_history = Engine::initialize_bsim4_history(&circuit, &solution);
+        let ekv26_history = Engine::initialize_ekv26_history(&circuit, &solution);
+        let diode_companion_slots = Engine::link_diode_companion_slots(&circuit, &matrix);
+        let mosfet_companion_slots = Engine::link_mosfet_companion_slots(&circuit, &matrix);
+        let vdmos_companion_slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
+        let coeff = CompanionCoefficients::backward_euler();
+        let baseline_diag_gmin = engine.config.convergence_config.gmin_target.max(0.0);
+        let ctx = TransientSystemContext {
+            coeff: &coeff,
+            xyce_one_step: false,
+            xyce_one_step_order2: false,
+            xyce_static_history: None,
+            bsim4_trnqs_coeff: &coeff,
+            bjt_history: &bjt_history,
+            jfet_history: &jfet_history,
+            diode_history: &diode_history,
+            diode_companion_slots: &diode_companion_slots,
+            mosfet_history: &mosfet_history,
+            mosfet_companion_slots: &mosfet_companion_slots,
+            vdmos_history: &vdmos_history,
+            vdmos_companion_slots: &vdmos_companion_slots,
+            b3soi_history: &b3soi_history,
+            b3soi_zero_first_transient_charge_derivative: false,
+            bsim3_history: &bsim3_history,
+            bsim4_history: &bsim4_history,
+            ekv26_history: &ekv26_history,
+            suppress_gate_charge: false,
+            baseline_diag_gmin,
+            tline_dc_refs: &tline_dc_refs,
+            coupled_tline_refs: &coupled_tline_refs,
+            analysis_initial_step: false,
+            analysis_final_step: false,
+        };
+        let mut rhs = vec![0.0; circuit.matrix_size()];
+        let mut vbic_snapshot_cache = Vec::new();
+
+        engine
+            .stamp_transient_system_with_generated_mode(
+                &mut circuit,
+                &mut matrix,
+                &mut rhs,
+                &solution,
+                time,
+                dt,
+                &ctx,
+                &mut vbic_snapshot_cache,
+                VbicCachedSnapshotReuse::SeedOnly,
+                false,
+                0.0,
+                crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+            )
+            .expect("canonical assembly succeeds");
+        let canonical_values = matrix.values_mut().to_vec();
+        let canonical_rhs = rhs.clone();
+
+        let mut cache = engine.initialize_classic_mos_transient_stamp_cache(
+            &circuit,
+            &mut matrix,
+            &mut rhs,
+            baseline_diag_gmin,
+        );
+        engine.prepare_classic_mos_transient_attempt(
+            &mut cache,
+            &circuit,
+            &mut matrix,
+            &mut rhs,
+            time,
+            dt,
+            &coeff,
+            false,
+        );
+        engine
+            .stamp_classic_mos_transient_system_from_cache(
+                &cache,
+                &mut circuit,
+                &mut matrix,
+                &mut rhs,
+                &solution,
+                dt,
+                &ctx,
+                false,
+                crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+            )
+            .expect("cached assembly succeeds");
+
+        assert_eq!(matrix.values_mut(), canonical_values);
+        assert_eq!(rhs, canonical_rhs);
     }
 
     /// The vbic_excess_phase_oracle testbench: the full diffamp N1 card

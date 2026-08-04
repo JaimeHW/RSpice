@@ -2417,6 +2417,19 @@ impl Engine {
         let progress_logging_enabled = log::log_enabled!(log::Level::Info);
         let mut last_progress_log = progress_logging_enabled.then(crate::time_compat::Instant::now);
         let mut rhs = vec![0.0; size];
+        // A classic-MOS/ordinary-RC transient has a run-invariant linear
+        // network. Retain it once and extend it with per-attempt source and
+        // capacitor terms below instead of rebuilding it per Newton iterate.
+        let mut classic_mos_stamp_cache = (self.config.spice_dialect != SpiceDialect::Xyce
+            && circuit.has_cacheable_classic_mos_transient_base())
+        .then(|| {
+            self.initialize_classic_mos_transient_stamp_cache(
+                &circuit,
+                &mut matrix,
+                &mut rhs,
+                transient_baseline_diag_gmin,
+            )
+        });
         let mut new_solution = solution.clone();
         let mut linear_solution = Vec::with_capacity(size);
         let mut correction_rhs = Vec::with_capacity(size);
@@ -2838,6 +2851,18 @@ impl Engine {
                 coeff
             };
             let suppress_gate_charge = false;
+            if let Some(cache) = classic_mos_stamp_cache.as_mut() {
+                self.prepare_classic_mos_transient_attempt(
+                    cache,
+                    &circuit,
+                    &mut matrix,
+                    &mut rhs,
+                    step_time,
+                    dt,
+                    &coeff,
+                    xyce_one_step,
+                );
+            }
             let mut rejected_attempt_nonlinear_state = if circuit.has_nonlinear_devices() {
                 if let Some(mut snapshot) = rejected_attempt_nonlinear_state_scratch.take() {
                     circuit.refresh_transient_trial_state_snapshot(&mut snapshot);
@@ -3054,19 +3079,33 @@ impl Engine {
                     analysis_initial_step,
                     analysis_final_step,
                 };
-                self.stamp_transient_system(
-                    &mut circuit,
-                    &mut matrix,
-                    &mut rhs,
-                    &new_solution,
-                    t + dt,
-                    dt,
-                    &transient_system_context,
-                    &mut vbic_snapshot_cache,
-                    VbicCachedSnapshotReuse::NewtonBypass,
-                    !nonlinear_state_matches_new_solution,
-                    0.0,
-                )?;
+                if let Some(cache) = classic_mos_stamp_cache.as_ref() {
+                    self.stamp_classic_mos_transient_system_from_cache(
+                        cache,
+                        &mut circuit,
+                        &mut matrix,
+                        &mut rhs,
+                        &new_solution,
+                        dt,
+                        &transient_system_context,
+                        !nonlinear_state_matches_new_solution,
+                        crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
+                    )?;
+                } else {
+                    self.stamp_transient_system(
+                        &mut circuit,
+                        &mut matrix,
+                        &mut rhs,
+                        &new_solution,
+                        t + dt,
+                        dt,
+                        &transient_system_context,
+                        &mut vbic_snapshot_cache,
+                        VbicCachedSnapshotReuse::NewtonBypass,
+                        !nonlinear_state_matches_new_solution,
+                        0.0,
+                    )?;
+                }
                 nonlinear_state_matches_new_solution = true;
 
                 let newton_stamp_elapsed = newton_stamp_start.elapsed();
@@ -3567,6 +3606,7 @@ impl Engine {
                                         analysis_initial_step,
                                         analysis_final_step,
                                     },
+                                    classic_mos_stamp_cache.as_ref(),
                                     &mut vbic_snapshot_cache,
                                 )?;
                             total_postsolve_residual_nanos +=

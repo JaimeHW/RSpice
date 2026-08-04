@@ -161,11 +161,27 @@ mod tests {
             0,
         ));
         assert!(circuit.has_classic_mos_only_transient_nonlinearity());
+        assert!(circuit.has_cacheable_classic_mos_transient_base());
 
         circuit
             .diodes
             .add(crate::device::Diode::new("d1".to_string(), 1, 0));
         assert!(!circuit.has_classic_mos_only_transient_nonlinearity());
+        assert!(!circuit.has_cacheable_classic_mos_transient_base());
+
+        let mut with_inductor = CircuitData::new();
+        with_inductor.mosfets.add(crate::device::Mosfet::new_nmos(
+            "m1".to_string(),
+            1,
+            2,
+            0,
+            0,
+        ));
+        with_inductor
+            .inductors
+            .add("l1".to_string(), 1, 0, 1, 1.0e-3);
+        assert!(with_inductor.has_classic_mos_only_transient_nonlinearity());
+        assert!(!with_inductor.has_cacheable_classic_mos_transient_base());
     }
 
     #[test]
@@ -248,6 +264,24 @@ impl CircuitData {
             && !self.has_xspice_devices()
             && !has_generated_veriloga
             && !has_dynamic_veriloga
+    }
+
+    /// Whether a transient attempt can reuse one solution-independent base
+    /// matrix for every classic-MOS Newton and residual assembly.
+    ///
+    /// This deliberately fails closed around every stateful linear companion
+    /// other than an ordinary capacitor. The excluded families are legal in a
+    /// classic-MOS-only nonlinear circuit, but some refresh trial state from
+    /// the candidate solution or carry analysis-specific stamping rules.
+    pub(crate) fn has_cacheable_classic_mos_transient_base(&self) -> bool {
+        self.has_classic_mos_only_transient_nonlinearity()
+            && self.resistors.thermal.iter().all(Option::is_none)
+            && self.inductors.is_empty()
+            && self.tlines.is_empty()
+            && self.coupled_tlines.is_empty()
+            && self.couplings.is_empty()
+            && self.coupled_inductor_pairs.is_empty()
+            && self.multi_winding_transformers.is_empty()
     }
 
     fn has_non_xspice_nonlinear_devices(&self) -> bool {
