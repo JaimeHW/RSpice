@@ -197,6 +197,8 @@ impl Engine {
             dt,
             ctx.mosfet_history,
             ctx.suppress_gate_charge,
+            evaluation_mode
+                != crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
             ctx.mosfet_companion_slots,
             caps_cache_out,
         );
@@ -455,6 +457,7 @@ impl Engine {
             dt,
             ctx.mosfet_history,
             ctx.suppress_gate_charge,
+            false,
             ctx.mosfet_companion_slots,
             None,
         );

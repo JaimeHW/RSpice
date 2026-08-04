@@ -992,6 +992,7 @@ impl Engine {
         dt: Value,
         history: &MosfetTransientHistory,
         suppress_gate_charge: bool,
+        use_verified_cached_bias: bool,
         slots: &[[TwoTerminalStampSlots; 5]],
         caps_cache_out: Option<&mut Vec<(Value, Value, Value)>>,
     ) {
@@ -1021,6 +1022,7 @@ impl Engine {
                 dt,
                 history,
                 suppress_gate_charge,
+                use_verified_cached_bias,
             );
             if let Some(cache) = caps_cache.as_deref_mut() {
                 cache.push(caps);
@@ -1052,13 +1054,21 @@ impl Engine {
         dt: Value,
         history: &MosfetTransientHistory,
         suppress_gate_charge: bool,
+        use_verified_cached_bias: bool,
     ) -> ([(Value, Value); 5], (Value, Value, Value)) {
         let mut terms = [(0.0, 0.0); 5];
         let mut caps = (0.0, 0.0, 0.0);
-        let (vgs_eval, vds_eval, vbs_eval) = mos.eval_branch_voltages_at(voltages);
+        let ((vgs, vgd, vgb), (vgs_eval, vds_eval, vbs_eval)) = if use_verified_cached_bias {
+            let ((vgs, vds, vbs), evaluated) = mos.verified_cached_transient_branch_voltages();
+            ((vgs, vgs - vds, vgs - vbs), evaluated)
+        } else {
+            (
+                mos.gate_charge_branch_voltages_at(voltages),
+                mos.eval_branch_voltages_at(voltages),
+            )
+        };
 
         if !suppress_gate_charge {
-            let (vgs, vgd, vgb) = mos.gate_charge_branch_voltages_at(voltages);
             let (cgs_half, cgd_half, cgb_half) =
                 mos.transient_capacitance_halves_at(vgs_eval, vds_eval, vbs_eval);
             caps = (cgs_half, cgd_half, cgb_half);

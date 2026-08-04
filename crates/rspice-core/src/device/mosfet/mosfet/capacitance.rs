@@ -348,6 +348,23 @@ impl Mosfet {
         Some((self.eval_vgs, self.eval_vds, self.eval_vbs))
     }
 
+    /// Raw and limited branch voltages for an iterate whose classic-MOS
+    /// nonlinear cache has already been verified by the transient engine.
+    #[inline]
+    pub(crate) fn verified_cached_transient_branch_voltages(
+        &self,
+    ) -> ((Value, Value, Value), (Value, Value, Value)) {
+        debug_assert!(self.has_branch_history);
+        debug_assert!(self.vgs.is_finite() && self.vds.is_finite() && self.vbs.is_finite());
+        debug_assert!(
+            self.eval_vgs.is_finite() && self.eval_vds.is_finite() && self.eval_vbs.is_finite()
+        );
+        (
+            (self.vgs, self.vds, self.vbs),
+            (self.eval_vgs, self.eval_vds, self.eval_vbs),
+        )
+    }
+
     #[inline]
     pub(crate) fn eval_branch_voltages_at(&self, voltages: &[Value]) -> (Value, Value, Value) {
         let (vgs, vds, vbs) = self.branch_voltages(voltages);
@@ -477,6 +494,17 @@ mod tests {
         let leff = mos.l - 2.0 * mos.ld;
         assert!((mos.oxide_capacitance_total() - mos.cox * mos.w * leff).abs() < 1.0e-30);
         assert!((mos.overlap_capacitances().2 - mos.cgbo * leff).abs() < 1.0e-30);
+    }
+
+    #[test]
+    fn verified_cached_transient_voltages_match_updated_iterate_exactly() {
+        let candidate = [1.3, 1.9, 0.2, -0.1];
+        let mut mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4);
+        mos.update(&candidate);
+
+        let (raw, evaluated) = mos.verified_cached_transient_branch_voltages();
+        assert_eq!(raw, mos.branch_voltages(&candidate));
+        assert_eq!(evaluated, mos.eval_branch_voltages_at(&candidate));
     }
 
     #[test]
