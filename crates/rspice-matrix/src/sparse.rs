@@ -65,6 +65,47 @@ struct LuWorkspace {
     factored_values: Vec<Value>,
 }
 
+/// Row-major traversal of the immutable CSC pattern used by normal residual
+/// checks. Each row retains ascending-column order, exactly matching the
+/// arithmetic order of the former column-major scatter walk.
+struct ResidualLayout {
+    row_ptr: Vec<usize>,
+    col_idx: Vec<usize>,
+    csc_idx: Vec<usize>,
+}
+
+impl ResidualLayout {
+    fn from_csc(csc: &SymbolicSparseColMat<usize>) -> Self {
+        let nrows = csc.nrows();
+        let nnz = csc.row_idx().len();
+        let mut row_ptr = vec![0usize; nrows + 1];
+        for &row in csc.row_idx() {
+            row_ptr[row + 1] += 1;
+        }
+        for row in 1..=nrows {
+            row_ptr[row] += row_ptr[row - 1];
+        }
+
+        let mut next = row_ptr[..nrows].to_vec();
+        let mut col_idx = vec![0usize; nnz];
+        let mut csc_idx = vec![0usize; nnz];
+        for col in 0..csc.ncols() {
+            for index in csc.col_ptr()[col]..csc.col_ptr()[col + 1] {
+                let row = csc.row_idx()[index];
+                let position = next[row];
+                next[row] += 1;
+                col_idx[position] = col;
+                csc_idx[position] = index;
+            }
+        }
+        Self {
+            row_ptr,
+            col_idx,
+            csc_idx,
+        }
+    }
+}
+
 //=============================================================================
 // Static Structure Matrix - The Key Optimization
 //=============================================================================
@@ -171,6 +212,8 @@ pub struct StaticMatrix {
     /// Frozen CSC sparsity pattern, validated once at construction.
     /// Solves borrow it as a view — no per-iteration structure copies.
     csc: Arc<SymbolicSparseColMat<usize>>,
+    /// Pre-transposed pattern traversal for cache-local normal residuals.
+    residual_layout: Arc<ResidualLayout>,
     /// CSC values (mutable - updated each iteration)
     values: Vec<Value>,
     /// Identity shared by matrices cloned from this exact sparsity pattern.
@@ -386,6 +429,7 @@ impl BackwardError {
 /// sparse solves (notably the inactive tail of a large RC ladder).
 /// `residual` is retained as `b - A*x` for iterative refinement.
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 fn componentwise_backward_error(
     csc: &SymbolicSparseColMat<usize>,
     values: &[Value],
@@ -397,8 +441,63 @@ fn componentwise_backward_error(
     row_nnz: &mut Vec<usize>,
     operation: RealSolveOp,
 ) -> Result<BackwardError, SolverError> {
+    componentwise_backward_error_impl(
+        csc,
+        None,
+        values,
+        solution,
+        rhs,
+        residual,
+        denominator,
+        compensation,
+        row_nnz,
+        operation,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn componentwise_backward_error_with_layout(
+    csc: &SymbolicSparseColMat<usize>,
+    residual_layout: &ResidualLayout,
+    values: &[Value],
+    solution: &[Value],
+    rhs: &[Value],
+    residual: &mut Vec<Value>,
+    denominator: &mut Vec<Value>,
+    compensation: &mut Vec<Value>,
+    row_nnz: &mut Vec<usize>,
+    operation: RealSolveOp,
+) -> Result<BackwardError, SolverError> {
+    componentwise_backward_error_impl(
+        csc,
+        Some(residual_layout),
+        values,
+        solution,
+        rhs,
+        residual,
+        denominator,
+        compensation,
+        row_nnz,
+        operation,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn componentwise_backward_error_impl(
+    csc: &SymbolicSparseColMat<usize>,
+    residual_layout: Option<&ResidualLayout>,
+    values: &[Value],
+    solution: &[Value],
+    rhs: &[Value],
+    residual: &mut Vec<Value>,
+    denominator: &mut Vec<Value>,
+    compensation: &mut Vec<Value>,
+    row_nnz: &mut Vec<usize>,
+    operation: RealSolveOp,
+) -> Result<BackwardError, SolverError> {
     let fast = fast_componentwise_backward_error(
         csc,
+        residual_layout,
         values,
         solution,
         rhs,
@@ -412,6 +511,7 @@ fn componentwise_backward_error(
     }
     compensated_componentwise_backward_error(
         csc,
+        residual_layout,
         values,
         solution,
         rhs,
@@ -430,6 +530,7 @@ fn componentwise_backward_error(
 #[allow(clippy::too_many_arguments)]
 fn fast_componentwise_backward_error(
     csc: &SymbolicSparseColMat<usize>,
+    residual_layout: Option<&ResidualLayout>,
     values: &[Value],
     solution: &[Value],
     rhs: &[Value],
@@ -444,6 +545,66 @@ fn fast_componentwise_backward_error(
         return Err(SolverError::InvalidCircuit(
             "Sparse backward-error dimension mismatch".to_string(),
         ));
+    }
+
+    if operation == RealSolveOp::Normal
+        && let Some(layout) = residual_layout
+    {
+        if layout.row_ptr.len() != nrows + 1
+            || layout.col_idx.len() != values.len()
+            || layout.csc_idx.len() != values.len()
+        {
+            return Err(SolverError::InvalidCircuit(
+                "Sparse residual layout dimension mismatch".to_string(),
+            ));
+        }
+        residual.resize(nrows, 0.0);
+        denominator.resize(nrows, 0.0);
+        row_nnz.resize(nrows, 0);
+        let mut error: Value = 0.0;
+        let mut acceptance_ratio: Value = 0.0;
+        for row in 0..nrows {
+            let rhs_value = rhs[row];
+            if !rhs_value.is_finite() {
+                return Err(SolverError::Overflow);
+            }
+            let mut row_residual = rhs_value;
+            let mut row_denominator = rhs_value.abs();
+            let mut nonzeros = 0usize;
+            for position in layout.row_ptr[row]..layout.row_ptr[row + 1] {
+                let value = values[layout.csc_idx[position]];
+                let x = solution[layout.col_idx[position]];
+                let term = value * x;
+                let magnitude = value.abs() * x.abs();
+                if !term.is_finite() || !magnitude.is_finite() {
+                    return Err(SolverError::Overflow);
+                }
+                if value != 0.0 {
+                    nonzeros = nonzeros.saturating_add(1);
+                }
+                row_residual -= term;
+                row_denominator = (row_denominator + magnitude).min(Value::MAX);
+            }
+            residual[row] = row_residual;
+            denominator[row] = row_denominator;
+            row_nnz[row] = nonzeros;
+
+            let safe1 = (nonzeros.saturating_add(1) as Value) * Value::MIN_POSITIVE;
+            let residual_abs = row_residual.abs();
+            if !residual_abs.is_finite() || !row_denominator.is_finite() {
+                return Err(SolverError::Overflow);
+            }
+            let rounding_bound = 4.0 * (nonzeros.saturating_add(1) as Value) * Value::EPSILON;
+            let row_error = residual_abs / row_denominator.max(safe1);
+            let certified_error = row_error + rounding_bound;
+            error = error.max(row_error);
+            acceptance_ratio =
+                acceptance_ratio.max(certified_error / backward_error_tolerance(nonzeros));
+        }
+        return Ok(BackwardError {
+            componentwise: error,
+            acceptance_ratio,
+        });
     }
 
     residual.resize(nrows, 0.0);
@@ -507,6 +668,7 @@ fn fast_componentwise_backward_error(
 #[allow(clippy::too_many_arguments)]
 fn compensated_componentwise_backward_error(
     csc: &SymbolicSparseColMat<usize>,
+    residual_layout: Option<&ResidualLayout>,
     values: &[Value],
     solution: &[Value],
     rhs: &[Value],
@@ -518,6 +680,64 @@ fn compensated_componentwise_backward_error(
 ) -> Result<BackwardError, SolverError> {
     let nrows = csc.nrows();
     let ncols = csc.ncols();
+    if operation == RealSolveOp::Normal
+        && let Some(layout) = residual_layout
+    {
+        residual.resize(nrows, 0.0);
+        denominator.resize(nrows, 0.0);
+        compensation.resize(nrows, 0.0);
+        row_nnz.resize(nrows, 0);
+        let mut error: Value = 0.0;
+        let mut acceptance_ratio: Value = 0.0;
+        for row in 0..nrows {
+            let mut row_residual = rhs[row];
+            let mut row_denominator = rhs[row].abs();
+            let mut row_compensation = 0.0;
+            let mut nonzeros = 0usize;
+            for position in layout.row_ptr[row]..layout.row_ptr[row + 1] {
+                let value = values[layout.csc_idx[position]];
+                let x = solution[layout.col_idx[position]];
+                let term = value * x;
+                let magnitude = value.abs() * x.abs();
+                if !term.is_finite() || !magnitude.is_finite() {
+                    return Err(SolverError::Overflow);
+                }
+                if value != 0.0 {
+                    nonzeros = nonzeros.saturating_add(1);
+                }
+                let product_hi = -term;
+                let product_lo = (-value).mul_add(x, -product_hi);
+                let sum = row_residual + product_hi;
+                let virtual_addend = sum - row_residual;
+                let sum_error =
+                    (row_residual - (sum - virtual_addend)) + (product_hi - virtual_addend);
+                let tail = row_compensation + product_lo + sum_error;
+                let refined = sum + tail;
+                row_compensation = tail - (refined - sum);
+                row_residual = refined;
+                row_denominator = (row_denominator + magnitude).min(Value::MAX);
+            }
+            row_residual += row_compensation;
+            residual[row] = row_residual;
+            denominator[row] = row_denominator;
+            compensation[row] = row_compensation;
+            row_nnz[row] = nonzeros;
+
+            let safe1 = (nonzeros.saturating_add(1) as Value) * Value::MIN_POSITIVE;
+            let residual_abs = row_residual.abs();
+            if !residual_abs.is_finite() || !row_denominator.is_finite() {
+                return Err(SolverError::Overflow);
+            }
+            let row_error = residual_abs / row_denominator.max(safe1);
+            error = error.max(row_error);
+            acceptance_ratio = acceptance_ratio.max(row_error / backward_error_tolerance(nonzeros));
+        }
+        return Ok(BackwardError {
+            componentwise: error,
+            acceptance_ratio,
+        });
+    }
+
     residual.resize(nrows, 0.0);
     denominator.resize(nrows, 0.0);
     compensation.resize(nrows, 0.0);
@@ -648,6 +868,7 @@ impl StaticMatrix {
             nrows: self.nrows,
             ncols: self.ncols,
             csc: self.csc.clone(),
+            residual_layout: self.residual_layout.clone(),
             values: vec![0.0; self.values.len()],
             pattern_id: self.pattern_id,
             lu: None,
@@ -805,11 +1026,13 @@ impl StaticMatrix {
             None,
             row_indices,
         ));
+        let residual_layout = Arc::new(ResidualLayout::from_csc(&csc));
 
         Ok(Self {
             nrows,
             ncols,
             csc,
+            residual_layout,
             values,
             pattern_id: next_pattern_id()?,
             lu: None,
@@ -1356,6 +1579,7 @@ impl StaticMatrix {
             let klu_accepted = {
                 let Self {
                     csc,
+                    residual_layout,
                     values,
                     klu,
                     klu_factored_values,
@@ -1424,8 +1648,9 @@ impl StaticMatrix {
                     } else {
                         let mut accepted = true;
                         for rhs_index in 0..rhs_count {
-                            let error = componentwise_backward_error(
+                            let error = componentwise_backward_error_with_layout(
                                 csc,
+                                residual_layout,
                                 values,
                                 &solution[rhs_index * n..(rhs_index + 1) * n],
                                 &rhs[rhs_index * n..(rhs_index + 1) * n],
@@ -1462,6 +1687,7 @@ impl StaticMatrix {
             let par = get_global_parallelism();
             let Self {
                 csc,
+                residual_layout,
                 values,
                 lu,
                 residual_scratch,
@@ -1552,8 +1778,9 @@ impl StaticMatrix {
                 for col in 0..n {
                     solution[rhs_index * n + col] = ws.rhs[(col, rhs_index)];
                 }
-                let error = componentwise_backward_error(
+                let error = componentwise_backward_error_with_layout(
                     csc,
+                    residual_layout,
                     &ws.scaled_values,
                     &solution[rhs_index * n..(rhs_index + 1) * n],
                     &ws.scaled_rhs[rhs_index * n..(rhs_index + 1) * n],
@@ -1724,6 +1951,7 @@ impl StaticMatrix {
         let par = get_global_parallelism();
         let Self {
             csc,
+            residual_layout,
             values,
             lu,
             residual_scratch,
@@ -1796,8 +2024,9 @@ impl StaticMatrix {
             return Err(SolverError::SingularMatrix);
         }
 
-        let mut backward_error = componentwise_backward_error(
+        let mut backward_error = componentwise_backward_error_with_layout(
             csc,
+            residual_layout,
             &ws.scaled_values,
             solution,
             &ws.scaled_rhs,
@@ -1855,8 +2084,9 @@ impl StaticMatrix {
                 *value = refined;
             }
 
-            let refined_error = componentwise_backward_error(
+            let refined_error = componentwise_backward_error_with_layout(
                 csc,
+                residual_layout,
                 &ws.scaled_values,
                 solution,
                 &ws.scaled_rhs,
@@ -1911,6 +2141,7 @@ impl StaticMatrix {
         let Self {
             nrows,
             csc,
+            residual_layout,
             values,
             klu,
             klu_factored_values,
@@ -1987,8 +2218,9 @@ impl StaticMatrix {
         if solve_result.is_err() {
             return false;
         }
-        let mut backward_error = match componentwise_backward_error(
+        let mut backward_error = match componentwise_backward_error_with_layout(
             csc,
+            residual_layout,
             values,
             solution,
             rhs,
@@ -2031,8 +2263,9 @@ impl StaticMatrix {
                 }
                 *value = refined;
             }
-            let refined_error = match componentwise_backward_error(
+            let refined_error = match componentwise_backward_error_with_layout(
                 csc,
+                residual_layout,
                 values,
                 solution,
                 rhs,
@@ -2078,8 +2311,9 @@ impl StaticMatrix {
         let mut denominator = Vec::new();
         let mut compensation = Vec::new();
         let mut row_nnz = Vec::new();
-        let backward_error = componentwise_backward_error(
+        let backward_error = componentwise_backward_error_with_layout(
             &self.csc,
+            &self.residual_layout,
             &self.values,
             &solution,
             rhs,
@@ -3694,6 +3928,39 @@ mod tests {
         )
         .unwrap();
         assert!(!perturbed_error.accepted());
+        let expected_residual = residual.clone();
+        let expected_denominator = denominator.clone();
+        let expected_compensation = compensation.clone();
+        let expected_row_nnz = row_nnz.clone();
+        let mut row_residual = Vec::new();
+        let mut row_denominator = Vec::new();
+        let mut row_compensation = Vec::new();
+        let mut row_nnz_layout = Vec::new();
+        let row_error = componentwise_backward_error_with_layout(
+            &matrix.csc,
+            &matrix.residual_layout,
+            &matrix.values,
+            &[1.0 + 1.0e-6, 2.0],
+            &rhs,
+            &mut row_residual,
+            &mut row_denominator,
+            &mut row_compensation,
+            &mut row_nnz_layout,
+            RealSolveOp::Normal,
+        )
+        .unwrap();
+        assert_eq!(
+            row_error.componentwise.to_bits(),
+            perturbed_error.componentwise.to_bits()
+        );
+        assert_eq!(
+            row_error.acceptance_ratio.to_bits(),
+            perturbed_error.acceptance_ratio.to_bits()
+        );
+        assert_eq!(row_residual, expected_residual);
+        assert_eq!(row_denominator, expected_denominator);
+        assert_eq!(row_compensation, expected_compensation);
+        assert_eq!(row_nnz_layout, expected_row_nnz);
 
         // A one-ulp subnormal tail is below the arithmetic noise floor. It
         // must not turn into an order-one backward error merely because both
