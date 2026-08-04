@@ -303,6 +303,12 @@ pub struct Diode {
     prev_vd_old: Value,
     /// Previous iteration current
     prev_id: Value,
+    /// Conductance paired with `prev_id` at exactly `prev_vd`.
+    prev_gd: Value,
+    /// Whether the paired candidate evaluation has been populated by
+    /// `NonlinearDevice::update`.  A separate validity bit prevents the
+    /// all-zero construction state from masquerading as an evaluated diode.
+    candidate_eval_valid: bool,
     /// Engine-supplied junction shunt conductance (ngspice `CKTgmin`):
     /// zero in plain solves, raised by gmin-stepping/rescue ladders so the
     /// continuation can deform the diode system like every other junction.
@@ -335,6 +341,8 @@ pub(crate) struct DiodeNonlinearState {
     prev_vd: Value,
     prev_vd_old: Value,
     prev_id: Value,
+    prev_gd: Value,
+    candidate_eval_valid: bool,
     junction_gmin: Value,
     last_limited_vd: Value,
     limited: bool,
@@ -349,6 +357,8 @@ impl Diode {
             prev_vd: self.prev_vd,
             prev_vd_old: self.prev_vd_old,
             prev_id: self.prev_id,
+            prev_gd: self.prev_gd,
+            candidate_eval_valid: self.candidate_eval_valid,
             junction_gmin: self.junction_gmin,
             last_limited_vd: self.last_limited_vd.get(),
             limited: self.limited.get(),
@@ -362,6 +372,8 @@ impl Diode {
         self.prev_vd = state.prev_vd;
         self.prev_vd_old = state.prev_vd_old;
         self.prev_id = state.prev_id;
+        self.prev_gd = state.prev_gd;
+        self.candidate_eval_valid = state.candidate_eval_valid;
         self.junction_gmin = state.junction_gmin;
         self.last_limited_vd.set(state.last_limited_vd);
         self.limited.set(state.limited);
@@ -426,6 +438,8 @@ impl Diode {
             prev_vd: 0.0,
             prev_vd_old: 0.0,
             prev_id: 0.0,
+            prev_gd: 0.0,
+            candidate_eval_valid: false,
             junction_gmin: 0.0,
             last_limited_vd: std::cell::Cell::new(0.0),
             limited: std::cell::Cell::new(false),
@@ -488,7 +502,7 @@ impl Diode {
         self.limited.set(limited);
         self.last_limited_vd.set(vd);
 
-        let (id, gd) = self.current_and_conductance(vd);
+        let (id, gd) = self.candidate_current_and_conductance(vd);
         let stamped_id = id + self.junction_gmin * vd;
         let stamped_gd = gd + self.junction_gmin;
         self.last_stamp_vd.set(vd);
@@ -1449,7 +1463,7 @@ impl Diode {
         voltages: &[Value],
     ) {
         let vd = self.terminal_voltage(voltages);
-        let (id, gd) = self.current_and_conductance(vd);
+        let (id, gd) = self.candidate_current_and_conductance(vd);
         let stamped_id = id + self.junction_gmin * vd;
         let stamped_gd = gd + self.junction_gmin;
         self.stamp_linearized_direct(matrix, rhs, vd, stamped_id, stamped_gd);
@@ -1548,6 +1562,19 @@ impl Diode {
         );
 
         (bottom_i + sidewall_i, bottom_g + sidewall_g)
+    }
+
+    /// Reuse the evaluation populated by `update` only at the exact same
+    /// terminal bias.  This is a semantic candidate cache, independent of
+    /// circuit identity, topology size, or analysis deck; every mismatch
+    /// falls through to the canonical model law.
+    #[inline]
+    fn candidate_current_and_conductance(&self, vd: Value) -> (Value, Value) {
+        if self.candidate_eval_valid && vd.to_bits() == self.prev_vd.to_bits() {
+            (self.prev_id, self.prev_gd)
+        } else {
+            self.current_and_conductance(vd)
+        }
     }
 
     /// Sidewall junction current, whether or not the card gave it its own
@@ -1919,7 +1946,11 @@ impl Diode {
     }
 
     fn linearized_current_matches_candidate(&self, criteria: NonlinearConvergenceCriteria) -> bool {
-        let candidate_current = self.current(self.prev_vd) + self.junction_gmin * self.prev_vd;
+        let candidate_current = if self.candidate_eval_valid {
+            self.prev_id
+        } else {
+            self.current(self.prev_vd)
+        } + self.junction_gmin * self.prev_vd;
         let predicted_current = self.last_stamp_id.get()
             + self.last_stamp_gd.get() * (self.prev_vd - self.last_stamp_vd.get());
         let tolerance = criteria.current_tolerance()
@@ -1942,7 +1973,8 @@ impl NonlinearDevice for Diode {
         };
         self.prev_vd_old = self.prev_vd;
         self.prev_vd = va - vc;
-        self.prev_id = self.current(self.prev_vd);
+        (self.prev_id, self.prev_gd) = self.current_and_conductance(self.prev_vd);
+        self.candidate_eval_valid = true;
     }
 
     fn stamp_nonlinear(
@@ -2000,6 +2032,31 @@ mod tests {
         d.cj0 = 2e-12;
         d.m = 0.4;
         d
+    }
+
+    #[test]
+    fn candidate_evaluation_cache_is_exact_bias_keyed_and_rollback_safe() {
+        let assert_pair_bits = |actual: (Value, Value), expected: (Value, Value)| {
+            assert_eq!(actual.0.to_bits(), expected.0.to_bits());
+            assert_eq!(actual.1.to_bits(), expected.1.to_bits());
+        };
+        let mut diode = test_diode();
+        let candidate = 0.413_25;
+        let expected = diode.current_and_conductance(candidate);
+        diode.update(&[candidate, 0.0]);
+        assert_pair_bits(diode.candidate_current_and_conductance(candidate), expected);
+
+        let mismatch = candidate + 1.0e-6;
+        let mismatch_expected = diode.current_and_conductance(mismatch);
+        assert_pair_bits(
+            diode.candidate_current_and_conductance(mismatch),
+            mismatch_expected,
+        );
+
+        let snapshot = diode.nonlinear_state_snapshot();
+        diode.update(&[0.62, 0.0]);
+        diode.restore_nonlinear_state(snapshot);
+        assert_pair_bits(diode.candidate_current_and_conductance(candidate), expected);
     }
 
     /// GF180MCU's `np_3p3`, the card that drove the LEVEL=3 work.
