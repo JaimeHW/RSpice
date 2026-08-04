@@ -46,6 +46,18 @@ impl Mosfet {
         } else {
             self.limited_branch_voltages_for_eval(vgs, vds, vbs)
         };
+        if constants.is_some()
+            && self.linearization_cache_valid
+            && self.has_branch_history
+            && vgs.to_bits() == self.vgs.to_bits()
+            && vds.to_bits() == self.vds.to_bits()
+            && vbs.to_bits() == self.vbs.to_bits()
+            && eval_vgs.to_bits() == self.eval_vgs.to_bits()
+            && eval_vds.to_bits() == self.eval_vds.to_bits()
+            && eval_vbs.to_bits() == self.eval_vbs.to_bits()
+        {
+            return;
+        }
         self.vgs = vgs;
         self.vds = vds;
         self.vbs = vbs;
@@ -73,6 +85,7 @@ impl Mosfet {
         (self.ibd, self.gbd) =
             self.body_drain_junction_current_and_conductance(self.eval_vds, self.eval_vbs);
         self.has_branch_history = true;
+        self.linearization_cache_valid = true;
     }
 }
 
@@ -272,6 +285,56 @@ mod tests {
                         "cached Meyer capacitances must match the canonical evaluator",
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn exact_physical_transient_update_matches_full_evaluation_and_tracks_gmin() {
+        for level in [1, 2, 3, 6] {
+            for mut cached in [
+                Mosfet::new_nmos(format!("mn{level}"), 1, 2, 3, 4).with_level(level),
+                Mosfet::new_pmos(format!("mp{level}"), 1, 2, 3, 4).with_level(level),
+            ] {
+                cached.is_bulk = 2.0e-14;
+                cached.source_area = 1.0e-12;
+                cached.drain_area = 1.5e-12;
+                let constants = cached.classic_transient_constants();
+                let candidate = [0.0, 0.0, 0.0, 0.0];
+
+                cached.update_with_classic_transient_constants(&candidate, &constants);
+                assert!(cached.cached_linearization_is_physical());
+                assert!(cached.linearization_cache_valid);
+
+                let mut full = cached.clone();
+                full.linearization_cache_valid = false;
+                cached.update_with_classic_transient_constants(&candidate, &constants);
+                full.update_with_classic_transient_constants(&candidate, &constants);
+                assert_eq!(
+                    cached.nonlinear_state_snapshot(),
+                    full.nonlinear_state_snapshot(),
+                    "exact cache reuse differs from full evaluation for level {level}, {:?}",
+                    cached.mos_type
+                );
+
+                let old_gbs = cached.gbs;
+                cached.set_junction_gmin(1.0e-6);
+                assert!(!cached.linearization_cache_valid);
+                cached.update_with_classic_transient_constants(&candidate, &constants);
+                assert_ne!(cached.gbs.to_bits(), old_gbs.to_bits());
+                assert!(cached.linearization_cache_valid);
+
+                cached.set_junction_gmin(0.0);
+                assert!(!cached.linearization_cache_valid);
+                let mut full = cached.clone();
+                full.linearization_cache_valid = false;
+                cached.update_with_classic_transient_constants(&candidate, &constants);
+                full.update_with_classic_transient_constants(&candidate, &constants);
+                assert_eq!(
+                    cached.nonlinear_state_snapshot(),
+                    full.nonlinear_state_snapshot(),
+                    "returning to the configured GMIN must not reuse an intermediate rescue cache"
+                );
             }
         }
     }

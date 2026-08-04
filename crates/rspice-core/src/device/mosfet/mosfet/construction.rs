@@ -178,6 +178,7 @@ impl Mosfet {
             ibd_prev: 0.0,
             gbd_prev: 0.0,
             has_branch_history: false,
+            linearization_cache_valid: false,
             indices: MosfetIndices::default(),
         }
     }
@@ -226,7 +227,11 @@ impl Mosfet {
 
     #[inline]
     pub fn set_junction_gmin(&mut self, gmin: Value) {
-        self.junction_gmin = gmin.max(0.0);
+        let gmin = gmin.max(0.0);
+        if gmin.to_bits() != self.junction_gmin.to_bits() {
+            self.junction_gmin = gmin;
+            self.linearization_cache_valid = false;
+        }
     }
 
     #[inline]
@@ -1164,7 +1169,10 @@ impl Mosfet {
 
     /// Set the native classic-MOS bulk-junction current compatibility model.
     pub fn set_body_junction_model(&mut self, model: MosBodyJunctionModel) {
-        self.body_junction_model = model;
+        if self.body_junction_model != model {
+            self.body_junction_model = model;
+            self.linearization_cache_valid = false;
+        }
     }
 
     /// Apply MOSFET instance parameters (W/L/M/NF).
@@ -1188,6 +1196,7 @@ impl Mosfet {
         if !temp.is_finite() || temp <= 0.0 || !tnom.is_finite() || tnom <= 0.0 {
             return;
         }
+        self.linearization_cache_valid = false;
 
         let vt = KOVERQ * temp;
         self.vt = vt;

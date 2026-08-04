@@ -363,6 +363,10 @@ pub struct Mosfet {
     ibd_prev: Value,
     gbd_prev: Value,
     has_branch_history: bool,
+    /// Whether cached currents and conductances reflect the active device law.
+    /// Runtime GMIN/temperature/model changes invalidate this independently
+    /// from branch history, which remains necessary for Newton convergence.
+    linearization_cache_valid: bool,
 
     /// Pre-computed matrix indices for O(1) stamping
     pub indices: MosfetIndices,
@@ -409,6 +413,7 @@ pub(crate) struct MosfetNonlinearState {
     ibd_prev: Value,
     gbd_prev: Value,
     has_branch_history: bool,
+    linearization_cache_valid: bool,
 }
 
 impl Mosfet {
@@ -447,6 +452,7 @@ impl Mosfet {
             ibd_prev: self.ibd_prev,
             gbd_prev: self.gbd_prev,
             has_branch_history: self.has_branch_history,
+            linearization_cache_valid: self.linearization_cache_valid,
         }
     }
 
@@ -484,6 +490,7 @@ impl Mosfet {
         self.ibd_prev = state.ibd_prev;
         self.gbd_prev = state.gbd_prev;
         self.has_branch_history = state.has_branch_history;
+        self.linearization_cache_valid = state.linearization_cache_valid;
     }
 
     /// True when this instance uses the Berkeley MOS3 equation core.
