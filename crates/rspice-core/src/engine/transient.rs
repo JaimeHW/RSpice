@@ -3122,6 +3122,7 @@ impl Engine {
                         !nonlinear_state_matches_new_solution,
                         crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
                         None,
+                        Some(&mut mosfet_companion_terms_scratch),
                         None,
                     )?;
                 } else {

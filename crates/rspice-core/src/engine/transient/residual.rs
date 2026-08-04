@@ -7,6 +7,11 @@
 
 use super::*;
 
+#[cfg(feature = "parallel")]
+const PARALLEL_CLASSIC_MOS_THRESHOLD: usize = 2_048;
+#[cfg(feature = "parallel")]
+const CLASSIC_MOS_INSTANCES_PER_WORKER: usize = 512;
+
 /// Per-step invariants of the transient system assembly. Holds borrows of
 /// the integration coefficients and the per-device-family histories, so a
 /// context is constructed locally at each use site (the histories are
@@ -106,6 +111,20 @@ impl ClassicMosTransientStampCache {
 }
 
 impl Engine {
+    /// Choose a bounded width for the short, memory-bound classic-MOS kernel.
+    /// One coarse task per contiguous instance batch avoids host-wide fanout
+    /// while allowing larger model populations to scale upward.
+    #[cfg(feature = "parallel")]
+    #[inline]
+    fn classic_mos_parallel_worker_count(&self, instance_count: usize) -> Option<usize> {
+        let useful_workers = instance_count.div_ceil(CLASSIC_MOS_INSTANCES_PER_WORKER);
+        let worker_count = self
+            .parallel_worker_count(instance_count)
+            .min(useful_workers.max(1));
+        (instance_count >= PARALLEL_CLASSIC_MOS_THRESHOLD && worker_count > 1)
+            .then_some(worker_count)
+    }
+
     /// Capture the run-invariant part of the restricted classic-MOS transient
     /// topology. The caller has already checked the fail-closed capability.
     pub(super) fn initialize_classic_mos_transient_stamp_cache(
@@ -175,30 +194,60 @@ impl Engine {
         refresh_nonlinear: bool,
         evaluation_mode: crate::device::veriloga_builtins::GeneratedEvaluationMode,
         companion_terms_cache: Option<&[MosfetCompanionBranchTerms]>,
+        mut companion_terms_out: Option<&mut Vec<MosfetCompanionBranchTerms>>,
         mut caps_cache_out: Option<&mut Vec<(Value, Value, Value)>>,
     ) -> Result<(), SimulationError> {
         debug_assert!(circuit.has_cacheable_classic_mos_transient_base());
         debug_assert!(!ctx.xyce_one_step_order2);
         cache.restore_attempt(matrix, rhs);
 
-        if refresh_nonlinear {
-            self.update_transient_nonlinear_devices(circuit, solution)?;
-        }
         let static_probe = evaluation_mode
             == crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe;
-        let physical_cache_matches_probe =
-            static_probe && circuit.mosfets.last_update_all_is_physical();
         let companion_coeff = if ctx.xyce_one_step {
             CompanionCoefficients::backward_euler()
         } else {
             *ctx.coeff
         };
+        let fused_companion_terms =
+            if refresh_nonlinear && !static_probe && companion_terms_cache.is_none() {
+                if let Some(terms) = companion_terms_out.as_deref_mut() {
+                    self.update_classic_mos_with_companion_terms_only(
+                        circuit,
+                        solution,
+                        &companion_coeff,
+                        dt,
+                        ctx.mosfet_history,
+                        ctx.suppress_gate_charge,
+                        terms,
+                    )?;
+                    Some(terms.as_slice())
+                } else {
+                    self.update_transient_nonlinear_devices(circuit, solution)?;
+                    None
+                }
+            } else {
+                if refresh_nonlinear {
+                    self.update_transient_nonlinear_devices(circuit, solution)?;
+                }
+                None
+            };
+        let physical_cache_matches_probe =
+            static_probe && circuit.mosfets.last_update_all_is_physical();
         if let Some(terms) = companion_terms_cache {
             debug_assert!(physical_cache_matches_probe);
             debug_assert_eq!(terms.len(), circuit.mosfets.devices.len());
             if let Some(caps) = caps_cache_out.as_deref() {
                 debug_assert_eq!(caps.len(), terms.len());
             }
+            Self::stamp_cached_mosfet_transient_companions(
+                matrix,
+                rhs,
+                ctx.mosfet_companion_slots,
+                terms,
+            );
+        } else if let Some(terms) = fused_companion_terms {
+            debug_assert!(!static_probe);
+            debug_assert_eq!(terms.len(), circuit.mosfets.devices.len());
             Self::stamp_cached_mosfet_transient_companions(
                 matrix,
                 rhs,
@@ -230,6 +279,93 @@ impl Engine {
         Ok(())
     }
 
+    /// Refresh a classic-MOS Newton iterate and evaluate its companion terms
+    /// in the same device walk. Model arithmetic can use the bounded worker
+    /// pool; sparse matrix and RHS writes stay serial and deterministic.
+    #[allow(clippy::too_many_arguments)]
+    fn update_classic_mos_with_companion_terms_only(
+        &self,
+        circuit: &mut crate::circuit::CircuitData,
+        solution: &[Value],
+        coeff: &CompanionCoefficients,
+        dt: Value,
+        history: &MosfetTransientHistory,
+        suppress_gate_charge: bool,
+        terms: &mut Vec<MosfetCompanionBranchTerms>,
+    ) -> Result<(), SimulationError> {
+        use crate::device::NonlinearDevice;
+
+        debug_assert!(circuit.has_cacheable_classic_mos_transient_base());
+        let instance_count = circuit.mosfets.len();
+        terms.resize(instance_count, [(0.0, 0.0); 5]);
+
+        #[cfg(feature = "parallel")]
+        {
+            use rayon::prelude::*;
+
+            if let Some(worker_count) = self.classic_mos_parallel_worker_count(instance_count) {
+                let chunk_size = instance_count.div_ceil(worker_count).max(1);
+                let all_physical = self.install_classic_mos_parallel(|| {
+                    circuit
+                        .mosfets
+                        .devices
+                        .par_chunks_mut(chunk_size)
+                        .zip(terms.par_chunks_mut(chunk_size))
+                        .enumerate()
+                        .map(|(chunk_idx, (devices, term_chunk))| {
+                            let base = chunk_idx * chunk_size;
+                            let mut chunk_physical = true;
+                            for (local, (device, term)) in
+                                devices.iter_mut().zip(term_chunk).enumerate()
+                            {
+                                device.update(solution);
+                                let (evaluated_terms, _charges, _caps) =
+                                    Self::mosfet_companion_branch_terms::<false>(
+                                        device,
+                                        base + local,
+                                        solution,
+                                        coeff,
+                                        dt,
+                                        history,
+                                        suppress_gate_charge,
+                                        true,
+                                    );
+                                *term = evaluated_terms;
+                                chunk_physical &= device.cached_linearization_is_physical();
+                            }
+                            chunk_physical
+                        })
+                        .reduce(|| true, |left, right| left && right)
+                })?;
+                circuit
+                    .mosfets
+                    .record_last_update_all_is_physical(all_physical);
+                return Ok(());
+            }
+        }
+
+        let mut all_physical = true;
+        for (idx, (device, term)) in circuit.mosfets.devices.iter_mut().zip(terms).enumerate() {
+            device.update(solution);
+            let (evaluated_terms, _charges, _caps) = Self::mosfet_companion_branch_terms::<false>(
+                device,
+                idx,
+                solution,
+                coeff,
+                dt,
+                history,
+                suppress_gate_charge,
+                true,
+            );
+            *term = evaluated_terms;
+            all_physical &= device.cached_linearization_is_physical();
+        }
+        circuit
+            .mosfets
+            .record_last_update_all_is_physical(all_physical);
+        Ok(())
+    }
+
     /// Refresh nonlinear trial state, parallelizing the model-batched classic
     /// MOS family only when its population amortizes bounded-pool dispatch.
     pub(super) fn update_transient_nonlinear_devices(
@@ -239,18 +375,12 @@ impl Engine {
     ) -> Result<(), SimulationError> {
         #[cfg(feature = "parallel")]
         {
-            const PARALLEL_CLASSIC_MOS_THRESHOLD: usize = 2_048;
             // Level-1/2/3 MOS evaluation is a short, memory-bound kernel.
-            // Host-wide task fanout regressed MOS4096 on a 28-thread machine;
-            // one coarse task per 512 contiguous instances reached the best
-            // measured width while still scaling larger arrays upward.
-            const CLASSIC_MOS_INSTANCES_PER_WORKER: usize = 512;
+            // Use the population-based bounded policy above for every eligible
+            // topology; the decision is independent of deck identity or node
+            // names and scales larger model populations upward.
             let instance_count = circuit.mosfets.len();
-            let useful_workers = instance_count.div_ceil(CLASSIC_MOS_INSTANCES_PER_WORKER);
-            let worker_count = self
-                .parallel_worker_count(instance_count)
-                .min(useful_workers.max(1));
-            if instance_count >= PARALLEL_CLASSIC_MOS_THRESHOLD && worker_count > 1 {
+            if let Some(worker_count) = self.classic_mos_parallel_worker_count(instance_count) {
                 return self.install_classic_mos_parallel(|| {
                     circuit.update_nonlinear_parallel_classic_mos(solution, worker_count);
                 });
@@ -291,13 +421,7 @@ impl Engine {
         {
             use rayon::prelude::*;
 
-            const PARALLEL_CLASSIC_MOS_THRESHOLD: usize = 2_048;
-            const CLASSIC_MOS_INSTANCES_PER_WORKER: usize = 512;
-            let useful_workers = instance_count.div_ceil(CLASSIC_MOS_INSTANCES_PER_WORKER);
-            let worker_count = self
-                .parallel_worker_count(instance_count)
-                .min(useful_workers.max(1));
-            if instance_count >= PARALLEL_CLASSIC_MOS_THRESHOLD && worker_count > 1 {
+            if let Some(worker_count) = self.classic_mos_parallel_worker_count(instance_count) {
                 let chunk_size = instance_count.div_ceil(worker_count).max(1);
                 let update_result = self.install_classic_mos_parallel(|| {
                     circuit
@@ -884,6 +1008,7 @@ impl Engine {
                 refresh_nonlinear,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
                 classic_mos_companion_terms,
+                None,
                 classic_mos_caps_out,
             )?;
         } else {
@@ -1101,9 +1226,32 @@ M1 d g 0 0 NM W=10u L=1u
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
                 None,
                 None,
+                None,
             )
             .expect("cached assembly succeeds");
 
+        assert_eq!(matrix.values_mut(), canonical_values);
+        assert_eq!(rhs, canonical_rhs);
+
+        let mut newton_companion_terms = Vec::new();
+        engine
+            .stamp_classic_mos_transient_system_from_cache(
+                &cache,
+                &mut circuit,
+                &mut matrix,
+                &mut rhs,
+                &solution,
+                dt,
+                &ctx,
+                true,
+                crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
+                None,
+                Some(&mut newton_companion_terms),
+                None,
+            )
+            .expect("fused Newton assembly succeeds");
+
+        assert_eq!(newton_companion_terms.len(), circuit.mosfets.devices.len());
         assert_eq!(matrix.values_mut(), canonical_values);
         assert_eq!(rhs, canonical_rhs);
 
@@ -1141,6 +1289,7 @@ M1 d g 0 0 NM W=10u L=1u
                 false,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
                 Some(&companion_terms),
+                None,
                 Some(&mut companion_caps),
             )
             .expect("fused cached assembly succeeds");
