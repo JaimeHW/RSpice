@@ -220,7 +220,8 @@ impl Mosfet {
         self.legacy_bsim_sized = self
             .legacy_bsim_model
             .as_ref()
-            .and_then(|model| model.sized(self.w, self.l));
+            .and_then(|model| model.sized(self.w, self.l))
+            .map(Box::new);
     }
 
     #[inline]
@@ -1030,7 +1031,8 @@ impl Mosfet {
             self.lambda1 = v;
         }
 
-        self.legacy_bsim_model = LegacyBsimModel::from_level_and_params(self.level, params);
+        self.legacy_bsim_model =
+            LegacyBsimModel::from_level_and_params(self.level, params).map(Box::new);
         self.refresh_legacy_bsim_size_params();
         self
     }

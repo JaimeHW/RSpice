@@ -147,9 +147,9 @@ pub struct Mosfet {
     /// Compatibility policy for the native bulk-junction current law.
     pub body_junction_model: MosBodyJunctionModel,
     /// Legacy BSIM1/BSIM2 model card for SPICE levels 4 and 5.
-    legacy_bsim_model: Option<LegacyBsimModel>,
+    legacy_bsim_model: Option<Box<LegacyBsimModel>>,
     /// Geometry-sized legacy BSIM instance data derived from W/L.
-    legacy_bsim_sized: Option<LegacyBsimSizedModel>,
+    legacy_bsim_sized: Option<Box<LegacyBsimSizedModel>>,
     /// Mobility at low field (U0) in cm^2/V*s
     pub u0: Value,
     /// U0 exactly as given on the model card, never temperature-scaled.
@@ -450,5 +450,19 @@ impl Mosfet {
     /// than the classic level 1/2/3/6 models.
     pub fn uses_legacy_bsim(&self) -> bool {
         self.legacy_bsim_model.is_some()
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn classic_mos_hot_instance_layout_stays_compact() {
+        let bytes = std::mem::size_of::<Mosfet>();
+        assert!(
+            bytes <= 1_216,
+            "classic MOS hot instance regressed to {bytes} bytes; keep cold model-family payloads indirect"
+        );
     }
 }
