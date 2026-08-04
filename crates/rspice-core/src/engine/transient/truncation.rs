@@ -783,21 +783,24 @@ impl Engine {
         current_abstol: Value,
         charge_abstol: Value,
         trtol: Value,
-        caps_cache_out: Option<&mut Vec<(Value, Value, Value)>>,
+        caps_cache: Option<(&mut Vec<(Value, Value, Value)>, bool)>,
     ) -> Option<Value> {
         if history.accepted_dt_prev <= 0.0 || !history.accepted_dt_prev.is_finite() {
             return None;
         }
         let lte_debug = lte_debug_enabled();
 
-        // The Meyer capacitance halves computed here are exactly what the
-        // acceptance-path history rotation re-derives on the same candidate
-        // solution; the caller can capture them to skip that second walk.
-        let mut caps_cache = caps_cache_out;
-        if let Some(cache) = caps_cache.as_deref_mut() {
-            cache.clear();
-            cache.reserve(circuit.mosfets.devices.len());
-        }
+        // Exact-residual assembly may already have evaluated the Meyer halves
+        // on this candidate. Reuse them when available; otherwise capture the
+        // truncation walk for the accepted-history rotation.
+        let mut caps_cache = caps_cache.map(|(cache, valid)| {
+            let reuse = valid && cache.len() == circuit.mosfets.devices.len();
+            if !reuse {
+                cache.clear();
+                cache.reserve(circuit.mosfets.devices.len());
+            }
+            (cache, reuse)
+        });
 
         let effective_method = Self::effective_companion_method(method, trap_order);
         let coeff = CompanionCoefficients::for_method_with_previous_step(
@@ -820,13 +823,18 @@ impl Engine {
         let mut found_branch = false;
 
         for (idx, mos) in circuit.mosfets.devices.iter().enumerate() {
-            let (vgs_eval, vds_eval, vbs_eval) = mos.eval_branch_voltages_at(candidate_solution);
-            let (vgs, vgd, vgb) = mos.gate_charge_branch_voltages_at(candidate_solution);
-            let (cgs_half, cgd_half, cgb_half) =
-                mos.transient_capacitance_halves_at(vgs_eval, vds_eval, vbs_eval);
-            if let Some(cache) = caps_cache.as_deref_mut() {
+            let (cgs_half, cgd_half, cgb_half) = match caps_cache.as_ref() {
+                Some((cache, true)) => cache[idx],
+                _ => {
+                    let (vgs_eval, vds_eval, vbs_eval) =
+                        mos.eval_branch_voltages_at(candidate_solution);
+                    mos.transient_capacitance_halves_at(vgs_eval, vds_eval, vbs_eval)
+                }
+            };
+            if let Some((cache, false)) = caps_cache.as_mut() {
                 cache.push((cgs_half, cgd_half, cgb_half));
             }
+            let (vgs, vgd, vgb) = mos.gate_charge_branch_voltages_at(candidate_solution);
             let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
 
             for (
@@ -2407,6 +2415,70 @@ M1 d g s 0 VM W=1 L=1u
             !Engine::mosfet_charge_truncation_covers_transient_lte(&circuit, Some(1.0e-9)),
             "MOSFET-family LTE shortcut must not hide generic LTE when a VDMOS is also present"
         );
+    }
+
+    #[test]
+    fn mosfet_truncation_reuses_candidate_capacitances_bit_exactly() {
+        let deck = "\
+Classic MOS capacitance reuse
+VD d 0 1
+VG g 0 0.5
+VS s 0 0
+M1 d g s 0 NM W=10u L=1u
+.MODEL NM NMOS LEVEL=1 VTO=0.7 KP=1e-3 CGSO=1e-10 CGDO=2e-10 CGBO=3e-10
+.OP
+.END
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let base = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("operating point converges");
+
+        let mut history = Engine::initialize_mosfet_history(&circuit, &base);
+        let dt = 1.0e-9;
+        history.accepted_dt_prev = dt;
+        history.accepted_dt_prev_prev = dt;
+        let gate = circuit.get_node_by_name("g").expect("gate node");
+        let mut candidate = base.clone();
+        candidate[gate - 1] += 0.25;
+
+        let mut cache = Vec::new();
+        let direct = Engine::mosfet_ngspice_truncation_limit(
+            &circuit,
+            &candidate,
+            IntegrationMethod::Trapezoidal,
+            1,
+            dt,
+            &history,
+            1.0e-3,
+            1.0e-12,
+            1.0e-14,
+            7.0,
+            Some((&mut cache, false)),
+        );
+        assert_eq!(cache.len(), circuit.mosfets.devices.len());
+        let captured = cache.clone();
+
+        let reused = Engine::mosfet_ngspice_truncation_limit(
+            &circuit,
+            &candidate,
+            IntegrationMethod::Trapezoidal,
+            1,
+            dt,
+            &history,
+            1.0e-3,
+            1.0e-12,
+            1.0e-14,
+            7.0,
+            Some((&mut cache, true)),
+        );
+
+        assert_eq!(reused.map(Value::to_bits), direct.map(Value::to_bits));
+        assert_eq!(cache, captured, "reuse must not rewrite the cache");
     }
 
     #[test]

@@ -2454,9 +2454,9 @@ impl Engine {
         let mut total_middle_nanos: u128 = 0;
         let mut total_merit_trials: usize = 0;
         let mut total_failed_attempts: usize = 0;
-        // Meyer capacitance halves captured by the device-truncation walk on
-        // the candidate solution; valid only for the accept path of the same
-        // loop pass (reset every attempt).
+        // Meyer capacitance halves captured by exact-residual assembly or the
+        // device-truncation walk on the candidate solution; valid only for the
+        // accept path of the same loop pass (reset every attempt).
         let mut mosfet_caps_scratch: Vec<(Value, Value, Value)> = Vec::new();
         let mut mosfet_caps_valid;
         let mut failed_voltage_conv: usize = 0;
@@ -3090,6 +3090,7 @@ impl Engine {
                         &transient_system_context,
                         !nonlinear_state_matches_new_solution,
                         crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
+                        None,
                     )?;
                 } else {
                     self.stamp_transient_system(
@@ -3608,7 +3609,15 @@ impl Engine {
                                     },
                                     classic_mos_stamp_cache.as_ref(),
                                     &mut vbic_snapshot_cache,
+                                    if classic_mos_stamp_cache.is_some() && !suppress_gate_charge {
+                                        Some(&mut mosfet_caps_scratch)
+                                    } else {
+                                        None
+                                    },
                                 )?;
+                            mosfet_caps_valid = residual_converged_for_acceptance
+                                && classic_mos_stamp_cache.is_some()
+                                && mosfet_caps_scratch.len() == circuit.mosfets.devices.len();
                             total_postsolve_residual_nanos +=
                                 postsolve_residual_start.elapsed().as_nanos();
                             // The proof restamp refreshes nonlinear, generated,
@@ -4518,7 +4527,7 @@ impl Engine {
                     self.current_abstol(),
                     self.charge_abstol(),
                     self.transient_trtol(),
-                    Some(&mut mosfet_caps_scratch),
+                    Some((&mut mosfet_caps_scratch, mosfet_caps_valid)),
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0);
                 mosfet_caps_valid = mosfet_caps_scratch.len() == circuit.mosfets.devices.len();

@@ -993,6 +993,7 @@ impl Engine {
         history: &MosfetTransientHistory,
         suppress_gate_charge: bool,
         slots: &[[TwoTerminalStampSlots; 5]],
+        caps_cache_out: Option<&mut Vec<(Value, Value, Value)>>,
     ) {
         // NOTE (M3.2, measured 2026-06-12 on mos_array_4096): evaluating
         // these per-device terms on the rayon pool — par_chunks(256) with a
@@ -1006,8 +1007,13 @@ impl Engine {
         // pool pass over persistent scratch. The terms helper below stays
         // pure precisely so that fused pass can be built when the model
         // tiers justify it.
+        let mut caps_cache = caps_cache_out;
+        if let Some(cache) = caps_cache.as_deref_mut() {
+            cache.clear();
+            cache.reserve(circuit.mosfets.devices.len());
+        }
         for (idx, mos) in circuit.mosfets.devices.iter().enumerate() {
-            let device_terms = Self::mosfet_companion_branch_terms(
+            let (device_terms, caps) = Self::mosfet_companion_branch_terms(
                 mos,
                 idx,
                 voltages,
@@ -1016,6 +1022,9 @@ impl Engine {
                 history,
                 suppress_gate_charge,
             );
+            if let Some(cache) = caps_cache.as_deref_mut() {
+                cache.push(caps);
+            }
             for (branch, &(geq, ieq)) in device_terms.iter().enumerate() {
                 if geq > 0.0 {
                     Self::stamp_two_terminal_companion_direct(
@@ -1043,14 +1052,16 @@ impl Engine {
         dt: Value,
         history: &MosfetTransientHistory,
         suppress_gate_charge: bool,
-    ) -> [(Value, Value); 5] {
+    ) -> ([(Value, Value); 5], (Value, Value, Value)) {
         let mut terms = [(0.0, 0.0); 5];
+        let mut caps = (0.0, 0.0, 0.0);
         let (vgs_eval, vds_eval, vbs_eval) = mos.eval_branch_voltages_at(voltages);
 
         if !suppress_gate_charge {
             let (vgs, vgd, vgb) = mos.gate_charge_branch_voltages_at(voltages);
             let (cgs_half, cgd_half, cgb_half) =
                 mos.transient_capacitance_halves_at(vgs_eval, vds_eval, vbs_eval);
+            caps = (cgs_half, cgd_half, cgb_half);
             let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
             let cgs = cgs_half + history.capgs_prev_half[idx] + cgs_ov;
             let cgd = cgd_half + history.capgd_prev_half[idx] + cgd_ov;
@@ -1127,7 +1138,7 @@ impl Engine {
             terms[4] = (geq_bd, ieq_bd);
         }
 
-        terms
+        (terms, caps)
     }
 
     #[inline]

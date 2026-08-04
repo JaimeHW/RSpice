@@ -298,6 +298,7 @@ impl Engine {
             ctx,
             None,
             vbic_snapshot_cache,
+            None,
         )? {
             return Ok(None);
         }

@@ -174,6 +174,7 @@ impl Engine {
         ctx: &TransientSystemContext<'_>,
         refresh_nonlinear: bool,
         evaluation_mode: crate::device::veriloga_builtins::GeneratedEvaluationMode,
+        caps_cache_out: Option<&mut Vec<(Value, Value, Value)>>,
     ) -> Result<(), SimulationError> {
         debug_assert!(circuit.has_cacheable_classic_mos_transient_base());
         debug_assert!(!ctx.xyce_one_step_order2);
@@ -197,6 +198,7 @@ impl Engine {
             ctx.mosfet_history,
             ctx.suppress_gate_charge,
             ctx.mosfet_companion_slots,
+            caps_cache_out,
         );
         if evaluation_mode == crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe
         {
@@ -454,6 +456,7 @@ impl Engine {
             ctx.mosfet_history,
             ctx.suppress_gate_charge,
             ctx.mosfet_companion_slots,
+            None,
         );
         Self::stamp_vdmos_transient_companions(
             circuit,
@@ -694,6 +697,7 @@ impl Engine {
         ctx: &TransientSystemContext<'_>,
         classic_mos_cache: Option<&ClassicMosTransientStampCache>,
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
+        classic_mos_caps_out: Option<&mut Vec<(Value, Value, Value)>>,
     ) -> Result<bool, SimulationError> {
         if solution.iter().any(|value| !value.is_finite()) {
             return Ok(false);
@@ -711,6 +715,7 @@ impl Engine {
                 ctx,
                 refresh_nonlinear,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+                classic_mos_caps_out,
             )?;
         } else {
             self.stamp_transient_system_with_generated_mode(
@@ -921,6 +926,7 @@ M1 d g 0 0 NM W=10u L=1u
                 &ctx,
                 false,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+                None,
             )
             .expect("cached assembly succeeds");
 
