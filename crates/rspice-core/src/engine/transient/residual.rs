@@ -533,6 +533,10 @@ impl Engine {
                                     device.update_with_classic_transient_constants(
                                         solution, constants,
                                     );
+                                    // Candidate caches feed accepted-state residual and LTE
+                                    // walks. Form raw gate branches in their canonical node-
+                                    // difference order; the evaluated Meyer bias may still
+                                    // reuse this update's verified limiter state.
                                     let (evaluated_terms, evaluated_charges, evaluated_caps) =
                                         Self::mosfet_companion_branch_terms::<true>(
                                             device,
@@ -542,7 +546,7 @@ impl Engine {
                                             dt,
                                             history,
                                             suppress_gate_charge,
-                                            true,
+                                            false,
                                             Some(constants),
                                         );
                                     *term = evaluated_terms;
@@ -603,6 +607,8 @@ impl Engine {
             .enumerate()
         {
             device.update_with_classic_transient_constants(solution, constants);
+            // Match the canonical accepted-state branch operation order. Static
+            // limiter validity is tracked independently below.
             let (evaluated_terms, evaluated_charges, evaluated_caps) =
                 Self::mosfet_companion_branch_terms::<true>(
                     device,
@@ -612,7 +618,7 @@ impl Engine {
                     dt,
                     history,
                     suppress_gate_charge,
-                    true,
+                    false,
                     Some(constants),
                 );
             *term = evaluated_terms;
@@ -1034,6 +1040,7 @@ impl Engine {
         ctx: &TransientSystemContext<'_>,
         row_ax: &mut Vec<Value>,
         row_rhs: &mut Vec<Value>,
+        candidate_companion_terms: Option<&[MosfetCompanionBranchTerms]>,
         mut caps_out: Option<&mut Vec<(Value, Value, Value)>>,
     ) -> bool {
         if cache.device_constants.len() != circuit.mosfets.devices.len()
@@ -1045,7 +1052,15 @@ impl Engine {
         row_rhs.clear();
         row_rhs.extend_from_slice(&cache.attempt_rhs);
 
-        if let Some(caps) = caps_out.as_deref_mut() {
+        let candidate_companion_terms = candidate_companion_terms.filter(|terms| {
+            terms.len() == circuit.mosfets.devices.len()
+                && caps_out
+                    .as_deref()
+                    .is_none_or(|caps| caps.len() == circuit.mosfets.devices.len())
+        });
+        if candidate_companion_terms.is_none()
+            && let Some(caps) = caps_out.as_deref_mut()
+        {
             caps.clear();
             caps.reserve(circuit.mosfets.devices.len());
         }
@@ -1062,21 +1077,28 @@ impl Engine {
             .zip(ctx.mosfet_companion_slots)
             .enumerate()
         {
-            let (terms, _, caps) = Self::mosfet_companion_branch_terms::<false>(
-                mosfet,
-                idx,
-                solution,
-                &companion_coeff,
-                dt,
-                ctx.mosfet_history,
-                ctx.suppress_gate_charge,
-                false,
-                Some(constants),
-            );
-            if let Some(caps_out) = caps_out.as_deref_mut() {
-                caps_out.push(caps);
-            }
-            for (slots, &(conductance, equivalent_current)) in slots.iter().zip(&terms) {
+            let evaluated_terms;
+            let terms = if let Some(candidate_terms) = candidate_companion_terms {
+                &candidate_terms[idx]
+            } else {
+                let (terms, _, caps) = Self::mosfet_companion_branch_terms::<false>(
+                    mosfet,
+                    idx,
+                    solution,
+                    &companion_coeff,
+                    dt,
+                    ctx.mosfet_history,
+                    ctx.suppress_gate_charge,
+                    false,
+                    Some(constants),
+                );
+                if let Some(caps_out) = caps_out.as_deref_mut() {
+                    caps_out.push(caps);
+                }
+                evaluated_terms = terms;
+                &evaluated_terms
+            };
+            for (slots, &(conductance, equivalent_current)) in slots.iter().zip(terms) {
                 if conductance <= 0.0 {
                     continue;
                 }
@@ -1225,6 +1247,12 @@ impl Engine {
 
         let refresh_nonlinear = !circuit.has_classic_mos_only_transient_nonlinearity();
         if let Some(cache) = classic_mos_cache {
+            let direct_companion_terms = classic_mos_companion_terms.filter(|terms| {
+                terms.len() == circuit.mosfets.devices.len()
+                    && classic_mos_caps_out
+                        .as_deref()
+                        .is_none_or(|caps| caps.len() == circuit.mosfets.devices.len())
+            });
             if let Some((row_ax, row_rhs)) = classic_mos_residual_scratch
                 && self.classic_mos_physical_residual_clearly_converged(
                     cache,
@@ -1235,11 +1263,14 @@ impl Engine {
                     ctx,
                     row_ax,
                     row_rhs,
+                    direct_companion_terms,
                     classic_mos_caps_out.as_deref_mut(),
                 )
             {
                 return Ok(true);
             }
+            let canonical_companion_terms = classic_mos_companion_terms
+                .filter(|_| circuit.mosfets.last_update_all_is_physical());
             self.stamp_classic_mos_transient_system_from_cache(
                 cache,
                 circuit,
@@ -1250,7 +1281,7 @@ impl Engine {
                 ctx,
                 refresh_nonlinear,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
-                classic_mos_companion_terms,
+                canonical_companion_terms,
                 None,
                 classic_mos_caps_out,
             )?;
@@ -1507,6 +1538,7 @@ M1 d g 0 0 NM W=10u L=1u
             &ctx,
             &mut direct_ax,
             &mut direct_rhs,
+            None,
             Some(&mut direct_caps),
         );
         let mut canonical_ax = Vec::new();
@@ -1618,6 +1650,97 @@ M1 d g 0 0 NM W=10u L=1u
 
         assert_eq!(matrix.values_mut(), canonical_values);
         assert_eq!(rhs, canonical_rhs);
+
+        // Static voltage limiting and transient-charge validity are separate
+        // domains. A limited channel linearization must never be reused by
+        // the physical residual, while the charge kernel has already
+        // evaluated the exact raw branch voltages and the same limited Meyer
+        // bias that the canonical accepted-state/truncation walks consume.
+        // Prove both companion and LTE reuse across that boundary.
+        let mut limited_solution = solution.clone();
+        limited_solution[circuit.get_node_by_name("g").expect("gate node") - 1] = 100.0;
+        let mut limited_history = mosfet_history.clone();
+        limited_history.accepted_dt_prev = dt;
+        limited_history.accepted_dt_prev_prev = dt;
+        let limited_coeff = CompanionCoefficients::for_method_with_previous_step(
+            IntegrationMethod::BackwardEuler,
+            dt,
+            dt,
+        );
+        let truncation = NgspiceChargeTruncationContext::new(
+            dt,
+            dt,
+            dt,
+            IntegrationMethod::BackwardEuler,
+            1,
+            1.0e-3,
+            1.0e-12,
+            1.0e-14,
+            7.0,
+        )
+        .expect("limited-candidate truncation context is valid");
+        let limited_evaluation = engine
+            .update_classic_mos_with_companion_terms(
+                &mut circuit,
+                &limited_solution,
+                cache.device_constants(),
+                &limited_coeff,
+                dt,
+                &limited_history,
+                false,
+                &mut companion_terms,
+                &mut companion_charges,
+                &mut companion_caps,
+                Some(&truncation),
+                Some(engine.device_convergence_criteria()),
+            )
+            .expect("limited fused companion evaluation succeeds");
+        assert!(
+            !circuit.mosfets.last_update_all_is_physical(),
+            "fixture must engage static Newton limiting"
+        );
+        for (idx, ((mosfet, constants), cached_terms)) in circuit
+            .mosfets
+            .devices
+            .iter()
+            .zip(cache.device_constants())
+            .zip(&companion_terms)
+            .enumerate()
+        {
+            let (canonical_terms, canonical_charges, canonical_caps) =
+                Engine::mosfet_companion_branch_terms::<true>(
+                    mosfet,
+                    idx,
+                    &limited_solution,
+                    &limited_coeff,
+                    dt,
+                    &limited_history,
+                    false,
+                    false,
+                    Some(constants),
+                );
+            assert_eq!(*cached_terms, canonical_terms);
+            assert_eq!(companion_charges[idx], canonical_charges);
+            assert_eq!(companion_caps[idx], canonical_caps);
+        }
+        let canonical_limit = Engine::mosfet_ngspice_truncation_limit(
+            &circuit,
+            &limited_solution,
+            IntegrationMethod::BackwardEuler,
+            1,
+            dt,
+            &limited_history,
+            1.0e-3,
+            1.0e-12,
+            1.0e-14,
+            7.0,
+            Some((&mut companion_caps, true)),
+        );
+        assert_eq!(
+            limited_evaluation.truncation_limit.map(Value::to_bits),
+            canonical_limit.map(Value::to_bits),
+            "limited static evaluation must retain bit-exact charge LTE reuse"
+        );
     }
 
     /// The vbic_excess_phase_oracle testbench: the full diffamp N1 card

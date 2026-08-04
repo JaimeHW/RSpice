@@ -3597,11 +3597,12 @@ impl Engine {
                                 cached_mosfet_truncation_limit = evaluation.truncation_limit;
                                 fused_classic_mos_device_converged =
                                     Some(evaluation.all_devices_converged);
-                                mosfet_companion_terms_valid = circuit
-                                    .mosfets
-                                    .last_update_all_is_physical()
-                                    && mosfet_companion_terms_scratch.len()
-                                        == circuit.mosfets.devices.len()
+                                // The charge kernel uses canonical raw branch arithmetic
+                                // and the accepted Meyer limiter state. Its companion/LTE
+                                // data remains exact even when static channel limiting
+                                // forbids reuse of the cached conduction Jacobian.
+                                mosfet_companion_terms_valid = mosfet_companion_terms_scratch.len()
+                                    == circuit.mosfets.devices.len()
                                     && mosfet_companion_charges_scratch.len()
                                         == circuit.mosfets.devices.len()
                                     && mosfet_caps_scratch.len() == circuit.mosfets.devices.len();
