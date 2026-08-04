@@ -1607,6 +1607,54 @@ impl Engine {
         found_branch.then_some(limit)
     }
 
+    /// Prepare the unique, non-excluded solution indices used by the
+    /// nonlinear terminal-activity guard. Circuit topology is immutable
+    /// during an analysis, so the accepted-step loop should not rediscover
+    /// these nodes through the large device-instance arrays.
+    pub(super) fn nonlinear_terminal_solution_indices(
+        circuit: &crate::circuit::CircuitData,
+        excluded_solution_indices: &[bool],
+    ) -> Vec<usize> {
+        let mut included = vec![false; excluded_solution_indices.len()];
+        let mut include = |node: usize| {
+            let Some(index) = node.checked_sub(1) else {
+                return;
+            };
+            if !excluded_solution_indices
+                .get(index)
+                .copied()
+                .unwrap_or(true)
+                && let Some(slot) = included.get_mut(index)
+            {
+                *slot = true;
+            }
+        };
+
+        for mos in &circuit.mosfets.devices {
+            include(mos.node_drain);
+            include(mos.node_gate);
+            include(mos.node_source);
+            include(mos.node_bulk);
+        }
+        for bjt in &circuit.bjts.devices {
+            include(bjt.node_collector);
+            include(bjt.node_base);
+            include(bjt.node_emitter);
+            include(bjt.node_substrate);
+        }
+        for jfet in &circuit.jfets {
+            include(jfet.drain);
+            include(jfet.gate);
+            include(jfet.source);
+        }
+
+        included
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, include)| include.then_some(index))
+            .collect()
+    }
+
     /// Signal-activity step limit: rescale the candidate step so that no
     /// solved nonlinear-device terminal voltage moves more than `bound` volts
     /// in one step.
@@ -1618,56 +1666,30 @@ impl Engine {
     /// proportionally reduced step when the bound is exceeded, `None` when
     /// the candidate respects it.
     pub(super) fn nonlinear_terminal_activity_limit(
-        circuit: &crate::circuit::CircuitData,
+        terminal_solution_indices: &[usize],
         accepted_solution: &[Value],
         candidate_solution: &[Value],
         dt: Value,
         bound: Value,
-        excluded_solution_indices: &[bool],
     ) -> Option<Value> {
         if !(bound.is_finite() && bound > 0.0 && dt.is_finite() && dt > 0.0) {
             return None;
         }
 
         let mut max_delta: Value = 0.0;
-        let mut consider = |node: usize| {
-            if node == 0 {
-                return;
-            }
-            let Some(solution_index) = node.checked_sub(1) else {
-                return;
-            };
-            if excluded_solution_indices
+        for &solution_index in terminal_solution_indices {
+            let accepted = accepted_solution
                 .get(solution_index)
                 .copied()
-                .unwrap_or(false)
-            {
-                return;
-            }
-            let accepted = accepted_solution.get(node - 1).copied().unwrap_or(0.0);
-            let candidate = candidate_solution.get(node - 1).copied().unwrap_or(0.0);
+                .unwrap_or(0.0);
+            let candidate = candidate_solution
+                .get(solution_index)
+                .copied()
+                .unwrap_or(0.0);
             let delta = (candidate - accepted).abs();
             if delta.is_finite() && delta > max_delta {
                 max_delta = delta;
             }
-        };
-
-        for mos in &circuit.mosfets.devices {
-            consider(mos.node_drain);
-            consider(mos.node_gate);
-            consider(mos.node_source);
-            consider(mos.node_bulk);
-        }
-        for bjt in &circuit.bjts.devices {
-            consider(bjt.node_collector);
-            consider(bjt.node_base);
-            consider(bjt.node_emitter);
-            consider(bjt.node_substrate);
-        }
-        for jfet in &circuit.jfets {
-            consider(jfet.drain);
-            consider(jfet.gate);
-            consider(jfet.source);
         }
 
         (max_delta > bound).then(|| dt * bound / max_delta)

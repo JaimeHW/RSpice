@@ -2180,6 +2180,8 @@ impl Engine {
         }
         xyce_lte_excluded_indices.sort_unstable();
         xyce_lte_excluded_indices.dedup();
+        let nonlinear_terminal_solution_indices =
+            Self::nonlinear_terminal_solution_indices(&circuit, &solution_lte_excluded);
 
         // Grid-locked stepping: the configured grid (filtered to points after
         // the start) is the mandatory target-sample sequence, and the run
@@ -4734,12 +4736,11 @@ impl Engine {
                 && !lte_estimator.uses_accepted_solution_reference()
             {
                 Self::nonlinear_terminal_activity_limit(
-                    &circuit,
+                    &nonlinear_terminal_solution_indices,
                     &solution,
                     &new_solution,
                     dt,
                     self.config.transient_node_activity_bound,
-                    &solution_lte_excluded,
                 )
             } else {
                 None
@@ -6777,26 +6778,28 @@ mod tests {
 
         let accepted = [0.0, 0.0, 0.0];
         let gate_only_step = [0.0, 1.0, 0.0];
+        let included = Engine::nonlinear_terminal_solution_indices(&circuit, &[false; 3]);
+        assert_eq!(included, [0, 1, 2]);
         let limited = Engine::nonlinear_terminal_activity_limit(
-            &circuit,
+            &included,
             &accepted,
             &gate_only_step,
             1.0e-9,
             0.4,
-            &[],
         )
         .expect("unexcluded gate motion should limit timestep");
         assert!((limited - 4.0e-10).abs() < 1.0e-18);
 
         let excluded_gate = [false, true, false];
+        let included = Engine::nonlinear_terminal_solution_indices(&circuit, &excluded_gate);
+        assert_eq!(included, [0, 2]);
         assert!(
             Engine::nonlinear_terminal_activity_limit(
-                &circuit,
+                &included,
                 &accepted,
                 &gate_only_step,
                 1.0e-9,
                 0.4,
-                &excluded_gate,
             )
             .is_none(),
             "voltage-LTE-excluded ideal source nodes are not solved dynamics"
@@ -6804,12 +6807,11 @@ mod tests {
 
         let drain_and_gate_step = [1.0, 1.0, 0.0];
         let limited = Engine::nonlinear_terminal_activity_limit(
-            &circuit,
+            &included,
             &accepted,
             &drain_and_gate_step,
             1.0e-9,
             0.4,
-            &excluded_gate,
         )
         .expect("unexcluded nonlinear terminal motion must still limit timestep");
         assert!((limited - 4.0e-10).abs() < 1.0e-18);
