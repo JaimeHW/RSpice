@@ -160,15 +160,17 @@ impl Engine {
     }
 
     /// Resolve Xyce's `NONLIN-TRAN ENFORCEDEVICECONV` status-test policy.
-    /// Xyce 7.10 deliberately disables the device-local convergence test for
-    /// transient NOX solves; its weighted-update and raw-residual tests remain
-    /// authoritative. Native and ngspice modes preserve the stricter legacy
-    /// RSpice policy unless explicitly overridden.
+    /// Xyce 7.10 disables the device-local convergence test for transient
+    /// solves by default (`NONLIN-TRAN ENFORCEDEVICECONV=0`). Native and
+    /// ngspice modes preserve the stricter legacy RSpice policy unless
+    /// explicitly overridden.
     #[inline]
     pub(crate) fn transient_enforce_device_convergence(&self) -> bool {
         self.config
             .transient_enforce_device_convergence
-            .unwrap_or(self.config.spice_dialect != SpiceDialect::Xyce)
+            .unwrap_or_else(|| {
+                self.config.spice_dialect != SpiceDialect::Xyce
+            })
     }
 
     /// Build Xyce's immutable transient nonlinear-update weights.
