@@ -1,6 +1,36 @@
 use super::*;
 
 impl Mosfet {
+    /// Evaluate the bulk-junction current and its small-signal conductance
+    /// together.  Both quantities use the same normalized voltage and
+    /// exponential, so computing them in separate helpers needlessly doubled
+    /// the transcendental work in every classic-MOS Newton update.
+    #[inline]
+    fn junction_diode_current_and_conductance(
+        &self,
+        isat: Value,
+        v: Value,
+        gmin: Value,
+    ) -> (Value, Value) {
+        let isat = if isat.is_finite() && isat > 0.0 {
+            isat
+        } else {
+            0.0
+        };
+        let gmin = gmin.max(0.0);
+        let nvt = self.body_junction_thermal_voltage();
+        if self.uses_xyce_classic_reverse_body_junction() && v <= 0.0 {
+            let conductance = isat / nvt + gmin;
+            return (conductance * v, conductance);
+        }
+        if v <= -3.0 * nvt {
+            return (gmin * v - isat, gmin);
+        }
+
+        let expv = (v / nvt).clamp(-80.0, 80.0).exp();
+        (isat * (expv - 1.0) + gmin * v, (isat / nvt) * expv + gmin)
+    }
+
     #[inline]
     pub(in crate::device::mosfet::mosfet) fn body_junction_thermal_voltage(&self) -> Value {
         self.vt.max(1e-12)
@@ -13,6 +43,7 @@ impl Mosfet {
     }
 
     #[inline]
+    #[cfg(test)]
     pub(in crate::device::mosfet::mosfet) fn junction_diode_current(
         &self,
         isat: Value,
@@ -38,6 +69,7 @@ impl Mosfet {
     }
 
     #[inline]
+    #[cfg(test)]
     pub(in crate::device::mosfet::mosfet) fn junction_diode_conductance(
         &self,
         isat: Value,
@@ -299,10 +331,7 @@ impl Mosfet {
     ) -> (Value, Value) {
         let vd = self.body_source_diode_voltage(vbs);
         let isat = self.effective_body_junction_saturation_current(self.source_area);
-        (
-            self.junction_diode_current(isat, vd, self.junction_gmin),
-            self.junction_diode_conductance(isat, vd, self.junction_gmin),
-        )
+        self.junction_diode_current_and_conductance(isat, vd, self.junction_gmin)
     }
 
     #[inline]
@@ -313,10 +342,7 @@ impl Mosfet {
     ) -> (Value, Value) {
         let vd = self.body_drain_diode_voltage(vds, vbs);
         let isat = self.effective_body_junction_saturation_current(self.drain_area);
-        (
-            self.junction_diode_current(isat, vd, self.junction_gmin),
-            self.junction_diode_conductance(isat, vd, self.junction_gmin),
-        )
+        self.junction_diode_current_and_conductance(isat, vd, self.junction_gmin)
     }
 
     #[inline]
@@ -568,6 +594,36 @@ mod tests {
             gmin,
             "ngspice reverse conductance",
         );
+    }
+
+    #[test]
+    fn fused_body_junction_evaluation_matches_separate_laws_bit_exactly() {
+        let mut ngspice = Mosfet::new_nmos("mn".to_string(), 1, 2, 3, 0).with_level(1);
+        let mut xyce = ngspice.clone();
+        xyce.set_body_junction_model(MosBodyJunctionModel::XyceClassicLinearizedReverse);
+        ngspice.vt = 0.026_001;
+        xyce.vt = ngspice.vt;
+
+        for mos in [&ngspice, &xyce] {
+            for isat in [0.0, 1.0e-14, 2.5e-9, Value::NAN] {
+                for voltage in [-2.62, -0.1, -0.078_003, -1.0e-9, 0.0, 0.1, 0.9] {
+                    let gmin = 1.0e-12;
+                    let (current, conductance) =
+                        mos.junction_diode_current_and_conductance(isat, voltage, gmin);
+                    assert_eq!(
+                        current.to_bits(),
+                        mos.junction_diode_current(isat, voltage, gmin).to_bits(),
+                        "current mismatch for isat={isat:e}, voltage={voltage:e}"
+                    );
+                    assert_eq!(
+                        conductance.to_bits(),
+                        mos.junction_diode_conductance(isat, voltage, gmin)
+                            .to_bits(),
+                        "conductance mismatch for isat={isat:e}, voltage={voltage:e}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
