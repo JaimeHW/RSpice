@@ -240,20 +240,76 @@ impl NgspiceChargeTruncationContext {
         debug_assert_eq!(constants.len(), charges.len());
         debug_assert_eq!(constants.len(), caps.len());
 
-        let mut limit = None;
+        let mut limit = 2.0 * self.dt;
+        let mut found_branch = false;
+
+        // History is stored branch-major. Traverse it in that same order so
+        // each CKTterr stream is contiguous and the accepted-state proof does
+        // not rebuild three temporary branch arrays for every device.
         for idx in 0..constants.len() {
-            limit = Engine::min_truncation_limit(
-                limit,
-                self.mosfet_gate_limit_from_cached_charges_and_overlap(
-                    idx,
-                    &charges[idx],
-                    caps[idx],
-                    constants[idx].overlap_capacitances(),
-                    history,
-                ),
-            );
+            let (cgs_ov, _, _) = constants[idx].overlap_capacitances();
+            let capacitance = caps[idx].0 + history.capgs_prev_half[idx] + cgs_ov;
+            if !capacitance.is_finite() || capacitance <= 0.0 {
+                continue;
+            }
+            let (q_curr, cq_curr) = charges[idx][0];
+            let Some(branch_limit) = self.limit(
+                q_curr,
+                history.qgs_prev[idx],
+                history.qgs_prev_prev[idx],
+                history.qgs_prev_prev_prev[idx],
+                cq_curr,
+                history.cqgs_prev[idx],
+            ) else {
+                continue;
+            };
+            found_branch = true;
+            limit = limit.min(branch_limit);
         }
-        limit
+
+        for idx in 0..constants.len() {
+            let (_, cgd_ov, _) = constants[idx].overlap_capacitances();
+            let capacitance = caps[idx].1 + history.capgd_prev_half[idx] + cgd_ov;
+            if !capacitance.is_finite() || capacitance <= 0.0 {
+                continue;
+            }
+            let (q_curr, cq_curr) = charges[idx][1];
+            let Some(branch_limit) = self.limit(
+                q_curr,
+                history.qgd_prev[idx],
+                history.qgd_prev_prev[idx],
+                history.qgd_prev_prev_prev[idx],
+                cq_curr,
+                history.cqgd_prev[idx],
+            ) else {
+                continue;
+            };
+            found_branch = true;
+            limit = limit.min(branch_limit);
+        }
+
+        for idx in 0..constants.len() {
+            let (_, _, cgb_ov) = constants[idx].overlap_capacitances();
+            let capacitance = caps[idx].2 + history.capgb_prev_half[idx] + cgb_ov;
+            if !capacitance.is_finite() || capacitance <= 0.0 {
+                continue;
+            }
+            let (q_curr, cq_curr) = charges[idx][2];
+            let Some(branch_limit) = self.limit(
+                q_curr,
+                history.qgb_prev[idx],
+                history.qgb_prev_prev[idx],
+                history.qgb_prev_prev_prev[idx],
+                cq_curr,
+                history.cqgb_prev[idx],
+            ) else {
+                continue;
+            };
+            found_branch = true;
+            limit = limit.min(branch_limit);
+        }
+
+        found_branch.then_some(limit)
     }
 }
 
@@ -2945,6 +3001,7 @@ VD d 0 1
 VG g 0 0.5
 VS s 0 0
 M1 d g s 0 NM W=10u L=1u
+M2 d g s 0 NM W=17u L=2u
 .MODEL NM NMOS LEVEL=1 VTO=0.7 KP=1e-3 CGSO=1e-10 CGDO=2e-10 CGBO=3e-10
 .OP
 .END
@@ -3005,17 +3062,23 @@ M1 d g s 0 NM W=10u L=1u
             dt,
             history.accepted_dt_prev,
         );
-        let (_terms, charges, caps) = Engine::mosfet_companion_branch_terms::<true>(
-            &circuit.mosfets.devices[0],
-            0,
-            &candidate,
-            &coeff,
-            dt,
-            &history,
-            false,
-            MosfetCompanionBiasSource::Solution,
-            None,
-        );
+        let mut charges = Vec::new();
+        let mut caps = Vec::new();
+        for (idx, device) in circuit.mosfets.devices.iter().enumerate() {
+            let (_terms, device_charges, device_caps) = Engine::mosfet_companion_branch_terms::<true>(
+                device,
+                idx,
+                &candidate,
+                &coeff,
+                dt,
+                &history,
+                false,
+                MosfetCompanionBiasSource::Solution,
+                None,
+            );
+            charges.push(device_charges);
+            caps.push(device_caps);
+        }
         let context = NgspiceChargeTruncationContext::new(
             dt,
             history.accepted_dt_prev,
@@ -3028,13 +3091,24 @@ M1 d g s 0 NM W=10u L=1u
             7.0,
         )
         .expect("valid truncation context");
-        let fused = context.mosfet_gate_limit_from_cached_charges(
-            &circuit.mosfets.devices[0],
-            0,
-            &charges,
-            caps,
-            &history,
-        );
+        let fused =
+            circuit
+                .mosfets
+                .devices
+                .iter()
+                .enumerate()
+                .fold(None, |limit, (idx, device)| {
+                    Engine::min_truncation_limit(
+                        limit,
+                        context.mosfet_gate_limit_from_cached_charges(
+                            device,
+                            idx,
+                            &charges[idx],
+                            caps[idx],
+                            &history,
+                        ),
+                    )
+                });
         assert_eq!(fused.map(Value::to_bits), direct.map(Value::to_bits));
         let constants = circuit
             .mosfets
@@ -3042,12 +3116,8 @@ M1 d g s 0 NM W=10u L=1u
             .iter()
             .map(crate::device::Mosfet::classic_transient_constants)
             .collect::<Vec<_>>();
-        let batched = context.classic_mos_gate_limit_from_cached_charges(
-            &constants,
-            &[charges],
-            &[caps],
-            &history,
-        );
+        let batched = context
+            .classic_mos_gate_limit_from_cached_charges(&constants, &charges, &caps, &history);
         assert_eq!(batched.map(Value::to_bits), direct.map(Value::to_bits));
     }
 
