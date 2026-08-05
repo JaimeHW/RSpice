@@ -204,6 +204,47 @@ impl ClassicMosTransientStampCache {
 }
 
 impl Engine {
+    /// Assemble the candidate-dependent remainder for a topology proven to
+    /// contain only ordinary R/C sources and diodes. Keep this out of the
+    /// general mixed-device assembler so its instruction footprint does not
+    /// grow for unrelated circuits.
+    #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
+    fn stamp_cached_diode_transient_system(
+        circuit: &mut crate::circuit::CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+        dt: Value,
+        companion_coeff: &CompanionCoefficients,
+        ctx: &TransientSystemContext<'_>,
+        refresh_nonlinear: bool,
+        evaluation_mode: crate::device::veriloga_builtins::GeneratedEvaluationMode,
+    ) {
+        debug_assert!(circuit.has_cacheable_diode_transient_base());
+        if refresh_nonlinear {
+            circuit.diodes.update_all(solution);
+        }
+        Self::stamp_diode_transient_companions(
+            circuit,
+            matrix,
+            rhs,
+            solution,
+            companion_coeff,
+            dt,
+            ctx.diode_history,
+            ctx.diode_companion_slots,
+        );
+        match evaluation_mode {
+            crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe => {
+                circuit
+                    .diodes
+                    .stamp_static_probe_all_direct(matrix, rhs, solution);
+            }
+            _ => circuit.diodes.stamp_all_direct(matrix, rhs, solution),
+        }
+    }
+
     pub(super) fn initialize_diode_transient_stamp_cache(
         &self,
         circuit: &crate::circuit::CircuitData,
@@ -997,6 +1038,31 @@ impl Engine {
         if let Some(cache) = ctx.diode_attempt_cache.filter(|_| used_diode_attempt_cache) {
             debug_assert!(circuit.has_cacheable_diode_transient_base());
             cache.restore_attempt(matrix, rhs);
+            // The cache itself is a construction-time capability token for a
+            // diode/ordinary-RC topology: every other nonlinear, behavioral,
+            // event-driven, and stateful linear family was proven absent before
+            // it was created. Once its exact per-attempt base has been restored,
+            // run only the three populated candidate-dependent passes instead of
+            // dispatching through the complete mixed-device assembly pipeline.
+            // Static probes retain their physical (unlimited) diode stamp; Newton
+            // iterations retain the canonical limited stamp.
+            let companion_coeff = if ctx.xyce_one_step {
+                CompanionCoefficients::backward_euler()
+            } else {
+                *ctx.coeff
+            };
+            Self::stamp_cached_diode_transient_system(
+                circuit,
+                matrix,
+                rhs,
+                solution,
+                dt,
+                &companion_coeff,
+                ctx,
+                refresh_nonlinear,
+                evaluation_mode,
+            );
+            return Ok(());
         } else {
             matrix.clear_values();
             rhs.fill(0.0);
@@ -1056,15 +1122,9 @@ impl Engine {
         }
         Self::refresh_jfet2_transient_linearizations(circuit, solution, dt, ctx.jfet_history);
 
-        if !used_diode_attempt_cache {
-            circuit.capacitors.stamp_transient_companion(
-                matrix,
-                rhs,
-                dt,
-                &companion_coeff,
-                num_nodes,
-            );
-        }
+        circuit
+            .capacitors
+            .stamp_transient_companion(matrix, rhs, dt, &companion_coeff, num_nodes);
         circuit
             .capacitors
             .stamp_solution_dependent_transient_companion(
