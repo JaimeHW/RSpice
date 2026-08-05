@@ -2668,6 +2668,13 @@ impl Engine {
             .as_ref()
             .is_some_and(residual::ClassicMosTransientStampCache::supports_direct_residual_proof)
             .then(|| (Vec::with_capacity(size), Vec::with_capacity(size)));
+        #[cfg(feature = "parallel")]
+        let capture_classic_mos_candidate_static_terms =
+            classic_mos_stamp_cache.as_ref().is_some_and(|cache| {
+                cache.supports_compact_candidate_static_stamps()
+                    || cache.supports_parallel_direct_residual_proof()
+            });
+        #[cfg(not(feature = "parallel"))]
         let capture_classic_mos_candidate_static_terms =
             classic_mos_stamp_cache.as_ref().is_some_and(
                 residual::ClassicMosTransientStampCache::supports_compact_candidate_static_stamps,

@@ -12,6 +12,11 @@ use super::*;
 const PARALLEL_CLASSIC_MOS_THRESHOLD: usize = 2_048;
 #[cfg(feature = "parallel")]
 const CLASSIC_MOS_INSTANCES_PER_WORKER: usize = 512;
+// Unlike the update kernel, the residual proof also captures a compact static
+// term stream and dispatches a second row walk. Keep its independently measured
+// crossover above the general classic-MOS parallel threshold.
+#[cfg(feature = "parallel")]
+const PARALLEL_CLASSIC_MOS_RESIDUAL_THRESHOLD: usize = 4_096;
 /// Minimum population that amortizes the compact constant-stream walk over
 /// the canonical collection updater on supported desktop targets.
 pub(super) const CLASSIC_MOS_CACHED_CONSTANTS_THRESHOLD: usize = 96;
@@ -136,6 +141,12 @@ pub(super) struct ClassicMosTransientStampCache {
     stamp_pattern: Option<crate::solver::CscPatternToken>,
     cached_devices_support_direct_values: bool,
     direct_residual_has_bounded_row_fan_in: bool,
+    #[cfg(feature = "parallel")]
+    direct_residual_row_offsets: Vec<usize>,
+    #[cfg(feature = "parallel")]
+    direct_residual_row_devices: Vec<usize>,
+    #[cfg(feature = "parallel")]
+    direct_residual_plans: Vec<crate::device::mosfet::ClassicMosResidualRowPlan>,
 }
 
 pub(super) struct ClassicMosCandidateEvaluation {
@@ -154,6 +165,27 @@ impl ClassicMosTransientStampCache {
         !self.direct_residual_has_bounded_row_fan_in
             && self.static_stamp_plans.len() == self.device_constants.len()
             && !self.static_stamp_plans.is_empty()
+    }
+
+    #[cfg(feature = "parallel")]
+    #[inline]
+    pub(super) fn supports_parallel_direct_residual_proof(&self) -> bool {
+        self.direct_residual_has_bounded_row_fan_in
+            && self.direct_residual_row_offsets.len() > 1
+            && self.direct_residual_plans.len() == self.device_constants.len()
+            && !self.direct_residual_plans.is_empty()
+            && self
+                .direct_residual_row_offsets
+                .last()
+                .is_some_and(|&end| end == self.direct_residual_row_devices.len())
+    }
+
+    #[cfg(feature = "parallel")]
+    #[inline]
+    fn direct_residual_devices_for_row(&self, row: usize) -> &[usize] {
+        let start = self.direct_residual_row_offsets[row];
+        let end = self.direct_residual_row_offsets[row + 1];
+        &self.direct_residual_row_devices[start..end]
     }
 
     #[inline]
@@ -415,6 +447,56 @@ impl Engine {
                 }
                 true
             });
+        #[cfg(feature = "parallel")]
+        if cache.direct_residual_has_bounded_row_fan_in
+            && circuit.mosfets.len() >= PARALLEL_CLASSIC_MOS_RESIDUAL_THRESHOLD
+            && self
+                .classic_mos_parallel_worker_count(circuit.mosfets.len())
+                .is_some()
+        {
+            let row_count = rhs.len();
+            cache.direct_residual_row_offsets.resize(row_count + 1, 0);
+            for row in 0..row_count {
+                let incidence = node_incidence.get(row + 1).copied().unwrap_or(0);
+                cache.direct_residual_row_offsets[row + 1] =
+                    cache.direct_residual_row_offsets[row] + incidence;
+            }
+            let incidence_count = cache.direct_residual_row_offsets[row_count];
+            cache
+                .direct_residual_row_devices
+                .resize(incidence_count, usize::MAX);
+            let mut row_cursor = cache.direct_residual_row_offsets[..row_count].to_vec();
+            for (device_idx, mosfet) in circuit.mosfets.devices.iter().enumerate() {
+                let nodes = [
+                    mosfet.node_drain,
+                    mosfet.node_gate,
+                    mosfet.node_source,
+                    mosfet.node_bulk,
+                ];
+                for (node_idx, &node) in nodes.iter().enumerate() {
+                    if node == 0 || nodes[..node_idx].contains(&node) {
+                        continue;
+                    }
+                    let row = node - 1;
+                    let cursor = &mut row_cursor[row];
+                    cache.direct_residual_row_devices[*cursor] = device_idx;
+                    *cursor += 1;
+                }
+            }
+            debug_assert!(
+                cache
+                    .direct_residual_row_devices
+                    .iter()
+                    .all(|&device_idx| device_idx != usize::MAX)
+            );
+            cache.direct_residual_plans.extend(
+                circuit
+                    .mosfets
+                    .devices
+                    .iter()
+                    .map(crate::device::Mosfet::classic_residual_row_plan),
+            );
+        }
         #[cfg(feature = "parallel")]
         let use_compact_static_stamps = self
             .classic_mos_parallel_worker_count(circuit.mosfets.len())
@@ -1446,6 +1528,95 @@ impl Engine {
         Ok(())
     }
 
+    #[cfg(feature = "parallel")]
+    #[allow(clippy::too_many_arguments)]
+    fn accumulate_cached_classic_mos_residual_rows_parallel(
+        &self,
+        cache: &ClassicMosTransientStampCache,
+        solution: &[Value],
+        row_ax: &mut [Value],
+        row_rhs: &mut [Value],
+        companion_terms: &[MosfetCompanionBranchTerms],
+        static_terms: &[crate::device::mosfet::ClassicMosCachedStaticTerms],
+        companion_slots: &[[TwoTerminalStampSlots; 5]],
+    ) -> bool {
+        use rayon::prelude::*;
+
+        let device_count = cache.direct_residual_plans.len();
+        if !cache.supports_parallel_direct_residual_proof()
+            || cache.direct_residual_row_offsets.len() != row_ax.len() + 1
+            || row_ax.len() != row_rhs.len()
+            || companion_terms.len() != device_count
+            || static_terms.len() != device_count
+            || companion_slots.len() != device_count
+        {
+            return false;
+        }
+        let Some(worker_count) = self.classic_mos_parallel_worker_count(device_count) else {
+            return false;
+        };
+        let rows_per_worker = row_ax.len().div_ceil(worker_count).max(1);
+
+        self.install_classic_mos_parallel(|| {
+            row_ax
+                .par_chunks_mut(rows_per_worker)
+                .zip(row_rhs.par_chunks_mut(rows_per_worker))
+                .enumerate()
+                .for_each(|(chunk_idx, (ax_chunk, rhs_chunk))| {
+                    let first_row = chunk_idx * rows_per_worker;
+                    for (local_row, (row_ax, row_rhs)) in
+                        ax_chunk.iter_mut().zip(rhs_chunk).enumerate()
+                    {
+                        let row = first_row + local_row;
+                        for &device_idx in cache.direct_residual_devices_for_row(row) {
+                            for (slots, &(conductance, equivalent_current)) in companion_slots
+                                [device_idx]
+                                .iter()
+                                .zip(&companion_terms[device_idx])
+                            {
+                                if conductance <= 0.0 {
+                                    continue;
+                                }
+                                let vp = if slots.pos == 0 {
+                                    0.0
+                                } else {
+                                    solution[slots.pos - 1]
+                                };
+                                let vn = if slots.neg == 0 {
+                                    0.0
+                                } else {
+                                    solution[slots.neg - 1]
+                                };
+                                if slots.pos > 0 && row == slots.pos - 1 {
+                                    *row_ax += conductance * vp;
+                                    if slots.neg > 0 {
+                                        *row_ax -= conductance * vn;
+                                    }
+                                    *row_rhs += equivalent_current;
+                                }
+                                if slots.neg > 0 && row == slots.neg - 1 {
+                                    if slots.pos > 0 {
+                                        *row_ax -= conductance * vp;
+                                    }
+                                    *row_ax += conductance * vn;
+                                    *row_rhs -= equivalent_current;
+                                }
+                            }
+                            crate::device::Mosfet::add_cached_physical_static_residual_row_terms(
+                                solution,
+                                &cache.direct_residual_plans[device_idx],
+                                &static_terms[device_idx],
+                                row,
+                                row_ax,
+                                row_rhs,
+                            );
+                        }
+                    }
+                });
+        })
+        .is_ok()
+    }
+
     /// Prove a clearly converged classic-MOS candidate from its true physical
     /// linearization without materializing a sparse Jacobian that will not be
     /// solved. The direct row scaling omits the canonical norm's non-negative
@@ -1463,8 +1634,11 @@ impl Engine {
         row_ax: &mut Vec<Value>,
         row_rhs: &mut Vec<Value>,
         candidate_companion_terms: Option<&[MosfetCompanionBranchTerms]>,
+        candidate_static_terms: Option<&[crate::device::mosfet::ClassicMosCachedStaticTerms]>,
         mut caps_out: Option<&mut Vec<(Value, Value, Value)>>,
     ) -> bool {
+        #[cfg(not(feature = "parallel"))]
+        let _ = candidate_static_terms;
         if cache.device_constants.len() != circuit.mosfets.devices.len()
             || ctx.mosfet_companion_slots.len() != circuit.mosfets.devices.len()
             || cache.attempt_ax_into(matrix, solution, row_ax).is_err()
@@ -1491,67 +1665,88 @@ impl Engine {
         } else {
             *ctx.coeff
         };
-        for (idx, ((mosfet, constants), slots)) in circuit
-            .mosfets
-            .devices
-            .iter()
-            .zip(&cache.device_constants)
-            .zip(ctx.mosfet_companion_slots)
-            .enumerate()
-        {
-            let evaluated_terms;
-            let terms = if let Some(candidate_terms) = candidate_companion_terms {
-                &candidate_terms[idx]
-            } else {
-                let (terms, _, caps) = Self::mosfet_companion_branch_terms::<false>(
-                    mosfet,
-                    idx,
+        #[cfg(feature = "parallel")]
+        let used_parallel_rows = candidate_companion_terms
+            .zip(candidate_static_terms)
+            .is_some_and(|(companion_terms, static_terms)| {
+                self.accumulate_cached_classic_mos_residual_rows_parallel(
+                    cache,
                     solution,
-                    &companion_coeff,
-                    dt,
-                    ctx.mosfet_history,
-                    ctx.suppress_gate_charge,
-                    MosfetCompanionBiasSource::Solution,
-                    Some(constants),
-                );
-                if let Some(caps_out) = caps_out.as_deref_mut() {
-                    caps_out.push(caps);
-                }
-                evaluated_terms = terms;
-                &evaluated_terms
-            };
-            for (slots, &(conductance, equivalent_current)) in slots.iter().zip(terms) {
-                if conductance <= 0.0 {
-                    continue;
-                }
-                let vp = if slots.pos == 0 {
-                    0.0
+                    row_ax,
+                    row_rhs,
+                    companion_terms,
+                    static_terms,
+                    ctx.mosfet_companion_slots,
+                )
+            });
+        #[cfg(not(feature = "parallel"))]
+        let used_parallel_rows = false;
+
+        if !used_parallel_rows {
+            for (idx, ((mosfet, constants), slots)) in circuit
+                .mosfets
+                .devices
+                .iter()
+                .zip(&cache.device_constants)
+                .zip(ctx.mosfet_companion_slots)
+                .enumerate()
+            {
+                let evaluated_terms;
+                let terms = if let Some(candidate_terms) = candidate_companion_terms {
+                    &candidate_terms[idx]
                 } else {
-                    solution[slots.pos - 1]
-                };
-                let vn = if slots.neg == 0 {
-                    0.0
-                } else {
-                    solution[slots.neg - 1]
-                };
-                if slots.pos > 0 {
-                    let row = slots.pos - 1;
-                    row_ax[row] += conductance * vp;
-                    if slots.neg > 0 {
-                        row_ax[row] -= conductance * vn;
+                    let (terms, _, caps) = Self::mosfet_companion_branch_terms::<false>(
+                        mosfet,
+                        idx,
+                        solution,
+                        &companion_coeff,
+                        dt,
+                        ctx.mosfet_history,
+                        ctx.suppress_gate_charge,
+                        MosfetCompanionBiasSource::Solution,
+                        Some(constants),
+                    );
+                    if let Some(caps_out) = caps_out.as_deref_mut() {
+                        caps_out.push(caps);
                     }
-                    row_rhs[row] += equivalent_current;
-                }
-                if slots.neg > 0 {
-                    let row = slots.neg - 1;
+                    evaluated_terms = terms;
+                    &evaluated_terms
+                };
+                for (slots, &(conductance, equivalent_current)) in slots.iter().zip(terms) {
+                    if conductance <= 0.0 {
+                        continue;
+                    }
+                    let vp = if slots.pos == 0 {
+                        0.0
+                    } else {
+                        solution[slots.pos - 1]
+                    };
+                    let vn = if slots.neg == 0 {
+                        0.0
+                    } else {
+                        solution[slots.neg - 1]
+                    };
                     if slots.pos > 0 {
-                        row_ax[row] -= conductance * vp;
+                        let row = slots.pos - 1;
+                        row_ax[row] += conductance * vp;
+                        if slots.neg > 0 {
+                            row_ax[row] -= conductance * vn;
+                        }
+                        row_rhs[row] += equivalent_current;
                     }
-                    row_ax[row] += conductance * vn;
-                    row_rhs[row] -= equivalent_current;
+                    if slots.neg > 0 {
+                        let row = slots.neg - 1;
+                        if slots.pos > 0 {
+                            row_ax[row] -= conductance * vp;
+                        }
+                        row_ax[row] += conductance * vn;
+                        row_rhs[row] -= equivalent_current;
+                    }
                 }
+                mosfet.add_physical_static_residual_row_terms_at(
+                    solution, constants, row_ax, row_rhs,
+                );
             }
-            mosfet.add_physical_static_residual_row_terms_at(solution, constants, row_ax, row_rhs);
         }
 
         let node_rows = circuit.num_nodes().min(row_rhs.len());
@@ -1676,6 +1871,14 @@ impl Engine {
                         .as_deref()
                         .is_none_or(|caps| caps.len() == circuit.mosfets.devices.len())
             });
+            #[cfg(feature = "parallel")]
+            let direct_static_terms = classic_mos_static_terms.filter(|terms| {
+                cache.supports_parallel_direct_residual_proof()
+                    && circuit.mosfets.last_update_all_is_physical()
+                    && terms.len() == circuit.mosfets.devices.len()
+            });
+            #[cfg(not(feature = "parallel"))]
+            let direct_static_terms = None;
             if let Some((row_ax, row_rhs)) = classic_mos_residual_scratch
                 && self.classic_mos_physical_residual_clearly_converged(
                     cache,
@@ -1687,6 +1890,7 @@ impl Engine {
                     row_ax,
                     row_rhs,
                     direct_companion_terms,
+                    direct_static_terms,
                     classic_mos_caps_out.as_deref_mut(),
                 )
             {
@@ -2107,6 +2311,7 @@ M1 d g 0 0 NM W=10u L=1u
             &ctx,
             &mut direct_ax,
             &mut direct_rhs,
+            None,
             None,
             Some(&mut direct_caps),
         );

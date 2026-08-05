@@ -27,6 +27,8 @@ pub use ekv::EkvMosfet;
 pub use ekv3::{Ekv3Device, Ekv3Op};
 pub use jfet::{Jfet, JfetChannelModel, JfetParams, JfetType};
 pub use mos_models::MosParams;
+#[cfg(feature = "parallel")]
+pub(crate) use mosfet::ClassicMosResidualRowPlan;
 pub(crate) use mosfet::{
     ClassicMosCachedStaticTerms, ClassicMosStaticStampPlan, ClassicMosTransientConstants,
     MosfetNonlinearState,

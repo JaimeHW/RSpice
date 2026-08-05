@@ -82,6 +82,23 @@ impl Mosfet {
         }
     }
 
+    #[cfg(feature = "parallel")]
+    #[inline]
+    pub(crate) fn classic_residual_row_plan(&self) -> ClassicMosResidualRowPlan {
+        let (body_source_anode, body_source_cathode) = self.body_source_diode_nodes();
+        let (body_drain_anode, body_drain_cathode) = self.body_drain_diode_nodes();
+        ClassicMosResidualRowPlan {
+            node_drain: self.node_drain,
+            node_gate: self.node_gate,
+            node_source: self.node_source,
+            node_bulk: self.node_bulk,
+            body_source_anode,
+            body_source_cathode,
+            body_drain_anode,
+            body_drain_cathode,
+        }
+    }
+
     #[inline]
     fn stamp_classic_diode_plan(
         matrix: &mut StaticMatrix,
@@ -528,6 +545,110 @@ impl Mosfet {
         );
     }
 
+    /// Add the already-evaluated physical static contribution for one MNA row.
+    ///
+    /// A row-parallel residual proof calls this for devices incident on each
+    /// row in original instance order. The arithmetic within a row is exactly
+    /// the same as [`Self::add_physical_static_residual_row_terms_at`], while
+    /// disjoint row outputs allow deterministic parallel execution.
+    #[cfg(feature = "parallel")]
+    pub(crate) fn add_cached_physical_static_residual_row_terms(
+        solution: &[Value],
+        plan: &ClassicMosResidualRowPlan,
+        terms: &ClassicMosCachedStaticTerms,
+        row: usize,
+        row_ax: &mut Value,
+        row_rhs: &mut Value,
+    ) {
+        let vd = Self::terminal_voltage(solution, plan.node_drain);
+        let vg = Self::terminal_voltage(solution, plan.node_gate);
+        let vs = Self::terminal_voltage(solution, plan.node_source);
+        let vb = Self::terminal_voltage(solution, plan.node_bulk);
+        let source_diagonal = terms.gm + terms.gds + terms.gmb;
+
+        if plan.node_drain > 0 && row == plan.node_drain - 1 {
+            *row_ax += terms.gds * vd;
+            if plan.node_gate > 0 {
+                *row_ax += terms.gm * vg;
+            }
+            if plan.node_source > 0 {
+                *row_ax -= source_diagonal * vs;
+            }
+            if plan.node_bulk > 0 {
+                *row_ax += terms.gmb * vb;
+            }
+            *row_rhs -= terms.id_eq;
+        }
+        if plan.node_source > 0 && row == plan.node_source - 1 {
+            if plan.node_drain > 0 {
+                *row_ax -= terms.gds * vd;
+            }
+            if plan.node_gate > 0 {
+                *row_ax -= terms.gm * vg;
+            }
+            *row_ax += source_diagonal * vs;
+            if plan.node_bulk > 0 {
+                *row_ax -= terms.gmb * vb;
+            }
+            *row_rhs += terms.id_eq;
+        }
+
+        Self::add_cached_diode_residual_row_terms(
+            solution,
+            row,
+            row_ax,
+            row_rhs,
+            plan.body_source_anode,
+            plan.body_source_cathode,
+            terms.gbs,
+            terms.ieq_bs,
+        );
+        Self::add_cached_diode_residual_row_terms(
+            solution,
+            row,
+            row_ax,
+            row_rhs,
+            plan.body_drain_anode,
+            plan.body_drain_cathode,
+            terms.gbd,
+            terms.ieq_bd,
+        );
+    }
+
+    #[cfg(feature = "parallel")]
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    fn add_cached_diode_residual_row_terms(
+        solution: &[Value],
+        row: usize,
+        row_ax: &mut Value,
+        row_rhs: &mut Value,
+        anode: NodeId,
+        cathode: NodeId,
+        conductance: Value,
+        equivalent_current: Value,
+    ) {
+        if conductance == 0.0 && equivalent_current == 0.0 {
+            return;
+        }
+        let va = Self::terminal_voltage(solution, anode);
+        let vc = Self::terminal_voltage(solution, cathode);
+        if anode > 0 && row == anode - 1 {
+            *row_ax += conductance * va;
+            if cathode > 0 {
+                *row_ax -= conductance * vc;
+            }
+            *row_rhs -= equivalent_current;
+        }
+        if cathode > 0 && row == cathode - 1 {
+            if anode > 0 {
+                *row_ax -= conductance * va;
+            }
+            *row_ax += conductance * vc;
+            *row_rhs += equivalent_current;
+        }
+    }
+
     #[inline]
     fn add_diode_residual_row_terms(
         solution: &[Value],
@@ -736,6 +857,24 @@ mod tests {
             &mut cached_ax,
             &mut cached_rhs,
         );
+        #[cfg(feature = "parallel")]
+        let rowwise = {
+            let cached_terms = cached_mos.classic_cached_static_terms();
+            let residual_plan = cached_mos.classic_residual_row_plan();
+            let mut rowwise_ax = vec![0.0; 4];
+            let mut rowwise_rhs = vec![0.0; 4];
+            for row in 0..4 {
+                Mosfet::add_cached_physical_static_residual_row_terms(
+                    &candidate,
+                    &residual_plan,
+                    &cached_terms,
+                    row,
+                    &mut rowwise_ax[row],
+                    &mut rowwise_rhs[row],
+                );
+            }
+            (rowwise_ax, rowwise_rhs)
+        };
 
         let fresh_mos = Mosfet::new_nmos("fresh".to_string(), 1, 2, 3, 4);
         let mut evaluated_ax = vec![0.0; 4];
@@ -749,5 +888,10 @@ mod tests {
 
         assert_eq!(cached_ax, evaluated_ax);
         assert_eq!(cached_rhs, evaluated_rhs);
+        #[cfg(feature = "parallel")]
+        {
+            assert_eq!(rowwise.0, cached_ax);
+            assert_eq!(rowwise.1, cached_rhs);
+        }
     }
 }

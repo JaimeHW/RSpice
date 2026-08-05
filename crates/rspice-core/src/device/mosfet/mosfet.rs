@@ -103,6 +103,23 @@ pub(crate) struct ClassicMosCachedStaticTerms {
     ieq_bd: Value,
 }
 
+/// Immutable topology needed to accumulate one classic-MOS physical residual
+/// row. Keeping this compact plan in the transient cache lets row-parallel
+/// proofs share only plain values, never the interior-mutability caches carried
+/// by the complete circuit and device objects.
+#[cfg(feature = "parallel")]
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ClassicMosResidualRowPlan {
+    node_drain: NodeId,
+    node_gate: NodeId,
+    node_source: NodeId,
+    node_bulk: NodeId,
+    body_source_anode: NodeId,
+    body_source_cathode: NodeId,
+    body_drain_anode: NodeId,
+    body_drain_cathode: NodeId,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct ClassicMosValueSlot(usize);
 
