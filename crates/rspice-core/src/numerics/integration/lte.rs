@@ -366,7 +366,7 @@ impl LteEstimator {
             self.prev_dt
         };
         if self.history_count >= 2 && predictor_dt > 0.0 {
-            prev + dt * (prev - prev_prev) / predictor_dt
+            prev + (dt / predictor_dt) * (prev - prev_prev)
         } else {
             prev
         }
