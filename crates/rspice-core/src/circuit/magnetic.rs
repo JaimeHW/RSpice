@@ -472,11 +472,7 @@ impl CircuitData {
                         jacobian_magnetization,
                     )
                     .unwrap_or(Value::NAN);
-                let d_m = if one_step_order2 {
-                    static_scale * voltage * fixed_mid_m / (mid * mid)
-                } else {
-                    -static_scale * voltage * fixed_mid_m / (mid * mid)
-                };
+                let d_m = static_scale * voltage * fixed_mid_m / (mid * mid);
                 if !d_m.is_finite() {
                     self.xyce_core_trial_invalid = true;
                     continue;
