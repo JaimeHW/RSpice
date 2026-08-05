@@ -222,7 +222,13 @@ impl TransientCapturePlan {
             })
     }
 
-    fn compile(netlist: &Netlist, node_names: &[String], branch_names: &[String]) -> Self {
+    fn compile(
+        netlist: &Netlist,
+        node_names: &[String],
+        branch_names: &[String],
+        retain_xyce_voltage_source_currents: bool,
+        voltage_source_names: &[String],
+    ) -> Self {
         // Measurement evaluation currently happens after integration. Until
         // measurements become online reducers, retain all analog operands for
         // measurement decks so output projection cannot change their result.
@@ -254,7 +260,12 @@ impl TransientCapturePlan {
         let branch_currents = branch_names
             .iter()
             .map(|name| {
+                let is_xyce_voltage_source = retain_xyce_voltage_source_currents
+                    && voltage_source_names.iter().any(|source| {
+                        Self::canonical_symbol(source) == Self::canonical_symbol(name)
+                    });
                 retain_all
+                    || is_xyce_voltage_source
                     || netlist.saves.selects(&format!("I({name})"))
                     || netlist
                         .output_requests
@@ -2090,7 +2101,24 @@ impl Engine {
                 .iter()
                 .map(|&branch| Self::derived_transient_branch_name(&circuit, branch)),
         );
-        let capture_plan = TransientCapturePlan::compile(netlist, &node_names, &branch_names);
+        let retain_xyce_voltage_source_currents =
+            self.config.spice_dialect == SpiceDialect::Xyce
+                && netlist.output_requests.iter().any(|request| {
+                    request
+                        .analysis
+                        .is_none_or(|analysis| analysis == OutputAnalysisKind::Tran)
+                        && request.dependencies.iter().any(|dependency| {
+                            dependency.kind == OutputSymbolKind::Device
+                                && matches!(dependency.operator.as_str(), "I" | "P" | "W")
+                        })
+                });
+        let capture_plan = TransientCapturePlan::compile(
+            netlist,
+            &node_names,
+            &branch_names,
+            retain_xyce_voltage_source_currents,
+            &circuit.voltage_sources.names,
+        );
         let trace_capacity = self.transient_initial_trace_capacity(
             (tstop - resume_time).max(0.0),
             hinted_max_step,
