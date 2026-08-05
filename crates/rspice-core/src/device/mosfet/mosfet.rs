@@ -7,7 +7,7 @@ use super::legacy_bsim::{LegacyBsimModel, LegacyBsimRegion, LegacyBsimSizedModel
 use super::smooth::{SMOOTH_VOLTAGE, smooth_max, smooth_min, smooth_positive, smooth_step};
 use crate::constants::VT_REFERENCE;
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
-use crate::solver::{CscIndex, StaticMatrix};
+use crate::solver::{CscIndex, CscPatternToken, StaticMatrix};
 use crate::{NodeId, Value};
 
 /// Separate smoothing width for Vds-dependent region transitions.
@@ -104,19 +104,69 @@ pub(crate) struct ClassicMosCachedStaticTerms {
 }
 
 #[derive(Debug, Clone, Copy)]
+struct ClassicMosValueSlot(usize);
+
+impl ClassicMosValueSlot {
+    const ABSENT: usize = usize::MAX;
+
+    #[inline]
+    fn from_index(index: Option<CscIndex>) -> Self {
+        Self(index.map_or(Self::ABSENT, CscIndex::offset))
+    }
+
+    #[inline]
+    fn offset(self) -> Option<usize> {
+        (self.0 != Self::ABSENT).then_some(self.0)
+    }
+
+    #[inline]
+    fn checked_index(self, pattern: CscPatternToken) -> Option<CscIndex> {
+        self.offset().map(|offset| pattern.bind_offset(offset))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ClassicMosValueIndices {
+    dd: ClassicMosValueSlot,
+    dg: ClassicMosValueSlot,
+    ds: ClassicMosValueSlot,
+    db: ClassicMosValueSlot,
+    sd: ClassicMosValueSlot,
+    sg: ClassicMosValueSlot,
+    ss: ClassicMosValueSlot,
+    sb: ClassicMosValueSlot,
+}
+
+impl From<&MosfetIndices> for ClassicMosValueIndices {
+    fn from(indices: &MosfetIndices) -> Self {
+        Self {
+            dd: ClassicMosValueSlot::from_index(indices.dd),
+            dg: ClassicMosValueSlot::from_index(indices.dg),
+            ds: ClassicMosValueSlot::from_index(indices.ds),
+            db: ClassicMosValueSlot::from_index(indices.db),
+            sd: ClassicMosValueSlot::from_index(indices.sd),
+            sg: ClassicMosValueSlot::from_index(indices.sg),
+            ss: ClassicMosValueSlot::from_index(indices.ss),
+            sb: ClassicMosValueSlot::from_index(indices.sb),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 struct ClassicMosDiodeStampPlan {
     anode: NodeId,
     cathode: NodeId,
-    aa: Option<CscIndex>,
-    ac: Option<CscIndex>,
-    ca: Option<CscIndex>,
-    cc: Option<CscIndex>,
+    aa: ClassicMosValueSlot,
+    ac: ClassicMosValueSlot,
+    ca: ClassicMosValueSlot,
+    cc: ClassicMosValueSlot,
 }
 
 /// Run-invariant direct-stamp locations for a classic MOS instance.
 #[derive(Debug, Clone)]
 pub(crate) struct ClassicMosStaticStampPlan {
-    indices: MosfetIndices,
+    pattern: CscPatternToken,
+    indices: ClassicMosValueIndices,
     node_drain: NodeId,
     node_source: NodeId,
     body_source: ClassicMosDiodeStampPlan,
@@ -525,6 +575,19 @@ mod layout_tests {
         assert!(
             bytes <= 1_216,
             "classic MOS hot instance regressed to {bytes} bytes; keep cold model-family payloads indirect"
+        );
+    }
+
+    #[test]
+    fn classic_mos_static_plan_keeps_one_pattern_token() {
+        assert_eq!(
+            std::mem::size_of::<ClassicMosValueSlot>(),
+            std::mem::size_of::<usize>()
+        );
+        let bytes = std::mem::size_of::<ClassicMosStaticStampPlan>();
+        assert!(
+            bytes <= 184,
+            "classic MOS static stamp plan regressed to {bytes} bytes; retain one pattern token per plan"
         );
     }
 }

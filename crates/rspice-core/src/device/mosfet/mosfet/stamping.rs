@@ -15,15 +15,15 @@ impl Mosfet {
         let plan = ClassicMosDiodeStampPlan {
             anode,
             cathode,
-            aa: index(anode, anode),
-            ac: index(anode, cathode),
-            ca: index(cathode, anode),
-            cc: index(cathode, cathode),
+            aa: ClassicMosValueSlot::from_index(index(anode, anode)),
+            ac: ClassicMosValueSlot::from_index(index(anode, cathode)),
+            ca: ClassicMosValueSlot::from_index(index(cathode, anode)),
+            cc: ClassicMosValueSlot::from_index(index(cathode, cathode)),
         };
-        let complete = (anode == 0 || plan.aa.is_some())
-            && (anode == 0 || cathode == 0 || plan.ac.is_some())
-            && (cathode == 0 || anode == 0 || plan.ca.is_some())
-            && (cathode == 0 || plan.cc.is_some());
+        let complete = (anode == 0 || plan.aa.offset().is_some())
+            && (anode == 0 || cathode == 0 || plan.ac.offset().is_some())
+            && (cathode == 0 || anode == 0 || plan.ca.offset().is_some())
+            && (cathode == 0 || plan.cc.offset().is_some());
         complete.then_some(plan)
     }
 
@@ -52,7 +52,8 @@ impl Mosfet {
         let (bs_anode, bs_cathode) = self.body_source_diode_nodes();
         let (bd_anode, bd_cathode) = self.body_drain_diode_nodes();
         Some(ClassicMosStaticStampPlan {
-            indices: self.indices.clone(),
+            pattern: matrix.pattern_token(),
+            indices: ClassicMosValueIndices::from(&self.indices),
             node_drain: self.node_drain,
             node_source: self.node_source,
             body_source: Self::classic_diode_stamp_plan(matrix, bs_anode, bs_cathode)?,
@@ -85,6 +86,7 @@ impl Mosfet {
     fn stamp_classic_diode_plan(
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
+        pattern: CscPatternToken,
         plan: &ClassicMosDiodeStampPlan,
         conductance: Value,
         equivalent_current: Value,
@@ -92,19 +94,19 @@ impl Mosfet {
         if conductance == 0.0 && equivalent_current == 0.0 {
             return;
         }
-        if let Some(index) = plan.aa {
+        if let Some(index) = plan.aa.checked_index(pattern) {
             matrix.stamp_direct(index, conductance);
         }
-        if let Some(index) = plan.ac {
+        if let Some(index) = plan.ac.checked_index(pattern) {
             matrix.stamp_direct(index, -conductance);
         }
         if plan.anode > 0 {
             rhs[plan.anode - 1] -= equivalent_current;
         }
-        if let Some(index) = plan.ca {
+        if let Some(index) = plan.ca.checked_index(pattern) {
             matrix.stamp_direct(index, -conductance);
         }
-        if let Some(index) = plan.cc {
+        if let Some(index) = plan.cc.checked_index(pattern) {
             matrix.stamp_direct(index, conductance);
         }
         if plan.cathode > 0 {
@@ -122,28 +124,28 @@ impl Mosfet {
         terms: &ClassicMosCachedStaticTerms,
     ) {
         let source_diagonal = terms.gm + terms.gds + terms.gmb;
-        if let Some(index) = plan.indices.dd {
+        if let Some(index) = plan.indices.dd.checked_index(plan.pattern) {
             matrix.stamp_direct(index, terms.gds);
         }
-        if let Some(index) = plan.indices.dg {
+        if let Some(index) = plan.indices.dg.checked_index(plan.pattern) {
             matrix.stamp_direct(index, terms.gm);
         }
-        if let Some(index) = plan.indices.ds {
+        if let Some(index) = plan.indices.ds.checked_index(plan.pattern) {
             matrix.stamp_direct(index, -terms.gm - terms.gds - terms.gmb);
         }
-        if let Some(index) = plan.indices.db {
+        if let Some(index) = plan.indices.db.checked_index(plan.pattern) {
             matrix.stamp_direct(index, terms.gmb);
         }
-        if let Some(index) = plan.indices.sd {
+        if let Some(index) = plan.indices.sd.checked_index(plan.pattern) {
             matrix.stamp_direct(index, -terms.gds);
         }
-        if let Some(index) = plan.indices.sg {
+        if let Some(index) = plan.indices.sg.checked_index(plan.pattern) {
             matrix.stamp_direct(index, -terms.gm);
         }
-        if let Some(index) = plan.indices.ss {
+        if let Some(index) = plan.indices.ss.checked_index(plan.pattern) {
             matrix.stamp_direct(index, source_diagonal);
         }
-        if let Some(index) = plan.indices.sb {
+        if let Some(index) = plan.indices.sb.checked_index(plan.pattern) {
             matrix.stamp_direct(index, -terms.gmb);
         }
         if plan.node_drain > 0 {
@@ -152,8 +154,22 @@ impl Mosfet {
         if plan.node_source > 0 {
             rhs[plan.node_source - 1] += terms.id_eq;
         }
-        Self::stamp_classic_diode_plan(matrix, rhs, &plan.body_source, terms.gbs, terms.ieq_bs);
-        Self::stamp_classic_diode_plan(matrix, rhs, &plan.body_drain, terms.gbd, terms.ieq_bd);
+        Self::stamp_classic_diode_plan(
+            matrix,
+            rhs,
+            plan.pattern,
+            &plan.body_source,
+            terms.gbs,
+            terms.ieq_bs,
+        );
+        Self::stamp_classic_diode_plan(
+            matrix,
+            rhs,
+            plan.pattern,
+            &plan.body_drain,
+            terms.gbd,
+            terms.ieq_bd,
+        );
     }
 
     #[inline]
@@ -167,20 +183,20 @@ impl Mosfet {
         if conductance == 0.0 && equivalent_current == 0.0 {
             return;
         }
-        if let Some(index) = plan.aa {
-            values[index.offset()] += conductance;
+        if let Some(offset) = plan.aa.offset() {
+            values[offset] += conductance;
         }
-        if let Some(index) = plan.ac {
-            values[index.offset()] += -conductance;
+        if let Some(offset) = plan.ac.offset() {
+            values[offset] += -conductance;
         }
         if plan.anode > 0 {
             rhs[plan.anode - 1] -= equivalent_current;
         }
-        if let Some(index) = plan.ca {
-            values[index.offset()] += -conductance;
+        if let Some(offset) = plan.ca.offset() {
+            values[offset] += -conductance;
         }
-        if let Some(index) = plan.cc {
-            values[index.offset()] += conductance;
+        if let Some(offset) = plan.cc.offset() {
+            values[offset] += conductance;
         }
         if plan.cathode > 0 {
             rhs[plan.cathode - 1] += equivalent_current;
@@ -198,29 +214,29 @@ impl Mosfet {
         terms: &ClassicMosCachedStaticTerms,
     ) {
         let source_diagonal = terms.gm + terms.gds + terms.gmb;
-        if let Some(index) = plan.indices.dd {
-            values[index.offset()] += terms.gds;
+        if let Some(offset) = plan.indices.dd.offset() {
+            values[offset] += terms.gds;
         }
-        if let Some(index) = plan.indices.dg {
-            values[index.offset()] += terms.gm;
+        if let Some(offset) = plan.indices.dg.offset() {
+            values[offset] += terms.gm;
         }
-        if let Some(index) = plan.indices.ds {
-            values[index.offset()] += -terms.gm - terms.gds - terms.gmb;
+        if let Some(offset) = plan.indices.ds.offset() {
+            values[offset] += -terms.gm - terms.gds - terms.gmb;
         }
-        if let Some(index) = plan.indices.db {
-            values[index.offset()] += terms.gmb;
+        if let Some(offset) = plan.indices.db.offset() {
+            values[offset] += terms.gmb;
         }
-        if let Some(index) = plan.indices.sd {
-            values[index.offset()] += -terms.gds;
+        if let Some(offset) = plan.indices.sd.offset() {
+            values[offset] += -terms.gds;
         }
-        if let Some(index) = plan.indices.sg {
-            values[index.offset()] += -terms.gm;
+        if let Some(offset) = plan.indices.sg.offset() {
+            values[offset] += -terms.gm;
         }
-        if let Some(index) = plan.indices.ss {
-            values[index.offset()] += source_diagonal;
+        if let Some(offset) = plan.indices.ss.offset() {
+            values[offset] += source_diagonal;
         }
-        if let Some(index) = plan.indices.sb {
-            values[index.offset()] += -terms.gmb;
+        if let Some(offset) = plan.indices.sb.offset() {
+            values[offset] += -terms.gmb;
         }
         if plan.node_drain > 0 {
             rhs[plan.node_drain - 1] -= terms.id_eq;
