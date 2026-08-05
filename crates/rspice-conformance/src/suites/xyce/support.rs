@@ -2153,6 +2153,7 @@ impl XyceTestRunner {
             measure_fail_output: _,
             measure_default_value: _,
             measure_use_cont_files: _,
+            output_snapshots: _,
             reltol,
             abstol,
             vntol,

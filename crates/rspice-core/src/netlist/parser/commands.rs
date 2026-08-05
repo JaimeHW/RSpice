@@ -1519,6 +1519,14 @@ pub(super) fn parse_options_command(
                 let _ = parse_positive_real_option("OUTPUT.INITIAL_INTERVAL", value, line_num)?;
                 consume_output_initial_interval_schedule(stream, line_num, params)?;
             }
+            (Some("OUTPUT"), "SNAPSHOTS") => {
+                options.output_snapshots = Some(parse_boolean_option(
+                    stream,
+                    line_num,
+                    params,
+                    has_equals,
+                )?);
+            }
             (_, "INTERP" | "NOACCT") => {
                 // Ngspice compatibility flags. INTERP affects rawfile storage
                 // density and NOACCT suppresses accounting output; neither

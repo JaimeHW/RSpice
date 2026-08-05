@@ -2661,6 +2661,14 @@ pub struct SimulationOptions {
     /// records to per-measure files instead of the aggregate measurement
     /// file. Xyce enables this by default.
     pub measure_use_cont_files: Option<bool>,
+    /// Xyce `.OPTIONS OUTPUT SNAPSHOTS`: replace each transient print list
+    /// with every solved node voltage and MNA branch-current variable.
+    ///
+    /// Snapshot output is intentionally represented as a capture policy on
+    /// the netlist.  The authored `.PRINT` probes remain available for
+    /// contract parsing, while the transient engine retains the complete
+    /// solution-variable set needed by Xyce's snapshot writer.
+    pub output_snapshots: Option<bool>,
     /// Xyce `.OPTIONS HBINT NUMFREQ[<n>]=...` harmonic orders.
     /// Each order produces a bilateral `2*N+1` collocation grid.
     pub hb_num_frequencies: Vec<usize>,
@@ -2827,6 +2835,9 @@ impl SimulationOptions {
         }
         if other.measure_use_cont_files.is_some() {
             self.measure_use_cont_files = other.measure_use_cont_files;
+        }
+        if other.output_snapshots.is_some() {
+            self.output_snapshots = other.output_snapshots;
         }
         if other.reltol.is_some() {
             self.reltol = other.reltol;

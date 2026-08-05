@@ -148,20 +148,107 @@ impl DiagnosticTimer {
 }
 
 impl TransientCapturePlan {
+    #[inline]
+    fn canonical_symbol(name: &str) -> String {
+        name.trim()
+            .chars()
+            .map(|character| {
+                if character == ':' {
+                    '.'
+                } else {
+                    character.to_ascii_uppercase()
+                }
+            })
+            .collect()
+    }
+
+    fn request_selects_node(
+        netlist: &Netlist,
+        request: &crate::netlist::OutputRequest,
+        candidate: &str,
+    ) -> bool {
+        if request.selects_transient_node_voltage(candidate) {
+            return true;
+        }
+
+        let candidate = Self::canonical_symbol(candidate);
+        request.dependencies.iter().any(|dependency| {
+            dependency.kind == OutputSymbolKind::Node
+                && request
+                    .analysis
+                    .is_none_or(|analysis| analysis == OutputAnalysisKind::Tran)
+                && Engine::resolve_hierarchical_node_name(netlist, &dependency.symbol)
+                    .is_some_and(|resolved| Self::canonical_symbol(&resolved) == candidate)
+        })
+    }
+
+    fn request_selects_core_winding_branch(
+        request: &crate::netlist::OutputRequest,
+        candidate: &str,
+    ) -> bool {
+        let candidate = Self::canonical_symbol(candidate);
+        request.dependencies.iter().any(|dependency| {
+            if dependency.kind != OutputSymbolKind::Node
+                || !dependency.operator.eq_ignore_ascii_case("N")
+                || !request
+                    .analysis
+                    .is_none_or(|analysis| analysis == OutputAnalysisKind::Tran)
+            {
+                return false;
+            }
+            let symbol = Self::canonical_symbol(&dependency.symbol);
+            let Some(core_parameter) = symbol.strip_prefix("YMIN!") else {
+                return false;
+            };
+            let Some(winding) = core_parameter.strip_suffix("_BRANCH") else {
+                return false;
+            };
+            winding
+                .rsplit_once('_')
+                .map(|(_, winding)| winding == candidate)
+                .unwrap_or(false)
+        })
+    }
+
+    #[inline]
+    fn request_requires_power_voltage(request: &crate::netlist::OutputRequest) -> bool {
+        request
+            .analysis
+            .is_none_or(|analysis| analysis == OutputAnalysisKind::Tran)
+            && request.dependencies.iter().any(|dependency| {
+                dependency.kind == OutputSymbolKind::Device
+                    && (dependency.operator.eq_ignore_ascii_case("P")
+                        || dependency.operator.eq_ignore_ascii_case("W"))
+            })
+    }
+
     fn compile(netlist: &Netlist, node_names: &[String], branch_names: &[String]) -> Self {
         // Measurement evaluation currently happens after integration. Until
         // measurements become online reducers, retain all analog operands for
         // measurement decks so output projection cannot change their result.
-        let retain_all = netlist.saves.keeps_everything() || !netlist.measurements.is_empty();
+        let retain_all = netlist.saves.keeps_everything()
+            || !netlist.measurements.is_empty()
+            || netlist.options.output_snapshots.unwrap_or(false);
+        // P()/W() are terminal quantities, not merely branch-current aliases:
+        // evaluating them after integration needs both terminal voltage
+        // waveforms.  The requested device may be hierarchical and its
+        // flattened element ports can be interface aliases, so retaining the
+        // complete voltage namespace is the only topology-independent way to
+        // preserve that output contract.
+        let retain_power_voltages = netlist
+            .output_requests
+            .iter()
+            .any(Self::request_requires_power_voltage);
         let voltages = node_names
             .iter()
             .map(|name| {
                 retain_all
+                    || retain_power_voltages
                     || netlist.saves.retains_voltage_operand(name)
                     || netlist
                         .output_requests
                         .iter()
-                        .any(|request| request.selects_transient_node_voltage(name))
+                        .any(|request| Self::request_selects_node(netlist, request, name))
             })
             .collect();
         let branch_currents = branch_names
@@ -172,7 +259,10 @@ impl TransientCapturePlan {
                     || netlist
                         .output_requests
                         .iter()
-                        .any(|request| request.selects_transient_device_current(name))
+                        .any(|request| {
+                            request.selects_transient_device_current(name)
+                                || Self::request_selects_core_winding_branch(request, name)
+                        })
             })
             .collect();
         // XSPICE event vectors occupy a distinct result namespace. Bare/raw
