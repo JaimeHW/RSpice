@@ -2648,6 +2648,18 @@ impl Engine {
             classic_mos_stamp_cache.as_ref().is_some_and(
                 residual::ClassicMosTransientStampCache::supports_compact_candidate_static_stamps,
             );
+        let reuse_sequential_classic_mos_newton_terms =
+            classic_mos_stamp_cache.as_ref().is_some_and(|_| {
+                #[cfg(feature = "parallel")]
+                {
+                    self.classic_mos_parallel_worker_count(circuit.mosfets.len())
+                        .is_none()
+                }
+                #[cfg(not(feature = "parallel"))]
+                {
+                    true
+                }
+            });
         let mut cached_mosfet_truncation_limit;
         let mut cached_mosfet_truncation_limit_valid;
         let mut failed_voltage_conv: usize = 0;
@@ -3340,22 +3352,52 @@ impl Engine {
                     analysis_final_step,
                 };
                 if let Some(cache) = classic_mos_stamp_cache.as_ref() {
-                    self.stamp_classic_mos_transient_system_from_cache(
-                        cache,
-                        &mut circuit,
-                        &mut matrix,
-                        &mut rhs,
-                        &new_solution,
-                        dt,
-                        &transient_system_context,
-                        !nonlinear_state_matches_new_solution,
-                        crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
-                        None,
-                        None,
-                        Some(&mut mosfet_companion_terms_scratch),
-                        Some(&mut mosfet_static_terms_scratch),
-                        None,
-                    )?;
+                    let refresh_classic_mos_nonlinear = !nonlinear_state_matches_new_solution;
+                    let reuse_classic_mos_terms = reuse_sequential_classic_mos_newton_terms
+                        && mosfet_companion_terms_valid
+                        && nonlinear_state_matches_new_solution
+                        && mosfet_companion_terms_scratch.len() == circuit.mosfets.devices.len();
+                    if reuse_classic_mos_terms {
+                        let reusable_static_terms = capture_classic_mos_candidate_static_terms
+                            .then_some(mosfet_static_terms_scratch.as_slice());
+                        self.stamp_classic_mos_transient_system_from_cache(
+                            cache,
+                            &mut circuit,
+                            &mut matrix,
+                            &mut rhs,
+                            &new_solution,
+                            dt,
+                            &transient_system_context,
+                            false,
+                            crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
+                            Some(mosfet_companion_terms_scratch.as_slice()),
+                            reusable_static_terms,
+                            None,
+                            None,
+                            None,
+                        )?;
+                    } else {
+                        self.stamp_classic_mos_transient_system_from_cache(
+                            cache,
+                            &mut circuit,
+                            &mut matrix,
+                            &mut rhs,
+                            &new_solution,
+                            dt,
+                            &transient_system_context,
+                            refresh_classic_mos_nonlinear,
+                            crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
+                            None,
+                            None,
+                            Some(&mut mosfet_companion_terms_scratch),
+                            Some(&mut mosfet_static_terms_scratch),
+                            None,
+                        )?;
+                        mosfet_companion_terms_valid = reuse_sequential_classic_mos_newton_terms
+                            && refresh_classic_mos_nonlinear
+                            && mosfet_companion_terms_scratch.len()
+                                == circuit.mosfets.devices.len();
+                    }
                 } else {
                     self.stamp_transient_system(
                         &mut circuit,
@@ -3945,12 +3987,29 @@ impl Engine {
                                         mosfet_companion_terms_valid
                                             && classic_mos_truncation_context.is_some();
                                 } else {
-                                    self.update_classic_mos_nonlinear_devices(
-                                        &mut circuit,
-                                        &new_solution,
-                                        classic_mos_cache.device_constants(),
-                                    )?;
-                                    mosfet_companion_terms_valid = false;
+                                    if reuse_sequential_classic_mos_newton_terms {
+                                        self.update_classic_mos_with_companion_terms_only(
+                                            &mut circuit,
+                                            &new_solution,
+                                            classic_mos_cache.device_constants(),
+                                            &coeff,
+                                            dt,
+                                            &mosfet_history,
+                                            suppress_gate_charge,
+                                            &mut mosfet_companion_terms_scratch,
+                                            &mut mosfet_static_terms_scratch,
+                                        )?;
+                                        mosfet_companion_terms_valid =
+                                            mosfet_companion_terms_scratch.len()
+                                                == circuit.mosfets.devices.len();
+                                    } else {
+                                        self.update_classic_mos_nonlinear_devices(
+                                            &mut circuit,
+                                            &new_solution,
+                                            classic_mos_cache.device_constants(),
+                                        )?;
+                                        mosfet_companion_terms_valid = false;
+                                    }
                                     cached_mosfet_truncation_limit_valid = false;
                                 }
                             } else {

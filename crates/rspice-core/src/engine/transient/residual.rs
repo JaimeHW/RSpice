@@ -538,8 +538,13 @@ impl Engine {
             };
         let physical_cache_matches_probe =
             static_probe && circuit.mosfets.last_update_all_is_physical();
+        let cached_terms_match_assembly = if static_probe {
+            physical_cache_matches_probe
+        } else {
+            !refresh_nonlinear
+        };
         let reusable_companion_terms = if let Some(terms) = companion_terms_cache {
-            debug_assert!(physical_cache_matches_probe);
+            debug_assert!(cached_terms_match_assembly);
             debug_assert_eq!(terms.len(), circuit.mosfets.devices.len());
             if let Some(caps) = caps_cache_out.as_deref() {
                 debug_assert_eq!(caps.len(), terms.len());
@@ -576,7 +581,7 @@ impl Engine {
             );
         }
         let cached_static_terms = static_terms_cache.filter(|terms| {
-            physical_cache_matches_probe && terms.len() == cache.static_stamp_plans.len()
+            cached_terms_match_assembly && terms.len() == cache.static_stamp_plans.len()
         });
         if let Some(static_terms) = fused_static_terms {
             debug_assert_eq!(static_terms.len(), cache.static_stamp_plans.len());
@@ -610,7 +615,7 @@ impl Engine {
     /// in the same device walk. Model arithmetic can use the bounded worker
     /// pool; sparse matrix and RHS writes stay serial and deterministic.
     #[allow(clippy::too_many_arguments)]
-    fn update_classic_mos_with_companion_terms_only(
+    pub(super) fn update_classic_mos_with_companion_terms_only(
         &self,
         circuit: &mut crate::circuit::CircuitData,
         solution: &[Value],
@@ -2147,6 +2152,7 @@ M1 d g 0 0 NM W=10u L=1u
         assert_eq!(rhs, canonical_rhs);
 
         let mut newton_companion_terms = Vec::new();
+        let mut newton_static_terms = Vec::new();
         engine
             .stamp_classic_mos_transient_system_from_cache(
                 &cache,
@@ -2161,12 +2167,35 @@ M1 d g 0 0 NM W=10u L=1u
                 None,
                 None,
                 Some(&mut newton_companion_terms),
-                None,
+                Some(&mut newton_static_terms),
                 None,
             )
             .expect("fused Newton assembly succeeds");
 
         assert_eq!(newton_companion_terms.len(), circuit.mosfets.devices.len());
+        assert_eq!(newton_static_terms.len(), circuit.mosfets.devices.len());
+        assert_eq!(matrix.values_mut(), canonical_values);
+        assert_eq!(rhs, canonical_rhs);
+
+        engine
+            .stamp_classic_mos_transient_system_from_cache(
+                &cache,
+                &mut circuit,
+                &mut matrix,
+                &mut rhs,
+                &solution,
+                dt,
+                &ctx,
+                false,
+                crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
+                Some(&newton_companion_terms),
+                Some(&newton_static_terms),
+                None,
+                None,
+                None,
+            )
+            .expect("next-iteration cached Newton assembly succeeds");
+
         assert_eq!(matrix.values_mut(), canonical_values);
         assert_eq!(rhs, canonical_rhs);
 
