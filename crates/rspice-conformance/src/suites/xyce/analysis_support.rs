@@ -2450,6 +2450,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 Self::find_recorded_two_terminal_branch_element(netlist, &element_name)
             {
                 return Self::evaluate_transient_two_terminal_branch_power(
+                    netlist,
                     result,
                     time,
                     "device",
@@ -2528,6 +2529,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     }
 
     pub(super) fn evaluate_transient_two_terminal_branch_power(
+        netlist: &Netlist,
         result: &TransientResult,
         time: Value,
         device_kind: &str,
@@ -2542,11 +2544,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             .nodes
             .get(1)
             .ok_or_else(|| format!("{device_kind} '{}' has no negative node", element.name))?;
-        let pos_index = result
-            .node_index_named(node_pos)
+        let pos_index = rspice_core::Engine::node_lookup_candidates(netlist, node_pos)
+            .into_iter()
+            .find_map(|candidate| result.node_index_named(&candidate))
             .ok_or_else(|| format!("node '{}' not found in transient result", node_pos))?;
-        let neg_index = result
-            .node_index_named(node_neg)
+        let neg_index = rspice_core::Engine::node_lookup_candidates(netlist, node_neg)
+            .into_iter()
+            .find_map(|candidate| result.node_index_named(&candidate))
             .ok_or_else(|| format!("node '{}' not found in transient result", node_neg))?;
         let current = Self::transient_branch_current_waveform_named(result, branch_name)
             .ok_or_else(|| {
