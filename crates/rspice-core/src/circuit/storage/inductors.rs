@@ -217,6 +217,24 @@ impl Inductors {
         rhs: &mut [Value],
         num_nodes: usize,
     ) {
+        self.stamp_transient_current_seed_direct_where(matrix, rhs, num_nodes, |_| true);
+    }
+
+    /// Stamp a deterministic transient-start seed while retaining a spanning
+    /// set of ideal inductor voltage constraints.  A caller may leave one or
+    /// more non-IC branches as ordinary shorts to keep the circuit's node
+    /// connectivity intact, while replacing only redundant cycle edges with
+    /// fixed current equations.
+    #[inline]
+    pub fn stamp_transient_current_seed_direct_where<F>(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        num_nodes: usize,
+        seed_current: F,
+    ) where
+        F: Fn(usize) -> bool,
+    {
         for i in 0..self.names.len() {
             let np = self.node_pos[i];
             let nn = self.node_neg[i];
@@ -224,14 +242,27 @@ impl Inductors {
             let br = num_nodes + br_ordinal;
             let current = self.ic[i].unwrap_or(0.0);
 
+            if self.ic[i].is_some() || seed_current(i) {
+                if np > 0 {
+                    rhs[np - 1] -= current;
+                }
+                if nn > 0 {
+                    rhs[nn - 1] += current;
+                }
+                matrix.add(br - 1, br - 1, 1.0);
+                rhs[br - 1] = current;
+                continue;
+            }
+
             if np > 0 {
-                rhs[np - 1] -= current;
+                matrix.add(br - 1, np - 1, 1.0);
+                matrix.add(np - 1, br - 1, 1.0);
             }
             if nn > 0 {
-                rhs[nn - 1] += current;
+                matrix.add(br - 1, nn - 1, -1.0);
+                matrix.add(nn - 1, br - 1, -1.0);
             }
-            matrix.add(br - 1, br - 1, 1.0);
-            rhs[br - 1] = current;
+            rhs[br - 1] = 0.0;
         }
     }
 

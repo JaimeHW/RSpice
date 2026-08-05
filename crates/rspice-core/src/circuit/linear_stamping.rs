@@ -749,8 +749,77 @@ impl CircuitData {
         self.stamp_transient_linear_base_direct(matrix, rhs);
         self.capacitors
             .stamp_ic_operating_point_direct(matrix, rhs, self.num_nodes);
-        self.inductors
-            .stamp_transient_current_seed_direct(matrix, rhs, self.num_nodes);
+
+        // Preserve one independent ideal-voltage constraint per connected
+        // component.  Pinning every inductor current removes the node
+        // connectivity that makes the startup system solvable; retaining a
+        // spanning forest keeps the physical node voltages constrained while
+        // replacing only cycle edges with deterministic current gauges.
+        let mut parent = (0..=self.num_nodes).collect::<Vec<_>>();
+        fn find(parent: &mut [usize], mut node: usize) -> usize {
+            while parent[node] != node {
+                parent[node] = parent[parent[node]];
+                node = parent[node];
+            }
+            node
+        }
+        let mut union = |positive: NodeId, negative: NodeId| {
+            let positive = find(&mut parent, positive as usize);
+            let negative = find(&mut parent, negative as usize);
+            if positive != negative {
+                parent[positive] = negative;
+            }
+        };
+
+        for (&positive, &negative) in self
+            .voltage_sources
+            .node_pos
+            .iter()
+            .zip(&self.voltage_sources.node_neg)
+        {
+            union(positive, negative);
+        }
+        for source in &self.behavioral_sources.voltage_sources {
+            union(source.node_pos, source.node_neg);
+        }
+        for (&positive, &negative) in self.vcvs.node_pos.iter().zip(&self.vcvs.node_neg) {
+            union(positive, negative);
+        }
+        for (&positive, &negative) in self.ccvs.node_pos.iter().zip(&self.ccvs.node_neg) {
+            union(positive, negative);
+        }
+
+        let mut seed_current = vec![false; self.inductors.len()];
+        let mut has_inductor_cycle = false;
+        for (index, (&positive, &negative)) in self
+            .inductors
+            .node_pos
+            .iter()
+            .zip(&self.inductors.node_neg)
+            .enumerate()
+        {
+            if self.inductors.ic[index].is_some() {
+                seed_current[index] = true;
+                continue;
+            }
+            let positive_root = find(&mut parent, positive as usize);
+            let negative_root = find(&mut parent, negative as usize);
+            if positive_root == negative_root {
+                seed_current[index] = true;
+                has_inductor_cycle = true;
+            } else {
+                parent[positive_root] = negative_root;
+            }
+        }
+        if !has_inductor_cycle {
+            seed_current.fill(true);
+        }
+        self.inductors.stamp_transient_current_seed_direct_where(
+            matrix,
+            rhs,
+            self.num_nodes,
+            |index| seed_current[index],
+        );
         self.stamp_multi_winding_transformers_dc_direct(matrix, rhs);
         self.stamp_tlines_dc_direct(matrix);
         self.stamp_coupled_tlines_dc_direct(matrix);
