@@ -22,43 +22,67 @@ use crate::numerics::integration::{CompanionCoefficients, IntegrationMethod};
 use crate::{Netlist, Value};
 use std::collections::{HashMap, HashSet};
 
-type TransientMeritRollback = (
-    crate::circuit::NonlinearDeviceStateSnapshot,
-    Vec<Option<BjtChargeSnapshot>>,
-);
+#[derive(Clone)]
+enum TransientMeritRollback {
+    ClassicMosOnly(Vec<crate::device::mosfet::MosfetNonlinearState>),
+    Full {
+        state: crate::circuit::NonlinearDeviceStateSnapshot,
+        cached_vbic: Vec<Option<BjtChargeSnapshot>>,
+    },
+}
 
 fn restore_transient_merit_rollback(
     circuit: &mut crate::circuit::CircuitData,
     vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
     rollback: &TransientMeritRollback,
 ) {
-    if circuit.has_xyce_core_inductors() {
-        // Xyce's MutIndNonLin2 has no rejectStep callback: its pending
-        // MagVarUpdate remains part of the trial state while a nonlinear
-        // search backs up. Preserve that carry across RSpice's merit rollback
-        // as well, so the globalization path has the same device lifecycle as
-        // the canonical Xyce solve.
-        circuit.restore_nonlinear_state_preserving_xyce_core_level2_carry(rollback.0.clone());
-    } else {
-        circuit.restore_nonlinear_state(rollback.0.clone());
+    match rollback {
+        TransientMeritRollback::ClassicMosOnly(states) => {
+            debug_assert!(circuit.has_classic_mos_only_transient_nonlinearity());
+            debug_assert!(vbic_snapshot_cache.is_empty());
+            circuit.mosfets.restore_nonlinear_state(states.clone());
+        }
+        TransientMeritRollback::Full { state, cached_vbic } => {
+            if circuit.has_xyce_core_inductors() {
+                // Xyce's MutIndNonLin2 has no rejectStep callback: its pending
+                // MagVarUpdate remains part of the trial state while a nonlinear
+                // search backs up. Preserve that carry across RSpice's merit rollback
+                // as well, so the globalization path has the same device lifecycle as
+                // the canonical Xyce solve.
+                circuit.restore_nonlinear_state_preserving_xyce_core_level2_carry(state.clone());
+            } else {
+                circuit.restore_nonlinear_state(state.clone());
+            }
+            vbic_snapshot_cache.clone_from_slice(cached_vbic);
+        }
     }
-    vbic_snapshot_cache.clone_from_slice(&rollback.1);
 }
 
 fn capture_transient_merit_rollback(
     circuit: &crate::circuit::CircuitData,
     vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
+    classic_mos_only: bool,
     rollback: &mut Option<TransientMeritRollback>,
 ) {
-    if let Some((state, cached_vbic)) = rollback.as_mut() {
+    if classic_mos_only {
+        debug_assert!(circuit.has_classic_mos_only_transient_nonlinearity());
+        debug_assert!(vbic_snapshot_cache.is_empty());
+        if let Some(TransientMeritRollback::ClassicMosOnly(states)) = rollback.as_mut() {
+            circuit.mosfets.nonlinear_state_snapshot_into(states);
+        } else {
+            *rollback = Some(TransientMeritRollback::ClassicMosOnly(
+                circuit.mosfets.nonlinear_state_snapshot(),
+            ));
+        }
+    } else if let Some(TransientMeritRollback::Full { state, cached_vbic }) = rollback.as_mut() {
         circuit.refresh_transient_trial_state_snapshot(state);
         cached_vbic.clear();
         cached_vbic.extend_from_slice(vbic_snapshot_cache);
     } else {
-        *rollback = Some((
-            circuit.transient_trial_state_snapshot(),
-            vbic_snapshot_cache.to_vec(),
-        ));
+        *rollback = Some(TransientMeritRollback::Full {
+            state: circuit.transient_trial_state_snapshot(),
+            cached_vbic: vbic_snapshot_cache.to_vec(),
+        });
     }
 }
 
@@ -3535,6 +3559,7 @@ impl Engine {
                     capture_transient_merit_rollback(
                         &circuit,
                         &vbic_snapshot_cache,
+                        classic_mos_stamp_cache.is_some(),
                         &mut last_stamped_rollback,
                     );
                     total_merit_nanos += merit_phase_start.elapsed().as_nanos();
@@ -3784,6 +3809,7 @@ impl Engine {
                                 capture_transient_merit_rollback(
                                     &circuit,
                                     &vbic_snapshot_cache,
+                                    classic_mos_stamp_cache.is_some(),
                                     &mut last_stamped_rollback,
                                 );
                                 total_merit_nanos += seed_start.elapsed().as_nanos();
@@ -3926,6 +3952,7 @@ impl Engine {
                             capture_transient_merit_rollback(
                                 &circuit,
                                 &vbic_snapshot_cache,
+                                classic_mos_stamp_cache.is_some(),
                                 &mut last_stamped_rollback,
                             );
                             total_merit_nanos += seed_start.elapsed().as_nanos();
@@ -4165,6 +4192,7 @@ impl Engine {
                                 capture_transient_merit_rollback(
                                     &circuit,
                                     &vbic_snapshot_cache,
+                                    classic_mos_stamp_cache.is_some(),
                                     &mut last_stamped_rollback,
                                 );
                             }
@@ -6875,10 +6903,10 @@ mod tests {
 
         let mut charge_snapshot = BjtChargeSnapshot::default();
         charge_snapshot.branches[0].charge = 3.25;
-        let rollback = (
-            circuit.nonlinear_state_snapshot(),
-            vec![Some(charge_snapshot)],
-        );
+        let rollback = TransientMeritRollback::Full {
+            state: circuit.nonlinear_state_snapshot(),
+            cached_vbic: vec![Some(charge_snapshot)],
+        };
 
         circuit.inductors.inductances[0] = 7.0e-3;
         let mut vbic_snapshot_cache = vec![None];
@@ -6893,6 +6921,42 @@ mod tests {
                 .charge,
             3.25
         );
+    }
+
+    #[test]
+    fn transient_merit_rollback_uses_compact_classic_mos_state() {
+        let mut circuit = crate::circuit::CircuitData::new();
+        circuit.mosfets.add(crate::device::Mosfet::new_nmos(
+            "m1".to_string(),
+            1,
+            2,
+            3,
+            4,
+        ));
+        assert!(circuit.has_classic_mos_only_transient_nonlinearity());
+
+        let first = [1.5, 2.0, 0.1, -0.2];
+        circuit.mosfets.update_all(&first);
+        circuit.mosfets.update_all(&first);
+        let mut rollback = None;
+        capture_transient_merit_rollback(&circuit, &[], true, &mut rollback);
+        assert!(matches!(
+            rollback,
+            Some(TransientMeritRollback::ClassicMosOnly(ref states)) if states.len() == 1
+        ));
+
+        let checkpoint = [2.5, 3.0, -0.1, 0.25];
+        circuit.mosfets.update_all(&checkpoint);
+        capture_transient_merit_rollback(&circuit, &[], true, &mut rollback);
+        let expected = circuit.mosfets.nonlinear_state_snapshot();
+
+        circuit.mosfets.update_all(&[0.2, 0.4, 0.0, 0.0]);
+        restore_transient_merit_rollback(
+            &mut circuit,
+            &mut [],
+            rollback.as_ref().expect("classic MOS checkpoint exists"),
+        );
+        assert_eq!(circuit.mosfets.nonlinear_state_snapshot(), expected);
     }
 
     #[test]
