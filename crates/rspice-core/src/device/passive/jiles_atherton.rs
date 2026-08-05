@@ -97,6 +97,22 @@ pub struct JilesAthertonParams {
     pub v_inf: Value,
     /// Xyce LEVEL=1 voltage scaling.
     pub delta_v_scaling: Value,
+    /// Use Xyce's constant DELVSCALING normalization for LEVEL=1 instead of
+    /// the accepted maximum-voltage-drop normalization.
+    pub const_delta_v_scaling: bool,
+    /// Xyce's optional FACTORMS state normalization switch.  The native
+    /// runtime keeps magnetic states in physical A/m units internally, so
+    /// this flag is retained for model fidelity while the equivalent
+    /// constitutive factor is evaluated in those physical units.
+    pub factor_ms: bool,
+    /// Xyce hidden-variable and hidden-equation scaling parameters.  The
+    /// reduced MNA implementation applies these factors to its physical
+    /// hidden M/R equations while retaining fixed internal coordinate scales
+    /// for matrix conditioning.
+    pub m_var_scaling: Value,
+    pub r_var_scaling: Value,
+    pub m_eq_scaling: Value,
+    pub r_eq_scaling: Value,
     /// Xyce CORE anhysteretic-curve modeling constant.
     pub beta_h: Value,
     /// Xyce CORE irreversible-domain modeling constant.
@@ -120,6 +136,11 @@ pub struct XyceCoreTrial {
     pub mid: Value,
     /// Applied field H before optional gap/turning-point display filtering.
     pub applied_field: Value,
+    /// Aggregate ampere-turn sum used by Xyce's `branchCurrentSum` member.
+    /// Retaining this raw sum lets the accepted-step transition reuse the
+    /// exact accumulation that produced `MagVarUpdate`, rather than
+    /// reconstructing it from a rounded device-current state.
+    pub applied_ampere_turns: Value,
     /// Forward-Euler magnetic update produced by this Newton evaluation.
     pub magnetization_update: Value,
     /// Xyce's `latestMag` argument used while evaluating `P`.
@@ -157,6 +178,12 @@ impl Default for JilesAthertonParams {
             delta_v: 0.1,
             v_inf: 1.0,
             delta_v_scaling: 1.0e3,
+            const_delta_v_scaling: false,
+            factor_ms: false,
+            m_var_scaling: 1.0,
+            r_var_scaling: 1.0,
+            m_eq_scaling: 1.0,
+            r_eq_scaling: 1.0,
             beta_h: 0.0001,
             beta_m: 3.125e-5,
             p_zero_tol: 0.1,
@@ -184,6 +211,12 @@ impl JilesAthertonParams {
             delta_v: 0.1,
             v_inf: 1.0,
             delta_v_scaling: 1.0e3,
+            const_delta_v_scaling: false,
+            factor_ms: false,
+            m_var_scaling: 1.0,
+            r_var_scaling: 1.0,
+            m_eq_scaling: 1.0,
+            r_eq_scaling: 1.0,
             beta_h: 0.0001,
             beta_m: 3.125e-5,
             p_zero_tol: 0.1,
@@ -294,6 +327,15 @@ pub struct JilesAthertonInductor {
     /// It is included in the nonlinear snapshot and rolled back with the
     /// rest of the circuit when a transient attempt is rejected.
     xyce_mag_update: Value,
+    /// Xyce's output store captures `latestMag = MagVar + MagVarUpdate`
+    /// before `acceptStep()` advances the constitutive `MagVar`. Keep that
+    /// published value separate from the state used to assemble the next
+    /// Newton system.
+    xyce_reported_magnetization: Value,
+    /// Xyce retains the accepted `oldBranchCurrentSum` evaluation member.
+    /// Keep its raw value across rejected attempts so the next constitutive
+    /// trial subtracts the same aggregate sum as the native device.
+    xyce_old_branch_current_sum: Value,
     /// Most recent pure endpoint produced while stamping a Newton iterate.
     /// The endpoint is committed verbatim when that iterate is accepted; this
     /// preserves Xyce's ordering where P is evaluated with the carried update
@@ -316,6 +358,10 @@ pub struct JilesAthertonInductor {
     xyce_dmdt_history_len: usize,
     /// Ring-buffer cursor for the next derivative replacement.
     xyce_dmdt_history_cursor: usize,
+    /// Previous accepted LEVEL=2 derivatives used by Xyce's OneStep
+    /// order-two state derivative.
+    xyce_core_dmdt_prev: Value,
+    xyce_core_dhapp_dt_prev: Value,
     /// Accepted LEVEL=1 hidden R variable, in physical (unscaled) units.
     /// The reduced Rust stamp eliminates Xyce's R equation algebraically, so
     /// this history is retained on the constitutive device instead of in an
@@ -368,12 +414,16 @@ impl JilesAthertonInductor {
             l_eff,
             core_loss: 0.0,
             xyce_mag_update: 0.0,
+            xyce_reported_magnetization: 0.0,
+            xyce_old_branch_current_sum: 0.0,
             xyce_trial: None,
             xyce_accepted_mid: 1.0,
             xyce_dmdt_average: 0.0,
             xyce_dmdt_history: [0.0; 10],
             xyce_dmdt_history_len: 0,
             xyce_dmdt_history_cursor: 0,
+            xyce_core_dmdt_prev: 0.0,
+            xyce_core_dhapp_dt_prev: 0.0,
             xyce_level1_rate: 0.0,
             xyce_level1_dmdt: 0.0,
             xyce_level1_p: 0.0,
@@ -421,12 +471,18 @@ impl JilesAthertonInductor {
     pub fn set_initial_current(&mut self, current: Value) {
         self.current = current;
         self.current_prev = current;
+        // MutIndNonLin2 retains the accepted branch-current sum as an
+        // evaluation member. Seed the raw accumulator at the same source
+        // boundary as the electrical initial condition so subsequent
+        // MagVarUpdate deltas use the native operation order.
+        self.xyce_old_branch_current_sum = current * self.params.n_turns;
         // Calculate initial H field and magnetization
         let h = current * self.params.n_turns / self.params.length;
         self.state.h = h;
         self.state.h_prev = h;
         // Start on anhysteretic curve
         self.state.m = self.anhysteretic(h);
+        self.xyce_reported_magnetization = self.state.m;
         if self.params.xyce_core && self.params.gap > 0.0 {
             self.state.h = (current * self.params.n_turns - self.params.gap * self.state.m)
                 / self.params.length;
@@ -608,41 +664,72 @@ impl JilesAthertonInductor {
     /// `tanh_qv` is the voltage-smoothed irreversible direction term used by
     /// both MutIndNonLin levels.
     fn xyce_core_p(&self, h: Value, m: Value, tanh_qv: Value) -> Value {
-        let man = self.xyce_anhysteretic(h, m);
         let he = h + self.params.alpha * m;
         let heo = self.params.beta_h * self.params.a;
-        let root_he = (heo * heo + he * he).sqrt();
-        let denominator = self.params.a + root_he;
-        let man_prime = if denominator.is_finite() && denominator > 0.0 && root_he > 0.0 {
-            self.params.ms * (self.params.a + heo * heo / root_he) / (denominator * denominator)
+        // Keep the intermediate terms and their evaluation order identical to
+        // Xyce's MutIndNonLin2::updateIntermediateVars().  The accepted
+        // magnetization update multiplies this value by the branch-current
+        // increment, so a seemingly insignificant rounding difference here
+        // becomes visible at hysteresis reversals.
+        let he2 = he * he;
+        let heo2 = heo * heo;
+        let sq_heo2_he2 = (heo2 + he2).sqrt();
+        let man = if (self.params.a + sq_heo2_he2).is_finite() {
+            self.params.ms * he / (self.params.a + sq_heo2_he2)
+        } else {
+            0.0
+        };
+
+        let man_prime = if sq_heo2_he2 > 0.0 {
+            self.params.ms
+                * (self.params.a + heo2 / sq_heo2_he2)
+                / (self.params.a + sq_heo2_he2).powf(2.0)
         } else {
             0.0
         };
 
         let del_m = man - m;
         let del_m0 = self.params.beta_m * self.params.ms;
-        let root_m = (del_m0 * del_m0 + del_m * del_m).sqrt();
-        let mirr_denominator = 2.0 * (self.params.k - self.params.alpha * root_m);
+        let del_m2 = del_m * del_m;
+        let del_m02 = del_m0 * del_m0;
+        let sq_del_m02_del_m2 = (del_m02 + del_m2).sqrt();
+        let mirr_denominator = 2.0 * (self.params.k - self.params.alpha * sq_del_m02_del_m2);
         let mirr_prime = if mirr_denominator.abs() > 1.0e-18 {
-            (del_m * tanh_qv + root_m) / mirr_denominator
+            (del_m * tanh_qv + sq_del_m02_del_m2) / mirr_denominator
         } else {
             0.0
         };
-
         let gap_path = self.params.gap / self.params.length;
         let denominator = 1.0
             + (gap_path - self.params.alpha) * self.params.c * man_prime
             + gap_path * (1.0 - self.params.c) * mirr_prime;
         if denominator.abs() > 1.0e-18 {
-            (self.params.c * man_prime + (1.0 - self.params.c) * mirr_prime) / denominator
+            let p = (self.params.c * man_prime + (1.0 - self.params.c) * mirr_prime)
+                / denominator;
+            if self.params.factor_ms {
+                p / self.params.ms
+            } else {
+                p
+            }
         } else {
             0.0
         }
     }
 
+    #[inline]
+    fn xyce_core_mid_from_p(&self, p: Value) -> Value {
+        let factor = if self.params.factor_ms {
+            self.params.ms
+        } else {
+            1.0
+        };
+        1.0 + (1.0 - self.params.gap / self.params.length) * p * factor
+    }
+
     /// Convert the accepted voltage drop to Xyce's smooth irreversible branch
     /// direction.  LEVEL=1 uses the adaptive `DELVSCALING/maxVoltageDrop`
-    /// form; LEVEL=2 uses its explicit `DELV/VINF` ratio.
+    /// form unless `CONSTDELVSCALING` is set; LEVEL=2 uses its explicit
+    /// `DELV/VINF` ratio.
     fn xyce_tanh_qv(&self, voltage: Value) -> Value {
         let qv = if self.params.xyce_core_level2 {
             let denominator = if self.params.v_inf.abs() > 1.0e-30 {
@@ -650,12 +737,19 @@ impl JilesAthertonInductor {
             } else {
                 1.0
             };
-            self.params.delta_v * voltage / denominator
+            // MutIndNonLin2 evaluates `(DeltaV / Vinf) * V` in this order.
+            // Preserve the source operation order: near a Core reversal the
+            // low bits of qV feed directly into the constitutive P factor.
+            (self.params.delta_v / denominator) * voltage
         } else {
-            let denominator = self.state.max_voltage_drop.max(1.0e-10);
+            let denominator = if self.params.const_delta_v_scaling {
+                1.0
+            } else {
+                self.state.max_voltage_drop.max(1.0e-10)
+            };
             self.params.delta_v_scaling * voltage / denominator
         };
-        if qv.abs() < 40.0 {
+        if qv.abs() < 20.0 {
             qv.tanh()
         } else {
             qv.signum()
@@ -676,10 +770,33 @@ impl JilesAthertonInductor {
             return None;
         }
 
-        let old_current = self.current;
-        let delta_happ = (current - old_current) * self.params.n_turns / self.params.length;
-        let happ = current * self.params.n_turns / self.params.length;
-        self.xyce_core_trial_from_happ_with_update(happ, delta_happ, voltage, mag_update)
+        // MutIndNonLin2 forms the applied-field increment from the two
+        // already-scaled branch-current sums. Preserve that operation order:
+        // subtracting currents before multiplying by turns loses low bits at
+        // sharp Core reversals and the constitutive P factor amplifies them.
+        let branch_current_sum = current * self.params.n_turns;
+        let delta_branch_current_sum = branch_current_sum - self.xyce_old_branch_current_sum;
+        let delta_happ = delta_branch_current_sum / self.params.length;
+        // Xyce forms Happ from the already accumulated branch-current sum;
+        // keeping the division after that product preserves the native
+        // operation order for the forward-Euler MagVar update.
+        let happ = branch_current_sum / self.params.length;
+        let mut trial = self.xyce_core_trial_from_happ_with_update_and_ampere_turn_delta(
+            happ,
+            delta_happ,
+            delta_branch_current_sum,
+            voltage,
+            mag_update,
+        )?;
+        trial.applied_ampere_turns = branch_current_sum;
+        Some(trial)
+    }
+
+    #[inline]
+    fn xyce_core_ampere_turns_and_delta(&self, current: Value) -> (Value, Value) {
+        let branch_current_sum = current * self.params.n_turns;
+        let delta_branch_current_sum = branch_current_sum - self.xyce_old_branch_current_sum;
+        (branch_current_sum, delta_branch_current_sum)
     }
 
     /// Evaluate the Core constitutive endpoint from an aggregate applied
@@ -693,6 +810,25 @@ impl JilesAthertonInductor {
         voltage: Value,
         mag_update: Value,
     ) -> Option<XyceCoreTrial> {
+        self.xyce_core_trial_from_happ_with_update_and_ampere_turn_delta(
+            happ,
+            delta_happ,
+            delta_happ * self.params.length,
+            voltage,
+            mag_update,
+        )
+    }
+
+    /// Evaluate a Core endpoint while preserving the native raw
+    /// ampere-turn-difference operation used for `MagVarUpdate`.
+    pub(crate) fn xyce_core_trial_from_happ_with_update_and_ampere_turn_delta(
+        &self,
+        happ: Value,
+        _delta_happ: Value,
+        delta_ampere_turns: Value,
+        voltage: Value,
+        mag_update: Value,
+    ) -> Option<XyceCoreTrial> {
         if !self.params.xyce_core {
             return None;
         }
@@ -702,18 +838,19 @@ impl JilesAthertonInductor {
         let latest_m = old_m + mag_update;
         let h = happ - (self.params.gap / self.params.length) * latest_m;
         let p = self.xyce_core_p(h, latest_m, tanh_qv);
-        let magnetization_update = if delta_happ.abs() > 1.0e-18 {
-            p * delta_happ
-        } else {
-            0.0
-        };
+        // MutIndNonLin2 uses the applied-field difference directly. Do not
+        // discard sub-1e-18 increments: Xyce's native updateIntermediateVars
+        // has no dead-band, and the carried update is part of the accepted
+        // constitutive history even when the electrical change is tiny.
+        let magnetization_update = (p * delta_ampere_turns) / self.params.length;
         let m_new = old_m + magnetization_update;
-        let mid = 1.0 + (1.0 - self.params.gap / self.params.length) * p;
+        let mid = self.xyce_core_mid_from_p(p);
         Some(XyceCoreTrial {
             magnetization: m_new,
             p,
             mid,
             applied_field: happ,
+            applied_ampere_turns: happ * self.params.length,
             magnetization_update,
             latest_magnetization: latest_m,
             level1_rate: 0.0,
@@ -961,7 +1098,7 @@ impl JilesAthertonInductor {
         }
         let h = happ - gap_path * latest_m;
         let p = self.xyce_core_p(h, latest_m, self.xyce_tanh_qv(voltage));
-        let mid = 1.0 + (1.0 - gap_path) * p;
+        let mid = self.xyce_core_mid_from_p(p);
         let effective_inductance = self.params.base_inductance() * mid;
         if !p.is_finite() || !mid.is_finite() || !effective_inductance.is_finite() {
             return None;
@@ -971,6 +1108,7 @@ impl JilesAthertonInductor {
             p,
             mid,
             applied_field: happ,
+            applied_ampere_turns: happ * self.params.length,
             magnetization_update: latest_m - old_m,
             latest_magnetization: latest_m,
             level1_rate: rate,
@@ -998,6 +1136,11 @@ impl JilesAthertonInductor {
             return None;
         }
         let p_scale = 1.0 - gap_path;
+        let p_to_mid_scale = if self.params.factor_ms {
+            self.params.ms
+        } else {
+            1.0
+        };
         let (fixed_mid_m, fixed_mid_happ, fixed_mid_voltage) = (
             self.xyce_core_dmid_d_magnetization(
                 trial.applied_field,
@@ -1013,6 +1156,7 @@ impl JilesAthertonInductor {
             self.xyce_core_dmid_d_voltage(trial.applied_field, voltage, trial.latest_magnetization)
                 .unwrap_or(0.0),
         );
+        let p_scale = p_scale * p_to_mid_scale;
         let (dp_dm, dp_dhapp, dp_dvoltage) = if p_scale.abs() > 1.0e-18 {
             (
                 fixed_mid_m / p_scale,
@@ -1023,15 +1167,9 @@ impl JilesAthertonInductor {
             (0.0, 0.0, 0.0)
         };
         let integration_scale = (if one_step_order2 { 0.5 } else { 1.0 }) * dt / self.params.length;
-        // MutIndNonLin regularizes the hidden M row when the constitutive
-        // factor is near zero.  Native Xyce adds one unit diagonal in this
-        // region so the otherwise purely derivative-based row remains
-        // anchored during a nonlinear zero crossing.
-        // Xyce evaluates P from the accepted state vector during
-        // updateIntermediateVars, before updatePrimaryState copies the
-        // current Newton M iterate into that vector.  Use that same accepted
-        // magnetization for the PZEROTOL test; the native dFdx path adds a
-        // unit diagonal independently of the transient integration order.
+        // MutIndNonLin regularizes the hidden M row near a constitutive zero
+        // crossing.  Xyce evaluates this check from the accepted state before
+        // the Newton hidden-M iterate is copied into its state vector.
         let accepted_p = self.xyce_core_p(
             trial.applied_field - (self.params.gap / self.params.length) * self.state.m,
             self.state.m,
@@ -1130,7 +1268,7 @@ impl JilesAthertonInductor {
         };
         let rate_target = self.xyce_core_level1_rate_target(delta_happ, dt, one_step_order2)?;
         let rate_residual = rate - rate_target;
-        let mid = 1.0 + (1.0 - gap_path) * p;
+        let mid = self.xyce_core_mid_from_p(p);
         let effective_inductance = self.params.base_inductance() * mid;
         if !p.is_finite()
             || !residual.is_finite()
@@ -1144,6 +1282,7 @@ impl JilesAthertonInductor {
             p,
             mid,
             applied_field: happ,
+            applied_ampere_turns: happ * self.params.length,
             magnetization_update: magnetization - self.state.m,
             latest_magnetization: magnetization,
             level1_rate: rate,
@@ -1165,7 +1304,8 @@ impl JilesAthertonInductor {
         if !self.params.xyce_core {
             return None;
         }
-        let happ = current * self.params.n_turns / self.params.length;
+        let branch_current_sum = current * self.params.n_turns;
+        let happ = branch_current_sum / self.params.length;
         let d_happ_d_current = self.params.n_turns / self.params.length;
         self.xyce_core_dmid_d_happ(happ, voltage, latest_m, d_happ_d_current)
     }
@@ -1195,7 +1335,7 @@ impl JilesAthertonInductor {
             return None;
         }
         let man_prime =
-            self.params.ms * (self.params.a + heo2 / root_he) / (denominator * denominator);
+            self.params.ms * (self.params.a + heo2 / root_he) / denominator.powf(2.0);
         let man = self.params.ms * he / denominator;
         let del_m = man - latest_m;
         let del_m0 = self.params.beta_m * self.params.ms;
@@ -1218,7 +1358,7 @@ impl JilesAthertonInductor {
         // updateIntermediateVars().  dHe/dM includes both the mean-field and
         // air-gap contributions; d(delM)/dM also contains the explicit -1.
         let d_he_d_m = self.params.alpha - gap_path;
-        let d_man_prime_d_m = (-self.params.ms * he / (denominator * denominator * root_he))
+        let d_man_prime_d_m = (-self.params.ms * he / (denominator.powf(2.0) * root_he))
             * (heo2 / (heo2 + he2) + 2.0 * (self.params.a + heo2 / root_he) / denominator)
             * d_he_d_m;
         let d_del_m_d_m =
@@ -1228,14 +1368,14 @@ impl JilesAthertonInductor {
                 + del_m / root_m
                 + (2.0 * self.params.alpha * del_m * (del_m * tanh_qv + root_m)
                     / (mirr_denominator * root_m)))
-            * d_del_m_d_m;
+                * d_del_m_d_m;
         let numerator_slope =
             self.params.c * d_man_prime_d_m + (1.0 - self.params.c) * d_mirr_prime_d_m;
         let denominator_slope = (gap_path - self.params.alpha) * self.params.c * d_man_prime_d_m
             + gap_path * (1.0 - self.params.c) * d_mirr_prime_d_m;
         let d_p_d_m = numerator_slope / p_denominator
             - (self.params.c * man_prime + (1.0 - self.params.c) * mirr_prime) * denominator_slope
-                / (p_denominator * p_denominator);
+                / p_denominator.powf(2.0);
         let d_mid_d_m = (1.0 - gap_path) * d_p_d_m;
         d_mid_d_m.is_finite().then_some(d_mid_d_m)
     }
@@ -1282,7 +1422,7 @@ impl JilesAthertonInductor {
         let tanh_qv = self.xyce_tanh_qv(voltage);
         let mirr_prime = (del_m * tanh_qv + root_m) / mirr_denominator;
         let man_prime =
-            self.params.ms * (self.params.a + heo2 / root_he) / (denominator * denominator);
+            self.params.ms * (self.params.a + heo2 / root_he) / denominator.powf(2.0);
         let p_denominator = 1.0
             + (gap_path - self.params.alpha) * self.params.c * man_prime
             + gap_path * (1.0 - self.params.c) * mirr_prime;
@@ -1291,7 +1431,7 @@ impl JilesAthertonInductor {
         }
 
         let d_he_d_current = d_happ_d_current;
-        let d_man_prime_d_current = (-self.params.ms * he / (denominator * denominator * root_he))
+        let d_man_prime_d_current = (-self.params.ms * he / (denominator.powf(2.0) * root_he))
             * (heo2 / (heo2 + he2) + 2.0 * (self.params.a + heo2 / root_he) / denominator)
             * d_he_d_current;
         let d_del_m_d_current =
@@ -1308,8 +1448,15 @@ impl JilesAthertonInductor {
             (gap_path - self.params.alpha) * self.params.c * d_man_prime_d_current
                 + gap_path * (1.0 - self.params.c) * d_mirr_prime_d_current;
         let d_p_d_current = numerator_slope / p_denominator
-            - (self.params.c * (man_prime - mirr_prime) + mirr_prime) * denominator_slope
-                / (p_denominator * p_denominator);
+            // MutIndNonLin2 forms this quotient numerator as
+            // `C*deltaM*(Manp-Mirrp)+Mirrp` (with deltaM=1 for this
+            // model), rather than algebraically regrouping it as
+            // `C*Manp+(1-C)*Mirrp`.  The two expressions are mathematically
+            // equivalent but differ at the low bits that seed a Core
+            // reversal, so preserve the native evaluation order here.
+            - ((self.params.c * 1.0 * (man_prime - mirr_prime) + mirr_prime)
+                / p_denominator.powf(2.0))
+                * denominator_slope;
         let d_mid_d_current = (1.0 - gap_path) * d_p_d_current;
         d_mid_d_current.is_finite().then_some(d_mid_d_current)
     }
@@ -1355,7 +1502,7 @@ impl JilesAthertonInductor {
         let denominator_p = 1.0
             + (gap_path - self.params.alpha)
                 * self.params.c
-                * (self.params.ms * (self.params.a + heo2 / root_he) / (denominator * denominator))
+                * (self.params.ms * (self.params.a + heo2 / root_he) / denominator.powf(2.0))
             + gap_path * (1.0 - self.params.c) * ((del_m * tanh_qv + root_m) / mirr_denominator);
         if !denominator_p.is_finite() || denominator_p.abs() <= 1.0e-18 {
             return None;
@@ -1363,19 +1510,23 @@ impl JilesAthertonInductor {
 
         let d_tanh_d_voltage =
             if self.params.delta_v_scaling.is_finite() && self.params.delta_v_scaling != 0.0 {
-                let scale_denominator = self.state.max_voltage_drop.max(1.0e-10);
+                let scale_denominator = if self.params.const_delta_v_scaling {
+                    1.0
+                } else {
+                    self.state.max_voltage_drop.max(1.0e-10)
+                };
                 self.params.delta_v_scaling / scale_denominator * (1.0 - tanh_qv * tanh_qv)
             } else {
                 0.0
             };
         let d_mirr_d_tanh = del_m / mirr_denominator;
         let man_prime =
-            self.params.ms * (self.params.a + heo2 / root_he) / (denominator * denominator);
+            self.params.ms * (self.params.a + heo2 / root_he) / denominator.powf(2.0);
         let mirr_prime = (del_m * tanh_qv + root_m) / mirr_denominator;
         let numerator = self.params.c * man_prime + (1.0 - self.params.c) * mirr_prime;
         let d_p_d_tanh =
             (1.0 - self.params.c) * d_mirr_d_tanh * (denominator_p - gap_path * numerator)
-                / (denominator_p * denominator_p);
+                / denominator_p.powf(2.0);
         let d_mid_d_voltage = (1.0 - gap_path) * d_p_d_tanh * d_tanh_d_voltage;
         d_mid_d_voltage.is_finite().then_some(d_mid_d_voltage)
     }
@@ -1394,9 +1545,19 @@ impl JilesAthertonInductor {
         dt: Value,
         one_step_order2: bool,
     ) {
-        let old_current = self.current;
-        let delta_happ = (current - old_current) * self.params.n_turns / self.params.length;
-        let happ = current * self.params.n_turns / self.params.length;
+        let raw_ampere_turns = if self.params.xyce_core_level2 {
+            Some(self.xyce_core_ampere_turns_and_delta(current))
+        } else {
+            None
+        };
+        let delta_happ = if let Some((_, delta_ampere_turns)) = raw_ampere_turns {
+            delta_ampere_turns / self.params.length
+        } else {
+            let old_current = self.current;
+            (current - old_current) * self.params.n_turns / self.params.length
+        };
+        let branch_current_sum = current * self.params.n_turns;
+        let happ = branch_current_sum / self.params.length;
         self.integrate_xyce_core_from_happ(
             current,
             happ,
@@ -1404,14 +1565,16 @@ impl JilesAthertonInductor {
             voltage,
             dt,
             one_step_order2,
+            raw_ampere_turns,
             None,
         );
     }
 
     /// Commit an accepted Core endpoint expressed in aggregate magnetic-field
     /// coordinates.  A shared multi-winding Core has one constitutive state,
-    /// so its magnetic update is driven by `Happ` and `delta_happ` assembled
-    /// from all branch currents rather than by a single branch current.
+    /// so its magnetic update is driven by `Happ` and the raw ampere-turn
+    /// delta assembled from all branch currents rather than by a single
+    /// branch current.
     fn integrate_xyce_core_from_happ(
         &mut self,
         current: Value,
@@ -1420,6 +1583,7 @@ impl JilesAthertonInductor {
         voltage: Value,
         dt: Value,
         one_step_order2: bool,
+        raw_ampere_turns: Option<(Value, Value)>,
         accepted_hidden_state: Option<(Value, Value)>,
     ) {
         if voltage.abs() > self.state.max_voltage_drop {
@@ -1496,14 +1660,23 @@ impl JilesAthertonInductor {
                         trial
                     }
                 } else {
-                    let Some(trial) = self.xyce_core_trial_from_happ_with_update(
-                        happ,
-                        delta_happ,
-                        voltage,
-                        self.xyce_mag_update,
-                    ) else {
+                    let delta_ampere_turns = raw_ampere_turns
+                        .map(|(_, delta_ampere_turns)| delta_ampere_turns)
+                        .unwrap_or(delta_happ * self.params.length);
+                    let Some(mut trial) = self
+                        .xyce_core_trial_from_happ_with_update_and_ampere_turn_delta(
+                            happ,
+                            delta_happ,
+                            delta_ampere_turns,
+                            voltage,
+                            self.xyce_mag_update,
+                        )
+                    else {
                         return;
                     };
+                    if let Some((ampere_turns, _)) = raw_ampere_turns {
+                        trial.applied_ampere_turns = ampere_turns;
+                    }
                     trial
                 };
                 if self.params.xyce_core_level2 {
@@ -1539,14 +1712,23 @@ impl JilesAthertonInductor {
                         trial
                     }
                 } else {
-                    let Some(trial) = self.xyce_core_trial_from_happ_with_update(
-                        happ,
-                        delta_happ,
-                        voltage,
-                        self.xyce_mag_update,
-                    ) else {
+                    let delta_ampere_turns = raw_ampere_turns
+                        .map(|(_, delta_ampere_turns)| delta_ampere_turns)
+                        .unwrap_or(delta_happ * self.params.length);
+                    let Some(mut trial) = self
+                        .xyce_core_trial_from_happ_with_update_and_ampere_turn_delta(
+                            happ,
+                            delta_happ,
+                            delta_ampere_turns,
+                            voltage,
+                            self.xyce_mag_update,
+                        )
+                    else {
                         return;
                     };
+                    if let Some((ampere_turns, _)) = raw_ampere_turns {
+                        trial.applied_ampere_turns = ampere_turns;
+                    }
                     trial
                 };
                 // LEVEL=2 retains the endpoint MagVarUpdate produced by the
@@ -1568,6 +1750,13 @@ impl JilesAthertonInductor {
             self.xyce_mag_update = trial.magnetization_update;
         }
         let m_new = trial.magnetization;
+        // Xyce recomputes `latestMag = MagVar + MagVarUpdate` after the new
+        // forward-Euler update is formed, then writes that post-update value
+        // to the accepted store used by the M/B outputs.  The constitutive
+        // Jacobian still consumes `trial.latest_magnetization` (the carried
+        // pre-update endpoint), but the reported channel must use the new
+        // accepted magnetization.
+        self.xyce_reported_magnetization = trial.magnetization;
         self.xyce_accepted_mid = if trial.mid.is_finite() && trial.mid.abs() > 1.0e-12 {
             trial.mid
         } else {
@@ -1587,6 +1776,19 @@ impl JilesAthertonInductor {
             self.xyce_level1_p = trial.p;
             self.xyce_mag_update = 0.0;
         }
+        // Xyce's acceptStep updates oldBranchCurrentSum from the raw
+        // branch-current accumulation that produced this endpoint. Keep that
+        // value verbatim instead of reconstructing it from the representative
+        // current after a shared-state commit.
+        if self.params.xyce_core_level2 && trial.applied_ampere_turns.is_finite() {
+            self.xyce_old_branch_current_sum = trial.applied_ampere_turns;
+        }
+        if self.params.xyce_core_level2 && self.state.m.abs() > 2.0 * self.params.ms.abs() {
+            // MutIndNonLin2::acceptStep resets the accepted magnetization when
+            // it leaves the model's physical envelope. MagVarUpdate itself is
+            // intentionally retained as an evaluation member.
+            self.state.m = 0.0;
+        }
         self.state.m_irr = self.state.m;
 
         self.state.h_prev = self.state.h;
@@ -1605,22 +1807,36 @@ impl JilesAthertonInductor {
         // and uses the accepted integrator derivative and R state.
         let gap_factor = -(self.params.gap / self.params.length) * self.state.m;
         let calculated_h = happ + gap_factor;
-        let dmdt = if dt.is_finite() && dt > 0.0 {
-            if self.params.xyce_core_level2 || !one_step_order2 {
-                (self.state.m - old_m) / dt
-            } else {
-                // OneStep order 2 is trapezoidal.  Its accepted derivative is
-                // 2*delta(M)/dt minus the previous accepted derivative, just
-                // as Xyce's staDerivVec is formed for the hidden M state.
-                2.0 * (self.state.m - old_m) / dt - self.xyce_level1_dmdt
-            }
+        let dmdt_secant = if dt.is_finite() && dt > 0.0 {
+            (self.state.m - old_m) / dt
         } else {
             0.0
         };
-        let d_happ_dt = if dt.is_finite() && dt > 0.0 {
+        let d_happ_dt_secant = if dt.is_finite() && dt > 0.0 {
             delta_happ / dt
         } else {
             0.0
+        };
+        let dmdt = if self.params.xyce_core_level2 {
+            if one_step_order2 {
+                2.0 * dmdt_secant - self.xyce_core_dmdt_prev
+            } else {
+                dmdt_secant
+            }
+        } else if one_step_order2 {
+            2.0 * dmdt_secant - self.xyce_level1_dmdt
+        } else {
+            dmdt_secant
+        };
+        // Xyce's `R` state is differentiated by OneStep in the same way as
+        // the magnetization state.  On an order-two step that is the current
+        // secant corrected by the previous accepted derivative; using the
+        // raw secant here changes the sign test that drives the secondary
+        // H/B turning-point filter at a reversal.
+        let d_happ_dt = if one_step_order2 {
+            2.0 * d_happ_dt_secant - self.xyce_core_dhapp_dt_prev
+        } else {
+            d_happ_dt_secant
         };
         let selected_reported_h = if self.params.xyce_core_level2 {
             let d_h_dt = d_happ_dt - (self.params.gap / self.params.length) * dmdt;
@@ -1689,11 +1905,17 @@ impl JilesAthertonInductor {
                 self.xyce_dmdt_history_cursor = (cursor + 1) % self.xyce_dmdt_history.len();
             }
             let history_sum: Value = self.xyce_dmdt_history.iter().sum();
-            // The Xyce FixedQueue is initialized with ten zeros and always
-            // averages all ten slots, including those initial zeros.
-            self.xyce_dmdt_average = history_sum / self.xyce_dmdt_history.len() as Value;
+            // Xyce 7.10's acceptStep accumulates into dMdtAverage_ without
+            // clearing it before summing the fixed queue. Preserve that
+            // source behavior for the reported H/B turning-point filter.
+            self.xyce_dmdt_average =
+                (self.xyce_dmdt_average + history_sum) / self.xyce_dmdt_history.len() as Value;
         } else {
             self.xyce_level1_dmdt = dmdt;
+        }
+        if self.params.xyce_core_level2 {
+            self.xyce_core_dmdt_prev = dmdt;
+            self.xyce_core_dhapp_dt_prev = d_happ_dt;
         }
         self.current_prev = old_current;
         self.current = current;
@@ -1718,7 +1940,7 @@ impl JilesAthertonInductor {
                 self.state.m,
                 self.xyce_tanh_qv(self.voltage_prev),
             );
-            let mid = 1.0 + (1.0 - self.params.gap / self.params.length) * p;
+            let mid = self.xyce_core_mid_from_p(p);
             let l = self.params.base_inductance() * mid;
             if l.is_finite() && l.abs() > self.params.base_inductance() * 1.0e-12 {
                 return l;
@@ -1742,8 +1964,65 @@ impl JilesAthertonInductor {
         self.state.m
     }
 
+    /// Magnetic M value published by Xyce's accepted output store.
+    pub(crate) fn xyce_core_reported_magnetization(&self) -> Value {
+        if self.params.xyce_core {
+            self.xyce_reported_magnetization
+        } else {
+            self.state.m
+        }
+    }
+
     pub(crate) fn xyce_core_mag_update(&self) -> Value {
         self.xyce_mag_update
+    }
+
+    #[inline]
+    pub(crate) fn xyce_core_m_eq_scaling(&self) -> Value {
+        self.params.m_eq_scaling
+    }
+
+    #[inline]
+    pub(crate) fn xyce_core_r_eq_scaling(&self) -> Value {
+        self.params.r_eq_scaling
+    }
+
+    /// Physical scale of the hidden M variable in Xyce's solver coordinate.
+    /// FACTORMS stores M normalized by Ms, so restore that factor before the
+    /// constitutive equations consume the hidden coordinate.
+    #[inline]
+    pub(crate) fn xyce_core_m_var_scaling(&self) -> Value {
+        let factor = if self.params.factor_ms {
+            self.params.ms
+        } else {
+            1.0
+        };
+        self.params.m_var_scaling * factor
+    }
+
+    /// Physical scale of the hidden R variable in Xyce's solver coordinate.
+    #[inline]
+    pub(crate) fn xyce_core_r_var_scaling(&self) -> Value {
+        self.params.r_var_scaling
+    }
+
+    /// Commit the `MagVarUpdate` produced by the current Newton evaluation.
+    /// Xyce updates this evaluation member after computing `P` and its
+    /// derivatives; callers must not invoke it for static residual probes.
+    pub(crate) fn advance_xyce_core_mag_update(&mut self, update: Value) {
+        if self.params.xyce_core_level2 && update.is_finite() {
+            self.xyce_mag_update = update;
+        }
+    }
+
+    pub(crate) fn restore_xyce_core_mag_update(&mut self, update: Value) {
+        self.advance_xyce_core_mag_update(update);
+    }
+
+    pub(crate) fn invalidate_xyce_core_trial(&mut self) {
+        if self.params.xyce_core_level2 {
+            self.xyce_trial = None;
+        }
     }
 
     #[doc(hidden)]
@@ -1761,15 +2040,19 @@ impl JilesAthertonInductor {
     /// `acceptStep()` mutates the Core state, so an accepted-history probe must
     /// retain that pre-commit factor.
     pub(crate) fn xyce_core_static_mid(&self, current: Value, voltage: Value) -> Value {
-        if let Some((trial_current, trial_voltage, trial)) = self.xyce_trial.as_ref()
+        let cached_mid = if let Some((trial_current, trial_voltage, trial)) =
+            self.xyce_trial.as_ref()
             && Self::xyce_endpoint_matches(*trial_current, current)
             && Self::xyce_endpoint_matches(*trial_voltage, voltage)
             && trial.mid.is_finite()
             && trial.mid.abs() > 1.0e-12
         {
-            return trial.mid;
-        }
-        self.xyce_accepted_mid
+            Some(trial.mid)
+        } else {
+            None
+        };
+        let mid = cached_mid.unwrap_or(self.xyce_accepted_mid);
+        mid
     }
 
     /// Cache the pure endpoint used by the current Newton stamp. The
@@ -1781,17 +2064,69 @@ impl JilesAthertonInductor {
         voltage: Value,
         trial: XyceCoreTrial,
     ) {
+        if self.params.xyce_core_level2 {
+            self.xyce_mag_update = trial.magnetization_update;
+        }
         self.xyce_trial = Some((current, voltage, trial));
+    }
+
+    /// Cache a pure Newton endpoint without changing Xyce's carried
+    /// `MagVarUpdate`.  Xyce refreshes its intermediate-variable cache for
+    /// every Newton endpoint, while the carried update is advanced only by
+    /// the accepted-state evaluation.  Keeping those lifecycles separate is
+    /// required for the subsequent static F-history probe.
+    pub(crate) fn cache_xyce_core_trial_endpoint(
+        &mut self,
+        current: Value,
+        voltage: Value,
+        trial: XyceCoreTrial,
+    ) {
+        self.xyce_trial = Some((current, voltage, trial));
+    }
+
+    /// Return the intermediate state produced by the most recent Xyce Core
+    /// RHS evaluation when it belongs to this exact Newton endpoint.  Xyce
+    /// computes `P` and its derivatives during `updateIntermediateVars()` and
+    /// the following Jacobian load consumes those cached quantities; it does
+    /// not recompute them from the newly advanced `MagVarUpdate`.
+    pub(crate) fn xyce_core_cached_trial(
+        &self,
+        current: Value,
+        voltage: Value,
+    ) -> Option<XyceCoreTrial> {
+        self.xyce_trial
+            .as_ref()
+            .and_then(|(trial_current, trial_voltage, trial)| {
+                (Self::xyce_endpoint_matches(*trial_current, current)
+                    && Self::xyce_endpoint_matches(*trial_voltage, voltage))
+                .then_some(*trial)
+            })
     }
 
     /// Check the scaled residuals of LEVEL=1's explicit hidden M/R equations
     /// for the most recently assembled Newton endpoint. Xyce scales each row
     /// by `1e-3`, while its device convergence RELTOL is `1e-4`; in physical
     /// units the same device threshold applies to M and R. LEVEL=2 has no
-    /// hidden equations and is always converged here.
+    /// hidden equations, but its forward-Euler limiter is still an active
+    /// device-convergence veto through MutIndNonLin2's `origFlag`.
     pub(crate) fn xyce_core_trial_converged(&self) -> bool {
-        if !self.params.xyce_core || self.params.xyce_core_level2 {
+        if !self.params.xyce_core {
             return true;
+        }
+        if self.params.xyce_core_level2 {
+            let Some((_, _, trial)) = self.xyce_trial.as_ref() else {
+                return false;
+            };
+            return trial.magnetization_update.is_finite()
+                && trial.magnetization.is_finite()
+                && trial.mid.is_finite()
+                // MutIndNonLin2's `origFlag` is cleared by
+                // updateIntermediateVars when the forward-Euler
+                // magnetization increment exceeds one quarter of Ms.  The
+                // device master includes that flag in its Newton convergence
+                // contract, so a candidate with this large a constitutive
+                // jump must force another Newton iteration/timepoint retry.
+                && trial.magnetization_update.abs() <= 0.25 * self.params.ms.abs();
         }
         let Some((_, _, trial)) = self.xyce_trial.as_ref() else {
             return false;
@@ -1808,11 +2143,12 @@ impl JilesAthertonInductor {
             .abs()
             .max(trial.level1_rate.abs())
             .max(1.0);
-        (!self.has_xyce_core_m_equation()
+        let converged = (!self.has_xyce_core_m_equation()
             || (trial.level1_residual.is_finite()
                 && trial.level1_residual.abs() <= Self::XYCE_CORE_DEVICE_RELTOL * scale))
             && trial.level1_rate_residual.is_finite()
-            && trial.level1_rate_residual.abs() <= Self::XYCE_CORE_DEVICE_RELTOL * rate_scale
+            && trial.level1_rate_residual.abs() <= Self::XYCE_CORE_DEVICE_RELTOL * rate_scale;
+        converged
     }
 
     pub fn current_value(&self) -> Value {
@@ -1834,7 +2170,11 @@ impl JilesAthertonInductor {
 
     /// Get current flux density B (T)
     pub fn flux_density(&self) -> Value {
-        self.state.b
+        if self.params.xyce_core {
+            Self::mu_0() * (self.state.reported_h + self.xyce_reported_magnetization)
+        } else {
+            self.state.b
+        }
     }
 
     /// Get flux linkage (Wb-turns)
@@ -1846,7 +2186,11 @@ impl JilesAthertonInductor {
     /// constant flux-linkage coefficient before the constitutive `mid`
     /// factor is applied.
     pub fn nominal_inductance(&self) -> Value {
-        self.params.base_inductance()
+        if self.params.xyce_core {
+            self.xyce_core_vacuum_mutual_inductance(self.params.n_turns, self.params.n_turns, 1.0)
+        } else {
+            self.params.base_inductance()
+        }
     }
 
     /// Return a constant vacuum mutual-inductance coefficient for two
@@ -1860,7 +2204,12 @@ impl JilesAthertonInductor {
         turns_j: Value,
         coupling: Value,
     ) -> Value {
-        Self::mu_0() * self.params.area / self.params.length * turns_i * turns_j * coupling
+        coupling
+            * 4.0e-7
+            * PI
+            * (self.params.area / self.params.length)
+            * turns_i
+            * turns_j
     }
 
     /// Convert aggregate ampere-turns to Xyce's applied magnetic field.
@@ -1911,9 +2260,22 @@ impl JilesAthertonInductor {
         } else {
             voltages.get(self.node_neg - 1).copied().unwrap_or(0.0)
         };
-        let old_current = self.current;
-        let delta_happ = (current - old_current) * self.params.n_turns / self.params.length;
-        let happ = current * self.params.n_turns / self.params.length;
+        // LEVEL=1 advances from the accepted branch-current difference. The
+        // raw branch-current accumulator is a MutIndNonLin2 (LEVEL=2)
+        // evaluation member and must not replace LEVEL=1's per-step history.
+        let raw_ampere_turns = if self.params.xyce_core_level2 {
+            Some(self.xyce_core_ampere_turns_and_delta(current))
+        } else {
+            None
+        };
+        let delta_happ = if let Some((_, delta_ampere_turns)) = raw_ampere_turns {
+            delta_ampere_turns / self.params.length
+        } else {
+            let old_current = self.current;
+            (current - old_current) * self.params.n_turns / self.params.length
+        };
+        let branch_current_sum = current * self.params.n_turns;
+        let happ = branch_current_sum / self.params.length;
         self.integrate_xyce_core_from_happ(
             current,
             happ,
@@ -1921,14 +2283,15 @@ impl JilesAthertonInductor {
             v_pos - v_neg,
             dt,
             one_step_order2,
+            raw_ampere_turns,
             hidden_state,
         );
     }
 
     /// Commit an accepted solution for a shared multi-winding Xyce Core.
     ///
-    /// `happ` and `delta_happ` are assembled by the circuit from the signed
-    /// sum of all winding ampere-turns.  The representative current retained
+    /// `happ` and the raw ampere-turn delta are assembled by the circuit from
+    /// the signed sum of all winding ampere-turns.  The representative current retained
     /// by this device is only a state-bookkeeping coordinate used to match a
     /// cached Newton endpoint and to expose the same current-based APIs as a
     /// single-winding device.
@@ -1959,6 +2322,7 @@ impl JilesAthertonInductor {
             voltage,
             dt,
             one_step_order2,
+            None,
             hidden_state,
         );
     }
@@ -1979,12 +2343,16 @@ impl JilesAthertonInductor {
         self.l_eff = self.params.base_inductance() * 1000.0;
         self.core_loss = 0.0;
         self.xyce_mag_update = 0.0;
+        self.xyce_reported_magnetization = 0.0;
+        self.xyce_old_branch_current_sum = 0.0;
         self.xyce_trial = None;
         self.xyce_accepted_mid = 1.0;
         self.xyce_dmdt_average = 0.0;
         self.xyce_dmdt_history = [0.0; 10];
         self.xyce_dmdt_history_len = 0;
         self.xyce_dmdt_history_cursor = 0;
+        self.xyce_core_dmdt_prev = 0.0;
+        self.xyce_core_dhapp_dt_prev = 0.0;
         self.xyce_level1_rate = 0.0;
         self.xyce_level1_dmdt = 0.0;
         self.xyce_level1_p = 0.0;

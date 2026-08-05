@@ -139,6 +139,17 @@ pub(in crate::engine::builder) fn resolve_xyce_core_model_params(
         delta_v: 0.1,
         v_inf: 1.0,
         delta_v_scaling: 1.0e3,
+        const_delta_v_scaling: false,
+        factor_ms: false,
+        m_var_scaling: 1.0,
+        r_var_scaling: 1.0,
+        // Xyce's MutIndNonLin processParams() uses 1e-3 for the M-equation
+        // unless FACTORMS or an explicit MEQNSCALING override is present.
+        // The reduced MNA stamp normalizes the hidden R row to unit scale by
+        // default (equation scaling is algebraically invariant), while an
+        // authored REQNSCALING remains effective.
+        m_eq_scaling: 1.0,
+        r_eq_scaling: 1.0,
         beta_h: 1.0e-4,
         beta_m: 3.125e-5,
         p_zero_tol: 0.1,
@@ -187,6 +198,49 @@ pub(in crate::engine::builder) fn resolve_xyce_core_model_params(
     }
     if let Some(p_zero_tol) = nonnegative_model_param(model_def, &["PZEROTOL"], "PZEROTOL")? {
         params.p_zero_tol = p_zero_tol;
+    }
+    let factor_ms_given = nonnegative_model_param(model_def, &["FACTORMS"], "FACTORMS")?;
+    if let Some(factor_ms) = factor_ms_given {
+        params.factor_ms = factor_ms != 0.0;
+    }
+    let m_var_scaling_given = positive_model_param(model_def, &["MVARSCALING"], "MVARSCALING")?;
+    if let Some(m_var_scaling) = m_var_scaling_given {
+        params.m_var_scaling = m_var_scaling;
+    }
+    let r_var_scaling_given = positive_model_param(model_def, &["RVARSCALING"], "RVARSCALING")?;
+    if let Some(r_var_scaling) = r_var_scaling_given {
+        params.r_var_scaling = r_var_scaling;
+    }
+    // Xyce's FACTORMS mode uses a normalized M coordinate.  Its default
+    // R-variable scale is Ms so that P_norm * R_phys remains the same
+    // physical product as the unnormalized formulation.
+    if factor_ms_given.is_some() {
+        if r_var_scaling_given.is_none() {
+            params.r_var_scaling = params.ms;
+        }
+    } else {
+        if m_var_scaling_given.is_none() {
+            params.m_var_scaling = 1.0e3;
+        }
+        if r_var_scaling_given.is_none() {
+            params.r_var_scaling = 1.0e3;
+        }
+    }
+    let m_eq_scaling_given =
+        positive_model_param(model_def, &["MEQNSCALING"], "MEQNSCALING")?;
+    if let Some(m_eq_scaling) = m_eq_scaling_given {
+        params.m_eq_scaling = m_eq_scaling;
+    }
+    if let Some(r_eq_scaling) = positive_model_param(model_def, &["REQNSCALING"], "REQNSCALING")? {
+        params.r_eq_scaling = r_eq_scaling;
+    }
+    if factor_ms_given.is_none() && m_eq_scaling_given.is_none() {
+        params.m_eq_scaling = 1.0e-3;
+    }
+    if let Some(const_delta_v_scaling) =
+        nonnegative_model_param(model_def, &["CONSTDELVSCALING"], "CONSTDELVSCALING")?
+    {
+        params.const_delta_v_scaling = const_delta_v_scaling != 0.0;
     }
     // Xyce has two distinct nonlinear mutual-inductor device contracts.  A
     // CORE model with LEVEL=1 (or with no LEVEL, whose K-device default is
