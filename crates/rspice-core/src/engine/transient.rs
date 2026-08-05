@@ -4019,7 +4019,7 @@ impl Engine {
                                             == circuit.mosfets.devices.len();
                                     cached_mosfet_truncation_limit_valid =
                                         mosfet_companion_terms_valid
-                                            && classic_mos_truncation_context.is_some();
+                                            && evaluation.truncation_evaluated;
                                 } else {
                                     if reuse_sequential_classic_mos_newton_terms {
                                         self.update_classic_mos_with_companion_terms_only(
@@ -5095,6 +5095,18 @@ impl Engine {
             {
                 let limit = if cached_mosfet_truncation_limit_valid {
                     cached_mosfet_truncation_limit
+                } else if mosfet_companion_terms_valid
+                    && mosfet_companion_charges_scratch.len() == circuit.mosfets.devices.len()
+                    && mosfet_caps_scratch.len() == circuit.mosfets.devices.len()
+                    && let Some(context) = classic_mos_truncation_context.as_ref()
+                    && let Some(classic_mos_cache) = classic_mos_stamp_cache.as_ref()
+                {
+                    context.classic_mos_gate_limit_from_cached_charges(
+                        classic_mos_cache.device_constants(),
+                        &mosfet_companion_charges_scratch,
+                        &mosfet_caps_scratch,
+                        &mosfet_history,
+                    )
                 } else {
                     Self::mosfet_ngspice_truncation_limit(
                         &circuit,

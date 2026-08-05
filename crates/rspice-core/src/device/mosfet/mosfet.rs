@@ -88,6 +88,13 @@ pub(crate) struct ClassicMosTransientConstants {
     overlap_capacitances: (Value, Value, Value),
 }
 
+impl ClassicMosTransientConstants {
+    #[inline]
+    pub(crate) fn overlap_capacitances(&self) -> (Value, Value, Value) {
+        self.overlap_capacitances
+    }
+}
+
 /// Compact Newton linearization consumed by the classic-MOS transient
 /// assembler. Keeping these eight scalars contiguous avoids revisiting the
 /// complete model-card-sized [`Mosfet`] object after its evaluation pass.

@@ -155,7 +155,25 @@ impl NgspiceChargeTruncationContext {
         caps: (Value, Value, Value),
         history: &MosfetTransientHistory,
     ) -> Option<Value> {
-        let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
+        self.mosfet_gate_limit_from_cached_charges_and_overlap(
+            idx,
+            charges,
+            caps,
+            mos.overlap_capacitances(),
+            history,
+        )
+    }
+
+    #[inline]
+    fn mosfet_gate_limit_from_cached_charges_and_overlap(
+        &self,
+        idx: usize,
+        charges: &MosfetGateCompanionCharges,
+        caps: (Value, Value, Value),
+        overlap: (Value, Value, Value),
+        history: &MosfetTransientHistory,
+    ) -> Option<Value> {
+        let (cgs_ov, cgd_ov, cgb_ov) = overlap;
         let capacitances = [
             caps.0 + history.capgs_prev_half[idx] + cgs_ov,
             caps.1 + history.capgd_prev_half[idx] + cgd_ov,
@@ -205,6 +223,37 @@ impl NgspiceChargeTruncationContext {
             limit = limit.min(branch_limit);
         }
         found_branch.then_some(limit)
+    }
+
+    /// Reduce the device-local CKTterr limits already captured by an accepted
+    /// classic-MOS candidate. Keeping this separate from candidate evaluation
+    /// lets sequential workloads avoid proving LTE for candidates that the
+    /// exact nonlinear residual subsequently rejects.
+    #[inline]
+    pub(super) fn classic_mos_gate_limit_from_cached_charges(
+        &self,
+        constants: &[crate::device::mosfet::ClassicMosTransientConstants],
+        charges: &[MosfetGateCompanionCharges],
+        caps: &[(Value, Value, Value)],
+        history: &MosfetTransientHistory,
+    ) -> Option<Value> {
+        debug_assert_eq!(constants.len(), charges.len());
+        debug_assert_eq!(constants.len(), caps.len());
+
+        let mut limit = None;
+        for idx in 0..constants.len() {
+            limit = Engine::min_truncation_limit(
+                limit,
+                self.mosfet_gate_limit_from_cached_charges_and_overlap(
+                    idx,
+                    &charges[idx],
+                    caps[idx],
+                    constants[idx].overlap_capacitances(),
+                    history,
+                ),
+            );
+        }
+        limit
     }
 }
 
@@ -2987,6 +3036,19 @@ M1 d g s 0 NM W=10u L=1u
             &history,
         );
         assert_eq!(fused.map(Value::to_bits), direct.map(Value::to_bits));
+        let constants = circuit
+            .mosfets
+            .devices
+            .iter()
+            .map(crate::device::Mosfet::classic_transient_constants)
+            .collect::<Vec<_>>();
+        let batched = context.classic_mos_gate_limit_from_cached_charges(
+            &constants,
+            &[charges],
+            &[caps],
+            &history,
+        );
+        assert_eq!(batched.map(Value::to_bits), direct.map(Value::to_bits));
     }
 
     #[test]

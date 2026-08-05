@@ -151,6 +151,7 @@ pub(super) struct ClassicMosTransientStampCache {
 
 pub(super) struct ClassicMosCandidateEvaluation {
     pub(super) truncation_limit: Option<Value>,
+    pub(super) truncation_evaluated: bool,
     pub(super) all_devices_converged: bool,
 }
 
@@ -976,6 +977,8 @@ impl Engine {
         convergence_criteria: Option<crate::device::NonlinearConvergenceCriteria>,
     ) -> Result<ClassicMosCandidateEvaluation, SimulationError> {
         debug_assert!(circuit.has_cacheable_classic_mos_transient_base());
+        #[cfg(not(feature = "parallel"))]
+        let _ = truncation;
         let instance_count = circuit.mosfets.len();
         debug_assert_eq!(constants.len(), instance_count);
         terms.resize(instance_count, [(0.0, 0.0); 5]);
@@ -1079,33 +1082,40 @@ impl Engine {
                     .record_last_update_all_is_physical(all_physical);
                 return Ok(ClassicMosCandidateEvaluation {
                     truncation_limit,
+                    truncation_evaluated: truncation.is_some(),
                     all_devices_converged,
                 });
             }
         }
 
-        let (all_physical, all_devices_converged, cached_limit) =
-            Self::evaluate_classic_mos_candidate_chunk(
-                &mut circuit.mosfets.devices,
-                constants,
-                terms,
-                charges,
-                caps,
-                static_terms.map(Vec::as_mut_slice),
-                0,
-                solution,
-                coeff,
-                dt,
-                history,
-                suppress_gate_charge,
-                truncation,
-                convergence_criteria,
-            );
+        // The serial candidate walk stays focused on device, companion, and
+        // convergence state. Its captured q/cq and Meyer data feed one compact
+        // CKTterr reduction after exact-residual acceptance; rejected
+        // candidates therefore never pay that device-local proof. Parallel
+        // populations retain the fused reduction above to avoid another pool
+        // dispatch and preserve their existing cache locality.
+        let (all_physical, all_devices_converged, _) = Self::evaluate_classic_mos_candidate_chunk(
+            &mut circuit.mosfets.devices,
+            constants,
+            terms,
+            charges,
+            caps,
+            static_terms.map(Vec::as_mut_slice),
+            0,
+            solution,
+            coeff,
+            dt,
+            history,
+            suppress_gate_charge,
+            None,
+            convergence_criteria,
+        );
         circuit
             .mosfets
             .record_last_update_all_is_physical(all_physical);
         Ok(ClassicMosCandidateEvaluation {
-            truncation_limit: cached_limit,
+            truncation_limit: None,
+            truncation_evaluated: false,
             all_devices_converged,
         })
     }
@@ -2544,10 +2554,17 @@ M1 d g 0 0 NM W=10u L=1u
             7.0,
             Some((&mut companion_caps, true)),
         );
+        assert!(!limited_evaluation.truncation_evaluated);
+        let deferred_limit = truncation.classic_mos_gate_limit_from_cached_charges(
+            cache.device_constants(),
+            &companion_charges,
+            &companion_caps,
+            &limited_history,
+        );
         assert_eq!(
-            limited_evaluation.truncation_limit.map(Value::to_bits),
+            deferred_limit.map(Value::to_bits),
             canonical_limit.map(Value::to_bits),
-            "limited static evaluation must retain bit-exact charge LTE reuse"
+            "deferred static evaluation must retain bit-exact charge LTE reuse"
         );
     }
 
