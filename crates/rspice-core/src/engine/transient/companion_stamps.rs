@@ -658,6 +658,34 @@ impl Engine {
         (geq, ieq, q_curr, cq_curr)
     }
 
+    /// Gate-charge companion update with the unit-capacitance conductance
+    /// already evaluated for this timestep. A MOS instance evaluates three
+    /// independent Meyer branches with the same coefficients and `dt`; sharing
+    /// this exact scalar avoids repeating identical divisions without changing
+    /// any per-branch arithmetic.
+    #[inline]
+    pub(super) fn jfet_companion_terms_with_unit_geq(
+        coeff: &CompanionCoefficients,
+        dt: Value,
+        unit_geq: Value,
+        capacitance: Value,
+        v_curr: Value,
+        v_prev: Value,
+        q_prev: Value,
+        q_prev_prev: Value,
+        cq_prev: Value,
+    ) -> (Value, Value, Value, Value) {
+        let geq = Self::jfet_companion_geq(coeff, capacitance, dt);
+        if geq == 0.0 {
+            return (0.0, 0.0, q_prev, 0.0);
+        }
+        let q_curr = q_prev + capacitance * (v_curr - v_prev);
+        let cq_curr =
+            unit_geq * q_curr - coeff.capacitor_ieq(1.0, dt, q_prev, q_prev_prev, cq_prev);
+        let ieq = geq * v_curr - cq_curr;
+        (geq, ieq, q_curr, cq_curr)
+    }
+
     #[inline]
     pub(super) fn nonlinear_charge_companion_terms(
         coeff: &CompanionCoefficients,
@@ -719,6 +747,58 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_unit_geq_companion_matches_canonical_terms_exactly() {
+        let coefficient_sets = [
+            CompanionCoefficients::backward_euler(),
+            CompanionCoefficients::trapezoidal(),
+            CompanionCoefficients::gear2(),
+        ];
+        for coeff in coefficient_sets {
+            for dt in [1.0e-15, 2.7e-12, 0.0, Value::INFINITY] {
+                let unit_geq = Engine::jfet_companion_geq(&coeff, 1.0, dt);
+                for capacitance in [0.0, 1.3e-15, 4.2e-9, -1.0, Value::NAN] {
+                    let canonical = Engine::jfet_companion_terms(
+                        &coeff,
+                        dt,
+                        capacitance,
+                        1.7,
+                        -0.4,
+                        3.1e-12,
+                        -2.7e-12,
+                        8.3e-6,
+                    );
+                    let shared = Engine::jfet_companion_terms_with_unit_geq(
+                        &coeff,
+                        dt,
+                        unit_geq,
+                        capacitance,
+                        1.7,
+                        -0.4,
+                        3.1e-12,
+                        -2.7e-12,
+                        8.3e-6,
+                    );
+                    assert_eq!(
+                        [
+                            shared.0.to_bits(),
+                            shared.1.to_bits(),
+                            shared.2.to_bits(),
+                            shared.3.to_bits(),
+                        ],
+                        [
+                            canonical.0.to_bits(),
+                            canonical.1.to_bits(),
+                            canonical.2.to_bits(),
+                            canonical.3.to_bits(),
+                        ],
+                        "shared factor differs for dt={dt}, capacitance={capacitance}, coeff={coeff:?}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn batched_companion_stamp_matches_validated_stamp_exactly() {
