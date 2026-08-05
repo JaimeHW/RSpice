@@ -2,6 +2,8 @@
 
 #![allow(clippy::needless_range_loop)]
 
+#[cfg(test)]
+use super::state::MosfetCompanionBiasSource;
 use super::*;
 
 #[cfg(feature = "parallel")]
@@ -2962,7 +2964,7 @@ M1 d g s 0 NM W=10u L=1u
             dt,
             &history,
             false,
-            false,
+            MosfetCompanionBiasSource::Solution,
             None,
         );
         let context = NgspiceChargeTruncationContext::new(

@@ -5,6 +5,7 @@
 //! transient system (linear, companion, nonlinear, behavioral, XSPICE) at a
 //! given iterate so the three consumers can never drift apart.
 
+use super::state::MosfetCompanionBiasSource;
 use super::*;
 
 #[cfg(feature = "parallel")]
@@ -589,7 +590,7 @@ impl Engine {
                                         dt,
                                         history,
                                         suppress_gate_charge,
-                                        true,
+                                        MosfetCompanionBiasSource::VerifiedPhysicalGate,
                                         Some(constants),
                                     );
                                 *term = evaluated_terms;
@@ -626,7 +627,7 @@ impl Engine {
                 dt,
                 history,
                 suppress_gate_charge,
-                true,
+                MosfetCompanionBiasSource::VerifiedPhysicalGate,
                 Some(constants),
             );
             *term = evaluated_terms;
@@ -761,9 +762,9 @@ impl Engine {
             let constants = &constants[local];
             device.update_with_classic_transient_constants(solution, constants);
             // Candidate caches feed accepted-state residual and LTE walks.
-            // Form raw gate branches in canonical node-difference order; the
-            // evaluated Meyer bias may still reuse this update's verified
-            // limiter state.
+            // The canonical candidate path forms both the gate companions and
+            // Meyer state from the evaluated bias, so reuse that just-written
+            // cache without reloading and revalidating the solution nodes.
             let (evaluated_terms, evaluated_charges, evaluated_caps) =
                 Self::mosfet_companion_branch_terms::<true>(
                     device,
@@ -773,7 +774,7 @@ impl Engine {
                     dt,
                     history,
                     suppress_gate_charge,
-                    false,
+                    MosfetCompanionBiasSource::VerifiedEvaluatedGate,
                     Some(constants),
                 );
             terms[local] = evaluated_terms;
@@ -1434,7 +1435,7 @@ impl Engine {
                     dt,
                     ctx.mosfet_history,
                     ctx.suppress_gate_charge,
-                    false,
+                    MosfetCompanionBiasSource::Solution,
                     Some(constants),
                 );
                 if let Some(caps_out) = caps_out.as_deref_mut() {
@@ -2218,7 +2219,7 @@ M1 d g 0 0 NM W=10u L=1u
                     dt,
                     &limited_history,
                     false,
-                    false,
+                    MosfetCompanionBiasSource::Solution,
                     Some(constants),
                 );
             assert_eq!(*cached_terms, canonical_terms);

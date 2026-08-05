@@ -4,6 +4,16 @@
 
 use super::*;
 
+#[derive(Clone, Copy)]
+pub(super) enum MosfetCompanionBiasSource {
+    /// Derive both gate and evaluated branches from the supplied solution.
+    Solution,
+    /// Reuse a verified update cache and form gate branches at physical bias.
+    VerifiedPhysicalGate,
+    /// Reuse a verified update cache and form gate branches at evaluated bias.
+    VerifiedEvaluatedGate,
+}
+
 impl Engine {
     #[inline]
     pub(super) fn legacy_bjt_charge_branch_voltages(
@@ -1022,7 +1032,11 @@ impl Engine {
                 dt,
                 history,
                 suppress_gate_charge,
-                use_verified_cached_bias,
+                if use_verified_cached_bias {
+                    MosfetCompanionBiasSource::VerifiedPhysicalGate
+                } else {
+                    MosfetCompanionBiasSource::Solution
+                },
                 None,
             );
             if let Some(cache) = caps_cache.as_deref_mut() {
@@ -1081,7 +1095,7 @@ impl Engine {
         dt: Value,
         history: &MosfetTransientHistory,
         suppress_gate_charge: bool,
-        use_verified_cached_bias: bool,
+        bias_source: MosfetCompanionBiasSource,
         constants: Option<&crate::device::mosfet::ClassicMosTransientConstants>,
     ) -> (
         MosfetCompanionBranchTerms,
@@ -1091,14 +1105,20 @@ impl Engine {
         let mut terms = [(0.0, 0.0); 5];
         let mut charges = [(0.0, 0.0); 3];
         let mut caps = (0.0, 0.0, 0.0);
-        let ((vgs, vgd, vgb), (vgs_eval, vds_eval, vbs_eval)) = if use_verified_cached_bias {
-            let ((vgs, vds, vbs), evaluated) = mos.verified_cached_transient_branch_voltages();
-            ((vgs, vgs - vds, vgs - vbs), evaluated)
-        } else {
-            (
+        let ((vgs, vgd, vgb), (vgs_eval, vds_eval, vbs_eval)) = match bias_source {
+            MosfetCompanionBiasSource::Solution => (
                 mos.gate_charge_branch_voltages_at(voltages),
                 mos.eval_branch_voltages_at(voltages),
-            )
+            ),
+            MosfetCompanionBiasSource::VerifiedPhysicalGate => {
+                let ((vgs, vds, vbs), evaluated) = mos.verified_cached_transient_branch_voltages();
+                ((vgs, vgs - vds, vgs - vbs), evaluated)
+            }
+            MosfetCompanionBiasSource::VerifiedEvaluatedGate => {
+                let (_, evaluated) = mos.verified_cached_transient_branch_voltages();
+                let (vgs, vds, vbs) = evaluated;
+                ((vgs, vgs - vds, vgs - vbs), evaluated)
+            }
         };
 
         if !suppress_gate_charge {
