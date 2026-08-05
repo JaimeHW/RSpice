@@ -178,8 +178,6 @@ impl From<&MosfetIndices> for ClassicMosValueIndices {
 
 #[derive(Debug, Clone, Copy)]
 struct ClassicMosDiodeStampPlan {
-    anode: NodeId,
-    cathode: NodeId,
     aa: ClassicMosValueSlot,
     ac: ClassicMosValueSlot,
     ca: ClassicMosValueSlot,
@@ -192,9 +190,29 @@ pub(crate) struct ClassicMosStaticStampPlan {
     pattern: CscPatternToken,
     indices: ClassicMosValueIndices,
     node_drain: NodeId,
+    node_gate: NodeId,
     node_source: NodeId,
+    node_bulk: NodeId,
+    body_anode_is_bulk: bool,
     body_source: ClassicMosDiodeStampPlan,
     body_drain: ClassicMosDiodeStampPlan,
+}
+
+impl ClassicMosStaticStampPlan {
+    #[inline]
+    fn body_diode_nodes(&self) -> ((NodeId, NodeId), (NodeId, NodeId)) {
+        if self.body_anode_is_bulk {
+            (
+                (self.node_bulk, self.node_source),
+                (self.node_bulk, self.node_drain),
+            )
+        } else {
+            (
+                (self.node_source, self.node_bulk),
+                (self.node_drain, self.node_bulk),
+            )
+        }
+    }
 }
 
 /// MOSFET device supporting native Berkeley MOS levels and related model paths.

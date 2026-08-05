@@ -163,8 +163,7 @@ impl ClassicMosTransientStampCache {
 
     #[inline]
     pub(super) fn supports_compact_candidate_static_stamps(&self) -> bool {
-        !self.direct_residual_has_bounded_row_fan_in
-            && self.static_stamp_plans.len() == self.device_constants.len()
+        self.static_stamp_plans.len() == self.device_constants.len()
             && !self.static_stamp_plans.is_empty()
     }
 
@@ -1647,8 +1646,6 @@ impl Engine {
         candidate_static_terms: Option<&[crate::device::mosfet::ClassicMosCachedStaticTerms]>,
         mut caps_out: Option<&mut Vec<(Value, Value, Value)>>,
     ) -> bool {
-        #[cfg(not(feature = "parallel"))]
-        let _ = candidate_static_terms;
         if cache.device_constants.len() != circuit.mosfets.devices.len()
             || ctx.mosfet_companion_slots.len() != circuit.mosfets.devices.len()
             || cache.attempt_ax_into(matrix, solution, row_ax).is_err()
@@ -1692,21 +1689,19 @@ impl Engine {
         #[cfg(not(feature = "parallel"))]
         let used_parallel_rows = false;
 
+        let compact_static_terms = candidate_static_terms.filter(|terms| {
+            cache.supports_compact_candidate_static_stamps()
+                && terms.len() == cache.static_stamp_plans.len()
+        });
+
         if !used_parallel_rows {
-            for (idx, ((mosfet, constants), slots)) in circuit
-                .mosfets
-                .devices
-                .iter()
-                .zip(&cache.device_constants)
-                .zip(ctx.mosfet_companion_slots)
-                .enumerate()
-            {
+            for (idx, slots) in ctx.mosfet_companion_slots.iter().enumerate() {
                 let evaluated_terms;
                 let terms = if let Some(candidate_terms) = candidate_companion_terms {
                     &candidate_terms[idx]
                 } else {
                     let (terms, _, caps) = Self::mosfet_companion_branch_terms::<false>(
-                        mosfet,
+                        &circuit.mosfets.devices[idx],
                         idx,
                         solution,
                         &companion_coeff,
@@ -1714,7 +1709,7 @@ impl Engine {
                         ctx.mosfet_history,
                         ctx.suppress_gate_charge,
                         MosfetCompanionBiasSource::Solution,
-                        Some(constants),
+                        Some(&cache.device_constants[idx]),
                     );
                     if let Some(caps_out) = caps_out.as_deref_mut() {
                         caps_out.push(caps);
@@ -1753,9 +1748,22 @@ impl Engine {
                         row_rhs[row] -= equivalent_current;
                     }
                 }
-                mosfet.add_physical_static_residual_row_terms_at(
-                    solution, constants, row_ax, row_rhs,
-                );
+                if let Some(static_terms) = compact_static_terms {
+                    crate::device::Mosfet::add_cached_physical_static_residual_terms(
+                        solution,
+                        &cache.static_stamp_plans[idx],
+                        &static_terms[idx],
+                        row_ax,
+                        row_rhs,
+                    );
+                } else {
+                    circuit.mosfets.devices[idx].add_physical_static_residual_row_terms_at(
+                        solution,
+                        &cache.device_constants[idx],
+                        row_ax,
+                        row_rhs,
+                    );
+                }
             }
         }
 
@@ -1881,14 +1889,16 @@ impl Engine {
                         .as_deref()
                         .is_none_or(|caps| caps.len() == circuit.mosfets.devices.len())
             });
-            #[cfg(feature = "parallel")]
             let direct_static_terms = classic_mos_static_terms.filter(|terms| {
-                cache.supports_parallel_direct_residual_proof()
+                #[cfg(feature = "parallel")]
+                let supported = cache.supports_compact_candidate_static_stamps()
+                    || cache.supports_parallel_direct_residual_proof();
+                #[cfg(not(feature = "parallel"))]
+                let supported = cache.supports_compact_candidate_static_stamps();
+                supported
                     && circuit.mosfets.last_update_all_is_physical()
                     && terms.len() == circuit.mosfets.devices.len()
             });
-            #[cfg(not(feature = "parallel"))]
-            let direct_static_terms = None;
             if let Some((row_ax, row_rhs)) = classic_mos_residual_scratch
                 && self.classic_mos_physical_residual_clearly_converged(
                     cache,

@@ -13,8 +13,6 @@ impl Mosfet {
                 .flatten()
         };
         let plan = ClassicMosDiodeStampPlan {
-            anode,
-            cathode,
             aa: ClassicMosValueSlot::from_index(index(anode, anode)),
             ac: ClassicMosValueSlot::from_index(index(anode, cathode)),
             ca: ClassicMosValueSlot::from_index(index(cathode, anode)),
@@ -55,7 +53,10 @@ impl Mosfet {
             pattern: matrix.pattern_token(),
             indices: ClassicMosValueIndices::from(&self.indices),
             node_drain: self.node_drain,
+            node_gate: self.node_gate,
             node_source: self.node_source,
+            node_bulk: self.node_bulk,
+            body_anode_is_bulk: matches!(self.mos_type, MosType::Nmos),
             body_source: Self::classic_diode_stamp_plan(matrix, bs_anode, bs_cathode)?,
             body_drain: Self::classic_diode_stamp_plan(matrix, bd_anode, bd_cathode)?,
         })
@@ -105,6 +106,8 @@ impl Mosfet {
         rhs: &mut [Value],
         pattern: CscPatternToken,
         plan: &ClassicMosDiodeStampPlan,
+        anode: NodeId,
+        cathode: NodeId,
         conductance: Value,
         equivalent_current: Value,
     ) {
@@ -117,8 +120,8 @@ impl Mosfet {
         if let Some(index) = plan.ac.checked_index(pattern) {
             matrix.stamp_direct(index, -conductance);
         }
-        if plan.anode > 0 {
-            rhs[plan.anode - 1] -= equivalent_current;
+        if anode > 0 {
+            rhs[anode - 1] -= equivalent_current;
         }
         if let Some(index) = plan.ca.checked_index(pattern) {
             matrix.stamp_direct(index, -conductance);
@@ -126,8 +129,8 @@ impl Mosfet {
         if let Some(index) = plan.cc.checked_index(pattern) {
             matrix.stamp_direct(index, conductance);
         }
-        if plan.cathode > 0 {
-            rhs[plan.cathode - 1] += equivalent_current;
+        if cathode > 0 {
+            rhs[cathode - 1] += equivalent_current;
         }
     }
 
@@ -171,11 +174,14 @@ impl Mosfet {
         if plan.node_source > 0 {
             rhs[plan.node_source - 1] += terms.id_eq;
         }
+        let ((bs_anode, bs_cathode), (bd_anode, bd_cathode)) = plan.body_diode_nodes();
         Self::stamp_classic_diode_plan(
             matrix,
             rhs,
             plan.pattern,
             &plan.body_source,
+            bs_anode,
+            bs_cathode,
             terms.gbs,
             terms.ieq_bs,
         );
@@ -184,6 +190,8 @@ impl Mosfet {
             rhs,
             plan.pattern,
             &plan.body_drain,
+            bd_anode,
+            bd_cathode,
             terms.gbd,
             terms.ieq_bd,
         );
@@ -194,6 +202,8 @@ impl Mosfet {
         values: &mut [Value],
         rhs: &mut [Value],
         plan: &ClassicMosDiodeStampPlan,
+        anode: NodeId,
+        cathode: NodeId,
         conductance: Value,
         equivalent_current: Value,
     ) {
@@ -206,8 +216,8 @@ impl Mosfet {
         if let Some(offset) = plan.ac.offset() {
             values[offset] += -conductance;
         }
-        if plan.anode > 0 {
-            rhs[plan.anode - 1] -= equivalent_current;
+        if anode > 0 {
+            rhs[anode - 1] -= equivalent_current;
         }
         if let Some(offset) = plan.ca.offset() {
             values[offset] += -conductance;
@@ -215,8 +225,8 @@ impl Mosfet {
         if let Some(offset) = plan.cc.offset() {
             values[offset] += conductance;
         }
-        if plan.cathode > 0 {
-            rhs[plan.cathode - 1] += equivalent_current;
+        if cathode > 0 {
+            rhs[cathode - 1] += equivalent_current;
         }
     }
 
@@ -261,8 +271,25 @@ impl Mosfet {
         if plan.node_source > 0 {
             rhs[plan.node_source - 1] += terms.id_eq;
         }
-        Self::stamp_classic_diode_values(values, rhs, &plan.body_source, terms.gbs, terms.ieq_bs);
-        Self::stamp_classic_diode_values(values, rhs, &plan.body_drain, terms.gbd, terms.ieq_bd);
+        let ((bs_anode, bs_cathode), (bd_anode, bd_cathode)) = plan.body_diode_nodes();
+        Self::stamp_classic_diode_values(
+            values,
+            rhs,
+            &plan.body_source,
+            bs_anode,
+            bs_cathode,
+            terms.gbs,
+            terms.ieq_bs,
+        );
+        Self::stamp_classic_diode_values(
+            values,
+            rhs,
+            &plan.body_drain,
+            bd_anode,
+            bd_cathode,
+            terms.gbd,
+            terms.ieq_bd,
+        );
     }
 
     /// Link this device to a StaticMatrix for O(1) stamping
@@ -542,6 +569,75 @@ impl Mosfet {
             self.body_drain_junction_linearization_cached(vds, vbs, cache_matches);
         Self::add_diode_residual_row_terms(
             solution, row_ax, row_rhs, bd_anode, bd_cathode, gbd, ieq_bd,
+        );
+    }
+
+    /// Add an already-evaluated physical static contribution through the
+    /// compact topology plan used by the serial transient assembler.
+    ///
+    /// This preserves the full-device residual arithmetic order while keeping
+    /// the proof walk on two tightly packed arrays instead of revisiting model
+    /// cards and mutable limiter history.
+    pub(crate) fn add_cached_physical_static_residual_terms(
+        solution: &[Value],
+        plan: &ClassicMosStaticStampPlan,
+        terms: &ClassicMosCachedStaticTerms,
+        row_ax: &mut [Value],
+        row_rhs: &mut [Value],
+    ) {
+        let vd = Self::terminal_voltage(solution, plan.node_drain);
+        let vg = Self::terminal_voltage(solution, plan.node_gate);
+        let vs = Self::terminal_voltage(solution, plan.node_source);
+        let vb = Self::terminal_voltage(solution, plan.node_bulk);
+        let source_diagonal = terms.gm + terms.gds + terms.gmb;
+
+        if plan.node_drain > 0 {
+            let row = plan.node_drain - 1;
+            row_ax[row] += terms.gds * vd;
+            if plan.node_gate > 0 {
+                row_ax[row] += terms.gm * vg;
+            }
+            if plan.node_source > 0 {
+                row_ax[row] -= source_diagonal * vs;
+            }
+            if plan.node_bulk > 0 {
+                row_ax[row] += terms.gmb * vb;
+            }
+            row_rhs[row] -= terms.id_eq;
+        }
+        if plan.node_source > 0 {
+            let row = plan.node_source - 1;
+            if plan.node_drain > 0 {
+                row_ax[row] -= terms.gds * vd;
+            }
+            if plan.node_gate > 0 {
+                row_ax[row] -= terms.gm * vg;
+            }
+            row_ax[row] += source_diagonal * vs;
+            if plan.node_bulk > 0 {
+                row_ax[row] -= terms.gmb * vb;
+            }
+            row_rhs[row] += terms.id_eq;
+        }
+
+        let ((bs_anode, bs_cathode), (bd_anode, bd_cathode)) = plan.body_diode_nodes();
+        Self::add_diode_residual_row_terms(
+            solution,
+            row_ax,
+            row_rhs,
+            bs_anode,
+            bs_cathode,
+            terms.gbs,
+            terms.ieq_bs,
+        );
+        Self::add_diode_residual_row_terms(
+            solution,
+            row_ax,
+            row_rhs,
+            bd_anode,
+            bd_cathode,
+            terms.gbd,
+            terms.ieq_bd,
         );
     }
 
@@ -843,55 +939,93 @@ mod tests {
 
     #[test]
     fn physical_residual_rows_reuse_matching_device_cache_exactly() {
-        let candidate = [1.2, 1.8, 0.2, -0.1];
-        let mut cached_mos = Mosfet::new_nmos("cached".to_string(), 1, 2, 3, 4);
-        let constants = cached_mos.classic_transient_constants();
-        cached_mos.update_with_classic_transient_constants(&candidate, &constants);
-        assert!(cached_mos.cached_linearization_is_physical());
+        let cases = [
+            (
+                "nmos",
+                Mosfet::new_nmos("cached_n".to_string(), 1, 2, 3, 4),
+                vec![1.2, 1.8, 0.2, -0.1],
+            ),
+            (
+                "pmos",
+                Mosfet::new_pmos("cached_p".to_string(), 1, 2, 3, 4),
+                vec![1.2, 0.1, 1.8, 2.0],
+            ),
+            (
+                "source-body tied nmos",
+                Mosfet::new_nmos("cached_tied".to_string(), 1, 2, 3, 3),
+                vec![1.2, 1.8, 0.2],
+            ),
+        ];
 
-        let mut cached_ax = vec![0.0; 4];
-        let mut cached_rhs = vec![0.0; 4];
-        cached_mos.add_physical_static_residual_row_terms_at(
-            &candidate,
-            &constants,
-            &mut cached_ax,
-            &mut cached_rhs,
-        );
-        #[cfg(feature = "parallel")]
-        let rowwise = {
-            let cached_terms = cached_mos.classic_cached_static_terms();
-            let residual_plan = cached_mos.classic_residual_row_plan();
-            let mut rowwise_ax = vec![0.0; 4];
-            let mut rowwise_rhs = vec![0.0; 4];
-            for row in 0..4 {
-                Mosfet::add_cached_physical_static_residual_row_terms(
+        for (case, mut cached_mos, candidate) in cases {
+            let fresh_mos = cached_mos.clone();
+            let linked_matrix = full_matrix(candidate.len());
+            cached_mos.link(&linked_matrix);
+            let constants = cached_mos.classic_transient_constants();
+            cached_mos.update_with_classic_transient_constants(&candidate, &constants);
+            assert!(cached_mos.cached_linearization_is_physical(), "{case}");
+
+            let mut cached_ax = vec![0.0; candidate.len()];
+            let mut cached_rhs = vec![0.0; candidate.len()];
+            cached_mos.add_physical_static_residual_row_terms_at(
+                &candidate,
+                &constants,
+                &mut cached_ax,
+                &mut cached_rhs,
+            );
+            let compact = {
+                let cached_terms = cached_mos.classic_cached_static_terms();
+                let static_plan = cached_mos
+                    .classic_static_stamp_plan(&linked_matrix)
+                    .expect("full matrix supports compact MOS stamp");
+                let mut compact_ax = vec![0.0; candidate.len()];
+                let mut compact_rhs = vec![0.0; candidate.len()];
+                Mosfet::add_cached_physical_static_residual_terms(
                     &candidate,
-                    &residual_plan,
+                    &static_plan,
                     &cached_terms,
-                    row,
-                    &mut rowwise_ax[row],
-                    &mut rowwise_rhs[row],
+                    &mut compact_ax,
+                    &mut compact_rhs,
                 );
+                (compact_ax, compact_rhs)
+            };
+            #[cfg(feature = "parallel")]
+            let rowwise = {
+                let cached_terms = cached_mos.classic_cached_static_terms();
+                let residual_plan = cached_mos.classic_residual_row_plan();
+                let mut rowwise_ax = vec![0.0; candidate.len()];
+                let mut rowwise_rhs = vec![0.0; candidate.len()];
+                for row in 0..candidate.len() {
+                    Mosfet::add_cached_physical_static_residual_row_terms(
+                        &candidate,
+                        &residual_plan,
+                        &cached_terms,
+                        row,
+                        &mut rowwise_ax[row],
+                        &mut rowwise_rhs[row],
+                    );
+                }
+                (rowwise_ax, rowwise_rhs)
+            };
+
+            let mut evaluated_ax = vec![0.0; candidate.len()];
+            let mut evaluated_rhs = vec![0.0; candidate.len()];
+            fresh_mos.add_physical_static_residual_row_terms_at(
+                &candidate,
+                &constants,
+                &mut evaluated_ax,
+                &mut evaluated_rhs,
+            );
+
+            assert_eq!(cached_ax, evaluated_ax, "{case} A*x");
+            assert_eq!(cached_rhs, evaluated_rhs, "{case} RHS");
+            assert_eq!(compact.0, cached_ax, "{case} compact A*x");
+            assert_eq!(compact.1, cached_rhs, "{case} compact RHS");
+            #[cfg(feature = "parallel")]
+            {
+                assert_eq!(rowwise.0, cached_ax, "{case} rowwise A*x");
+                assert_eq!(rowwise.1, cached_rhs, "{case} rowwise RHS");
             }
-            (rowwise_ax, rowwise_rhs)
-        };
-
-        let fresh_mos = Mosfet::new_nmos("fresh".to_string(), 1, 2, 3, 4);
-        let mut evaluated_ax = vec![0.0; 4];
-        let mut evaluated_rhs = vec![0.0; 4];
-        fresh_mos.add_physical_static_residual_row_terms_at(
-            &candidate,
-            &constants,
-            &mut evaluated_ax,
-            &mut evaluated_rhs,
-        );
-
-        assert_eq!(cached_ax, evaluated_ax);
-        assert_eq!(cached_rhs, evaluated_rhs);
-        #[cfg(feature = "parallel")]
-        {
-            assert_eq!(rowwise.0, cached_ax);
-            assert_eq!(rowwise.1, cached_rhs);
         }
     }
 }
