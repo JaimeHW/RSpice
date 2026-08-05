@@ -34,13 +34,43 @@ impl Mosfet {
         (isat * (expv - 1.0) + gmin * v, (isat / nvt) * expv + gmin)
     }
 
+    /// Transient-cache form of the bulk-diode evaluator. The saturation
+    /// current, thermal voltage, and compatibility selector are invariant for
+    /// a transient run; GMIN deliberately remains live because convergence
+    /// rescue can change it between Newton attempts.
+    #[inline]
+    fn junction_diode_current_and_conductance_with_constants(
+        &self,
+        isat: Value,
+        v: Value,
+        constants: &ClassicMosTransientConstants,
+    ) -> (Value, Value) {
+        let gmin = self.junction_gmin.max(0.0);
+        let nvt = constants.body_junction_nvt;
+        if constants.uses_xyce_classic_reverse_body_junction && v <= 0.0 {
+            let conductance = isat / nvt + gmin;
+            return (conductance * v, conductance);
+        }
+        if v == 0.0 {
+            return (0.0, isat / nvt + gmin);
+        }
+        if v <= -3.0 * nvt {
+            return (gmin * v - isat, gmin);
+        }
+
+        let expv = (v / nvt).clamp(-80.0, 80.0).exp();
+        (isat * (expv - 1.0) + gmin * v, (isat / nvt) * expv + gmin)
+    }
+
     #[inline]
     pub(in crate::device::mosfet::mosfet) fn body_junction_thermal_voltage(&self) -> Value {
         self.vt.max(1e-12)
     }
 
     #[inline]
-    fn uses_xyce_classic_reverse_body_junction(&self) -> bool {
+    pub(in crate::device::mosfet::mosfet) fn uses_xyce_classic_reverse_body_junction(
+        &self,
+    ) -> bool {
         self.body_junction_model == MosBodyJunctionModel::XyceClassicLinearizedReverse
             && matches!(self.level, 1 | 2 | 3 | 6)
     }
@@ -328,6 +358,14 @@ impl Mosfet {
     }
 
     #[inline]
+    pub(crate) fn body_junction_charge_mask_with_constants(
+        &self,
+        constants: &ClassicMosTransientConstants,
+    ) -> u8 {
+        constants.body_junction_charge_mask
+    }
+
+    #[inline]
     pub(in crate::device::mosfet::mosfet) fn body_source_junction_current_and_conductance(
         &self,
         vbs: Value,
@@ -335,6 +373,20 @@ impl Mosfet {
         let vd = self.body_source_diode_voltage(vbs);
         let isat = self.effective_body_junction_saturation_current(self.source_area);
         self.junction_diode_current_and_conductance(isat, vd, self.junction_gmin)
+    }
+
+    #[inline]
+    pub(in crate::device::mosfet::mosfet) fn body_source_junction_current_and_conductance_with_constants(
+        &self,
+        vbs: Value,
+        constants: &ClassicMosTransientConstants,
+    ) -> (Value, Value) {
+        let vd = self.body_source_diode_voltage(vbs);
+        self.junction_diode_current_and_conductance_with_constants(
+            constants.source_body_isat,
+            vd,
+            constants,
+        )
     }
 
     #[inline]
@@ -346,6 +398,21 @@ impl Mosfet {
         let vd = self.body_drain_diode_voltage(vds, vbs);
         let isat = self.effective_body_junction_saturation_current(self.drain_area);
         self.junction_diode_current_and_conductance(isat, vd, self.junction_gmin)
+    }
+
+    #[inline]
+    pub(in crate::device::mosfet::mosfet) fn body_drain_junction_current_and_conductance_with_constants(
+        &self,
+        vds: Value,
+        vbs: Value,
+        constants: &ClassicMosTransientConstants,
+    ) -> (Value, Value) {
+        let vd = self.body_drain_diode_voltage(vds, vbs);
+        self.junction_diode_current_and_conductance_with_constants(
+            constants.drain_body_isat,
+            vd,
+            constants,
+        )
     }
 
     #[inline]

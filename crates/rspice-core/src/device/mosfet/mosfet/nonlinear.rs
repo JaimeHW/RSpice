@@ -32,12 +32,26 @@ impl Mosfet {
             self.ibd_prev = self.ibd;
             self.gbd_prev = self.gbd;
         } else {
-            (self.ibs_prev, self.gbs_prev) =
-                self.body_source_junction_current_and_conductance(self.eval_vbs_prev);
-            (self.ibd_prev, self.gbd_prev) = self.body_drain_junction_current_and_conductance(
-                self.eval_vds_prev,
-                self.eval_vbs_prev,
-            );
+            if let Some(constants) = constants {
+                (self.ibs_prev, self.gbs_prev) = self
+                    .body_source_junction_current_and_conductance_with_constants(
+                        self.eval_vbs_prev,
+                        constants,
+                    );
+                (self.ibd_prev, self.gbd_prev) = self
+                    .body_drain_junction_current_and_conductance_with_constants(
+                        self.eval_vds_prev,
+                        self.eval_vbs_prev,
+                        constants,
+                    );
+            } else {
+                (self.ibs_prev, self.gbs_prev) =
+                    self.body_source_junction_current_and_conductance(self.eval_vbs_prev);
+                (self.ibd_prev, self.gbd_prev) = self.body_drain_junction_current_and_conductance(
+                    self.eval_vds_prev,
+                    self.eval_vbs_prev,
+                );
+            }
         }
 
         let (vgs, vds, vbs) = self.branch_voltages(voltages);
@@ -81,9 +95,22 @@ impl Mosfet {
         self.gds = gds;
         self.gmb = gmb;
         self.id_eq = id_eq;
-        (self.ibs, self.gbs) = self.body_source_junction_current_and_conductance(self.eval_vbs);
-        (self.ibd, self.gbd) =
-            self.body_drain_junction_current_and_conductance(self.eval_vds, self.eval_vbs);
+        if let Some(constants) = constants {
+            (self.ibs, self.gbs) = self
+                .body_source_junction_current_and_conductance_with_constants(
+                    self.eval_vbs,
+                    constants,
+                );
+            (self.ibd, self.gbd) = self.body_drain_junction_current_and_conductance_with_constants(
+                self.eval_vds,
+                self.eval_vbs,
+                constants,
+            );
+        } else {
+            (self.ibs, self.gbs) = self.body_source_junction_current_and_conductance(self.eval_vbs);
+            (self.ibd, self.gbd) =
+                self.body_drain_junction_current_and_conductance(self.eval_vds, self.eval_vbs);
+        }
         self.has_branch_history = true;
         self.linearization_cache_valid = true;
     }

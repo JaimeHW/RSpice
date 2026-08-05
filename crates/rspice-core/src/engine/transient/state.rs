@@ -1165,7 +1165,10 @@ impl Engine {
             }
         }
 
-        let body_charge_mask = mos.body_junction_charge_mask();
+        let body_charge_mask = constants.map_or_else(
+            || mos.body_junction_charge_mask(),
+            |constants| mos.body_junction_charge_mask_with_constants(constants),
+        );
         if body_charge_mask & 1 != 0 {
             let vbs_j = mos.body_source_charge_branch_voltage(vbs_eval);
             let (qbs_curr, cbs) = mos.body_source_junction_charge_and_capacitance_at(vbs_eval);

@@ -307,12 +307,19 @@ impl Mosfet {
         let effective_length = (self.l - 2.0 * self.ld).max(1.0e-12);
         let meyer_width = self.classic_meyer_effective_width();
         let meyer_length = self.classic_meyer_effective_length();
+        let source_body_isat = self.effective_body_junction_saturation_current(self.source_area);
+        let drain_body_isat = self.effective_body_junction_saturation_current(self.drain_area);
         ClassicMosTransientConstants {
             sqrt_phi: self.phi.sqrt(),
             level1_sqrt_phi: phi.sqrt(),
             level1_beta: self.kp * self.w / effective_length,
-            source_body_vcrit: self.source_body_vcrit(),
-            drain_body_vcrit: self.drain_body_vcrit(),
+            source_body_isat,
+            drain_body_isat,
+            body_junction_nvt: self.body_junction_thermal_voltage(),
+            uses_xyce_classic_reverse_body_junction: self.uses_xyce_classic_reverse_body_junction(),
+            body_junction_charge_mask: self.body_junction_charge_mask(),
+            source_body_vcrit: self.body_junction_vcrit(source_body_isat),
+            drain_body_vcrit: self.body_junction_vcrit(drain_body_isat),
             oxide_capacitance_total: self.cox * meyer_width * meyer_length,
             overlap_capacitances: (
                 self.cgso * meyer_width,
