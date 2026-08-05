@@ -3900,44 +3900,59 @@ impl Engine {
                         if circuit.has_nonlinear_devices() && !nonlinear_state_matches_new_solution
                         {
                             if let Some(classic_mos_cache) = classic_mos_stamp_cache.as_ref()
-                                && update_converged_for_acceptance
+                                && (update_converged_for_acceptance
+                                    || circuit.mosfets.len()
+                                        >= residual::CLASSIC_MOS_CACHED_CONSTANTS_THRESHOLD)
                             {
-                                let postsolve_companion_coeff = if xyce_one_step {
-                                    CompanionCoefficients::backward_euler()
-                                } else {
-                                    coeff
-                                };
-                                let evaluation = self.update_classic_mos_with_companion_terms(
-                                    &mut circuit,
-                                    &new_solution,
-                                    classic_mos_cache.device_constants(),
-                                    &postsolve_companion_coeff,
-                                    dt,
-                                    &mosfet_history,
-                                    suppress_gate_charge,
-                                    &mut mosfet_companion_terms_scratch,
-                                    &mut mosfet_companion_charges_scratch,
-                                    &mut mosfet_caps_scratch,
-                                    capture_classic_mos_candidate_static_terms
-                                        .then_some(&mut mosfet_static_terms_scratch),
-                                    classic_mos_truncation_context.as_ref(),
-                                    enforce_device_convergence
-                                        .then(|| self.device_convergence_criteria()),
-                                )?;
-                                cached_mosfet_truncation_limit = evaluation.truncation_limit;
-                                fused_classic_mos_device_converged =
-                                    Some(evaluation.all_devices_converged);
-                                // The charge kernel uses canonical raw branch arithmetic
-                                // and the accepted Meyer limiter state. Its companion/LTE
-                                // data remains exact even when static channel limiting
-                                // forbids reuse of the cached conduction Jacobian.
-                                mosfet_companion_terms_valid = mosfet_companion_terms_scratch.len()
-                                    == circuit.mosfets.devices.len()
-                                    && mosfet_companion_charges_scratch.len()
+                                if update_converged_for_acceptance {
+                                    let postsolve_companion_coeff = if xyce_one_step {
+                                        CompanionCoefficients::backward_euler()
+                                    } else {
+                                        coeff
+                                    };
+                                    let evaluation = self.update_classic_mos_with_companion_terms(
+                                        &mut circuit,
+                                        &new_solution,
+                                        classic_mos_cache.device_constants(),
+                                        &postsolve_companion_coeff,
+                                        dt,
+                                        &mosfet_history,
+                                        suppress_gate_charge,
+                                        &mut mosfet_companion_terms_scratch,
+                                        &mut mosfet_companion_charges_scratch,
+                                        &mut mosfet_caps_scratch,
+                                        capture_classic_mos_candidate_static_terms
+                                            .then_some(&mut mosfet_static_terms_scratch),
+                                        classic_mos_truncation_context.as_ref(),
+                                        enforce_device_convergence
+                                            .then(|| self.device_convergence_criteria()),
+                                    )?;
+                                    cached_mosfet_truncation_limit = evaluation.truncation_limit;
+                                    fused_classic_mos_device_converged =
+                                        Some(evaluation.all_devices_converged);
+                                    // The charge kernel uses canonical raw branch arithmetic
+                                    // and the accepted Meyer limiter state. Its companion/LTE
+                                    // data remains exact even when static channel limiting
+                                    // forbids reuse of the cached conduction Jacobian.
+                                    mosfet_companion_terms_valid = mosfet_companion_terms_scratch
+                                        .len()
                                         == circuit.mosfets.devices.len()
-                                    && mosfet_caps_scratch.len() == circuit.mosfets.devices.len();
-                                cached_mosfet_truncation_limit_valid = mosfet_companion_terms_valid
-                                    && classic_mos_truncation_context.is_some();
+                                        && mosfet_companion_charges_scratch.len()
+                                            == circuit.mosfets.devices.len()
+                                        && mosfet_caps_scratch.len()
+                                            == circuit.mosfets.devices.len();
+                                    cached_mosfet_truncation_limit_valid =
+                                        mosfet_companion_terms_valid
+                                            && classic_mos_truncation_context.is_some();
+                                } else {
+                                    self.update_classic_mos_nonlinear_devices(
+                                        &mut circuit,
+                                        &new_solution,
+                                        classic_mos_cache.device_constants(),
+                                    )?;
+                                    mosfet_companion_terms_valid = false;
+                                    cached_mosfet_truncation_limit_valid = false;
+                                }
                             } else {
                                 self.update_transient_nonlinear_devices(
                                     &mut circuit,

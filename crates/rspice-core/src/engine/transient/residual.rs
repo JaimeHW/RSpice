@@ -11,6 +11,9 @@ use super::*;
 const PARALLEL_CLASSIC_MOS_THRESHOLD: usize = 2_048;
 #[cfg(feature = "parallel")]
 const CLASSIC_MOS_INSTANCES_PER_WORKER: usize = 512;
+/// Minimum population that amortizes the compact constant-stream walk over
+/// the canonical collection updater on supported desktop targets.
+pub(super) const CLASSIC_MOS_CACHED_CONSTANTS_THRESHOLD: usize = 96;
 // The direct proof omits the canonical sparse norm's 256-epsilon gross-term
 // cancellation allowance. Reserving three quarters of that budget for sparse
 // coefficient aggregation keeps its 2x acceptance margin conservative.
@@ -587,6 +590,60 @@ impl Engine {
             );
             *term = evaluated_terms;
             *static_terms = device.classic_cached_static_terms();
+            all_physical &= device.cached_linearization_is_physical();
+        }
+        circuit
+            .mosfets
+            .record_last_update_all_is_physical(all_physical);
+        Ok(())
+    }
+
+    /// Refresh a classic-MOS-only Newton iterate using the immutable device
+    /// constants captured by the transient topology cache. This is the same
+    /// nonlinear update as the canonical MOS collection walk, without
+    /// recomputing bias-invariant model arithmetic for every rejected iterate.
+    pub(super) fn update_classic_mos_nonlinear_devices(
+        &self,
+        circuit: &mut crate::circuit::CircuitData,
+        solution: &[Value],
+        constants: &[crate::device::mosfet::ClassicMosTransientConstants],
+    ) -> Result<(), SimulationError> {
+        debug_assert!(circuit.has_cacheable_classic_mos_transient_base());
+        let instance_count = circuit.mosfets.len();
+        debug_assert_eq!(constants.len(), instance_count);
+
+        #[cfg(feature = "parallel")]
+        {
+            use rayon::prelude::*;
+
+            if let Some(worker_count) = self.classic_mos_parallel_worker_count(instance_count) {
+                let chunk_size = instance_count.div_ceil(worker_count).max(1);
+                let all_physical = self.install_classic_mos_parallel(|| {
+                    circuit
+                        .mosfets
+                        .devices
+                        .par_chunks_mut(chunk_size)
+                        .zip(constants.par_chunks(chunk_size))
+                        .map(|(devices, constants)| {
+                            let mut chunk_physical = true;
+                            for (device, constants) in devices.iter_mut().zip(constants) {
+                                device.update_with_classic_transient_constants(solution, constants);
+                                chunk_physical &= device.cached_linearization_is_physical();
+                            }
+                            chunk_physical
+                        })
+                        .reduce(|| true, |left, right| left && right)
+                })?;
+                circuit
+                    .mosfets
+                    .record_last_update_all_is_physical(all_physical);
+                return Ok(());
+            }
+        }
+
+        let mut all_physical = true;
+        for (device, constants) in circuit.mosfets.devices.iter_mut().zip(constants) {
+            device.update_with_classic_transient_constants(solution, constants);
             all_physical &= device.cached_linearization_is_physical();
         }
         circuit
