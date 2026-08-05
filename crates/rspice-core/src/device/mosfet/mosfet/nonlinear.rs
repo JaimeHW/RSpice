@@ -166,32 +166,12 @@ impl NonlinearDevice for Mosfet {
     }
 
     fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
-        if !self.vgs.is_finite()
-            || !self.vgs_prev.is_finite()
-            || !self.vds.is_finite()
-            || !self.vds_prev.is_finite()
-            || !self.vbs.is_finite()
-            || !self.vbs_prev.is_finite()
-            || !self.eval_vgs.is_finite()
-            || !self.eval_vgs_prev.is_finite()
-            || !self.eval_vds.is_finite()
-            || !self.eval_vds_prev.is_finite()
-            || !self.eval_vbs.is_finite()
-            || !self.eval_vbs_prev.is_finite()
-            || !self.id.is_finite()
-            || !self.id_prev.is_finite()
-            || !self.gm_prev.is_finite()
-            || !self.gds_prev.is_finite()
-            || !self.gmb_prev.is_finite()
-            || !self.ibs.is_finite()
-            || !self.gbs.is_finite()
-            || !self.ibd.is_finite()
-            || !self.gbd.is_finite()
-            || !self.ibs_prev.is_finite()
-            || !self.gbs_prev.is_finite()
-            || !self.ibd_prev.is_finite()
-            || !self.gbd_prev.is_finite()
-        {
+        // Every voltage, channel-current, and previous-junction field below
+        // participates in a strict `< tolerance` predicate. IEEE NaN/Inf
+        // therefore fails closed without a separate scan. The current body
+        // conductances are the only convergence-state fields not consumed by
+        // those expressions, so retain their explicit validity guard.
+        if !self.gbs.is_finite() || !self.gbd.is_finite() {
             return false;
         }
 
@@ -216,7 +196,11 @@ impl NonlinearDevice for Mosfet {
             + self.gds_prev * (self.eval_vds - self.eval_vds_prev)
             + self.gmb_prev * (self.eval_vbs - self.eval_vbs_prev);
         let drain_current_tol = reltol * self.id.abs().max(drain_current_hat.abs()) + current_tol;
-        if (drain_current_hat - self.id).abs() >= drain_current_tol {
+        if (drain_current_hat - self.id)
+            .abs()
+            .partial_cmp(&drain_current_tol)
+            != Some(std::cmp::Ordering::Less)
+        {
             return false;
         }
 
@@ -361,6 +345,54 @@ mod tests {
                     cached.nonlinear_state_snapshot(),
                     full.nonlinear_state_snapshot(),
                     "returning to the configured GMIN must not reuse an intermediate rescue cache"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn classic_mos_convergence_fails_closed_for_every_nonfinite_input() {
+        type Corrupt = fn(&mut Mosfet, Value);
+        let corruptions: [Corrupt; 25] = [
+            |mos, value| mos.vgs = value,
+            |mos, value| mos.vgs_prev = value,
+            |mos, value| mos.vds = value,
+            |mos, value| mos.vds_prev = value,
+            |mos, value| mos.vbs = value,
+            |mos, value| mos.vbs_prev = value,
+            |mos, value| mos.eval_vgs = value,
+            |mos, value| mos.eval_vgs_prev = value,
+            |mos, value| mos.eval_vds = value,
+            |mos, value| mos.eval_vds_prev = value,
+            |mos, value| mos.eval_vbs = value,
+            |mos, value| mos.eval_vbs_prev = value,
+            |mos, value| mos.id = value,
+            |mos, value| mos.id_prev = value,
+            |mos, value| mos.gm_prev = value,
+            |mos, value| mos.gds_prev = value,
+            |mos, value| mos.gmb_prev = value,
+            |mos, value| mos.ibs = value,
+            |mos, value| mos.gbs = value,
+            |mos, value| mos.ibd = value,
+            |mos, value| mos.gbd = value,
+            |mos, value| mos.ibs_prev = value,
+            |mos, value| mos.gbs_prev = value,
+            |mos, value| mos.ibd_prev = value,
+            |mos, value| mos.gbd_prev = value,
+        ];
+        let candidate = [1.2, 1.8, 0.2, -0.1];
+        let mut converged = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4);
+        converged.update(&candidate);
+        converged.update(&candidate);
+        assert!(converged.is_converged(NonlinearConvergenceCriteria::default()));
+
+        for (index, corrupt) in corruptions.into_iter().enumerate() {
+            for value in [Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
+                let mut mos = converged.clone();
+                corrupt(&mut mos, value);
+                assert!(
+                    !mos.is_converged(NonlinearConvergenceCriteria::default()),
+                    "non-finite convergence field {index} must fail closed for {value:?}"
                 );
             }
         }
