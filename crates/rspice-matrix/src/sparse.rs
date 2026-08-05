@@ -118,6 +118,14 @@ pub struct CscIndex(
     u64,
 );
 
+/// Opaque identity for one frozen CSC sparsity pattern.
+///
+/// Matrices created by [`StaticMatrix::clone_structure`] intentionally share
+/// this token. Unrelated matrices never do, even when their dimensions and
+/// numeric offsets happen to match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CscPatternToken(u64);
+
 impl CscIndex {
     /// Numeric offset in the CSC value array.
     ///
@@ -1154,6 +1162,23 @@ impl StaticMatrix {
     #[inline]
     pub fn get_index(&self, row: usize, col: usize) -> Option<CscIndex> {
         find_csc_offset(&self.csc, row, col).map(|offset| CscIndex(offset, self.pattern_id))
+    }
+
+    /// Return the opaque identity of this matrix's frozen sparsity pattern.
+    #[inline]
+    pub const fn pattern_token(&self) -> CscPatternToken {
+        CscPatternToken(self.pattern_id)
+    }
+
+    /// Borrow numeric storage after validating a prelinked pattern once.
+    ///
+    /// This supports deterministic batched stamping: callers that resolved all
+    /// [`CscIndex`] values from `token` can avoid repeating the same pattern
+    /// identity check for every scalar addition. A token from an unrelated
+    /// matrix fails closed.
+    #[inline]
+    pub fn values_mut_for_pattern(&mut self, token: CscPatternToken) -> Option<&mut [Value]> {
+        (token.0 == self.pattern_id).then_some(self.values.as_mut_slice())
     }
 
     /// Direct write to values array using pre-computed index
@@ -4614,16 +4639,19 @@ mod tests {
     #[test]
     fn direct_stamp_tokens_are_bound_to_their_originating_pattern() {
         let first = StaticMatrix::from_triplets(2, 2, &[(0, 0, 0.0), (1, 1, 0.0)]).unwrap();
+        let pattern = first.pattern_token();
         let index = first.get_index(0, 0).unwrap();
         let second_index = first.get_index(1, 1).unwrap();
 
         let mut unrelated = StaticMatrix::from_triplets(2, 2, &[(0, 0, 0.0), (1, 1, 0.0)]).unwrap();
+        assert!(unrelated.values_mut_for_pattern(pattern).is_none());
         unrelated.stamp_direct(index, 1.0);
         let message = unrelated.solve(&[1.0, 1.0]).unwrap_err().to_string();
         assert!(message.contains("StaticMatrix::stamp_direct"));
         assert!(message.contains("pattern"));
 
         let mut clone = first.clone_structure();
+        assert!(clone.values_mut_for_pattern(pattern).is_some());
         clone.stamp_direct(index, 2.0);
         clone.stamp_direct(clone.get_index(1, 1).unwrap(), 4.0);
         assert_relative_solution(&clone.solve(&[2.0, 4.0]).unwrap(), &[1.0, 1.0]);

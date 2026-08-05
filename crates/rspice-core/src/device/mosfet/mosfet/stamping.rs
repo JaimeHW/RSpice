@@ -156,6 +156,82 @@ impl Mosfet {
         Self::stamp_classic_diode_plan(matrix, rhs, &plan.body_drain, terms.gbd, terms.ieq_bd);
     }
 
+    #[inline]
+    fn stamp_classic_diode_values(
+        values: &mut [Value],
+        rhs: &mut [Value],
+        plan: &ClassicMosDiodeStampPlan,
+        conductance: Value,
+        equivalent_current: Value,
+    ) {
+        if conductance == 0.0 && equivalent_current == 0.0 {
+            return;
+        }
+        if let Some(index) = plan.aa {
+            values[index.offset()] += conductance;
+        }
+        if let Some(index) = plan.ac {
+            values[index.offset()] += -conductance;
+        }
+        if plan.anode > 0 {
+            rhs[plan.anode - 1] -= equivalent_current;
+        }
+        if let Some(index) = plan.ca {
+            values[index.offset()] += -conductance;
+        }
+        if let Some(index) = plan.cc {
+            values[index.offset()] += conductance;
+        }
+        if plan.cathode > 0 {
+            rhs[plan.cathode - 1] += equivalent_current;
+        }
+    }
+
+    /// Stamp a compact cached linearization into a once-validated CSC value
+    /// slice. Arithmetic and per-device contribution order match
+    /// [`Self::stamp_classic_cached_static_terms`] exactly.
+    #[inline]
+    pub(crate) fn stamp_classic_cached_static_values(
+        values: &mut [Value],
+        rhs: &mut [Value],
+        plan: &ClassicMosStaticStampPlan,
+        terms: &ClassicMosCachedStaticTerms,
+    ) {
+        let source_diagonal = terms.gm + terms.gds + terms.gmb;
+        if let Some(index) = plan.indices.dd {
+            values[index.offset()] += terms.gds;
+        }
+        if let Some(index) = plan.indices.dg {
+            values[index.offset()] += terms.gm;
+        }
+        if let Some(index) = plan.indices.ds {
+            values[index.offset()] += -terms.gm - terms.gds - terms.gmb;
+        }
+        if let Some(index) = plan.indices.db {
+            values[index.offset()] += terms.gmb;
+        }
+        if let Some(index) = plan.indices.sd {
+            values[index.offset()] += -terms.gds;
+        }
+        if let Some(index) = plan.indices.sg {
+            values[index.offset()] += -terms.gm;
+        }
+        if let Some(index) = plan.indices.ss {
+            values[index.offset()] += source_diagonal;
+        }
+        if let Some(index) = plan.indices.sb {
+            values[index.offset()] += -terms.gmb;
+        }
+        if plan.node_drain > 0 {
+            rhs[plan.node_drain - 1] -= terms.id_eq;
+        }
+        if plan.node_source > 0 {
+            rhs[plan.node_source - 1] += terms.id_eq;
+        }
+        Self::stamp_classic_diode_values(values, rhs, &plan.body_source, terms.gbs, terms.ieq_bs);
+        Self::stamp_classic_diode_values(values, rhs, &plan.body_drain, terms.gbd, terms.ieq_bd);
+    }
+
     /// Link this device to a StaticMatrix for O(1) stamping
     pub fn link(&mut self, matrix: &StaticMatrix) {
         let d = self.node_drain;
@@ -292,6 +368,79 @@ impl Mosfet {
             self.id_eq,
             true,
         );
+    }
+
+    /// Stamp a cached linearization into a once-validated CSC value slice
+    /// when the body terminal is ground. This mirrors
+    /// [`Self::stamp_cached_direct`] without repeating the matrix-pattern
+    /// check for every scalar contribution.
+    #[inline]
+    pub(crate) fn stamp_grounded_bulk_cached_values(
+        &self,
+        values: &mut [Value],
+        rhs: &mut [Value],
+    ) {
+        debug_assert!(self.has_branch_history);
+        debug_assert_eq!(self.node_bulk, 0);
+
+        if let Some(index) = self.indices.dd {
+            values[index.offset()] += self.gds;
+        }
+        if let Some(index) = self.indices.dg {
+            values[index.offset()] += self.gm;
+        }
+        if let Some(index) = self.indices.ds {
+            values[index.offset()] += -self.gm - self.gds - self.gmb;
+        }
+        if let Some(index) = self.indices.db {
+            values[index.offset()] += self.gmb;
+        }
+        if let Some(index) = self.indices.sd {
+            values[index.offset()] += -self.gds;
+        }
+        if let Some(index) = self.indices.sg {
+            values[index.offset()] += -self.gm;
+        }
+        if let Some(index) = self.indices.ss {
+            values[index.offset()] += self.gm + self.gds + self.gmb;
+        }
+        if let Some(index) = self.indices.sb {
+            values[index.offset()] += -self.gmb;
+        }
+        if self.node_drain > 0 {
+            rhs[self.node_drain - 1] -= self.id_eq;
+        }
+        if self.node_source > 0 {
+            rhs[self.node_source - 1] += self.id_eq;
+        }
+
+        let (bs_anode, bs_cathode, gbs, ieq_bs) =
+            self.body_source_junction_linearization_cached(self.eval_vbs, true);
+        if gbs != 0.0 || ieq_bs != 0.0 {
+            if let Some(index) = self.indices.ss {
+                values[index.offset()] += gbs;
+            }
+            if bs_anode > 0 {
+                rhs[bs_anode - 1] -= ieq_bs;
+            }
+            if bs_cathode > 0 {
+                rhs[bs_cathode - 1] += ieq_bs;
+            }
+        }
+
+        let (bd_anode, bd_cathode, gbd, ieq_bd) =
+            self.body_drain_junction_linearization_cached(self.eval_vds, self.eval_vbs, true);
+        if gbd != 0.0 || ieq_bd != 0.0 {
+            if let Some(index) = self.indices.dd {
+                values[index.offset()] += gbd;
+            }
+            if bd_anode > 0 {
+                rhs[bd_anode - 1] -= ieq_bd;
+            }
+            if bd_cathode > 0 {
+                rhs[bd_cathode - 1] += ieq_bd;
+            }
+        }
     }
 
     /// Evaluate the true, unlimited static device at `solution` and add its
@@ -496,6 +645,63 @@ mod tests {
 
         assert_eq!(cached_rhs, verified_rhs);
         assert_eq!(cached_matrix.values_mut(), verified_matrix.values_mut());
+    }
+
+    #[test]
+    fn batched_cached_static_stamp_matches_validated_stamp_exactly() {
+        let candidate = [1.2, 1.8, 0.2, -0.1];
+        let mut mos = Mosfet::new_nmos("mn".to_string(), 1, 2, 3, 4);
+        let linked_matrix = full_matrix(4);
+        mos.link(&linked_matrix);
+        let constants = mos.classic_transient_constants();
+        mos.update_with_classic_transient_constants(&candidate, &constants);
+        let plan = mos
+            .classic_static_stamp_plan(&linked_matrix)
+            .expect("full matrix supports compact MOS stamp");
+        let terms = mos.classic_cached_static_terms();
+
+        let mut validated_matrix = linked_matrix.clone_structure();
+        let mut validated_rhs = vec![0.0; 4];
+        Mosfet::stamp_classic_cached_static_terms(
+            &mut validated_matrix,
+            &mut validated_rhs,
+            &plan,
+            &terms,
+        );
+
+        let mut batched_matrix = linked_matrix.clone_structure();
+        let mut batched_rhs = vec![0.0; 4];
+        let values = batched_matrix
+            .values_mut_for_pattern(linked_matrix.pattern_token())
+            .expect("clone retains the linked pattern");
+        Mosfet::stamp_classic_cached_static_values(values, &mut batched_rhs, &plan, &terms);
+
+        assert_eq!(batched_rhs, validated_rhs);
+        assert_eq!(batched_matrix.values_mut(), validated_matrix.values_mut());
+    }
+
+    #[test]
+    fn grounded_bulk_batched_cached_stamp_matches_validated_stamp_exactly() {
+        let candidate = [1.2, 1.8, 0.2];
+        let mut mos = Mosfet::new_nmos("mn".to_string(), 1, 2, 3, 0);
+        let linked_matrix = full_matrix(3);
+        mos.link(&linked_matrix);
+        let constants = mos.classic_transient_constants();
+        mos.update_with_classic_transient_constants(&candidate, &constants);
+
+        let mut validated_matrix = linked_matrix.clone_structure();
+        let mut validated_rhs = vec![0.0; 3];
+        mos.stamp_cached_direct(&mut validated_matrix, &mut validated_rhs);
+
+        let mut batched_matrix = linked_matrix.clone_structure();
+        let mut batched_rhs = vec![0.0; 3];
+        let values = batched_matrix
+            .values_mut_for_pattern(linked_matrix.pattern_token())
+            .expect("clone retains the linked pattern");
+        mos.stamp_grounded_bulk_cached_values(values, &mut batched_rhs);
+
+        assert_eq!(batched_rhs, validated_rhs);
+        assert_eq!(batched_matrix.values_mut(), validated_matrix.values_mut());
     }
 
     #[test]

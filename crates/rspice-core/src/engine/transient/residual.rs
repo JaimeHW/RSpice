@@ -133,6 +133,8 @@ pub(super) struct ClassicMosTransientStampCache {
     attempt_rhs: Vec<Value>,
     device_constants: Vec<crate::device::mosfet::ClassicMosTransientConstants>,
     static_stamp_plans: Vec<crate::device::mosfet::ClassicMosStaticStampPlan>,
+    stamp_pattern: Option<crate::solver::CscPatternToken>,
+    cached_devices_support_direct_values: bool,
     direct_residual_has_bounded_row_fan_in: bool,
 }
 
@@ -205,6 +207,58 @@ impl ClassicMosTransientStampCache {
 }
 
 impl Engine {
+    #[inline]
+    fn stamp_cached_mosfet_companions_for_pattern(
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        pattern: Option<crate::solver::CscPatternToken>,
+        slots: &[[TwoTerminalStampSlots; 5]],
+        terms: &[MosfetCompanionBranchTerms],
+    ) {
+        if let Some(values) = pattern.and_then(|pattern| matrix.values_mut_for_pattern(pattern)) {
+            Self::stamp_cached_mosfet_transient_companion_values(values, rhs, slots, terms);
+        } else {
+            Self::stamp_cached_mosfet_transient_companions(matrix, rhs, slots, terms);
+        }
+    }
+
+    #[inline]
+    fn stamp_classic_static_terms_for_pattern(
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        pattern: Option<crate::solver::CscPatternToken>,
+        plans: &[crate::device::mosfet::ClassicMosStaticStampPlan],
+        terms: &[crate::device::mosfet::ClassicMosCachedStaticTerms],
+    ) {
+        if let Some(values) = pattern.and_then(|pattern| matrix.values_mut_for_pattern(pattern)) {
+            for (plan, terms) in plans.iter().zip(terms) {
+                crate::device::Mosfet::stamp_classic_cached_static_values(values, rhs, plan, terms);
+            }
+        } else {
+            for (plan, terms) in plans.iter().zip(terms) {
+                crate::device::Mosfet::stamp_classic_cached_static_terms(matrix, rhs, plan, terms);
+            }
+        }
+    }
+
+    #[inline]
+    fn stamp_classic_cached_devices_for_pattern(
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        pattern: Option<crate::solver::CscPatternToken>,
+        devices: &[crate::device::Mosfet],
+    ) {
+        if let Some(values) = pattern.and_then(|pattern| matrix.values_mut_for_pattern(pattern)) {
+            for device in devices {
+                device.stamp_grounded_bulk_cached_values(values, rhs);
+            }
+            return;
+        }
+        for device in devices {
+            device.stamp_cached_direct(matrix, rhs);
+        }
+    }
+
     /// Assemble the candidate-dependent remainder for a topology proven to
     /// contain only ordinary R/C sources and diodes. Keep this out of the
     /// general mixed-device assembler so its instruction footprint does not
@@ -325,6 +379,12 @@ impl Engine {
         circuit.stamp_transient_linear_direct(matrix, rhs);
 
         let mut cache = ClassicMosTransientStampCache::default();
+        cache.stamp_pattern = Some(matrix.pattern_token());
+        cache.cached_devices_support_direct_values = circuit
+            .mosfets
+            .devices
+            .iter()
+            .all(|mosfet| mosfet.node_bulk == 0);
         cache.device_constants.extend(
             circuit
                 .mosfets
@@ -362,6 +422,7 @@ impl Engine {
             || !cache.direct_residual_has_bounded_row_fan_in;
         #[cfg(not(feature = "parallel"))]
         let use_compact_static_stamps = true;
+        cache.cached_devices_support_direct_values &= !use_compact_static_stamps;
         if use_compact_static_stamps {
             let plans = circuit
                 .mosfets
@@ -477,24 +538,25 @@ impl Engine {
             };
         let physical_cache_matches_probe =
             static_probe && circuit.mosfets.last_update_all_is_physical();
-        if let Some(terms) = companion_terms_cache {
+        let reusable_companion_terms = if let Some(terms) = companion_terms_cache {
             debug_assert!(physical_cache_matches_probe);
             debug_assert_eq!(terms.len(), circuit.mosfets.devices.len());
             if let Some(caps) = caps_cache_out.as_deref() {
                 debug_assert_eq!(caps.len(), terms.len());
             }
-            Self::stamp_cached_mosfet_transient_companions(
-                matrix,
-                rhs,
-                ctx.mosfet_companion_slots,
-                terms,
-            );
+            Some(terms)
         } else if let Some(terms) = fused_companion_terms {
             debug_assert!(!static_probe);
             debug_assert_eq!(terms.len(), circuit.mosfets.devices.len());
-            Self::stamp_cached_mosfet_transient_companions(
+            Some(terms)
+        } else {
+            None
+        };
+        if let Some(terms) = reusable_companion_terms {
+            Self::stamp_cached_mosfet_companions_for_pattern(
                 matrix,
                 rhs,
+                cache.stamp_pattern,
                 ctx.mosfet_companion_slots,
                 terms,
             );
@@ -516,19 +578,28 @@ impl Engine {
         let cached_static_terms = static_terms_cache.filter(|terms| {
             physical_cache_matches_probe && terms.len() == cache.static_stamp_plans.len()
         });
+        if let Some(static_terms) = fused_static_terms {
+            debug_assert_eq!(static_terms.len(), cache.static_stamp_plans.len());
+        }
         if static_probe && !physical_cache_matches_probe {
             circuit
                 .mosfets
                 .stamp_all_static_probe_direct(matrix, rhs, solution);
-        } else if let Some(static_terms) = cached_static_terms {
-            for (plan, terms) in cache.static_stamp_plans.iter().zip(static_terms) {
-                crate::device::Mosfet::stamp_classic_cached_static_terms(matrix, rhs, plan, terms);
-            }
-        } else if let Some(static_terms) = fused_static_terms {
-            debug_assert_eq!(static_terms.len(), cache.static_stamp_plans.len());
-            for (plan, terms) in cache.static_stamp_plans.iter().zip(static_terms) {
-                crate::device::Mosfet::stamp_classic_cached_static_terms(matrix, rhs, plan, terms);
-            }
+        } else if let Some(static_terms) = cached_static_terms.or(fused_static_terms) {
+            Self::stamp_classic_static_terms_for_pattern(
+                matrix,
+                rhs,
+                cache.stamp_pattern,
+                &cache.static_stamp_plans,
+                static_terms,
+            );
+        } else if cache.cached_devices_support_direct_values {
+            Self::stamp_classic_cached_devices_for_pattern(
+                matrix,
+                rhs,
+                cache.stamp_pattern,
+                &circuit.mosfets.devices,
+            );
         } else {
             circuit.mosfets.stamp_all_cached_direct(matrix, rhs);
         }

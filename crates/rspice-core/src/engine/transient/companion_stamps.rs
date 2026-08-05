@@ -46,6 +46,38 @@ impl TwoTerminalStampSlots {
 }
 
 impl Engine {
+    /// Batched-stamp twin of [`Engine::stamp_two_terminal_companion_direct`].
+    ///
+    /// `values` has already been matched to the frozen pattern that produced
+    /// `slots`, so the enclosing batch pays that identity check only once.
+    #[inline]
+    pub(super) fn stamp_two_terminal_companion_values(
+        values: &mut [Value],
+        rhs: &mut [Value],
+        slots: &TwoTerminalStampSlots,
+        geq: Value,
+        i_eq: Value,
+    ) {
+        if let Some(idx) = slots.pp {
+            values[idx.offset()] += geq;
+        }
+        if let Some(idx) = slots.pn {
+            values[idx.offset()] += -geq;
+        }
+        if let Some(idx) = slots.np {
+            values[idx.offset()] += -geq;
+        }
+        if let Some(idx) = slots.nn {
+            values[idx.offset()] += geq;
+        }
+        if slots.pos > 0 {
+            rhs[slots.pos - 1] += i_eq;
+        }
+        if slots.neg > 0 {
+            rhs[slots.neg - 1] -= i_eq;
+        }
+    }
+
     /// Index-resolved twin of [`Engine::stamp_two_terminal_companion`].
     #[inline]
     pub(super) fn stamp_two_terminal_companion_direct(
@@ -681,5 +713,41 @@ impl Engine {
         } else {
             previous
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn batched_companion_stamp_matches_validated_stamp_exactly() {
+        let linked_matrix = crate::solver::StaticMatrix::from_triplets(
+            2,
+            2,
+            &[(0, 0, 0.0), (0, 1, 0.0), (1, 0, 0.0), (1, 1, 0.0)],
+        )
+        .expect("full two-node matrix");
+        let slots = TwoTerminalStampSlots::link(&linked_matrix, 1, 2);
+
+        let mut validated_matrix = linked_matrix.clone_structure();
+        let mut validated_rhs = vec![0.0; 2];
+        Engine::stamp_two_terminal_companion_direct(
+            &mut validated_matrix,
+            &mut validated_rhs,
+            &slots,
+            1.25,
+            -0.75,
+        );
+
+        let mut batched_matrix = linked_matrix.clone_structure();
+        let mut batched_rhs = vec![0.0; 2];
+        let values = batched_matrix
+            .values_mut_for_pattern(linked_matrix.pattern_token())
+            .expect("clone retains the linked pattern");
+        Engine::stamp_two_terminal_companion_values(values, &mut batched_rhs, &slots, 1.25, -0.75);
+
+        assert_eq!(batched_rhs, validated_rhs);
+        assert_eq!(batched_matrix.values_mut(), validated_matrix.values_mut());
     }
 }

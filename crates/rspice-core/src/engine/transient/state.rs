@@ -1082,6 +1082,30 @@ impl Engine {
         }
     }
 
+    /// Apply cached MOS companion terms to a once-validated CSC value slice.
+    #[inline]
+    pub(super) fn stamp_cached_mosfet_transient_companion_values(
+        values: &mut [Value],
+        rhs: &mut [Value],
+        slots: &[[TwoTerminalStampSlots; 5]],
+        terms: &[MosfetCompanionBranchTerms],
+    ) {
+        debug_assert_eq!(slots.len(), terms.len());
+        for (device_slots, device_terms) in slots.iter().zip(terms) {
+            for (branch, &(geq, ieq)) in device_terms.iter().enumerate() {
+                if geq > 0.0 {
+                    Self::stamp_two_terminal_companion_values(
+                        values,
+                        rhs,
+                        &device_slots[branch],
+                        geq,
+                        ieq,
+                    );
+                }
+            }
+        }
+    }
+
     /// Charge-companion `(geq, ieq)` for one MOSFET's five reactive branches
     /// (gate-source, gate-drain, gate-bulk, body-source, body-drain) at the
     /// given iterate. Pure: no engine or device state is touched, which is
