@@ -20,11 +20,13 @@ impl CircuitData {
         rhs: &mut [Value],
     ) {
         for binding in &self.jiles_atherton_inductors {
+            let m_var_scaling = binding.device.xyce_core_m_var_scaling();
+            let r_var_scaling = binding.device.xyce_core_r_var_scaling();
             if let Some(slot) = binding.hidden_m_slot {
                 let index = self.get_hidden_state_matrix_index(slot);
                 matrix.add(index - 1, index - 1, 1.0);
                 if index <= rhs.len() {
-                    rhs[index - 1] += binding.device.magnetization() / XYCE_CORE_M_VAR_SCALING;
+                    rhs[index - 1] += binding.device.magnetization() / m_var_scaling;
                 }
             }
             if let Some(rate_slot) = binding.hidden_r_slot {
@@ -32,16 +34,18 @@ impl CircuitData {
                 matrix.add(rate_index - 1, rate_index - 1, 1.0);
                 if rate_index <= rhs.len() {
                     rhs[rate_index - 1] +=
-                        binding.device.xyce_core_level1_rate_debug() / XYCE_CORE_R_VAR_SCALING;
+                        binding.device.xyce_core_level1_rate_debug() / r_var_scaling;
                 }
             }
         }
         for group in &self.xyce_core_groups {
+            let m_var_scaling = group.device.xyce_core_m_var_scaling();
+            let r_var_scaling = group.device.xyce_core_r_var_scaling();
             if let Some(slot) = group.hidden_m_slot {
                 let index = self.get_hidden_state_matrix_index(slot);
                 matrix.add(index - 1, index - 1, 1.0);
                 if index <= rhs.len() {
-                    rhs[index - 1] += group.device.magnetization() / XYCE_CORE_M_VAR_SCALING;
+                    rhs[index - 1] += group.device.magnetization() / m_var_scaling;
                 }
             }
             if let Some(rate_slot) = group.hidden_r_slot {
@@ -49,7 +53,7 @@ impl CircuitData {
                 matrix.add(rate_index - 1, rate_index - 1, 1.0);
                 if rate_index <= rhs.len() {
                     rhs[rate_index - 1] +=
-                        group.device.xyce_core_level1_rate_debug() / XYCE_CORE_R_VAR_SCALING;
+                        group.device.xyce_core_level1_rate_debug() / r_var_scaling;
                 }
             }
         }
@@ -58,11 +62,13 @@ impl CircuitData {
     #[inline]
     fn stamp_xyce_core_hidden_state_identity(&self, matrix: &mut TripletMatrix, rhs: &mut [Value]) {
         for binding in &self.jiles_atherton_inductors {
+            let m_var_scaling = binding.device.xyce_core_m_var_scaling();
+            let r_var_scaling = binding.device.xyce_core_r_var_scaling();
             if let Some(slot) = binding.hidden_m_slot {
                 let index = self.get_hidden_state_matrix_index(slot);
                 matrix.push(index - 1, index - 1, 1.0);
                 if index <= rhs.len() {
-                    rhs[index - 1] += binding.device.magnetization() / XYCE_CORE_M_VAR_SCALING;
+                    rhs[index - 1] += binding.device.magnetization() / m_var_scaling;
                 }
             }
             if let Some(rate_slot) = binding.hidden_r_slot {
@@ -70,16 +76,18 @@ impl CircuitData {
                 matrix.push(rate_index - 1, rate_index - 1, 1.0);
                 if rate_index <= rhs.len() {
                     rhs[rate_index - 1] +=
-                        binding.device.xyce_core_level1_rate_debug() / XYCE_CORE_R_VAR_SCALING;
+                        binding.device.xyce_core_level1_rate_debug() / r_var_scaling;
                 }
             }
         }
         for group in &self.xyce_core_groups {
+            let m_var_scaling = group.device.xyce_core_m_var_scaling();
+            let r_var_scaling = group.device.xyce_core_r_var_scaling();
             if let Some(slot) = group.hidden_m_slot {
                 let index = self.get_hidden_state_matrix_index(slot);
                 matrix.push(index - 1, index - 1, 1.0);
                 if index <= rhs.len() {
-                    rhs[index - 1] += group.device.magnetization() / XYCE_CORE_M_VAR_SCALING;
+                    rhs[index - 1] += group.device.magnetization() / m_var_scaling;
                 }
             }
             if let Some(rate_slot) = group.hidden_r_slot {
@@ -87,7 +95,7 @@ impl CircuitData {
                 matrix.push(rate_index - 1, rate_index - 1, 1.0);
                 if rate_index <= rhs.len() {
                     rhs[rate_index - 1] +=
-                        group.device.xyce_core_level1_rate_debug() / XYCE_CORE_R_VAR_SCALING;
+                        group.device.xyce_core_level1_rate_debug() / r_var_scaling;
                 }
             }
         }

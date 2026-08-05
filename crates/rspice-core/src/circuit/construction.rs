@@ -65,6 +65,7 @@ impl CircuitData {
             jiles_atherton_inductors: Vec::new(),
             xyce_core_groups: Vec::new(),
             xyce_core_trial_invalid: false,
+            xyce_core_transient_residuals: Vec::new(),
             transient_max_step_hint: None,
             behavioral_sources: BehavioralSources::new(),
             // XSPICE instances

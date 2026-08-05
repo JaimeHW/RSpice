@@ -16,12 +16,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use thiserror::Error;
 
-/// Xyce MutIndNonLin hidden-state normalization factors.
-pub(crate) const XYCE_CORE_M_VAR_SCALING: Value = 1.0e3;
-pub(crate) const XYCE_CORE_M_EQ_SCALING: Value = 1.0e-3;
-pub(crate) const XYCE_CORE_R_VAR_SCALING: Value = 1.0e3;
-pub(crate) const XYCE_CORE_R_EQ_SCALING: Value = 1.0e-3;
-
 mod storage;
 pub use storage::{
     B3SoiDds, B3SoiFds, B3SoiPds, Bjts, Bsim3v3s, Bsim4v8s, Capacitors, CurrentSources, Diodes,
@@ -436,6 +430,13 @@ pub struct CircuitData {
     /// falling back to the ordinary linear companion would silently solve a
     /// different circuit equation.
     pub(crate) xyce_core_trial_invalid: bool,
+    /// Explicit branch residuals from the current Xyce Core transient stamp.
+    ///
+    /// The correction-form Newton solve uses `J * delta = -F`.  Reconstructing
+    /// `-F` as `b - A*x` can erase the small constitutive residual when the
+    /// companion/history terms are much larger than the Core equation, so the
+    /// stamp retains the exact residual for the branch rows it owns.
+    pub(crate) xyce_core_transient_residuals: Vec<(usize, Value)>,
     /// Circuit-level transient step-size hint for synthesized distributed
     /// structures that need finer temporal resolution than the user-level
     /// `.tran` print/max-step request to preserve propagation fidelity.

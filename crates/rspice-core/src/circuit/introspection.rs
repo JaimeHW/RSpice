@@ -413,7 +413,8 @@ impl CircuitData {
                 let mu_0 = 4.0 * std::f64::consts::PI * 1.0e-7;
                 1.0e4
                     * mu_0
-                    * (h_si * (4.0 * std::f64::consts::PI / 1.0e3) + binding.device.magnetization())
+                    * (h_si * (4.0 * std::f64::consts::PI / 1.0e3)
+                        + binding.device.xyce_core_reported_magnetization())
             };
             entries.push(DeviceOpEntry {
                 name: name.to_string(),
@@ -423,9 +424,9 @@ impl CircuitData {
                     (
                         "m",
                         if binding.device.is_xyce_core_level2() {
-                            binding.device.magnetization()
+                            binding.device.xyce_core_reported_magnetization()
                         } else {
-                            binding.device.magnetization() / 1.0e3
+                            binding.device.xyce_core_reported_magnetization() / 1.0e3
                         },
                     ),
                     (
@@ -454,7 +455,8 @@ impl CircuitData {
                 let mu_0 = 4.0 * std::f64::consts::PI * 1.0e-7;
                 1.0e4
                     * mu_0
-                    * (h_si * (4.0 * std::f64::consts::PI / 1.0e3) + binding.device.magnetization())
+                    * (h_si * (4.0 * std::f64::consts::PI / 1.0e3)
+                        + binding.device.xyce_core_reported_magnetization())
             };
             entries.push(DeviceOpEntry {
                 name: name.to_string(),
@@ -464,9 +466,9 @@ impl CircuitData {
                     (
                         "m",
                         if binding.device.is_xyce_core_level2() {
-                            binding.device.magnetization()
+                            binding.device.xyce_core_reported_magnetization()
                         } else {
-                            binding.device.magnetization() / 1.0e3
+                            binding.device.xyce_core_reported_magnetization() / 1.0e3
                         },
                     ),
                     (

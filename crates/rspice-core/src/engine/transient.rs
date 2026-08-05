@@ -32,7 +32,16 @@ fn restore_transient_merit_rollback(
     vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
     rollback: &TransientMeritRollback,
 ) {
-    circuit.restore_nonlinear_state(rollback.0.clone());
+    if circuit.has_xyce_core_inductors() {
+        // Xyce's MutIndNonLin2 has no rejectStep callback: its pending
+        // MagVarUpdate remains part of the trial state while a nonlinear
+        // search backs up. Preserve that carry across RSpice's merit rollback
+        // as well, so the globalization path has the same device lifecycle as
+        // the canonical Xyce solve.
+        circuit.restore_nonlinear_state_preserving_xyce_core_level2_carry(rollback.0.clone());
+    } else {
+        circuit.restore_nonlinear_state(rollback.0.clone());
+    }
     vbic_snapshot_cache.clone_from_slice(&rollback.1);
 }
 
@@ -1739,13 +1748,31 @@ impl Engine {
                 requires_conservative_nonlinear_limiting,
             );
         let enforce_device_convergence = self.transient_enforce_device_convergence();
+        let xyce_nox_requested = self.config.spice_dialect == SpiceDialect::Xyce
+            && self.config.transient_nonlinear_nox.unwrap_or(false);
+        let has_shared_xyce_core_level1_ill_conditioned =
+            circuit.has_xyce_core_shared_level1_ill_conditioned();
+        let has_shared_xyce_core_level2 = circuit.has_xyce_core_shared_level2();
+        let uses_xyce_damped_solver = self.config.spice_dialect == SpiceDialect::Xyce
+            && !xyce_nox_requested
+            // MutIndNonLin2's shared LEVEL=2 residual is a coupled charge
+            // system; its correction-form Jacobian must be solved together
+            // with the winding branches rather than accepted by the scalar
+            // DampedNewton status test.
+            && !has_shared_xyce_core_level2
+            // A very small shared LEVEL=1 vacuum coefficient makes the
+            // electrical Schur complement effectively rank deficient. Keep
+            // that topology on correction-form Newton while retaining
+            // DampedNewton for well-conditioned shared cores.
+            && !has_shared_xyce_core_level1_ill_conditioned;
         // MutIndNonLin's hidden M/R equations are part of the physical DAE,
         // not an optional convergence hint.  A failed constitutive trial must
         // reject the Newton candidate even when Xyce's general device
         // convergence status test is disabled.
         let core_trial_converged = |circuit: &crate::circuit::CircuitData| {
             !circuit.has_xyce_core_inductors()
-                || (!circuit.xyce_core_trial_invalid() && circuit.xyce_core_trial_converged())
+                || (!circuit.xyce_core_trial_invalid()
+                    && (!enforce_device_convergence || circuit.xyce_core_trial_converged()))
         };
         let enforce_force_candidate_safety =
             requires_conservative_nonlinear_limiting || circuit.has_xspice_devices();
@@ -1755,14 +1782,10 @@ impl Engine {
         let uses_inductor_correction = !circuit.inductors.is_empty()
             || !circuit.coupled_inductor_pairs.is_empty()
             || !circuit.multi_winding_transformers.is_empty();
-        // Xyce Core branches are assembled as a complete nonlinear DAE row.
-        // The generic correction-form solve reconstructs `b - A*x` after the
-        // ordinary-inductor cancellation stamp, which loses significant
-        // digits when the constitutive mid-factor crosses zero.  A Core-only
-        // network has no ordinary inductive rows requiring that stabilization,
-        // so solve its absolute Jacobian directly as Xyce does.
         let uses_inductor_correction =
-            uses_inductor_correction && !circuit.has_only_xyce_core_inductors();
+            uses_inductor_correction
+                && (!circuit.has_only_xyce_core_inductors()
+                    || has_shared_xyce_core_level2);
         // ngspice's flat transient Newton: when junction devices replace
         // their own iterate voltages (legacy GP pnjlim in update), the full
         // node step is the algorithm; per-iteration node-delta clamps walk
@@ -2468,9 +2491,22 @@ impl Engine {
         let mut total_middle_nanos: u128 = 0;
         let mut total_merit_trials: usize = 0;
         let mut total_failed_attempts: usize = 0;
+        // Xyce's default DampedNewton path takes full Newton steps.  Merit
+        // globalization is retained as a deterministic retry only after a
+        // full-step nonlinear attempt fails; it must not perturb a step that
+        // already follows the source-faithful orbit.
+        let mut xyce_damped_first_solver_call = true;
+        let mut xyce_damped_status = uses_xyce_damped_solver.then(|| {
+            damped_status::XyceTransientDampedStatus::new(
+                self.transient_newton_iteration_budget(false),
+            )
+        });
         // Meyer capacitance halves captured by exact-residual assembly or the
         // device-truncation walk on the candidate solution; valid only for the
         // accept path of the same loop pass (reset every attempt).
+        //
+        // The source-faithful DampedNewton state above is independent of the
+        // reusable MOS/LTE scratch below.
         let mut mosfet_caps_scratch: Vec<(Value, Value, Value)> = Vec::new();
         let mut mosfet_caps_valid;
         let mut mosfet_companion_terms_scratch: Vec<MosfetCompanionBranchTerms> = Vec::new();
@@ -2722,8 +2758,16 @@ impl Engine {
             };
             let mut dt = dt.min(tstop - t); // Don't overshoot tstop
             let mut locked_replay_hidden_attempt = false;
+            let locked_contraction_replay = locked_grid.as_ref().is_some_and(|grid| {
+                Self::dialect_requires_locked_grid_order_restart(
+                    self.config.spice_dialect,
+                    grid,
+                    locked_cursor,
+                    false,
+                )
+            });
             if locked_grid.is_some()
-                && retry_count > 0
+                && (retry_count > 0 || locked_contraction_replay)
                 && let (Some(grid), Some(steps)) =
                     (locked_grid.as_ref(), locked_step_sizes.as_ref())
                 && let (Some(&target), Some(&scheduled_dt)) =
@@ -2950,8 +2994,14 @@ impl Engine {
             macro_rules! restore_rejected_transient_nonlinear_state {
                 () => {{
                     lte_estimator.rollback_xyce_attempt();
-                    if let Some(snapshot) = rejected_attempt_nonlinear_state.take() {
-                        circuit.restore_nonlinear_state(snapshot);
+                    if let Some(snapshot) = rejected_attempt_nonlinear_state.as_ref().cloned() {
+                        if circuit.has_xyce_core_inductors() {
+                            circuit.restore_nonlinear_state_preserving_xyce_core_level2_carry(
+                                snapshot,
+                            );
+                        } else {
+                            circuit.restore_nonlinear_state(snapshot);
+                        }
                     }
                 }};
             }
@@ -3060,8 +3110,24 @@ impl Engine {
             // from the initial timepoint iterate and the previously accepted
             // solution.  Keep those weights immutable across every Newton
             // correction and globalization trial for this attempted step.
-            let transient_newton_update_weights =
-                self.transient_newton_update_weights(&new_solution, &solution);
+            let damped_first_solver_call = xyce_damped_first_solver_call;
+            if uses_xyce_damped_solver {
+                // Xyce increments iNumCalls_ after every nonlinear solve,
+                // including a failed/rejected attempt.  Consume the first-call
+                // special case exactly once over the whole transient run.
+                xyce_damped_first_solver_call = false;
+            }
+            let transient_newton_update_weights = if uses_xyce_damped_solver {
+                damped_status::xyce_damped_transient_weights(
+                    &new_solution,
+                    &solution,
+                    self.transient_nonlinear_reltol(),
+                    self.transient_nonlinear_abstol(),
+                    damped_first_solver_call,
+                )
+            } else {
+                self.transient_newton_update_weights(&new_solution, &solution)
+            };
             if b3soi_first_transient_handoff && result.time.len() == 1 {
                 Self::reseed_b3soi_first_transient_history(
                     &circuit,
@@ -3087,7 +3153,8 @@ impl Engine {
             // Classic SPICE transient analysis uses the transient-specific ITL4
             // budget, not the DC operating-point iteration limit.
             let tran_max_iterations = self.transient_newton_iteration_budget(startup_recovery);
-            let uses_xyce_nox_status = self.config.spice_dialect == SpiceDialect::Xyce;
+            let uses_xyce_nox_status = self.config.spice_dialect == SpiceDialect::Xyce
+                && self.config.transient_nonlinear_nox.unwrap_or(false);
             let mut xyce_nox_status = uses_xyce_nox_status
                 .then(|| nox_status::XyceTransientNoxStatus::new(tran_max_iterations));
             let mut xyce_weighted_update_norm = None;
@@ -3188,6 +3255,17 @@ impl Engine {
                 }
                 nonlinear_state_matches_new_solution = true;
 
+                if uses_xyce_damped_solver && _iter == 0 {
+                    let (_, predictor_residual_l2_norm) =
+                        matrix.raw_residual_norms(&new_solution, &rhs)?;
+                    if let Some(status) = xyce_damped_status.as_mut() {
+                        status.begin_solve_with_initial_residual(
+                            tran_max_iterations,
+                            predictor_residual_l2_norm,
+                        );
+                    }
+                }
+
                 let newton_stamp_elapsed = newton_stamp_start.elapsed();
                 total_stamp_nanos += newton_stamp_elapsed.as_nanos();
                 static TRANSIENT_NEWTON_STAMP_LOG_COUNT: std::sync::atomic::AtomicUsize =
@@ -3198,7 +3276,7 @@ impl Engine {
                     if log_count < 40 {
                         log::warn!(
                             "Slow transient Newton stamp at t={:.6e}, dt={:.3e}, iter={}, elapsed={:.3?}",
-                            t,
+                            t + dt,
                             dt,
                             total_iterations,
                             newton_stamp_elapsed,
@@ -3217,7 +3295,8 @@ impl Engine {
                     && ((self.config.spice_dialect != SpiceDialect::Xyce
                         && circuit.has_nonlinear_devices())
                         || (self.config.spice_dialect == SpiceDialect::Xyce
-                            && circuit.has_xyce_core_inductors()));
+                            && circuit.has_xyce_core_inductors()
+                            && uses_xyce_nox_status));
                 // Iteration zero has no preceding Newton step to judge. Defer
                 // its merit product and rollback capture until the post-solve
                 // checks prove that a second iteration is actually needed.
@@ -3310,7 +3389,7 @@ impl Engine {
                             || circuit.nonlinear_converged(self.device_convergence_criteria()));
                     let behavioral_converged = circuit.behavioral_linearizations_converged(
                         &new_solution,
-                        t + dt,
+                        t,
                         self.voltage_reltol(),
                         self.voltage_abstol(),
                         self.current_abstol(),
@@ -3377,6 +3456,13 @@ impl Engine {
                                     dt,
                                     &coeff,
                                 );
+                                if circuit.has_xyce_core_inductors() {
+                                    circuit.overwrite_xyce_core_transient_correction_rhs(
+                                        &mut correction_rhs,
+                                        xyce_one_step_order2,
+                                        xyce_static_history.as_deref(),
+                                    );
+                                }
                                 if prefer_dense_solver {
                                     linear_solution = matrix.solve_dense(&correction_rhs)?;
                                 } else {
@@ -3547,6 +3633,90 @@ impl Engine {
                             continue;
                         }
 
+                        if uses_xyce_damped_solver {
+                            // DampedNewton checks the corrected candidate, not
+                            // the predictor, and obtains its RHS norms from a
+                            // fresh full Newton-mode assembly at that
+                            // candidate. Keep this restamp separate from the
+                            // StaticProbe acceptance helper: generated devices
+                            // must observe the same evaluation mode as the
+                            // canonical Xyce Newton loop.
+                            new_solution.copy_from_slice(sol);
+                            self.stamp_transient_system_with_generated_mode(
+                                &mut circuit,
+                                &mut matrix,
+                                &mut rhs,
+                                &new_solution,
+                                t + dt,
+                                dt,
+                                &transient_system_context,
+                                &mut vbic_snapshot_cache,
+                                VbicCachedSnapshotReuse::SeedOnly,
+                                true,
+                                0.0,
+                                crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
+                            )?;
+                            nonlinear_state_matches_new_solution = true;
+                            let (residual_inf_norm, residual_l2_norm) =
+                                matrix.raw_residual_norms(&new_solution, &rhs)?;
+                            let device_converged = core_trial_converged(&circuit)
+                                && (!enforce_device_convergence
+                                    || !circuit.has_nonlinear_devices()
+                                    || circuit
+                                        .nonlinear_converged(self.device_convergence_criteria()));
+                            let behavioral_converged = circuit.behavioral_linearizations_converged(
+                                &new_solution,
+                                t + dt,
+                                self.voltage_reltol(),
+                                self.voltage_abstol(),
+                                self.current_abstol(),
+                            );
+                            let decision = xyce_damped_status
+                                .as_mut()
+                                .expect("Xyce DampedNewton status is initialized for this path")
+                                .evaluate(
+                                    damped_status::XyceDampedSample {
+                                        newton_step: _iter.saturating_add(1),
+                                        residual_inf_norm,
+                                        residual_l2_norm,
+                                        weighted_update_norm: raw_weighted_update_norm
+                                            .unwrap_or(Value::INFINITY),
+                                        device_converged,
+                                        inner_device_converged: true,
+                                        linear_solve_ok: true,
+                                        linear_solve_nan: false,
+                                    },
+                                    self.transient_nonlinear_deltaxtol(),
+                                    self.transient_nonlinear_rhstol(),
+                                );
+                            match decision {
+                                damped_status::XyceDampedDecision::Accepted { .. }
+                                    if behavioral_converged =>
+                                {
+                                    converged = true;
+                                    total_postsolve_nanos +=
+                                        postsolve_phase_start.elapsed().as_nanos();
+                                    break;
+                                }
+                                damped_status::XyceDampedDecision::Accepted { .. }
+                                    if _iter.saturating_add(1) >= tran_max_iterations =>
+                                {
+                                    total_postsolve_nanos +=
+                                        postsolve_phase_start.elapsed().as_nanos();
+                                    break;
+                                }
+                                damped_status::XyceDampedDecision::Failed { .. } => {
+                                    total_postsolve_nanos +=
+                                        postsolve_phase_start.elapsed().as_nanos();
+                                    break;
+                                }
+                                damped_status::XyceDampedDecision::Accepted { .. }
+                                | damped_status::XyceDampedDecision::Continue => {}
+                            }
+                            total_postsolve_nanos += postsolve_phase_start.elapsed().as_nanos();
+                            continue;
+                        }
+
                         if is_strictly_linear_transient && !uses_inductor_correction {
                             // An absolute solve is exact for an ordinary linear
                             // deck. Correction-form inductive solves still run
@@ -3676,7 +3846,7 @@ impl Engine {
                         // ENFORCEDEVICECONV status test.
                         let mut behavioral_converged = circuit.behavioral_linearizations_converged(
                             &new_solution,
-                            t + dt,
+                            t,
                             self.voltage_reltol(),
                             self.voltage_abstol(),
                             self.current_abstol(),
@@ -3704,7 +3874,7 @@ impl Engine {
                                     &mut matrix,
                                     &mut rhs,
                                     &new_solution,
-                                    t + dt,
+                                    t,
                                     dt,
                                     &residual::TransientSystemContext {
                                         coeff: &coeff,

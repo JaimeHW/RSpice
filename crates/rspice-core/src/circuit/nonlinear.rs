@@ -900,6 +900,51 @@ impl CircuitData {
 
     /// Restore mutable nonlinear evaluation state after a trial residual probe.
     pub(crate) fn restore_nonlinear_state(&mut self, snapshot: NonlinearDeviceStateSnapshot) {
+        self.restore_nonlinear_state_with_xyce_core_carry(snapshot, false);
+    }
+
+    /// Restore a rejected adaptive timestep while retaining Xyce LEVEL=2's
+    /// latest `MagVarUpdate` evaluation member. Xyce does not roll that
+    /// member back on timestep rejection, although merit/line-search probes
+    /// do require the ordinary strict rollback above.
+    pub(crate) fn restore_nonlinear_state_preserving_xyce_core_level2_carry(
+        &mut self,
+        snapshot: NonlinearDeviceStateSnapshot,
+    ) {
+        self.restore_nonlinear_state_with_xyce_core_carry(snapshot, true);
+    }
+
+    fn restore_nonlinear_state_with_xyce_core_carry(
+        &mut self,
+        snapshot: NonlinearDeviceStateSnapshot,
+        preserve_xyce_core_carry: bool,
+    ) {
+        let core_mag_updates = if preserve_xyce_core_carry {
+            self.jiles_atherton_inductors
+                .iter()
+                .map(|binding| {
+                    binding
+                        .device
+                        .is_xyce_core_level2()
+                        .then(|| binding.device.xyce_core_mag_update())
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let grouped_core_mag_updates = if preserve_xyce_core_carry {
+            self.xyce_core_groups
+                .iter()
+                .map(|group| {
+                    group
+                        .device
+                        .is_xyce_core_level2()
+                        .then(|| group.device.xyce_core_mag_update())
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         if let Some(capacitors) = snapshot.capacitors {
             self.capacitors = capacitors;
         }
@@ -908,6 +953,28 @@ impl CircuitData {
         }
         self.jiles_atherton_inductors = snapshot.jiles_atherton_inductors;
         self.xyce_core_groups = snapshot.xyce_core_groups;
+        if preserve_xyce_core_carry {
+            for (binding, update) in self
+                .jiles_atherton_inductors
+                .iter_mut()
+                .zip(core_mag_updates.into_iter())
+            {
+                if let Some(update) = update {
+                    binding.device.restore_xyce_core_mag_update(update);
+                }
+                binding.device.invalidate_xyce_core_trial();
+            }
+            for (group, update) in self
+                .xyce_core_groups
+                .iter_mut()
+                .zip(grouped_core_mag_updates.into_iter())
+            {
+                if let Some(update) = update {
+                    group.device.restore_xyce_core_mag_update(update);
+                }
+                group.device.invalidate_xyce_core_trial();
+            }
+        }
         self.diodes.restore_nonlinear_state(snapshot.diodes);
         self.bjts = snapshot.bjts;
         self.mosfets.restore_nonlinear_state(snapshot.mosfets);

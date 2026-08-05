@@ -1032,6 +1032,8 @@ impl Engine {
             dt,
             &companion_coeff,
             ctx.xyce_one_step_order2,
+            // Keep the Core carry advancement coupled to a refreshed
+            // candidate. Static/cached probes must remain pure.
             evaluation_mode
                 == crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited
                 && refresh_nonlinear,
