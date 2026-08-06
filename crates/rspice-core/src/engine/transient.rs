@@ -2981,6 +2981,7 @@ impl Engine {
                     at_breakpoint,
                     expected_source_delta,
                     interior_source_delta,
+                    self.config.transient_node_activity_bound,
                     practical_min,
                     timestep.preferred_min_dt(),
                     Self::should_apply_active_source_recovery_cap(force_accept_cooldown),
@@ -7399,6 +7400,42 @@ mod tests {
         )
         .expect("unexcluded nonlinear terminal motion must still limit timestep");
         assert!((limited - 4.0e-10).abs() < 1.0e-18);
+    }
+
+    #[test]
+    fn proactive_source_ramp_cap_matches_terminal_activity_contract() {
+        let dt = 2.0e-9;
+        let source_delta = 1.8;
+        let limited = Engine::bias_transient_step_for_source_activity(
+            dt,
+            dt,
+            false,
+            source_delta,
+            source_delta,
+            crate::constants::DEVICE_ACTIVITY_STEP_BOUND,
+            1.0e-15,
+            1.0e-12,
+            false,
+            true,
+        );
+        let expected = dt * crate::constants::DEVICE_ACTIVITY_STEP_BOUND / source_delta;
+
+        assert!((limited - expected).abs() < 1.0e-18);
+        assert_eq!(
+            Engine::bias_transient_step_for_source_activity(
+                dt,
+                dt,
+                false,
+                source_delta,
+                source_delta,
+                crate::constants::DEVICE_ACTIVITY_STEP_BOUND,
+                1.0e-15,
+                1.0e-12,
+                false,
+                false,
+            ),
+            dt
+        );
     }
 
     fn missing_pwl_path(name: &str) -> String {

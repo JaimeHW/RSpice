@@ -61,8 +61,6 @@ pub(super) const MIN_RETRIES_AT_MINIMUM_TIMESTEP: usize = 1;
 pub(super) const TRANSIENT_GMIN_RESCUE_MIN_RETRIES: usize = 2;
 /// Source edge magnitude that triggers transient source-step capping.
 pub(super) const SOURCE_ACTIVE_DELTA: Value = 1e-2;
-/// Largest single source movement to allow on proactive nonlinear ramp tracking.
-pub(super) const SOURCE_RAMP_TRACKING_DELTA: Value = 5e-2;
 /// Local ngspice `NIiter()` raises any smaller iteration limit to 100.
 pub(super) const NGSPICE_NIITER_MIN_ITERATIONS: usize = 100;
 /// Safety cap for synthesized transmission-line arrival breakpoints.

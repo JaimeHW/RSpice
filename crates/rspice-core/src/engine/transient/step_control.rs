@@ -220,6 +220,7 @@ impl Engine {
         at_breakpoint: bool,
         expected_source_delta: Value,
         interior_source_delta: Value,
+        source_ramp_tracking_delta: Value,
         practical_min_dt: Value,
         preferred_min_dt: Value,
         recovery_cap_enabled: bool,
@@ -229,11 +230,13 @@ impl Engine {
         let source_is_moving_before_endpoint =
             !at_breakpoint || interior_source_delta >= SOURCE_ACTIVE_DELTA;
         if nonlinear_source_ramp_cap_enabled
+            && source_ramp_tracking_delta.is_finite()
+            && source_ramp_tracking_delta > 0.0
             && expected_source_delta.is_finite()
-            && expected_source_delta > SOURCE_RAMP_TRACKING_DELTA
+            && expected_source_delta > source_ramp_tracking_delta
             && source_is_moving_before_endpoint
         {
-            let ramp_cap = dt * (SOURCE_RAMP_TRACKING_DELTA / expected_source_delta);
+            let ramp_cap = dt * (source_ramp_tracking_delta / expected_source_delta);
             if ramp_cap.is_finite() && ramp_cap > 0.0 {
                 dt = dt.min(ramp_cap.max(practical_min_dt));
             }
