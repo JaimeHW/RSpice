@@ -18,5 +18,6 @@
 //! and oracle math, not final hashes.
 
 pub mod canonical;
+pub mod capture;
 pub mod contract;
 pub mod decimal;
