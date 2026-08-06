@@ -452,11 +452,14 @@ fn run_directive(
                     results.iter().map(|point| point.frequency).collect(),
                 ),
                 (
+                    // The engine's density is a power quantity (V^2/Hz);
+                    // the declared unit is the amplitude density every
+                    // commercial noise report uses.
                     "onoise".to_owned(),
                     "V/Hz0.5",
                     results
                         .iter()
-                        .map(|point| point.output_noise_density)
+                        .map(|point| point.output_noise_rms())
                         .collect(),
                 ),
             ];
