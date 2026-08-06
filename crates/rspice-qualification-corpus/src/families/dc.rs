@@ -308,15 +308,23 @@ pub fn drafts() -> Vec<CaseDraft> {
     // Temperature-coefficient resistor dividers at hot and cold corners:
     // r2 carries tc1/tc2, r1 is temperature-flat, so the ratio moves by
     // the closed-form polynomial.
-    for (ordinal, (temperature, tc1, tc2)) in [
-        (85.0, 2.0e-3, 0.0),
-        (-40.0, 2.0e-3, 0.0),
-        (125.0, 0.0, 1.5e-5),
-        (85.0, 1.0e-3, 8.0e-6),
-        (-40.0, 1.0e-3, 8.0e-6),
-        (0.0, 3.9e-3, 0.0),
-        (175.0, 2.0e-3, 1.0e-5),
-        (60.0, -5.0e-4, 0.0),
+    //
+    // The run temperature is stated through both spellings across the
+    // family. `.temp` and `.options temp` are separate parse paths onto the
+    // same setting, and a deck that names a corner and is answered at 27 C
+    // is a wrong answer rather than a refusal, so neither path can go
+    // uncovered. The last case states the temperature twice and disagrees on
+    // purpose: `.temp` outranks `.options temp` whichever is written first.
+    for (ordinal, (temperature, tc1, tc2, temperature_cards)) in [
+        (85.0, 2.0e-3, 0.0, ".temp 85"),
+        (-40.0, 2.0e-3, 0.0, ".options temp=-40"),
+        (125.0, 0.0, 1.5e-5, ".temp 125"),
+        (85.0, 1.0e-3, 8.0e-6, ".options temp=85"),
+        (-40.0, 1.0e-3, 8.0e-6, ".temp -40"),
+        (0.0, 3.9e-3, 0.0, ".options temp=0"),
+        (175.0, 2.0e-3, 1.0e-5, ".temp 175"),
+        (60.0, -5.0e-4, 0.0, ".options temp=60"),
+        (125.0, 1.0e-3, 0.0, ".options temp=27\n.temp 125"),
     ]
     .into_iter()
     .enumerate()
@@ -334,7 +342,7 @@ pub fn drafts() -> Vec<CaseDraft> {
                  r1 in out 1k\n\
                  r2 out 0 rmod 1k\n\
                  .model rmod r(tc1={tc1} tc2={tc2})\n\
-                 .options temp={temperature}\n\
+                 {temperature_cards}\n\
                  .dc v1 0 {supply} 0.5\n\
                  .end\n"
             ),
@@ -374,7 +382,11 @@ pub fn drafts() -> Vec<CaseDraft> {
     // Diode forward drop across temperature: saturation-current scaling
     // with the standard level-1 defaults (eg=1.11, xti=3) plus the shifted
     // thermal voltage, still solved by bisection.
-    for (ordinal, temperature) in [85.0, -40.0].into_iter().enumerate() {
+    for (ordinal, (temperature, temperature_cards)) in
+        [(85.0, ".temp 85"), (-40.0, ".options temp=-40")]
+            .into_iter()
+            .enumerate()
+    {
         let (stop, series, is, emission) = (5.0, 1.0e3, 1.0e-14, 1.0);
         let is_at_t = diode_saturation_current_at(is, emission, temperature);
         let anode = diode_node_voltage(stop, series, is_at_t, emission, temperature);
@@ -388,7 +400,7 @@ pub fn drafts() -> Vec<CaseDraft> {
                  r1 in anode {series}\n\
                  d1 anode 0 dmod\n\
                  .model dmod d(is={is} n={emission})\n\
-                 .options temp={temperature}\n\
+                 {temperature_cards}\n\
                  .dc v1 0 {stop} 0.1\n\
                  .end\n"
             ),
