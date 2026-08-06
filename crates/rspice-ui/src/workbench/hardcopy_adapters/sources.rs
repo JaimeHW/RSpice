@@ -60,9 +60,9 @@ use crate::workbench::SurfaceId;
 // The persisted source-set records and the validation they share with these
 // adapters are owned one layer down, where `state` can reach them.
 use crate::hardcopy::sources::{
-    DISPLAY_NAME_LIMIT, HardcopySourceError, HardcopySourceIdentity, HardcopySourceSet,
-    HardcopySourceSetMember, MAX_HARDCOPY_SOURCE_SET_MEMBERS, SOURCE_KEY_LIMIT, canonical_digest,
-    validate_label,
+    DISPLAY_NAME_LIMIT, HardcopyPublicationIdentity, HardcopySourceError, HardcopySourceIdentity,
+    HardcopySourceSet, HardcopySourceSetMember, MAX_HARDCOPY_SOURCE_SET_MEMBERS, SOURCE_KEY_LIMIT,
+    canonical_digest, validate_label,
 };
 use crate::workbench::documents::result_document::ResultViewer;
 use crate::workbench::documents::visualization_studio::{
@@ -96,9 +96,9 @@ pub const BLANK_SCHEMATIC_SHEET_HEIGHT_UM: i64 = 215_900;
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub(crate) const MAX_WORKER_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-pub(super) const WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
+pub(super) const WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 3;
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-pub(super) const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 5;
+pub(super) const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 7;
 const SCHEMATIC_EDGE_ALLOWANCE_UNITS: i64 = 16;
 const SYMBOL_EDGE_ALLOWANCE_UNITS: i64 = 10;
 const PLOT_INSET_UM: i64 = 12_700;
@@ -901,6 +901,7 @@ pub fn resolve_hardcopy_source_set_with(
             local_bounds: bounds,
             placement_origin: SemanticPoint::new(0, next_y_um),
             page_break_before: index != 0,
+            publication_page_label: None,
             document: Box::new(semantic_document),
         });
         next_y_um = next_y_um
@@ -910,6 +911,36 @@ pub fn resolve_hardcopy_source_set_with(
             next_y_um = next_y_um
                 .checked_add(REPORT_PAGE_GAP_UM)
                 .ok_or(HardcopySourceError::CoordinateOverflow)?;
+        }
+    }
+
+    // A per-print-set schematic is numbered by the exact ordered schematic
+    // subset in this authenticated aggregate, not by its full source catalog.
+    // The override belongs to the aggregate projection and therefore does not
+    // mutate or misrepresent the retained child source digest.
+    let per_print_set_count = children
+        .iter()
+        .filter(|child| {
+            matches!(
+                child.document.as_ref(),
+                HardcopySemanticDocument::Schematic(schematic)
+                    if schematic.drawing_sheet_page_numbering
+                        == Some(crate::state::SheetPageNumbering::PerPrintSet)
+            )
+        })
+        .count();
+    if per_print_set_count > 0 {
+        let mut page = 0_usize;
+        for child in &mut children {
+            if matches!(
+                child.document.as_ref(),
+                HardcopySemanticDocument::Schematic(schematic)
+                    if schematic.drawing_sheet_page_numbering
+                        == Some(crate::state::SheetPageNumbering::PerPrintSet)
+            ) {
+                page += 1;
+                child.publication_page_label = Some(format!("{page} of {per_print_set_count}"));
+            }
         }
     }
 
@@ -1569,16 +1600,45 @@ fn active_cell_view_identity(
             .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?,
         state.workspace.project.revision(),
         state.workspace.active_display_path(),
-    )
+    )?
+    .with_publication(HardcopyPublicationIdentity::try_new(
+        state.workspace.project.name(),
+        state.workspace.active_view.display_path(),
+        Some(
+            state
+                .workspace
+                .design_management
+                .drawing_sheet_settings()
+                .document_control
+                .revision
+                .clone(),
+        ),
+        (!state
+            .workspace
+            .design_management
+            .drawing_sheet_settings()
+            .document_control
+            .revision_date_utc
+            .is_empty())
+        .then(|| {
+            state
+                .workspace
+                .design_management
+                .drawing_sheet_settings()
+                .document_control
+                .revision_date_utc
+                .clone()
+        }),
+    )?)
 }
 
-fn schematic_sheet_identity(
+pub(super) fn schematic_sheet_identity(
     base: &HardcopySourceIdentity,
     sheet: &DesignSheet,
 ) -> Result<HardcopySourceIdentity, HardcopySourceError> {
     let mut identity_material = b"rspice-hardcopy-schematic-sheet-v1:".to_vec();
     identity_material.extend_from_slice(sheet.id().as_uuid().as_bytes());
-    HardcopySourceIdentity::try_new(
+    let mut identity = HardcopySourceIdentity::try_new(
         format!("{}:sheet:{}", base.source_key, sheet.id()),
         HardcopyDocumentId::try_from_uuid(Uuid::new_v5(
             &base.document_id.as_uuid(),
@@ -1591,7 +1651,9 @@ fn schematic_sheet_identity(
             &format!("{} · {}", base.display_name, sheet.name()),
             "Schematic sheet",
         ),
-    )
+    )?;
+    identity.publication.clone_from(&base.publication);
+    Ok(identity)
 }
 
 fn require_active_result_document(

@@ -17,9 +17,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
+
+mod trust_verification;
 
 use crate::product::ContentDigest;
 
@@ -1573,25 +1575,13 @@ pub fn validate_archive(
         .map_err(|error| PdkTechnologyError::ManifestParse(error.to_string()))?;
     validate_manifest(&manifest)?;
 
-    let key = trust_store.resolve(&manifest.publisher_id, &manifest.signing_key_id)?;
-    let verifying_key = VerifyingKey::from_bytes(&key.verifying_key).map_err(|error| {
-        PdkTechnologyError::InvalidTrustStore(format!(
-            "trusted key {}/{} is invalid: {error}",
-            key.publisher_id, key.key_id
-        ))
-    })?;
     let signature_bytes = decode_bounded("signature_base64", &archive.signature_base64, 64)?;
-    let signature_bytes: [u8; 64] = signature_bytes.try_into().map_err(|bytes: Vec<u8>| {
-        PdkTechnologyError::InvalidSignatureLength {
-            actual: bytes.len(),
-        }
-    })?;
-    verifying_key
-        .verify(&manifest_bytes, &Signature::from_bytes(&signature_bytes))
-        .map_err(|_| PdkTechnologyError::InvalidSignature {
-            publisher_id: manifest.publisher_id.clone(),
-            key_id: manifest.signing_key_id.clone(),
-        })?;
+    trust_store.verify_publisher_signature(
+        &manifest.publisher_id,
+        &manifest.signing_key_id,
+        &manifest_bytes,
+        &signature_bytes,
+    )?;
 
     let mut actual_files = BTreeMap::<String, (usize, ContentDigest)>::new();
     let mut total = 0usize;

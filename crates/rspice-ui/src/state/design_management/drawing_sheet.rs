@@ -19,6 +19,13 @@ pub const MAX_DRAWING_SHEET_PRESET_NAME_CHARS: usize = 48;
 pub const MAX_DRAWING_SHEET_PRESET_IMPORT_RECEIPTS: usize = 4_096;
 pub const MAX_DRAWING_SHEET_PRESET_IMPORT_CANDIDATES: usize = MAX_DRAWING_SHEET_PROJECT_PRESETS;
 pub const MAX_DRAWING_SHEET_TRANSACTION_RECEIPTS: usize = 4_096;
+pub const MAX_DRAWING_SHEET_REVISION_BYTES: usize = 64;
+pub const MAX_DRAWING_SHEET_CHANGE_REFERENCE_BYTES: usize = 256;
+pub const DRAWING_SHEET_MANAGED_TEMPLATE_SCHEMA_VERSION: u32 = 1;
+pub const DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS: u16 = 10_000;
+pub const MAX_DRAWING_SHEET_MANAGED_LOGO_PRIMITIVES: usize = 64;
+pub const MAX_DRAWING_SHEET_MANAGED_LOGO_POINTS_PER_PRIMITIVE: usize = 256;
+pub const MAX_DRAWING_SHEET_MANAGED_LOGO_POINTS: usize = 4_096;
 
 /// Compatibility projection consumed by existing hardcopy code.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -646,6 +653,29 @@ impl DrawingSheetTitleFieldId {
         )
     }
 
+    /// Canonical human-facing wording shared by canvas, dialogs, preview,
+    /// and hardcopy. Renderers may change case for typography, but not the
+    /// field's wording or engineering meaning.
+    #[must_use]
+    pub const fn display_label(self) -> &'static str {
+        match self {
+            Self::Project => "Project",
+            Self::CellView => "Cell / view",
+            Self::SheetTitle => "Sheet title",
+            Self::Page => "Page",
+            Self::Revision => "Revision",
+            Self::Format => "Format",
+            Self::Scale => "Scale",
+            Self::DrawnBy => "Drawn by",
+            Self::CheckedBy => "Checked by",
+            Self::ApprovedBy => "Approved by",
+            Self::Date => "Date",
+            Self::Organization => "Organization",
+            Self::DocumentId => "Document ID",
+            Self::Classification => "Classification",
+        }
+    }
+
     #[must_use]
     pub const fn policy(self) -> DrawingSheetTitleFieldPolicy {
         match self {
@@ -688,6 +718,467 @@ pub enum DrawingSheetTitleFieldValueAuthority {
     Authored,
 }
 
+/// One normalized point in a bounded organization logo. Coordinates use a
+/// 0..=10,000 basis so the same exact geometry can be projected to canvas,
+/// preview, SVG/PDF, raster output, and printer pages without embedding an
+/// executable or externally linked asset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DrawingSheetManagedLogoPoint {
+    x: u16,
+    y: u16,
+}
+
+impl DrawingSheetManagedLogoPoint {
+    pub fn try_new(x: u16, y: u16) -> Result<Self, DesignManagementError> {
+        if x > DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS
+            || y > DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS
+        {
+            return Err(DesignManagementError::NumericRange(
+                "drawing sheet managed logo point",
+            ));
+        }
+        Ok(Self { x, y })
+    }
+
+    #[must_use]
+    pub const fn x(self) -> u16 {
+        self.x
+    }
+
+    #[must_use]
+    pub const fn y(self) -> u16 {
+        self.y
+    }
+}
+
+/// A deliberately small, monochrome vector primitive for an organization
+/// mark. Filled primitives must be closed convex polygons; this keeps every
+/// renderer deterministic and prevents SVG/script/font/raster payloads from
+/// entering governed sheet state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DrawingSheetManagedLogoPrimitive {
+    points: Vec<DrawingSheetManagedLogoPoint>,
+    closed: bool,
+    filled: bool,
+}
+
+impl DrawingSheetManagedLogoPrimitive {
+    pub fn try_new(
+        points: Vec<DrawingSheetManagedLogoPoint>,
+        closed: bool,
+        filled: bool,
+    ) -> Result<Self, DesignManagementError> {
+        let primitive = Self {
+            points,
+            closed,
+            filled,
+        };
+        primitive.validate()?;
+        Ok(primitive)
+    }
+
+    fn validate(&self) -> Result<(), DesignManagementError> {
+        let minimum = if self.closed { 3 } else { 2 };
+        if !(minimum..=MAX_DRAWING_SHEET_MANAGED_LOGO_POINTS_PER_PRIMITIVE)
+            .contains(&self.points.len())
+            || (self.filled && !self.closed)
+            || self.points.iter().any(|point| {
+                point.x > DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS
+                    || point.y > DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS
+            })
+            || self.points.windows(2).any(|pair| pair[0] == pair[1])
+            || (self.closed && self.points.first() == self.points.last())
+            || (self.filled && !managed_logo_polygon_is_convex(&self.points))
+        {
+            return Err(DesignManagementError::NumericRange(
+                "drawing sheet managed logo primitive",
+            ));
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn points(&self) -> &[DrawingSheetManagedLogoPoint] {
+        &self.points
+    }
+
+    #[must_use]
+    pub const fn closed(&self) -> bool {
+        self.closed
+    }
+
+    #[must_use]
+    pub const fn filled(&self) -> bool {
+        self.filled
+    }
+}
+
+fn managed_logo_polygon_is_convex(points: &[DrawingSheetManagedLogoPoint]) -> bool {
+    let mut direction = 0i32;
+    for index in 0..points.len() {
+        let a = points[index];
+        let b = points[(index + 1) % points.len()];
+        let c = points[(index + 2) % points.len()];
+        let ab_x = i32::from(b.x) - i32::from(a.x);
+        let ab_y = i32::from(b.y) - i32::from(a.y);
+        let bc_x = i32::from(c.x) - i32::from(b.x);
+        let bc_y = i32::from(c.y) - i32::from(b.y);
+        let cross = ab_x * bc_y - ab_y * bc_x;
+        if cross == 0 {
+            continue;
+        }
+        let observed = cross.signum();
+        if direction != 0 && direction != observed {
+            return false;
+        }
+        direction = observed;
+    }
+    direction != 0
+}
+
+/// Digest-covered, self-contained organization mark and its reserved title
+/// block width. The point and primitive budgets are strict denial-of-service
+/// bounds for project loading and worker transfer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DrawingSheetManagedLogo {
+    alternative_text: String,
+    reserved_width_um: u64,
+    primitives: Vec<DrawingSheetManagedLogoPrimitive>,
+}
+
+impl DrawingSheetManagedLogo {
+    pub fn try_new(
+        alternative_text: impl Into<String>,
+        reserved_width_um: u64,
+        primitives: Vec<DrawingSheetManagedLogoPrimitive>,
+    ) -> Result<Self, DesignManagementError> {
+        let logo = Self {
+            alternative_text: alternative_text.into(),
+            reserved_width_um,
+            primitives,
+        };
+        logo.validate()?;
+        Ok(logo)
+    }
+
+    fn validate(&self) -> Result<(), DesignManagementError> {
+        validate_name(
+            "drawing sheet managed logo alternative text",
+            &self.alternative_text,
+        )?;
+        let total_points = self
+            .primitives
+            .iter()
+            .try_fold(0usize, |total, primitive| {
+                primitive.validate()?;
+                total.checked_add(primitive.points.len()).ok_or(
+                    DesignManagementError::NumericRange("drawing sheet managed logo point count"),
+                )
+            })?;
+        if self.primitives.is_empty()
+            || self.primitives.len() > MAX_DRAWING_SHEET_MANAGED_LOGO_PRIMITIVES
+            || total_points > MAX_DRAWING_SHEET_MANAGED_LOGO_POINTS
+        {
+            return Err(DesignManagementError::NumericRange(
+                "drawing sheet managed logo complexity",
+            ));
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn alternative_text(&self) -> &str {
+        &self.alternative_text
+    }
+
+    #[must_use]
+    pub const fn reserved_width_um(&self) -> u64 {
+        self.reserved_width_um
+    }
+
+    #[must_use]
+    pub fn primitives(&self) -> &[DrawingSheetManagedLogoPrimitive] {
+        &self.primitives
+    }
+}
+
+/// Exact organization-managed title-block contract captured with a sheet or
+/// preset. A digest-authenticated snapshot prevents a later policy update
+/// from silently changing released drawings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DrawingSheetManagedTemplateSnapshot {
+    schema_version: u32,
+    template_id: String,
+    revision: String,
+    width_um: u64,
+    height_um: u64,
+    rows: u8,
+    field_order: Vec<DrawingSheetTitleFieldId>,
+    locked_fields: Vec<DrawingSheetTitleFieldId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    logo: Option<DrawingSheetManagedLogo>,
+    content_digest: ContentDigest,
+}
+
+#[derive(Serialize)]
+struct DrawingSheetManagedTemplateDigestMaterial<'a> {
+    schema_version: u32,
+    template_id: &'a str,
+    revision: &'a str,
+    width_um: u64,
+    height_um: u64,
+    rows: u8,
+    field_order: &'a [DrawingSheetTitleFieldId],
+    locked_fields: &'a [DrawingSheetTitleFieldId],
+    logo: Option<&'a DrawingSheetManagedLogo>,
+}
+
+impl Default for DrawingSheetManagedTemplateSnapshot {
+    fn default() -> Self {
+        Self::try_new(
+            "rspice.organization-title-block",
+            "1",
+            180_000,
+            50_000,
+            5,
+            DrawingSheetTitleFieldId::ALL.to_vec(),
+            vec![DrawingSheetTitleFieldId::Classification],
+        )
+        .expect("the built-in organization title-block snapshot is valid")
+    }
+}
+
+impl DrawingSheetManagedTemplateSnapshot {
+    pub fn try_new(
+        template_id: impl Into<String>,
+        revision: impl Into<String>,
+        width_um: u64,
+        height_um: u64,
+        rows: u8,
+        field_order: Vec<DrawingSheetTitleFieldId>,
+        locked_fields: Vec<DrawingSheetTitleFieldId>,
+    ) -> Result<Self, DesignManagementError> {
+        Self::try_new_with_logo(
+            template_id,
+            revision,
+            width_um,
+            height_um,
+            rows,
+            field_order,
+            locked_fields,
+            None,
+        )
+    }
+
+    pub fn try_new_with_logo(
+        template_id: impl Into<String>,
+        revision: impl Into<String>,
+        width_um: u64,
+        height_um: u64,
+        rows: u8,
+        field_order: Vec<DrawingSheetTitleFieldId>,
+        locked_fields: Vec<DrawingSheetTitleFieldId>,
+        logo: Option<DrawingSheetManagedLogo>,
+    ) -> Result<Self, DesignManagementError> {
+        let mut snapshot = Self {
+            schema_version: DRAWING_SHEET_MANAGED_TEMPLATE_SCHEMA_VERSION,
+            template_id: template_id.into(),
+            revision: revision.into(),
+            width_um,
+            height_um,
+            rows,
+            field_order,
+            locked_fields,
+            logo,
+            content_digest: ContentDigest::from_bytes([0; 32]),
+        };
+        snapshot.validate_shape()?;
+        snapshot.content_digest = snapshot.compute_content_digest()?;
+        Ok(snapshot)
+    }
+
+    pub fn validate(&self) -> Result<(), DesignManagementError> {
+        self.validate_shape()?;
+        if self.compute_content_digest()? != self.content_digest {
+            return Err(DesignManagementError::InvalidText {
+                field: "drawing sheet managed template digest",
+                value: self.content_digest.to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    fn validate_shape(&self) -> Result<(), DesignManagementError> {
+        if self.schema_version != DRAWING_SHEET_MANAGED_TEMPLATE_SCHEMA_VERSION {
+            return Err(DesignManagementError::NumericRange(
+                "drawing sheet managed template schema",
+            ));
+        }
+        validate_name("drawing sheet managed template identity", &self.template_id)?;
+        validate_value(
+            "drawing sheet managed template revision",
+            &self.revision,
+            false,
+        )?;
+        if !(50_000..=600_000).contains(&self.width_um)
+            || !(20_000..=200_000).contains(&self.height_um)
+            || !(2..=8).contains(&self.rows)
+        {
+            return Err(DesignManagementError::NumericRange(
+                "drawing sheet managed template geometry",
+            ));
+        }
+        let expected = DrawingSheetTitleFieldId::ALL
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        let actual = self.field_order.iter().copied().collect::<BTreeSet<_>>();
+        if self.field_order.len() != DrawingSheetTitleFieldId::ALL.len() || actual != expected {
+            return Err(DesignManagementError::NumericRange(
+                "drawing sheet managed template field order",
+            ));
+        }
+        let locked = self.locked_fields.iter().copied().collect::<BTreeSet<_>>();
+        if locked.len() != self.locked_fields.len()
+            || self.locked_fields.iter().any(|field| {
+                field.policy().value_authority != DrawingSheetTitleFieldValueAuthority::Authored
+            })
+        {
+            return Err(DesignManagementError::NumericRange(
+                "drawing sheet managed template locked fields",
+            ));
+        }
+        if let Some(logo) = &self.logo {
+            logo.validate()?;
+            if !(10_000..=self.width_um.saturating_sub(50_000)).contains(&logo.reserved_width_um) {
+                return Err(DesignManagementError::NumericRange(
+                    "drawing sheet managed logo reserved width",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn compute_content_digest(&self) -> Result<ContentDigest, DesignManagementError> {
+        digest(
+            "rspice-drawing-sheet-managed-template/v1",
+            &DrawingSheetManagedTemplateDigestMaterial {
+                schema_version: self.schema_version,
+                template_id: &self.template_id,
+                revision: &self.revision,
+                width_um: self.width_um,
+                height_um: self.height_um,
+                rows: self.rows,
+                field_order: &self.field_order,
+                locked_fields: &self.locked_fields,
+                logo: self.logo.as_ref(),
+            },
+        )
+    }
+
+    #[must_use]
+    pub fn template_id(&self) -> &str {
+        &self.template_id
+    }
+
+    #[must_use]
+    pub fn revision(&self) -> &str {
+        &self.revision
+    }
+
+    #[must_use]
+    pub const fn dimensions_um(&self) -> (u64, u64) {
+        (self.width_um, self.height_um)
+    }
+
+    #[must_use]
+    pub const fn rows(&self) -> usize {
+        self.rows as usize
+    }
+
+    #[must_use]
+    pub fn field_order(&self) -> &[DrawingSheetTitleFieldId] {
+        &self.field_order
+    }
+
+    #[must_use]
+    pub fn locks_field(&self, field: DrawingSheetTitleFieldId) -> bool {
+        self.locked_fields.contains(&field)
+    }
+
+    #[must_use]
+    pub const fn logo(&self) -> Option<&DrawingSheetManagedLogo> {
+        self.logo.as_ref()
+    }
+
+    #[must_use]
+    pub const fn content_digest(&self) -> ContentDigest {
+        self.content_digest
+    }
+}
+
+/// One visible title-field value after ownership and migration fallback rules
+/// have been resolved. This semantic value is renderer-independent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedDrawingSheetTitleField {
+    pub id: DrawingSheetTitleFieldId,
+    pub value: String,
+    pub authority: DrawingSheetTitleFieldValueAuthority,
+}
+
+/// Resolve the exact visible title fields for canvas and publication.
+/// `authority_values` supplies automatic values plus canonical project-owned
+/// authored values; ordinary authored values remain in the sheet format.
+#[must_use]
+pub fn resolve_drawing_sheet_title_fields(
+    format: &SchematicSheetFormat,
+    authority_values: &BTreeMap<DrawingSheetTitleFieldId, String>,
+) -> Vec<ResolvedDrawingSheetTitleField> {
+    format
+        .title_block_field_order()
+        .iter()
+        .copied()
+        .filter_map(|id| {
+            let authored = format.title_block.fields.get(&id)?;
+            authored.visible.then(|| {
+                let authority = id.policy().value_authority;
+                let governed = authority_values
+                    .get(&id)
+                    .map(String::as_str)
+                    .unwrap_or_default();
+                let value = match authority {
+                    DrawingSheetTitleFieldValueAuthority::Automatic => governed,
+                    DrawingSheetTitleFieldValueAuthority::Authored if id.is_project_owned() => {
+                        if governed.trim().is_empty() {
+                            authored.value.as_str()
+                        } else {
+                            governed
+                        }
+                    }
+                    DrawingSheetTitleFieldValueAuthority::Authored
+                        if authored.value.trim().is_empty() =>
+                    {
+                        governed
+                    }
+                    DrawingSheetTitleFieldValueAuthority::Authored => authored.value.as_str(),
+                };
+                ResolvedDrawingSheetTitleField {
+                    id,
+                    value: if value.trim().is_empty() {
+                        "—".to_owned()
+                    } else {
+                        value.to_owned()
+                    },
+                    authority,
+                }
+            })
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DrawingSheetTitleFieldState {
@@ -713,6 +1204,8 @@ pub struct DrawingSheetTitleBlock {
     pub offset_x_um: i64,
     pub offset_y_um: i64,
     pub scale: DrawingSheetScale,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_template: Option<DrawingSheetManagedTemplateSnapshot>,
     pub fields: BTreeMap<DrawingSheetTitleFieldId, DrawingSheetTitleFieldState>,
 }
 
@@ -729,14 +1222,39 @@ impl Default for DrawingSheetTitleBlock {
             offset_x_um: 0,
             offset_y_um: 0,
             scale: DrawingSheetScale::default(),
+            managed_template: None,
             fields,
         }
     }
 }
 
 impl DrawingSheetTitleBlock {
+    fn normalize_managed_template(&mut self) {
+        if self.template == DrawingSheetTitleBlockTemplate::OrganizationManaged {
+            self.managed_template.get_or_insert_with(Default::default);
+        } else {
+            self.managed_template = None;
+        }
+    }
+
     fn validate(&self) -> Result<(), DesignManagementError> {
         self.scale.validate()?;
+        match (&self.template, &self.managed_template) {
+            (DrawingSheetTitleBlockTemplate::OrganizationManaged, Some(snapshot)) => {
+                snapshot.validate()?;
+            }
+            (DrawingSheetTitleBlockTemplate::OrganizationManaged, None) => {
+                return Err(DesignManagementError::NumericRange(
+                    "drawing sheet managed template snapshot",
+                ));
+            }
+            (_, Some(_)) => {
+                return Err(DesignManagementError::NumericRange(
+                    "drawing sheet managed template ownership",
+                ));
+            }
+            (_, None) => {}
+        }
         if self.fields.len() != DrawingSheetTitleFieldId::ALL.len()
             || DrawingSheetTitleFieldId::ALL
                 .into_iter()
@@ -774,14 +1292,7 @@ impl DrawingSheetTitleBlock {
     }
 }
 
-/// UTC document date used by automatic title-block fields when the project
-/// does not provide a more specific release date.
-#[must_use]
-pub fn automatic_drawing_sheet_date_utc() -> String {
-    let days = crate::time_compat::unix_epoch().as_secs() / 86_400;
-    civil_date_from_unix_days(days as i64)
-}
-
+#[cfg(test)]
 pub(super) fn civil_date_from_unix_days(days: i64) -> String {
     // Proleptic Gregorian conversion adapted from Howard Hinnant's
     // `civil_from_days`; integral and locale-independent on every target.
@@ -960,6 +1471,7 @@ impl<'de> Deserialize<'de> for SchematicSheetFormat {
             .or_default()
             .value
             .clear();
+        format.title_block.normalize_managed_template();
         if legacy_title_block {
             format.fit_default_title_block();
         }
@@ -975,7 +1487,10 @@ impl SchematicSheetFormat {
     }
 
     /// Atomically materialize and validate a complete Page Setup draft.
-    pub fn try_from_draft(draft: SchematicSheetFormatDraft) -> Result<Self, DesignManagementError> {
+    pub fn try_from_draft(
+        mut draft: SchematicSheetFormatDraft,
+    ) -> Result<Self, DesignManagementError> {
+        draft.title_block.normalize_managed_template();
         let format = Self {
             size: draft.authored_size.legacy_projection(),
             orientation: draft.orientation,
@@ -1219,7 +1734,7 @@ impl SchematicSheetFormat {
     #[must_use]
     pub fn effective_title_block_template(&self) -> DrawingSheetTitleBlockTemplate {
         let requested = self.title_block.template;
-        let Some((template_width_um, _)) = requested.dimensions_um() else {
+        let Some((template_width_um, _)) = self.title_block_dimensions_um(requested) else {
             return DrawingSheetTitleBlockTemplate::None;
         };
         let (paper_width_um, _) = self.oriented_dimensions_um();
@@ -1235,6 +1750,63 @@ impl SchematicSheetFormat {
     #[must_use]
     pub fn title_block_substituted(&self) -> bool {
         self.effective_title_block_template() != self.title_block.template
+    }
+
+    /// Exact dimensions for the requested/effective template. Managed
+    /// templates read their captured snapshot; built-ins read the stable
+    /// product contract.
+    #[must_use]
+    pub fn title_block_dimensions_um(
+        &self,
+        template: DrawingSheetTitleBlockTemplate,
+    ) -> Option<(u64, u64)> {
+        if template == DrawingSheetTitleBlockTemplate::OrganizationManaged {
+            self.title_block
+                .managed_template
+                .as_ref()
+                .map(DrawingSheetManagedTemplateSnapshot::dimensions_um)
+        } else {
+            template.dimensions_um()
+        }
+    }
+
+    #[must_use]
+    pub fn title_block_rows(&self, template: DrawingSheetTitleBlockTemplate) -> Option<usize> {
+        if template == DrawingSheetTitleBlockTemplate::OrganizationManaged {
+            self.title_block
+                .managed_template
+                .as_ref()
+                .map(DrawingSheetManagedTemplateSnapshot::rows)
+        } else {
+            drawing_sheet_title_block_rows(template)
+        }
+    }
+
+    #[must_use]
+    pub fn title_block_field_order(&self) -> &[DrawingSheetTitleFieldId] {
+        self.title_block
+            .managed_template
+            .as_ref()
+            .filter(|_| {
+                self.title_block.template == DrawingSheetTitleBlockTemplate::OrganizationManaged
+            })
+            .map_or(&DrawingSheetTitleFieldId::ALL, |snapshot| {
+                snapshot.field_order()
+            })
+    }
+
+    /// Captured organization logo for the exact effective title contract.
+    /// A substituted compact block never inherits managed artwork that no
+    /// longer has an authored reserve in its grid.
+    #[must_use]
+    pub fn title_block_logo(
+        &self,
+        template: DrawingSheetTitleBlockTemplate,
+    ) -> Option<&DrawingSheetManagedLogo> {
+        (template == DrawingSheetTitleBlockTemplate::OrganizationManaged)
+            .then_some(self.title_block.managed_template.as_ref())
+            .flatten()
+            .and_then(DrawingSheetManagedTemplateSnapshot::logo)
     }
 
     #[must_use]
@@ -1322,7 +1894,8 @@ impl SchematicSheetFormat {
         drawing_area: DrawingSheetRect,
         template: DrawingSheetTitleBlockTemplate,
     ) -> Result<Option<DrawingSheetRect>, DesignManagementError> {
-        let Some((template_width, template_height)) = template.dimensions_um() else {
+        let Some((template_width, template_height)) = self.title_block_dimensions_um(template)
+        else {
             return Ok(None);
         };
         let (rotated_width, height) = match self.title_block.rotation {
@@ -1638,988 +2211,19 @@ pub fn drawing_sheet_title_cell_capacity(
     visible_field_count: usize,
 ) -> Option<usize> {
     let block = geometry.title_block?;
-    let rows = drawing_sheet_title_block_rows(geometry.effective_title_block_template)?;
+    let rows = format.title_block_rows(geometry.effective_title_block_template)?;
     let columns = visible_field_count.max(1).div_ceil(rows).max(1) as u64;
     let authored_width_um = match format.title_block.rotation {
         DrawingSheetTitleBlockRotation::Upright => block.width_um,
         DrawingSheetTitleBlockRotation::Clockwise90
         | DrawingSheetTitleBlockRotation::CounterClockwise90 => block.height_um,
     };
-    let cell_width_um = authored_width_um / columns;
+    let logo_reserve_um = format
+        .title_block_logo(geometry.effective_title_block_template)
+        .map_or(0, DrawingSheetManagedLogo::reserved_width_um);
+    let cell_width_um = authored_width_um.saturating_sub(logo_reserve_um) / columns;
     Some(((cell_width_um.saturating_sub(4_000)) / 1_400).max(4) as usize)
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DrawingSheetPresetScope {
-    #[default]
-    Project,
-    User,
-    Organization,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DrawingSheetNewSheetPolicy {
-    #[default]
-    ProjectDefault,
-    Ask,
-    MatchCurrent,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DrawingSheetPresetImportReference {
-    pub preset_id: String,
-    pub scope: DrawingSheetPresetScope,
-}
-
-impl DrawingSheetPresetImportReference {
-    fn validate(&self) -> Result<(), DesignManagementError> {
-        validate_name("drawing sheet preset import reference", &self.preset_id)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DrawingSheetPresetImportResolution {
-    NewIdentity,
-    MatchesByDigest,
-    KeepBothRename,
-    MapExisting,
-    ReplaceManagedDependencies,
-    RetainUnavailableDependency,
-    Skip,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DrawingSheetPresetImportMappingKind {
-    CreatedProjectPreset,
-    ExistingPreset,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DrawingSheetPresetImportMapping {
-    pub source: DrawingSheetPresetImportReference,
-    pub target: DrawingSheetPresetImportReference,
-    pub kind: DrawingSheetPresetImportMappingKind,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DrawingSheetPresetImportConflict {
-    pub source: DrawingSheetPresetImportReference,
-    pub existing: Option<DrawingSheetPresetImportReference>,
-    pub missing_managed_dependency: bool,
-    pub resolution: DrawingSheetPresetImportResolution,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DrawingSheetPresetImportSkipReason {
-    NotSelected,
-    ExplicitlySkipped,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DrawingSheetPresetImportSkip {
-    pub source: DrawingSheetPresetImportReference,
-    pub reason: DrawingSheetPresetImportSkipReason,
-}
-
-/// Immutable audit evidence for one reviewed custom-sheet preset import.
-///
-/// Source candidates are partitioned into selected candidates and
-/// `NotSelected` skips. Every selected candidate is then partitioned into one
-/// mapping or one `ExplicitlySkipped` outcome.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DrawingSheetPresetImportReceipt {
-    pub source_digest_sha256: String,
-    pub source_schema: String,
-    pub source_schema_version: u16,
-    pub reviewed_candidate_count: usize,
-    pub selected_candidates: Vec<DrawingSheetPresetImportReference>,
-    pub mappings: Vec<DrawingSheetPresetImportMapping>,
-    pub conflicts: Vec<DrawingSheetPresetImportConflict>,
-    pub skipped_candidates: Vec<DrawingSheetPresetImportSkip>,
-}
-
-impl DrawingSheetPresetImportReceipt {
-    pub fn validate(&self) -> Result<(), DesignManagementError> {
-        if self.source_digest_sha256.len() != 64
-            || !self
-                .source_digest_sha256
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        {
-            return Err(DesignManagementError::InvalidText {
-                field: "drawing sheet preset import source digest",
-                value: self.source_digest_sha256.clone(),
-            });
-        }
-        validate_name(
-            "drawing sheet preset import source schema",
-            &self.source_schema,
-        )?;
-        if self.source_schema_version == 0 {
-            return Err(DesignManagementError::NumericRange(
-                "drawing sheet preset import source schema version",
-            ));
-        }
-        require_limit(
-            "drawing sheet preset import reviewed candidates",
-            self.reviewed_candidate_count,
-            MAX_DRAWING_SHEET_PRESET_IMPORT_CANDIDATES,
-        )?;
-        for (domain, actual) in [
-            (
-                "drawing sheet preset import selected candidates",
-                self.selected_candidates.len(),
-            ),
-            ("drawing sheet preset import mappings", self.mappings.len()),
-            (
-                "drawing sheet preset import conflicts",
-                self.conflicts.len(),
-            ),
-            (
-                "drawing sheet preset import skipped candidates",
-                self.skipped_candidates.len(),
-            ),
-        ] {
-            require_limit(domain, actual, MAX_DRAWING_SHEET_PRESET_IMPORT_CANDIDATES)?;
-        }
-
-        let mut selected = BTreeSet::new();
-        for source in &self.selected_candidates {
-            source.validate()?;
-            if !selected.insert(source.clone()) {
-                return Err(DesignManagementError::DuplicateListEntry {
-                    field: "drawing sheet preset import selected candidate",
-                    value: source.preset_id.clone(),
-                });
-            }
-        }
-
-        let mut skipped = BTreeMap::new();
-        let mut not_selected = 0_usize;
-        for skip in &self.skipped_candidates {
-            skip.source.validate()?;
-            if skipped.insert(skip.source.clone(), skip.reason).is_some() {
-                return Err(DesignManagementError::DuplicateListEntry {
-                    field: "drawing sheet preset import skipped candidate",
-                    value: skip.source.preset_id.clone(),
-                });
-            }
-            match skip.reason {
-                DrawingSheetPresetImportSkipReason::NotSelected => {
-                    if selected.contains(&skip.source) {
-                        return Err(DesignManagementError::NumericRange(
-                            "drawing sheet preset import not-selected partition",
-                        ));
-                    }
-                    not_selected += 1;
-                }
-                DrawingSheetPresetImportSkipReason::ExplicitlySkipped => {
-                    if !selected.contains(&skip.source) {
-                        return Err(DesignManagementError::NumericRange(
-                            "drawing sheet preset import explicit-skip partition",
-                        ));
-                    }
-                }
-            }
-        }
-        if self.reviewed_candidate_count != selected.len() + not_selected {
-            return Err(DesignManagementError::NumericRange(
-                "drawing sheet preset import reviewed-candidate partition",
-            ));
-        }
-
-        let mut mapped = BTreeSet::new();
-        for mapping in &self.mappings {
-            mapping.source.validate()?;
-            mapping.target.validate()?;
-            if !selected.contains(&mapping.source) || skipped.contains_key(&mapping.source) {
-                return Err(DesignManagementError::NumericRange(
-                    "drawing sheet preset import mapping partition",
-                ));
-            }
-            if mapping.kind == DrawingSheetPresetImportMappingKind::CreatedProjectPreset
-                && mapping.target.scope != DrawingSheetPresetScope::Project
-            {
-                return Err(DesignManagementError::NumericRange(
-                    "drawing sheet preset import created target ownership",
-                ));
-            }
-            if !mapped.insert(mapping.source.clone()) {
-                return Err(DesignManagementError::DuplicateListEntry {
-                    field: "drawing sheet preset import mapped candidate",
-                    value: mapping.source.preset_id.clone(),
-                });
-            }
-        }
-        for source in &selected {
-            if !mapped.contains(source)
-                && skipped.get(source)
-                    != Some(&DrawingSheetPresetImportSkipReason::ExplicitlySkipped)
-            {
-                return Err(DesignManagementError::NumericRange(
-                    "drawing sheet preset import selected-candidate outcome",
-                ));
-            }
-        }
-
-        let reviewed = selected
-            .iter()
-            .cloned()
-            .chain(
-                self.skipped_candidates
-                    .iter()
-                    .filter(|skip| skip.reason == DrawingSheetPresetImportSkipReason::NotSelected)
-                    .map(|skip| skip.source.clone()),
-            )
-            .collect::<BTreeSet<_>>();
-        let mut conflicts = BTreeSet::new();
-        for conflict in &self.conflicts {
-            conflict.source.validate()?;
-            if let Some(existing) = &conflict.existing {
-                existing.validate()?;
-            }
-            if !reviewed.contains(&conflict.source)
-                || (conflict.existing.is_none() && !conflict.missing_managed_dependency)
-            {
-                return Err(DesignManagementError::NumericRange(
-                    "drawing sheet preset import conflict evidence",
-                ));
-            }
-            if !conflicts.insert(conflict.source.clone()) {
-                return Err(DesignManagementError::DuplicateListEntry {
-                    field: "drawing sheet preset import conflict",
-                    value: conflict.source.preset_id.clone(),
-                });
-            }
-            if !selected.contains(&conflict.source) {
-                continue;
-            }
-            let mapping = self
-                .mappings
-                .iter()
-                .find(|mapping| mapping.source == conflict.source);
-            let explicitly_skipped = skipped.get(&conflict.source)
-                == Some(&DrawingSheetPresetImportSkipReason::ExplicitlySkipped);
-            match conflict.resolution {
-                DrawingSheetPresetImportResolution::Skip => {
-                    if !explicitly_skipped || mapping.is_some() {
-                        return Err(DesignManagementError::NumericRange(
-                            "drawing sheet preset import skip conflict outcome",
-                        ));
-                    }
-                }
-                DrawingSheetPresetImportResolution::MatchesByDigest
-                | DrawingSheetPresetImportResolution::MapExisting => {
-                    let Some(mapping) = mapping else {
-                        return Err(DesignManagementError::NumericRange(
-                            "drawing sheet preset import existing conflict mapping",
-                        ));
-                    };
-                    if explicitly_skipped
-                        || mapping.kind != DrawingSheetPresetImportMappingKind::ExistingPreset
-                        || conflict.existing.as_ref() != Some(&mapping.target)
-                    {
-                        return Err(DesignManagementError::NumericRange(
-                            "drawing sheet preset import existing conflict outcome",
-                        ));
-                    }
-                }
-                DrawingSheetPresetImportResolution::NewIdentity
-                | DrawingSheetPresetImportResolution::KeepBothRename
-                | DrawingSheetPresetImportResolution::ReplaceManagedDependencies
-                | DrawingSheetPresetImportResolution::RetainUnavailableDependency => {
-                    let Some(mapping) = mapping else {
-                        return Err(DesignManagementError::NumericRange(
-                            "drawing sheet preset import created conflict mapping",
-                        ));
-                    };
-                    if explicitly_skipped
-                        || mapping.kind != DrawingSheetPresetImportMappingKind::CreatedProjectPreset
-                    {
-                        return Err(DesignManagementError::NumericRange(
-                            "drawing sheet preset import created conflict outcome",
-                        ));
-                    }
-                }
-            }
-            if matches!(
-                conflict.resolution,
-                DrawingSheetPresetImportResolution::ReplaceManagedDependencies
-                    | DrawingSheetPresetImportResolution::RetainUnavailableDependency
-            ) && !conflict.missing_managed_dependency
-            {
-                return Err(DesignManagementError::NumericRange(
-                    "drawing sheet preset import managed-dependency resolution",
-                ));
-            }
-            if conflict.missing_managed_dependency
-                && !matches!(
-                    conflict.resolution,
-                    DrawingSheetPresetImportResolution::MatchesByDigest
-                        | DrawingSheetPresetImportResolution::MapExisting
-                        | DrawingSheetPresetImportResolution::ReplaceManagedDependencies
-                        | DrawingSheetPresetImportResolution::RetainUnavailableDependency
-                        | DrawingSheetPresetImportResolution::Skip
-                )
-            {
-                return Err(DesignManagementError::NumericRange(
-                    "drawing sheet preset import missing-managed outcome",
-                ));
-            }
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DrawingSheetPreset {
-    pub id: String,
-    pub name: String,
-    pub scope: DrawingSheetPresetScope,
-    pub format: SchematicSheetFormat,
-}
-
-/// Project-domain evidence for a committed Page Setup or Sheet Format Manager
-/// operation. It is deliberately independent from transient console messages
-/// and undo history so a saved project can explain every multi-sheet format
-/// mutation after reopening.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DrawingSheetTransactionKind {
-    PageSetup,
-    SheetFormatManager,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DrawingSheetTransactionSkip {
-    pub sheet_id: SheetId,
-    pub sheet_name: String,
-    pub reason: String,
-}
-
-impl DrawingSheetTransactionSkip {
-    fn validate(&self) -> Result<(), DesignManagementError> {
-        require_non_nil(self.sheet_id.as_uuid(), "drawing sheet transaction skip")?;
-        validate_name("drawing sheet transaction skipped sheet", &self.sheet_name)?;
-        validate_value("drawing sheet transaction skip reason", &self.reason, false)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DrawingSheetTransactionReceipt {
-    pub catalog_revision: u64,
-    pub kind: DrawingSheetTransactionKind,
-    pub owner_cell_view_key: String,
-    pub source_format_digest: ContentDigest,
-    pub selected_sheet_ids: Vec<SheetId>,
-    pub applied_sheet_ids: Vec<SheetId>,
-    pub unchanged_sheet_ids: Vec<SheetId>,
-    pub skipped: Vec<DrawingSheetTransactionSkip>,
-    #[serde(default)]
-    pub project_default_changed: bool,
-    #[serde(default)]
-    pub project_preset_saved: bool,
-    #[serde(default)]
-    pub project_settings_changed: bool,
-}
-
-impl DrawingSheetTransactionReceipt {
-    pub fn validate(&self) -> Result<(), DesignManagementError> {
-        require_nonzero_revision(
-            self.catalog_revision,
-            "drawing sheet transaction receipt",
-            self.owner_cell_view_key.clone(),
-        )?;
-        canonical_cell_view_key(&self.owner_cell_view_key)?;
-        require_limit(
-            "drawing sheet transaction selected sheets",
-            self.selected_sheet_ids.len(),
-            MAX_DESIGN_SHEETS,
-        )?;
-        require_limit(
-            "drawing sheet transaction applied sheets",
-            self.applied_sheet_ids.len(),
-            MAX_DESIGN_SHEETS,
-        )?;
-        require_limit(
-            "drawing sheet transaction unchanged sheets",
-            self.unchanged_sheet_ids.len(),
-            MAX_DESIGN_SHEETS,
-        )?;
-        require_limit(
-            "drawing sheet transaction skipped sheets",
-            self.skipped.len(),
-            MAX_DESIGN_SHEETS,
-        )?;
-        if self.selected_sheet_ids.is_empty() {
-            return Err(DesignManagementError::ActiveSelectionRequired(
-                "drawing sheet transaction sheet",
-            ));
-        }
-        let mut selected = BTreeSet::new();
-        for id in &self.selected_sheet_ids {
-            require_non_nil(id.as_uuid(), "drawing sheet transaction selected sheet")?;
-            if !selected.insert(*id) {
-                return Err(DesignManagementError::DuplicateIdentity {
-                    domain: "drawing sheet transaction selected sheet",
-                    identity: id.to_string(),
-                });
-            }
-        }
-        let mut dispositions = BTreeSet::new();
-        for id in &self.applied_sheet_ids {
-            require_non_nil(id.as_uuid(), "drawing sheet transaction applied sheet")?;
-            if !selected.contains(id) {
-                return Err(DesignManagementError::MissingReference {
-                    domain: "drawing sheet transaction selected sheet",
-                    identity: id.to_string(),
-                });
-            }
-            if !dispositions.insert(*id) {
-                return Err(DesignManagementError::DuplicateIdentity {
-                    domain: "drawing sheet transaction disposition",
-                    identity: id.to_string(),
-                });
-            }
-        }
-        for id in &self.unchanged_sheet_ids {
-            require_non_nil(id.as_uuid(), "drawing sheet transaction unchanged sheet")?;
-            if !selected.contains(id) {
-                return Err(DesignManagementError::MissingReference {
-                    domain: "drawing sheet transaction selected sheet",
-                    identity: id.to_string(),
-                });
-            }
-            if !dispositions.insert(*id) {
-                return Err(DesignManagementError::DuplicateIdentity {
-                    domain: "drawing sheet transaction disposition",
-                    identity: id.to_string(),
-                });
-            }
-        }
-        for skip in &self.skipped {
-            skip.validate()?;
-            if !selected.contains(&skip.sheet_id) {
-                return Err(DesignManagementError::MissingReference {
-                    domain: "drawing sheet transaction selected sheet",
-                    identity: skip.sheet_id.to_string(),
-                });
-            }
-            if !dispositions.insert(skip.sheet_id) {
-                return Err(DesignManagementError::DuplicateIdentity {
-                    domain: "drawing sheet transaction disposition",
-                    identity: skip.sheet_id.to_string(),
-                });
-            }
-        }
-        if dispositions.len() != selected.len() {
-            return Err(DesignManagementError::NumericRange(
-                "drawing sheet transaction disposition coverage",
-            ));
-        }
-        if self.applied_sheet_ids.is_empty()
-            && self.skipped.is_empty()
-            && !self.project_default_changed
-            && !self.project_preset_saved
-            && !self.project_settings_changed
-        {
-            return Err(DesignManagementError::NoChanges(
-                "drawing sheet transaction receipt",
-            ));
-        }
-        Ok(())
-    }
-}
-
-impl DrawingSheetPreset {
-    /// Canonicalize a preset at an authority boundary.
-    ///
-    /// This is also the bounded migration path for legacy presets that stored
-    /// a standard-size enum or repeated sheet title values. The resulting
-    /// preset always owns an explicit custom snapshot whose identity exactly
-    /// matches the containing preset.
-    pub fn normalized_for_storage(mut self) -> Result<Self, DesignManagementError> {
-        let (portrait_width_um, portrait_height_um) =
-            self.format.authored_size.portrait_dimensions_um();
-        let source_preset_unavailable = matches!(
-            &self.format.authored_size,
-            AuthoredDrawingSheetSize::Custom {
-                snapshot: CustomDrawingSheetSnapshot {
-                    source_preset_unavailable: true,
-                    ..
-                }
-            }
-        );
-        let id = self.id.clone();
-        let name = self.name.clone();
-        self.format = self.format.try_update(|draft| {
-            draft.inheritance = DrawingSheetInheritance::Explicit;
-            draft.authored_size = AuthoredDrawingSheetSize::Custom {
-                snapshot: CustomDrawingSheetSnapshot {
-                    preset_id: Some(id),
-                    name,
-                    portrait_width_um,
-                    portrait_height_um,
-                    source_preset_unavailable,
-                },
-            };
-            for field in draft.title_block.fields.values_mut() {
-                field.value.clear();
-            }
-        })?;
-        self.validate()?;
-        Ok(self)
-    }
-
-    pub fn validate(&self) -> Result<(), DesignManagementError> {
-        validate_name("drawing sheet preset id", &self.id)?;
-        validate_name("drawing sheet preset name", &self.name)?;
-        validate_drawing_sheet_preset_label(&self.name)?;
-        self.format.validate()?;
-        if self.format.inheritance != DrawingSheetInheritance::Explicit {
-            return Err(DesignManagementError::NumericRange(
-                "drawing sheet preset inheritance",
-            ));
-        }
-        let AuthoredDrawingSheetSize::Custom { snapshot } = &self.format.authored_size else {
-            return Err(DesignManagementError::NumericRange(
-                "drawing sheet preset custom snapshot",
-            ));
-        };
-        if snapshot.preset_id.as_deref() != Some(self.id.as_str()) || snapshot.name != self.name {
-            return Err(DesignManagementError::NumericRange(
-                "drawing sheet preset snapshot identity",
-            ));
-        }
-        validate_no_title_values(&self.format)
-    }
-}
-
-pub(super) fn validate_drawing_sheet_preset_label(name: &str) -> Result<(), DesignManagementError> {
-    if name.chars().count() > MAX_DRAWING_SHEET_PRESET_NAME_CHARS
-        || name.chars().any(|character| {
-            matches!(
-                character,
-                '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|'
-            )
-        })
-    {
-        return Err(DesignManagementError::InvalidText {
-            field: "drawing sheet preset name",
-            value: name.to_owned(),
-        });
-    }
-    Ok(())
-}
-
-#[must_use]
-pub fn drawing_sheet_preset_key(value: &str) -> String {
-    case_fold(value)
-}
-
-/// Project-owned drawing-sheet policy.
-///
-/// Only `Project` presets are accepted here. User and organization presets
-/// belong to their respective preference/policy authorities; a project may
-/// use one only after capturing it as an explicitly owned project snapshot.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct DrawingSheetProjectSettings {
-    pub default_format: SchematicSheetFormat,
-    pub presets: Vec<DrawingSheetPreset>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub preset_import_receipts: Vec<DrawingSheetPresetImportReceipt>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub transaction_receipts: Vec<DrawingSheetTransactionReceipt>,
-    /// Canonical project-owned title-block values. Sheets own visibility for
-    /// these fields, but never duplicate their values.
-    #[serde(default = "default_project_title_block_field_values")]
-    pub title_block_field_values: BTreeMap<DrawingSheetTitleFieldId, String>,
-    #[serde(default)]
-    pub new_sheet_policy: DrawingSheetNewSheetPolicy,
-    #[serde(default)]
-    pub remember_last_explicit_format: bool,
-    #[serde(default)]
-    pub last_explicit_format: Option<SchematicSheetFormat>,
-}
-
-impl Default for DrawingSheetProjectSettings {
-    fn default() -> Self {
-        Self {
-            default_format: SchematicSheetFormat {
-                inheritance: DrawingSheetInheritance::ProjectDefault,
-                ..SchematicSheetFormat::default()
-            },
-            presets: Vec::new(),
-            preset_import_receipts: Vec::new(),
-            transaction_receipts: Vec::new(),
-            title_block_field_values: default_project_title_block_field_values(),
-            new_sheet_policy: DrawingSheetNewSheetPolicy::ProjectDefault,
-            remember_last_explicit_format: false,
-            last_explicit_format: None,
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct DrawingSheetProjectSettingsWire {
-    default_format: SchematicSheetFormat,
-    presets: Vec<DrawingSheetPreset>,
-    preset_import_receipts: Vec<DrawingSheetPresetImportReceipt>,
-    transaction_receipts: Vec<DrawingSheetTransactionReceipt>,
-    title_block_field_values: Option<BTreeMap<DrawingSheetTitleFieldId, String>>,
-    new_sheet_policy: DrawingSheetNewSheetPolicy,
-    remember_last_explicit_format: bool,
-    last_explicit_format: Option<SchematicSheetFormat>,
-}
-
-impl Default for DrawingSheetProjectSettingsWire {
-    fn default() -> Self {
-        let settings = DrawingSheetProjectSettings::default();
-        Self {
-            default_format: settings.default_format,
-            presets: settings.presets,
-            preset_import_receipts: settings.preset_import_receipts,
-            transaction_receipts: settings.transaction_receipts,
-            // `None` is the schema-presence sentinel. A missing field belongs
-            // to the legacy format and must migrate project-owned values from
-            // `default_format`; an explicitly serialized empty/default map is
-            // still deserialized as `Some`.
-            title_block_field_values: None,
-            new_sheet_policy: settings.new_sheet_policy,
-            remember_last_explicit_format: settings.remember_last_explicit_format,
-            last_explicit_format: settings.last_explicit_format,
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for DrawingSheetProjectSettings {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let wire = DrawingSheetProjectSettingsWire::deserialize(deserializer)?;
-        let mut default_format = wire.default_format;
-        let presets = wire
-            .presets
-            .into_iter()
-            .map(DrawingSheetPreset::normalized_for_storage)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(D::Error::custom)?;
-        let title_block_field_values = wire.title_block_field_values.unwrap_or_else(|| {
-            let mut migrated = default_project_title_block_field_values();
-            for id in DrawingSheetTitleFieldId::PROJECT_OWNED {
-                if let Some(field) = default_format.title_block.fields.get(&id) {
-                    migrated.insert(id, field.value.clone());
-                }
-            }
-            migrated
-        });
-        clear_project_owned_title_values(&mut default_format);
-        let mut last_explicit_format = wire.last_explicit_format;
-        if let Some(format) = &mut last_explicit_format {
-            clear_project_owned_title_values(format);
-        }
-        let mut settings = Self {
-            default_format,
-            presets,
-            preset_import_receipts: wire.preset_import_receipts,
-            transaction_receipts: wire.transaction_receipts,
-            title_block_field_values,
-            new_sheet_policy: wire.new_sheet_policy,
-            remember_last_explicit_format: wire.remember_last_explicit_format,
-            last_explicit_format,
-        };
-        settings.normalize_preset_references();
-        settings.validate().map_err(D::Error::custom)?;
-        Ok(settings)
-    }
-}
-
-impl DrawingSheetProjectSettings {
-    pub(super) fn normalize_preset_references(&mut self) {
-        let available = self
-            .presets
-            .iter()
-            .map(|preset| {
-                (
-                    case_fold(&preset.id),
-                    (
-                        preset.name.clone(),
-                        matches!(
-                            &preset.format.authored_size,
-                            AuthoredDrawingSheetSize::Custom {
-                                snapshot: CustomDrawingSheetSnapshot {
-                                    source_preset_unavailable: true,
-                                    ..
-                                }
-                            }
-                        ),
-                    ),
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
-        normalize_format_preset_reference(&mut self.default_format, &available);
-        if let Some(format) = &mut self.last_explicit_format {
-            normalize_format_preset_reference(format, &available);
-        }
-    }
-
-    pub fn validate(&self) -> Result<(), DesignManagementError> {
-        if self.default_format.inheritance != DrawingSheetInheritance::ProjectDefault {
-            return Err(DesignManagementError::NumericRange(
-                "project drawing sheet default inheritance",
-            ));
-        }
-        self.default_format.validate()?;
-        validate_no_project_owned_title_values(&self.default_format)?;
-        validate_project_drawing_sheet_title_field_values(&self.title_block_field_values)?;
-        if let Some(format) = &self.last_explicit_format {
-            format.validate()?;
-            validate_no_project_owned_title_values(format)?;
-            if format.inheritance != DrawingSheetInheritance::Explicit {
-                return Err(DesignManagementError::NumericRange(
-                    "last explicit drawing sheet format inheritance",
-                ));
-            }
-        }
-        require_limit(
-            "drawing sheet project presets",
-            self.presets.len(),
-            MAX_DRAWING_SHEET_PROJECT_PRESETS,
-        )?;
-        require_limit(
-            "drawing sheet preset import receipts",
-            self.preset_import_receipts.len(),
-            MAX_DRAWING_SHEET_PRESET_IMPORT_RECEIPTS,
-        )?;
-        for receipt in &self.preset_import_receipts {
-            receipt.validate()?;
-        }
-        require_limit(
-            "drawing sheet transaction receipts",
-            self.transaction_receipts.len(),
-            MAX_DRAWING_SHEET_TRANSACTION_RECEIPTS,
-        )?;
-        let mut receipt_revisions = BTreeSet::new();
-        for receipt in &self.transaction_receipts {
-            receipt.validate()?;
-            if !receipt_revisions.insert(receipt.catalog_revision) {
-                return Err(DesignManagementError::DuplicateIdentity {
-                    domain: "drawing sheet transaction receipt revision",
-                    identity: receipt.catalog_revision.to_string(),
-                });
-            }
-        }
-        let mut ids = BTreeSet::new();
-        let mut names = BTreeSet::new();
-        for preset in &self.presets {
-            preset.validate()?;
-            if preset.scope != DrawingSheetPresetScope::Project
-                || preset.format.inheritance != DrawingSheetInheritance::Explicit
-            {
-                return Err(DesignManagementError::NumericRange(
-                    "project drawing sheet preset ownership",
-                ));
-            }
-            if !ids.insert(case_fold(&preset.id)) {
-                return Err(DesignManagementError::DuplicateListEntry {
-                    field: "drawing sheet preset id",
-                    value: preset.id.clone(),
-                });
-            }
-            if !names.insert(case_fold(&preset.name)) {
-                return Err(DesignManagementError::DuplicateListEntry {
-                    field: "drawing sheet preset name",
-                    value: preset.name.clone(),
-                });
-            }
-        }
-        let available = self
-            .presets
-            .iter()
-            .map(|preset| {
-                (
-                    case_fold(&preset.id),
-                    (
-                        preset.name.clone(),
-                        matches!(
-                            &preset.format.authored_size,
-                            AuthoredDrawingSheetSize::Custom {
-                                snapshot: CustomDrawingSheetSnapshot {
-                                    source_preset_unavailable: true,
-                                    ..
-                                }
-                            }
-                        ),
-                    ),
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
-        validate_format_preset_reference(&self.default_format, &available)?;
-        if let Some(format) = &self.last_explicit_format {
-            validate_format_preset_reference(format, &available)?;
-        }
-        Ok(())
-    }
-
-    #[must_use]
-    pub fn find_preset(&self, id: &str) -> Option<&DrawingSheetPreset> {
-        let id = case_fold(id);
-        self.presets
-            .iter()
-            .find(|preset| case_fold(&preset.id) == id)
-    }
-}
-
-pub fn validate_project_drawing_sheet_title_field_values(
-    values: &BTreeMap<DrawingSheetTitleFieldId, String>,
-) -> Result<(), DesignManagementError> {
-    if values.len() != DrawingSheetTitleFieldId::PROJECT_OWNED.len()
-        || DrawingSheetTitleFieldId::PROJECT_OWNED
-            .into_iter()
-            .any(|field| !values.contains_key(&field))
-    {
-        return Err(DesignManagementError::NumericRange(
-            "project drawing sheet title field set",
-        ));
-    }
-    for (field, value) in values {
-        if !field.is_project_owned() {
-            return Err(DesignManagementError::NumericRange(
-                "project drawing sheet title field ownership",
-            ));
-        }
-        validate_value("project drawing sheet title field", value, true)?;
-    }
-    Ok(())
-}
-
-fn default_project_title_block_field_values() -> BTreeMap<DrawingSheetTitleFieldId, String> {
-    DrawingSheetTitleFieldId::PROJECT_OWNED
-        .into_iter()
-        .map(|field| (field, String::new()))
-        .collect()
-}
-
-fn clear_project_owned_title_values(format: &mut SchematicSheetFormat) {
-    for id in DrawingSheetTitleFieldId::PROJECT_OWNED {
-        format
-            .title_block
-            .fields
-            .entry(id)
-            .or_default()
-            .value
-            .clear();
-    }
-}
-
-fn clear_all_title_values(format: &mut SchematicSheetFormat) {
-    for field in format.title_block.fields.values_mut() {
-        field.value.clear();
-    }
-}
-
-fn validate_no_title_values(format: &SchematicSheetFormat) -> Result<(), DesignManagementError> {
-    if format
-        .title_block
-        .fields
-        .values()
-        .any(|field| !field.value.is_empty())
-    {
-        return Err(DesignManagementError::InvalidText {
-            field: "authored drawing sheet title value in preset",
-            value: "preset formats retain visibility but never authored values".to_owned(),
-        });
-    }
-    Ok(())
-}
-
-fn validate_no_project_owned_title_values(
-    format: &SchematicSheetFormat,
-) -> Result<(), DesignManagementError> {
-    if DrawingSheetTitleFieldId::PROJECT_OWNED
-        .into_iter()
-        .any(|id| {
-            format
-                .title_block
-                .fields
-                .get(&id)
-                .is_some_and(|field| !field.value.is_empty())
-        })
-    {
-        return Err(DesignManagementError::InvalidText {
-            field: "project-owned drawing sheet title value in format",
-            value: "value must be stored by project authority".to_owned(),
-        });
-    }
-    Ok(())
-}
-
-pub(super) fn normalize_format_preset_reference(
-    format: &mut SchematicSheetFormat,
-    available: &BTreeMap<String, (String, bool)>,
-) {
-    let AuthoredDrawingSheetSize::Custom { snapshot } = &mut format.authored_size else {
-        return;
-    };
-    let Some(id) = snapshot.preset_id.as_ref() else {
-        snapshot.source_preset_unavailable = false;
-        return;
-    };
-    if let Some((name, unavailable)) = available.get(&case_fold(id)) {
-        snapshot.name.clone_from(name);
-        snapshot.source_preset_unavailable = *unavailable;
-    } else {
-        snapshot.source_preset_unavailable = true;
-    }
-}
-
-pub fn validate_format_preset_reference(
-    format: &SchematicSheetFormat,
-    available: &BTreeMap<String, (String, bool)>,
-) -> Result<(), DesignManagementError> {
-    let AuthoredDrawingSheetSize::Custom { snapshot } = &format.authored_size else {
-        return Ok(());
-    };
-    let Some(id) = snapshot.preset_id.as_ref() else {
-        if snapshot.source_preset_unavailable {
-            return Err(DesignManagementError::NumericRange(
-                "unavailable drawing sheet preset without identity",
-            ));
-        }
-        return Ok(());
-    };
-    let expected_unavailable = available
-        .get(&case_fold(id))
-        .is_none_or(|(_, unavailable)| *unavailable);
-    if let Some((name, _)) = available.get(&case_fold(id))
-        && snapshot.name != *name
-    {
-        return Err(DesignManagementError::InvalidText {
-            field: "drawing sheet preset reference name",
-            value: snapshot.name.clone(),
-        });
-    }
-    if snapshot.source_preset_unavailable != expected_unavailable {
-        return Err(DesignManagementError::MissingReference {
-            domain: "drawing sheet preset",
-            identity: id.clone(),
-        });
-    }
-    Ok(())
-}
+pub(super) mod presets;
+pub use presets::*;

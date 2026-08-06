@@ -94,10 +94,8 @@ pub(crate) fn open_drawing_sheet_setup_for_state(state: &mut AppState) -> bool {
     let (governed, format, sheet_name, sheet_count, sheet_number) =
         if let Some((catalog, sheet)) = governed {
             let sheet_number = catalog
-                .sheets()
-                .iter()
-                .position(|candidate| candidate.id() == sheet.id())
-                .map_or(1, |index| index + 1);
+                .page_number_and_count(sheet.id())
+                .map_or(1, |(page, _)| page);
             (
                 Some(GovernedDrawingSheetAuthority {
                     cell_view_key: cell_view_key.clone(),
@@ -403,7 +401,12 @@ fn apply_governed_sheet_setup(
             .ok_or_else(|| "The governed active sheet is unavailable.".to_owned())?;
         sheet_format = enforce_managed_format_authority(sheet_format, target_authority)?;
     }
-    migrate_and_canonicalize_project_title_values(&mut candidate, &mut sheet_format, false)?;
+    publish_staged_document_control(&mut candidate, transaction.staged_document_control.as_ref())?;
+    migrate_and_canonicalize_project_title_values(
+        &mut candidate,
+        &mut sheet_format,
+        transaction.staged_project_title_values.is_some(),
+    )?;
     if scope != PageSetupScope::CurrentSheet
         || (sheet_format.inheritance != crate::state::DrawingSheetInheritance::Explicit
             && !same_setup_ignoring_inheritance(
@@ -499,10 +502,7 @@ fn apply_governed_sheet_setup(
             };
             let already_matches = catalog.find(sheet_id).is_some_and(|sheet| {
                 sheet.page_format() == &applied_format
-                    || (sheet.page_format().inheritance
-                        == crate::state::DrawingSheetInheritance::ProjectDefault
-                        && applied_format.inheritance
-                            == crate::state::DrawingSheetInheritance::ProjectDefault)
+                    || inherited_sheet_owned_state_matches(sheet.page_format(), &applied_format)
             });
             if already_matches {
                 unchanged_sheet_ids.push(sheet_id);
@@ -711,6 +711,20 @@ fn same_setup_ignoring_inheritance(
         })
         .map_err(|error| error.to_string())?;
     Ok(left == right)
+}
+
+/// Project-default sheets retain a physical-format snapshot for migration and
+/// recovery, but only their title-field state is authored by the sheet. A
+/// stale physical snapshot must not create history when the effective default
+/// already matches; conversely, a title-field edit must never be discarded
+/// merely because both formats inherit from the project default.
+fn inherited_sheet_owned_state_matches(
+    left: &SchematicSheetFormat,
+    right: &SchematicSheetFormat,
+) -> bool {
+    left.inheritance == crate::state::DrawingSheetInheritance::ProjectDefault
+        && right.inheritance == crate::state::DrawingSheetInheritance::ProjectDefault
+        && left.title_block.fields == right.title_block.fields
 }
 
 fn unique_preset_id(name: &str, candidate: &crate::state::DesignManagementCatalog) -> String {
@@ -940,8 +954,15 @@ fn apply_legacy_sheet_setup(
         )
         .map_err(|error| error.to_string())?;
     let mut format = validated.page_format;
+    publish_staged_document_control(&mut candidate, transaction.staged_document_control.as_ref())?;
     migrate_and_canonicalize_project_title_values(&mut candidate, &mut format, true)?;
-    if transaction.draft.scope != PageSetupScope::CurrentSheet {
+    if transaction.draft.scope != PageSetupScope::CurrentSheet
+        || (format.inheritance != crate::state::DrawingSheetInheritance::Explicit
+            && !same_setup_ignoring_inheritance(
+                &format,
+                candidate.drawing_sheet_settings().default_format.clone(),
+            )?)
+    {
         format = format
             .try_update(|draft| {
                 draft.inheritance = crate::state::DrawingSheetInheritance::Explicit;
@@ -1066,6 +1087,27 @@ fn migrate_and_canonicalize_project_title_values(
             .map_err(|error| error.to_string())?;
     }
     *format = format.without_project_owned_title_values();
+    Ok(())
+}
+
+fn publish_staged_document_control(
+    candidate: &mut crate::state::DesignManagementCatalog,
+    document_control: Option<&crate::state::DrawingSheetDocumentControl>,
+) -> Result<(), String> {
+    let Some(document_control) = document_control else {
+        return Ok(());
+    };
+    document_control
+        .validate()
+        .map_err(|error| error.to_string())?;
+    if &candidate.drawing_sheet_settings().document_control == document_control {
+        return Ok(());
+    }
+    let mut settings = candidate.drawing_sheet_settings().clone();
+    settings.document_control.clone_from(document_control);
+    candidate
+        .update_drawing_sheet_settings(candidate.revision(), settings)
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -1319,6 +1361,69 @@ mod tests {
             super::super::state::SheetSizeChoice::Standard(DrawingSheetStandard::IsoA4)
         );
         assert!(!setup.is_dirty());
+    }
+
+    #[test]
+    fn inherited_sheet_title_edit_is_committed_without_severing_inheritance() {
+        let (mut app, key, ids) = governed_app_with_sheets(1);
+        let inherited = app
+            .state
+            .workspace
+            .design_management
+            .drawing_sheet_settings()
+            .default_format
+            .clone()
+            .try_update(|draft| {
+                draft.inheritance = crate::state::DrawingSheetInheritance::ProjectDefault;
+                draft
+                    .title_block
+                    .fields
+                    .get_mut(&crate::state::DrawingSheetTitleFieldId::SheetTitle)
+                    .expect("canonical title field")
+                    .value = "Original title".to_owned();
+            })
+            .unwrap();
+        let catalog = app
+            .state
+            .workspace
+            .design_management
+            .sheet_catalog_mut(&key)
+            .unwrap();
+        let revision = catalog.find(ids[0]).unwrap().revision();
+        catalog
+            .update_sheet_page_format(ids[0], revision, inherited)
+            .unwrap();
+
+        open_drawing_sheet_setup(&mut app);
+        app.state
+            .dialogs
+            .drawing_sheet_setup
+            .draft
+            .title_fields
+            .get_mut(&crate::state::DrawingSheetTitleFieldId::SheetTitle)
+            .expect("canonical title field")
+            .value = "Released amplifier".to_owned();
+
+        apply_drawing_sheet_setup(&mut app).unwrap();
+
+        let saved = app
+            .state
+            .workspace
+            .design_management
+            .sheet_catalog(&key)
+            .unwrap()
+            .find(ids[0])
+            .unwrap()
+            .page_format();
+        assert_eq!(
+            saved.inheritance,
+            crate::state::DrawingSheetInheritance::ProjectDefault
+        );
+        assert_eq!(
+            saved.title_block.fields[&crate::state::DrawingSheetTitleFieldId::SheetTitle].value,
+            "Released amplifier"
+        );
+        assert!(app.state.can_undo_project_design());
     }
 
     #[test]
@@ -1816,5 +1921,41 @@ mod tests {
             .expect("bootstrap publishes the first governed sheet");
         assert_eq!(catalog.sheets().len(), 1);
         assert!(app.state.can_undo_project_design());
+    }
+
+    #[test]
+    fn bootstrap_current_sheet_physical_edit_severs_default_inheritance() {
+        let mut app = RSpiceApp::test_instance();
+        let key = app.state.workspace.active_key();
+        open_drawing_sheet_setup(&mut app);
+        app.state
+            .dialogs
+            .drawing_sheet_setup
+            .draft
+            .set_orientation(crate::state::SchematicPageOrientation::Portrait);
+
+        apply_drawing_sheet_setup(&mut app).unwrap();
+
+        let sheet = app
+            .state
+            .workspace
+            .design_management
+            .sheet_catalog(&key)
+            .and_then(|catalog| catalog.active())
+            .expect("bootstrap publishes the edited governed sheet");
+        assert_eq!(
+            sheet.page_format().inheritance,
+            crate::state::DrawingSheetInheritance::Explicit
+        );
+        assert_eq!(
+            sheet.page_format().orientation,
+            crate::state::SchematicPageOrientation::Portrait
+        );
+        assert_eq!(
+            crate::schematic::view::drawing_sheet::ActiveDrawingSheet::resolve(&app.state)
+                .format
+                .orientation,
+            crate::state::SchematicPageOrientation::Portrait
+        );
     }
 }

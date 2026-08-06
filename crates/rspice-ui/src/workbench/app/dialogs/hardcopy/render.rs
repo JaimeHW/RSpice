@@ -182,7 +182,7 @@ impl RSpiceApp {
                 })
                 .to_uppercase()
         );
-        let (eyebrow, title, primary, secondary) = match page {
+        let (eyebrow, title, primary, secondary): (&str, &str, &str, Option<&str>) = match page {
             HardcopyDialogPage::Main => (
                 main_eyebrow.as_str(),
                 self.state.dialogs.hardcopy.workflow.title(),
@@ -1808,7 +1808,13 @@ fn tiling_key(value: TilingMode) -> u8 {
 fn format_label(format: OutputFormat) -> &'static str {
     match format {
         OutputFormat::NativePrinter => "System printer",
-        OutputFormat::BrowserPrintDocument => "Browser print dialog",
+        OutputFormat::BrowserPrintDocument => {
+            if cfg!(target_arch = "wasm32") {
+                "Browser print dialog"
+            } else {
+                "Print-ready document handoff"
+            }
+        }
         OutputFormat::PdfVector => "PDF · vector",
         OutputFormat::PdfA => "PDF/A · vector",
         OutputFormat::SvgVector => "SVG · vector",

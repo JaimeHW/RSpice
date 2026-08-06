@@ -12,11 +12,11 @@ use egui::{
 };
 
 use crate::state::{
-    DrawingSheetBorderTemplate, DrawingSheetDisplayUnit,
-    DrawingSheetGeometry as AuthoredDrawingSheetGeometry, DrawingSheetRect, DrawingSheetScale,
-    DrawingSheetTitleBlockRotation, DrawingSheetTitleFieldId, DrawingSheetTitleFieldValueAuthority,
-    DrawingSheetZoneEdges, DrawingSheetZoneGrid, DrawingSheetZoneLabels, Point,
-    SchematicSheetFormat,
+    DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS, DrawingSheetBorderTemplate,
+    DrawingSheetDisplayUnit, DrawingSheetGeometry as AuthoredDrawingSheetGeometry,
+    DrawingSheetRect, DrawingSheetScale, DrawingSheetTitleBlockRotation, DrawingSheetTitleFieldId,
+    DrawingSheetTitleFieldValueAuthority, DrawingSheetZoneEdges, DrawingSheetZoneGrid,
+    DrawingSheetZoneLabels, Point, SchematicSheetFormat,
 };
 use crate::ui::theme;
 use crate::ui::tokens::{Mode, Tokens};
@@ -190,7 +190,6 @@ pub(crate) struct ActiveDrawingSheet {
     pub(crate) geometry: DrawingSheetGeometry,
     pub(crate) sheet_name: String,
     pub(crate) page_label: String,
-    pub(crate) revision: u64,
 }
 
 impl ActiveDrawingSheet {
@@ -199,12 +198,9 @@ impl ActiveDrawingSheet {
         if let Some(catalog) = state.workspace.design_management.sheet_catalog(&key)
             && let Some(sheet) = catalog.active()
         {
-            let page = catalog
-                .sheets()
-                .iter()
-                .position(|candidate| candidate.id() == sheet.id())
-                .unwrap_or(0)
-                + 1;
+            let (page, page_count) = catalog
+                .page_number_and_count(sheet.id())
+                .unwrap_or((1, u32::try_from(catalog.sheets().len()).unwrap_or(1)));
             let format = match sheet.page_format().inheritance {
                 crate::state::DrawingSheetInheritance::ProjectDefault => state
                     .workspace
@@ -219,8 +215,7 @@ impl ActiveDrawingSheet {
                 geometry: DrawingSheetGeometry::from_format(&format),
                 format,
                 sheet_name: sheet.name().to_owned(),
-                page_label: format!("{page} of {}", catalog.sheets().len()),
-                revision: sheet.revision(),
+                page_label: format!("{page} of {page_count}"),
             };
         }
 
@@ -235,7 +230,6 @@ impl ActiveDrawingSheet {
             format,
             sheet_name: state.workspace.active_view.cell.clone(),
             page_label: "1 of 1".to_owned(),
-            revision: state.workspace.project.revision().get(),
         }
     }
 
@@ -1277,10 +1271,34 @@ fn draw_title_block(
         palette.block,
         Stroke::new(1.25, palette.border),
     ));
-    if !lod.show_title_block_fields
-        || authored_block.width() < 80.0
-        || authored_block.height() < 30.0
+    let effective_template = sheet.geometry.physical.effective_title_block_template;
+    let mut field_grid = authored_block;
+    if let Some(logo) = sheet.format.title_block_logo(effective_template)
+        && let Some((template_width_um, _)) =
+            sheet.format.title_block_dimensions_um(effective_template)
     {
+        let reserved_width =
+            authored_block.width() * (logo.reserved_width_um() as f32 / template_width_um as f32);
+        field_grid.min.x = (authored_block.left() + reserved_width).min(authored_block.right());
+        painter.line_segment(
+            [
+                transform(pos2(field_grid.left(), authored_block.top())),
+                transform(pos2(field_grid.left(), authored_block.bottom())),
+            ],
+            Stroke::new(0.8, palette.zone),
+        );
+        draw_managed_title_logo(
+            painter,
+            Rect::from_min_max(
+                authored_block.left_top(),
+                pos2(field_grid.left(), authored_block.bottom()),
+            ),
+            &transform,
+            logo,
+            palette,
+        );
+    }
+    if !lod.show_title_block_fields || field_grid.width() < 80.0 || field_grid.height() < 30.0 {
         return;
     }
     let fields = resolved_title_block_fields(state, sheet);
@@ -1288,9 +1306,10 @@ fn draw_title_block(
         return;
     }
     let fields = fields.into_iter().collect::<Vec<_>>();
-    let Some(rows) = crate::state::drawing_sheet_title_block_rows(
-        sheet.geometry.physical.effective_title_block_template,
-    ) else {
+    let Some(rows) = sheet
+        .format
+        .title_block_rows(sheet.geometry.physical.effective_title_block_template)
+    else {
         return;
     };
     let max_chars = crate::state::drawing_sheet_title_cell_capacity(
@@ -1300,14 +1319,14 @@ fn draw_title_block(
     )
     .unwrap_or(4);
     let columns = fields.len().div_ceil(rows).max(1);
-    let cell_width = authored_block.width() / columns as f32;
-    let cell_height = authored_block.height() / rows as f32;
+    let cell_width = field_grid.width() / columns as f32;
+    let cell_height = field_grid.height() / rows as f32;
     for row in 1..rows {
-        let y = authored_block.top() + cell_height * row as f32;
+        let y = field_grid.top() + cell_height * row as f32;
         painter.line_segment(
             [
-                transform(pos2(authored_block.left(), y)),
-                transform(pos2(authored_block.right(), y)),
+                transform(pos2(field_grid.left(), y)),
+                transform(pos2(field_grid.right(), y)),
             ],
             Stroke::new(0.8, palette.zone),
         );
@@ -1316,8 +1335,8 @@ fn draw_title_block(
         let row = index / columns;
         let column = index % columns;
         if column > 0 {
-            let x = authored_block.left() + cell_width * column as f32;
-            let top = authored_block.top() + cell_height * row as f32;
+            let x = field_grid.left() + cell_width * column as f32;
+            let top = field_grid.top() + cell_height * row as f32;
             painter.line_segment(
                 [
                     transform(pos2(x, top)),
@@ -1328,12 +1347,12 @@ fn draw_title_block(
         }
         let authored_cell = Rect::from_min_max(
             pos2(
-                authored_block.left() + cell_width * column as f32,
-                authored_block.top() + cell_height * row as f32,
+                field_grid.left() + cell_width * column as f32,
+                field_grid.top() + cell_height * row as f32,
             ),
             pos2(
-                authored_block.left() + cell_width * (column + 1) as f32,
-                authored_block.top() + cell_height * (row + 1) as f32,
+                field_grid.left() + cell_width * (column + 1) as f32,
+                field_grid.top() + cell_height * (row + 1) as f32,
             ),
         )
         .shrink2(vec2(4.0 * zoom.max(1.0), 2.0 * zoom.max(1.0)));
@@ -1346,7 +1365,7 @@ fn draw_title_block(
             &clipped,
             transform(authored_cell.left_top()),
             Align2::LEFT_TOP,
-            field.label,
+            field.id.display_label().to_uppercase(),
             theme::mono(
                 drawing_sheet_font_size(zoom, 5.5, 7.0),
                 theme::FontWeight::Regular,
@@ -1376,60 +1395,56 @@ fn draw_title_block(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ResolvedDrawingSheetTitleField {
-    pub(crate) id: DrawingSheetTitleFieldId,
-    pub(crate) label: &'static str,
-    pub(crate) value: String,
-    pub(crate) authority: DrawingSheetTitleFieldValueAuthority,
+fn draw_managed_title_logo(
+    painter: &Painter,
+    reserved: Rect,
+    transform: &impl Fn(Pos2) -> Pos2,
+    logo: &crate::state::DrawingSheetManagedLogo,
+    palette: DrawingSheetPalette,
+) {
+    let inset = (reserved.width().min(reserved.height()) * 0.08).max(1.0);
+    let content = reserved.shrink(inset);
+    if content.width() <= 0.0 || content.height() <= 0.0 {
+        return;
+    }
+    let basis = f32::from(DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS);
+    let stroke = Stroke::new(0.9, palette.block_ink);
+    for primitive in logo.primitives() {
+        let points = primitive
+            .points()
+            .iter()
+            .map(|point| {
+                transform(pos2(
+                    egui::lerp(
+                        content.left()..=content.right(),
+                        f32::from(point.x()) / basis,
+                    ),
+                    egui::lerp(
+                        content.top()..=content.bottom(),
+                        f32::from(point.y()) / basis,
+                    ),
+                ))
+            })
+            .collect::<Vec<_>>();
+        if primitive.filled() {
+            painter.add(Shape::convex_polygon(points, palette.block_ink, stroke));
+        } else if primitive.closed() {
+            painter.add(Shape::closed_line(points, stroke));
+        } else {
+            painter.add(Shape::line(points, stroke));
+        }
+    }
 }
 
 pub(crate) fn resolved_title_block_fields(
     state: &AppState,
     sheet: &ActiveDrawingSheet,
-) -> Vec<ResolvedDrawingSheetTitleField> {
-    DrawingSheetTitleFieldId::ALL
+) -> Vec<crate::state::ResolvedDrawingSheetTitleField> {
+    let authority_values = DrawingSheetTitleFieldId::ALL
         .into_iter()
-        .filter_map(|id| {
-            let authored = sheet.format.title_block.fields.get(&id)?;
-            authored.visible.then(|| {
-                let default_value = default_title_field_value(id, state, sheet);
-                let authority = id.policy().value_authority;
-                let value = match authority {
-                    DrawingSheetTitleFieldValueAuthority::Automatic => default_value,
-                    DrawingSheetTitleFieldValueAuthority::Authored if id.is_project_owned() => {
-                        if default_value.is_empty() {
-                            // Migration fallback for projects saved before
-                            // project-owned title fields were canonicalized.
-                            if authored.value.trim().is_empty() {
-                                "—".to_owned()
-                            } else {
-                                authored.value.clone()
-                            }
-                        } else {
-                            default_value
-                        }
-                    }
-                    DrawingSheetTitleFieldValueAuthority::Authored
-                        if authored.value.trim().is_empty() =>
-                    {
-                        if default_value.is_empty() {
-                            "—".to_owned()
-                        } else {
-                            default_value
-                        }
-                    }
-                    DrawingSheetTitleFieldValueAuthority::Authored => authored.value.clone(),
-                };
-                ResolvedDrawingSheetTitleField {
-                    id,
-                    label: title_field_label(id),
-                    value,
-                    authority,
-                }
-            })
-        })
-        .collect()
+        .map(|id| (id, default_title_field_value(id, state, sheet)))
+        .collect();
+    crate::state::resolve_drawing_sheet_title_fields(&sheet.format, &authority_values)
 }
 
 fn truncate_canvas_title_value(value: &str, max_chars: usize) -> String {
@@ -1494,25 +1509,6 @@ fn paint_title_text(
     );
 }
 
-fn title_field_label(field: DrawingSheetTitleFieldId) -> &'static str {
-    match field {
-        DrawingSheetTitleFieldId::Project => "PROJECT",
-        DrawingSheetTitleFieldId::CellView => "CELL / VIEW",
-        DrawingSheetTitleFieldId::SheetTitle => "SHEET TITLE",
-        DrawingSheetTitleFieldId::Page => "PAGE",
-        DrawingSheetTitleFieldId::Revision => "REVISION",
-        DrawingSheetTitleFieldId::Format => "FORMAT",
-        DrawingSheetTitleFieldId::Scale => "SCALE",
-        DrawingSheetTitleFieldId::DrawnBy => "DRAWN BY",
-        DrawingSheetTitleFieldId::CheckedBy => "CHECKED BY",
-        DrawingSheetTitleFieldId::ApprovedBy => "APPROVED BY",
-        DrawingSheetTitleFieldId::Date => "DATE",
-        DrawingSheetTitleFieldId::Organization => "ORGANIZATION",
-        DrawingSheetTitleFieldId::DocumentId => "DOCUMENT ID",
-        DrawingSheetTitleFieldId::Classification => "CLASSIFICATION",
-    }
-}
-
 fn default_title_field_value(
     field: DrawingSheetTitleFieldId,
     state: &AppState,
@@ -1523,7 +1519,13 @@ fn default_title_field_value(
         DrawingSheetTitleFieldId::CellView => state.workspace.active_view.display_path().to_owned(),
         DrawingSheetTitleFieldId::SheetTitle => sheet.sheet_name.clone(),
         DrawingSheetTitleFieldId::Page => sheet.page_label.clone(),
-        DrawingSheetTitleFieldId::Revision => sheet.revision.to_string(),
+        DrawingSheetTitleFieldId::Revision => state
+            .workspace
+            .design_management
+            .drawing_sheet_settings()
+            .document_control
+            .revision
+            .clone(),
         DrawingSheetTitleFieldId::Format => sheet.format_label(),
         DrawingSheetTitleFieldId::Scale => match sheet.format.title_block.scale {
             DrawingSheetScale::NotToScale => "NTS".to_owned(),
@@ -1532,7 +1534,13 @@ fn default_title_field_value(
                 reality_units,
             } => format!("{drawing_units}:{reality_units}"),
         },
-        DrawingSheetTitleFieldId::Date => crate::state::automatic_drawing_sheet_date_utc(),
+        DrawingSheetTitleFieldId::Date => state
+            .workspace
+            .design_management
+            .drawing_sheet_settings()
+            .document_control
+            .display_date()
+            .to_owned(),
         DrawingSheetTitleFieldId::Organization
         | DrawingSheetTitleFieldId::DocumentId
         | DrawingSheetTitleFieldId::Classification => state
@@ -1760,7 +1768,6 @@ mod tests {
             format,
             sheet_name: "top".to_owned(),
             page_label: "1 of 1".to_owned(),
-            revision: 1,
         };
         let point = (
             sheet.geometry.drawing_area.min_x + 1.0,
@@ -1820,7 +1827,6 @@ mod tests {
             format,
             sheet_name: "top".to_owned(),
             page_label: "1 of 1".to_owned(),
-            revision: 1,
         };
         let one_inch = 25.4 * DRAWING_SHEET_UNITS_PER_MM;
 

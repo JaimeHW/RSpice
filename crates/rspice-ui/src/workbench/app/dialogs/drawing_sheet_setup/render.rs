@@ -31,7 +31,20 @@ const DESCRIPTION: &str = "Author the permanent physical drawing sheet independe
 const PRIMARY: &str = "Apply sheet setup";
 const NAV_WIDTH: f32 = 230.0;
 const COLUMN_GAP: f32 = 0.0;
+/// Gutter between the paired fields of a form row, and between an Apply-summary
+/// label and its value. The body zeroes item spacing so the three studio
+/// columns meet on their shared rules, so every gutter inside a panel has to be
+/// asked for explicitly.
+const FIELD_GUTTER: f32 = 14.0;
 const FACT_ROW_GAP: f32 = 12.0;
+const MARGIN_MAP_HEIGHT: f32 = 200.0;
+const MARGIN_MAP_GUTTER: f32 = 12.0;
+const MARGIN_MAP_CAPTION_HEIGHT: f32 = 26.0;
+/// The inset the section panels carry. A figure that bleeds to the editor
+/// column's edges has to paint back across it.
+const PANEL_INSET_X: f32 = 18.0;
+const PANEL_INSET_Y: f32 = 16.0;
+const PHONE_FIELD_STACK_BREAKPOINT: f32 = 480.0;
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_drawing_sheet_setup_dialog(&mut self, ctx: &Context) {
@@ -146,7 +159,15 @@ impl RSpiceApp {
                     setup.support_suspended = true;
                     setup.commit_error = None;
                 }
-                Err(error) => self.state.dialogs.drawing_sheet_setup.commit_error = Some(error),
+                Err(error) => {
+                    // Raised in the console: the surface has no banner, and a
+                    // refused request must not fail silently.
+                    self.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::error(
+                            error.clone(),
+                        ));
+                    self.state.dialogs.drawing_sheet_setup.commit_error = Some(error);
+                }
             }
             return;
         }
@@ -160,6 +181,10 @@ impl RSpiceApp {
                     .state
                     .push_user_message(crate::diagnostics::ConsoleMessage::info(message)),
                 Err(error) => {
+                    self.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::error(
+                            error.clone(),
+                        ));
                     self.state.dialogs.drawing_sheet_setup.commit_error = Some(error);
                 }
             },
@@ -186,16 +211,10 @@ fn drawing_sheet_setup_body(
         read_only_banner(ui, reason);
     }
     let available = ui.available_size();
-    // Validation belongs to the transaction, not to the editor column. The
-    // strip exists only while there is something to report — the reference
-    // dialog hides its transaction strip entirely between reports, and a
-    // permanently reserved empty band reads as a designed-in gap.
-    let validation_height = if validation_notice_visible(state, problems) {
-        48.0
-    } else {
-        0.0
-    };
-    let body_height = (available.y - validation_height).max(1.0);
+    // No transaction banner. Every field problem is already reported under the
+    // field it belongs to, and a commit failure is raised in the console, so a
+    // band across the foot of the surface only repeated what the form said.
+    let body_height = available.y.max(1.0);
     if available.x < 980.0 {
         stacked_body(
             ui,
@@ -205,7 +224,6 @@ fn drawing_sheet_setup_body(
             preview_content,
             body_height,
         );
-        drawing_sheet_validation_strip(ui, state, problems, validation_height);
         return;
     }
 
@@ -260,18 +278,6 @@ fn drawing_sheet_setup_body(
                 },
             );
         });
-    drawing_sheet_validation_strip(ui, state, problems, validation_height);
-}
-
-fn drawing_sheet_validation_strip(
-    ui: &mut Ui,
-    state: &DrawingSheetSetupState,
-    problems: &[FieldProblem],
-    height: f32,
-) {
-    if validation_notice_visible(state, problems) {
-        validation_slot(ui, state, problems, height);
-    }
 }
 
 fn read_only_banner(ui: &mut Ui, reason: &str) {
@@ -340,7 +346,6 @@ fn section_navigation(ui: &mut Ui, state: &mut DrawingSheetSetupState, height: f
     let t = Tokens::get(ui.ctx());
     Frame::NONE.fill(t.color.bg_panel).show(ui, |ui| {
         ui.set_width(NAV_WIDTH);
-        ui.set_min_height(height);
         ui.spacing_mut().item_spacing.y = 0.0;
         for section in DrawingSheetSection::ALL {
             let selected = state.section == section;
@@ -416,26 +421,42 @@ fn section_navigation(ui: &mut Ui, state: &mut DrawingSheetSetupState, height: f
                 Stroke::new(1.0, t.color.border),
             );
         }
-        let used = DrawingSheetSection::ALL.len() as f32 * 54.0;
-        ui.add_space((height - used - 112.0).max(12.0));
-        Frame::NONE
-            .fill(t.color.bg_inset)
-            .inner_margin(Margin::same(12))
-            .show(ui, |ui| {
-                ui.label(
-                    egui::RichText::new("AUTHORED SHEET ≠ OUTPUT MEDIA")
-                        .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
-                        .color(t.color.accent),
-                );
-                ui.add_space(5.0);
-                ui.label(
-                    egui::RichText::new(
-                        "Print and Export may fit, tile or clip this sheet without changing it.",
-                    )
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-                );
-            });
+        // Dock the note on the rail's bottom edge by giving it the leftover
+        // space bottom-up. Reserving a guessed height for it instead left a
+        // ragged band of panel below the note, and any change of density,
+        // font, or wording moved the guess again.
+        let remaining = (height - ui.min_rect().height()).max(12.0);
+        // The rows plus `remaining` consume the rail's exact assigned height.
+        // Applying the full height again after this allocation expands the
+        // dialog body, pushes its footer off-screen, and leaves a dead band
+        // below the editor and preview columns.
+        ui.allocate_ui_with_layout(
+            vec2(ui.available_width(), remaining),
+            Layout::bottom_up(Align::Min),
+            |ui| {
+                Frame::NONE
+                    .fill(t.color.bg_inset)
+                    .inner_margin(Margin::same(12))
+                    .show(ui, |ui| {
+                        // The frame inherits the bottom-up layout, so the
+                        // note's two lines are added in reverse.
+                        ui.set_min_width(ui.available_width());
+                        ui.label(
+                            egui::RichText::new(
+                                "Print and Export may fit, tile or clip this sheet without changing it.",
+                            )
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_dim),
+                        );
+                        ui.add_space(5.0);
+                        ui.label(
+                            egui::RichText::new("AUTHORED SHEET ≠ OUTPUT MEDIA")
+                                .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
+                                .color(t.color.accent),
+                        );
+                });
+            },
+        );
     });
 }
 
@@ -540,7 +561,10 @@ fn editor_column(
                     active_panel_header(ui, state.section);
                     ui.add_enabled_ui(state.authority_error.is_none(), |ui| {
                         Frame::NONE
-                            .inner_margin(Margin::symmetric(18, 16))
+                            .inner_margin(Margin::symmetric(
+                                PANEL_INSET_X as i8,
+                                PANEL_INSET_Y as i8,
+                            ))
                             .show(ui, |ui| match state.section {
                                 DrawingSheetSection::Format => format_panel(ui, state, problems),
                                 DrawingSheetSection::Margins => margins_panel(ui, state, problems),
@@ -760,6 +784,7 @@ fn format_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fie
                 });
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = FIELD_GUTTER;
                     if Button::new("Swap edges").show(ui).clicked() {
                         let next = match state.draft.orientation {
                             SchematicPageOrientation::Landscape => {
@@ -820,50 +845,67 @@ fn format_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fie
     }
     ui.add_space(14.0);
 
-    two_column(ui, |left, right| {
-        field_caption(left, "Orientation");
-        left.horizontal(|ui| {
-            let mut selected = state.draft.orientation;
-            let segment_width =
-                ((ui.available_width() - ui.spacing().item_spacing.x) * 0.5).max(72.0);
-            orientation_choice(
-                ui,
-                &mut selected,
-                SchematicPageOrientation::Landscape,
-                "Landscape",
-                segment_width,
-            );
-            orientation_choice(
-                ui,
-                &mut selected,
-                SchematicPageOrientation::Portrait,
-                "Portrait",
-                segment_width,
-            );
-            if selected != state.draft.orientation {
-                state.draft.set_orientation(selected);
-            }
+    if format_controls_stack(ui.available_width()) {
+        orientation_field(ui, state);
+        ui.add_space(11.0);
+        display_units_field(ui, state);
+    } else {
+        two_column(ui, |left, right| {
+            orientation_field(left, state);
+            display_units_field(right, state);
         });
-        field_caption(right, "Display units");
-        let previous = state.draft.display_unit;
-        egui::ComboBox::from_id_salt("drawing-sheet-unit")
-            .width(right.available_width())
-            .selected_text(state.draft.display_unit.label())
-            .show_ui(right, |ui| {
-                for unit in SheetDisplayUnit::ALL {
-                    ui.selectable_value(&mut state.draft.display_unit, unit, unit.label());
-                }
-            });
-        if previous != state.draft.display_unit {
-            let selected = state.draft.display_unit;
-            state.draft.display_unit = previous;
-            if let Err(error) = state.draft.set_display_unit(selected) {
-                state.commit_error = Some(error);
-            }
-        }
-    });
+    }
     ui.add_space(15.0);
     measurement_row(ui, state, &state.last_valid_format);
+}
+
+fn format_controls_stack(available_width: f32) -> bool {
+    available_width < PHONE_FIELD_STACK_BREAKPOINT
+}
+
+fn orientation_field(ui: &mut Ui, state: &mut DrawingSheetSetupState) {
+    field_caption(ui, "Orientation");
+    ui.horizontal(|ui| {
+        let mut selected = state.draft.orientation;
+        let segment_width = ((ui.available_width() - ui.spacing().item_spacing.x) * 0.5).max(72.0);
+        orientation_choice(
+            ui,
+            &mut selected,
+            SchematicPageOrientation::Landscape,
+            "Landscape",
+            segment_width,
+        );
+        orientation_choice(
+            ui,
+            &mut selected,
+            SchematicPageOrientation::Portrait,
+            "Portrait",
+            segment_width,
+        );
+        if selected != state.draft.orientation {
+            state.draft.set_orientation(selected);
+        }
+    });
+}
+
+fn display_units_field(ui: &mut Ui, state: &mut DrawingSheetSetupState) {
+    field_caption(ui, "Display units");
+    let previous = state.draft.display_unit;
+    egui::ComboBox::from_id_salt("drawing-sheet-unit")
+        .width(ui.available_width())
+        .selected_text(state.draft.display_unit.label())
+        .show_ui(ui, |ui| {
+            for unit in SheetDisplayUnit::ALL {
+                ui.selectable_value(&mut state.draft.display_unit, unit, unit.label());
+            }
+        });
+    if previous != state.draft.display_unit {
+        let selected = state.draft.display_unit;
+        state.draft.display_unit = previous;
+        if let Err(error) = state.draft.set_display_unit(selected) {
+            state.commit_error = Some(error);
+        }
+    }
 }
 
 fn margins_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[FieldProblem]) {
@@ -871,6 +913,8 @@ fn margins_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fi
     ui.add_space(15.0);
     let unit = state.draft.display_unit.suffix();
     let mut changed_edge = None;
+    let restore_gutter = ui.spacing().item_spacing.x;
+    ui.spacing_mut().item_spacing.x = FIELD_GUTTER;
     ui.columns(4, |columns| {
         if length_field(
             &mut columns[0],
@@ -913,6 +957,7 @@ fn margins_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fi
             changed_edge = Some(MarginEdge::Left);
         }
     });
+    ui.spacing_mut().item_spacing.x = restore_gutter;
     if let Some(edge) = changed_edge {
         state.draft.link_margins_from(edge);
     }
@@ -934,6 +979,9 @@ fn margins_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fi
     });
     ui.add_space(14.0);
     ui.horizontal_wrapped(|ui| {
+        // The body zeroes item spacing for its column rules, which otherwise
+        // butts this note straight against the button.
+        ui.spacing_mut().item_spacing.x = FIELD_GUTTER;
         let restore_label = state
             .draft
             .size
@@ -977,7 +1025,7 @@ fn frame_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fiel
     if previous_border != state.draft.border {
         state.draft.set_border_template(state.draft.border);
     }
-    muted(ui, state.draft.border.summary());
+    control_note(ui, state.draft.border.summary());
     ui.add_space(14.0);
     let zones_available = !matches!(
         state.draft.border,
@@ -1003,7 +1051,7 @@ fn frame_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fiel
                         });
                 },
             );
-            muted(
+            control_note(
                 left,
                 &match state.draft.zone_mode {
                     ZoneModeChoice::Automatic => format!(
@@ -1107,7 +1155,28 @@ fn title_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fiel
             .draft
             .set_title_block_template(state.draft.title_block);
     }
-    muted(ui, state.draft.title_block.summary());
+    control_note(ui, state.draft.title_block.summary());
+    // The substitution warning belongs to the choice that triggers it. It used
+    // to be raised in a banner across the foot of the surface, several hundred
+    // pixels from the control it is about.
+    if state
+        .draft
+        .validate()
+        .is_ok_and(|validated| validated.page_format.title_block_substituted())
+    {
+        let t = Tokens::get(ui.ctx());
+        ui.add_space(6.0);
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(
+                    "Does not fit this drawing area — RSpice compact will be drawn. The requested choice stays saved.",
+                )
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.warn),
+            )
+            .wrap(),
+        );
+    }
     ui.add_space(14.0);
     let enabled = state.draft.title_block != TitleBlockTemplateChoice::None;
     ui.add_enabled_ui(enabled, |ui| {
@@ -1144,7 +1213,7 @@ fn title_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fiel
                         );
                     }
                 });
-            muted(right, state.draft.title_block_rotation.note());
+            control_note(right, state.draft.title_block_rotation.note());
         });
         ui.add_space(11.0);
         let unit = state.draft.display_unit.suffix();
@@ -1223,6 +1292,7 @@ fn scope_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState) {
             .stroke(Stroke::new(1.0, Tokens::get(ui.ctx()).color.border))
             .inner_margin(Margin::symmetric(10, 9))
             .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
                 ui.horizontal(|ui| {
                     ui.radio_value(&mut state.draft.scope, scope, "");
                     ui.vertical(|ui| {
@@ -1383,76 +1453,6 @@ fn elide_to_width(value: &str, max_width: f32, width_of: impl Fn(&str) -> f32) -
     "\u{2026}".to_owned()
 }
 
-fn validation_slot(
-    ui: &mut Ui,
-    state: &DrawingSheetSetupState,
-    problems: &[FieldProblem],
-    height: f32,
-) {
-    let t = Tokens::get(ui.ctx());
-    let substitution = state
-        .draft
-        .validate()
-        .ok()
-        .filter(|validated| validated.page_format.title_block_substituted());
-    let problem_detail = (!problems.is_empty()).then(|| {
-        problems
-            .iter()
-            .map(|problem| problem.message.as_str())
-            .collect::<Vec<_>>()
-            .join("  •  ")
-    });
-    let Some((color, title, detail)) = (if let Some(error) = state.commit_error.as_deref() {
-        Some((t.color.err, "Sheet setup was not applied", error))
-    } else if let Some(detail) = problem_detail.as_deref() {
-        Some((t.color.err, "Review the highlighted sheet values", detail))
-    } else if substitution.is_some() {
-        Some((
-            t.color.warn,
-            "Title block will use the compact form",
-            "The requested title block does not fit this drawing area. RSpice compact will be drawn; the requested choice remains saved.",
-        ))
-    } else {
-        None
-    }) else {
-        return;
-    };
-    Frame::NONE
-        .fill(t.color.bg_panel)
-        .stroke(Stroke::new(1.0, t.color.border))
-        .inner_margin(Margin::symmetric(12, 6))
-        .show(ui, |ui| {
-            ui.set_min_height(height - 12.0);
-            ui.horizontal(|ui| {
-                let (rect, _) = ui.allocate_exact_size(vec2(8.0, 8.0), Sense::hover());
-                ui.painter().circle_filled(rect.center(), 3.0, color);
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new(title)
-                            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                            .color(t.color.text),
-                    );
-                    ui.label(
-                        egui::RichText::new(detail)
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_dim),
-                    )
-                    .on_hover_text(detail);
-                });
-            });
-        });
-}
-
-fn validation_notice_visible(state: &DrawingSheetSetupState, problems: &[FieldProblem]) -> bool {
-    state.commit_error.is_some()
-        || !problems.is_empty()
-        || state
-            .draft
-            .validate()
-            .ok()
-            .is_some_and(|validated| validated.page_format.title_block_substituted())
-}
-
 fn preview_column(
     ui: &mut Ui,
     state: &DrawingSheetSetupState,
@@ -1524,17 +1524,17 @@ fn preview_column(
                     vec2(ui.available_width(), preview_height),
                     Layout::top_down(Align::Min),
                     |ui| {
-                        Frame::NONE
-                            .inner_margin(Margin::symmetric(12, 12))
-                            .show(ui, |ui| {
-                                draw_sheet_preview(
-                                    ui,
-                                    &state.draft,
-                                    &state.last_valid_format,
-                                    preview_content,
-                                    preview_height - 24.0,
-                                );
-                            });
+                        // No inset: the preview paints its own desk across the
+                        // whole region it is given, including the format
+                        // caption. An inset here framed that desk in dialog
+                        // background and left the caption sitting outside it.
+                        draw_sheet_preview(
+                            ui,
+                            &state.draft,
+                            &state.last_valid_format,
+                            preview_content,
+                            preview_height,
+                        );
                     },
                 );
                 Frame::NONE
@@ -1612,7 +1612,6 @@ fn prospective_overflow_count(
         format,
         sheet_name: current.sheet_name,
         page_label: current.page_label,
-        revision: current.revision,
     };
     let symbols = crate::schematic::view::SchematicSymbolContext::from_state(state);
     Some(
@@ -1695,8 +1694,32 @@ fn geometry_preview_format(
 
 fn margin_map(ui: &mut Ui, draft: &DrawingSheetDraft) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 160.0), Sense::hover());
-    ui.painter().rect_filled(rect, 2.0, t.color.canvas_bg);
+    // The map is a figure, not a field: it bleeds back through the panel's own
+    // inset on three sides, so it meets the section header above it and the
+    // column edges beside it, and its caption sits on the same surface rather
+    // than on the panel behind it.
+    let (allocated, _) = ui.allocate_exact_size(
+        vec2(
+            ui.available_width(),
+            MARGIN_MAP_HEIGHT + MARGIN_MAP_CAPTION_HEIGHT - PANEL_INSET_Y,
+        ),
+        Sense::hover(),
+    );
+    let surface = Rect::from_min_max(
+        pos2(
+            allocated.left() - PANEL_INSET_X,
+            allocated.top() - PANEL_INSET_Y,
+        ),
+        pos2(allocated.right() + PANEL_INSET_X, allocated.bottom()),
+    );
+    ui.painter().rect_filled(surface, 0.0, t.color.canvas_bg);
+    let rect = Rect::from_min_max(
+        surface.min,
+        pos2(
+            surface.right(),
+            surface.bottom() - MARGIN_MAP_CAPTION_HEIGHT,
+        ),
+    );
     let fallback = crate::state::SchematicSheetFormat::default();
     let Some(format) = geometry_preview_format(draft, &fallback) else {
         return;
@@ -1705,9 +1728,17 @@ fn margin_map(ui: &mut Ui, draft: &DrawingSheetDraft) {
         return;
     };
     let paper_geometry = geometry.paper;
-    let scale = ((rect.width() - 84.0) / paper_geometry.width_um as f32)
-        .min((rect.height() - 24.0) / paper_geometry.height_um as f32)
-        .max(0.001);
+    // Fit the sheet inside the map with a gutter on every edge. A floor on the
+    // scale would defeat the fit rather than guard it — every ISO sheet lands
+    // well below a 0.001 px/µm floor, and clamping there drew the page larger
+    // than the box it was allocated, spilling the diagram over the section
+    // header. Guarding the inputs keeps the ratio positive without that.
+    let scale = ((rect.width() - 2.0 * MARGIN_MAP_GUTTER).max(1.0)
+        / paper_geometry.width_um.max(1) as f32)
+        .min(
+            (rect.height() - 2.0 * MARGIN_MAP_GUTTER).max(1.0)
+                / paper_geometry.height_um.max(1) as f32,
+        );
     let page = Rect::from_center_size(
         rect.center(),
         vec2(
@@ -1740,53 +1771,106 @@ fn margin_map(ui: &mut Ui, draft: &DrawingSheetDraft) {
         egui::StrokeKind::Inside,
     );
     paint_dashed_rect(ui, printable, Stroke::new(1.0, t.color.accent), 4.0, 3.0);
-    for (position, align, value) in [
+    // A margin band is routinely thinner than a line of type — a 10 mm ISO
+    // margin is a handful of pixels at map scale — so a value centred in its
+    // band crosses the paper edge and the printable rule, and the left and
+    // right values run off the sheet entirely. Dimension each margin the way a
+    // drawing does instead: a witness line spanning the band, and the value set
+    // clear of it inside the drawing area, which is always the largest region
+    // on the map.
+    let callout = Stroke::new(1.0, t.color.text_dim);
+    let label_font = theme::mono(tokens::FS_0, FontWeight::Medium);
+    let inset = 7.0;
+    let binding_value = format!("binding {}", draft.margin_left);
+    let right_value = format!("right {}", draft.margin_right);
+    let text_width = |text: &str| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), label_font.clone(), Color32::WHITE)
+            .size()
+            .x
+    };
+    // A portrait sheet is narrow enough that the two side values would meet in
+    // the middle of the drawing area. Split them onto their own rules when the
+    // centre line cannot seat both.
+    let side_shift = if text_width(&binding_value) + text_width(&right_value) + 2.0 * inset + 8.0
+        > printable.width()
+    {
+        9.0
+    } else {
+        0.0
+    };
+    let binding_y = page.center().y - side_shift;
+    let right_y = page.center().y + side_shift;
+    for (span, anchor, align, value) in [
         (
-            egui::pos2(page.center().x, (page.top() + printable.top()) * 0.5),
-            Align2::CENTER_CENTER,
+            [
+                egui::pos2(page.center().x, page.top()),
+                egui::pos2(page.center().x, printable.top()),
+            ],
+            egui::pos2(page.center().x, printable.top() + inset),
+            Align2::CENTER_TOP,
             format!("top {}", draft.margin_top),
         ),
         (
-            egui::pos2((printable.right() + page.right()) * 0.5, page.center().y),
-            Align2::CENTER_CENTER,
-            format!("right {}", draft.margin_right),
+            [
+                egui::pos2(printable.right(), right_y),
+                egui::pos2(page.right(), right_y),
+            ],
+            egui::pos2(printable.right() - inset, right_y),
+            Align2::RIGHT_CENTER,
+            right_value.clone(),
         ),
         (
-            egui::pos2(page.center().x, (printable.bottom() + page.bottom()) * 0.5),
-            Align2::CENTER_CENTER,
+            [
+                egui::pos2(page.center().x, printable.bottom()),
+                egui::pos2(page.center().x, page.bottom()),
+            ],
+            egui::pos2(page.center().x, printable.bottom() - inset),
+            Align2::CENTER_BOTTOM,
             format!("bottom {}", draft.margin_bottom),
         ),
         (
-            egui::pos2((page.left() + printable.left()) * 0.5, page.center().y),
-            Align2::CENTER_CENTER,
-            format!("binding {}", draft.margin_left),
+            [
+                egui::pos2(page.left(), binding_y),
+                egui::pos2(printable.left(), binding_y),
+            ],
+            egui::pos2(printable.left() + inset, binding_y),
+            Align2::LEFT_CENTER,
+            binding_value.clone(),
         ),
     ] {
-        ui.painter().text(
-            position,
-            align,
-            &value,
-            theme::mono(tokens::FS_0, FontWeight::Medium),
-            t.color.text,
-        );
+        paint_dimension_span(ui, span, callout);
+        ui.painter()
+            .text(anchor, align, &value, label_font.clone(), t.color.text);
     }
-    // Margin labels are painter text rather than layout widgets. Keep a fixed
-    // caption track below their glyph bounds so high DPI and fractional
-    // browser zoom cannot make the bottom label and figcaption collide.
-    ui.add_space(28.0);
-    ui.allocate_ui_with_layout(
-        vec2(ui.available_width(), 20.0),
-        Layout::centered_and_justified(egui::Direction::LeftToRight),
-        |ui| {
-            ui.label(
-                egui::RichText::new(
-                    "Shaded bands are margin; the dashed rule is the printable boundary.",
-                )
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
-            );
-        },
+    // The caption is painted on the map's own surface, in the track reserved
+    // for it below the sheet, rather than laid out on the panel behind it.
+    ui.painter().text(
+        pos2(
+            surface.center().x,
+            surface.bottom() - MARGIN_MAP_CAPTION_HEIGHT * 0.5,
+        ),
+        Align2::CENTER_CENTER,
+        "Shaded bands are margin; the dashed rule is the printable boundary.",
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
     );
+}
+
+/// A drafting dimension across one margin band: the measured span plus a
+/// terminator at each end, so the band being quoted stays legible even when it
+/// is only a few pixels deep.
+fn paint_dimension_span(ui: &Ui, span: [egui::Pos2; 2], stroke: Stroke) {
+    let [start, end] = span;
+    let delta = end - start;
+    if delta.length() <= f32::EPSILON {
+        return;
+    }
+    let tick = vec2(-delta.y, delta.x).normalized() * 3.0;
+    ui.painter().line_segment(span, stroke);
+    ui.painter()
+        .line_segment([start - tick, start + tick], stroke);
+    ui.painter().line_segment([end - tick, end + tick], stroke);
 }
 
 fn paint_dashed_rect(ui: &Ui, rect: Rect, stroke: Stroke, dash: f32, gap: f32) {
@@ -1881,15 +1965,12 @@ fn measurement_row(
     );
 }
 
+/// The authored sheet's identity for a measurement cell. Dimensions are the
+/// Size & orientation section's readout and are deliberately left out here:
+/// a third of the editor column cannot hold them without eliding the part
+/// that names the format.
 fn format_summary(draft: &DrawingSheetDraft) -> String {
-    format!(
-        "{} · {} · {} × {} {}",
-        draft.size.label(),
-        draft.orientation.label(),
-        draft.width,
-        draft.height,
-        draft.display_unit.suffix()
-    )
+    format!("{} · {}", draft.size.label(), draft.orientation.label())
 }
 
 fn selected_size_label(state: &DrawingSheetSetupState) -> String {
@@ -2069,6 +2150,9 @@ fn toggle_card(ui: &mut Ui, title: &str, detail: &str, checked: &mut bool) {
         .stroke(Stroke::new(1.0, t.color.border))
         .inner_margin(Margin::symmetric(10, 9))
         .show(ui, |ui| {
+            // Without this the card hugs its own label and the paired cards end
+            // up two different widths, neither aligned with the fields above.
+            ui.set_min_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.checkbox(checked, "");
                 ui.vertical(|ui| {
@@ -2083,13 +2167,19 @@ fn toggle_card(ui: &mut Ui, title: &str, detail: &str, checked: &mut bool) {
         });
 }
 
+/// `Ui::columns` derives the gutter from the parent's item spacing before the
+/// column rects exist, so the gutter has to be set here rather than on the
+/// columns themselves.
 fn two_column(ui: &mut Ui, content: impl FnOnce(&mut Ui, &mut Ui)) {
+    let restore = ui.spacing().item_spacing.x;
+    ui.spacing_mut().item_spacing.x = FIELD_GUTTER;
     ui.columns(2, |columns| {
         columns[0].spacing_mut().item_spacing.x = 12.0;
         columns[1].spacing_mut().item_spacing.x = 12.0;
         let (left, right) = columns.split_at_mut(1);
         content(&mut left[0], &mut right[0]);
     });
+    ui.spacing_mut().item_spacing.x = restore;
 }
 
 fn orientation_choice(
@@ -2349,6 +2439,14 @@ fn fact_row(ui: &mut Ui, label: &str, value: &str) {
         .galley(value_rect.min, value_galley, t.color.text_dim);
 }
 
+/// A muted note that explains the control directly above it. The studio body
+/// stacks with zero item spacing so the three columns meet on their shared
+/// rules, which leaves a bare note sitting flush against its control.
+fn control_note(ui: &mut Ui, text: &str) {
+    ui.add_space(6.0);
+    muted(ui, text);
+}
+
 fn muted(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
     ui.label(
@@ -2368,31 +2466,4 @@ const fn page_setup_primary_enabled(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{elide_to_width, page_setup_primary_enabled};
-
-    #[test]
-    fn initial_governed_sheet_can_be_created_without_artificial_edits() {
-        assert!(page_setup_primary_enabled(false, true, false, true));
-        assert!(!page_setup_primary_enabled(false, true, false, false));
-        assert!(!page_setup_primary_enabled(false, false, false, true));
-    }
-
-    /// A measurement cell narrower than its value used to spin forever, which
-    /// froze the whole application on the Scope & inheritance section.
-    #[test]
-    fn measurement_values_elide_instead_of_looping() {
-        let width_of = |text: &str| text.chars().count() as f32 * 7.0;
-        let value = "ISO A4 · landscape · 297 × 210 mm";
-        for max_width in [0.0, 1.0, 12.0, 40.0, 90.0, 160.0] {
-            let elided = elide_to_width(value, max_width, width_of);
-            assert!(elided.ends_with('\u{2026}'), "{max_width} → {elided:?}");
-            assert!(
-                width_of(&elided) <= max_width.max(width_of("\u{2026}")),
-                "{max_width} → {elided:?}"
-            );
-            assert!(value.starts_with(elided.trim_end_matches('\u{2026}')));
-        }
-        assert_eq!(elide_to_width(value, 4000.0, width_of), value);
-    }
-}
+mod tests;

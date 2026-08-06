@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod drawing_sheet_release;
+
 fn sheet(name: &str, page: u32) -> SheetDefinition {
     SheetDefinition {
         name: name.to_owned(),
@@ -277,6 +279,273 @@ fn drawing_sheet_title_contract_matches_field_provenance_and_required_visibility
 }
 
 #[test]
+fn drawing_sheet_title_resolution_is_one_renderer_independent_authority() {
+    let format = SchematicSheetFormat::default()
+        .try_update(|draft| {
+            draft
+                .title_block
+                .fields
+                .get_mut(&DrawingSheetTitleFieldId::SheetTitle)
+                .unwrap()
+                .value = "Power tree".to_owned();
+            draft
+                .title_block
+                .fields
+                .get_mut(&DrawingSheetTitleFieldId::CheckedBy)
+                .unwrap()
+                .visible = false;
+            // Legacy project-owned storage remains a migration fallback only.
+            draft
+                .title_block
+                .fields
+                .get_mut(&DrawingSheetTitleFieldId::Organization)
+                .unwrap()
+                .value = "Legacy Labs".to_owned();
+        })
+        .unwrap();
+    let authority_values = [
+        (DrawingSheetTitleFieldId::Project, "Precision Instruments"),
+        (DrawingSheetTitleFieldId::CellView, "analog/top/schematic"),
+        (DrawingSheetTitleFieldId::Page, "2 of 4"),
+        (DrawingSheetTitleFieldId::Revision, "B"),
+        (DrawingSheetTitleFieldId::Format, "A3 · landscape"),
+        (DrawingSheetTitleFieldId::Scale, "1:1"),
+        (DrawingSheetTitleFieldId::Date, "2026-08-04"),
+        (DrawingSheetTitleFieldId::Organization, "RSpice Engineering"),
+    ]
+    .into_iter()
+    .map(|(id, value)| (id, value.to_owned()))
+    .collect();
+
+    let resolved = resolve_drawing_sheet_title_fields(&format, &authority_values);
+    let value = |id| {
+        resolved
+            .iter()
+            .find(|field| field.id == id)
+            .map(|field| field.value.as_str())
+    };
+    assert_eq!(
+        value(DrawingSheetTitleFieldId::Project),
+        Some("Precision Instruments")
+    );
+    assert_eq!(
+        value(DrawingSheetTitleFieldId::SheetTitle),
+        Some("Power tree")
+    );
+    assert_eq!(value(DrawingSheetTitleFieldId::DrawnBy), Some("—"));
+    assert_eq!(
+        value(DrawingSheetTitleFieldId::Organization),
+        Some("RSpice Engineering")
+    );
+    assert_eq!(value(DrawingSheetTitleFieldId::CheckedBy), None);
+    assert_eq!(
+        DrawingSheetTitleFieldId::SheetTitle.display_label(),
+        "Sheet title"
+    );
+}
+
+#[test]
+fn managed_title_templates_are_versioned_digest_verified_and_layout_authoritative() {
+    let managed = SchematicSheetFormat::default()
+        .try_update(|draft| {
+            draft.title_block.template = DrawingSheetTitleBlockTemplate::OrganizationManaged;
+        })
+        .unwrap();
+    let built_in = managed
+        .title_block
+        .managed_template
+        .as_ref()
+        .expect("managed selection captures the built-in policy snapshot");
+    assert_eq!(built_in.template_id(), "rspice.organization-title-block");
+    assert_eq!(built_in.revision(), "1");
+    built_in.validate().unwrap();
+    assert_eq!(
+        managed.title_block_dimensions_um(DrawingSheetTitleBlockTemplate::OrganizationManaged),
+        Some((180_000, 50_000))
+    );
+    assert_eq!(
+        managed.title_block_rows(DrawingSheetTitleBlockTemplate::OrganizationManaged),
+        Some(5)
+    );
+    assert!(built_in.locks_field(DrawingSheetTitleFieldId::Classification));
+
+    let mut reversed = DrawingSheetTitleFieldId::ALL.to_vec();
+    reversed.reverse();
+    let logo = DrawingSheetManagedLogo::try_new(
+        "Example Labs mark",
+        40_000,
+        vec![
+            DrawingSheetManagedLogoPrimitive::try_new(
+                vec![
+                    DrawingSheetManagedLogoPoint::try_new(1_000, 9_000).unwrap(),
+                    DrawingSheetManagedLogoPoint::try_new(5_000, 1_000).unwrap(),
+                    DrawingSheetManagedLogoPoint::try_new(9_000, 9_000).unwrap(),
+                ],
+                true,
+                true,
+            )
+            .unwrap(),
+            DrawingSheetManagedLogoPrimitive::try_new(
+                vec![
+                    DrawingSheetManagedLogoPoint::try_new(2_500, 7_000).unwrap(),
+                    DrawingSheetManagedLogoPoint::try_new(7_500, 7_000).unwrap(),
+                ],
+                false,
+                false,
+            )
+            .unwrap(),
+        ],
+    )
+    .unwrap();
+    let snapshot = DrawingSheetManagedTemplateSnapshot::try_new_with_logo(
+        "example.release-title-block",
+        "2026.08",
+        160_000,
+        40_000,
+        4,
+        reversed.clone(),
+        vec![DrawingSheetTitleFieldId::ApprovedBy],
+        Some(logo),
+    )
+    .unwrap();
+    let custom = managed
+        .try_update(|draft| {
+            draft.title_block.managed_template = Some(snapshot.clone());
+        })
+        .unwrap();
+    assert_eq!(custom.title_block_field_order(), reversed.as_slice());
+    assert_eq!(
+        custom.title_block_dimensions_um(DrawingSheetTitleBlockTemplate::OrganizationManaged),
+        Some((160_000, 40_000))
+    );
+    assert_eq!(
+        custom.title_block_rows(DrawingSheetTitleBlockTemplate::OrganizationManaged),
+        Some(4)
+    );
+    assert_eq!(
+        custom
+            .title_block_logo(DrawingSheetTitleBlockTemplate::OrganizationManaged)
+            .map(DrawingSheetManagedLogo::alternative_text),
+        Some("Example Labs mark")
+    );
+    let without_logo_snapshot = DrawingSheetManagedTemplateSnapshot::try_new(
+        "example.release-title-block",
+        "2026.08",
+        160_000,
+        40_000,
+        4,
+        reversed.clone(),
+        vec![DrawingSheetTitleFieldId::ApprovedBy],
+    )
+    .unwrap();
+    let without_logo = custom
+        .try_update(|draft| {
+            draft.title_block.managed_template = Some(without_logo_snapshot);
+        })
+        .unwrap();
+    assert!(
+        drawing_sheet_title_cell_capacity(&custom, &custom.geometry().unwrap(), 9).unwrap()
+            < drawing_sheet_title_cell_capacity(
+                &without_logo,
+                &without_logo.geometry().unwrap(),
+                9
+            )
+            .unwrap()
+    );
+    assert_eq!(
+        resolve_drawing_sheet_title_fields(&custom, &BTreeMap::new())
+            .first()
+            .map(|field| field.id),
+        Some(DrawingSheetTitleFieldId::Classification)
+    );
+
+    let mut tampered = serde_json::to_value(&custom).unwrap();
+    tampered["title_block"]["managed_template"]["content_digest"] =
+        serde_json::Value::String("00".repeat(32));
+    assert!(serde_json::from_value::<SchematicSheetFormat>(tampered).is_err());
+
+    let mut tampered_logo = serde_json::to_value(&custom).unwrap();
+    tampered_logo["title_block"]["managed_template"]["logo"]["primitives"][0]["points"][0]["x"] =
+        serde_json::Value::from(2_000);
+    assert!(serde_json::from_value::<SchematicSheetFormat>(tampered_logo).is_err());
+
+    let mut legacy = serde_json::to_value(&managed).unwrap();
+    legacy["title_block"]
+        .as_object_mut()
+        .unwrap()
+        .remove("managed_template");
+    let migrated: SchematicSheetFormat = serde_json::from_value(legacy).unwrap();
+    assert_eq!(
+        migrated
+            .title_block
+            .managed_template
+            .as_ref()
+            .map(DrawingSheetManagedTemplateSnapshot::content_digest),
+        Some(DrawingSheetManagedTemplateSnapshot::default().content_digest())
+    );
+}
+
+#[test]
+fn managed_title_logo_rejects_ambiguous_unbounded_and_excessive_geometry() {
+    assert!(
+        DrawingSheetManagedLogoPoint::try_new(DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS + 1, 0)
+            .is_err()
+    );
+    let concave = vec![
+        DrawingSheetManagedLogoPoint::try_new(0, 0).unwrap(),
+        DrawingSheetManagedLogoPoint::try_new(10_000, 0).unwrap(),
+        DrawingSheetManagedLogoPoint::try_new(5_000, 5_000).unwrap(),
+        DrawingSheetManagedLogoPoint::try_new(10_000, 10_000).unwrap(),
+        DrawingSheetManagedLogoPoint::try_new(0, 10_000).unwrap(),
+    ];
+    assert!(DrawingSheetManagedLogoPrimitive::try_new(concave, true, true).is_err());
+    assert!(
+        DrawingSheetManagedLogoPrimitive::try_new(
+            vec![
+                DrawingSheetManagedLogoPoint::try_new(0, 0).unwrap(),
+                DrawingSheetManagedLogoPoint::try_new(10_000, 10_000).unwrap(),
+            ],
+            false,
+            true,
+        )
+        .is_err()
+    );
+
+    let line = DrawingSheetManagedLogoPrimitive::try_new(
+        vec![
+            DrawingSheetManagedLogoPoint::try_new(0, 0).unwrap(),
+            DrawingSheetManagedLogoPoint::try_new(10_000, 10_000).unwrap(),
+        ],
+        false,
+        false,
+    )
+    .unwrap();
+    assert!(
+        DrawingSheetManagedLogo::try_new(
+            "Excessive mark",
+            20_000,
+            vec![line.clone(); MAX_DRAWING_SHEET_MANAGED_LOGO_PRIMITIVES + 1],
+        )
+        .is_err()
+    );
+    let oversized_reserve =
+        DrawingSheetManagedLogo::try_new("Oversized mark", 120_000, vec![line]).unwrap();
+    assert!(
+        DrawingSheetManagedTemplateSnapshot::try_new_with_logo(
+            "example.release-title-block",
+            "2026.08",
+            160_000,
+            40_000,
+            4,
+            DrawingSheetTitleFieldId::ALL.to_vec(),
+            Vec::new(),
+            Some(oversized_reserve),
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn applying_a_format_preserves_target_sheet_fields_but_updates_declared_scale() {
     let source = SchematicSheetFormat::default()
         .try_update(|draft| {
@@ -337,16 +606,6 @@ fn applying_a_format_preserves_target_sheet_fields_but_updates_declared_scale() 
         }
     );
     assert!(!applied.title_block.fields[&DrawingSheetTitleFieldId::Scale].visible);
-}
-
-#[test]
-fn automatic_drawing_sheet_date_uses_exact_iso_calendar_format() {
-    assert_eq!(civil_date_from_unix_days(0), "1970-01-01");
-    assert_eq!(civil_date_from_unix_days(20_663), "2026-07-29");
-    let today = automatic_drawing_sheet_date_utc();
-    assert_eq!(today.len(), 10);
-    assert_eq!(today.as_bytes()[4], b'-');
-    assert_eq!(today.as_bytes()[7], b'-');
 }
 
 #[test]

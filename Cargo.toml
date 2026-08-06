@@ -9,6 +9,7 @@ members = [
     "crates/rspice-cli",
     "crates/rspice-publication-contract",
     "crates/rspice-publish",
+    "crates/rspice-sheet-publisher",
     "crates/rspice-ui",
     "crates/rspice-veriloga",
     "crates/rspice-python",

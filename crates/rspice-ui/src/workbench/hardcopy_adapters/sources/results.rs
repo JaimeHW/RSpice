@@ -621,9 +621,9 @@ pub(super) fn resolve_results_quick_view_parts(
         | ResultViewer::TransferFunction
         | ResultViewer::Specs
         | ResultViewer::Table
-        | ResultViewer::PoleZero => HardcopySemanticDocument::ResultSummary(
+        | ResultViewer::PoleZero => HardcopySemanticDocument::ResultSummary(Box::new(
             semantic_result_summary(viewer, active.analysis)?,
-        ),
+        )),
         ResultViewer::Manifest => {
             return Err(HardcopySourceError::UnsupportedVisualizationViewer(
                 "dataset-native Manifest must resolve from its owning run".to_owned(),
@@ -680,7 +680,7 @@ fn resolve_results_manifest_source(
 
     let manifest = ManifestViewModel::from_run(run);
     let semantic_document =
-        HardcopySemanticDocument::ResultSummary(semantic_manifest_summary(&manifest));
+        HardcopySemanticDocument::ResultSummary(Box::new(semantic_manifest_summary(&manifest)));
     let dataset_digest = run.dataset_content_digest();
     let digest = canonical_digest(
         b"rspice-hardcopy-results-manifest-v1",
@@ -1559,7 +1559,7 @@ pub(super) fn resolve_studio_result_summary(
         digest,
         HardcopyDocumentKind::PlotOrWorksheet,
         source.scope,
-        HardcopySemanticDocument::ResultSummary(summary),
+        HardcopySemanticDocument::ResultSummary(Box::new(summary)),
         SemanticBounds::try_new(
             SemanticPoint::new(0, 0),
             SemanticPoint::new(REPORT_PAGE_WIDTH_UM, REPORT_PAGE_HEIGHT_UM),

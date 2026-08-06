@@ -8,6 +8,8 @@ mod commit;
 mod render;
 mod state;
 
+#[cfg(test)]
+pub(crate) use commit::apply_drawing_sheet_setup;
 pub(crate) use commit::{
     drawing_sheet_setup_available, open_drawing_sheet_setup, open_drawing_sheet_setup_for_state,
     open_drawing_sheet_setup_with_preset, validate_drawing_sheet_authority,

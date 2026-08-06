@@ -105,7 +105,7 @@ dirs = "5.0"
 # Rust, works on wasm32. Signing lives in the `services::license` test module,
 # so `rand_core` is requested by the dev-dependency below rather than here:
 # a release or wasm build links the verifier only.
-ed25519-dalek = { version = "2", default-features = false, features = ["std", "fast"] }
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "fast", "zeroize"] }
 
 [dev-dependencies]
 # Keypair generation for license issuance in the `services::license` tests.

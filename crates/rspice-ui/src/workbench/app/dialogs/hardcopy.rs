@@ -43,6 +43,7 @@ pub(crate) enum HardcopyDialogError {
     Contract(#[from] HardcopyError),
     #[error("select a printer and resolve its current capabilities before printing")]
     #[cfg(not(target_arch = "wasm32"))]
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     MissingPrinterCapabilities,
     #[error("{field} must be an unsigned integer from 1 through 65535")]
     InvalidUnsignedInteger { field: &'static str },
@@ -423,10 +424,6 @@ impl HardcopyDialogState {
                 OutputFormat::NativePrinter | OutputFormat::BrowserPrintDocument
             )
         {
-            draft.format = OutputFormat::PdfVector;
-        }
-        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
-        if draft.format == OutputFormat::NativePrinter {
             draft.format = OutputFormat::PdfVector;
         }
         draft.refresh_preview();
@@ -859,7 +856,7 @@ fn merge_print_mapping(
     PrintMappingTable::try_new(saved.save_scope().clone(), entries)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_os = "windows")]
 fn runtime_print_target(
     printer_id: &str,
     job: Option<&PrinterJobSettings>,
@@ -872,7 +869,7 @@ fn runtime_print_target(
     })
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(not(target_os = "windows"))]
 fn runtime_print_target(
     _printer_id: &str,
     _job: Option<&PrinterJobSettings>,
@@ -880,12 +877,12 @@ fn runtime_print_target(
     Ok(RenderTarget::BrowserPrintDialog)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_os = "windows")]
 const fn runtime_print_format() -> OutputFormat {
     OutputFormat::NativePrinter
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(not(target_os = "windows"))]
 const fn runtime_print_format() -> OutputFormat {
     OutputFormat::BrowserPrintDocument
 }

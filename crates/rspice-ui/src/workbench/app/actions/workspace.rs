@@ -573,18 +573,32 @@ impl AppState {
         }
         let mut symbol_error = None;
         let ports = self.schematic.interface_ports();
-        let Some(cell) = self
+        let existing_symbol = self
             .library_manager
-            .get_library_mut(&reference.library)
-            .and_then(|library| library.get_cell_mut(&reference.cell))
-        else {
+            .get_library(&reference.library)
+            .and_then(|library| library.get_cell(&reference.cell))
+            .and_then(|cell| cell.get_view("symbol"))
+            .cloned();
+        if self
+            .library_manager
+            .get_library(&reference.library)
+            .and_then(|library| library.get_cell(&reference.cell))
+            .is_none()
+        {
             return;
-        };
+        }
 
         if ports.is_empty() {
-            if cell
-                .get_view("symbol")
+            if !existing_symbol
+                .as_ref()
                 .is_some_and(|view| view.metadata.contains_key(GENERATED_KEY))
+            {
+                return;
+            }
+            if let Some(cell) = self
+                .library_manager
+                .get_library_mut(&reference.library)
+                .and_then(|library| library.get_cell_mut(&reference.cell))
             {
                 cell.remove_view("symbol");
             }
@@ -596,13 +610,23 @@ impl AppState {
             .map(|port| format!("{}:{}", port.name, port.direction.keyword()))
             .collect::<Vec<_>>()
             .join(" ");
-        match cell.get_view_mut("symbol") {
-            Some(view) if view.metadata.contains_key(GENERATED_KEY) => {
+        match existing_symbol {
+            Some(mut view) if view.metadata.contains_key(GENERATED_KEY) => {
+                let before = view.metadata.clone();
                 view.metadata.insert(PORTS_KEY.to_owned(), encoded);
-                if let Err(error) = SymbolDocument::generated_from_ports(&ports).store_in_view(view)
+                if let Err(error) =
+                    SymbolDocument::generated_from_ports(&ports).store_in_view(&mut view)
                 {
                     symbol_error =
                         Some(format!("Generated symbol could not be refreshed: {error}"));
+                } else if view.metadata != before
+                    && let Some(target) = self
+                        .library_manager
+                        .get_library_mut(&reference.library)
+                        .and_then(|library| library.get_cell_mut(&reference.cell))
+                        .and_then(|cell| cell.get_view_mut("symbol"))
+                {
+                    target.metadata = view.metadata;
                 }
             }
             Some(_) => {} // hand-authored symbol: leave it alone
@@ -615,7 +639,11 @@ impl AppState {
                     SymbolDocument::generated_from_ports(&ports).store_in_view(&mut view)
                 {
                     symbol_error = Some(format!("Generated symbol could not be created: {error}"));
-                } else {
+                } else if let Some(cell) = self
+                    .library_manager
+                    .get_library_mut(&reference.library)
+                    .and_then(|library| library.get_cell_mut(&reference.cell))
+                {
                     cell.add_view(view);
                 }
             }

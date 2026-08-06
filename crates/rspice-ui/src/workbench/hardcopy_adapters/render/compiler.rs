@@ -140,7 +140,15 @@ impl<'a> SemanticSceneCompiler<'a> {
                 aggregate_sections: Vec::new(),
                 mapping_ordinal: Some(child.ordinal),
             };
-            compiler.compile_document(&child.document)?;
+            match (
+                child.document.as_ref(),
+                child.publication_page_label.as_deref(),
+            ) {
+                (HardcopySemanticDocument::Schematic(schematic), Some(page_label)) => {
+                    compiler.schematic_with_page_label(schematic, Some(page_label))?;
+                }
+                _ => compiler.compile_document(&child.document)?,
+            }
             let primitive_start = self.primitives.len();
             let primitive_end = primitive_start
                 .checked_add(compiler.primitives.len())
@@ -329,12 +337,26 @@ impl<'a> SemanticSceneCompiler<'a> {
         &mut self,
         schematic: &SemanticSchematic,
     ) -> Result<(), HardcopyRenderError> {
+        self.schematic_with_page_label(schematic, None)
+    }
+
+    pub(super) fn schematic_with_page_label(
+        &mut self,
+        schematic: &SemanticSchematic,
+        page_label: Option<&str>,
+    ) -> Result<(), HardcopyRenderError> {
         if let Some(format) = &schematic.drawing_sheet {
-            self.drawing_sheet(
-                format,
-                &schematic.drawing_sheet_title_values,
-                schematic.grid_pitch_units,
-            )?;
+            if let Some(page_label) = page_label {
+                let mut title_values = schematic.drawing_sheet_title_values.clone();
+                title_values.insert(DrawingSheetTitleFieldId::Page, page_label.to_owned());
+                self.drawing_sheet(format, &title_values, schematic.grid_pitch_units)?;
+            } else {
+                self.drawing_sheet(
+                    format,
+                    &schematic.drawing_sheet_title_values,
+                    schematic.grid_pitch_units,
+                )?;
+            }
         }
         let component_stroke = self.mapped_stroke(
             PrintObjectKind::Layer,
@@ -1041,71 +1063,100 @@ impl<'a> SemanticSceneCompiler<'a> {
                 SceneTextRotation::CounterClockwise90
             }
         };
-        let rows = crate::state::drawing_sheet_title_block_rows(template)
-            .map(|rows| rows as u64)
-            .ok_or_else(|| conversion_error("title block has no authored grid"))?;
-        let mut lines = format
-            .title_block
-            .fields
-            .iter()
-            .filter(|(_, state)| state.visible)
-            .map(|(field, state)| {
-                let automatic = field.policy().value_authority
-                    == crate::state::DrawingSheetTitleFieldValueAuthority::Automatic;
-                let value = if automatic {
-                    automatic_values
-                        .get(field)
-                        .map(String::as_str)
-                        .filter(|value| !value.trim().is_empty())
-                        .unwrap_or("—")
-                } else if field.is_project_owned() && automatic_values.contains_key(field) {
-                    automatic_values.get(field).map_or("—", |value| {
-                        if value.trim().is_empty() {
-                            "—"
-                        } else {
-                            value.trim()
-                        }
-                    })
-                } else if state.value.trim().is_empty() {
-                    "\u{2014}"
-                } else {
-                    state.value.trim()
-                };
-                (
-                    format!(
-                        "{}{}: {value}",
-                        if automatic { "• " } else { "" },
-                        title_field_label(*field)
-                    ),
-                    automatic,
-                )
-            })
-            .collect::<Vec<_>>();
-        if lines.is_empty() {
-            lines.push((format.authored_size.label().to_owned(), false));
-            lines.push((format.display(), false));
-        }
-        let visible_field_count = lines.len();
-        let columns = lines.len().div_ceil(rows as usize).max(1) as u64;
-        let row_height = authored_block.height_um / rows;
-        let cell_width = authored_block.width_um / columns;
-        for row in 1..rows {
-            let y = authored_block.y_um + (authored_block.height_um * row / rows) as i64;
+        let logo = format.title_block_logo(template);
+        let logo_reserved_width_um = logo.map_or(0, |logo| logo.reserved_width_um());
+        let field_grid_x = authored_block
+            .x_um
+            .checked_add(i64::try_from(logo_reserved_width_um).map_err(|_| {
+                conversion_error("drawing-sheet managed logo width exceeds coordinate range")
+            })?)
+            .ok_or_else(|| conversion_error("drawing-sheet managed logo position overflow"))?;
+        let field_grid_width = authored_block
+            .width_um
+            .checked_sub(logo_reserved_width_um)
+            .ok_or_else(|| conversion_error("drawing-sheet managed logo exceeds title block"))?;
+        if let Some(logo) = logo {
             self.primitives.push(ScenePrimitive::Line {
-                from: transform(self, authored_block.x_um, y)?,
+                from: transform(self, field_grid_x, authored_block.y_um)?,
                 to: transform(
                     self,
-                    authored_block.x_um + authored_block.width_um as i64,
-                    y,
+                    field_grid_x,
+                    authored_block.y_um + authored_block.height_um as i64,
                 )?,
                 stroke,
             });
+            let inset = 3_000u64
+                .min(logo_reserved_width_um / 10)
+                .min(authored_block.height_um / 10);
+            let logo_width = logo_reserved_width_um.saturating_sub(inset.saturating_mul(2));
+            let logo_height = authored_block
+                .height_um
+                .saturating_sub(inset.saturating_mul(2));
+            let basis = u64::from(crate::state::DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS);
+            for primitive in logo.primitives() {
+                let points = primitive
+                    .points()
+                    .iter()
+                    .map(|point| {
+                        let x_offset =
+                            inset + logo_width.saturating_mul(u64::from(point.x())) / basis;
+                        let y_offset =
+                            inset + logo_height.saturating_mul(u64::from(point.y())) / basis;
+                        transform(
+                            self,
+                            authored_block.x_um + x_offset as i64,
+                            authored_block.y_um + y_offset as i64,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.primitives.push(ScenePrimitive::Polyline {
+                    points,
+                    closed: primitive.closed(),
+                    stroke,
+                    fill: primitive.filled().then_some(SceneFill::solid(stroke.color)),
+                });
+            }
         }
-        for index in 0..lines.len() {
+        let rows = format
+            .title_block_rows(template)
+            .map(|rows| rows as u64)
+            .ok_or_else(|| conversion_error("title block has no authored grid"))?;
+        let mut fields = crate::state::resolve_drawing_sheet_title_fields(format, automatic_values)
+            .into_iter()
+            .map(|field| {
+                (
+                    field.id.display_label().to_owned(),
+                    field.value,
+                    field.authority
+                        == crate::state::DrawingSheetTitleFieldValueAuthority::Automatic,
+                )
+            })
+            .collect::<Vec<_>>();
+        if fields.is_empty() {
+            fields.push((
+                "Format".to_owned(),
+                format.authored_size.label().to_owned(),
+                false,
+            ));
+            fields.push(("Description".to_owned(), format.display(), false));
+        }
+        let visible_field_count = fields.len();
+        let columns = fields.len().div_ceil(rows as usize).max(1) as u64;
+        let row_height = authored_block.height_um / rows;
+        let cell_width = field_grid_width / columns;
+        for row in 1..rows {
+            let y = authored_block.y_um + (authored_block.height_um * row / rows) as i64;
+            self.primitives.push(ScenePrimitive::Line {
+                from: transform(self, field_grid_x, y)?,
+                to: transform(self, field_grid_x + field_grid_width as i64, y)?,
+                stroke,
+            });
+        }
+        for index in 0..fields.len() {
             let row = index as u64 / columns;
             let column = index as u64 % columns;
             if column > 0 {
-                let x = authored_block.x_um + (cell_width * column) as i64;
+                let x = field_grid_x + (cell_width * column) as i64;
                 let top = authored_block.y_um + (row_height * row) as i64;
                 self.primitives.push(ScenePrimitive::Line {
                     from: transform(self, x, top)?,
@@ -1114,7 +1165,7 @@ impl<'a> SemanticSceneCompiler<'a> {
                 });
             }
         }
-        for (index, (line, automatic)) in lines.into_iter().enumerate() {
+        for (index, (label, value, automatic)) in fields.into_iter().enumerate() {
             let row = index as u64 / columns;
             let column = index as u64 % columns;
             let max_chars = crate::state::drawing_sheet_title_cell_capacity(
@@ -1125,19 +1176,31 @@ impl<'a> SemanticSceneCompiler<'a> {
                 visible_field_count,
             )
             .ok_or_else(|| conversion_error("title block has no authored cell capacity"))?;
-            let line = truncate_title_block_text(&line, max_chars);
+            let label = if automatic {
+                format!("• {label}")
+            } else {
+                label
+            };
             self.add_text_rotated(
                 transform(
                     self,
-                    authored_block.x_um + (cell_width * column) as i64 + 2_000,
-                    authored_block.y_um + (row_height * row) as i64 + (row_height / 2) as i64,
+                    field_grid_x + (cell_width * column) as i64 + 2_000,
+                    authored_block.y_um + (row_height * row) as i64 + 2_800,
                 )?,
-                &line,
-                if automatic {
-                    SceneFont::Sans
-                } else {
-                    SceneFont::SansSemibold
-                },
+                &label,
+                SceneFont::Sans,
+                1_800,
+                stroke.color,
+                text_rotation,
+            )?;
+            self.add_text_rotated(
+                transform(
+                    self,
+                    field_grid_x + (cell_width * column) as i64 + 2_000,
+                    authored_block.y_um + (row_height * (row + 1)) as i64 - 2_200,
+                )?,
+                &truncate_title_block_text(&value, max_chars),
+                SceneFont::SansSemibold,
                 2_400,
                 stroke.color,
                 text_rotation,
@@ -2400,88 +2463,5 @@ impl<'a> SemanticSceneCompiler<'a> {
     }
 }
 
-fn authored_title_block_rect(
-    block: DrawingSheetRect,
-    rotation: DrawingSheetTitleBlockRotation,
-) -> Result<DrawingSheetRect, HardcopyRenderError> {
-    if rotation == DrawingSheetTitleBlockRotation::Upright {
-        return Ok(block);
-    }
-    let block_width = i64::try_from(block.width_um)
-        .map_err(|_| conversion_error("drawing-sheet title-block width overflow"))?;
-    let block_height = i64::try_from(block.height_um)
-        .map_err(|_| conversion_error("drawing-sheet title-block height overflow"))?;
-    let x_twice = block
-        .x_um
-        .checked_mul(2)
-        .and_then(|value| value.checked_add(block_width))
-        .and_then(|value| value.checked_sub(block_height))
-        .ok_or_else(|| conversion_error("drawing-sheet title-block X geometry overflow"))?;
-    let y_twice = block
-        .y_um
-        .checked_mul(2)
-        .and_then(|value| value.checked_add(block_height))
-        .and_then(|value| value.checked_sub(block_width))
-        .ok_or_else(|| conversion_error("drawing-sheet title-block Y geometry overflow"))?;
-    if x_twice % 2 != 0 || y_twice % 2 != 0 {
-        return Err(conversion_error(
-            "drawing-sheet title-block geometry requires half-micrometre coordinates",
-        ));
-    }
-    Ok(DrawingSheetRect {
-        x_um: x_twice / 2,
-        y_um: y_twice / 2,
-        width_um: block.height_um,
-        height_um: block.width_um,
-    })
-}
-
-pub(super) fn zone_alpha_label(index: u8) -> String {
-    // Match canvas and preview: engineering drawing zones omit ambiguous
-    // letters and fall back to the numeric ordinal once the alphabet ends.
-    const LETTERS: &[u8] = b"ABCDEFGHJKLMNPRSTUVWXY";
-    LETTERS.get(usize::from(index)).map_or_else(
-        || (usize::from(index) + 1).to_string(),
-        |letter| char::from(*letter).to_string(),
-    )
-}
-
-fn midpoint_coordinate(
-    start: i64,
-    end: i64,
-    context: &'static str,
-) -> Result<i64, HardcopyRenderError> {
-    end.checked_sub(start)
-        .and_then(|distance| start.checked_add(distance / 2))
-        .ok_or_else(|| conversion_error(format!("{context} coordinate overflow")))
-}
-
-fn title_field_label(field: DrawingSheetTitleFieldId) -> &'static str {
-    match field {
-        DrawingSheetTitleFieldId::Project => "Project",
-        DrawingSheetTitleFieldId::CellView => "Cell / view",
-        DrawingSheetTitleFieldId::SheetTitle => "Sheet",
-        DrawingSheetTitleFieldId::Page => "Page",
-        DrawingSheetTitleFieldId::Revision => "Revision",
-        DrawingSheetTitleFieldId::Format => "Format",
-        DrawingSheetTitleFieldId::Scale => "Scale",
-        DrawingSheetTitleFieldId::DrawnBy => "Drawn by",
-        DrawingSheetTitleFieldId::CheckedBy => "Checked by",
-        DrawingSheetTitleFieldId::ApprovedBy => "Approved by",
-        DrawingSheetTitleFieldId::Date => "Date",
-        DrawingSheetTitleFieldId::Organization => "Organization",
-        DrawingSheetTitleFieldId::DocumentId => "Document ID",
-        DrawingSheetTitleFieldId::Classification => "Classification",
-    }
-}
-
-fn truncate_title_block_text(value: &str, max_chars: usize) -> String {
-    let count = value.chars().count();
-    if count <= max_chars {
-        return value.to_owned();
-    }
-    let keep = max_chars.saturating_sub(1);
-    let mut truncated = value.chars().take(keep).collect::<String>();
-    truncated.push('…');
-    truncated
-}
+mod title_block;
+pub(super) use title_block::*;

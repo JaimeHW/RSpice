@@ -976,6 +976,17 @@ fn browser_print_handoff_is_distinct_from_artifact_export() {
         ),
         Err(HardcopyError::AcceptedPageCountMismatch { .. })
     ));
+    assert!(
+        HardcopyReceipt::record(
+            &plan,
+            HardcopyOutcome::DesktopPrintHandoffAccepted {
+                handoff_id: "desktop-print-24".to_owned(),
+                pages_accepted: pages,
+                source_artifact_digest: digest(0x93),
+            },
+        )
+        .is_ok()
+    );
 }
 
 #[test]

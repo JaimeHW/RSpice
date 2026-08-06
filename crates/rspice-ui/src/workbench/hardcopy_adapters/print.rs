@@ -2,19 +2,23 @@
 //!
 //! Rendering stays in `workbench::hardcopy_render`; this module owns the
 //! irreversible platform boundary. A successful native result means that the
-//! Windows spooler accepted the complete GDI job. A successful browser result
-//! means only that the browser accepted navigation of a user-initiated window
-//! to a Blob-backed print document. Neither result claims that a browser print
-//! dialog opened or that paper was produced.
+//! Windows spooler accepted the complete GDI job. Browser and non-Windows
+//! desktop handoffs have distinct receipt types and claim only that their
+//! respective platform accepted the print-ready document. Neither claims that
+//! a print dialog opened or that paper was produced.
 
-// The browser build retains the shared native-print contracts so persisted
-// setup and receipt data have one schema across targets. Their platform
-// adapters are intentionally unreachable on wasm.
-#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
+// Non-Windows builds retain the shared native-print contracts so persisted
+// setup and receipt data have one schema across targets. Their direct-spool
+// adapters are intentionally unreachable there.
+#![cfg_attr(not(target_os = "windows"), allow(dead_code))]
 
 use std::collections::BTreeSet;
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::Write as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -25,7 +29,6 @@ use crate::hardcopy::{
     RenderTarget, ResolvedOrientation,
 };
 use crate::product::ContentDigest;
-#[cfg(target_arch = "wasm32")]
 use crate::workbench::hardcopy_adapters::render::RenderedHardcopyPublication;
 use crate::workbench::hardcopy_adapters::render::RenderedPrinterPages;
 
@@ -35,12 +38,17 @@ const MAX_CAPABILITIES_PER_DEVICE: usize = 4_096;
 const MAX_PLATFORM_TEXT_BYTES: usize = 4_096;
 const MAX_RECEIPT_MESSAGE_BYTES: usize = 2_048;
 const PAPER_DIMENSION_TOLERANCE_UM: u64 = 100;
+#[cfg(not(target_arch = "wasm32"))]
+const DESKTOP_HANDOFF_RETENTION: Duration = Duration::from_secs(24 * 60 * 60);
+#[cfg(not(target_arch = "wasm32"))]
+const DESKTOP_HANDOFF_ROOT: &str = "rspice-print-handoffs";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum HardcopyPlatformUnavailableReason {
     NativePrintingIsWindowsOnly,
     BrowserPrintingRequiresWebAssembly,
+    DesktopPrintHandoffRequiresMacOsOrLinux,
     BrowserWindowApiUnavailable,
     BrowserBlobApiUnavailable,
 }
@@ -634,6 +642,11 @@ pub enum HardcopyPrintError {
         operation: &'static str,
         message: String,
     },
+    #[error("desktop print handoff failed while {operation}: {message}")]
+    DesktopHandoff {
+        operation: &'static str,
+        message: String,
+    },
     #[error("could not authenticate capability snapshot: {0}")]
     Digest(String),
 }
@@ -686,7 +699,8 @@ impl HardcopyPrintError {
             | Self::Windows { .. }
             | Self::DriverRejected { .. }
             | Self::InvalidDriverGeometry(_)
-            | Self::SpoolCleanupFailed { .. } => (HardcopyFailureCode::DeviceUnavailable, true),
+            | Self::SpoolCleanupFailed { .. }
+            | Self::DesktopHandoff { .. } => (HardcopyFailureCode::DeviceUnavailable, true),
             Self::PrinterCapabilitiesChanged
             | Self::UnsupportedPaper
             | Self::MixedAuthoredMediaUnsupported
@@ -1084,6 +1098,273 @@ pub(crate) fn finalize_browser_print(
     publication: &RenderedHardcopyPublication,
 ) -> Result<HardcopyOutcome, HardcopyPrintError> {
     browser_backend::finalize_browser_print(reservation, plan, publication)
+}
+
+/// Open a complete print-ready HTML document through the native desktop's
+/// registered browser/document launcher. Success means only that the launcher
+/// accepted the handoff; it is never reported as a direct spool result.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn handoff_desktop_print_document(
+    plan: &HardcopyPlan,
+    publication: &RenderedHardcopyPublication,
+) -> Result<HardcopyOutcome, HardcopyPrintError> {
+    handoff_desktop_print_document_with(
+        plan,
+        publication,
+        &SystemDesktopPrintLauncher,
+        &std::env::temp_dir().join(DESKTOP_HANDOFF_ROOT),
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+trait DesktopPrintLauncher {
+    fn launch(&self, document: &std::path::Path) -> Result<(), HardcopyPrintError>;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct SystemDesktopPrintLauncher;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl DesktopPrintLauncher for SystemDesktopPrintLauncher {
+    fn launch(&self, document: &std::path::Path) -> Result<(), HardcopyPrintError> {
+        #[cfg(target_os = "macos")]
+        let mut command = std::process::Command::new("open");
+        #[cfg(target_os = "linux")]
+        let mut command = std::process::Command::new("xdg-open");
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        {
+            let _ = document;
+            Err(HardcopyPrintError::PlatformUnavailable(
+                HardcopyPlatformUnavailableReason::DesktopPrintHandoffRequiresMacOsOrLinux,
+            ))
+        }
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            let status = command
+                .arg(document)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .map_err(|error| HardcopyPrintError::DesktopHandoff {
+                    operation: "starting the system document launcher",
+                    message: error.to_string(),
+                })?;
+            if !status.success() {
+                return Err(HardcopyPrintError::DesktopHandoff {
+                    operation: "opening the print-ready document",
+                    message: format!("the system document launcher exited with {status}"),
+                });
+            }
+            Ok(())
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn handoff_desktop_print_document_with(
+    plan: &HardcopyPlan,
+    publication: &RenderedHardcopyPublication,
+    launcher: &impl DesktopPrintLauncher,
+    root: &std::path::Path,
+) -> Result<HardcopyOutcome, HardcopyPrintError> {
+    let html = validate_print_document_publication(plan, publication)?;
+    prepare_handoff_root(root)?;
+    cleanup_expired_handoffs(root);
+
+    let handoff_id = uuid::Uuid::new_v4().to_string();
+    let directory = root.join(format!("handoff-{handoff_id}"));
+    #[cfg(unix)]
+    let mut directory_builder = std::fs::DirBuilder::new();
+    #[cfg(not(unix))]
+    let directory_builder = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt as _;
+        directory_builder.mode(0o700);
+    }
+    directory_builder
+        .create(&directory)
+        .map_err(|error| desktop_io_error("creating a private print handoff directory", error))?;
+    let document = directory.join("document.html");
+    let result = (|| {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        let mut file = options
+            .open(&document)
+            .map_err(|error| desktop_io_error("creating the print-ready document", error))?;
+        file.write_all(html.as_bytes())
+            .and_then(|()| file.sync_all())
+            .map_err(|error| desktop_io_error("committing the print-ready document", error))?;
+        launcher.launch(&document)
+    })();
+    if let Err(error) = result {
+        cleanup_handoff_directory(&directory);
+        return Err(error);
+    }
+
+    Ok(HardcopyOutcome::DesktopPrintHandoffAccepted {
+        handoff_id,
+        pages_accepted: publication.page_count(),
+        source_artifact_digest: publication.digest(),
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn validate_print_document_publication<'a>(
+    plan: &HardcopyPlan,
+    publication: &'a RenderedHardcopyPublication,
+) -> Result<&'a str, HardcopyPrintError> {
+    if plan.setup().render().format() != OutputFormat::BrowserPrintDocument
+        || !matches!(
+            plan.setup().render().target(),
+            RenderTarget::BrowserPrintDialog
+        )
+    {
+        return Err(HardcopyPrintError::BrowserPrintPlanRequired);
+    }
+    if publication.format() != OutputFormat::BrowserPrintDocument
+        || publication.page_count() != plan.pagination().pages().len() as u32
+    {
+        return Err(HardcopyPrintError::BrowserPublicationMismatch(
+            "format or page count differs from the plan".to_owned(),
+        ));
+    }
+    let part = publication.single_part().ok_or_else(|| {
+        HardcopyPrintError::BrowserPublicationMismatch(
+            "desktop print handoff must contain exactly one HTML document".to_owned(),
+        )
+    })?;
+    if part.media_type() != "text/html" {
+        return Err(HardcopyPrintError::BrowserPublicationMismatch(
+            "desktop print handoff publication is not HTML".to_owned(),
+        ));
+    }
+    let html = std::str::from_utf8(part.bytes()).map_err(|error| {
+        HardcopyPrintError::BrowserPublicationMismatch(format!(
+            "desktop print handoff HTML is not UTF-8: {error}"
+        ))
+    })?;
+    if !html.contains(&format!(
+        "name=\"rspice-plan-digest\" content=\"{}\"",
+        plan.content_digest()
+    )) || !html.contains("Content-Security-Policy")
+        || html.to_ascii_lowercase().contains("<script")
+    {
+        return Err(HardcopyPrintError::BrowserPublicationMismatch(
+            "desktop print handoff is not the expected self-contained authenticated document"
+                .to_owned(),
+        ));
+    }
+    Ok(html)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn prepare_handoff_root(root: &std::path::Path) -> Result<(), HardcopyPrintError> {
+    if !root.exists() {
+        #[cfg(unix)]
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(not(unix))]
+        let builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt as _;
+            builder.mode(0o700);
+        }
+        match builder.create(root) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => {
+                return Err(desktop_io_error("creating the print handoff root", error));
+            }
+        }
+    }
+    let metadata = std::fs::symlink_metadata(root)
+        .map_err(|error| desktop_io_error("inspecting the print handoff root", error))?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(HardcopyPrintError::DesktopHandoff {
+            operation: "validating the print handoff root",
+            message: "the temporary handoff root is not a private directory".to_owned(),
+        });
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return Err(HardcopyPrintError::DesktopHandoff {
+                operation: "validating the print handoff root",
+                message: "the temporary handoff root grants access to other users".to_owned(),
+            });
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn cleanup_expired_handoffs(root: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    let now = SystemTime::now();
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if !name.starts_with("handoff-") {
+            continue;
+        }
+        let Ok(metadata) = entry.path().symlink_metadata() else {
+            continue;
+        };
+        if !metadata.is_dir()
+            || metadata.file_type().is_symlink()
+            || metadata
+                .modified()
+                .ok()
+                .and_then(|modified| now.duration_since(modified).ok())
+                .is_none_or(|age| age < DESKTOP_HANDOFF_RETENTION)
+        {
+            continue;
+        }
+        cleanup_handoff_directory(&entry.path());
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn cleanup_handoff_directory(directory: &std::path::Path) {
+    let document = directory.join("document.html");
+    let safe_document = document
+        .symlink_metadata()
+        .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink());
+    let entries = std::fs::read_dir(directory).ok().map(|entries| {
+        entries
+            .flatten()
+            .map(|entry| entry.file_name())
+            .collect::<Vec<_>>()
+    });
+    if entries.as_ref().is_some_and(Vec::is_empty) {
+        let _ = std::fs::remove_dir(directory);
+        return;
+    }
+    let only_expected_entry =
+        entries.is_some_and(|names| names.len() == 1 && names[0] == "document.html");
+    if safe_document && only_expected_entry {
+        let _ = std::fs::remove_file(&document);
+        let _ = std::fs::remove_dir(directory);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn desktop_io_error(operation: &'static str, error: std::io::Error) -> HardcopyPrintError {
+    HardcopyPrintError::DesktopHandoff {
+        operation,
+        message: error.to_string(),
+    }
 }
 
 trait NativeSpoolBackend {
@@ -1604,6 +1885,127 @@ mod tests {
         let scene = HardcopyScene::try_new(plan.content_extent(), metadata, Vec::new(), Vec::new())
             .unwrap();
         HardcopyRenderer::render_printer_pages(plan, &scene, dpi).unwrap()
+    }
+
+    fn browser_print_plan_and_publication() -> (HardcopyPlan, RenderedHardcopyPublication) {
+        let extent = ContentExtent::try_new(
+            Length::from_micrometres(100_000),
+            Length::from_micrometres(60_000),
+        )
+        .unwrap();
+        let setup = HardcopySetup::try_new(
+            PhysicalPageSetup::try_new(
+                PaperSize::Standard(StandardPaper::Letter),
+                PageMargins::uniform(Length::from_micrometres(10_000)),
+                Bleed::None,
+                Orientation::Landscape,
+            )
+            .unwrap(),
+            ScaleMode::FitPrintableArea,
+            TilingSetup::try_new(TilingMode::SinglePage, Length::ZERO, false).unwrap(),
+            RenderSetup::try_new(
+                RenderTarget::BrowserPrintDialog,
+                OutputFormat::BrowserPrintDocument,
+                ColorMapping::PrintSafeEngineeringPalette,
+                BackgroundMode::White,
+                FontPolicy::new(true, false),
+                true,
+            )
+            .unwrap(),
+            DecorationSetup::try_new(false, false, false, Watermark::None).unwrap(),
+            PrintMappingTable::default(),
+        )
+        .unwrap();
+        let plan = HardcopyPlan::compile_with_id(
+            HardcopyPlanId::try_from_uuid(Uuid::from_u128(3)).unwrap(),
+            source(),
+            setup,
+            extent,
+        )
+        .unwrap();
+        let metadata = HardcopySceneMetadata::try_new("test", "RSpice").unwrap();
+        let scene = HardcopyScene::try_new(extent, metadata, Vec::new(), Vec::new()).unwrap();
+        let publication = HardcopyRenderer::render(&plan, &scene).unwrap();
+        (plan, publication)
+    }
+
+    struct FakeDesktopLauncher {
+        observed: Rc<RefCell<Vec<std::path::PathBuf>>>,
+        fail: bool,
+    }
+
+    impl DesktopPrintLauncher for FakeDesktopLauncher {
+        fn launch(&self, document: &std::path::Path) -> Result<(), HardcopyPrintError> {
+            self.observed.borrow_mut().push(document.to_owned());
+            if self.fail {
+                Err(HardcopyPrintError::DesktopHandoff {
+                    operation: "testing the launcher",
+                    message: "rejected".to_owned(),
+                })
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[test]
+    fn desktop_print_handoff_is_authenticated_private_and_not_spool_acceptance() {
+        let (plan, publication) = browser_print_plan_and_publication();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-print-handoff-test-{}",
+            Uuid::new_v4().simple()
+        ));
+        let observed = Rc::new(RefCell::new(Vec::new()));
+        let outcome = handoff_desktop_print_document_with(
+            &plan,
+            &publication,
+            &FakeDesktopLauncher {
+                observed: observed.clone(),
+                fail: false,
+            },
+            &root,
+        )
+        .unwrap();
+        assert!(matches!(
+            outcome,
+            HardcopyOutcome::DesktopPrintHandoffAccepted {
+                pages_accepted: 1,
+                ..
+            }
+        ));
+        let document = observed.borrow()[0].clone();
+        let html = std::fs::read_to_string(&document).unwrap();
+        assert!(html.contains(&plan.content_digest().to_string()));
+        assert!(!html.to_ascii_lowercase().contains("<script"));
+
+        let directory = document.parent().unwrap().to_owned();
+        cleanup_handoff_directory(&directory);
+        std::fs::remove_dir(&root).unwrap();
+    }
+
+    #[test]
+    fn rejected_desktop_handoff_removes_the_unclaimed_document() {
+        let (plan, publication) = browser_print_plan_and_publication();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-print-handoff-test-{}",
+            Uuid::new_v4().simple()
+        ));
+        let observed = Rc::new(RefCell::new(Vec::new()));
+        assert!(
+            handoff_desktop_print_document_with(
+                &plan,
+                &publication,
+                &FakeDesktopLauncher {
+                    observed: observed.clone(),
+                    fail: true,
+                },
+                &root,
+            )
+            .is_err()
+        );
+        assert!(!observed.borrow()[0].exists());
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
+        std::fs::remove_dir(&root).unwrap();
     }
 
     fn native_plan_for_exact_mode(

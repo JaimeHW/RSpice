@@ -7,6 +7,30 @@ use super::super::{GovernedSheetPageAuthority, SchematicPageSetupAuthority};
 use super::*;
 
 #[test]
+fn governed_design_print_selects_the_active_sheet_identity() {
+    let mut app = RSpiceApp::test_instance();
+    let reference = app.state.workspace.active_view.clone();
+    app.state
+        .workbench
+        .documents
+        .activate(crate::workbench::state::WorkspaceDocumentId::CellView(
+            reference,
+        ));
+    let key = app.state.workspace.active_key();
+    let sheet_id = app
+        .state
+        .workspace
+        .design_management
+        .bootstrap_for_cell_view(&key, "Main", [])
+        .unwrap();
+
+    let (source_key, scope) = active_retained_source_selection(&app).unwrap();
+
+    assert!(source_key.ends_with(&format!(":sheet:{sheet_id}")));
+    assert_eq!(scope, crate::hardcopy::HardcopyScope::CurrentSheet);
+}
+
+#[test]
 fn authored_sheet_formats_seed_output_media_without_reverse_coercion() {
     use crate::hardcopy::{
         HardcopySetup, Orientation, PaperSize, PhysicalPageSetup, StandardPaper,

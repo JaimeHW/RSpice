@@ -17,6 +17,45 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::state::Workspace;
 
 #[test]
+fn generated_symbol_sync_advances_the_catalog_only_for_real_changes() {
+    let mut state = AppState::default();
+    let empty_revision = state.library_manager.revision();
+
+    state.sync_active_schematic_to_workspace();
+
+    assert_eq!(
+        state.library_manager.revision(),
+        empty_revision,
+        "an empty generated-symbol synchronization must be revision-stable"
+    );
+
+    let port_id = state
+        .schematic
+        .add_component(ComponentType::Port, Point::origin());
+    state
+        .schematic
+        .components
+        .iter_mut()
+        .find(|component| component.id == port_id)
+        .expect("new interface port")
+        .value = "IN".to_owned();
+
+    state.sync_active_schematic_to_workspace();
+    let generated_revision = state.library_manager.revision();
+    assert!(
+        generated_revision > empty_revision,
+        "creating a generated symbol must advance the catalog revision"
+    );
+
+    state.sync_active_schematic_to_workspace();
+    assert_eq!(
+        state.library_manager.revision(),
+        generated_revision,
+        "repeating an identical generated-symbol synchronization must be a no-op"
+    );
+}
+
+#[test]
 fn new_document_defaults_are_resolved_once_and_existing_buffers_are_preserved() {
     let mut state = AppState::default();
     state

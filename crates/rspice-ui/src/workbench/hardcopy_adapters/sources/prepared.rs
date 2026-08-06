@@ -1149,6 +1149,7 @@ fn validate_project_source_identity(
     identity: &HardcopySourceIdentity,
     family: &'static str,
 ) -> Result<(), HardcopySourceError> {
+    identity.validate()?;
     validate_label(
         "prepared source key",
         &identity.source_key,

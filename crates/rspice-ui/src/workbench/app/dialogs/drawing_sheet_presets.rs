@@ -31,13 +31,19 @@ use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
 pub(crate) use model::capture_personal_preset_into_project;
+pub use model::{
+    DRAWING_SHEET_PACKAGE_MAX_BYTES, DrawingSheetPackageEncoding, DrawingSheetPackageInspection,
+    DrawingSheetPackageVerification, PublishedDrawingSheetPackage,
+    drawing_sheet_publisher_public_key, inspect_drawing_sheet_package,
+    publish_organization_drawing_sheet_package, verify_published_drawing_sheet_package,
+};
 
 use model::{
     ImportResolution, PresetEditorDraft, PresetEditorMode, PresetEditorUnit, PresetPackageFormat,
     PresetTransferState, StartingFrame, TransferMode, all_visible_presets,
     build_package_with_options, encode_package_with_format, imported_project_preset, parse_package,
     prepare_import_candidates, preset_from_editor, unavailable, unique_copy_name,
-    validate_preset_name,
+    unsigned_exportable, validate_preset_name,
 };
 use render::{EditorBodyAction, LibraryBodyAction, PresetKey, TransferBodyAction};
 
@@ -144,6 +150,9 @@ impl RSpiceApp {
         let choice = Dialog::new(LIBRARY_EYEBROW, LIBRARY_TITLE, "Close")
             .description(LIBRARY_DESCRIPTION)
             .size(DialogSize::DrawingSheetWorkflow)
+            // The body owns its section surfaces and they butt on their own
+            // edges; the dialog's default inset framed the whole page.
+            .flush_body()
             .primary_on_enter(false)
             .show(ctx, |ui| {
                 action = render::library_body(
@@ -550,7 +559,7 @@ impl RSpiceApp {
         let visible = all_visible_presets(&self.state.workspace.design_management, &personal);
         let export_ids = visible
             .iter()
-            .filter(|preset| !unavailable(preset))
+            .filter(|preset| unsigned_exportable(preset))
             .map(transfer_identity)
             .collect();
         let package_name = if mode == TransferMode::Import {
@@ -681,7 +690,7 @@ impl RSpiceApp {
                     transfer.export_ids.extend(
                         visible
                             .iter()
-                            .filter(|preset| !unavailable(preset))
+                            .filter(|preset| unsigned_exportable(preset))
                             .map(transfer_identity),
                     );
                 }
@@ -694,7 +703,7 @@ impl RSpiceApp {
         source: &str,
         visible: &[DrawingSheetPreset],
     ) -> Result<(), String> {
-        let package = parse_package(source)?;
+        let package = parse_package(source, &self.state.pdk_config.publisher_trust_store)?;
         let candidates = prepare_import_candidates(&package, visible)?;
         let transfer = &mut self.state.dialogs.drawing_sheet_presets.transfer;
         transfer.reviewed_digest = Some(package.source_digest_sha256);
@@ -707,7 +716,7 @@ impl RSpiceApp {
         validate_project_authority(&self.state, &self.state.dialogs.drawing_sheet_presets)?;
         self.ensure_personal_fresh()?;
         let transfer = self.state.dialogs.drawing_sheet_presets.transfer.clone();
-        let package = parse_package(&transfer.json)?;
+        let package = parse_package(&transfer.json, &self.state.pdk_config.publisher_trust_store)?;
         if transfer.reviewed_digest.as_deref() != Some(package.source_digest_sha256.as_str()) {
             return Err(
                 "The package changed after review. Review the current JSON before importing."
@@ -861,7 +870,8 @@ impl RSpiceApp {
         let selected = visible
             .iter()
             .filter(|preset| {
-                !unavailable(preset) && transfer.export_ids.contains(&transfer_identity(preset))
+                unsigned_exportable(preset)
+                    && transfer.export_ids.contains(&transfer_identity(preset))
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -1499,6 +1509,8 @@ mod tests {
             explicitly_skipped.clone(),
         ])
         .unwrap();
+        let (package, trust) = model::authenticate_package_for_test(package);
+        app.state.pdk_config.publisher_trust_store = trust;
         let source = model::encode_package(&package).unwrap();
 
         assert!(open_custom_sheet_size_library(&mut app.state));

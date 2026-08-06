@@ -4814,6 +4814,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rspice-sheet-publisher"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "clap",
+ "rspice-ui",
+ "rustix 1.1.4",
+ "windows-sys 0.61.2",
+ "zeroize",
+]
+
+[[package]]
 name = "rspice-ui"
 version = "0.1.0"
 dependencies = [

@@ -1,5 +1,8 @@
 //! Project-level design-management aggregate and transactional lifecycle operations.
 
+use super::drawing_sheet::presets::{
+    normalize_format_preset_reference, validate_drawing_sheet_preset_label,
+};
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

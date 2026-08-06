@@ -64,6 +64,12 @@ mod surfaces;
 pub(crate) mod tools;
 pub(crate) mod workflows;
 
+pub use app::{
+    DRAWING_SHEET_PACKAGE_MAX_BYTES, DrawingSheetPackageEncoding, DrawingSheetPackageInspection,
+    DrawingSheetPackageVerification, PublishedDrawingSheetPackage,
+    drawing_sheet_publisher_public_key, inspect_drawing_sheet_package,
+    publish_organization_drawing_sheet_package, verify_published_drawing_sheet_package,
+};
 pub(crate) use cross_probe::synchronize_schematic_cross_probe;
 pub use documents::result_document::ResultViewer;
 pub(crate) use lifecycle::session::{SchematicSelectionRecovery, SchematicVisibilityRecovery};

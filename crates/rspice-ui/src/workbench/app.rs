@@ -97,6 +97,12 @@ pub(crate) use dialogs::design_management::{
 pub(crate) use dialogs::drawing_sheet_defaults::{
     DrawingSheetDefaultsDialogState, open_drawing_sheet_defaults,
 };
+pub use dialogs::drawing_sheet_presets::{
+    DRAWING_SHEET_PACKAGE_MAX_BYTES, DrawingSheetPackageEncoding, DrawingSheetPackageInspection,
+    DrawingSheetPackageVerification, PublishedDrawingSheetPackage,
+    drawing_sheet_publisher_public_key, inspect_drawing_sheet_package,
+    publish_organization_drawing_sheet_package, verify_published_drawing_sheet_package,
+};
 pub(crate) use dialogs::drawing_sheet_presets::{
     DrawingSheetPresetDialogsState, capture_personal_preset_into_project,
     open_custom_sheet_size_library,

@@ -207,29 +207,46 @@ pub(super) fn schematic_bounds(
 pub(crate) fn authored_sheet_bounds(
     format: &SchematicSheetFormat,
 ) -> Result<SemanticBounds, HardcopySourceError> {
+    let geometry = format
+        .geometry()
+        .map_err(|error| HardcopySourceError::InvalidSheetPartition(error.to_string()))?;
+    // Authored-sheet clipping is governed by the physical paper edge. Bleed
+    // is publication artwork and must never make off-sheet schematic content
+    // appear to be on the authored sheet.
+    drawing_sheet_rect_bounds(geometry.paper)
+}
+
+/// Bounds of every drawing-sheet primitive emitted by the scene compiler.
+/// Unlike authored-sheet clipping bounds, this includes configured bleed so
+/// signed bleed coordinates are authenticated before scene compilation.
+pub(crate) fn drawing_sheet_artwork_bounds(
+    format: &SchematicSheetFormat,
+) -> Result<SemanticBounds, HardcopySourceError> {
+    let geometry = format
+        .geometry()
+        .map_err(|error| HardcopySourceError::InvalidSheetPartition(error.to_string()))?;
+    drawing_sheet_rect_bounds(geometry.bleed)
+}
+
+fn drawing_sheet_rect_bounds(
+    rect: crate::state::DrawingSheetRect,
+) -> Result<SemanticBounds, HardcopySourceError> {
     let origin_x = SCHEMATIC_SHEET_ORIGIN_X_UNITS
         .checked_mul(SCHEMATIC_UNIT_UM)
         .ok_or(HardcopySourceError::CoordinateOverflow)?;
     let origin_y = SCHEMATIC_SHEET_ORIGIN_Y_UNITS
         .checked_mul(SCHEMATIC_UNIT_UM)
         .ok_or(HardcopySourceError::CoordinateOverflow)?;
-    let geometry = format
-        .geometry()
-        .map_err(|error| HardcopySourceError::InvalidSheetPartition(error.to_string()))?;
-    // Authored-sheet clipping is governed by the physical paper edge. Bleed
-    // is export artwork outside that edge and must never make off-sheet
-    // schematic content appear to be on the authored sheet.
-    let paper = geometry.paper;
     let minimum_x = origin_x
-        .checked_add(paper.x_um)
+        .checked_add(rect.x_um)
         .ok_or(HardcopySourceError::CoordinateOverflow)?;
     let minimum_y = origin_y
-        .checked_add(paper.y_um)
+        .checked_add(rect.y_um)
         .ok_or(HardcopySourceError::CoordinateOverflow)?;
     let width_um =
-        i64::try_from(paper.width_um).map_err(|_| HardcopySourceError::CoordinateOverflow)?;
+        i64::try_from(rect.width_um).map_err(|_| HardcopySourceError::CoordinateOverflow)?;
     let height_um =
-        i64::try_from(paper.height_um).map_err(|_| HardcopySourceError::CoordinateOverflow)?;
+        i64::try_from(rect.height_um).map_err(|_| HardcopySourceError::CoordinateOverflow)?;
     SemanticBounds::try_new(
         SemanticPoint::new(minimum_x, minimum_y),
         SemanticPoint::new(
@@ -642,6 +659,19 @@ mod drawing_sheet_geometry_tests {
     }
 
     #[test]
+    fn drawing_sheet_artwork_bounds_include_configured_bleed() {
+        let format = SchematicSheetFormat::default()
+            .try_update(|draft| draft.bleed_um = 5_000)
+            .unwrap();
+        let paper = authored_sheet_bounds(&format).unwrap();
+        let artwork = drawing_sheet_artwork_bounds(&format).unwrap();
+        assert_eq!(artwork.minimum.x_um, paper.minimum.x_um - 5_000);
+        assert_eq!(artwork.minimum.y_um, paper.minimum.y_um - 5_000);
+        assert_eq!(artwork.maximum.x_um, paper.maximum.x_um + 5_000);
+        assert_eq!(artwork.maximum.y_um, paper.maximum.y_um + 5_000);
+    }
+
+    #[test]
     fn schematic_bounds_include_major_arc_cardinal_extrema() {
         let arc = DocumentationShape::new(
             1,
@@ -656,6 +686,7 @@ mod drawing_sheet_geometry_tests {
             view_path: "library/cell/schematic".to_owned(),
             drawing_sheet: None,
             drawing_sheet_title_values: std::collections::BTreeMap::new(),
+            drawing_sheet_page_numbering: None,
             grid_pitch_units: 10,
             components: Vec::new(),
             wires: Vec::new(),

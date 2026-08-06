@@ -12,7 +12,7 @@ use crate::ui::widgets::Button;
 use super::model::{
     ImportCandidate, ImportResolution, PresetEditorDraft, PresetEditorMode, PresetEditorUnit,
     PresetPackageFormat, PresetTransferState, StartingFrame, TransferMode, format_dimension_um,
-    unavailable,
+    unavailable, unsigned_exportable,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,43 +68,50 @@ pub(super) fn library_body(
     let t = Tokens::get(ui.ctx());
     let mut action = None;
 
+    // Banner, toolbar, table and closing notes are one continuous page: each
+    // section owns its own surface and they meet on their edges, rather than
+    // floating as separate boxes on a band of background.
+    ui.spacing_mut().item_spacing.y = 0.0;
     concept_banner(
         ui,
         "A sheet never depends on a preset the next reader will not have.",
         "Project presets travel with the project. A personal preset is copied into the project the first time a sheet uses it. Dimensions are stored on every using sheet as well as in the preset, so a missing library never changes page geometry.",
     );
-    ui.add_space(10.0);
-    ui.horizontal_wrapped(|ui| {
-        if Button::new("New custom size\u{2026}")
-            .accent()
-            .show(ui)
-            .clicked()
-        {
-            action = Some(LibraryBodyAction::New);
-        }
-        if Button::new("Import\u{2026}").show(ui).clicked() {
-            action = Some(LibraryBodyAction::Import);
-        }
-        let exportable = presets.iter().any(|preset| !unavailable(preset));
-        if Button::new("Export\u{2026}")
-            .enabled(exportable)
-            .show(ui)
-            .clicked()
-        {
-            action = Some(LibraryBodyAction::Export);
-        }
-        ui.add_space(8.0);
-        let available = ui.available_width().clamp(180.0, 280.0);
-        ui.add_sized(
-            vec2(available, t.metrics.ctl_h),
-            TextEdit::singleline(search).hint_text("Filter custom sizes\u{2026}"),
-        );
-    });
+    egui::Frame::new()
+        .fill(t.color.bg_panel)
+        .inner_margin(egui::Margin::symmetric(10, 6))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                if Button::new("New custom size\u{2026}")
+                    .accent()
+                    .show(ui)
+                    .clicked()
+                {
+                    action = Some(LibraryBodyAction::New);
+                }
+                if Button::new("Import\u{2026}").show(ui).clicked() {
+                    action = Some(LibraryBodyAction::Import);
+                }
+                let exportable = presets.iter().any(|preset| !unavailable(preset));
+                if Button::new("Export\u{2026}")
+                    .enabled(exportable)
+                    .show(ui)
+                    .clicked()
+                {
+                    action = Some(LibraryBodyAction::Export);
+                }
+                let available = ui.available_width().clamp(180.0, 280.0);
+                ui.add_sized(
+                    vec2(available, t.metrics.ctl_h),
+                    TextEdit::singleline(search).hint_text("Filter custom sizes\u{2026}"),
+                );
+            });
+        });
     if let Some(notice) = authority_notice {
-        ui.add_space(8.0);
         warning_notice(ui, notice);
     }
-    ui.add_space(10.0);
     let query = search.trim().to_lowercase();
     let filtered = presets
         .iter()
@@ -222,25 +229,36 @@ pub(super) fn library_body(
                     });
             });
     }
-    ui.add_space(10.0);
-    ui.columns(3, |columns| {
-        workflow_note(
-            &mut columns[0],
+    let notes = [
+        (
             "Renaming",
             "A preset name is only a label. Sheets reference its stable identity, so renaming changes no geometry.",
-        );
-        workflow_note(
-            &mut columns[1],
+        ),
+        (
             "Deleting",
             "Only a preset with no sheet or drawing-sheet default references can be deleted. Former using sheets retain their exact dimensions.",
-        );
-        workflow_note(
-            &mut columns[2],
+        ),
+        (
             "Migration",
             "A project with a missing preset library recovers each sheet from its embedded dimensions and reports the dependency as unavailable.",
-        );
-    });
+        ),
+    ];
+    if library_notes_stack(ui.available_width()) {
+        for (title, detail) in notes {
+            workflow_note(ui, title, detail);
+        }
+    } else {
+        ui.columns(3, |columns| {
+            for (column, (title, detail)) in columns.iter_mut().zip(notes) {
+                workflow_note(column, title, detail);
+            }
+        });
+    }
     action
+}
+
+fn library_notes_stack(available_width: f32) -> bool {
+    available_width < 620.0
 }
 
 pub(super) fn editor_body(
@@ -250,26 +268,71 @@ pub(super) fn editor_body(
     project_error: Option<&str>,
     personal_stale: bool,
 ) -> Option<EditorBodyAction> {
-    let mut changed = false;
     let editing_name_only = draft.mode == PresetEditorMode::Edit;
-
-    let t = Tokens::get(ui.ctx());
     let available = ui.available_width();
     let gap = 12.0;
-    let form_width = ((available - gap) * 0.58).max(360.0);
-    let preview_width = (available - gap - form_width).max(280.0);
-    ui.horizontal_top(|ui| {
-        ui.spacing_mut().item_spacing.x = gap;
-        ui.allocate_ui_with_layout(
-            vec2(form_width, 0.0),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                egui::Frame::NONE
-                    .fill(t.color.bg_panel)
-                    .stroke(egui::Stroke::new(1.0, t.color.border))
-                    .corner_radius(t.radius)
-                    .inner_margin(egui::Margin::same(12))
-                    .show(ui, |form| {
+    let mut changed = false;
+    if custom_editor_stacks(available) {
+        changed |= preset_editor_form_card(
+            ui,
+            draft,
+            validation_error,
+            project_error,
+            personal_stale,
+            editing_name_only,
+        );
+        ui.add_space(gap);
+        preset_editor_preview_card(ui, draft);
+    } else {
+        let form_width = ((available - gap) * 0.58).max(360.0);
+        let preview_width = (available - gap - form_width).max(280.0);
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            ui.allocate_ui_with_layout(
+                vec2(form_width, 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    changed |= preset_editor_form_card(
+                        ui,
+                        draft,
+                        validation_error,
+                        project_error,
+                        personal_stale,
+                        editing_name_only,
+                    );
+                },
+            );
+            ui.allocate_ui_with_layout(
+                vec2(preview_width, 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| preset_editor_preview_card(ui, draft),
+            );
+        });
+    }
+
+    changed.then_some(EditorBodyAction::RefreshPreview)
+}
+
+fn custom_editor_stacks(available_width: f32) -> bool {
+    available_width < 720.0
+}
+
+fn preset_editor_form_card(
+    ui: &mut Ui,
+    draft: &mut PresetEditorDraft,
+    validation_error: Option<&str>,
+    project_error: Option<&str>,
+    personal_stale: bool,
+    editing_name_only: bool,
+) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let mut changed = false;
+    egui::Frame::NONE
+        .fill(t.color.bg_panel)
+        .stroke(egui::Stroke::new(1.0, t.color.border))
+        .corner_radius(t.radius)
+        .inner_margin(egui::Margin::same(12))
+        .show(ui, |form| {
         section_heading(
             form,
             if editing_name_only {
@@ -427,46 +490,40 @@ pub(super) fn editor_body(
                 }
             },
         );
-                    });
-            },
-        );
-        ui.allocate_ui_with_layout(
-            vec2(preview_width, 0.0),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                egui::Frame::NONE
-                    .fill(t.color.bg_panel)
-                    .stroke(egui::Stroke::new(1.0, t.color.border))
-                    .corner_radius(t.radius)
-                    .inner_margin(egui::Margin::same(12))
-                    .show(ui, |preview| {
-                        let preview_caption = custom_preview_caption(draft);
-                        super::super::drawing_sheet_preview::drawing_sheet_preview(
-                            preview,
-                            &draft.last_valid_preview,
-                            230.0,
-                            &preview_caption,
-                        );
-                        preview.add_space(8.0);
-                        section_heading(preview, "Preset contract");
-                        key_value(preview, "Current sheet", "unchanged");
-                        key_value(preview, "Identity", "stable preset ID");
-                        key_value(
-                            preview,
-                            "Portability",
-                            "dimensions copied onto every using sheet",
-                        );
-                        key_value(
-                            preview,
-                            "Undo",
-                            "preset creation remains reversible until project save",
-                        );
-                    });
-            },
-        );
-    });
+        });
+    changed
+}
 
-    changed.then_some(EditorBodyAction::RefreshPreview)
+fn preset_editor_preview_card(ui: &mut Ui, draft: &PresetEditorDraft) {
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::NONE
+        .fill(t.color.bg_panel)
+        .stroke(egui::Stroke::new(1.0, t.color.border))
+        .corner_radius(t.radius)
+        .inner_margin(egui::Margin::same(12))
+        .show(ui, |preview| {
+            let preview_caption = custom_preview_caption(draft);
+            super::super::drawing_sheet_preview::drawing_sheet_preview(
+                preview,
+                &draft.last_valid_preview,
+                230.0,
+                &preview_caption,
+            );
+            preview.add_space(8.0);
+            section_heading(preview, "Preset contract");
+            key_value(preview, "Current sheet", "unchanged");
+            key_value(preview, "Identity", "stable preset ID");
+            key_value(
+                preview,
+                "Portability",
+                "dimensions copied onto every using sheet",
+            );
+            key_value(
+                preview,
+                "Undo",
+                "preset creation remains reversible until project save",
+            );
+        });
 }
 
 pub(super) fn transfer_body(
@@ -564,23 +621,31 @@ fn import_body(ui: &mut Ui, transfer: &mut PresetTransferState) -> Option<Transf
         error_notice(ui, error);
     }
     ui.add_space(10.0);
-    ui.columns(3, |columns| {
-        workflow_note(
-            &mut columns[0],
+    let notes = [
+        (
             "Units",
             "Every candidate shows normalized dimensions; exact micrometre values survive conversion.",
-        );
-        workflow_note(
-            &mut columns[1],
+        ),
+        (
             "Missing templates",
             "Managed dependencies require an explicit replacement or a retained unavailable dependency.",
-        );
-        workflow_note(
-            &mut columns[2],
+        ),
+        (
             "Receipt",
             "Import records the source digest, schema, selected candidates, mappings, conflicts, and skips.",
-        );
-    });
+        ),
+    ];
+    if library_notes_stack(ui.available_width()) {
+        for (title, detail) in notes {
+            workflow_note(ui, title, detail);
+        }
+    } else {
+        ui.columns(3, |columns| {
+            for (column, (title, detail)) in columns.iter_mut().zip(notes) {
+                workflow_note(column, title, detail);
+            }
+        });
+    }
     action
 }
 
@@ -715,7 +780,7 @@ fn export_body(
                     for preset in visible {
                         let identity = super::transfer_identity(preset);
                         let mut selected = transfer.export_ids.contains(&identity);
-                        let available = !unavailable(preset);
+                        let available = unsigned_exportable(preset);
                         let response =
                             ui.add_enabled(available, egui::Checkbox::new(&mut selected, ""));
                         if response.changed() {
@@ -730,7 +795,11 @@ fn export_body(
                             if !available {
                                 ui.colored_label(
                                     Tokens::get(ui.ctx()).color.warn,
-                                    "Unavailable dependency",
+                                    if unavailable(preset) {
+                                        "Unavailable dependency"
+                                    } else {
+                                        "Publisher-signed distribution only"
+                                    },
                                 );
                             }
                         });
@@ -796,12 +865,12 @@ fn warning_notice(ui: &mut Ui, message: &str) {
     notice(ui, message, NoticeTone::Warning);
 }
 
+/// The page's opening statement: a full-bleed inset band, not a bordered card.
 fn concept_banner(ui: &mut Ui, title: &str, body: &str) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
-        .fill(t.color.bg_panel_2)
-        .stroke(egui::Stroke::new(1.0, t.color.border))
-        .inner_margin(egui::Margin::same(10))
+        .fill(t.color.bg_inset)
+        .inner_margin(egui::Margin::same(8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.label(
@@ -814,11 +883,10 @@ fn concept_banner(ui: &mut Ui, title: &str, body: &str) {
 }
 
 fn workflow_note(ui: &mut Ui, title: &str, body: &str) {
-    let t = Tokens::get(ui.ctx());
     egui::Frame::new()
-        .fill(t.color.bg_panel_2)
-        .inner_margin(egui::Margin::same(8))
+        .inner_margin(egui::Margin::same(10))
         .show(ui, |ui| {
+            ui.set_width(ui.available_width());
             ui.label(RichText::new(title).strong());
             ui.weak(body);
         });
@@ -850,7 +918,6 @@ fn empty_state(ui: &mut Ui, title: &str, detail: &str) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
         .fill(t.color.canvas_bg)
-        .stroke(egui::Stroke::new(1.0, t.color.border))
         .inner_margin(egui::Margin::same(18))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -1013,5 +1080,26 @@ fn format_mm(value_um: u64) -> String {
         format!("{whole}.{fraction:03}")
             .trim_end_matches('0')
             .to_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{custom_editor_stacks, library_notes_stack};
+
+    #[test]
+    fn library_notes_stack_at_phone_width() {
+        assert!(library_notes_stack(390.0));
+        assert!(library_notes_stack(619.0));
+        assert!(!library_notes_stack(620.0));
+        assert!(!library_notes_stack(834.0));
+    }
+
+    #[test]
+    fn custom_editor_stacks_before_its_preview_can_leave_the_viewport() {
+        assert!(custom_editor_stacks(366.0));
+        assert!(custom_editor_stacks(719.0));
+        assert!(!custom_editor_stacks(720.0));
+        assert!(!custom_editor_stacks(980.0));
     }
 }

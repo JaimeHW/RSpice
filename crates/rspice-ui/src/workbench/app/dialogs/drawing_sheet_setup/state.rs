@@ -7,12 +7,13 @@
 
 use crate::state::{
     AuthoredDrawingSheetSize, CustomDrawingSheetSnapshot, DrawingSheetBorderTemplate,
-    DrawingSheetDisplayUnit, DrawingSheetInheritance, DrawingSheetMargins, DrawingSheetMarks,
-    DrawingSheetPreset, DrawingSheetPresetScope, DrawingSheetScale, DrawingSheetStandard,
-    DrawingSheetTitleBlock, DrawingSheetTitleBlockAnchor, DrawingSheetTitleBlockRotation,
-    DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, DrawingSheetTitleFieldState,
-    DrawingSheetZoneEdges, DrawingSheetZoneLabels, DrawingSheetZoneMode, DrawingSheetZones,
-    SchematicPageOrientation, SchematicSheetFormat, SchematicSheetFormatDraft, SheetId,
+    DrawingSheetDisplayUnit, DrawingSheetInheritance, DrawingSheetManagedTemplateSnapshot,
+    DrawingSheetMargins, DrawingSheetMarks, DrawingSheetPreset, DrawingSheetPresetScope,
+    DrawingSheetScale, DrawingSheetStandard, DrawingSheetTitleBlock, DrawingSheetTitleBlockAnchor,
+    DrawingSheetTitleBlockRotation, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId,
+    DrawingSheetTitleFieldState, DrawingSheetZoneEdges, DrawingSheetZoneLabels,
+    DrawingSheetZoneMode, DrawingSheetZones, SchematicPageOrientation, SchematicSheetFormat,
+    SchematicSheetFormatDraft, SheetId,
 };
 use crate::workbench::app::SchematicEditAuthority;
 
@@ -368,6 +369,7 @@ pub(crate) struct DrawingSheetDraft {
     pub(crate) title_block_offset_x: String,
     pub(crate) title_block_offset_y: String,
     pub(crate) declared_scale: String,
+    pub(crate) managed_title_template: Option<DrawingSheetManagedTemplateSnapshot>,
     pub(crate) title_fields:
         std::collections::BTreeMap<DrawingSheetTitleFieldId, DrawingSheetTitleFieldState>,
     pub(crate) inheritance: DrawingSheetInheritance,
@@ -434,6 +436,7 @@ impl DrawingSheetDraft {
             title_block_offset_x: format_signed_um(format.title_block.offset_x_um, display_unit),
             title_block_offset_y: format_signed_um(format.title_block.offset_y_um, display_unit),
             declared_scale: scale_from_model(format.title_block.scale),
+            managed_title_template: format.title_block.managed_template.clone(),
             title_fields: format.title_block.fields.clone(),
             inheritance: format.inheritance,
             scope: PageSetupScope::CurrentSheet,
@@ -776,6 +779,7 @@ impl DrawingSheetDraft {
                 offset_x_um: offset_x_um.expect("validated horizontal title offset"),
                 offset_y_um: offset_y_um.expect("validated vertical title offset"),
                 scale: declared_scale,
+                managed_template: self.managed_title_template.clone(),
                 fields: title_fields,
             },
             inheritance: self.inheritance,
@@ -890,6 +894,13 @@ pub(crate) struct DrawingSheetSetupState {
     pub(crate) authority: Option<DrawingSheetAuthority>,
     pub(crate) baseline: DrawingSheetDraft,
     pub(crate) draft: DrawingSheetDraft,
+    /// Project-owned title values accepted by the nested field editor. They
+    /// remain part of this transaction until Page Setup applies or discards.
+    pub(crate) staged_project_title_values:
+        Option<std::collections::BTreeMap<DrawingSheetTitleFieldId, String>>,
+    /// Project-owned revision/date authority accepted by the nested field
+    /// editor. It publishes only when this Page Setup transaction applies.
+    pub(crate) staged_document_control: Option<crate::state::DrawingSheetDocumentControl>,
     /// Last geometrically valid format produced by this draft. Invalid
     /// in-progress text never blanks the preview or makes its layout jump.
     pub(crate) last_valid_format: SchematicSheetFormat,
@@ -918,6 +929,8 @@ impl Default for DrawingSheetSetupState {
             baseline: draft.clone(),
             last_valid_format: SchematicSheetFormat::default(),
             draft,
+            staged_project_title_values: None,
+            staged_document_control: None,
             authority_error: None,
             commit_error: None,
             pending_support: None,
@@ -932,11 +945,13 @@ impl DrawingSheetSetupState {
     }
 
     pub(crate) fn is_dirty(&self) -> bool {
-        self.draft != self.baseline
+        self.draft != self.baseline || self.staged_document_control.is_some()
     }
 
     pub(crate) fn restore_opened_values(&mut self) {
         self.draft.clone_from(&self.baseline);
+        self.staged_project_title_values = None;
+        self.staged_document_control = None;
         self.capture_restore_margins_from_draft();
         self.commit_error = None;
     }

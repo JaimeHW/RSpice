@@ -54,6 +54,7 @@ pub(super) fn resolve_blank_schematic_sheet_with_format_and_project_values(
         drawing_sheet_title_values: drawing_sheet.map_or_else(BTreeMap::new, |format| {
             drawing_sheet_title_values(&identity, format, None, project_title_block_field_values)
         }),
+        drawing_sheet_page_numbering: None,
         grid_pitch_units: 10,
         components: Vec::new(),
         wires: Vec::new(),
@@ -75,14 +76,14 @@ pub(super) fn resolve_blank_schematic_sheet_with_format_and_project_values(
                 ),
             )
         },
-        authored_sheet_bounds,
+        drawing_sheet_artwork_bounds,
     )?;
     finish_resolved(
         identity,
         digest,
         HardcopyDocumentKind::SchematicOrSymbol,
         scope,
-        HardcopySemanticDocument::Schematic(semantic),
+        HardcopySemanticDocument::Schematic(Box::new(semantic)),
         bounds,
     )
 }
@@ -267,6 +268,8 @@ pub fn resolve_schematic_source(
                 source.project_title_block_field_values,
             )
         }),
+        drawing_sheet_page_numbering: governed_sheet
+            .map(|(catalog, _)| catalog.settings().page_numbering),
         drawing_sheet,
         grid_pitch_units: source.schematic.grid_size.max(1),
         components: Vec::new(),
@@ -423,7 +426,7 @@ pub fn resolve_schematic_source(
     }
 
     let bounds = if content_empty {
-        authored_sheet_bounds(
+        drawing_sheet_artwork_bounds(
             semantic
                 .drawing_sheet
                 .as_ref()
@@ -435,7 +438,7 @@ pub fn resolve_schematic_source(
             .drawing_sheet
             .as_ref()
             .map_or(Ok(content_bounds), |format| {
-                authored_sheet_bounds(format)
+                drawing_sheet_artwork_bounds(format)
                     .map(|sheet_bounds| union_bounds(content_bounds, sheet_bounds))
             })?
     };
@@ -445,7 +448,7 @@ pub fn resolve_schematic_source(
         digest,
         HardcopyDocumentKind::SchematicOrSymbol,
         source.scope,
-        HardcopySemanticDocument::Schematic(semantic),
+        HardcopySemanticDocument::Schematic(Box::new(semantic)),
         bounds,
     )
 }
@@ -484,28 +487,25 @@ fn drawing_sheet_title_values(
     project_title_block_field_values: Option<&BTreeMap<DrawingSheetTitleFieldId, String>>,
 ) -> BTreeMap<DrawingSheetTitleFieldId, String> {
     let mut values = BTreeMap::new();
-    let source_view = identity
-        .source_key
-        .split(":sheet:")
-        .next()
-        .unwrap_or(identity.source_key.as_str());
-    let project = source_view
-        .split(['/', '\\', ':'])
-        .find(|part| !part.trim().is_empty())
-        .unwrap_or("Project");
+    let source_view = identity.publication.as_ref().map_or_else(
+        || identity.display_name.as_str(),
+        |publication| publication.document_path.as_str(),
+    );
+    let project = identity
+        .publication
+        .as_ref()
+        .map_or("Project", |publication| publication.project_name.as_str());
     let (sheet_title, page) = governed.map_or_else(
-        || (identity.display_name.clone(), "1 / 1".to_owned()),
+        || (identity.display_name.clone(), "1 of 1".to_owned()),
         |(catalog, sheet_id)| {
-            let index = catalog
-                .sheets()
-                .iter()
-                .position(|sheet| sheet.id() == sheet_id)
-                .unwrap_or(0);
             let title = catalog.find(sheet_id).map_or_else(
                 || identity.display_name.clone(),
                 |sheet| sheet.name().to_owned(),
             );
-            (title, format!("{} / {}", index + 1, catalog.sheets().len()))
+            let (page, count) = catalog
+                .page_number_and_count(sheet_id)
+                .unwrap_or((1, u32::try_from(catalog.sheets().len()).unwrap_or(1)));
+            (title, format!("{page} of {count}"))
         },
     );
     values.insert(DrawingSheetTitleFieldId::Project, project.to_owned());
@@ -514,11 +514,19 @@ fn drawing_sheet_title_values(
     values.insert(DrawingSheetTitleFieldId::Page, page);
     values.insert(
         DrawingSheetTitleFieldId::Revision,
-        identity.revision.get().to_string(),
+        identity
+            .publication
+            .as_ref()
+            .and_then(|publication| publication.revision_label.clone())
+            .unwrap_or_else(|| identity.revision.get().to_string()),
     );
     values.insert(
         DrawingSheetTitleFieldId::Format,
-        format.authored_size.label().to_owned(),
+        format!(
+            "{} · {}",
+            format.authored_size.label(),
+            format.orientation.label().to_lowercase()
+        ),
     );
     values.insert(
         DrawingSheetTitleFieldId::Scale,
@@ -532,7 +540,11 @@ fn drawing_sheet_title_values(
     );
     values.insert(
         DrawingSheetTitleFieldId::Date,
-        crate::state::automatic_drawing_sheet_date_utc(),
+        identity
+            .publication
+            .as_ref()
+            .and_then(|publication| publication.publication_date_utc.clone())
+            .unwrap_or_else(|| "UNRELEASED".to_owned()),
     );
     if let Some(project_values) = project_title_block_field_values {
         for id in DrawingSheetTitleFieldId::PROJECT_OWNED {

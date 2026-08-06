@@ -29,7 +29,8 @@ use crate::results::report_document::{
 };
 use crate::state::{
     AnalysisResultPayload, Bus, BusTap, Component, DesignNote, DocumentationShape,
-    DrawingSheetTitleFieldId, Junction, NetLabel, SchematicSheetFormat, SymbolDocument, Wire,
+    DrawingSheetTitleFieldId, Junction, NetLabel, SchematicSheetFormat, SheetPageNumbering,
+    SymbolDocument, Wire,
 };
 use crate::workbench::documents::result_document::ResultViewer;
 
@@ -136,6 +137,10 @@ pub struct SemanticSchematic {
     /// output identical even if the active workspace changes after queuing.
     #[serde(default)]
     pub drawing_sheet_title_values: BTreeMap<DrawingSheetTitleFieldId, String>,
+    /// Numbering authority retained with governed schematic sheets. Aggregate
+    /// publication uses this to project exact named-print-set page labels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drawing_sheet_page_numbering: Option<SheetPageNumbering>,
     /// Frozen authored snap-grid pitch in schematic world units. One world
     /// unit is exactly [`super::SCHEMATIC_UNIT_UM`] micrometres.
     #[serde(default = "default_schematic_grid_pitch_units")]
@@ -274,6 +279,10 @@ pub struct SemanticAggregateChild {
     pub local_bounds: SemanticBounds,
     pub placement_origin: SemanticPoint,
     pub page_break_before: bool,
+    /// Aggregate-owned page label for a per-print-set schematic. The child
+    /// source remains digest-authenticated independently of this projection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publication_page_label: Option<String>,
     pub document: Box<HardcopySemanticDocument>,
 }
 
@@ -291,10 +300,10 @@ pub struct SemanticAggregate {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "document-kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum HardcopySemanticDocument {
-    Schematic(SemanticSchematic),
+    Schematic(Box<SemanticSchematic>),
     Symbol(SymbolDocument),
     Plot(SemanticPlot),
-    ResultSummary(SemanticResultSummary),
+    ResultSummary(Box<SemanticResultSummary>),
     Report(SemanticReport),
     Aggregate(SemanticAggregate),
 }

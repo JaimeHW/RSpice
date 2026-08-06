@@ -101,31 +101,52 @@ fn drawing_sheet_layers_body(ui: &mut Ui, layers: &mut DrawingSheetLayerVisibili
         });
 
     ui.add_space(12.0);
-    ui.columns(3, |columns| {
+    if ui.available_width() < 680.0 {
         note(
-            &mut columns[0],
+            ui,
             "Canvas",
             "The unbounded workspace remains available outside the paper for parking and reorganizing content.",
         );
+        ui.add_space(8.0);
         note(
-            &mut columns[1],
+            ui,
             "Output",
             "Print and Export have independent inclusion controls for border, title block, zones, grid, crop marks, and outside-sheet content.",
         );
-        columns[2].group(|ui| {
-            ui.label(
-                RichText::new("Reset")
-                    .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
-                    .color(t.color.text),
+        ui.add_space(8.0);
+        reset_card(ui, layers);
+    } else {
+        ui.columns(3, |columns| {
+            note(
+                &mut columns[0],
+                "Canvas",
+                "The unbounded workspace remains available outside the paper for parking and reorganizing content.",
             );
-            ui.add_space(6.0);
-            if Button::new("Restore recommended editing layers")
-                .show(ui)
-                .clicked()
-            {
-                *layers = DrawingSheetLayerVisibility::default();
-            }
+            note(
+                &mut columns[1],
+                "Output",
+                "Print and Export have independent inclusion controls for border, title block, zones, grid, crop marks, and outside-sheet content.",
+            );
+            reset_card(&mut columns[2], layers);
         });
+    }
+}
+
+fn reset_card(ui: &mut Ui, layers: &mut DrawingSheetLayerVisibility) {
+    let t = Tokens::get(ui.ctx());
+    ui.group(|ui| {
+        ui.label(
+            RichText::new("Reset")
+                .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
+                .color(t.color.text),
+        );
+        ui.add_space(6.0);
+        if Button::new("Restore recommended editing layers")
+            .show(ui)
+            .clicked()
+        {
+            *layers = DrawingSheetLayerVisibility::default();
+        }
     });
 }
 

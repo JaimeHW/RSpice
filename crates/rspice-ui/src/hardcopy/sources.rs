@@ -26,6 +26,95 @@ pub const HARDCOPY_SOURCE_SET_SCHEMA_VERSION: u32 = 1;
 pub(crate) const SOURCE_KEY_LIMIT: usize = 512;
 pub(crate) const DISPLAY_NAME_LIMIT: usize = 256;
 
+/// User-visible document identity frozen with a hardcopy source. Internal
+/// source keys remain stable machine identifiers and are never repurposed as
+/// title-block text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HardcopyPublicationIdentity {
+    pub project_name: String,
+    pub document_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publication_date_utc: Option<String>,
+}
+
+impl HardcopyPublicationIdentity {
+    pub fn try_new(
+        project_name: impl Into<String>,
+        document_path: impl Into<String>,
+        revision_label: Option<String>,
+        publication_date_utc: Option<String>,
+    ) -> Result<Self, HardcopySourceError> {
+        let identity = Self {
+            project_name: project_name.into(),
+            document_path: document_path.into(),
+            revision_label,
+            publication_date_utc,
+        };
+        identity.validate()?;
+        Ok(identity)
+    }
+
+    fn validate(&self) -> Result<(), HardcopySourceError> {
+        validate_label(
+            "publication project name",
+            &self.project_name,
+            DISPLAY_NAME_LIMIT,
+        )?;
+        validate_label(
+            "publication document path",
+            &self.document_path,
+            SOURCE_KEY_LIMIT,
+        )?;
+        if let Some(revision) = &self.revision_label {
+            validate_label("publication revision", revision, DISPLAY_NAME_LIMIT)?;
+        }
+        if let Some(date) = &self.publication_date_utc
+            && !is_iso_utc_date(date)
+        {
+            return Err(HardcopySourceError::InvalidSourceSet(
+                "publication date must use the exact YYYY-MM-DD UTC form".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn is_iso_utc_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if !(bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit()))
+    {
+        return false;
+    }
+    let Ok(year) = value[0..4].parse::<u16>() else {
+        return false;
+    };
+    let Ok(month) = value[5..7].parse::<u8>() else {
+        return false;
+    };
+    let Ok(day) = value[8..10].parse::<u8>() else {
+        return false;
+    };
+    let leap_year =
+        year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+    let maximum_day = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap_year => 29,
+        2 => 28,
+        _ => return false,
+    };
+    year != 0 && (1..=maximum_day).contains(&day)
+}
+
 /// Stable source identity supplied by the owner of a schematic or symbol
 /// document. The source adapter authenticates content but never fabricates an
 /// application document identity or revision.
@@ -36,6 +125,8 @@ pub struct HardcopySourceIdentity {
     pub document_id: HardcopyDocumentId,
     pub revision: ObjectRevision,
     pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publication: Option<HardcopyPublicationIdentity>,
 }
 
 impl HardcopySourceIdentity {
@@ -47,14 +138,33 @@ impl HardcopySourceIdentity {
     ) -> Result<Self, HardcopySourceError> {
         let source_key = source_key.into();
         let display_name = display_name.into();
-        validate_label("source key", &source_key, SOURCE_KEY_LIMIT)?;
-        validate_label("display name", &display_name, DISPLAY_NAME_LIMIT)?;
-        Ok(Self {
+        let identity = Self {
             source_key,
             document_id,
             revision,
             display_name,
-        })
+            publication: None,
+        };
+        identity.validate()?;
+        Ok(identity)
+    }
+
+    pub fn with_publication(
+        mut self,
+        publication: HardcopyPublicationIdentity,
+    ) -> Result<Self, HardcopySourceError> {
+        publication.validate()?;
+        self.publication = Some(publication);
+        Ok(self)
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), HardcopySourceError> {
+        validate_label("source key", &self.source_key, SOURCE_KEY_LIMIT)?;
+        validate_label("display name", &self.display_name, DISPLAY_NAME_LIMIT)?;
+        if let Some(publication) = &self.publication {
+            publication.validate()?;
+        }
+        Ok(())
     }
 }
 

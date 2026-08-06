@@ -13,9 +13,9 @@
 
 use egui::{
     Align, Align2, Color32, ComboBox, Context, Frame, Layout, Rect, RichText, Sense, Stroke,
-    StrokeKind, Ui, UiBuilder,
+    StrokeKind, Ui, UiBuilder, pos2,
     text::{LayoutJob, TextFormat},
-    pos2, vec2,
+    vec2,
 };
 
 use crate::diagnostics::ConsoleMessage;
@@ -157,6 +157,11 @@ impl RSpiceApp {
         let choice = Dialog::new(EYEBROW, TITLE, "Save sheet defaults")
             .description(DESCRIPTION)
             .size(DialogSize::DrawingSheetWorkflow)
+            // The body is one bordered shell whose regions meet on their own
+            // 1 px seams. The dialog's default 12 pt inset framed that shell in
+            // a band of elevated background instead of letting it reach the
+            // surface edge the way Page Setup's studio does.
+            .flush_body()
             .ghost("Cancel")
             .primary_enabled(enabled)
             .show(ctx, |ui| {
@@ -296,8 +301,7 @@ fn drawing_sheet_defaults_body(
     if stacked {
         let band_h = SHELL_ROW1_H;
         let preview_h = 250.0;
-        let total_h =
-            2.0 + band_h * 3.0 + 2.0 + 1.0 + catalog_h + 1.0 + preview_h + 1.0 + frame_h;
+        let total_h = 2.0 + band_h * 3.0 + 2.0 + 1.0 + catalog_h + 1.0 + preview_h + 1.0 + frame_h;
         let (shell, _) = ui.allocate_exact_size(vec2(avail, total_h), Sense::hover());
         ui.painter().rect_filled(shell, 3.0, t.color.border);
         let x0 = shell.left() + 1.0;
@@ -327,7 +331,15 @@ fn drawing_sheet_defaults_body(
         preview_region(ui, rect, &record, target, following_sheets);
         y += preview_h + 1.0;
         let rect = Rect::from_min_size(pos2(x0, y), vec2(inner_w, frame_h));
-        frame_row(ui, rect, &record, &authority, record_enabled, true, &mut edits);
+        frame_row(
+            ui,
+            rect,
+            &record,
+            &authority,
+            record_enabled,
+            true,
+            &mut edits,
+        );
     } else {
         let band_unit = (left_w - 2.0) / 2.9;
         let band1_w = band_unit.floor();
@@ -340,7 +352,11 @@ fn drawing_sheet_defaults_body(
 
         let mut x = x0;
         for (band_target, salt, width) in [
-            (DrawingSheetDefaultsTarget::Project, "target-project", band1_w),
+            (
+                DrawingSheetDefaultsTarget::Project,
+                "target-project",
+                band1_w,
+            ),
             (
                 DrawingSheetDefaultsTarget::Personal,
                 "target-personal",
@@ -356,10 +372,8 @@ fn drawing_sheet_defaults_body(
         let rect = Rect::from_min_size(pos2(x, y0), vec2(band3_w, SHELL_ROW1_H));
         behavior_band(ui, rect, state, project_editable);
 
-        let catalog_rect = Rect::from_min_size(
-            pos2(x0, y0 + SHELL_ROW1_H + 1.0),
-            vec2(left_w, catalog_h),
-        );
+        let catalog_rect =
+            Rect::from_min_size(pos2(x0, y0 + SHELL_ROW1_H + 1.0), vec2(left_w, catalog_h));
         if let Some(action) = catalog_region(ui, catalog_rect, &series_list, record_enabled) {
             match action {
                 ChipAction::NewPreset => *open_presets = true,
@@ -938,7 +952,12 @@ fn chip_button(
     } else {
         let strong_w = measure(&strong_font, &spec.strong);
         let dims_w = measure(&dims_font, &spec.dims);
-        let content_w = strong_w + if spec.dims.is_empty() { 0.0 } else { 6.0 + dims_w };
+        let content_w = strong_w
+            + if spec.dims.is_empty() {
+                0.0
+            } else {
+                6.0 + dims_w
+            };
         let start = (rect.center().x - content_w / 2.0).max(rect.left() + 6.0);
         painter.text(
             pos2(start, rect.center().y),
@@ -1000,7 +1019,8 @@ fn preview_region(
     following_sheets: Option<(usize, usize)>,
 ) {
     let t = Tokens::get(ui.ctx());
-    ui.painter().rect_filled(rect, 0.0, sheet_desk_color(ui.ctx()));
+    ui.painter()
+        .rect_filled(rect, 0.0, sheet_desk_color(ui.ctx()));
 
     let facts = preview_facts_galley(ui, rect, record, target, following_sheets);
     let warning = record.title_block_substituted().then(|| {
@@ -1057,7 +1077,7 @@ fn preview_facts_galley(
     record: &SchematicSheetFormat,
     target: DrawingSheetDefaultsTarget,
     following_sheets: Option<(usize, usize)>,
-) -> std::sync::Arc<egui::Galley>{
+) -> std::sync::Arc<egui::Galley> {
     let t = Tokens::get(ui.ctx());
     let faint = TextFormat {
         font_id: theme::sans(tokens::FS_MICRO, FontWeight::Regular),
@@ -1078,9 +1098,10 @@ fn preview_facts_galley(
         Ok(geometry) => {
             job.append("drawing area ", 0.0, faint.clone());
             job.append(
-                &record
-                    .display_unit
-                    .format_size_um(geometry.drawing_area.width_um, geometry.drawing_area.height_um),
+                &record.display_unit.format_size_um(
+                    geometry.drawing_area.width_um,
+                    geometry.drawing_area.height_um,
+                ),
                 0.0,
                 strong.clone(),
             );
@@ -1350,8 +1371,7 @@ fn orientation_segment(
     width: f32,
 ) -> bool {
     let t = Tokens::get(ui.ctx());
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(width, t.metrics.ctl_h), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(vec2(width, t.metrics.ctl_h), Sense::click());
     let painter = ui.painter();
     let fill = if selected {
         t.color.accent.gamma_multiply(0.11)
@@ -1409,7 +1429,11 @@ fn orientation_segment(
         Align2::LEFT_CENTER,
         label,
         label_font,
-        if selected { t.color.text } else { t.color.text_dim },
+        if selected {
+            t.color.text
+        } else {
+            t.color.text_dim
+        },
     );
     if response.hovered() && ui.is_enabled() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -1445,10 +1469,14 @@ fn oriented_standard_size(standard: DrawingSheetStandard, record: &SchematicShee
 
 fn oriented_preset_size(preset: &DrawingSheetPreset, record: &SchematicSheetFormat) -> String {
     match &preset.format.authored_size {
-        AuthoredDrawingSheetSize::Custom { snapshot } => {
-            oriented_size_text(snapshot.portrait_width_um, snapshot.portrait_height_um, record)
+        AuthoredDrawingSheetSize::Custom { snapshot } => oriented_size_text(
+            snapshot.portrait_width_um,
+            snapshot.portrait_height_um,
+            record,
+        ),
+        AuthoredDrawingSheetSize::Standard { standard } => {
+            oriented_standard_size(*standard, record)
         }
-        AuthoredDrawingSheetSize::Standard { standard } => oriented_standard_size(*standard, record),
     }
 }
 

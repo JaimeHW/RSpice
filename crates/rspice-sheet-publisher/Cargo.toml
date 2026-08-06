@@ -1,0 +1,33 @@
+[package]
+name = "rspice-sheet-publisher"
+description = "Offline publisher for organization-managed RSpice drawing-sheet packages"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "rspice-sheet-publisher"
+path = "src/main.rs"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rspice-ui = { path = "../rspice-ui", version = "0.1.0" }
+base64 = "0.22"
+clap.workspace = true
+zeroize = "1"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs", "process"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+    "Win32_Storage_FileSystem",
+] }
+
+[lints]
+workspace = true

@@ -594,6 +594,14 @@ pub(super) fn rendering_options(ui: &mut Ui, draft: &mut HardcopyDialogState) {
                                 "Browser print dialog",
                             );
                         }
+                        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
+                        if draft.workflow != HardcopyWorkflow::Export {
+                            ui.selectable_value(
+                                &mut draft.format,
+                                OutputFormat::BrowserPrintDocument,
+                                "Print-ready document handoff",
+                            );
+                        }
                         for (format, label) in [
                             (OutputFormat::PdfVector, "PDF · vector"),
                             (OutputFormat::PdfA, "PDF/A · vector"),

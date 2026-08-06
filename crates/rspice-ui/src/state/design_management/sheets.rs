@@ -466,6 +466,25 @@ impl SheetCatalog {
         self.active_sheet_id.and_then(|id| self.find(id))
     }
 
+    /// Resolve the page number printed for a sheet under the catalog's
+    /// numbering authority. Stable-project numbering honors the sheet's
+    /// explicit number; per-print-set numbering uses catalog order until a
+    /// publication supplies a narrower ordered print set.
+    #[must_use]
+    pub fn page_number_and_count(&self, id: SheetId) -> Option<(u32, u32)> {
+        let index = self.sheets.iter().position(|sheet| sheet.id == id)?;
+        let ordinal = u32::try_from(index + 1).ok()?;
+        let count = u32::try_from(self.sheets.len()).ok()?;
+        let number = match self.settings.page_numbering {
+            SheetPageNumbering::StableProjectOrder => self.sheets[index]
+                .definition
+                .explicit_page_number
+                .unwrap_or(ordinal),
+            SheetPageNumbering::PerPrintSet => ordinal,
+        };
+        Some((number, count))
+    }
+
     #[must_use]
     pub fn sheet_for_object(&self, object_id: u64) -> Option<SheetId> {
         self.object_assignments.get(&object_id).copied()

@@ -1,13 +1,13 @@
 //! Shared physical drawing-sheet preview for supporting setup surfaces.
 
-use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
+use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 
 use crate::schematic::view::drawing_sheet::{
     DrawingSheetPrintablePreview, DrawingSheetPrintablePreviewKind, drawing_sheet_printable_preview,
 };
 use crate::state::{
-    DrawingSheetRect, DrawingSheetTitleBlockTemplate, DrawingSheetZoneEdges, DrawingSheetZoneGrid,
-    DrawingSheetZoneLabels, SchematicSheetFormat,
+    DrawingSheetRect, DrawingSheetTitleBlockRotation, DrawingSheetTitleBlockTemplate,
+    DrawingSheetZoneEdges, DrawingSheetZoneGrid, DrawingSheetZoneLabels, SchematicSheetFormat,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -116,6 +116,10 @@ fn drawing_sheet_preview_impl(
     let (stage, response) = ui.allocate_exact_size(vec2(width, total_height), Sense::hover());
 
     let caption_height = if label.trim().is_empty() { 0.0 } else { 20.0 };
+    // The desk covers the whole stage, caption track included, so the preview
+    // reads as one surface: a desk that stopped short of the caption left a
+    // band of dialog background under the sheet and set the format line on it.
+    ui.painter().rect_filled(stage, 0.0, palette.desk);
     let canvas = Rect::from_min_max(
         stage.min,
         pos2(
@@ -123,7 +127,6 @@ fn drawing_sheet_preview_impl(
             (stage.bottom() - caption_height).max(stage.top()),
         ),
     );
-    ui.painter().rect_filled(canvas, 0.0, palette.desk);
 
     let Ok(geometry) = format.geometry() else {
         response.widget_info(|| {
@@ -572,14 +575,6 @@ fn paint_title_block(
     format: &SchematicSheetFormat,
     palette: SheetPreviewPalette,
 ) {
-    ui.painter().rect_filled(title, 0.0, palette.block);
-    ui.painter().rect_stroke(
-        title,
-        0.0,
-        Stroke::new(1.0, palette.border),
-        egui::StrokeKind::Inside,
-    );
-
     let visible_fields = format
         .title_block
         .fields
@@ -587,40 +582,152 @@ fn paint_title_block(
         .filter(|field| field.visible)
         .count()
         .max(1);
-    let Some(rows) = crate::state::drawing_sheet_title_block_rows(template) else {
+    let Some(rows) = format.title_block_rows(template) else {
         return;
     };
     let columns = visible_fields.div_ceil(rows).clamp(1, 5);
     let line_stroke = Stroke::new(0.55, palette.zone);
+    let angle = match format.title_block.rotation {
+        DrawingSheetTitleBlockRotation::Upright => 0.0,
+        DrawingSheetTitleBlockRotation::Clockwise90 => std::f32::consts::FRAC_PI_2,
+        DrawingSheetTitleBlockRotation::CounterClockwise90 => -std::f32::consts::FRAC_PI_2,
+    };
+    let authored = if angle == 0.0 {
+        title
+    } else {
+        Rect::from_center_size(title.center(), vec2(title.height(), title.width()))
+    };
+    let transform = |point: Pos2| {
+        let offset = point - authored.center();
+        let (sin, cos) = angle.sin_cos();
+        authored.center()
+            + vec2(
+                offset.x * cos - offset.y * sin,
+                offset.x * sin + offset.y * cos,
+            )
+    };
+    let outline = [
+        transform(authored.left_top()),
+        transform(authored.right_top()),
+        transform(authored.right_bottom()),
+        transform(authored.left_bottom()),
+    ];
+    ui.painter().add(Shape::convex_polygon(
+        outline.to_vec(),
+        palette.block,
+        Stroke::new(1.0, palette.border),
+    ));
+    let mut field_grid = authored;
+    if let Some(logo) = format.title_block_logo(template)
+        && let Some((template_width_um, _)) = format.title_block_dimensions_um(template)
+    {
+        let reserved_width =
+            authored.width() * (logo.reserved_width_um() as f32 / template_width_um as f32);
+        field_grid.min.x = (authored.left() + reserved_width).min(authored.right());
+        ui.painter().line_segment(
+            [
+                transform(pos2(field_grid.left(), authored.top())),
+                transform(pos2(field_grid.left(), authored.bottom())),
+            ],
+            line_stroke,
+        );
+        let reserved = Rect::from_min_max(
+            authored.left_top(),
+            pos2(field_grid.left(), authored.bottom()),
+        );
+        let inset = (reserved.width().min(reserved.height()) * 0.08).max(0.5);
+        let content = reserved.shrink(inset);
+        if content.width() > 0.0 && content.height() > 0.0 {
+            let basis = f32::from(crate::state::DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS);
+            for primitive in logo.primitives() {
+                let points = primitive
+                    .points()
+                    .iter()
+                    .map(|point| {
+                        transform(pos2(
+                            egui::lerp(
+                                content.left()..=content.right(),
+                                f32::from(point.x()) / basis,
+                            ),
+                            egui::lerp(
+                                content.top()..=content.bottom(),
+                                f32::from(point.y()) / basis,
+                            ),
+                        ))
+                    })
+                    .collect::<Vec<_>>();
+                if primitive.filled() {
+                    ui.painter().add(Shape::convex_polygon(
+                        points,
+                        palette.block_ink,
+                        line_stroke,
+                    ));
+                } else if primitive.closed() {
+                    ui.painter().add(Shape::closed_line(points, line_stroke));
+                } else {
+                    ui.painter().add(Shape::line(points, line_stroke));
+                }
+            }
+        }
+    }
 
     for row in 1..rows {
-        let y = egui::lerp(title.top()..=title.bottom(), row as f32 / rows as f32);
-        ui.painter()
-            .line_segment([pos2(title.left(), y), pos2(title.right(), y)], line_stroke);
+        let y = egui::lerp(
+            field_grid.top()..=field_grid.bottom(),
+            row as f32 / rows as f32,
+        );
+        ui.painter().line_segment(
+            [
+                transform(pos2(field_grid.left(), y)),
+                transform(pos2(field_grid.right(), y)),
+            ],
+            line_stroke,
+        );
     }
-    for column in 1..columns {
-        let x = egui::lerp(title.left()..=title.right(), column as f32 / columns as f32);
-        ui.painter()
-            .line_segment([pos2(x, title.top()), pos2(x, title.bottom())], line_stroke);
+    for field_index in 0..visible_fields {
+        let row = field_index / columns;
+        let column = field_index % columns;
+        if column == 0 {
+            continue;
+        }
+        let x = egui::lerp(
+            field_grid.left()..=field_grid.right(),
+            column as f32 / columns as f32,
+        );
+        let top = egui::lerp(
+            field_grid.top()..=field_grid.bottom(),
+            row as f32 / rows as f32,
+        );
+        let bottom = egui::lerp(
+            field_grid.top()..=field_grid.bottom(),
+            (row + 1) as f32 / rows as f32,
+        );
+        ui.painter().line_segment(
+            [transform(pos2(x, top)), transform(pos2(x, bottom))],
+            line_stroke,
+        );
     }
 
     // At preview scale, field text would become an illegible grey smear.
     // Short ruled silhouettes still communicate the populated title-grid
     // structure without claiming values the preview cannot resolve.
-    let cell_width = title.width() / columns as f32;
-    let cell_height = title.height() / rows as f32;
+    let cell_width = field_grid.width() / columns as f32;
+    let cell_height = field_grid.height() / rows as f32;
     if cell_width >= 7.0 && cell_height >= 4.0 {
         for field_index in 0..visible_fields.min(rows * columns) {
             let row = field_index / columns;
             let column = field_index % columns;
-            let cell_left = title.left() + cell_width * column as f32;
-            let cell_top = title.top() + cell_height * row as f32;
+            let cell_left = field_grid.left() + cell_width * column as f32;
+            let cell_top = field_grid.top() + cell_height * row as f32;
             let inset = (cell_width * 0.12).clamp(1.0, 4.0);
             let width_ratio = 0.42 + (field_index % 3) as f32 * 0.12;
             let end_x = (cell_left + cell_width * width_ratio).min(cell_left + cell_width - inset);
             let y = cell_top + cell_height * 0.58;
             ui.painter().line_segment(
-                [pos2(cell_left + inset, y), pos2(end_x, y)],
+                [
+                    transform(pos2(cell_left + inset, y)),
+                    transform(pos2(end_x, y)),
+                ],
                 Stroke::new(0.65, palette.block_ink),
             );
         }

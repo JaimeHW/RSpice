@@ -1,0 +1,69 @@
+name: Drawing-sheet qualification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: never
+  RUST_BACKTRACE: "1"
+  RUST_TOOLCHAIN: "1.94.0"
+
+jobs:
+  qualify:
+    name: Qualify (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+          - os: ubuntu-24.04
+            target: wasm32-unknown-unknown
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.14"
+      - name: Install pinned Rust toolchain and qualification target
+        run: >-
+          rustup toolchain install ${{ env.RUST_TOOLCHAIN }}
+          --profile minimal --target ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: drawing-sheet-qualification-${{ matrix.target }}
+      - name: Test qualification evidence runner
+        run: python tools/ci/test_qualify_drawing_sheet.py -v
+      - name: Run locked drawing-sheet qualification
+        run: >-
+          python tools/ci/qualify_drawing_sheet.py
+          --jobs 1
+          --target ${{ matrix.target }}
+          --out target/drawing-sheet-qualification-${{ matrix.target }}.json
+      - name: Upload checksummed qualification evidence and logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: drawing-sheet-qualification-${{ matrix.target }}
+          path: |
+            target/drawing-sheet-qualification-${{ matrix.target }}.json
+            target/drawing-sheet-qualification-${{ matrix.target }}.json.sha256
+            target/drawing-sheet-qualification-${{ matrix.target }}.logs/
+          if-no-files-found: error

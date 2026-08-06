@@ -21,7 +21,8 @@ use crate::hardcopy::{
 };
 use crate::product::ContentDigest;
 use crate::workbench::hardcopy_adapters::print::{
-    HardcopyCancellationToken, HardcopyPrintError, discover_native_printers, spool_native_hardcopy,
+    HardcopyCancellationToken, HardcopyPrintError, discover_native_printers,
+    handoff_desktop_print_document, spool_native_hardcopy,
 };
 use crate::workbench::hardcopy_adapters::render::{
     RenderedHardcopyPublication, RenderedPrinterPages,
@@ -50,12 +51,15 @@ pub(crate) enum FinalizationOperation {
         capabilities_digest: ContentDigest,
         cancellation: HardcopyCancellationToken,
     },
+    DesktopPrintHandoff {
+        publication: RenderedHardcopyPublication,
+    },
 }
 
 impl FinalizationOperation {
     fn cancellation(&self) -> Option<&HardcopyCancellationToken> {
         match self {
-            Self::Export { .. } => None,
+            Self::Export { .. } | Self::DesktopPrintHandoff { .. } => None,
             Self::Print { cancellation, .. } => Some(cancellation),
         }
     }
@@ -85,6 +89,10 @@ pub(crate) enum FinalizationPayload {
         outcome: HardcopyOutcome,
         accepted: usize,
         display_name: String,
+    },
+    DesktopPrintHandoff {
+        outcome: HardcopyOutcome,
+        accepted: usize,
     },
 }
 
@@ -449,6 +457,36 @@ fn execute_owned(
                 display_name,
             })
         }
+        FinalizationOperation::DesktopPrintHandoff { publication } => {
+            ensure_not_cancelled(
+                cancelled,
+                None,
+                CancellationPhase::Preparing,
+                "Cancelled before the desktop print handoff",
+            )?;
+            validate_desktop_handoff_metadata(plan, &publication)
+                .map_err(FinalizationFailure::Message)?;
+            validate_worker_ticket(
+                plan,
+                ticket,
+                operation_digest_for_desktop_handoff(&publication),
+            )?;
+
+            boundary_started.store(true, Ordering::Release);
+            let outcome = handoff_desktop_print_document(plan, &publication).map_err(|error| {
+                FinalizationFailure::Print {
+                    error,
+                    pages_completed: 0,
+                }
+            })?;
+            let accepted = match &outcome {
+                HardcopyOutcome::DesktopPrintHandoffAccepted { pages_accepted, .. } => {
+                    *pages_accepted as usize
+                }
+                _ => 0,
+            };
+            Ok(FinalizationPayload::DesktopPrintHandoff { outcome, accepted })
+        }
     }
 }
 
@@ -484,7 +522,37 @@ fn validate_operation(
             pages.pages().len(),
             cancellation.is_cancelled(),
         ),
+        FinalizationOperation::DesktopPrintHandoff { publication } => {
+            validate_desktop_handoff_metadata(plan, publication)
+                .map_err(FinalizationFailure::Message)
+        }
     }
+}
+
+fn validate_desktop_handoff_metadata(
+    plan: &HardcopyPlan,
+    publication: &RenderedHardcopyPublication,
+) -> Result<(), String> {
+    if !matches!(
+        plan.setup().render().target(),
+        RenderTarget::BrowserPrintDialog
+    ) || plan.setup().render().format() != OutputFormat::BrowserPrintDocument
+    {
+        return Err("Desktop print handoff requires a browser-print-document plan.".to_owned());
+    }
+    if publication.format() != OutputFormat::BrowserPrintDocument
+        || publication.page_count() != plan.pagination().pages().len() as u32
+        || publication.parts().len() != 1
+        || publication
+            .single_part()
+            .is_none_or(|part| part.media_type() != "text/html")
+    {
+        return Err(
+            "The rendered desktop print document does not match the immutable handoff plan."
+                .to_owned(),
+        );
+    }
+    Ok(())
 }
 
 fn validate_export_metadata(
@@ -661,7 +729,9 @@ fn ensure_not_cancelled(
 fn pre_boundary_cancellation_phase(operation: &FinalizationOperation) -> CancellationPhase {
     match operation {
         FinalizationOperation::Export { .. } => CancellationPhase::CommittingArtifact,
-        FinalizationOperation::Print { .. } => CancellationPhase::Preparing,
+        FinalizationOperation::Print { .. } | FinalizationOperation::DesktopPrintHandoff { .. } => {
+            CancellationPhase::Preparing
+        }
     }
 }
 
@@ -718,6 +788,9 @@ fn operation_digest(operation: &FinalizationOperation) -> ContentDigest {
             capabilities_digest,
             ..
         } => operation_digest_for_print(pages, printer_id, *capabilities_digest),
+        FinalizationOperation::DesktopPrintHandoff { publication } => {
+            operation_digest_for_desktop_handoff(publication)
+        }
     }
 }
 
@@ -746,6 +819,15 @@ fn operation_digest_for_print(
     digest.update(pages.digest().as_bytes());
     digest.update(capabilities_digest.as_bytes());
     update_digest_field(&mut digest, printer_id.as_bytes());
+    ContentDigest::from_bytes(digest.finalize().into())
+}
+
+fn operation_digest_for_desktop_handoff(
+    publication: &RenderedHardcopyPublication,
+) -> ContentDigest {
+    let mut digest = Sha256::new();
+    digest.update(b"rspice-desktop-print-handoff-v1");
+    digest.update(publication.digest().as_bytes());
     ContentDigest::from_bytes(digest.finalize().into())
 }
 

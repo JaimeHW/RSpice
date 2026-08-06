@@ -700,7 +700,7 @@ pub(super) fn render_editor(ctx: &Context, state: &mut AppState) {
         .body_scroll_offset(&mut scroll_offset)
         .flush_body();
         if let Some((tone, title, detail)) = transaction_state.as_ref() {
-            dialog = dialog.transaction_state(*tone, title, detail);
+            dialog = dialog.transaction_state(*tone, *title, detail.as_str());
         }
         let choice = dialog.show(ctx, |ui| {
             ui.add_enabled_ui(!editor.persistence_pending, |ui| {
