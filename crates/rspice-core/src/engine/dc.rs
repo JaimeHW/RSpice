@@ -1364,6 +1364,29 @@ mod tests {
     }
 
     #[test]
+    fn temp_directive_drives_behavioral_source_coefficients() {
+        // ngspice's own `.temp` coverage is `regression/misc/asrc-tc-1.cir`,
+        // which states this closed form and then checks it inside a `.control`
+        // block — a block the conformance harness does not execute, which is
+        // why that deck stayed green the whole time `.temp` was ignored.
+        // dT = 127 - 27 = 100, so the coefficient scales the 100 V source by
+        // 1 + 0.001*100. ngspice-46 answers 1.100000e+02.
+        let netlist = Netlist::parse(
+            "asrc temperature coefficient\n\
+             v1 1 0 dc 100\n\
+             b3 3 0 v=v(1) tc1=0.001\n\
+             .temp 127\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let (result, _) = Engine::default()
+            .run_dc_op_with_report_and_abort(&netlist, &NoAbort)
+            .expect("hot behavioral source solves");
+        assert_voltage(&result, "3", 110.0);
+    }
+
+    #[test]
     fn temp_directive_outranks_options_temp_at_the_engine() {
         // ngspice applies `.temp` after the deck is read, so it wins over
         // `.options temp` whichever card is written first.
