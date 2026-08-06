@@ -8,6 +8,24 @@ name: Simulation qualification release
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: >-
+          Cloud release tag to qualify. Leave empty to publish the policy
+          and corpus artifacts instead.
+        required: false
+        default: ""
+        type: string
+      evidence_tag:
+        description: Evidence release tag (rspice-evidence-*) when qualifying
+        required: false
+        default: ""
+        type: string
+      cloud_repository:
+        description: Repository holding the release under qualification
+        required: false
+        default: JaimeHW/RSpice-Cloud
+        type: string
 
 permissions:
   contents: read
@@ -28,7 +46,7 @@ env:
 jobs:
   publish:
     name: Generate, publish, and sign the qualification policy and corpus
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.release_tag == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
@@ -189,4 +207,366 @@ jobs:
             echo "- \`simulation_qualification_corpus_manifest_sha256\`: \`$CORPUS_SHA256\`"
             echo "- \`simulation_qualification_corpus_manifest_size_bytes\`: \`$CORPUS_SIZE_BYTES\`"
             echo "- certificate identity: \`$identity\`"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  qualify:
+    name: Execute the corpus against the released worker and sign the evidence
+    if: github.ref == 'refs/heads/main' && inputs.release_tag != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      EVIDENCE_TAG: ${{ inputs.evidence_tag }}
+      CLOUD_REPOSITORY: ${{ inputs.cloud_repository }}
+      CLOUD_TOKEN: ${{ secrets.RSPICE_CLOUD_RELEASE_TOKEN }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Validate the dispatch inputs
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^rspice-cloud-v[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9.-]+)?-enforcement-0062$ ]]
+          [[ "$EVIDENCE_TAG" =~ ^rspice-evidence-[a-z0-9][a-z0-9._-]{0,119}$ ]]
+          [[ "$CLOUD_REPOSITORY" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]]
+          test -n "$CLOUD_TOKEN"
+      - name: Check out the admission tooling of the release under test
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          repository: ${{ inputs.cloud_repository }}
+          token: ${{ secrets.RSPICE_CLOUD_RELEASE_TOKEN }}
+          path: cloud
+      - name: Install keyless signing client
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: ${{ env.COSIGN_VERSION }}
+      - name: Install OCI artifact client
+        uses: oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6 # v1.2.4
+        with:
+          version: 1.3.2
+      - name: Authenticate to the immutable component registry
+        run: |
+          set -euo pipefail
+          printf '%s' "$CLOUD_TOKEN" \
+            | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Fetch and verify the release under qualification
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.RSPICE_CLOUD_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -m 0700 release-under-test qualification-inputs
+          gh release download "$RELEASE_TAG" \
+            --repo "$CLOUD_REPOSITORY" \
+            --dir release-under-test \
+            --pattern release-manifest.json \
+            --pattern release-manifest.sigstore.json
+          source_sha=$(jq -er .source_sha release-under-test/release-manifest.json)
+          [[ "$source_sha" =~ ^[a-f0-9]{40}$ ]]
+          cosign verify-blob \
+            --bundle release-under-test/release-manifest.sigstore.json \
+            --certificate-identity "https://github.com/${CLOUD_REPOSITORY}/.github/workflows/release.yml@refs/heads/main" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-github-workflow-sha "$source_sha" \
+            release-under-test/release-manifest.json >/dev/null
+          manifest=release-under-test/release-manifest.json
+          worker_image=$(jq -er '.images[] | select(.target == "worker") | .reference' "$manifest")
+          cosign verify \
+            --certificate-identity "https://github.com/${CLOUD_REPOSITORY}/.github/workflows/release.yml@refs/heads/main" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$worker_image" >/dev/null
+          # The published policy and corpus, fetched exactly as admission
+          # fetches them and verified against this lane's own identity.
+          identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/simulation-qualification-release.yml@refs/heads/main"
+          for kind in policy corpus; do
+            image=$(jq -er ".simulation_qualification_authority.${kind}_image" "$manifest")
+            cosign verify \
+              --certificate-identity "$identity" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              "$image" >/dev/null
+          done
+          bash cloud/tools/fetch-verified-oci-evidence.sh \
+            "$(jq -er .simulation_qualification_authority.policy_image "$manifest")" \
+            "$(jq -er .simulation_qualification_authority.policy_sha256 "$manifest")" \
+            "$(jq -er .simulation_qualification_authority.policy_size_bytes "$manifest")" \
+            "$POLICY_MEDIA_TYPE" "$POLICY_FILE_NAME" \
+            qualification-inputs/simulator-qualification-policy.json
+          bash cloud/tools/fetch-verified-oci-evidence.sh \
+            "$(jq -er .simulation_qualification_authority.corpus_image "$manifest")" \
+            "$(jq -er .simulation_qualification_authority.corpus_manifest_sha256 "$manifest")" \
+            "$(jq -er .simulation_qualification_authority.corpus_manifest_size_bytes "$manifest")" \
+            "$CORPUS_MEDIA_TYPE" "$CORPUS_FILE_NAME" \
+            qualification-inputs/simulator-qualification-corpus.json
+          echo "worker_image=$worker_image" >>"$GITHUB_OUTPUT"
+      - name: Build the harness in the pinned builder
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --volume "$PWD:/source" \
+            --workdir /source \
+            --env CARGO_INCREMENTAL=0 \
+            --env CARGO_TERM_COLOR=always \
+            "$BUILDER_IMAGE" \
+            bash -euo pipefail -c '
+              cargo build --locked --release --bin qualification-harness
+            '
+      - name: Plan and execute every corpus case through the released adapter
+        id: run
+        env:
+          WORKER_IMAGE: ${{ steps.release.outputs.worker_image }}
+        run: |
+          set -euo pipefail
+          suite_run_id=$(uuidgen | tr 'A-F' 'a-f')
+          started_at=$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')
+          target/release/qualification-harness plan \
+            qualification-inputs/simulator-qualification-policy.json \
+            qualification-inputs/simulator-qualification-corpus.json \
+            "$suite_run_id" qualification-plan
+          docker pull --quiet "$WORKER_IMAGE"
+          docker run --detach --name qualification-worker \
+            --network=none --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --pids-limit=128 \
+            --memory=2g --cpus=2 --user=10001:10001 \
+            --tmpfs /work/rspice:rw,nosuid,nodev,size=268435456,mode=0700,uid=10001,gid=10001 \
+            --entrypoint sleep "$WORKER_IMAGE" infinity >/dev/null
+          mkdir -m 0700 qualification-responses
+          ordinal=0
+          for request in qualification-plan/requests/*.request.json; do
+            name=$(printf '%05d' "$ordinal")
+            docker exec --interactive qualification-worker sh -ec '
+              job=/work/rspice/job
+              [ -e "$job" ] && rm -r "$job"
+              mkdir -m 0700 -p "$job/artifacts" "$job/results"
+              cd "$job"
+              exec env -i \
+                RSPICE_ENGINE_PROTOCOL_VERSION=3 \
+                RSPICE_ENGINE_INPUT=stdin-json \
+                RSPICE_ENGINE_OUTPUT=stdout-json \
+                /opt/rspice/worker/bin/rspice-engine-adapter
+            ' <"$request" >"qualification-responses/${name}.response.json"
+            ordinal=$((ordinal + 1))
+          done
+          docker rm --force qualification-worker >/dev/null
+          {
+            echo "suite_run_id=$suite_run_id"
+            echo "started_at=$started_at"
+          } >>"$GITHUB_OUTPUT"
+      - name: Publish the harness identity and assemble the retained artifacts
+        id: assemble
+        env:
+          SUITE_RUN_ID: ${{ steps.run.outputs.suite_run_id }}
+        run: |
+          set -euo pipefail
+          repository="${GITHUB_REPOSITORY,,}"
+          harness_tag="ghcr.io/${repository}/rspice-qualification-harness:${GITHUB_RUN_ID}-${GITHUB_SHA}"
+          tar --create --file harness-tree.tar \
+            .github/workflows/simulation-qualification-release.yml \
+            crates/rspice-qualification-corpus/src
+          printf 'FROM scratch\nCOPY harness-tree.tar /harness-tree.tar\n' >harness.Dockerfile
+          docker build --file harness.Dockerfile --tag "$harness_tag" . >/dev/null
+          docker push "$harness_tag" >/dev/null
+          harness_digest=$(docker inspect --format '{{index .RepoDigests 0}}' "$harness_tag" | cut -d '@' -f 2)
+          [[ "$harness_digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          harness_image="${harness_tag}@${harness_digest}"
+          cosign sign --yes "$harness_image" >/dev/null
+
+          manifest=release-under-test/release-manifest.json
+          jq --arg observer "$harness_image" '{
+            worker_image_reference: (.images[] | select(.target == "worker") | .reference),
+            worker_platform_digest: (.images[] | select(.target == "worker") | .platform_digest),
+            runtime_mode: .simulation_components.runtime_mode,
+            engine_name: .simulation_components.engine_name,
+            engine_build: .simulation_components.engine_build,
+            adapter_image_reference: .simulation_components.adapter.image,
+            adapter_sha256: .simulation_components.adapter.sha256,
+            solver_image_reference: (.simulation_components.solver.image? // null),
+            solver_sha256: (.simulation_components.solver.sha256? // null),
+            model_library_image_reference: (.simulation_components.model_library.image? // null),
+            model_library_sha256: (.simulation_components.model_library.sha256? // null),
+            observer_image_reference: $observer,
+            components: ([.simulation_components
+              | {role: "adapter", record: .adapter},
+                (if .solver != null then {role: "solver", record: .solver} else empty end),
+                (if .model_library != null then {role: "model_library", record: .model_library} else empty end)]
+              | map({
+                  role: .role,
+                  image_reference: .record.image,
+                  exported_file_sha256: .record.sha256,
+                  predicate_type: .record.predicate_type,
+                  attestation_statement_sha256: .record.attestation_statement_sha256,
+                  source_repository: .record.source_repository,
+                  source_sha: .record.source_sha,
+                  build_recipe_sha256: .record.build_recipe_sha256,
+                  capabilities_manifest_sha256: .record.capabilities_manifest_sha256
+                }))
+          }' "$manifest" >binding.json
+          printf 'qualification harness run %s for %s\n' "$GITHUB_RUN_ID" "$RELEASE_TAG" >harness.log
+          target/release/qualification-harness assemble \
+            qualification-inputs/simulator-qualification-policy.json \
+            qualification-inputs/simulator-qualification-corpus.json \
+            "$SUITE_RUN_ID" qualification-responses binding.json harness.log \
+            qualification-artifacts
+          echo "harness_image=$harness_image" >>"$GITHUB_OUTPUT"
+      - name: Publish the retained artifacts and sign every reference
+        run: |
+          set -euo pipefail
+          repository="${GITHUB_REPOSITORY,,}"
+          manifest=release-under-test/release-manifest.json
+          policy_image=$(jq -er .simulation_qualification_authority.policy_image "$manifest")
+          corpus_image=$(jq -er .simulation_qualification_authority.corpus_image "$manifest")
+          declare -A references
+          references[policy]="$policy_image"
+          references[corpus-manifest]="$corpus_image"
+          push_retained() {
+            local kind="$1" file="$2" media="$3"
+            local tag="ghcr.io/${repository}/rspice-qualification-${kind}:${GITHUB_RUN_ID}-${GITHUB_SHA}"
+            (cd qualification-artifacts && oras push "$tag" --artifact-type "$ARTIFACT_TYPE" "$file:$media")
+            local digest
+            digest=$(oras manifest fetch --descriptor "$tag" | jq -r .digest)
+            [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+            cosign sign --yes "${tag}@${digest}" >/dev/null
+            references[$kind]="${tag}@${digest}"
+          }
+          media_for() {
+            case "$1" in
+              policy) printf '%s' "$POLICY_MEDIA_TYPE" ;;
+              corpus-manifest) printf '%s' "$CORPUS_MEDIA_TYPE" ;;
+              *) printf 'application/vnd.rspice.simulator-qualification-%s.v1+json' "$1" ;;
+            esac
+          }
+          file_for() {
+            case "$1" in
+              policy) printf '%s' "$POLICY_FILE_NAME" ;;
+              corpus-manifest) printf '%s' "$CORPUS_FILE_NAME" ;;
+              *) printf '%s.json' "$1" ;;
+            esac
+          }
+          for kind in case-results component-contracts evaluator-report \
+            execution-manifests invocation-traces logs oracle-manifest \
+            raw-results tolerance-manifest; do
+            push_retained "$kind" "$(file_for "$kind")" "$(media_for "$kind")"
+          done
+          # The policy and corpus artifacts re-sign under this run, so the
+          # admission rebind to this evidence's source sha verifies.
+          cosign sign --yes "$policy_image" >/dev/null
+          cosign sign --yes "$corpus_image" >/dev/null
+          for kind in case-results component-contracts corpus-manifest \
+            evaluator-report execution-manifests invocation-traces logs \
+            oracle-manifest policy raw-results tolerance-manifest; do
+            file=$(file_for "$kind")
+            jq -n \
+              --arg kind "$kind" \
+              --arg reference "${references[$kind]}" \
+              --arg sha "$(sha256sum "qualification-artifacts/$file" | cut -d ' ' -f 1)" \
+              --argjson size "$(stat -c '%s' "qualification-artifacts/$file")" \
+              --arg media "$(media_for "$kind")" \
+              --arg file "$file" \
+              '{kind: $kind, reference: $reference, payload_sha256: $sha,
+                size_bytes: $size, media_type: $media, file_name: $file}'
+          done | jq -s . >retained-artifacts.json
+      - name: Assemble, self-verify, and sign the qualification evidence
+        env:
+          GH_TOKEN: ${{ secrets.RSPICE_CLOUD_RELEASE_TOKEN }}
+          SUITE_RUN_ID: ${{ steps.run.outputs.suite_run_id }}
+          STARTED_AT: ${{ steps.run.outputs.started_at }}
+          HARNESS_IMAGE: ${{ steps.assemble.outputs.harness_image }}
+        run: |
+          set -euo pipefail
+          manifest=release-under-test/release-manifest.json
+          jq -n \
+            --slurpfile release "$manifest" \
+            --slurpfile summary qualification-artifacts/assembly-summary.json \
+            --slurpfile retained retained-artifacts.json \
+            --slurpfile binding binding.json \
+            --arg release_sha "$(sha256sum "$manifest" | cut -d ' ' -f 1)" \
+            --arg policy_sha "$(sha256sum qualification-artifacts/simulator-qualification-policy.json | cut -d ' ' -f 1)" \
+            --arg corpus_sha "$(sha256sum qualification-artifacts/simulator-qualification-corpus.json | cut -d ' ' -f 1)" \
+            --arg harness "$HARNESS_IMAGE" \
+            --arg qualification_source_sha "$GITHUB_SHA" \
+            --arg started "$STARTED_AT" \
+            --arg completed "$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" \
+            --arg created "$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" \
+            '($release[0]) as $r | ($summary[0]) as $s | ($binding[0]) as $b | {
+              adapter_image_reference: $b.adapter_image_reference,
+              adapter_sha256: $b.adapter_sha256,
+              case_set_sha256: $s.case_set_sha256,
+              categories: ($s.categories_in_policy_order | from_entries),
+              completed_at: $completed,
+              corpus_image: $r.simulation_qualification_authority.corpus_image,
+              corpus_manifest_sha256: $corpus_sha,
+              decimal_comparison_algorithm: "rspice-decimal-v1",
+              engine_build: $b.engine_build,
+              engine_name: $b.engine_name,
+              engine_protocol_versions: [3],
+              evidence_created_at: $created,
+              evidence_type: "rspice.simulator-qualification/v1",
+              executed_case_count: $s.executed_case_count,
+              failed_case_count: 0,
+              format_version: 1,
+              migration_manifest_sha256: $r.migration_manifest_sha256,
+              model_library_image_reference: $b.model_library_image_reference,
+              model_library_sha256: $b.model_library_sha256,
+              observer_image_reference: $b.observer_image_reference,
+              evaluator_image_reference: $b.observer_image_reference,
+              passed_case_count: $s.executed_case_count,
+              platforms: ["linux/amd64"],
+              policy_epoch: 1,
+              policy_image: $r.simulation_qualification_authority.policy_image,
+              policy_sha256: $policy_sha,
+              profile: "rspice-cloud-linux-amd64",
+              profile_version: 1,
+              qualification_harness_image_reference: $harness,
+              qualification_source_sha: $qualification_source_sha,
+              release_manifest_sha256: $release_sha,
+              release_version: $r.release_version,
+              required_case_count: $s.required_case_count,
+              result: "passed",
+              retained_artifacts: $retained[0],
+              rollout_phase: $r.rollout_phase,
+              runtime_mode: $b.runtime_mode,
+              skipped_case_count: 0,
+              solver_image_reference: $b.solver_image_reference,
+              solver_sha256: $b.solver_sha256,
+              source_repository: $r.source_repository,
+              source_sha: $r.source_sha,
+              started_at: $started,
+              suite: "rspice-commercial-cloud-v1",
+              suite_run_id: $s.suite_run_id,
+              suite_version: 1,
+              worker_image_reference: $b.worker_image_reference,
+              worker_platform_digest: $b.worker_platform_digest
+            }' >simulation-qualification.json
+          node cloud/tools/verify-simulation-qualification-evidence.mjs \
+            simulation-qualification.json "$manifest" qualification-artifacts
+          cosign sign-blob --yes --bundle simulation-qualification.sigstore.json \
+            simulation-qualification.json
+          if ! gh release view "$EVIDENCE_TAG" --repo "$CLOUD_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$EVIDENCE_TAG" \
+              --repo "$CLOUD_REPOSITORY" \
+              --title "RSpice deployment evidence $EVIDENCE_TAG" \
+              --notes "Signed deployment-admission evidence. Assets are immutable once uploaded." \
+              --latest=false
+          fi
+          existing=$(gh release view "$EVIDENCE_TAG" --repo "$CLOUD_REPOSITORY" --json assets \
+            --jq '.assets[].name' || true)
+          for name in simulation-qualification.json simulation-qualification.sigstore.json; do
+            if grep -Fxq "$name" <<<"$existing"; then
+              echo "evidence asset already exists and is immutable: $name" >&2
+              exit 1
+            fi
+          done
+          gh release upload "$EVIDENCE_TAG" --repo "$CLOUD_REPOSITORY" \
+            simulation-qualification.json simulation-qualification.sigstore.json
+          {
+            echo '### Simulation qualification evidence'
+            echo "- release under test: \`$RELEASE_TAG\`"
+            echo "- evidence release: \`$EVIDENCE_TAG\`"
+            echo "- suite run: \`$SUITE_RUN_ID\`"
+            echo "- evidence sha256: \`$(sha256sum simulation-qualification.json | cut -d ' ' -f 1)\`"
           } >>"$GITHUB_STEP_SUMMARY"
