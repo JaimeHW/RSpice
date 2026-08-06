@@ -2,6 +2,7 @@
 //! domain; every draft carries its own engine-independent oracle.
 
 pub mod dc;
+pub mod dynamics;
 pub mod op;
 pub mod physics;
 
@@ -11,6 +12,7 @@ use crate::capture::CaseDraft;
 pub fn all() -> Vec<CaseDraft> {
     let mut drafts = op::drafts();
     drafts.extend(dc::drafts());
+    drafts.extend(dynamics::drafts());
     drafts
 }
 
