@@ -291,6 +291,44 @@ fn wrong_analysis_kind_for_the_deck_is_a_bounded_failure() {
     assert_eq!(response["failure_code"], "analysis.directive_missing");
 }
 
+/// A node with no DC path to ground has no operating point to report. The
+/// solver's conditioning shunt can always produce a number for it, so the
+/// refusal has to be explicit, and it has to reach the wire as a stable code
+/// rather than as a success carrying a fabricated bias.
+#[test]
+fn a_node_with_no_dc_path_to_ground_is_a_bounded_failure() {
+    let job = Job::new("no-dc-path");
+    let deck = "floating node\nI1 0 out DC 1m\nC1 out 0 1u\n.op\n.end\n";
+    let request = build_request(
+        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
+        json!({"kind": "operating_point"}),
+        Vec::new(),
+    );
+    let response = parse_stdout(&job.run(&request));
+    assert_eq!(response["status"], "failed");
+    assert_eq!(response["failure_code"], "engine.circuit_error");
+}
+
+/// The same deck with ngspice's `RSHUNT` shunt resistor runs, because the
+/// shunt is a real element the author sized: 1 mA through 1 GOhm is 1 MV.
+#[test]
+fn rshunt_restores_the_dc_path_and_the_run_succeeds() {
+    let job = Job::new("rshunt");
+    let deck = "shunted floating node\n\
+                I1 0 out DC 1m\nC1 out 0 1u\n.options rshunt=1e9\n.op\n.end\n";
+    let request = build_request(
+        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
+        json!({"kind": "operating_point"}),
+        Vec::new(),
+    );
+    let response = parse_stdout(&job.run(&request));
+    assert_eq!(response["status"], "succeeded");
+    assert_eq!(
+        measurement(&response, "v(out)")["value_decimal"],
+        "9.999999999999999e5"
+    );
+}
+
 #[test]
 fn an_unparseable_deck_is_a_bounded_failure() {
     let job = Job::new("parse-failure");

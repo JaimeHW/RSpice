@@ -379,13 +379,19 @@ fn check_connectivity(netlist: &Netlist, result: &mut ValidationResult) {
                 code: Some("TOPOLOGY_ONE_DEVICE_TERMINAL".to_string()),
             });
         }
-        for node in diagnostics.no_dc_path_nodes {
-            result.warnings.push(ValidationIssue {
-                message: format!("Voltage Node ({node}) does not have a DC path to ground"),
-                element: None,
-                line: None,
-                code: Some("TOPOLOGY_NO_DC_PATH".to_string()),
-            });
+        // The DC-path warning comes from the conduction analysis rather than
+        // Xyce's lead groups so that this command agrees with the engine: a
+        // node reported here is exactly one that would make an operating point
+        // refuse to run.
+        if let Ok(dc_paths) = rspice_core::netlist::analyze_dc_ground_paths(&flattened.elements) {
+            for node in dc_paths.no_dc_path_nodes {
+                result.warnings.push(ValidationIssue {
+                    message: format!("Voltage Node ({node}) does not have a DC path to ground"),
+                    element: None,
+                    line: None,
+                    code: Some("TOPOLOGY_NO_DC_PATH".to_string()),
+                });
+            }
         }
         return;
     }

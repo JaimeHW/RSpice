@@ -230,6 +230,9 @@ pub fn resolve_simulation_config(
         if let Some(scaling) = opts.b3soi_gmin_scaling {
             b3soi_gmin_scaling = scaling;
         }
+        if let Some(rshunt) = opts.rshunt {
+            resolved.rshunt = Some(rshunt);
+        }
     }
 
     if let Some(temp_k) = overrides.temperature_kelvin {

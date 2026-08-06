@@ -55,11 +55,23 @@ impl Engine {
     /// native BSIM3-SOI DC system without an extra nodal floor.
     pub(in crate::engine) fn dc_nodal_gmin_floor(&self, circuit: &CircuitData) -> Value {
         let gmin = self.config.convergence_config.gmin_target.max(0.0);
-        if circuit.has_b3soi_devices() {
+        let baseline = if circuit.has_b3soi_devices() {
             0.0
         } else {
             gmin
-        }
+        };
+        // `.OPTIONS RSHUNT` is an element the deck asked for, not solver
+        // conditioning, so it survives the B3SOI exemption above.
+        baseline.max(self.nodal_shunt_conductance())
+    }
+
+    /// Conductance of the `.OPTIONS RSHUNT` node-to-ground shunt, or zero when
+    /// the deck did not ask for one.
+    pub(in crate::engine) fn nodal_shunt_conductance(&self) -> Value {
+        self.config
+            .rshunt
+            .filter(|resistance| resistance.is_finite() && *resistance > 0.0)
+            .map_or(0.0, |resistance| 1.0 / resistance)
     }
 
     /// Stamp all DC values into matrix using O(1) direct stamping

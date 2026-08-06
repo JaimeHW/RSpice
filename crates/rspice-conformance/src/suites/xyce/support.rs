@@ -2181,6 +2181,7 @@ impl XyceTestRunner {
             iabstol,
             residual_reltol,
             gmin,
+            rshunt,
             method,
             trtol,
             timeint_reltol,
@@ -2244,6 +2245,7 @@ impl XyceTestRunner {
             && iabstol.is_none()
             && residual_reltol.is_none()
             && gmin.is_none()
+            && rshunt.is_none()
             && method.as_deref() == method_selector
             && trtol.is_none()
             && ramptime.is_none()

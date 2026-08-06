@@ -109,10 +109,6 @@ pub fn drafts() -> Vec<CaseDraft> {
         "analysis.directive_missing",
     ));
 
-    // (A current source into a floating capacitor node is deliberately
-    // absent: the engine currently regularizes the singular system into a
-    // silent 1e12 V "success" — tracked separately as a topology-check
-    // defect. Once the engine refuses it, that deck belongs here.)
     drafts.push(failure_case(
         "fail.directive.004",
         "* noise-only deck submitted for an operating point\n\
@@ -127,6 +123,28 @@ pub fn drafts() -> Vec<CaseDraft> {
 
     // Structurally unsolvable circuits: the classification must stay a
     // bounded engine code, not a crash or a fabricated result.
+    //
+    // This first one is the subtlest of the family. Nothing about it is
+    // malformed and it converges immediately; the node simply has no DC path
+    // to ground, so its voltage is whatever the solver's conditioning shunt
+    // makes it -- a teravolt, at the shunt sizes in use. A run that reports
+    // that number as an operating point is indistinguishable, downstream,
+    // from one that measured something real, which is why the engine has to
+    // refuse it rather than converge on it.
+    drafts.push(failure_case(
+        "fail.singular.001",
+        "* current source into a node with no dc path to ground\n\
+         i1 0 out dc 1m\n\
+         c1 out 0 1u\n\
+         .op\n\
+         .end\n",
+        vec![Parameter {
+            name: "i1",
+            unit: "A",
+            value: 1e-3,
+        }],
+        "engine.circuit_error",
+    ));
     drafts.push(failure_case(
         "fail.singular.002",
         "* two voltage sources forcing different values on one node\n\

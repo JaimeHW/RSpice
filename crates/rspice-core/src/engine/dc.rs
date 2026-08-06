@@ -520,6 +520,44 @@ impl Engine {
         self.run_dc_op_with_startup_report_and_abort(netlist, DcOpStartup::Zero, abort)
     }
 
+    /// Refuse an operating point whose answer the conditioning shunt would
+    /// invent rather than the circuit determine.
+    ///
+    /// A node that no DC-conducting element ties to ground contributes an
+    /// all-but-empty matrix row. The nodal GMIN floor keeps that row solvable,
+    /// which is what makes continuation and startup work on real circuits, but
+    /// it also means the solve always returns *something*: divide an injected
+    /// current by a 1e-15 S floor and the node reports a teravolt, and the
+    /// bias moves if the floor ever changes. ngspice has no such floor, so its
+    /// matrix goes singular here and its operating point produces no table at
+    /// all; reporting a number in that situation is strictly worse than
+    /// refusing, because nothing downstream can tell the number is fictional.
+    ///
+    /// `.OPTIONS RSHUNT` is the escape hatch, matching ngspice. It is not a
+    /// flag that suppresses the check: it adds a real shunt conductance to
+    /// every node, so the topology genuinely acquires the DC path the deck was
+    /// missing, and the resulting bias is one the author chose and can size.
+    fn ensure_dc_paths_to_ground(&self, circuit: &CircuitData) -> Result<(), SimulationError> {
+        let floating = circuit.no_dc_path_nodes();
+        if floating.is_empty() || self.nodal_shunt_conductance() > 0.0 {
+            return Ok(());
+        }
+        let shown: Vec<&str> = floating.iter().take(8).map(String::as_str).collect();
+        let suffix = if floating.len() > shown.len() {
+            format!(" (and {} more)", floating.len() - shown.len())
+        } else {
+            String::new()
+        };
+        Err(SimulationError::Circuit(format!(
+            "no DC path to ground from node(s) {}{}: capacitors and current sources do not \
+             conduct at DC, so nothing in the circuit sets their operating-point voltage. \
+             Connect them through a conducting element, or set .OPTIONS RSHUNT=<ohms> to \
+             shunt every node to ground with a resistor of that value.",
+            shown.join(", "),
+            suffix
+        )))
+    }
+
     fn run_dc_op_with_startup_report_and_abort(
         &self,
         netlist: &Netlist,
@@ -535,6 +573,8 @@ impl Engine {
 
         // Build circuit from netlist
         let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
+
+        engine.ensure_dc_paths_to_ground(&circuit)?;
 
         if circuit.num_nodes() == 0 {
             if force_initial_conditions {
@@ -1203,6 +1243,120 @@ mod tests {
         assert!(
             (actual - expected).abs() <= 1.0e-10,
             "expected V({node})={expected:.17e}, got {actual:.17e}"
+        );
+    }
+
+    fn op_error(deck: &str) -> SimulationError {
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        Engine::default()
+            .run_dc_op(&netlist)
+            .expect_err("operating point must be refused")
+    }
+
+    fn op_voltage(deck: &str, node: &str) -> Value {
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let result = Engine::default()
+            .run_dc_op(&netlist)
+            .expect("operating point must solve");
+        result
+            .try_voltage_named(node)
+            .unwrap_or_else(|| panic!("missing voltage for node {node}"))
+    }
+
+    /// A current source feeding a capacitor leaves the node's DC voltage set
+    /// by nothing but the conditioning shunt, which reported a teravolt.
+    #[test]
+    fn operating_point_refuses_a_node_with_no_dc_path_to_ground() {
+        let error = op_error(
+            "current source into a node with no dc path\n\
+             i1 0 out dc 1m\n\
+             c1 out 0 1u\n\
+             .op\n\
+             .end\n",
+        );
+        assert_eq!(
+            error.descriptor().code,
+            crate::engine::SimulationErrorCode::CircuitError,
+            "got {error}"
+        );
+        assert!(error.to_string().contains("OUT"), "got {error}");
+    }
+
+    /// Two opposed current sources on an otherwise unconnected node: KCL has
+    /// no solution, and the shunt used to park the node at minus a teravolt.
+    #[test]
+    fn operating_point_refuses_opposed_current_sources_on_a_floating_node() {
+        let error = op_error(
+            "kcl-inconsistent current source pair\n\
+             i1 0 a 1m\n\
+             i2 a 0 2m\n\
+             .op\n\
+             .end\n",
+        );
+        assert_eq!(
+            error.descriptor().code,
+            crate::engine::SimulationErrorCode::CircuitError,
+            "got {error}"
+        );
+        assert!(error.to_string().contains("A"), "got {error}");
+    }
+
+    /// The control: a real bleed resistor, however large, determines the node,
+    /// so the same topology must still solve — and to Ohm's law, not to the
+    /// shunt-perturbed value.
+    #[test]
+    fn operating_point_solves_through_a_one_gigaohm_bleed_resistor() {
+        let voltage = op_voltage(
+            "bleed resistor provides the dc path\n\
+             i1 0 out dc 1m\n\
+             c1 out 0 1u\n\
+             r1 out 0 1g\n\
+             .op\n\
+             .end\n",
+            "out",
+        );
+        assert!(
+            (voltage - 1.0e6).abs() <= 10.0,
+            "expected ~1e6 V across 1 GOhm, got {voltage:.17e}"
+        );
+    }
+
+    /// `.OPTIONS RSHUNT` supplies the missing path as a real element, so the
+    /// deck runs and lands on the value that shunt implies.
+    #[test]
+    fn rshunt_supplies_the_missing_dc_path_and_sets_the_bias() {
+        let voltage = op_voltage(
+            "rshunt makes the floating node solvable\n\
+             i1 0 out dc 1m\n\
+             c1 out 0 1u\n\
+             .options rshunt=1e9\n\
+             .op\n\
+             .end\n",
+            "out",
+        );
+        assert!(
+            (voltage - 1.0e6).abs() <= 10.0,
+            "expected 1 mA through the 1 GOhm shunt, got {voltage:.17e}"
+        );
+    }
+
+    /// Nonlinear continuation must be untouched: a diode circuit needs GMIN
+    /// and source stepping, and every node here has a DC path.
+    #[test]
+    fn nonlinear_continuation_still_solves_a_grounded_diode_circuit() {
+        let voltage = op_voltage(
+            "diode clamp\n\
+             v1 in 0 dc 5\n\
+             r1 in out 1k\n\
+             d1 out 0 dmod\n\
+             .model dmod d(is=1e-14 n=1)\n\
+             .op\n\
+             .end\n",
+            "out",
+        );
+        assert!(
+            (0.3..0.9).contains(&voltage),
+            "expected a forward diode drop, got {voltage:.17e}"
         );
     }
 

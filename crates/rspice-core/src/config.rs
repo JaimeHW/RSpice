@@ -241,6 +241,13 @@ pub struct SimulationConfig {
     /// Xyce BSIMSOI3 terminal-GMIN policy. When true, B3SOI devices receive
     /// `GMIN * 1e-6`; when false, they receive the full device GMIN.
     pub b3soi_gmin_scaling: bool,
+    /// Ngspice `.OPTIONS RSHUNT`: resistance of a shunt resistor from every
+    /// node to ground, raising the DC nodal conductance floor to `1/RSHUNT`.
+    ///
+    /// Unset means no shunt beyond the solver's own conditioning term. A set
+    /// value is a deliberate topological statement by the deck author, so it
+    /// also satisfies the operating point's DC-path requirement.
+    pub rshunt: Option<Value>,
     /// Transient truncation tolerance factor for charge-state timestep control.
     pub transient_trtol: Value,
     /// Explicit transient LTE relative tolerance. `None` uses Xyce's independent
@@ -718,6 +725,7 @@ impl Default for SimulationConfig {
             matrix_pivot_tolerance: 1.0e-3,
             matrix_absolute_pivot_tolerance: 0.0,
             b3soi_gmin_scaling: true,
+            rshunt: None,
             transient_trtol: crate::constants::TRTOL,
             transient_lte_reltol: None,
             transient_lte_abstol: None,

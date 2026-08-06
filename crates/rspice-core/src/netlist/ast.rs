@@ -2708,6 +2708,15 @@ pub struct SimulationOptions {
     pub residual_reltol: Option<Value>,
     /// Minimum conductance (default: 1e-12 S)
     pub gmin: Option<Value>,
+    /// Ngspice `.OPTIONS RSHUNT`: resistance of a shunt resistor placed from
+    /// every circuit node to ground.
+    ///
+    /// This is ngspice's sanctioned way to keep a deck whose topology leaves
+    /// a node without a DC path to ground solvable. Because the shunt is a
+    /// real element the user chose and sized, it also satisfies the DC
+    /// operating point's topology check, which otherwise refuses such a deck
+    /// rather than reporting a bias the conditioning shunt invented.
+    pub rshunt: Option<Value>,
     /// Integration method: "TRAP", "GEAR", "TRAPGEAR"
     pub method: Option<String>,
     /// Transient error tolerance factor (default: 7.0)
@@ -2882,6 +2891,9 @@ impl SimulationOptions {
         }
         if other.gmin.is_some() {
             self.gmin = other.gmin;
+        }
+        if other.rshunt.is_some() {
+            self.rshunt = other.rshunt;
         }
         if other.method.is_some() {
             self.method = other.method.clone();

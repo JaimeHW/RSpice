@@ -1258,93 +1258,32 @@ pub(super) fn native_bsim4_model_params_upper_map(
     Ok(resolved)
 }
 
-/// Warn about nodes with no conductive path to ground: the unconditional
-/// matrix gmin keeps such systems numerically solvable, so without this
-/// notice a forgotten connection simulates silently with a meaningless bias.
-/// Capacitors and current sources do not conduct DC; every other element's
-/// terminals are treated as connected, which never produces a false alarm.
-pub(super) fn warn_floating_nodes(flat_elements: &[crate::netlist::Element]) {
-    use crate::netlist::ElementKind;
-    use std::collections::HashMap;
-
+/// Report topology diagnostics and return the nodes with no DC path to ground.
+///
+/// Two independent questions are asked here. Xyce's lead-group analysis
+/// supplies the "connected to only 1 device Terminal" notice, which is a
+/// wiring-mistake heuristic. [`analyze_dc_ground_paths`] answers the separate
+/// question of whether anything determines a node's DC voltage; only that
+/// second list is returned, because the operating point refuses to report a
+/// bias for those nodes.
+///
+/// [`analyze_dc_ground_paths`]: crate::netlist::analyze_dc_ground_paths
+pub(super) fn collect_floating_nodes(flat_elements: &[crate::netlist::Element]) -> Vec<String> {
     if let Ok(diagnostics) = crate::netlist::analyze_xyce_connectivity(flat_elements) {
         for node in diagnostics.one_device_terminal_nodes {
             log::warn!("Voltage Node ({node}) connected to only 1 device Terminal");
         }
-        for node in diagnostics.no_dc_path_nodes {
-            log::warn!("Voltage Node ({node}) does not have a DC path to ground");
-        }
-        return;
     }
 
-    let canonical = |node: &str| -> String { node.to_ascii_lowercase() };
-
-    let mut parent: HashMap<String, String> = HashMap::new();
-    fn find(parent: &mut HashMap<String, String>, node: &str) -> String {
-        let mut current = node.to_string();
-        loop {
-            let up = parent
-                .entry(current.clone())
-                .or_insert_with(|| current.clone())
-                .clone();
-            if up == current {
-                return current;
-            }
-            let grand = parent.get(&up).cloned().unwrap_or_else(|| up.clone());
-            parent.insert(current, grand);
-            current = up;
-        }
-    }
-
-    let mut all_nodes: Vec<String> = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for element in flat_elements {
-        let conducts = !matches!(
-            element.kind,
-            ElementKind::Capacitor { .. } | ElementKind::CurrentSource(_)
-        );
-        let nodes: Vec<String> = element.nodes.iter().map(|n| canonical(n)).collect();
-        for node in &nodes {
-            if seen.insert(node.clone()) {
-                all_nodes.push(node.clone());
-            }
-        }
-        if conducts && nodes.len() >= 2 {
-            let first = find(&mut parent, &nodes[0]);
-            for other in &nodes[1..] {
-                let root = find(&mut parent, other);
-                if root != first {
-                    parent.insert(root, first.clone());
-                }
-            }
-        }
-    }
-
-    if !seen.contains("0") {
-        // No ground reference at all; other validation owns that report.
-        return;
-    }
-    let ground_root = find(&mut parent, "0");
-    let floating: Vec<&String> = all_nodes
-        .iter()
-        .filter(|node| node.as_str() != "0" && find(&mut parent, node) != ground_root)
-        .collect();
-    if floating.is_empty() {
-        return;
-    }
-    let shown: Vec<&str> = floating.iter().take(8).map(|s| s.as_str()).collect();
-    let suffix = if floating.len() > shown.len() {
-        format!(" (and {} more)", floating.len() - shown.len())
-    } else {
-        String::new()
+    // An unanalyzable topology yields no nodes rather than a guess, leaving
+    // every analysis free to run exactly as it did before.
+    let Ok(diagnostics) = crate::netlist::analyze_dc_ground_paths(flat_elements) else {
+        return Vec::new();
     };
-    log::warn!(
-        "node(s) {}{} have no conductive path to ground (capacitors and current sources \
-         do not conduct DC); their bias is set by the matrix gmin only and is not \
-         physically meaningful",
-        shown.join(", "),
-        suffix
-    );
+    for node in &diagnostics.no_dc_path_nodes {
+        log::warn!("Voltage Node ({node}) does not have a DC path to ground");
+    }
+    diagnostics.no_dc_path_nodes
 }
 
 /// Diagnostic descriptor for well-known MOS model levels.

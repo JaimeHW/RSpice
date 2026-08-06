@@ -40,6 +40,7 @@ impl CircuitData {
             b3soi_fd: B3SoiFds::new(),
             b3soi_pd: B3SoiPds::new(),
             b3soi_gmin_scale: 1.0e-6,
+            no_dc_path_nodes: Vec::new(),
             bsim3v3: Bsim3v3s::new(),
             bsim4v8: Bsim4v8s::new(),
             ekv26s: EkvMosfets::new(),

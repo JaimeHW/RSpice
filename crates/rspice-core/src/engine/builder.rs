@@ -4865,7 +4865,7 @@ impl Engine {
             }
         }
 
-        warn_floating_nodes(&flat_elements);
+        circuit.no_dc_path_nodes = collect_floating_nodes(&flat_elements);
 
         for (element_index, element) in flat_elements.iter().enumerate() {
             if element_index.is_multiple_of(64) {

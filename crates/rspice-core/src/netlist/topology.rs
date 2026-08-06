@@ -135,6 +135,142 @@ fn connectivity_terminal_nodes(element: &Element) -> Result<Vec<&str>, Connectiv
     Ok(nodes)
 }
 
+/// Nodes whose DC voltage nothing in the circuit determines.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DcGroundPathDiagnostics {
+    /// Non-ground nodes that no chain of DC-conducting elements connects to
+    /// ground, in deck order of first appearance.
+    pub no_dc_path_nodes: Vec<String>,
+}
+
+/// Find nodes that no DC-conducting element ties to ground.
+///
+/// This answers a narrower question than [`analyze_xyce_connectivity`], which
+/// reproduces Xyce's lead-group *warnings*. Xyce puts both leads of a current
+/// source in one group, so that routine reports nothing for a node fed only
+/// by a current source through a capacitor -- the very topology whose DC
+/// voltage is undetermined. It also splits a MOSFET's drain from its source,
+/// which flags ordinary CMOS output nodes. Neither convention can decide
+/// whether refusing a deck is correct.
+///
+/// The rule here is conduction, not lead grouping: an element ties all of its
+/// terminals together unless it is open at DC. Capacitors are open, and so is
+/// every current source -- independent, controlled, or behavioral -- because a
+/// prescribed current constrains no node voltage. Everything else conducts,
+/// including a MOSFET's gate, whose oxide blocks DC but whose isolation is not
+/// modeled here: erring toward conduction can only miss a floating node, while
+/// erring the other way would refuse working circuits.
+///
+/// Fails closed for elements whose DC conduction is not modeled -- XSPICE code
+/// models and anything still unresolved after flattening -- so a caller can
+/// decline to judge the circuit rather than guess about it.
+pub fn analyze_dc_ground_paths(
+    elements: &[Element],
+) -> Result<DcGroundPathDiagnostics, ConnectivityAnalysisError> {
+    let mut union = NodeUnion::default();
+    let mut order: Vec<String> = Vec::new();
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+
+    for element in elements {
+        union.collect_element_nodes(element);
+        for node in connectivity_terminal_nodes(element)? {
+            if seen.insert(node_key(node)) {
+                order.push(normalize_node_name(node));
+            }
+        }
+        for group in dc_conduction_groups(element)? {
+            if let Some((first, rest)) = group.split_first() {
+                for node in rest {
+                    union.union_nodes(first, node);
+                }
+            }
+        }
+    }
+
+    let Some(ground) = union
+        .index_by_key
+        .get(&node_key("0"))
+        .map(|index| union.root_of(*index))
+    else {
+        // No ground reference at all. Circuit validation owns that report;
+        // every node would otherwise be listed here.
+        return Ok(DcGroundPathDiagnostics::default());
+    };
+
+    let no_dc_path_nodes = order
+        .into_iter()
+        .filter(|node| !is_ground_name(node))
+        .filter(|node| {
+            union
+                .index_by_key
+                .get(&node_key(node))
+                .is_some_and(|index| union.root_of(*index) != ground)
+        })
+        .collect();
+
+    Ok(DcGroundPathDiagnostics { no_dc_path_nodes })
+}
+
+/// Terminal sets an element ties together through DC conduction.
+///
+/// An empty result means the element conducts between none of its terminals.
+fn dc_conduction_groups(element: &Element) -> Result<Vec<Vec<&str>>, ConnectivityAnalysisError> {
+    let all = || vec![element.nodes.iter().map(String::as_str).collect::<Vec<_>>()];
+    let groups = match &element.kind {
+        // A capacitor carrying an initial condition states a voltage across
+        // itself. Xyce turns that into a branch constraint that holds during
+        // the operating point, which does determine the far terminal; ngspice
+        // saves it for a UIC transient instead and leaves the DC node free.
+        // Treating it as conducting either way costs only detection on the
+        // ngspice reading, where refusing would instead be wrong under Xyce's.
+        ElementKind::Capacitor {
+            initial_voltage: Some(_),
+            ..
+        } => all(),
+        // Open at DC: a capacitor blocks it, and a source that prescribes a
+        // current leaves the voltage across itself free.
+        ElementKind::Capacitor { .. }
+        | ElementKind::CurrentSource(_)
+        | ElementKind::Cccs { .. }
+        | ElementKind::Vccs { .. }
+        | ElementKind::BehavioralCurrent { .. } => Vec::new(),
+        ElementKind::Coupling { .. } => Vec::new(),
+        // A controlled source's sense terminals draw no current, so only its
+        // output pair can tie nodes together.
+        ElementKind::Vcvs { .. } | ElementKind::VSwitch { .. } => all(),
+        ElementKind::Subcircuit { .. }
+        | ElementKind::VoltageSourceDeferred(_)
+        | ElementKind::CurrentSourceDeferred(_) => {
+            return Err(ConnectivityAnalysisError {
+                element: element.name.clone(),
+                reason: "element must be resolved during flattening".to_string(),
+            });
+        }
+        ElementKind::Xspice { .. } => {
+            return Err(ConnectivityAnalysisError {
+                element: element.name.clone(),
+                reason: "XSPICE lead groups are model-specific".to_string(),
+            });
+        }
+        ElementKind::Resistor { .. }
+        | ElementKind::Inductor { .. }
+        | ElementKind::JilesAthertonInductor { .. }
+        | ElementKind::VoltageSource(_)
+        | ElementKind::Diode { .. }
+        | ElementKind::XyceMemristor { .. }
+        | ElementKind::Ccvs { .. }
+        | ElementKind::BehavioralVoltage { .. }
+        | ElementKind::ISwitch { .. }
+        | ElementKind::GenericSwitch { .. }
+        | ElementKind::Bjt { .. }
+        | ElementKind::Mosfet { .. }
+        | ElementKind::Jfet { .. }
+        | ElementKind::Mesfet { .. }
+        | ElementKind::TransmissionLine { .. } => all(),
+    };
+    Ok(groups)
+}
+
 fn xyce_dc_lead_groups(element: &Element) -> Result<Vec<Vec<&str>>, ConnectivityAnalysisError> {
     let all = || vec![element.nodes.iter().map(String::as_str).collect::<Vec<_>>()];
     let separate = || {
@@ -798,6 +934,119 @@ mod tests {
             diagnostics.no_dc_path_nodes,
             vec!["$G_BAD_PATH".to_string()]
         );
+    }
+
+    fn dc_ground_paths_of(deck: &str) -> Vec<String> {
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let flat = flatten_netlist_with_models(&netlist)
+            .expect("deck flattens")
+            .elements;
+        analyze_dc_ground_paths(&flat)
+            .expect("topology is supported")
+            .no_dc_path_nodes
+    }
+
+    #[test]
+    fn dc_ground_paths_flag_a_node_fed_only_by_a_current_source() {
+        // The Xyce lead-group analysis puts both leads of a current source in
+        // one group and so reports nothing here, which is why this analysis
+        // exists: a prescribed current fixes no voltage.
+        let deck = "current source into a floating capacitor\n\
+                    i1 0 out dc 1m\n\
+                    c1 out 0 1u\n\
+                    .op\n\
+                    .end\n";
+        assert_eq!(dc_ground_paths_of(deck), vec!["OUT".to_string()]);
+    }
+
+    #[test]
+    fn dc_ground_paths_accept_a_resistive_bleed_to_ground() {
+        let deck = "bleed resistor pins the node\n\
+                    i1 0 out dc 1m\n\
+                    c1 out 0 1u\n\
+                    r1 out 0 1g\n\
+                    .op\n\
+                    .end\n";
+        assert!(dc_ground_paths_of(deck).is_empty());
+    }
+
+    #[test]
+    fn dc_ground_paths_flag_the_midpoint_of_series_capacitors() {
+        let deck = "series capacitors leave the midpoint free\n\
+                    v1 in 0 dc 1\n\
+                    c1 in mid 1u\n\
+                    c2 mid 0 1u\n\
+                    .op\n\
+                    .end\n";
+        assert_eq!(dc_ground_paths_of(deck), vec!["MID".to_string()]);
+    }
+
+    #[test]
+    fn dc_ground_paths_reach_ground_through_a_resistor_chain() {
+        // OUT reaches ground the long way, through R1 and the source branch.
+        let deck = "capacitor hangs off a resistively driven node\n\
+                    v1 in 0 dc 1\n\
+                    r1 in out 1k\n\
+                    c1 out 0 1u\n\
+                    .op\n\
+                    .end\n";
+        assert!(dc_ground_paths_of(deck).is_empty());
+    }
+
+    #[test]
+    fn dc_ground_paths_treat_a_mosfet_channel_as_conducting() {
+        // A CMOS output node is driven only through drain terminals. Xyce's
+        // lead groups split drain from source and would flag it; conduction
+        // must not, or ordinary logic gates would be refused.
+        let deck = "cmos inverter output\n\
+                    vdd vdd 0 dc 5\n\
+                    vin in 0 dc 0\n\
+                    m1 out in 0 0 nch w=1u l=1u\n\
+                    m2 out in vdd vdd pch w=2u l=1u\n\
+                    c1 out 0 1p\n\
+                    .model nch nmos level=1\n\
+                    .model pch pmos level=1\n\
+                    .op\n\
+                    .end\n";
+        assert!(dc_ground_paths_of(deck).is_empty());
+    }
+
+    #[test]
+    fn dc_ground_paths_flag_a_node_driven_only_by_a_controlled_current_source() {
+        // G1 prescribes a current into OUT and pins nothing, so OUT floats
+        // even though its controlling branch is well grounded.
+        let deck = "transconductance drive with no load to ground\n\
+                    v1 sense 0 dc 1\n\
+                    r1 sense 0 1k\n\
+                    g1 out 0 sense 0 1m\n\
+                    c1 out 0 1u\n\
+                    .op\n\
+                    .end\n";
+        assert_eq!(dc_ground_paths_of(deck), vec!["OUT".to_string()]);
+    }
+
+    #[test]
+    fn dc_ground_paths_accept_a_capacitor_carrying_an_initial_condition() {
+        // Xyce holds `IC=` as a branch constraint through the operating point,
+        // so the far terminal is determined and must not be refused.
+        let deck = "capacitor initial condition pins the far terminal\n\
+                    v1 fixed 0 1\n\
+                    c1 fixed floating 1u ic=0\n\
+                    .op\n\
+                    .end\n";
+        assert!(dc_ground_paths_of(deck).is_empty());
+    }
+
+    #[test]
+    fn dc_ground_paths_stay_silent_without_a_ground_reference() {
+        // Circuit validation owns the missing-ground report; listing every
+        // node here would bury it.
+        let deck = "no ground node at all\n\
+                    v1 a b dc 1\n\
+                    r1 a b 1k\n\
+                    .op\n\
+                    .end\n";
+        assert!(dc_ground_paths_of(deck).is_empty());
     }
 
     #[test]

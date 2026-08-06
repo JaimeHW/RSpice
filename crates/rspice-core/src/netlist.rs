@@ -72,8 +72,9 @@ pub use parser::*;
 pub use source_map::*;
 pub use startup::{validate_startup_directives, validate_startup_directives_with_abort};
 pub use topology::{
-    ConnectivityAnalysisError, ConnectivityDiagnostics, TopologyReduction,
-    XYCE_DEFAULT_ZERO_RESISTANCE_TOL, analyze_xyce_connectivity, reduce_supernode_topology,
+    ConnectivityAnalysisError, ConnectivityDiagnostics, DcGroundPathDiagnostics, TopologyReduction,
+    XYCE_DEFAULT_ZERO_RESISTANCE_TOL, analyze_dc_ground_paths, analyze_xyce_connectivity,
+    reduce_supernode_topology,
 };
 pub(crate) use xspice_parser::{
     DeferredXspiceStringVectorEntry, encode_deferred_xspice_complex,

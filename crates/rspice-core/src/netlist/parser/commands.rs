@@ -1454,6 +1454,10 @@ pub(super) fn parse_options_command(
                 let value = expect_value(stream, line_num, params)?;
                 options.gmin = Some(parse_non_negative_real_option("GMIN", value, line_num)?);
             }
+            (_, "RSHUNT") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.rshunt = Some(parse_positive_real_option("RSHUNT", value, line_num)?);
+            }
             (_, "TRTOL") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.trtol = Some(parse_positive_real_option("TRTOL", value, line_num)?);
@@ -4906,6 +4910,8 @@ mod tests {
             ".options chgtol=-1e-15",
             ".options pivtol=0",
             ".options gmin=-1e-12",
+            ".options rshunt=0",
+            ".options rshunt=-1e9",
             ".options nonlin-tran reltol=0",
             ".options nonlin-tran abstol=-1e-6",
             ".options nonlin-tran deltaxtol=0",
@@ -5653,6 +5659,20 @@ mod tests {
                     .message
                     .contains("ignoring the previous definition")
         }));
+    }
+
+    #[test]
+    fn rshunt_option_parses_as_a_resistance() {
+        let netlist =
+            Netlist::parse(&deck_with_options(".options rshunt=1e12")).expect("RSHUNT parses");
+        assert_eq!(netlist.options.rshunt, Some(1.0e12));
+        assert_eq!(
+            Netlist::parse(&deck_with_options(".options rshunt=1meg"))
+                .expect("suffixed RSHUNT parses")
+                .options
+                .rshunt,
+            Some(1.0e6)
+        );
     }
 
     #[test]

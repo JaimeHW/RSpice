@@ -398,6 +398,13 @@ pub struct CircuitData {
     /// Multiplier applied to the circuit-level device GMIN before it reaches
     /// BSIMSOI3 terminal-GMIN branches. Xyce defaults this to `1e-6`.
     pub(crate) b3soi_gmin_scale: Value,
+    /// Nodes that no DC-conducting element ties to ground, as found during
+    /// construction from the flattened elements.
+    ///
+    /// Empty also means "nothing to report" when the topology could not be
+    /// analyzed at all (an XSPICE code model, say); the two cases are not
+    /// distinguished because both leave the operating point free to run.
+    pub(crate) no_dc_path_nodes: Vec<String>,
     pub(crate) bsim3v3: Bsim3v3s,
     pub(crate) bsim4v8: Bsim4v8s,
     pub(crate) ekv26s: EkvMosfets,

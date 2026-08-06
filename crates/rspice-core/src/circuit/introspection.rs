@@ -34,6 +34,16 @@ impl DeviceOpReport {
 }
 
 impl CircuitData {
+    /// Nodes that no chain of DC-conducting elements ties to ground.
+    ///
+    /// Their DC voltage is set by the solver's conditioning shunt rather than
+    /// by the circuit, so an operating point reported for them would be an
+    /// artifact of the shunt's size. Empty when the circuit is sound or when
+    /// its topology could not be analyzed.
+    pub fn no_dc_path_nodes(&self) -> &[String] {
+        &self.no_dc_path_nodes
+    }
+
     /// Whether a matrix row inside the nodal prefix represents a private
     /// non-electrical DAE state rather than an electrical node voltage.
     ///
