@@ -1958,6 +1958,13 @@ impl Engine {
         } else {
             BreakpointManager::new_with_tolerance(breakpoint_tolerance)
         };
+        if self.config.spice_dialect != SpiceDialect::Xyce && circuit.has_b3soi_devices() {
+            // Native B3SOI charge integration still needs the established
+            // smaller warmup step to preserve its transient oracle accuracy.
+            // Keep this capability guard independent of deck identity and let
+            // ordinary ngspice-style circuits use the source-compatible scale.
+            breakpoints.use_conservative_restart_step();
+        }
         Self::collect_transient_source_breakpoints(
             &circuit,
             tstop,

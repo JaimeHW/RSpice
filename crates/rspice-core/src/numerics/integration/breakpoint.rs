@@ -22,9 +22,15 @@ const DEFAULT_BREAKPOINT_TOLERANCE: Value = 1e-15;
 /// Ngspice `dctran.c` factor for equalizing the last two pre-breakpoint steps.
 const BREAKPOINT_EQUALIZATION_FACTOR: Value = 1.9;
 
-/// Established restart scale used by the default (ngspice-compatible)
-/// breakpoint policy.
-const DEFAULT_BREAKPOINT_RESTART_STEP_SCALE: Value = 0.005;
+/// Ngspice `dctran.c` scale for the first step after a breakpoint.
+///
+/// Ngspice limits that step to 10% of the smaller of the saved, uncut
+/// pre-breakpoint proposal and the distance to the next breakpoint.
+const NGSPICE_BREAKPOINT_RESTART_STEP_SCALE: Value = 0.1;
+
+/// Accuracy guard for dynamic-charge implementations whose post-breakpoint
+/// LTE path has not yet demonstrated stability at the native ngspice scale.
+const CONSERVATIVE_BREAKPOINT_RESTART_STEP_SCALE: Value = 0.005;
 
 /// Xyce 7.10 OneStep/Gear12 scale for the first step after a breakpoint.
 ///
@@ -69,8 +75,8 @@ impl Ord for BreakpointTimeKey {
 
 /// Breakpoint manager for handling discontinuities
 ///
-/// Ensures solver lands exactly on breakpoints and restarts from the same
-/// saved-delta scale used by Xyce's time-integration restart path.
+/// Ensures the solver lands exactly on breakpoints and restarts according to
+/// the selected simulator dialect's time-integration policy.
 #[derive(Debug)]
 pub struct BreakpointManager {
     /// Sorted list of breakpoint times
@@ -113,7 +119,7 @@ impl BreakpointManager {
 
     pub fn new_with_tolerance_and_policy(tolerance: Value, policy: BreakpointStepPolicy) -> Self {
         let (restart_step_scale, equalize_pre_breakpoint_steps) = match policy {
-            BreakpointStepPolicy::Ngspice => (DEFAULT_BREAKPOINT_RESTART_STEP_SCALE, true),
+            BreakpointStepPolicy::Ngspice => (NGSPICE_BREAKPOINT_RESTART_STEP_SCALE, true),
             BreakpointStepPolicy::Xyce => (XYCE_BREAKPOINT_RESTART_STEP_SCALE, false),
         };
         Self {
@@ -130,6 +136,14 @@ impl BreakpointManager {
                 DEFAULT_BREAKPOINT_TOLERANCE
             },
         }
+    }
+
+    /// Retain the established small restart for device families whose dynamic
+    /// charge integration still needs the extra breakpoint warmup resolution.
+    pub(crate) fn use_conservative_restart_step(&mut self) {
+        self.restart_step_scale = self
+            .restart_step_scale
+            .min(CONSERVATIVE_BREAKPOINT_RESTART_STEP_SCALE);
     }
 
     /// Add a breakpoint time (deduplicates automatically)
@@ -349,7 +363,7 @@ impl BreakpointManager {
     }
 
     /// Mark that we just solved at a breakpoint (call after solving at BP)
-    /// Returns the Xyce-style restart timestep.
+    /// Returns the dialect-specific restart timestep.
     pub fn mark_breakpoint_solved(&mut self, time: Value) -> Value {
         // Advance current_index past this breakpoint
         while self.current_index < self.breakpoints.len()
@@ -434,7 +448,7 @@ mod breakpoint_manager_tests {
     }
 
     #[test]
-    fn breakpoint_restart_scales_saved_attempted_step() {
+    fn ngspice_breakpoint_restart_uses_ten_percent_of_saved_attempted_step() {
         let mut breakpoints = BreakpointManager::new();
         breakpoints.add(10.0);
 
@@ -444,8 +458,38 @@ mod breakpoint_manager_tests {
 
         let restart = breakpoints.mark_breakpoint_solved(10.0);
 
-        assert_eq!(restart, DEFAULT_BREAKPOINT_RESTART_STEP_SCALE * 6.0);
+        assert!((restart - 0.6).abs() <= 8.0 * Value::EPSILON);
         assert!(breakpoints.should_use_minimal_step());
+    }
+
+    #[test]
+    fn ngspice_breakpoint_restart_is_limited_by_next_breakpoint_gap() {
+        let mut breakpoints = BreakpointManager::new();
+        breakpoints.add(10.0);
+        breakpoints.add(10.5);
+
+        let (dt, lands_on_breakpoint) = breakpoints.limit_step(4.0, 6.0);
+        assert_eq!(dt, 6.0);
+        assert!(lands_on_breakpoint);
+
+        let restart = breakpoints.mark_breakpoint_solved(10.0);
+
+        assert!((restart - 0.05).abs() <= 8.0 * Value::EPSILON);
+    }
+
+    #[test]
+    fn conservative_restart_guard_only_tightens_the_selected_policy() {
+        let mut breakpoints = BreakpointManager::new();
+        breakpoints.add(10.0);
+        breakpoints.use_conservative_restart_step();
+
+        let (dt, lands_on_breakpoint) = breakpoints.limit_step(4.0, 6.0);
+        assert_eq!(dt, 6.0);
+        assert!(lands_on_breakpoint);
+
+        let restart = breakpoints.mark_breakpoint_solved(10.0);
+
+        assert!((restart - 0.03).abs() <= 8.0 * Value::EPSILON);
     }
 
     #[test]
