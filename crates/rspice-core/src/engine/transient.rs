@@ -1909,14 +1909,13 @@ impl Engine {
                     // a timestep-safety contract, not an optional device
                     // status hint.  Xyce normally leaves the broad
                     // ENFORCEDEVICECONV test disabled for transient solves,
-                    // but a level-2 Core candidate that exceeds the native
-                    // quarter-Ms increment can cross a hysteresis branch and
-                    // must force a smaller retry in either policy mode.
-                    && (!circuit.has_xyce_core_level2()
+                    // The native origFlag is consulted by Xyce only when
+                    // ENFORCEDEVICECONV is enabled.  Keep the same policy:
+                    // the broad device-convergence switch governs both the
+                    // hidden LEVEL=1 rows and MutIndNonLin2's limiter.
+                    && (!enforce_device_convergence
+                        || !circuit.has_xyce_core_level2()
                         || circuit.xyce_core_level2_trial_converged())
-                    // LEVEL=1's hidden M/R equations remain governed by the
-                    // broad device-convergence policy; they are not part of
-                    // MutIndNonLin2's unconditional LEVEL=2 origFlag veto.
                     && (!enforce_device_convergence || circuit.xyce_core_trial_converged()))
         };
         let enforce_force_candidate_safety =
@@ -3677,8 +3676,7 @@ impl Engine {
                 let newton_solve_start = DiagnosticTimer::start(diagnostic_timing_enabled);
                 let solve_result: Result<(), rspice_matrix::SolverError> =
                     if uses_inductor_correction {
-                        matrix
-                            .correction_rhs_into(&rhs, &new_solution, &mut correction_rhs)
+                        matrix.correction_rhs_into(&rhs, &new_solution, &mut correction_rhs)
                             .and_then(|()| {
                                 circuit.stabilize_inductor_transient_correction_rhs(
                                     &mut correction_rhs,
