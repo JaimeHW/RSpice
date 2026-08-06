@@ -803,26 +803,6 @@ impl JilesAthertonInductor {
         (branch_current_sum, delta_branch_current_sum)
     }
 
-    /// Evaluate the Core constitutive endpoint from an aggregate applied
-    /// field.  Multi-winding Xyce devices form `Happ` from the sum of
-    /// `turns[i] * I[i]`; keeping this primitive independent of one winding's
-    /// turn count preserves the canonical shared-state equation.
-    pub(crate) fn xyce_core_trial_from_happ_with_update(
-        &self,
-        happ: Value,
-        delta_happ: Value,
-        voltage: Value,
-        mag_update: Value,
-    ) -> Option<XyceCoreTrial> {
-        self.xyce_core_trial_from_happ_with_update_and_ampere_turn_delta(
-            happ,
-            delta_happ,
-            delta_happ * self.params.length,
-            voltage,
-            mag_update,
-        )
-    }
-
     /// Evaluate a Core endpoint while preserving the native raw
     /// ampere-turn-difference operation used for `MagVarUpdate`.
     pub(crate) fn xyce_core_trial_from_happ_with_update_and_ampere_turn_delta(
@@ -2221,6 +2201,16 @@ impl JilesAthertonInductor {
         self.xyce_core_happ_from_ampere_turns(current * self.params.n_turns)
     }
 
+    /// Return MutIndNonLin2's accepted raw branch-current accumulator.
+    ///
+    /// Xyce keeps this value as an evaluation member and subtracts it from
+    /// the next source-ordered branch-current sum.  Shared K-card devices
+    /// must use the same boundary value rather than reconstructing it from a
+    /// representative winding current.
+    pub(crate) fn xyce_core_old_ampere_turns(&self) -> Value {
+        self.xyce_old_branch_current_sum
+    }
+
     pub(crate) fn n_turns_for_xyce_core(&self) -> Value {
         self.params.n_turns
     }
@@ -2329,6 +2319,7 @@ impl JilesAthertonInductor {
         hidden_state: Option<(Value, Value)>,
         dt: Value,
         one_step_order2: bool,
+        raw_ampere_turns: Option<(Value, Value)>,
     ) {
         if !self.params.xyce_core {
             return;
@@ -2348,7 +2339,7 @@ impl JilesAthertonInductor {
             voltage,
             dt,
             one_step_order2,
-            None,
+            raw_ampere_turns,
             hidden_state,
         );
     }

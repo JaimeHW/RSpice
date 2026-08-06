@@ -208,6 +208,29 @@ impl CircuitData {
         })
     }
 
+    /// Return the physical residual floor for Xyce Core electrical branch
+    /// equations.
+    ///
+    /// Xyce's global transient `RHSTOL` is intentionally permissive, but a
+    /// Core branch is a constitutive closure equation whose Q/F cancellation
+    /// directly appears as a winding voltage.  Letting that row stop at the
+    /// global RHS norm can therefore leave a finite voltage on an otherwise
+    /// ideal coupled winding.  LEVEL=2 is solved in the full electrical
+    /// correction system and reaches the direct double-precision floor.  A
+    /// shared LEVEL=1 Core is Schur-reduced through hidden M/R coordinates;
+    /// its deliberately scaled electrical row has a larger, model-conditioned
+    /// round-off floor when the vacuum coefficient is near rank deficiency.
+    pub(crate) fn xyce_core_branch_residual_tolerance(&self) -> Value {
+        const DIRECT_LEVEL2_FLOOR: Value = 1.0e-13;
+        const REDUCED_LEVEL1_FLOOR: Value = 1.0e-11;
+
+        if self.has_xyce_core_shared_level1_ill_conditioned() {
+            REDUCED_LEVEL1_FLOOR
+        } else {
+            DIRECT_LEVEL2_FLOOR
+        }
+    }
+
     /// Restamp the single-winding Xyce Core branch equations with the pure
     /// constitutive endpoint evaluated at the current Newton iterate.
     ///
@@ -657,7 +680,11 @@ impl CircuitData {
             let mut previous_previous = Vec::with_capacity(group.windings.len());
             let mut voltages = Vec::with_capacity(group.windings.len());
             let mut ampere_turns = 0.0;
-            let mut old_ampere_turns = 0.0;
+            let mut old_ampere_turns = if group.device.is_xyce_core_level2() {
+                group.device.xyce_core_old_ampere_turns()
+            } else {
+                0.0
+            };
             for winding in &group.windings {
                 let index = winding.inductor_index;
                 let branch = self.num_nodes + self.inductors.branch_indices[index];
@@ -678,7 +705,9 @@ impl CircuitData {
                     self.inductors.node_neg[index],
                 );
                 ampere_turns += winding.turns * current;
-                old_ampere_turns += winding.turns * i_prev;
+                if !group.device.is_xyce_core_level2() {
+                    old_ampere_turns += winding.turns * i_prev;
+                }
                 currents.push(current);
                 previous.push(i_prev);
                 previous_previous.push(i_prev_prev);
@@ -747,7 +776,7 @@ impl CircuitData {
                         .xyce_core_cached_trial(representative_current, first_voltage)
                 })
                 .flatten();
-            let Some(trial) = (if let Some(trial) = cached_trial {
+            let Some(mut trial) = (if let Some(trial) = cached_trial {
                 Some(trial)
             } else if !group.device.is_xyce_core_level2() {
                 group
@@ -762,9 +791,12 @@ impl CircuitData {
                         hidden_rate,
                     )
             } else {
-                group.device.xyce_core_trial_from_happ_with_update(
+                group
+                    .device
+                    .xyce_core_trial_from_happ_with_update_and_ampere_turn_delta(
                     happ,
                     delta_happ,
+                    ampere_turns - old_ampere_turns,
                     first_voltage,
                     carried_mag_update,
                 )
@@ -772,6 +804,13 @@ impl CircuitData {
                 self.xyce_core_trial_invalid = true;
                 continue;
             };
+            // MutIndNonLin2::acceptStep stores the source-ordered aggregate
+            // branch-current sum verbatim.  A shared K-card trial is formed
+            // from Happ, so retain the original sum rather than reconstructing
+            // it as Happ*Path at the accepted-step boundary.
+            if group.device.is_xyce_core_level2() {
+                trial.applied_ampere_turns = ampere_turns;
+            }
             if !trial.mid.is_finite() || trial.mid.abs() <= 1.0e-12 {
                 self.xyce_core_trial_invalid = true;
                 continue;
@@ -1360,14 +1399,30 @@ impl CircuitData {
                 group.xyce_q_history[i] = q;
             }
             let happ = group.device.xyce_core_happ_from_ampere_turns(ampere_turns);
-            // The generic inductor history is rotated before this commit
-            // hook runs.  The shared device's representative current is the
-            // accepted-state coordinate retained by its own prior commit,
-            // so use it to recover the previous aggregate field.
-            let previous_ampere_turns = first.turns * group.device.current_value();
-            let previous_happ = group
-                .device
-                .xyce_core_happ_from_ampere_turns(previous_ampere_turns);
+            // MutIndNonLin2 retains the exact source-ordered aggregate sum
+            // from its previous accepted step.  Preserve that value across a
+            // shared K-card commit instead of recovering it through the
+            // representative winding current.
+            let (previous_happ, raw_ampere_turns) = if group.device.is_xyce_core_level2() {
+                let previous_ampere_turns = group.device.xyce_core_old_ampere_turns();
+                (
+                    group
+                        .device
+                        .xyce_core_happ_from_ampere_turns(previous_ampere_turns),
+                    Some((
+                        ampere_turns,
+                        ampere_turns - previous_ampere_turns,
+                    )),
+                )
+            } else {
+                let previous_ampere_turns = first.turns * group.device.current_value();
+                (
+                    group
+                        .device
+                        .xyce_core_happ_from_ampere_turns(previous_ampere_turns),
+                    None,
+                )
+            };
             let first_voltage = node_voltage(
                 solution,
                 self.inductors.node_pos[first.inductor_index],
@@ -1397,6 +1452,7 @@ impl CircuitData {
                 hidden_state,
                 dt,
                 one_step_order2,
+                raw_ampere_turns,
             );
         }
     }
