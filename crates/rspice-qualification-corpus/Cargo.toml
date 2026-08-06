@@ -1,0 +1,20 @@
+[package]
+name = "rspice-qualification-corpus"
+description = "Generator for the signed RSpice simulator-qualification policy and corpus artifacts"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+num-bigint = "0.4"
+rayon.workspace = true
+rspice-engine-adapter = { path = "../rspice-engine-adapter" }
+serde_json.workspace = true
+sha2 = "0.10"
+
+[lints]
+workspace = true

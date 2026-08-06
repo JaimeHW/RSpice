@@ -4900,6 +4900,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rspice-qualification-corpus"
+version = "0.1.0"
+dependencies = [
+ "num-bigint",
+ "rayon",
+ "rspice-engine-adapter",
+ "serde_json",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "rspice-sheet-publisher"
 version = "0.1.0"
 dependencies = [
