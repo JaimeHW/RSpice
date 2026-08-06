@@ -19,8 +19,8 @@ use rspice_publication_contract::{
     NetlistSection, PUBLICATION_SNAPSHOT_SCHEMA_VERSION, Paint, PaintRole, PathPrimitive,
     PathSegment, PayloadRef, PlotFigure, PlotHydration, PlotTraceBinding, Point, Primitive,
     PrimitiveGroup, PublicationMetadata, PublicationSnapshot, ResultsSection, Scene,
-    SchematicSection, SheetScene, Stroke, StrokePattern, SweepAxis, TextAnchor, TextPrimitive,
-    Trace, TraceTransform, TraceValues, Validate,
+    SchematicSection, SheetScene, Stroke, StrokePattern, SweepAxis, TextAnchor, TextFont,
+    TextPrimitive, Trace, TraceTransform, TraceValues, Validate,
 };
 
 const RC_LOWPASS_GOLDEN: &str = include_str!("fixtures/rc-lowpass.json");
@@ -51,11 +51,12 @@ fn line_to(x_um: i64, y_um: i64) -> PathSegment {
     }
 }
 
-fn label(x_um: i64, y_um: i64, text: &str, role: PaintRole) -> Primitive {
+fn label(x_um: i64, y_um: i64, text: &str, font: TextFont, role: PaintRole) -> Primitive {
     Primitive::Text(TextPrimitive {
         origin: Point { x_um, y_um },
         text: text.to_string(),
         height_um: 2_540,
+        font,
         anchor: TextAnchor::Start,
         rotation_millideg: 0,
         paint: Paint::Role(role),
@@ -80,7 +81,7 @@ fn rc_lowpass_sheet() -> Scene {
                         line_to(6_350, 209_550),
                         PathSegment::Close,
                     ],
-                    stroke: stroke(254, PaintRole::SheetFrame),
+                    stroke: stroke(254, PaintRole::Foreground),
                     fill: None,
                 })],
             },
@@ -99,11 +100,23 @@ fn rc_lowpass_sheet() -> Scene {
                             start_millideg: 0,
                             sweep_millideg: 360_000,
                         }],
-                        stroke: stroke(381, PaintRole::SymbolBody),
+                        stroke: stroke(381, PaintRole::Foreground),
                         fill: None,
                     }),
-                    label(59_690, 96_520, "V1", PaintRole::ReferenceDesignator),
-                    label(59_690, 100_330, "PULSE", PaintRole::ComponentValue),
+                    label(
+                        59_690,
+                        96_520,
+                        "V1",
+                        TextFont::SansSemibold,
+                        PaintRole::Foreground,
+                    ),
+                    label(
+                        59_690,
+                        100_330,
+                        "PULSE",
+                        TextFont::Sans,
+                        PaintRole::Secondary,
+                    ),
                 ],
             },
             PrimitiveGroup {
@@ -119,11 +132,17 @@ fn rc_lowpass_sheet() -> Scene {
                             line_to(114_300, 76_200),
                             PathSegment::Close,
                         ],
-                        stroke: stroke(381, PaintRole::SymbolBody),
+                        stroke: stroke(381, PaintRole::Foreground),
                         fill: None,
                     }),
-                    label(95_250, 66_040, "R1", PaintRole::ReferenceDesignator),
-                    label(95_250, 80_010, "1k", PaintRole::ComponentValue),
+                    label(
+                        95_250,
+                        66_040,
+                        "R1",
+                        TextFont::SansSemibold,
+                        PaintRole::Foreground,
+                    ),
+                    label(95_250, 80_010, "1k", TextFont::Sans, PaintRole::Secondary),
                 ],
             },
             PrimitiveGroup {
@@ -138,7 +157,7 @@ fn rc_lowpass_sheet() -> Scene {
                             move_to(146_050, 99_060),
                             line_to(156_210, 99_060),
                         ],
-                        stroke: stroke(381, PaintRole::SymbolBody),
+                        stroke: stroke(381, PaintRole::Foreground),
                         fill: None,
                     }),
                     Primitive::Text(TextPrimitive {
@@ -148,9 +167,10 @@ fn rc_lowpass_sheet() -> Scene {
                         },
                         text: "1µ".to_string(),
                         height_um: 2_540,
+                        font: TextFont::Sans,
                         anchor: TextAnchor::Start,
                         rotation_millideg: -90_000,
-                        paint: Paint::Role(PaintRole::ComponentValue),
+                        paint: Paint::Role(PaintRole::Secondary),
                     }),
                 ],
             },
@@ -161,10 +181,16 @@ fn rc_lowpass_sheet() -> Scene {
                 primitives: vec![
                     Primitive::Path(PathPrimitive {
                         segments: vec![move_to(114_300, 73_660), line_to(151_130, 73_660)],
-                        stroke: stroke(254, PaintRole::Wire),
+                        stroke: stroke(254, PaintRole::Foreground),
                         fill: None,
                     }),
-                    label(129_540, 69_850, "out", PaintRole::NetLabel),
+                    label(
+                        129_540,
+                        69_850,
+                        "out",
+                        TextFont::SansSemibold,
+                        PaintRole::Foreground,
+                    ),
                 ],
             },
             PrimitiveGroup {
@@ -192,6 +218,7 @@ fn rc_lowpass_sheet() -> Scene {
                         },
                         text: "τ = 1 ms".to_string(),
                         height_um: 2_540,
+                        font: TextFont::Sans,
                         anchor: TextAnchor::Start,
                         rotation_millideg: 0,
                         paint: Paint::Rgba([214, 138, 42, 255]),
@@ -219,14 +246,14 @@ fn plot_scene(x_caption: &str, y_caption: &str, series: u8) -> Scene {
                             line_to(15_240, 86_360),
                             PathSegment::Close,
                         ],
-                        stroke: stroke(254, PaintRole::PlotFrame),
+                        stroke: stroke(254, PaintRole::Secondary),
                         fill: None,
                     }),
                     Primitive::Path(PathPrimitive {
                         segments: vec![move_to(15_240, 46_990), line_to(147_320, 46_990)],
                         stroke: Some(Stroke {
                             width_um: 127,
-                            paint: Paint::Role(PaintRole::PlotGrid),
+                            paint: Paint::Role(PaintRole::Grid),
                             pattern: StrokePattern::Dotted,
                         }),
                         fill: None,
@@ -238,9 +265,10 @@ fn plot_scene(x_caption: &str, y_caption: &str, series: u8) -> Scene {
                         },
                         text: x_caption.to_string(),
                         height_um: 2_286,
+                        font: TextFont::Monospace,
                         anchor: TextAnchor::Middle,
                         rotation_millideg: 0,
-                        paint: Paint::Role(PaintRole::PlotAxisText),
+                        paint: Paint::Role(PaintRole::Secondary),
                     }),
                     Primitive::Text(TextPrimitive {
                         origin: Point {
@@ -249,9 +277,10 @@ fn plot_scene(x_caption: &str, y_caption: &str, series: u8) -> Scene {
                         },
                         text: y_caption.to_string(),
                         height_um: 2_286,
+                        font: TextFont::Monospace,
                         anchor: TextAnchor::Middle,
                         rotation_millideg: 90_000,
-                        paint: Paint::Role(PaintRole::PlotAxisText),
+                        paint: Paint::Role(PaintRole::Secondary),
                     }),
                 ],
             },

@@ -65,7 +65,7 @@
                     "stroke": {
                       "width_um": 254,
                       "paint": {
-                        "role": "sheet-frame"
+                        "role": "foreground"
                       },
                       "pattern": "solid"
                     },
@@ -99,7 +99,7 @@
                     "stroke": {
                       "width_um": 381,
                       "paint": {
-                        "role": "symbol-body"
+                        "role": "foreground"
                       },
                       "pattern": "solid"
                     },
@@ -114,10 +114,11 @@
                     },
                     "text": "V1",
                     "height_um": 2540,
+                    "font": "sans-semibold",
                     "anchor": "start",
                     "rotation_millideg": 0,
                     "paint": {
-                      "role": "reference-designator"
+                      "role": "foreground"
                     }
                   }
                 },
@@ -129,10 +130,11 @@
                     },
                     "text": "PULSE",
                     "height_um": 2540,
+                    "font": "sans",
                     "anchor": "start",
                     "rotation_millideg": 0,
                     "paint": {
-                      "role": "component-value"
+                      "role": "secondary"
                     }
                   }
                 }
@@ -185,7 +187,7 @@
                     "stroke": {
                       "width_um": 381,
                       "paint": {
-                        "role": "symbol-body"
+                        "role": "foreground"
                       },
                       "pattern": "solid"
                     },
@@ -200,10 +202,11 @@
                     },
                     "text": "R1",
                     "height_um": 2540,
+                    "font": "sans-semibold",
                     "anchor": "start",
                     "rotation_millideg": 0,
                     "paint": {
-                      "role": "reference-designator"
+                      "role": "foreground"
                     }
                   }
                 },
@@ -215,10 +218,11 @@
                     },
                     "text": "1k",
                     "height_um": 2540,
+                    "font": "sans",
                     "anchor": "start",
                     "rotation_millideg": 0,
                     "paint": {
-                      "role": "component-value"
+                      "role": "secondary"
                     }
                   }
                 }
@@ -270,7 +274,7 @@
                     "stroke": {
                       "width_um": 381,
                       "paint": {
-                        "role": "symbol-body"
+                        "role": "foreground"
                       },
                       "pattern": "solid"
                     },
@@ -285,10 +289,11 @@
                     },
                     "text": "1µ",
                     "height_um": 2540,
+                    "font": "sans",
                     "anchor": "start",
                     "rotation_millideg": -90000,
                     "paint": {
-                      "role": "component-value"
+                      "role": "secondary"
                     }
                   }
                 }
@@ -324,7 +329,7 @@
                     "stroke": {
                       "width_um": 254,
                       "paint": {
-                        "role": "wire"
+                        "role": "foreground"
                       },
                       "pattern": "solid"
                     },
@@ -339,10 +344,11 @@
                     },
                     "text": "out",
                     "height_um": 2540,
+                    "font": "sans-semibold",
                     "anchor": "start",
                     "rotation_millideg": 0,
                     "paint": {
-                      "role": "net-label"
+                      "role": "foreground"
                     }
                   }
                 }
@@ -418,6 +424,7 @@
                     },
                     "text": "τ = 1 ms",
                     "height_um": 2540,
+                    "font": "sans",
                     "anchor": "start",
                     "rotation_millideg": 0,
                     "paint": {
@@ -590,7 +597,7 @@
                       "stroke": {
                         "width_um": 254,
                         "paint": {
-                          "role": "plot-frame"
+                          "role": "secondary"
                         },
                         "pattern": "solid"
                       },
@@ -620,7 +627,7 @@
                       "stroke": {
                         "width_um": 127,
                         "paint": {
-                          "role": "plot-grid"
+                          "role": "grid"
                         },
                         "pattern": "dotted"
                       },
@@ -635,10 +642,11 @@
                       },
                       "text": "time (s)",
                       "height_um": 2286,
+                      "font": "monospace",
                       "anchor": "middle",
                       "rotation_millideg": 0,
                       "paint": {
-                        "role": "plot-axis-text"
+                        "role": "secondary"
                       }
                     }
                   },
@@ -650,10 +658,11 @@
                       },
                       "text": "V",
                       "height_um": 2286,
+                      "font": "monospace",
                       "anchor": "middle",
                       "rotation_millideg": 90000,
                       "paint": {
-                        "role": "plot-axis-text"
+                        "role": "secondary"
                       }
                     }
                   }

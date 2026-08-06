@@ -11,7 +11,7 @@ use std::fmt::Write as _;
 
 use rspice_publication_contract::{
     GroupTag, Paint, PaintRole, PathPrimitive, PathSegment, Point, Primitive, PrimitiveGroup,
-    Scene, Stroke, StrokePattern, TextAnchor, TextPrimitive,
+    Scene, Stroke, StrokePattern, TextAnchor, TextFont, TextPrimitive,
 };
 
 use crate::escape_html;
@@ -32,19 +32,12 @@ fn fmt_f64(value: f64) -> String {
 
 fn role_token(role: PaintRole) -> String {
     match role {
-        PaintRole::SheetFrame => "sheet-frame".to_string(),
-        PaintRole::SymbolBody => "symbol-body".to_string(),
-        PaintRole::Wire => "wire".to_string(),
-        PaintRole::Bus => "bus".to_string(),
-        PaintRole::Junction => "junction".to_string(),
-        PaintRole::Pin => "pin".to_string(),
-        PaintRole::NetLabel => "net-label".to_string(),
-        PaintRole::ReferenceDesignator => "reference-designator".to_string(),
-        PaintRole::ComponentValue => "component-value".to_string(),
-        PaintRole::Annotation => "annotation".to_string(),
-        PaintRole::PlotFrame => "plot-frame".to_string(),
-        PaintRole::PlotGrid => "plot-grid".to_string(),
-        PaintRole::PlotAxisText => "plot-axis-text".to_string(),
+        PaintRole::Foreground => "foreground".to_string(),
+        PaintRole::Secondary => "secondary".to_string(),
+        PaintRole::Grid => "grid".to_string(),
+        PaintRole::Accent => "accent".to_string(),
+        PaintRole::Warning => "warning".to_string(),
+        PaintRole::Success => "success".to_string(),
         PaintRole::TraceSeries(index) => format!("trace-{}", index % TRACE_PALETTE_SIZE),
     }
 }
@@ -89,6 +82,15 @@ impl Presentation {
                 let dot = stroke.width_um.max(1);
                 let gap = stroke.width_um.saturating_mul(3).max(1);
                 let _ = write!(self.attributes, " stroke-dasharray=\"{dot} {gap}\"");
+            }
+            StrokePattern::DashDot => {
+                let dash = stroke.width_um.saturating_mul(4).max(1);
+                let dot = stroke.width_um.max(1);
+                let gap = stroke.width_um.saturating_mul(2).max(1);
+                let _ = write!(
+                    self.attributes,
+                    " stroke-dasharray=\"{dash} {gap} {dot} {gap}\""
+                );
             }
         }
     }
@@ -228,6 +230,13 @@ fn text_markup(text: &TextPrimitive) -> String {
     let mut presentation = Presentation::default();
     presentation.text_paint(text.paint);
     let presentation = presentation.markup();
+    let font = match text.font {
+        TextFont::Sans => "",
+        TextFont::SansSemibold => " font-weight=\"600\"",
+        TextFont::Monospace => {
+            " font-family=\"Consolas, 'Cascadia Code', 'DejaVu Sans Mono', monospace\""
+        }
+    };
     let rotation = if text.rotation_millideg == 0 {
         String::new()
     } else {
@@ -241,7 +250,7 @@ fn text_markup(text: &TextPrimitive) -> String {
         )
     };
     format!(
-        "<text x=\"{}\" y=\"{}\" font-size=\"{}\" text-anchor=\"{anchor}\"{presentation}{rotation}>{}</text>",
+        "<text x=\"{}\" y=\"{}\" font-size=\"{}\" text-anchor=\"{anchor}\"{font}{presentation}{rotation}>{}</text>",
         fmt_um(text.origin.x_um),
         fmt_um(text.origin.y_um),
         fmt_um(text.height_um as i64),
@@ -285,7 +294,7 @@ pub fn scene_svg(scene: &Scene, accessible_title: &str) -> String {
     let width_mm = fmt_f64(scene.width_um as f64 / 1000.0);
     let height_mm = fmt_f64(scene.height_um as f64 / 1000.0);
     let mut svg = format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {} {}\" width=\"{width_mm}mm\" height=\"{height_mm}mm\" role=\"img\" aria-label=\"{}\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\" font-family=\"'Cascadia Code', Consolas, 'DejaVu Sans Mono', monospace\">",
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {} {}\" width=\"{width_mm}mm\" height=\"{height_mm}mm\" role=\"img\" aria-label=\"{}\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\" font-family=\"'Segoe UI', system-ui, sans-serif\">",
         fmt_um(scene.width_um as i64),
         fmt_um(scene.height_um as i64),
         escape_html(accessible_title),

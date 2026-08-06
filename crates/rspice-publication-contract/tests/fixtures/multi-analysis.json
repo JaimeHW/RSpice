@@ -288,7 +288,7 @@
                       "stroke": {
                         "width_um": 254,
                         "paint": {
-                          "role": "plot-frame"
+                          "role": "secondary"
                         },
                         "pattern": "solid"
                       },
@@ -318,7 +318,7 @@
                       "stroke": {
                         "width_um": 127,
                         "paint": {
-                          "role": "plot-grid"
+                          "role": "grid"
                         },
                         "pattern": "dotted"
                       },
@@ -333,10 +333,11 @@
                       },
                       "text": "frequency (Hz)",
                       "height_um": 2286,
+                      "font": "monospace",
                       "anchor": "middle",
                       "rotation_millideg": 0,
                       "paint": {
-                        "role": "plot-axis-text"
+                        "role": "secondary"
                       }
                     }
                   },
@@ -348,10 +349,11 @@
                       },
                       "text": "dB",
                       "height_um": 2286,
+                      "font": "monospace",
                       "anchor": "middle",
                       "rotation_millideg": 90000,
                       "paint": {
-                        "role": "plot-axis-text"
+                        "role": "secondary"
                       }
                     }
                   }
@@ -488,7 +490,7 @@
                       "stroke": {
                         "width_um": 254,
                         "paint": {
-                          "role": "plot-frame"
+                          "role": "secondary"
                         },
                         "pattern": "solid"
                       },
@@ -518,7 +520,7 @@
                       "stroke": {
                         "width_um": 127,
                         "paint": {
-                          "role": "plot-grid"
+                          "role": "grid"
                         },
                         "pattern": "dotted"
                       },
@@ -533,10 +535,11 @@
                       },
                       "text": "frequency (Hz)",
                       "height_um": 2286,
+                      "font": "monospace",
                       "anchor": "middle",
                       "rotation_millideg": 0,
                       "paint": {
-                        "role": "plot-axis-text"
+                        "role": "secondary"
                       }
                     }
                   },
@@ -548,10 +551,11 @@
                       },
                       "text": "°",
                       "height_um": 2286,
+                      "font": "monospace",
                       "anchor": "middle",
                       "rotation_millideg": 90000,
                       "paint": {
-                        "role": "plot-axis-text"
+                        "role": "secondary"
                       }
                     }
                   }
@@ -688,7 +692,7 @@
                       "stroke": {
                         "width_um": 254,
                         "paint": {
-                          "role": "plot-frame"
+                          "role": "secondary"
                         },
                         "pattern": "solid"
                       },
@@ -718,7 +722,7 @@
                       "stroke": {
                         "width_um": 127,
                         "paint": {
-                          "role": "plot-grid"
+                          "role": "grid"
                         },
                         "pattern": "dotted"
                       },
@@ -733,10 +737,11 @@
                       },
                       "text": "VIN (V)",
                       "height_um": 2286,
+                      "font": "monospace",
                       "anchor": "middle",
                       "rotation_millideg": 0,
                       "paint": {
-                        "role": "plot-axis-text"
+                        "role": "secondary"
                       }
                     }
                   },
@@ -748,10 +753,11 @@
                       },
                       "text": "V(out)",
                       "height_um": 2286,
+                      "font": "monospace",
                       "anchor": "middle",
                       "rotation_millideg": 90000,
                       "paint": {
-                        "role": "plot-axis-text"
+                        "role": "secondary"
                       }
                     }
                   }
@@ -893,7 +899,7 @@
                       "stroke": {
                         "width_um": 254,
                         "paint": {
-                          "role": "plot-frame"
+                          "role": "secondary"
                         },
                         "pattern": "solid"
                       },
@@ -923,7 +929,7 @@
                       "stroke": {
                         "width_um": 127,
                         "paint": {
-                          "role": "plot-grid"
+                          "role": "grid"
                         },
                         "pattern": "dotted"
                       },
@@ -938,10 +944,11 @@
                       },
                       "text": "time (s)",
                       "height_um": 2286,
+                      "font": "monospace",
                       "anchor": "middle",
                       "rotation_millideg": 0,
                       "paint": {
-                        "role": "plot-axis-text"
+                        "role": "secondary"
                       }
                     }
                   },
@@ -953,10 +960,11 @@
                       },
                       "text": "A",
                       "height_um": 2286,
+                      "font": "monospace",
                       "anchor": "middle",
                       "rotation_millideg": 90000,
                       "paint": {
-                        "role": "plot-axis-text"
+                        "role": "secondary"
                       }
                     }
                   }

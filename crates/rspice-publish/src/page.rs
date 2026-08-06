@@ -14,12 +14,12 @@ use crate::{Bundle, dataset_csv_path, escape_html, svg::scene_svg};
 /// Palette, typography, and print rules for the published page and its
 /// scenes. Scene classes are the `s-`/`f-`/`t-` role tokens emitted by the
 /// SVG module.
-pub const PAGE_STYLES: &str = r#":root{--paper:#f7f8f7;--card:#ffffff;--ink:#181c1a;--muted:#5c6663;--line:#dce1de;--accent:#0d6b52;--fail:#a33232;--sheet-frame:#7a827e;--symbol-body:#20423a;--wire:#155e49;--bus:#0f4a63;--junction:#155e49;--pin:#8a4d18;--net-label:#0f4a63;--reference-designator:#20423a;--component-value:#5c6663;--annotation:#7a5a1e;--plot-frame:#7a827e;--plot-grid:#c9cfcc;--plot-axis-text:#5c6663;--trace-0:#0d6b52;--trace-1:#1f5f8f;--trace-2:#a3572a;--trace-3:#6a4b8f;--trace-4:#8f6a1f;--trace-5:#2a7d7d;--trace-6:#9c3f68;--trace-7:#4a6b2a}
-@media (prefers-color-scheme:dark){:root{--paper:#111514;--card:#181d1b;--ink:#e4e9e6;--muted:#94a09b;--line:#2b332f;--accent:#4cc19a;--fail:#e08585;--sheet-frame:#5d6662;--symbol-body:#cdd8d3;--wire:#57bd9c;--bus:#6aa8cf;--junction:#57bd9c;--pin:#cf9257;--net-label:#6aa8cf;--reference-designator:#cdd8d3;--component-value:#94a09b;--annotation:#cfa957;--plot-frame:#5d6662;--plot-grid:#2f3733;--plot-axis-text:#94a09b;--trace-0:#4cc19a;--trace-1:#6aa8cf;--trace-2:#d99a6c;--trace-3:#a98fd0;--trace-4:#cfb46a;--trace-5:#6ac4c4;--trace-6:#d284a9;--trace-7:#96b96a}}
+pub const PAGE_STYLES: &str = r#":root{--paper:#f7f8f7;--card:#ffffff;--ink:#181c1a;--muted:#5c6663;--line:#dce1de;--link:#0d6b52;--fail:#a33232;--foreground:#192026;--secondary:#5b6670;--grid:#b5bcc2;--accent:#c48b00;--warning:#be4336;--success:#007d52;--trace-0:#0d6b52;--trace-1:#1f5f8f;--trace-2:#a3572a;--trace-3:#6a4b8f;--trace-4:#8f6a1f;--trace-5:#2a7d7d;--trace-6:#9c3f68;--trace-7:#4a6b2a}
+@media (prefers-color-scheme:dark){:root{--paper:#111514;--card:#181d1b;--ink:#e4e9e6;--muted:#94a09b;--line:#2b332f;--link:#4cc19a;--fail:#e08585;--foreground:#d9e0dc;--secondary:#94a09b;--grid:#333b37;--accent:#d9a75a;--warning:#e08585;--success:#4cc19a;--trace-0:#4cc19a;--trace-1:#6aa8cf;--trace-2:#d99a6c;--trace-3:#a98fd0;--trace-4:#cfb46a;--trace-5:#6ac4c4;--trace-6:#d284a9;--trace-7:#96b96a}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.6 "Segoe UI",system-ui,sans-serif}
 .page{max-width:960px;margin:0 auto;padding:40px 24px 80px}
-header .eyebrow{font-family:Consolas,monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin:0 0 8px}
+header .eyebrow{font-family:Consolas,monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--link);margin:0 0 8px}
 h1{font-size:28px;line-height:1.2;margin:0 0 8px;letter-spacing:-.01em}
 .description{color:var(--muted);margin:0 0 4px;max-width:70ch}
 .byline{font-family:Consolas,monospace;font-size:12px;color:var(--muted);margin:0 0 32px}
@@ -32,18 +32,19 @@ th{text-align:left;font-family:Consolas,monospace;font-size:11px;letter-spacing:
 td{padding:7px 12px 7px 0;border-bottom:1px solid var(--line)}
 td.num{font-family:Consolas,monospace}
 td.status{font-family:Consolas,monospace;font-size:12px}
-td.status.pass{color:var(--accent)}
+td.status.pass{color:var(--link)}
 td.status.fail{color:var(--fail)}
 pre.deck{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;font:12.5px/1.55 Consolas,monospace}
 ul.assets{list-style:none;margin:0;padding:0}
 ul.assets li{padding:6px 0;border-bottom:1px solid var(--line);font-size:13.5px}
-ul.assets a{color:var(--accent);font-family:Consolas,monospace;text-decoration:none}
+ul.assets a{color:var(--link);font-family:Consolas,monospace;text-decoration:none}
 ul.assets a:hover,ul.assets a:focus-visible{text-decoration:underline}
 footer{margin-top:48px;padding-top:14px;border-top:1px solid var(--line);font-family:Consolas,monospace;font-size:11.5px;color:var(--muted);overflow-wrap:anywhere}
-svg .s-sheet-frame{stroke:var(--sheet-frame)}svg .s-symbol-body{stroke:var(--symbol-body)}svg .s-wire{stroke:var(--wire)}svg .s-bus{stroke:var(--bus)}svg .s-junction{stroke:var(--junction)}svg .s-pin{stroke:var(--pin)}svg .s-net-label{stroke:var(--net-label)}svg .s-plot-frame{stroke:var(--plot-frame)}svg .s-plot-grid{stroke:var(--plot-grid)}svg .s-annotation{stroke:var(--annotation)}
+svg .s-foreground{stroke:var(--foreground)}svg .s-secondary{stroke:var(--secondary)}svg .s-grid{stroke:var(--grid)}svg .s-accent{stroke:var(--accent)}svg .s-warning{stroke:var(--warning)}svg .s-success{stroke:var(--success)}
 svg .s-trace-0{stroke:var(--trace-0)}svg .s-trace-1{stroke:var(--trace-1)}svg .s-trace-2{stroke:var(--trace-2)}svg .s-trace-3{stroke:var(--trace-3)}svg .s-trace-4{stroke:var(--trace-4)}svg .s-trace-5{stroke:var(--trace-5)}svg .s-trace-6{stroke:var(--trace-6)}svg .s-trace-7{stroke:var(--trace-7)}
-svg .f-junction{fill:var(--junction)}svg .f-symbol-body{fill:var(--symbol-body)}svg .f-annotation{fill:var(--annotation)}
-svg .t-net-label{fill:var(--net-label)}svg .t-reference-designator{fill:var(--reference-designator)}svg .t-component-value{fill:var(--component-value)}svg .t-plot-axis-text{fill:var(--plot-axis-text)}svg .t-annotation{fill:var(--annotation)}svg .t-sheet-frame{fill:var(--sheet-frame)}
+svg .f-foreground{fill:var(--foreground)}svg .f-secondary{fill:var(--secondary)}svg .f-grid{fill:var(--grid)}svg .f-accent{fill:var(--accent)}svg .f-warning{fill:var(--warning)}svg .f-success{fill:var(--success)}
+svg .f-trace-0{fill:var(--trace-0)}svg .f-trace-1{fill:var(--trace-1)}svg .f-trace-2{fill:var(--trace-2)}svg .f-trace-3{fill:var(--trace-3)}svg .f-trace-4{fill:var(--trace-4)}svg .f-trace-5{fill:var(--trace-5)}svg .f-trace-6{fill:var(--trace-6)}svg .f-trace-7{fill:var(--trace-7)}
+svg .t-foreground{fill:var(--foreground)}svg .t-secondary{fill:var(--secondary)}svg .t-grid{fill:var(--grid)}svg .t-accent{fill:var(--accent)}svg .t-warning{fill:var(--warning)}svg .t-success{fill:var(--success)}
 @media print{body{background:#fff;color:#000}.page{max-width:none;padding:0}figure{break-inside:avoid;border:none;padding:0}ul.assets,footer{display:none}}
 "#;
 

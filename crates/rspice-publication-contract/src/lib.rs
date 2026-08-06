@@ -269,25 +269,26 @@ pub struct Point {
     pub y_um: i64,
 }
 
-/// Semantic paint role. Renderers map roles onto their palette so a page can
-/// present light and dark themes from one sealed scene; explicit RGBA is
-/// reserved for author-picked colors that must survive verbatim.
+/// Semantic paint role, mirroring the display-semantic color classes the
+/// RSpice scene pipeline resolves every drawn object into. Renderers map
+/// roles onto their palette so a page can present light and dark themes from
+/// one sealed scene; explicit RGBA is reserved for author-picked colors that
+/// must survive verbatim.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PaintRole {
-    SheetFrame,
-    SymbolBody,
-    Wire,
-    Bus,
-    Junction,
-    Pin,
-    NetLabel,
-    ReferenceDesignator,
-    ComponentValue,
-    Annotation,
-    PlotFrame,
-    PlotGrid,
-    PlotAxisText,
+    /// Primary drawing ink: symbol bodies, wires, frames, labels.
+    Foreground,
+    /// De-emphasized ink: annotations, documentation, secondary chrome.
+    Secondary,
+    /// Grid and minor guide lines.
+    Grid,
+    /// Highlighted engineering accents: pins, markers.
+    Accent,
+    /// Failure and violation emphasis.
+    Warning,
+    /// Success and pass emphasis.
+    Success,
     /// Zero-based series index into the renderer's trace palette.
     TraceSeries(u8),
 }
@@ -308,6 +309,7 @@ pub enum StrokePattern {
     Solid,
     Dashed,
     Dotted,
+    DashDot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -347,6 +349,16 @@ pub enum TextAnchor {
     End,
 }
 
+/// Typeface class for scene text, mirroring the scene pipeline's font
+/// vocabulary. Concrete font files are a renderer decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TextFont {
+    Sans,
+    SansSemibold,
+    Monospace,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PathPrimitive {
@@ -361,6 +373,7 @@ pub struct TextPrimitive {
     pub origin: Point,
     pub text: String,
     pub height_um: u64,
+    pub font: TextFont,
     pub anchor: TextAnchor,
     /// Integral millidegrees, counter-clockwise positive.
     pub rotation_millideg: i32,
@@ -1257,7 +1270,7 @@ mod tests {
                     ],
                     stroke: Some(Stroke {
                         width_um: 254,
-                        paint: Paint::Role(PaintRole::SheetFrame),
+                        paint: Paint::Role(PaintRole::Foreground),
                         pattern: StrokePattern::Solid,
                     }),
                     fill: None,
@@ -1541,7 +1554,7 @@ mod tests {
             }],
             stroke: Some(Stroke {
                 width_um: 254,
-                paint: Paint::Role(PaintRole::Wire),
+                paint: Paint::Role(PaintRole::Foreground),
                 pattern: StrokePattern::Solid,
             }),
             fill: None,
