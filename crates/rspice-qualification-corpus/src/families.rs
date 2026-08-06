@@ -4,6 +4,7 @@
 pub mod dc;
 pub mod dynamics;
 pub mod frequency;
+pub mod limits;
 pub mod op;
 pub mod physics;
 
@@ -15,6 +16,7 @@ pub fn all() -> Vec<CaseDraft> {
     drafts.extend(dc::drafts());
     drafts.extend(dynamics::drafts());
     drafts.extend(frequency::drafts());
+    drafts.extend(limits::drafts());
     drafts
 }
 
@@ -37,18 +39,7 @@ mod tests {
                 *counts.entry(category).or_default() += 1;
             }
         }
-        for category in [
-            "operating_point",
-            "dc_sweep",
-            "transient",
-            "ac_small_signal",
-            "noise",
-            "nonlinear_devices",
-            "semiconductor_models",
-            "temperature_and_corners",
-            "mixed_signal",
-            "deterministic_reproducibility",
-        ] {
+        for category in crate::contract::REQUIRED_CATEGORIES {
             let count = counts.get(category).copied().unwrap_or(0);
             assert!(count >= 10, "category {category} covers {count} < 10 cases");
         }
