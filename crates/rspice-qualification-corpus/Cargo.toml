@@ -13,6 +13,7 @@ rust-version.workspace = true
 num-bigint = "0.4"
 rayon.workspace = true
 rspice-engine-adapter.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.10"
 uuid = { version = "1.0", default-features = false, features = ["serde", "std"] }

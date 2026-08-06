@@ -48,10 +48,53 @@ fn run() -> Result<(), String> {
             );
             Ok(())
         }
-        _ => Err(
-            "usage: qualification-harness plan <policy.json> <corpus.json> \
-                  <suite-run-id> <output-directory>"
-                .to_owned(),
-        ),
+        Some("assemble") => {
+            let [
+                _,
+                policy_path,
+                corpus_path,
+                suite_run_id,
+                responses,
+                binding_path,
+                log_path,
+                output,
+            ] = arguments.as_slice()
+            else {
+                return Err(
+                    "usage: qualification-harness assemble <policy.json> <corpus.json> \
+                     <suite-run-id> <responses-directory> <binding.json> <log-file> \
+                     <output-directory>"
+                        .to_owned(),
+                );
+            };
+            let policy_bytes = std::fs::read(policy_path)
+                .map_err(|error| format!("cannot read {policy_path}: {error}"))?;
+            let corpus_bytes = std::fs::read(corpus_path)
+                .map_err(|error| format!("cannot read {corpus_path}: {error}"))?;
+            let suite_run_id: uuid::Uuid = suite_run_id
+                .parse()
+                .map_err(|error| format!("suite run id: {error}"))?;
+            let binding_bytes = std::fs::read(binding_path)
+                .map_err(|error| format!("cannot read {binding_path}: {error}"))?;
+            let binding: harness::ReleaseBinding = serde_json::from_slice(&binding_bytes)
+                .map_err(|error| format!("{binding_path}: {error}"))?;
+            let log_bytes = std::fs::read(log_path)
+                .map_err(|error| format!("cannot read {log_path}: {error}"))?;
+            let summary = harness::assemble(
+                &policy_bytes,
+                &corpus_bytes,
+                suite_run_id,
+                Path::new(responses),
+                &binding,
+                &log_bytes,
+                Path::new(output),
+            )?;
+            println!(
+                "assembled {} executions, case set sha256 {}",
+                summary.executed_case_count, summary.case_set_sha256
+            );
+            Ok(())
+        }
+        _ => Err("usage: qualification-harness <plan|assemble> ...".to_owned()),
     }
 }
