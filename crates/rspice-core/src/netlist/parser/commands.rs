@@ -235,7 +235,7 @@ pub(super) fn parse_command(
             analyses.push(AnalysisCommand::MonteCarlo(mc_cmd));
         }
         ".TEMP" => {
-            let temperatures = parse_temp_command(stream, params)?;
+            let temperatures = parse_temp_command(stream, line_num, params)?;
             analyses.push(AnalysisCommand::Temp { temperatures });
         }
         ".FOUR" | ".FOURIER" => {
@@ -4464,7 +4464,10 @@ pub(super) fn consume_uic_keyword(stream: &mut TokenStream) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Netlist, netlist::DcSweepMode};
+    use crate::{
+        Netlist,
+        netlist::{AnalysisCommand, DcSweepMode},
+    };
 
     #[test]
     fn dc_list_accepts_signed_values_without_leading_zero() {
@@ -4580,6 +4583,89 @@ mod tests {
             assert!(
                 err.to_string().contains("absolute zero") || err.to_string().contains("finite"),
                 "unexpected error for {options}: {err}"
+            );
+        }
+    }
+
+    fn deck_with_directives(directives: &str) -> String {
+        format!(
+            "temp directive test\n\
+             {directives}\n\
+             V1 1 0 1\n\
+             R1 1 0 1k\n\
+             .op\n\
+             .end\n"
+        )
+    }
+
+    #[test]
+    fn temp_directive_sets_the_run_temperature() {
+        let netlist =
+            Netlist::parse(&deck_with_directives(".temp 85")).expect("`.temp` deck parses");
+        assert_eq!(netlist.options.temp, Some(85.0));
+        assert!(matches!(
+            netlist.analyses.as_slice(),
+            [AnalysisCommand::Temp { .. }, AnalysisCommand::Op]
+        ));
+    }
+
+    #[test]
+    fn temp_directive_wins_over_options_temp_in_either_order() {
+        // ngspice reads `.temp` out of the whole deck and applies it after the
+        // circuit exists, so authored order does not decide this.
+        for directives in [".options temp=27\n.temp 85", ".temp 85\n.options temp=27"] {
+            let netlist = Netlist::parse(&deck_with_directives(directives))
+                .expect("mixed temperature deck parses");
+            assert_eq!(
+                netlist.options.temp,
+                Some(85.0),
+                "`.temp` must win for {directives:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn last_temp_directive_wins() {
+        let netlist = Netlist::parse(&deck_with_directives(".temp 85\n.temp 0"))
+            .expect("repeated `.temp` deck parses");
+        assert_eq!(netlist.options.temp, Some(0.0));
+    }
+
+    #[test]
+    fn temp_directive_accepts_sub_zero_corners_and_the_equals_spelling() {
+        for (directive, expected) in [(".temp -40", -40.0), (".temp=125", 125.0)] {
+            let netlist = Netlist::parse(&deck_with_directives(directive))
+                .expect("`.temp` corner deck parses");
+            assert_eq!(
+                netlist.options.temp,
+                Some(expected),
+                "unexpected temperature for {directive:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn multi_valued_temp_directive_stays_a_sweep_and_leaves_the_run_temperature() {
+        // The list is a temperature sweep the runners expand a point at a
+        // time, so folding its first point into the single-run temperature
+        // would silently pin every other point to it.
+        let netlist = Netlist::parse(&deck_with_directives(".options temp=40\n.temp 25 50 85"))
+            .expect("temperature sweep deck parses");
+        assert_eq!(netlist.options.temp, Some(40.0));
+        assert!(netlist.analyses.iter().any(|analysis| matches!(
+            analysis,
+            AnalysisCommand::Temp { temperatures } if temperatures.as_slice() == [25.0, 50.0, 85.0]
+        )));
+    }
+
+    #[test]
+    fn temp_directive_rejects_nonphysical_temperatures() {
+        for directive in [".temp -273.15", ".temp 1e309"] {
+            let err = Netlist::parse(&deck_with_directives(directive))
+                .expect_err("invalid `.temp` value must fail parsing");
+            assert!(
+                err.to_string().contains("absolute zero") || err.to_string().contains("finite"),
+                "unexpected error for {directive:?}: {err}"
             );
         }
     }

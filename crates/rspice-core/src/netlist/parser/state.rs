@@ -196,6 +196,7 @@ impl ParseState {
             source_text: Some(input.to_string()),
             source_path: None,
         };
+        apply_temp_directive_to_options(&mut netlist);
         let ground_policy = netlist.ground_policy();
         netlist.saves.apply_ground_policy(ground_policy);
         for measurement in &mut netlist.measurements {
@@ -238,6 +239,29 @@ impl ParseState {
             detected_at,
             boundary,
         }))
+    }
+}
+
+/// Fold a `.TEMP` card into the run temperature that `.OPTIONS TEMP` names.
+///
+/// ngspice reads `.temp` out of the whole deck and applies it once the circuit
+/// exists (`inp.c`, `inp_spsource`), so the card wins over `.options temp` in
+/// either authored order and the last `.temp` is the one that lands. Resolving
+/// it here rather than at the callers keeps one source of truth for circuit
+/// temperature: `.step temp` and `.dc temp` already drive the same field.
+///
+/// A multi-valued `.temp` is a temperature sweep, which ngspice does not
+/// accept at all and RSpice expands in the runners. Its per-point temperature
+/// is theirs to set, so the single-run temperature is left alone here.
+fn apply_temp_directive_to_options(netlist: &mut Netlist) {
+    if let Some(AnalysisCommand::Temp { temperatures }) = netlist
+        .analyses
+        .iter()
+        .rev()
+        .find(|analysis| matches!(analysis, AnalysisCommand::Temp { .. }))
+        && let [single] = temperatures.as_slice()
+    {
+        netlist.options.temp = Some(*single);
     }
 }
 

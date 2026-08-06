@@ -379,14 +379,22 @@ fn parse_step_points_per_interval(
 }
 
 /// Parse .TEMP command: .TEMP t1 [t2 t3...]
+///
+/// ngspice also accepts the `.TEMP=t1` spelling, and sub-zero corners are
+/// routine, so the value list reads signed magnitudes.
 pub(super) fn parse_temp_command(
     stream: &mut TokenStream,
+    line_num: usize,
     params: &ParamContext,
 ) -> Result<Vec<Value>, ParseError> {
+    if matches!(stream.peek().kind, TokenKind::Equals) {
+        stream.advance();
+    }
+
     let mut temperatures = Vec::new();
 
-    while let Some(v) = try_value(stream, params) {
-        temperatures.push(v);
+    while let Some(v) = try_signed_value(stream, params) {
+        temperatures.push(super::commands::parse_celsius_option("TEMP", v, line_num)?);
     }
 
     if temperatures.is_empty() {
