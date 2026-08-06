@@ -29,6 +29,14 @@ pub fn drafts() -> Vec<CaseDraft> {
         (10.0, 0.1, 2.2e3, 4.7e3),
         (-8.0, -0.25, 1.0e4, 1.0e4),
         (3.3, 0.05, 3.3e2, 1.2e3),
+        (24.0, 1.2, 4.7e3, 1.5e3),
+        (-15.0, -0.3, 6.8e3, 2.2e3),
+        (1.0, 0.02, 1.0e2, 3.0e2),
+        (40.0, 0.8, 2.0e5, 5.0e4),
+        (6.0, 0.12, 9.1e2, 4.3e2),
+        (18.0, 0.36, 1.0e4, 9.0e4),
+        (2.0, 0.04, 5.1e4, 5.1e4),
+        (60.0, 1.5, 7.5e2, 2.5e2),
     ]
     .into_iter()
     .enumerate()
@@ -109,6 +117,62 @@ pub fn drafts() -> Vec<CaseDraft> {
         )]),
     });
 
+    // More swept gain stages across gain sign and divider ratio.
+    for (ordinal, (gain, stop, step, r1, r2)) in [
+        (3.0, 2.0, 0.05, 1.0e3, 1.0e3),
+        (-0.5, 6.0, 0.12, 2.2e3, 6.8e3),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let ratio = r2 / (r1 + r2);
+        drafts.push(CaseDraft {
+            id: format!("dc.vcvs.{:03}", ordinal + 2),
+            primary_category: "dc_sweep",
+            extra_categories: vec![],
+            deck: format!(
+                "* swept voltage-controlled voltage source\n\
+                 v1 in 0 dc 0\n\
+                 r1 in mid {r1}\n\
+                 r2 mid 0 {r2}\n\
+                 e1 out 0 mid 0 {gain}\n\
+                 rload out 0 10k\n\
+                 .dc v1 0 {stop} {step}\n\
+                 .end\n"
+            ),
+            parameters: vec![
+                Parameter {
+                    name: "gain",
+                    unit: "V/V",
+                    value: gain,
+                },
+                Parameter {
+                    name: "r1",
+                    unit: "Ohm",
+                    value: r1,
+                },
+                Parameter {
+                    name: "r2",
+                    unit: "Ohm",
+                    value: r2,
+                },
+                Parameter {
+                    name: "vstop",
+                    unit: "V",
+                    value: stop,
+                },
+            ],
+            temperature_celsius: 27.0,
+            repetitions: 1,
+            expectation: Expectation::Succeeds(vec![volts(
+                "out",
+                gain * stop * ratio,
+                "1e-12",
+                "1e-9",
+            )]),
+        });
+    }
+
     // Current sweep into a resistor pair.
     drafts.push(CaseDraft {
         id: "dc.isweep.001".to_owned(),
@@ -146,6 +210,52 @@ pub fn drafts() -> Vec<CaseDraft> {
         ]),
     });
 
+    // Two more current sweeps at different impedance levels.
+    for (ordinal, (stop, step, r1, r2)) in [
+        (5.0e-3, 1.0e-4, 2.2e2, 3.3e2),
+        (5.0e-4, 1.0e-5, 1.0e4, 1.5e4),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        drafts.push(CaseDraft {
+            id: format!("dc.isweep.{:03}", ordinal + 2),
+            primary_category: "dc_sweep",
+            extra_categories: vec![],
+            deck: format!(
+                "* swept current source into a resistor chain\n\
+                 i1 0 out dc 0\n\
+                 r1 out mid {r1}\n\
+                 r2 mid 0 {r2}\n\
+                 .dc i1 0 {stop} {step}\n\
+                 .end\n"
+            ),
+            parameters: vec![
+                Parameter {
+                    name: "istop",
+                    unit: "A",
+                    value: stop,
+                },
+                Parameter {
+                    name: "r1",
+                    unit: "Ohm",
+                    value: r1,
+                },
+                Parameter {
+                    name: "r2",
+                    unit: "Ohm",
+                    value: r2,
+                },
+            ],
+            temperature_celsius: 27.0,
+            repetitions: 1,
+            expectation: Expectation::Succeeds(vec![
+                volts("out", stop * (r1 + r2), "1e-12", "1e-9"),
+                volts("mid", stop * r2, "1e-12", "1e-9"),
+            ]),
+        });
+    }
+
     // Diode forward transfer curves: the final anode voltage is the
     // bisected Shockley node equation at the stop drive.
     for (ordinal, (stop, series, is, emission)) in [
@@ -153,6 +263,12 @@ pub fn drafts() -> Vec<CaseDraft> {
         (3.3, 4.7e2, 1.0e-12, 1.0),
         (12.0, 1.0e4, 1.0e-15, 1.5),
         (2.0, 1.0e5, 1.0e-9, 2.0),
+        (7.5, 2.2e3, 1.0e-13, 1.2),
+        (24.0, 4.7e4, 1.0e-15, 1.0),
+        (1.5, 1.0e3, 1.0e-10, 1.8),
+        (9.0, 5.6e2, 1.0e-14, 1.4),
+        (2.7, 1.0e4, 1.0e-11, 2.0),
+        (18.0, 3.9e3, 1.0e-16, 1.0),
     ]
     .into_iter()
     .enumerate()
@@ -203,9 +319,17 @@ pub fn drafts() -> Vec<CaseDraft> {
     // Level-1 MOSFET transfer curves ending in saturation: square law at
     // the final gate voltage.
     let beta = 2.0e-5 * 10.0;
-    for (ordinal, (gate_stop, drain_resistor)) in [(3.0, 2.0e3), (2.5, 4.7e3), (2.0, 1.0e4)]
-        .into_iter()
-        .enumerate()
+    for (ordinal, (gate_stop, drain_resistor)) in [
+        (3.0, 2.0e3),
+        (2.5, 4.7e3),
+        (2.0, 1.0e4),
+        (3.5, 1.2e3),
+        (1.6, 4.7e4),
+        (2.8, 2.7e3),
+        (2.2, 6.8e3),
+    ]
+    .into_iter()
+    .enumerate()
     {
         let supply = 5.0;
         let overdrive = gate_stop - 1.0;
@@ -305,6 +429,58 @@ pub fn drafts() -> Vec<CaseDraft> {
         });
     }
 
+    // Two more output curves at different modulation strengths and biases.
+    for (ordinal, (gate, lambda, drain_stop, step)) in
+        [(2.5, 0.05, 4.0, 0.1), (1.8, 0.01, 6.0, 0.1)]
+            .into_iter()
+            .enumerate()
+    {
+        let overdrive: f64 = gate - 1.0;
+        let drain_current = 0.5 * beta * overdrive * overdrive * (1.0 + lambda * drain_stop);
+        assert!(drain_stop > overdrive);
+        drafts.push(CaseDraft {
+            id: format!("dc.semi.mos1-output.{:03}", ordinal + 2),
+            primary_category: "semiconductor_models",
+            extra_categories: vec!["dc_sweep", "nonlinear_devices"],
+            deck: format!(
+                "* level-1 mosfet output curve with channel-length modulation\n\
+                 vd drain 0 dc 0\n\
+                 vg gate 0 dc {gate}\n\
+                 vsense drain2 drain dc 0\n\
+                 m1 drain2 gate 0 0 nmod w=10u l=1u\n\
+                 .model nmod nmos(level=1 vto=1 kp=2e-5 lambda={lambda})\n\
+                 .dc vd 0 {drain_stop} {step}\n\
+                 .end\n"
+            ),
+            parameters: vec![
+                Parameter {
+                    name: "lambda",
+                    unit: "perV",
+                    value: lambda,
+                },
+                Parameter {
+                    name: "vdstop",
+                    unit: "V",
+                    value: drain_stop,
+                },
+                Parameter {
+                    name: "vgs",
+                    unit: "V",
+                    value: gate,
+                },
+            ],
+            temperature_celsius: 27.0,
+            repetitions: 1,
+            expectation: Expectation::Succeeds(vec![Probe {
+                name: "i(vsense)".to_owned(),
+                unit: "A",
+                expected: -drain_current,
+                absolute_tolerance: "1e-12",
+                relative_tolerance: "1e-6",
+            }]),
+        });
+    }
+
     // Temperature-coefficient resistor dividers at hot and cold corners:
     // r2 carries tc1/tc2, r1 is temperature-flat, so the ratio moves by
     // the closed-form polynomial.
@@ -313,7 +489,7 @@ pub fn drafts() -> Vec<CaseDraft> {
     // family. `.temp` and `.options temp` are separate parse paths onto the
     // same setting, and a deck that names a corner and is answered at 27 C
     // is a wrong answer rather than a refusal, so neither path can go
-    // uncovered. The last case states the temperature twice and disagrees on
+    // uncovered. One case states the temperature twice and disagrees on
     // purpose: `.temp` outranks `.options temp` whichever is written first.
     for (ordinal, (temperature, tc1, tc2, temperature_cards)) in [
         (85.0, 2.0e-3, 0.0, ".temp 85"),
@@ -325,6 +501,12 @@ pub fn drafts() -> Vec<CaseDraft> {
         (175.0, 2.0e-3, 1.0e-5, ".temp 175"),
         (60.0, -5.0e-4, 0.0, ".options temp=60"),
         (125.0, 1.0e-3, 0.0, ".options temp=27\n.temp 125"),
+        (150.0, 5.0e-4, 2.0e-6, ".temp 150"),
+        (-55.0, 2.0e-3, 0.0, ".options temp=-55"),
+        (25.0, 1.0e-2, 0.0, ".temp 25"),
+        (105.0, -1.2e-3, 4.0e-6, ".options temp=105"),
+        (-10.0, 6.0e-4, 1.2e-5, ".temp -10"),
+        (140.0, 1.0e-3, 5.0e-6, ".options temp=140"),
     ]
     .into_iter()
     .enumerate()
@@ -382,10 +564,16 @@ pub fn drafts() -> Vec<CaseDraft> {
     // Diode forward drop across temperature: saturation-current scaling
     // with the standard level-1 defaults (eg=1.11, xti=3) plus the shifted
     // thermal voltage, still solved by bisection.
-    for (ordinal, (temperature, temperature_cards)) in
-        [(85.0, ".temp 85"), (-40.0, ".options temp=-40")]
-            .into_iter()
-            .enumerate()
+    for (ordinal, (temperature, temperature_cards)) in [
+        (85.0, ".temp 85"),
+        (-40.0, ".options temp=-40"),
+        (125.0, ".temp 125"),
+        (0.0, ".options temp=0"),
+        (60.0, ".temp 60"),
+        (-55.0, ".options temp=-55"),
+    ]
+    .into_iter()
+    .enumerate()
     {
         let (stop, series, is, emission) = (5.0, 1.0e3, 1.0e-14, 1.0);
         let is_at_t = diode_saturation_current_at(is, emission, temperature);

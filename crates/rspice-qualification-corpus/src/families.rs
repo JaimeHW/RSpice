@@ -32,6 +32,11 @@ mod tests {
     /// fails here even though every remaining draft still realizes.
     #[test]
     fn authored_families_meet_their_category_floors() {
+        let total = all().len();
+        assert!(
+            total >= crate::contract::MINIMUM_CASE_COUNT,
+            "corpus has {total} cases, below the policy minimum"
+        );
         let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
         for draft in all() {
             *counts.entry(draft.primary_category).or_default() += 1;

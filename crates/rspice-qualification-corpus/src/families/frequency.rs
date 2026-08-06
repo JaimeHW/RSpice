@@ -143,6 +143,34 @@ pub fn drafts() -> Vec<CaseDraft> {
             10.0,
             1.0e3,
         ),
+        ("ac.rc-low-pass.004", 2.2e3, 2.2e-7, "dec", 10.0, 3.0, 3.0e2),
+        (
+            "ac.rc-low-pass.005",
+            5.6e4,
+            1.0e-9,
+            "dec",
+            20.0,
+            100.0,
+            1.0e5,
+        ),
+        (
+            "ac.rc-low-pass.006",
+            3.3e2,
+            1.0e-6,
+            "lin",
+            51.0,
+            10.0,
+            5.1e2,
+        ),
+        (
+            "ac.rc-low-pass.007",
+            7.5e3,
+            3.3e-8,
+            "dec",
+            10.0,
+            10.0,
+            1.0e4,
+        ),
     ] {
         let (magnitude, phase) = rc_low_pass_response(stop, r, c);
         let mut parameters = sweep_parameters(points, start, stop);
@@ -186,6 +214,24 @@ pub fn drafts() -> Vec<CaseDraft> {
             10.0,
             1.0,
             100.0,
+        ),
+        (
+            "ac.rc-high-pass.003",
+            4.7e3,
+            4.7e-8,
+            "dec",
+            10.0,
+            10.0,
+            1.0e4,
+        ),
+        (
+            "ac.rc-high-pass.004",
+            1.0e5,
+            1.0e-9,
+            "lin",
+            101.0,
+            100.0,
+            2.0e3,
         ),
     ] {
         let (magnitude, phase) = rc_high_pass_response(stop, r, c);
@@ -234,6 +280,34 @@ pub fn drafts() -> Vec<CaseDraft> {
                  r2 out 0 {r2}\n\
                  c1 out 0 {c}\n\
                  .ac dec 10 100 {stop}\n\
+                 .end\n"
+            ),
+            parameters,
+            temperature_celsius: 27.0,
+            repetitions: 1,
+            expectation: transfer_probes("out", ratio * magnitude, phase),
+        });
+    }
+    {
+        let (r1, r2, c, stop) = (1.0e3, 9.0e3, 4.7e-8, 1.5e3);
+        let ratio = r2 / (r1 + r2);
+        let parallel = r1 * r2 / (r1 + r2);
+        let (magnitude, phase) = rc_low_pass_response(stop, parallel, c);
+        let mut parameters = sweep_parameters(10.0, 10.0, stop);
+        parameters.push(farads(c));
+        parameters.push(ohms("r1", r1));
+        parameters.push(ohms("r2", r2));
+        drafts.push(CaseDraft {
+            id: "ac.divider-low-pass.002".to_owned(),
+            primary_category: "ac_small_signal",
+            extra_categories: vec![],
+            deck: format!(
+                "* loaded divider low-pass small-signal transfer\n\
+                 v1 in 0 dc 0 ac 1\n\
+                 r1 in out {r1}\n\
+                 r2 out 0 {r2}\n\
+                 c1 out 0 {c}\n\
+                 .ac dec 10 10 {stop}\n\
                  .end\n"
             ),
             parameters,
@@ -299,6 +373,26 @@ pub fn drafts() -> Vec<CaseDraft> {
             20.0,
             1.0e3,
             2.5e4,
+        ),
+        // Swept into the immediate vicinity of resonance, where the
+        // magnitude peaks at the quality factor.
+        (
+            "ac.rlc-low-pass.003",
+            10.0,
+            1.0e-3,
+            1.0e-6,
+            20.0,
+            100.0,
+            5.033e3,
+        ),
+        (
+            "ac.rlc-low-pass.004",
+            5.0,
+            1.0e-3,
+            1.0e-6,
+            20.0,
+            100.0,
+            5.033e3,
         ),
     ] {
         let (magnitude, phase) = rlc_capacitor_response(stop, r, l, c);
@@ -371,6 +465,12 @@ pub fn drafts() -> Vec<CaseDraft> {
         ("noise.divider.003", 1.0e5, 1.0e5),
         ("noise.divider.004", 4.7e4, 1.0e3),
         ("noise.divider.005", 1.0e2, 1.0e2),
+        ("noise.divider.006", 2.2e3, 3.3e3),
+        ("noise.divider.007", 1.5e4, 1.5e4),
+        ("noise.divider.008", 6.8e4, 1.2e4),
+        ("noise.divider.009", 3.3e2, 4.7e2),
+        ("noise.divider.010", 2.0e5, 2.0e5),
+        ("noise.divider.011", 9.1e3, 1.1e3),
     ] {
         let parallel = r1 * r2 / (r1 + r2);
         let expected = thermal_noise_density(parallel);
@@ -448,6 +548,46 @@ pub fn drafts() -> Vec<CaseDraft> {
             5.0,
             100.0,
             964.0,
+        ),
+        (
+            "noise.rc-filter.006",
+            1.2e4,
+            1.2e4,
+            2.2e-8,
+            "lin",
+            5.0,
+            100.0,
+            2.0e3,
+        ),
+        (
+            "noise.rc-filter.007",
+            5.6e2,
+            5.6e2,
+            1.0e-6,
+            "lin",
+            5.0,
+            10.0,
+            5.0e3,
+        ),
+        (
+            "noise.rc-filter.008",
+            2.7e3,
+            3.9e3,
+            1.0e-7,
+            "dec",
+            10.0,
+            10.0,
+            1.0e4,
+        ),
+        (
+            "noise.rc-filter.009",
+            8.2e3,
+            8.2e3,
+            4.7e-8,
+            "lin",
+            9.0,
+            50.0,
+            1.2e3,
         ),
     ] {
         let parallel = r1 * r2 / (r1 + r2);

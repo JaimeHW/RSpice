@@ -219,6 +219,8 @@ pub fn drafts() -> Vec<CaseDraft> {
         ("limits.bounded-run.003", 12.0, 4.7e3, 4.7e-7, 0.12, 1e-6),
         ("limits.bounded-run.004", 1.8, 1.0e4, 1.0e-7, 0.2, 2e-6),
         ("limits.bounded-run.005", 9.0, 6.8e3, 2.2e-7, 0.4, 5e-6),
+        ("limits.bounded-run.006", 2.2, 3.9e3, 1.0e-6, 0.18, 1e-6),
+        ("limits.bounded-run.007", 7.0, 5.1e3, 2.2e-7, 0.3, 2e-6),
     ] {
         let pulse = Pulse {
             initial: 0.0,

@@ -35,7 +35,8 @@ fn linear_volts(name: &str, expected: f64) -> Probe {
 pub fn drafts() -> Vec<CaseDraft> {
     let mut drafts = Vec::new();
 
-    // Two-resistor dividers across value decades and polarities.
+    // Two-resistor dividers across value decades and polarities: the same
+    // exact algebra stressed from ten-ohm to megohm impedance levels.
     for (ordinal, (supply, r1, r2)) in [
         (10.0, 1.0e3, 1.0e3),
         (5.0, 4.7e3, 3.3e2),
@@ -43,6 +44,24 @@ pub fn drafts() -> Vec<CaseDraft> {
         (2.5, 1.0e5, 1.0e5),
         (-5.0, 1.0e3, 9.0e3),
         (1.0, 1.0e6, 1.0e3),
+        (24.0, 1.0e2, 4.7e2),
+        (0.5, 2.2e3, 2.2e3),
+        (-12.0, 3.3e3, 6.8e3),
+        (48.0, 1.0e5, 4.7e3),
+        (3.3, 5.6e2, 1.8e3),
+        (9.0, 1.0e1, 1.0e1),
+        (15.0, 7.5e3, 2.4e4),
+        (-3.3, 4.7e4, 1.5e4),
+        (6.0, 8.2e2, 9.1e3),
+        (36.0, 6.2e4, 3.0e3),
+        (1.8, 1.3e3, 2.0e2),
+        (2.5, 1.0e6, 1.0e6),
+        (-24.0, 5.1e3, 7.5e3),
+        (18.0, 2.0e2, 8.0e3),
+        (0.9, 3.6e3, 1.1e3),
+        (30.0, 9.1e4, 1.0e4),
+        (-1.5, 6.8e2, 6.8e2),
+        (7.5, 1.2e4, 3.9e4),
     ]
     .into_iter()
     .enumerate()
@@ -86,15 +105,17 @@ pub fn drafts() -> Vec<CaseDraft> {
                     name: "i(v1)".to_owned(),
                     unit: "A",
                     expected: source_current,
+                    // Megohm-level rows sit a few parts per billion off the
+                    // ideal branch current; ten ppb covers every decade.
                     absolute_tolerance: "1e-15",
-                    relative_tolerance: "1e-9",
+                    relative_tolerance: "1e-8",
                 },
             ]),
         });
     }
 
     // Uniform ladders: tap k of n equal resistors sits at v * (n-k)/n.
-    for (ordinal, stages) in [4_usize, 8].into_iter().enumerate() {
+    for (ordinal, stages) in [4_usize, 8, 12, 5, 10].into_iter().enumerate() {
         let supply = 9.0;
         let mut deck = String::from("* uniform resistor ladder operating point\nv1 n0 0 dc 9\n");
         for stage in 0..stages {
@@ -144,9 +165,15 @@ pub fn drafts() -> Vec<CaseDraft> {
     }
 
     // A Wheatstone bridge is two independent dividers; probe both midpoints.
-    for (ordinal, (ra, rb, rc, rd)) in [(1.0e3, 1.0e3, 1.0e3, 1.0e3), (1.0e3, 2.0e3, 3.3e3, 1.2e3)]
-        .into_iter()
-        .enumerate()
+    for (ordinal, (ra, rb, rc, rd)) in [
+        (1.0e3, 1.0e3, 1.0e3, 1.0e3),
+        (1.0e3, 2.0e3, 3.3e3, 1.2e3),
+        (2.2e3, 4.7e3, 1.0e3, 3.3e3),
+        (5.6e2, 5.6e2, 1.2e3, 8.2e2),
+        (1.0e4, 2.0e3, 4.7e3, 4.7e3),
+    ]
+    .into_iter()
+    .enumerate()
     {
         let supply = 6.0;
         let left = supply * rb / (ra + rb);
@@ -203,7 +230,7 @@ pub fn drafts() -> Vec<CaseDraft> {
 
     // Controlled sources: each of the four dependent-source elements with
     // a directly computable output.
-    for (ordinal, gain) in [2.0, -4.0].into_iter().enumerate() {
+    for (ordinal, gain) in [2.0, -4.0, 0.5, -12.0, 7.5].into_iter().enumerate() {
         let input = 1.5; // divider halves 3 V
         drafts.push(CaseDraft {
             id: format!("op.vcvs.{:03}", ordinal + 1),
@@ -236,7 +263,7 @@ pub fn drafts() -> Vec<CaseDraft> {
             expectation: Expectation::Succeeds(vec![linear_volts("out", gain * input)]),
         });
     }
-    for (ordinal, transconductance) in [1.0e-3, 2.5e-4].into_iter().enumerate() {
+    for (ordinal, transconductance) in [1.0e-3, 2.5e-4, 5.0e-3, -2.0e-3].into_iter().enumerate() {
         let control = 2.0; // full source voltage across the control divider top
         let load = 4.7e3;
         drafts.push(CaseDraft {
@@ -315,6 +342,40 @@ pub fn drafts() -> Vec<CaseDraft> {
             expectation: Expectation::Succeeds(vec![linear_volts("out", 1.2e3 * sense_current)]),
         });
         drafts.push(CaseDraft {
+            id: "op.ccvs.002".to_owned(),
+            primary_category: "operating_point",
+            extra_categories: vec![],
+            deck: "* negative-transresistance ccvs operating point\n\
+                   v1 in 0 dc 8\n\
+                   vsense in mid dc 0\n\
+                   r1 mid 0 1k\n\
+                   h1 out 0 vsense -300\n\
+                   rload out 0 4.7k\n\
+                   .op\n\
+                   .end\n"
+                .to_owned(),
+            parameters: vec![
+                Parameter {
+                    name: "r1",
+                    unit: "Ohm",
+                    value: 1.0e3,
+                },
+                Parameter {
+                    name: "transresistance",
+                    unit: "V/A",
+                    value: -3.0e2,
+                },
+                Parameter {
+                    name: "v1",
+                    unit: "V",
+                    value: 8.0,
+                },
+            ],
+            temperature_celsius: 27.0,
+            repetitions: 1,
+            expectation: Expectation::Succeeds(vec![linear_volts("out", -3.0e2 * (8.0 / 1.0e3))]),
+        });
+        drafts.push(CaseDraft {
             id: "op.cccs.001".to_owned(),
             primary_category: "operating_point",
             extra_categories: vec![],
@@ -351,6 +412,43 @@ pub fn drafts() -> Vec<CaseDraft> {
                 40.0 * sense_current * 150.0,
             )]),
         });
+        drafts.push(CaseDraft {
+            id: "op.cccs.002".to_owned(),
+            primary_category: "operating_point",
+            extra_categories: vec![],
+            deck: "* inverting cccs operating point\n\
+                   v1 in 0 dc 8\n\
+                   vsense in mid dc 0\n\
+                   r1 mid 0 1k\n\
+                   f1 0 out vsense -5\n\
+                   rload out 0 1.2k\n\
+                   .op\n\
+                   .end\n"
+                .to_owned(),
+            parameters: vec![
+                Parameter {
+                    name: "current-gain",
+                    unit: "A/A",
+                    value: -5.0,
+                },
+                Parameter {
+                    name: "r1",
+                    unit: "Ohm",
+                    value: 1.0e3,
+                },
+                Parameter {
+                    name: "rload",
+                    unit: "Ohm",
+                    value: 1.2e3,
+                },
+            ],
+            temperature_celsius: 27.0,
+            repetitions: 1,
+            expectation: Expectation::Succeeds(vec![linear_volts(
+                "out",
+                -5.0 * (8.0 / 1.0e3) * 1.2e3,
+            )]),
+        });
     }
 
     // Diode forward drops across saturation currents, emission
@@ -361,6 +459,18 @@ pub fn drafts() -> Vec<CaseDraft> {
         (3.3, 4.7e2, 1.0e-12, 1.0),
         (12.0, 1.0e3, 1.0e-15, 1.8),
         (1.2, 1.0e5, 1.0e-9, 2.0),
+        (5.0, 1.0e3, 1.0e-16, 1.0),
+        (5.0, 1.0e3, 1.0e-13, 1.0),
+        (9.0, 2.2e3, 1.0e-14, 1.2),
+        (2.5, 3.3e3, 1.0e-12, 1.5),
+        (24.0, 1.0e4, 1.0e-15, 1.0),
+        (0.9, 4.7e4, 1.0e-9, 2.0),
+        (5.0, 2.0e2, 1.0e-11, 1.1),
+        (15.0, 6.8e3, 1.0e-14, 1.6),
+        (3.3, 1.5e3, 1.0e-10, 1.9),
+        (7.5, 8.2e2, 1.0e-13, 1.3),
+        (30.0, 2.0e4, 1.0e-14, 1.0),
+        (4.5, 3.9e2, 1.0e-12, 1.1),
     ]
     .into_iter()
     .enumerate()
@@ -410,10 +520,22 @@ pub fn drafts() -> Vec<CaseDraft> {
     // Level-1 MOSFETs where the square law is exact: saturation with
     // lambda = 0, plus one triode point from the closed-form quadratic.
     let beta = 2.0e-5 * 10.0; // kp * w / l
-    for (ordinal, (gate, drain_resistor)) in
-        [(2.0, 1.0e4), (2.5, 4.7e3), (3.0, 2.0e3), (1.5, 5.6e4)]
-            .into_iter()
-            .enumerate()
+    for (ordinal, (gate, drain_resistor)) in [
+        (2.0, 1.0e4),
+        (2.5, 4.7e3),
+        (3.0, 2.0e3),
+        (1.5, 5.6e4),
+        (1.2, 1.0e5),
+        (3.5, 2.0e3),
+        (4.0, 1.0e3),
+        (2.2, 1.2e4),
+        (2.8, 3.3e3),
+        (1.8, 3.3e4),
+        (2.4, 8.2e3),
+        (3.2, 2.4e3),
+    ]
+    .into_iter()
+    .enumerate()
     {
         let supply = 5.0;
         let overdrive = gate - 1.0; // vto = 1
@@ -456,11 +578,64 @@ pub fn drafts() -> Vec<CaseDraft> {
             expectation: Expectation::Succeeds(vec![volts("drain", drain, "1e-9", "1e-6")]),
         });
     }
+    // PMOS mirrors of the square law: source at the rail, drain pulled to
+    // ground through the load, the same exact algebra with signs flipped.
+    for (ordinal, (gate, drain_resistor)) in [(3.0, 1.0e4), (2.5, 8.2e3), (3.5, 4.7e4)]
+        .into_iter()
+        .enumerate()
+    {
+        let supply = 5.0;
+        let overdrive = (supply - gate) - 1.0; // |vto| = 1
+        let drain_current = 0.5 * beta * overdrive * overdrive;
+        let drain = drain_current * drain_resistor;
+        assert!(
+            supply - drain > overdrive,
+            "pmos bias must stay in saturation"
+        );
+        drafts.push(CaseDraft {
+            id: format!("op.nonlinear.pmos1-sat.{:03}", ordinal + 1),
+            primary_category: "nonlinear_devices",
+            extra_categories: vec!["operating_point"],
+            deck: format!(
+                "* level-1 pmos saturation operating point\n\
+                 vdd vdd 0 dc {supply}\n\
+                 vg gate 0 dc {gate}\n\
+                 rd drain 0 {drain_resistor}\n\
+                 m1 drain gate vdd vdd pmod w=10u l=1u\n\
+                 .model pmod pmos(level=1 vto=-1 kp=2e-5 lambda=0)\n\
+                 .op\n\
+                 .end\n"
+            ),
+            parameters: vec![
+                Parameter {
+                    name: "rd",
+                    unit: "Ohm",
+                    value: drain_resistor,
+                },
+                Parameter {
+                    name: "vdd",
+                    unit: "V",
+                    value: supply,
+                },
+                Parameter {
+                    name: "vgate",
+                    unit: "V",
+                    value: gate,
+                },
+            ],
+            temperature_celsius: 27.0,
+            repetitions: 1,
+            expectation: Expectation::Succeeds(vec![volts("drain", drain, "1e-9", "1e-6")]),
+        });
+    }
+
+    for (ordinal, (supply, gate, drain_resistor)) in [(5.0, 4.5, 5.0e3), (5.0, 4.0, 8.0e3)]
+        .into_iter()
+        .enumerate()
     {
         // Triode: beta*((vov)*vd - vd^2/2) = (vdd - vd)/rd, the physical
         // root of a quadratic in vd. The load line is chosen so saturation
         // cannot carry it (the saturation drop would exceed the supply).
-        let (supply, gate, drain_resistor) = (5.0, 4.5, 5.0e3);
         let overdrive = gate - 1.0;
         let a = 0.5 * beta;
         let b = -(beta * overdrive + 1.0 / drain_resistor);
@@ -468,7 +643,7 @@ pub fn drafts() -> Vec<CaseDraft> {
         let drain = (-b - (b * b - 4.0 * a * c).sqrt()) / (2.0 * a);
         assert!(drain < overdrive, "bias must stay in triode");
         drafts.push(CaseDraft {
-            id: "op.nonlinear.mos1-triode.001".to_owned(),
+            id: format!("op.nonlinear.mos1-triode.{:03}", ordinal + 1),
             primary_category: "nonlinear_devices",
             extra_categories: vec!["operating_point"],
             deck: format!(
