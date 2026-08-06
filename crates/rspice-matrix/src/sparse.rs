@@ -1426,6 +1426,88 @@ impl StaticMatrix {
         Ok((inf_norm, l2_norm))
     }
 
+    /// Compute the maximum componentwise backward-error ratio for selected
+    /// rows of `A*x=b`.
+    ///
+    /// The ratio uses the same compensated residual and denominator as the
+    /// solver's acceptance test: `|b_i-A_i x| / (|b_i|+|A_i||x|)` divided by
+    /// the row-size-aware `64*EPSILON*(nnz_i+1)` bound. Returning the ratio
+    /// rather than an absolute residual makes the check invariant under
+    /// physical units and the extreme coefficient scales common in coupled
+    /// magnetic DAEs. An empty row set returns zero.
+    pub fn componentwise_backward_error_by_rows(
+        &self,
+        solution: &[Value],
+        rhs: &[Value],
+        rows: &[usize],
+    ) -> Result<Value, SolverError> {
+        self.check_stamping_error()?;
+        if self.nrows != rhs.len() || self.ncols != solution.len() {
+            return Err(SolverError::InvalidCircuit(format!(
+                "Backward-error dimension mismatch: matrix is {}x{}, solution has {}, RHS has {}",
+                self.nrows,
+                self.ncols,
+                solution.len(),
+                rhs.len()
+            )));
+        }
+        if solution.iter().any(|value| !value.is_finite()) {
+            return Ok(Value::INFINITY);
+        }
+
+        let mut maximum_ratio: Value = 0.0;
+        for &row in rows {
+            if row >= self.nrows {
+                return Err(SolverError::InvalidCircuit(format!(
+                    "Backward-error row {} is outside matrix with {} rows",
+                    row, self.nrows
+                )));
+            }
+            let mut residual = rhs[row];
+            if !residual.is_finite() {
+                return Ok(Value::INFINITY);
+            }
+            let mut compensation = 0.0;
+            let mut denominator = rhs[row].abs();
+            let mut nonzeros = 0usize;
+            for position in
+                self.residual_layout.row_ptr[row]..self.residual_layout.row_ptr[row + 1]
+            {
+                let value = self.values[self.residual_layout.csc_idx[position]];
+                let x = solution[self.residual_layout.col_idx[position]];
+                let term = value * x;
+                let magnitude = value.abs() * x.abs();
+                if !term.is_finite() || !magnitude.is_finite() {
+                    return Ok(Value::INFINITY);
+                }
+                if value != 0.0 {
+                    nonzeros = nonzeros.saturating_add(1);
+                }
+                let product_hi = -term;
+                let product_lo = (-value).mul_add(x, -product_hi);
+                let sum = residual + product_hi;
+                let virtual_addend = sum - residual;
+                let sum_error =
+                    (residual - (sum - virtual_addend)) + (product_hi - virtual_addend);
+                let tail = compensation + product_lo + sum_error;
+                let refined = sum + tail;
+                compensation = tail - (refined - sum);
+                residual = refined;
+                denominator = (denominator + magnitude).min(Value::MAX);
+            }
+            residual += compensation;
+            let safe_denominator =
+                (nonzeros.saturating_add(1) as Value) * Value::MIN_POSITIVE;
+            let row_error = residual.abs() / denominator.max(safe_denominator);
+            let ratio = row_error / backward_error_tolerance(nonzeros);
+            if !ratio.is_finite() {
+                return Ok(Value::INFINITY);
+            }
+            maximum_ratio = maximum_ratio.max(ratio);
+        }
+        Ok(maximum_ratio)
+    }
+
     /// Compute raw residual vector `A*x - b`.
     pub fn residual_vector(
         &self,

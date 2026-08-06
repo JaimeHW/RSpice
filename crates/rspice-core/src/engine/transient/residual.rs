@@ -1283,9 +1283,34 @@ impl Engine {
             return false;
         }
 
+        let core_branch_converged = if circuit.has_xyce_core_inductors() {
+            let rows = circuit
+                .xyce_core_transient_residuals
+                .iter()
+                .map(|&(row, _)| row)
+                .collect::<Vec<_>>();
+            let physical_residual_converged = matrix
+                .residual_vector(solution, rhs)
+                .ok()
+                .is_some_and(|residual| {
+                    let tolerance = circuit.xyce_core_branch_residual_tolerance();
+                    circuit.xyce_core_transient_residuals.iter().all(|&(row, _)| {
+                        residual
+                            .get(row)
+                            .is_some_and(|value| value.abs() <= tolerance)
+                    })
+                });
+            physical_residual_converged
+                && matrix
+                .componentwise_backward_error_by_rows(solution, rhs, &rows)
+                .is_ok_and(|ratio| ratio <= 1.0)
+        } else {
+            true
+        };
         matrix
             .raw_residual_inf_norm(solution, rhs)
             .is_ok_and(|norm| norm.is_finite() && norm < self.transient_nonlinear_rhstol())
+            && core_branch_converged
     }
 
     /// Assemble the complete transient system `A(x)·x = b(x)` at `solution`
