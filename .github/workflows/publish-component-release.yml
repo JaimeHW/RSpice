@@ -58,6 +58,26 @@ jobs:
             --env CARGO_TERM_COLOR=always \
             "$BUILDER_IMAGE" \
             bash -euo pipefail -c '
+              # The viewer runtime is built first and embedded into the
+              # renderer, so the attested /rspice-publish file covers the
+              # exact wasm it seals into every figure-bearing bundle. The
+              # wasm-bindgen CLI is pinned to the workspace lockfile version;
+              # a mismatch would be rejected by wasm-bindgen itself.
+              bindgen_version=$(sed -n "/^name = \"wasm-bindgen\"\$/,/^\$/s/^version = \"\(.*\)\"\$/\1/p" Cargo.lock)
+              test -n "$bindgen_version"
+              rustup target add wasm32-unknown-unknown
+              cargo install --locked wasm-bindgen-cli --version "$bindgen_version"
+              cargo build --locked --profile viewer-release -p rspice-viewer --target wasm32-unknown-unknown
+              wasm-bindgen --target web --out-name viewer --out-dir /tmp/viewer-runtime \
+                target/wasm32-unknown-unknown/viewer-release/rspice_viewer.wasm
+              # Hydration budget gate: the compressed runtime a reader
+              # downloads on first activation stays at or under 3 MB.
+              runtime_gz=$(( $(gzip -9 -c /tmp/viewer-runtime/viewer_bg.wasm | wc -c) \
+                + $(gzip -9 -c /tmp/viewer-runtime/viewer.js | wc -c) ))
+              echo "compressed viewer runtime: ${runtime_gz} bytes"
+              test "$runtime_gz" -le 3145728
+              export RSPICE_VIEWER_RUNTIME_DIR=/tmp/viewer-runtime
+              cargo test --locked --release -p rspice-viewer
               cargo test --locked --release -p rspice-publish
               cargo build --locked --release -p rspice-publish
             '
@@ -67,11 +87,24 @@ jobs:
           binary=target/release/rspice-publish
           test -f "$binary"
           "$binary" --version
+          "$binary" component-info | tee component-info.json
+          test "$(jq -r .viewer_runtime_embedded component-info.json)" = "true"
+          wasm_sha=$(jq -r .viewer_wasm_sha256 component-info.json)
+          [[ "$wasm_sha" =~ ^[0-9a-f]{64}$ ]]
           printf 'not a sealed publication snapshot' > malformed-snapshot.json
           status=0
           "$binary" render --snapshot malformed-snapshot.json --out smoke-bundle || status=$?
           test "$status" -eq 2
           test ! -e smoke-bundle
+          # A real fixture renders a bundle that seals exactly the embedded
+          # runtime and its hydration handshake.
+          "$binary" render \
+            --snapshot crates/rspice-publication-contract/tests/fixtures/rc-lowpass.json \
+            --out smoke-page
+          test "$(sha256sum smoke-page/assets/viewer.wasm | cut -d ' ' -f 1)" = "$wasm_sha"
+          test -s smoke-page/assets/viewer.js
+          test -s smoke-page/assets/loader.js
+          grep -q 'id="rspice-hydration"' smoke-page/index.html
       - name: Resolve exact component identity and reject tag replacement
         id: package
         run: |
@@ -175,4 +208,5 @@ jobs:
             echo "- \`render_publish_image\`: \`$IMAGE@$DIGEST\`"
             echo "- \`render_publish_sha256\`: \`$EXPORTED_FILE_SHA256\`"
             echo "- certificate identity: \`$identity\`"
+            echo "- embedded viewer runtime: \`$(jq -c . component-info.json)\`"
           } >>"$GITHUB_STEP_SUMMARY"
