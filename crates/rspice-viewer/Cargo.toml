@@ -1,0 +1,32 @@
+[package]
+name = "rspice-viewer"
+description = "Published-page figure runtime: hydrates sealed RSpice publication figures into live egui panes"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rspice-publication-contract.workspace = true
+egui = "0.35.0"
+serde_json.workspace = true
+sha2 = "0.10"
+thiserror.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+eframe = { version = "0.35.0", default-features = false, features = ["glow"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["HtmlCanvasElement"] }
+
+[dev-dependencies]
+rspice-publish.workspace = true
+
+[lints]
+workspace = true

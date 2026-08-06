@@ -10,6 +10,7 @@ members = [
     "crates/rspice-publication-contract",
     "crates/rspice-publish",
     "crates/rspice-sheet-publisher",
+    "crates/rspice-viewer",
     "crates/rspice-ui",
     "crates/rspice-veriloga",
     "crates/rspice-python",
@@ -60,6 +61,7 @@ unicode-normalization = "0.1"
 # Internal crates
 rspice-matrix = { path = "crates/rspice-matrix", version = "0.1.0" }
 rspice-publication-contract = { path = "crates/rspice-publication-contract", version = "0.1.0" }
+rspice-publish = { path = "crates/rspice-publish", version = "0.1.0" }
 rspice-veriloga-runtime = { path = "crates/rspice-veriloga-runtime", version = "0.1.0" }
 rspice-veriloga-models = { path = "crates/rspice-veriloga-models", version = "0.1.0", default-features = false }
 rspice-core = { path = "crates/rspice-core", version = "0.1.0" }
