@@ -291,13 +291,10 @@ impl TransientCapturePlan {
                 retain_all
                     || is_xyce_voltage_source
                     || netlist.saves.selects(&format!("I({name})"))
-                    || netlist
-                        .output_requests
-                        .iter()
-                        .any(|request| {
-                            request.selects_transient_device_current(name)
-                                || Self::request_selects_core_winding_branch(request, name)
-                        })
+                    || netlist.output_requests.iter().any(|request| {
+                        request.selects_transient_device_current(name)
+                            || Self::request_selects_core_winding_branch(request, name)
+                    })
             })
             .collect();
         // XSPICE event vectors occupy a distinct result namespace. Bare/raw
@@ -1829,12 +1826,17 @@ impl Engine {
             && !self
                 .collect_node_voltage_hints(netlist, &circuit)
                 .is_empty();
-        let transient_baseline_diag_gmin =
-            if self.config.spice_dialect == SpiceDialect::Xyce && startup_voltage_hints_active {
-                0.0
-            } else {
-                self.dc_nodal_gmin_floor(&circuit)
-            };
+        // Xyce applies its GMIN continuation only while solving the DC
+        // operating point.  It does not carry the final continuation shunt
+        // into the transient DAE; doing so changes even an ideal resistor's
+        // KCL by a low-bit amount and can materially alter hysteretic devices.
+        let transient_baseline_diag_gmin = if self.config.spice_dialect == SpiceDialect::Xyce {
+            0.0
+        } else if startup_voltage_hints_active {
+            0.0
+        } else {
+            self.dc_nodal_gmin_floor(&circuit)
+        };
         if circuit.has_nonlinear_devices() {
             self.update_transient_nonlinear_devices(&mut circuit, &solution)?;
         }
@@ -1866,7 +1868,13 @@ impl Engine {
                     true
                 }
             };
-        let requires_conservative_nonlinear_limiting = circuit.has_physical_nonlinear_devices();
+        // Xyce's DampedNewton path delegates globalization to each device's
+        // native limiter.  A global nodal trust region changes the accepted
+        // Newton orbit after a retry (and is not part of Xyce's transient
+        // algorithm), so keep this recovery guard on the ngspice/native path.
+        let requires_conservative_nonlinear_limiting = self.config.spice_dialect
+            != SpiceDialect::Xyce
+            && circuit.has_physical_nonlinear_devices();
         let nonlinear_source_ramp_cap_enabled = self.config.spice_dialect != SpiceDialect::Xyce
             && Self::should_enable_nonlinear_source_ramp_cap(
                 &circuit,
@@ -1897,6 +1905,13 @@ impl Engine {
         let core_trial_converged = |circuit: &crate::circuit::CircuitData| {
             !circuit.has_xyce_core_inductors()
                 || (!circuit.xyce_core_trial_invalid()
+                    // MutIndNonLin2's forward-Euler magnetization limiter is
+                    // a timestep-safety contract, not an optional device
+                    // status hint.  Xyce normally leaves the broad
+                    // ENFORCEDEVICECONV test disabled for transient solves,
+                    // but a level-2 Core candidate that exceeds the native
+                    // quarter-Ms increment can cross a hysteresis branch and
+                    // must force a smaller retry in either policy mode.
                     && (!enforce_device_convergence || circuit.xyce_core_trial_converged()))
         };
         let enforce_force_candidate_safety =
@@ -1907,10 +1922,8 @@ impl Engine {
         let uses_inductor_correction = !circuit.inductors.is_empty()
             || !circuit.coupled_inductor_pairs.is_empty()
             || !circuit.multi_winding_transformers.is_empty();
-        let uses_inductor_correction =
-            uses_inductor_correction
-                && (!circuit.has_only_xyce_core_inductors()
-                    || has_shared_xyce_core_level2);
+        let uses_inductor_correction = uses_inductor_correction
+            && (!circuit.has_only_xyce_core_inductors() || has_shared_xyce_core_level2);
         // ngspice's flat transient Newton: when junction devices replace
         // their own iterate voltages (legacy GP pnjlim in update), the full
         // node step is the algorithm; per-iteration node-delta clamps walk
@@ -2125,17 +2138,16 @@ impl Engine {
                 .iter()
                 .map(|&branch| Self::derived_transient_branch_name(&circuit, branch)),
         );
-        let retain_xyce_voltage_source_currents =
-            self.config.spice_dialect == SpiceDialect::Xyce
-                && netlist.output_requests.iter().any(|request| {
-                    request
-                        .analysis
-                        .is_none_or(|analysis| analysis == OutputAnalysisKind::Tran)
-                        && request.dependencies.iter().any(|dependency| {
-                            dependency.kind == OutputSymbolKind::Device
-                                && matches!(dependency.operator.as_str(), "I" | "P" | "W")
-                        })
-                });
+        let retain_xyce_voltage_source_currents = self.config.spice_dialect == SpiceDialect::Xyce
+            && netlist.output_requests.iter().any(|request| {
+                request
+                    .analysis
+                    .is_none_or(|analysis| analysis == OutputAnalysisKind::Tran)
+                    && request.dependencies.iter().any(|dependency| {
+                        dependency.kind == OutputSymbolKind::Device
+                            && matches!(dependency.operator.as_str(), "I" | "P" | "W")
+                    })
+            });
         let capture_plan = TransientCapturePlan::compile(
             netlist,
             &node_names,
@@ -2496,6 +2508,11 @@ impl Engine {
                 }
             }
         }
+
+        // OneStep's qHistory[0] is the accepted MutIndNonLin2 LOI vector,
+        // not a value reconstructed from a later Newton iterate.  Seed the
+        // Core snapshots only after DC/checkpoint histories are authoritative.
+        circuit.initialize_xyce_core_q_histories();
 
         let tline_dc_refs = Self::initialize_tline_history(&mut circuit, &solution, resume_time);
         let coupled_tline_refs =
@@ -4072,7 +4089,7 @@ impl Engine {
                         // ENFORCEDEVICECONV status test.
                         let mut behavioral_converged = circuit.behavioral_linearizations_converged(
                             &new_solution,
-                            t,
+                            t + dt,
                             self.voltage_reltol(),
                             self.voltage_abstol(),
                             self.current_abstol(),
@@ -4100,7 +4117,7 @@ impl Engine {
                                     &mut matrix,
                                     &mut rhs,
                                     &new_solution,
-                                    t,
+                                    t + dt,
                                     dt,
                                     &residual::TransientSystemContext {
                                         coeff: &coeff,
@@ -4383,6 +4400,25 @@ impl Engine {
                 // it fails the run with the offending grid time — committing
                 // a non-converged point would poison the locked trajectory.
                 if locked_grid.is_some() {
+                    // A paired reference schedule may request one hidden
+                    // trial at the controller's larger proposal before the
+                    // recorded accepted interval. A failed hidden trial is
+                    // expected: restore its state and land on the scheduled
+                    // interval on the next pass instead of consuming the
+                    // locked retry budget against the same hidden candidate.
+                    if locked_replay_hidden_attempt {
+                        if let Some(&scheduled_dt) = locked_step_sizes
+                            .as_ref()
+                            .and_then(|steps| steps.get(locked_cursor))
+                            && scheduled_dt.is_finite()
+                            && scheduled_dt > 0.0
+                        {
+                            timestep.force_step(scheduled_dt);
+                        }
+                        restore_rejected_transient_nonlinear_state!();
+                        total_postloop_nanos += postloop_phase_start.elapsed().as_nanos();
+                        continue;
+                    }
                     if retry_count >= LOCKED_MAX_RETRIES {
                         log::error!(
                             "Grid-locked step to t={:.12e}s (dt={:.3e}) failed Newton after {} retries",

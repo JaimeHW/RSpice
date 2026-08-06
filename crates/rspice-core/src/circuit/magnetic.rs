@@ -166,9 +166,13 @@ impl CircuitData {
     /// [`Self::has_xyce_core_shared_level2`], which asks the narrower question
     /// of whether the stabilized Picard Jacobian applies.
     pub(crate) fn has_xyce_core_level2(&self) -> bool {
-        self.xyce_core_groups
+        self.jiles_atherton_inductors
             .iter()
-            .any(|group| group.device.is_xyce_core() && group.device.is_xyce_core_level2())
+            .any(|binding| binding.device.is_xyce_core_level2())
+            || self
+                .xyce_core_groups
+                .iter()
+                .any(|group| group.device.is_xyce_core() && group.device.is_xyce_core_level2())
     }
 
     /// Whether a shared winding group uses MutIndNonLin2's LEVEL=2 state
@@ -199,6 +203,7 @@ impl CircuitData {
         solution: &[Value],
         dt: Value,
         coeff: &CompanionCoefficients,
+        one_step: bool,
         one_step_order2: bool,
         advance_magvar_update: bool,
     ) {
@@ -302,7 +307,7 @@ impl CircuitData {
             // `(Q_{n+1}-Q_n)/dt`. The ordinary trapezoidal companion has a
             // `2/dt` conductance, so its coefficient must not leak into the
             // Core's order-2 DAE row.
-            let charge_coeff = if one_step_order2 { 1.0 } else { coeff.coeff_g };
+            let charge_coeff = if one_step { 1.0 } else { coeff.coeff_g };
             let residual = |trial_current: Value,
                             trial_voltage: Value,
                             cached_trial: Option<XyceCoreTrial>| {
@@ -334,18 +339,28 @@ impl CircuitData {
                         carried_mag_update,
                     )?
                 };
-                let mut charge_derivative = charge_coeff * (trial_current - i_prev);
-                if !one_step_order2 && coeff.needs_two_history {
-                    charge_derivative += coeff.coeff_v_n_minus_1 * (i_prev - i_prev_prev);
+                // MutIndNonLin2 assembles the DAE charge vector first and
+                // subtracts its accepted Q history (`Q_{n+1}-Q_n`) in the
+                // time integrator.  Form those products before taking the
+                // difference; factoring the constant inductance as
+                // `L*(I_{n+1}-I_n)` is algebraically equivalent but changes
+                // the low bits at the Core's near-singular reversals.
+                let q_current = binding.device.xyce_core_q_from_current(trial_current);
+                let q_previous = binding.device.xyce_core_q_history();
+                let mut charge_difference = charge_coeff * (q_current - q_previous);
+                if !one_step && coeff.needs_two_history {
+                    let q_previous_previous = nominal * i_prev_prev;
+                    charge_difference +=
+                        coeff.coeff_v_n_minus_1 * (q_previous - q_previous_previous);
                 }
-                charge_derivative *= nominal / dt;
+                let charge_derivative = charge_difference / dt;
                 let previous_static_voltage =
                     if previous_mid.is_finite() && previous_mid.abs() > 1.0e-12 {
                         v_prev / previous_mid
                     } else {
                         0.0
                     };
-                let history = if one_step_order2 {
+                let history = if one_step {
                     // The transient assembler supplies +1/2(F_n-B_n) from
                     // its accepted static-history snapshot.  Keep the Core
                     // branch's local history empty so that term is not
@@ -363,18 +378,15 @@ impl CircuitData {
                 // Keep the branch residual in that source-equivalent
                 // orientation so its Jacobian retains the same conditioning
                 // as Xyce's device row near a constitutive zero crossing.
-                let static_branch = static_scale * trial_voltage / trial.mid;
-                let f0 = if one_step_order2 {
-                    // OneStep's `alpha_s=-1` makes its Newton matrix the
-                    // physical DAE Jacobian, dQ/dx + dF/dx.  Keep this branch
-                    // in Xyce's source orientation (F=-V/mid); the accepted
-                    // static F history is added by the outer OneStep pass.
-                    charge_derivative - static_branch + history
+                let f0 = if one_step {
+                    let static_branch = static_scale * (-(trial_voltage / trial.mid));
+                    charge_derivative + static_branch + history
                 } else {
                     // MutIndNonLin2's native transient row is also expressed
                     // as dQ/dt + F, with F=-V/mid.  Keeping this orientation
                     // (rather than its exact negative) preserves Xyce's
                     // branch-row signs and pivoting at a constitutive zero.
+                    let static_branch = static_scale * trial_voltage / trial.mid;
                     charge_derivative - static_branch - history
                 };
                 Some((f0, trial))
@@ -414,6 +426,10 @@ impl CircuitData {
                 None
             };
             let d_mid_d_current = if binding.device.is_xyce_core_level2() {
+                // Keep the branch derivative in Xyce's native
+                // `(1-gap/path)*dP_dI` form. Reconstructing `dP_dI` from
+                // this value and multiplying by the geometry factor again
+                // introduces an avoidable divide/multiply round trip.
                 binding
                     .device
                     .xyce_core_dmid_d_current(current, voltage, jacobian_magnetization)
@@ -450,16 +466,19 @@ impl CircuitData {
                 .device
                 .xyce_core_dmid_d_voltage(trial.applied_field, voltage, jacobian_magnetization)
                 .unwrap_or(0.0);
-            let d_static_voltage_direct = if one_step_order2 {
-                -static_scale / mid + static_scale * voltage * d_mid_d_voltage / (mid * mid)
+            let d_static_voltage_direct = if binding.device.is_xyce_core_level2() && one_step {
+                let d_f_voltage = -1.0 / mid;
+                static_scale * d_f_voltage
             } else {
                 -static_scale / mid + static_scale * voltage * d_mid_d_voltage / (mid * mid)
             };
-            let d_current_direct = if one_step_order2 {
-                static_scale * voltage * d_mid_d_current / (mid * mid) + charge_coeff * nominal / dt
+            let d_current_direct = if binding.device.is_xyce_core_level2() && one_step {
+                let d_f_current = (voltage * d_mid_d_current) / (mid * mid);
+                let fterm = static_scale * d_f_current;
+                let qterm = (charge_coeff * (1.0 / dt)) * nominal;
+                qterm + fterm
             } else {
-                static_scale * voltage * d_mid_d_current / (mid * mid)
-                    + charge_coeff * nominal / dt
+                static_scale * voltage * d_mid_d_current / (mid * mid) + charge_coeff * nominal / dt
             };
             let (d_current, d_voltage) = (d_current_direct, d_static_voltage_direct);
             let mut hidden_linearized = 0.0;
@@ -501,11 +520,7 @@ impl CircuitData {
                 );
             }
             if self.inductors.node_neg[index] > 0 {
-                matrix.add(
-                    branch - 1,
-                    self.inductors.node_neg[index] - 1,
-                    -d_voltage,
-                );
+                matrix.add(branch - 1, self.inductors.node_neg[index] - 1, -d_voltage);
             }
             // Core branches own their complete DAE row.  The transient
             // companion pass contributes only the MNA incidence entries;
@@ -787,7 +802,9 @@ impl CircuitData {
                 let winding_i = &group.windings[i];
                 let index_i = winding_i.inductor_index;
                 let branch_i = self.num_nodes + self.inductors.branch_indices[index_i];
-                let mut charge_derivative = 0.0;
+                let mut q_current = 0.0;
+                let mut q_previous_reconstructed = 0.0;
+                let mut q_previous_previous = 0.0;
                 for j in 0..group.windings.len() {
                     let winding_j = &group.windings[j];
                     let l0 = group.device.xyce_core_vacuum_mutual_inductance(
@@ -795,13 +812,25 @@ impl CircuitData {
                         winding_j.turns,
                         1.0,
                     );
-                    let mut current_delta = charge_coeff * (currents[j] - previous[j]);
-                    if !one_step_order2 && coeff.needs_two_history {
-                        current_delta +=
-                            coeff.coeff_v_n_minus_1 * (previous[j] - previous_previous[j]);
-                    }
-                    charge_derivative += l0 * current_delta / dt;
+                    // Xyce stores each winding's dense LO current sum as Q
+                    // history.  Accumulate Q at each accepted endpoint before
+                    // differencing; summing `LO*(I-I_prev)` instead loses the
+                    // source operation order at sharp reversals.
+                    q_current += l0 * currents[j];
+                    q_previous_reconstructed += l0 * previous[j];
+                    q_previous_previous += l0 * previous_previous[j];
                 }
+                let q_previous = group
+                    .xyce_q_history
+                    .get(i)
+                    .copied()
+                    .unwrap_or(q_previous_reconstructed);
+                let mut charge_difference = charge_coeff * (q_current - q_previous);
+                if !one_step_order2 && coeff.needs_two_history {
+                    charge_difference +=
+                        coeff.coeff_v_n_minus_1 * (q_previous - q_previous_previous);
+                }
+                let charge_derivative = charge_difference / dt;
                 let previous_static_voltage = self.inductors.v_prev[index_i] / previous_mid;
                 let history = if one_step_order2 {
                     // The transient assembler supplies +1/2(F_n-B_n) from
@@ -821,8 +850,7 @@ impl CircuitData {
                     static_branch - charge_derivative + history
                 };
                 if f0.is_finite() {
-                    self.xyce_core_transient_residuals
-                        .push((branch_i - 1, f0));
+                    self.xyce_core_transient_residuals.push((branch_i - 1, f0));
                 }
                 if !f0.is_finite() {
                     self.xyce_core_trial_invalid = true;
@@ -862,11 +890,7 @@ impl CircuitData {
                         continue;
                     }
                     if let Some(hidden_branch) = hidden_branch {
-                        matrix.add(
-                            branch_i - 1,
-                            hidden_branch - 1,
-                            d_m * m_var_scaling,
-                        );
+                        matrix.add(branch_i - 1, hidden_branch - 1, d_m * m_var_scaling);
                     }
                     hidden_linearized = d_m * hidden_m;
                 }
@@ -1032,8 +1056,8 @@ impl CircuitData {
                     hidden_rate_branch - 1,
                     r_var_scaling * r_eq_scaling,
                 );
-                rhs[hidden_rate_branch - 1] += r_eq_scaling
-                    * (-trial.level1_rate_residual + hidden_rate + current_linear);
+                rhs[hidden_rate_branch - 1] +=
+                    r_eq_scaling * (-trial.level1_rate_residual + hidden_rate + current_linear);
             }
             if advance_magvar_update && group.device.is_xyce_core_level2() {
                 group
@@ -1196,6 +1220,51 @@ impl CircuitData {
         }
     }
 
+    /// Seed Xyce's accepted charge-vector history from the current accepted
+    /// inductor histories.  This is called after DC initialization and after
+    /// checkpoint injection, before the first transient residual is formed.
+    pub fn initialize_xyce_core_q_histories(&mut self) {
+        for binding in &mut self.jiles_atherton_inductors {
+            if !binding.device.is_xyce_core() {
+                continue;
+            }
+            let current = self
+                .inductors
+                .i_prev
+                .get(binding.inductor_index)
+                .copied()
+                .unwrap_or(0.0);
+            binding.device.initialize_xyce_core_q_history(current);
+        }
+        for group in &mut self.xyce_core_groups {
+            if !group.device.is_xyce_core() {
+                continue;
+            }
+            if group.xyce_q_history.len() != group.windings.len() {
+                group.xyce_q_history.resize(group.windings.len(), 0.0);
+            }
+            for i in 0..group.windings.len() {
+                let winding_i = &group.windings[i];
+                let mut q = 0.0;
+                for winding_j in &group.windings {
+                    let current = self
+                        .inductors
+                        .i_prev
+                        .get(winding_j.inductor_index)
+                        .copied()
+                        .unwrap_or(0.0);
+                    let l0 = group.device.xyce_core_vacuum_mutual_inductance(
+                        winding_i.turns,
+                        winding_j.turns,
+                        1.0,
+                    );
+                    q += l0 * current;
+                }
+                group.xyce_q_history[i] = q;
+            }
+        }
+    }
+
     /// Advance Xyce Core states from an accepted transient solution and make
     /// the resulting differential inductance active for the next step.
     pub fn commit_xyce_core_inductances(
@@ -1239,6 +1308,7 @@ impl CircuitData {
             }
             let mut ampere_turns = 0.0;
             let first = &group.windings[0];
+            let mut accepted_currents = Vec::with_capacity(group.windings.len());
             for winding in &group.windings {
                 let index = winding.inductor_index;
                 let branch = num_nodes + self.inductors.branch_indices[index];
@@ -1246,7 +1316,27 @@ impl CircuitData {
                     .get(branch - 1)
                     .copied()
                     .unwrap_or_else(|| self.inductors.i_prev[index]);
+                accepted_currents.push(current);
                 ampere_turns += winding.turns * current;
+            }
+            if group.xyce_q_history.len() != group.windings.len() {
+                group.xyce_q_history.resize(group.windings.len(), 0.0);
+            }
+            // Commit the dense LOI entries in Xyce's winding/column order.
+            // These values are the exact accepted qHistory[0] snapshot used
+            // by the next OneStep residual.
+            for i in 0..group.windings.len() {
+                let winding_i = &group.windings[i];
+                let mut q = 0.0;
+                for (j, winding_j) in group.windings.iter().enumerate() {
+                    let l0 = group.device.xyce_core_vacuum_mutual_inductance(
+                        winding_i.turns,
+                        winding_j.turns,
+                        1.0,
+                    );
+                    q += l0 * accepted_currents[j];
+                }
+                group.xyce_q_history[i] = q;
             }
             let happ = group.device.xyce_core_happ_from_ampere_turns(ampere_turns);
             // The generic inductor history is rotated before this commit

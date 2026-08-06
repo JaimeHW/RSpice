@@ -336,6 +336,11 @@ pub struct JilesAthertonInductor {
     /// Keep its raw value across rejected attempts so the next constitutive
     /// trial subtracts the same aggregate sum as the native device.
     xyce_old_branch_current_sum: Value,
+    /// Accepted MutIndNonLin2 charge-vector entry (`LOI`) used as
+    /// OneStep's `qHistory[0]`.  Xyce snapshots this vector at an accepted
+    /// endpoint; reconstructing it later from the generic current history
+    /// can change the operation order at a near-singular reversal.
+    xyce_q_history: Value,
     /// Most recent pure endpoint produced while stamping a Newton iterate.
     /// The endpoint is committed verbatim when that iterate is accepted; this
     /// preserves Xyce's ordering where P is evaluated with the carried update
@@ -416,6 +421,7 @@ impl JilesAthertonInductor {
             xyce_mag_update: 0.0,
             xyce_reported_magnetization: 0.0,
             xyce_old_branch_current_sum: 0.0,
+            xyce_q_history: 0.0,
             xyce_trial: None,
             xyce_accepted_mid: 1.0,
             xyce_dmdt_average: 0.0,
@@ -681,8 +687,7 @@ impl JilesAthertonInductor {
         };
 
         let man_prime = if sq_heo2_he2 > 0.0 {
-            self.params.ms
-                * (self.params.a + heo2 / sq_heo2_he2)
+            self.params.ms * (self.params.a + heo2 / sq_heo2_he2)
                 / (self.params.a + sq_heo2_he2).powf(2.0)
         } else {
             0.0
@@ -704,8 +709,7 @@ impl JilesAthertonInductor {
             + (gap_path - self.params.alpha) * self.params.c * man_prime
             + gap_path * (1.0 - self.params.c) * mirr_prime;
         if denominator.abs() > 1.0e-18 {
-            let p = (self.params.c * man_prime + (1.0 - self.params.c) * mirr_prime)
-                / denominator;
+            let p = (self.params.c * man_prime + (1.0 - self.params.c) * mirr_prime) / denominator;
             if self.params.factor_ms {
                 p / self.params.ms
             } else {
@@ -1334,8 +1338,7 @@ impl JilesAthertonInductor {
         if !root_he.is_finite() || root_he <= 0.0 || !denominator.is_finite() {
             return None;
         }
-        let man_prime =
-            self.params.ms * (self.params.a + heo2 / root_he) / denominator.powf(2.0);
+        let man_prime = self.params.ms * (self.params.a + heo2 / root_he) / denominator.powf(2.0);
         let man = self.params.ms * he / denominator;
         let del_m = man - latest_m;
         let del_m0 = self.params.beta_m * self.params.ms;
@@ -1368,7 +1371,7 @@ impl JilesAthertonInductor {
                 + del_m / root_m
                 + (2.0 * self.params.alpha * del_m * (del_m * tanh_qv + root_m)
                     / (mirr_denominator * root_m)))
-                * d_del_m_d_m;
+            * d_del_m_d_m;
         let numerator_slope =
             self.params.c * d_man_prime_d_m + (1.0 - self.params.c) * d_mirr_prime_d_m;
         let denominator_slope = (gap_path - self.params.alpha) * self.params.c * d_man_prime_d_m
@@ -1421,8 +1424,7 @@ impl JilesAthertonInductor {
         }
         let tanh_qv = self.xyce_tanh_qv(voltage);
         let mirr_prime = (del_m * tanh_qv + root_m) / mirr_denominator;
-        let man_prime =
-            self.params.ms * (self.params.a + heo2 / root_he) / denominator.powf(2.0);
+        let man_prime = self.params.ms * (self.params.a + heo2 / root_he) / denominator.powf(2.0);
         let p_denominator = 1.0
             + (gap_path - self.params.alpha) * self.params.c * man_prime
             + gap_path * (1.0 - self.params.c) * mirr_prime;
@@ -1447,7 +1449,11 @@ impl JilesAthertonInductor {
         let denominator_slope =
             (gap_path - self.params.alpha) * self.params.c * d_man_prime_d_current
                 + gap_path * (1.0 - self.params.c) * d_mirr_prime_d_current;
-        let d_p_d_current = numerator_slope / p_denominator
+        // Match MutIndNonLin2's source evaluation order.  Near a hysteresis
+        // reversal the branch Jacobian is nearly singular, so replacing
+        // `(1.0 / denom) * numerator` with `numerator / denom` can move the
+        // accepted Newton endpoint by several output tolerances.
+        let d_p_d_current = (1.0 / p_denominator) * numerator_slope
             // MutIndNonLin2 forms this quotient numerator as
             // `C*deltaM*(Manp-Mirrp)+Mirrp` (with deltaM=1 for this
             // model), rather than algebraically regrouping it as
@@ -1520,8 +1526,7 @@ impl JilesAthertonInductor {
                 0.0
             };
         let d_mirr_d_tanh = del_m / mirr_denominator;
-        let man_prime =
-            self.params.ms * (self.params.a + heo2 / root_he) / denominator.powf(2.0);
+        let man_prime = self.params.ms * (self.params.a + heo2 / root_he) / denominator.powf(2.0);
         let mirr_prime = (del_m * tanh_qv + root_m) / mirr_denominator;
         let numerator = self.params.c * man_prime + (1.0 - self.params.c) * mirr_prime;
         let d_p_d_tanh =
@@ -2204,12 +2209,7 @@ impl JilesAthertonInductor {
         turns_j: Value,
         coupling: Value,
     ) -> Value {
-        coupling
-            * 4.0e-7
-            * PI
-            * (self.params.area / self.params.length)
-            * turns_i
-            * turns_j
+        coupling * 4.0e-7 * PI * (self.params.area / self.params.length) * turns_i * turns_j
     }
 
     /// Convert aggregate ampere-turns to Xyce's applied magnetic field.
@@ -2228,6 +2228,27 @@ impl JilesAthertonInductor {
     /// Return the applied-field slope contributed by one winding current.
     pub(crate) fn xyce_core_happ_slope_for_turns(&self, turns: Value) -> Value {
         turns / self.params.length
+    }
+
+    /// Form the single-winding MutIndNonLin2 charge entry in the same
+    /// source order as Xyce's `LOI[i] += LO[i][j] * I[j]` operation.
+    pub(crate) fn xyce_core_q_from_current(&self, current: Value) -> Value {
+        self.xyce_core_vacuum_mutual_inductance(self.params.n_turns, self.params.n_turns, 1.0)
+            * current
+    }
+
+    /// Return the accepted charge-vector entry used by the transient
+    /// integrator's `qHistory[0]` subtraction.
+    pub(crate) fn xyce_core_q_history(&self) -> Value {
+        self.xyce_q_history
+    }
+
+    /// Initialize the accepted charge-vector entry from the accepted
+    /// inductor current at transient startup or a checkpoint seam.
+    pub(crate) fn initialize_xyce_core_q_history(&mut self, current: Value) {
+        if self.params.xyce_core {
+            self.xyce_q_history = self.xyce_core_q_from_current(current);
+        }
     }
 
     /// Commit an accepted transient Core solution with the actual interval
@@ -2286,6 +2307,11 @@ impl JilesAthertonInductor {
             raw_ampere_turns,
             hidden_state,
         );
+        // OneStep updates qHistory[0] only after the point is accepted.  The
+        // constitutive commit above consumes the prior accepted state, so the
+        // new vector entry is stored last and is never visible to a rejected
+        // Newton probe.
+        self.xyce_q_history = self.xyce_core_q_from_current(current);
     }
 
     /// Commit an accepted solution for a shared multi-winding Xyce Core.
@@ -2345,6 +2371,7 @@ impl JilesAthertonInductor {
         self.xyce_mag_update = 0.0;
         self.xyce_reported_magnetization = 0.0;
         self.xyce_old_branch_current_sum = 0.0;
+        self.xyce_q_history = 0.0;
         self.xyce_trial = None;
         self.xyce_accepted_mid = 1.0;
         self.xyce_dmdt_average = 0.0;

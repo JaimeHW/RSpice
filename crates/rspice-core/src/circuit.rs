@@ -294,6 +294,10 @@ pub struct XyceCoreGroupBinding {
     pub hidden_r_slot: Option<usize>,
     /// Winding branches participating in the shared DAE.
     pub windings: Vec<XyceCoreWindingBinding>,
+    /// Accepted dense `LOI` entries used as OneStep's charge history.  The
+    /// vector is parallel to `windings` and is updated only at accepted
+    /// transient endpoints.
+    pub xyce_q_history: Vec<Value>,
     /// Scalar coupling value authored on the K-card.  Xyce's level-2
     /// MutIndNonLin2 path treats this as metadata and uses the canonical
     /// unity mutual matrix; retaining it here keeps the parsed topology
@@ -479,8 +483,7 @@ pub struct CircuitData {
     #[cfg(feature = "veriloga")]
     pub(crate) veriloga_devices: crate::device::veriloga::VerilogADevices,
     #[cfg(feature = "veriloga-builtins-base")]
-    pub(crate) generated_veriloga_devices:
-        crate::device::veriloga_builtins::BuiltinVerilogADevices,
+    pub(crate) generated_veriloga_devices: crate::device::veriloga_builtins::BuiltinVerilogADevices,
     /// Solver-controlled `$simparam` environment. This is deliberately not
     /// part of nonlinear device snapshots: rollback must not change the
     /// continuation stage selected by the engine.

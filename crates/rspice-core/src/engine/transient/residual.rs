@@ -1316,9 +1316,15 @@ impl Engine {
             solution,
             dt,
             &companion_coeff,
+            ctx.xyce_one_step,
             ctx.xyce_one_step_order2,
             // Keep the Core carry advancement coupled to a refreshed
-            // candidate. Static/cached probes must remain pure.
+            // candidate. Static/cached probes must remain pure.  The transient
+            // Newton loop stamps the corrected candidate once as its RHS and
+            // then stamps that same point again to build the next Jacobian;
+            // reusing the cached endpoint for the latter is the equivalent of
+            // Xyce's loadDAEMatrices call, which does not run
+            // MutIndNonLin2::updatePrimaryState a second time.
             evaluation_mode
                 == crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited
                 && refresh_nonlinear,

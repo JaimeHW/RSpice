@@ -656,12 +656,14 @@ impl CircuitData {
             .has_xyce_core_m_equation()
             .then(|| self.allocate_hidden_state());
         let hidden_r_slot = (!device.is_xyce_core_level2()).then(|| self.allocate_hidden_state());
+        let winding_count = windings.len();
         self.xyce_core_groups.push(XyceCoreGroupBinding {
             core_output_name,
             device,
             hidden_m_slot,
             hidden_r_slot,
             windings,
+            xyce_q_history: vec![0.0; winding_count],
             coupling,
             core_bh_si_units,
         });
