@@ -1,0 +1,178 @@
+name: Publication renderer component release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-component-release
+  cancel-in-progress: false
+
+env:
+  BUILDER_IMAGE: rust:1.94.0-bookworm@sha256:365468470075493dc4583f47387001854321c5a8583ea9604b297e67f01c5a4f
+  COSIGN_VERSION: v3.1.2
+  PREDICATE_TYPE: https://rspice.app/attestations/render-component/v1
+
+jobs:
+  publish:
+    name: Build, publish, sign, and attest /rspice-publish
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Reject a mutable or drifted component source
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git status --short)" = ""
+      - name: Authenticate to the immutable component registry
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install BuildKit driver
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Install keyless signing client
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: ${{ env.COSIGN_VERSION }}
+      - name: Test and build the renderer in the runtime-matched toolchain
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --volume "$PWD:/source" \
+            --workdir /source \
+            --env CARGO_INCREMENTAL=0 \
+            --env CARGO_TERM_COLOR=always \
+            "$BUILDER_IMAGE" \
+            bash -euo pipefail -c '
+              cargo test --locked --release -p rspice-publish
+              cargo build --locked --release -p rspice-publish
+            '
+      - name: Smoke the packaged renderer contract boundary
+        run: |
+          set -euo pipefail
+          binary=target/release/rspice-publish
+          test -f "$binary"
+          "$binary" --version
+          printf 'not a sealed publication snapshot' > malformed-snapshot.json
+          status=0
+          "$binary" render --snapshot malformed-snapshot.json --out smoke-bundle || status=$?
+          test "$status" -eq 2
+          test ! -e smoke-bundle
+      - name: Resolve exact component identity and reject tag replacement
+        id: package
+        run: |
+          set -euo pipefail
+          repository="${GITHUB_REPOSITORY,,}"
+          version=$(python3 - <<'PY'
+          import tomllib
+          with open("Cargo.toml", "rb") as source:
+              print(tomllib.load(source)["workspace"]["package"]["version"])
+          PY
+          )
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9.-]+)?$ ]]
+          image="ghcr.io/${repository}/rspice-publish:${version}-${GITHUB_SHA}"
+          if docker buildx imagetools inspect "$image" >/dev/null 2>&1; then
+            echo "immutable component tag already exists: $image" >&2
+            exit 1
+          fi
+          exported_file_sha256=$(sha256sum target/release/rspice-publish | cut -d ' ' -f 1)
+          schema_version=$(sed -n 's/^pub const PUBLICATION_SNAPSHOT_SCHEMA_VERSION: u32 = \([0-9][0-9]*\);$/\1/p' \
+            crates/rspice-publication-contract/src/lib.rs)
+          [[ "$schema_version" =~ ^[1-9][0-9]{0,3}$ ]]
+          build_recipe_sha256=$(sha256sum .github/workflows/publish-component-release.yml | cut -d ' ' -f 1)
+          {
+            echo "image=$image"
+            echo "exported_file_sha256=$exported_file_sha256"
+            echo "schema_version=$schema_version"
+            echo "build_recipe_sha256=$build_recipe_sha256"
+          } >>"$GITHUB_OUTPUT"
+      - name: Stage exactly the exported renderer for the carrier image
+        run: |
+          set -euo pipefail
+          install -d component-context
+          install -m 0555 target/release/rspice-publish component-context/rspice-publish
+      - name: Build and publish the immutable component image
+        id: publish
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: component-context
+          file: tools/release/publish-component.Dockerfile
+          platforms: linux/amd64
+          build-args: |
+            RSPICE_BUILD_SHA=${{ github.sha }}
+          tags: ${{ steps.package.outputs.image }}
+          push: true
+          provenance: mode=max
+          sbom: true
+      - name: Sign the immutable component digest
+        env:
+          IMAGE: ${{ steps.package.outputs.image }}
+          DIGEST: ${{ steps.publish.outputs.digest }}
+        run: cosign sign --yes "$IMAGE@$DIGEST"
+      - name: Attest the render component contract
+        env:
+          IMAGE: ${{ steps.package.outputs.image }}
+          DIGEST: ${{ steps.publish.outputs.digest }}
+          EXPORTED_FILE_SHA256: ${{ steps.package.outputs.exported_file_sha256 }}
+          SCHEMA_VERSION: ${{ steps.package.outputs.schema_version }}
+          BUILD_RECIPE_SHA256: ${{ steps.package.outputs.build_recipe_sha256 }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg exported_file_sha256 "$EXPORTED_FILE_SHA256" \
+            --argjson schema_version "$SCHEMA_VERSION" \
+            --arg source_repository "${GITHUB_REPOSITORY,,}" \
+            --arg source_sha "$GITHUB_SHA" \
+            --arg build_recipe_sha256 "$BUILD_RECIPE_SHA256" \
+            '{format_version: 1, role: "publish", exported_path: "/rspice-publish",
+              exported_file_sha256: $exported_file_sha256,
+              contract_schema_versions: [$schema_version],
+              source_repository: $source_repository,
+              source_sha: $source_sha,
+              build_recipe_sha256: $build_recipe_sha256}' \
+            >render-component-predicate.json
+          cosign attest --yes \
+            --predicate render-component-predicate.json \
+            --type "$PREDICATE_TYPE" \
+            "$IMAGE@$DIGEST"
+      - name: Verify the published component end to end
+        env:
+          IMAGE: ${{ steps.package.outputs.image }}
+          DIGEST: ${{ steps.publish.outputs.digest }}
+          EXPORTED_FILE_SHA256: ${{ steps.package.outputs.exported_file_sha256 }}
+        run: |
+          set -euo pipefail
+          identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/publish-component-release.yml@refs/heads/main"
+          cosign verify \
+            --certificate-identity "$identity" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE@$DIGEST" >/dev/null
+          cosign verify-attestation \
+            --certificate-identity "$identity" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --type "$PREDICATE_TYPE" \
+            "$IMAGE@$DIGEST" >/dev/null
+          container_id=$(docker create "$IMAGE@$DIGEST" /rspice-publish)
+          docker cp "$container_id:/rspice-publish" exported-rspice-publish
+          docker rm "$container_id" >/dev/null
+          test "$(sha256sum exported-rspice-publish | cut -d ' ' -f 1)" = "$EXPORTED_FILE_SHA256"
+          {
+            echo '### Render component dispatcher inputs'
+            echo "- \`render_publish_image\`: \`$IMAGE@$DIGEST\`"
+            echo "- \`render_publish_sha256\`: \`$EXPORTED_FILE_SHA256\`"
+            echo "- certificate identity: \`$identity\`"
+          } >>"$GITHUB_STEP_SUMMARY"
