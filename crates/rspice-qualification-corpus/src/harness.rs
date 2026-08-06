@@ -781,6 +781,8 @@ mod tests {
         let image_at = contracts.find("\"image_reference\"").expect("image key");
         assert!(role_at < image_at, "component key order must be preserved");
 
-        std::fs::remove_dir_all(&scratch).ok();
+        if std::env::var_os("RSPICE_HARNESS_KEEP_SCRATCH").is_none() {
+            std::fs::remove_dir_all(&scratch).ok();
+        }
     }
 }
