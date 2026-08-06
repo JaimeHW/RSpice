@@ -448,6 +448,7 @@ impl Command {
                 | Self::ImportResultDataset
                 | Self::ExportSchematicSvg
                 | Self::ExportWaveformsCsv
+                | Self::ExportPublicationSnapshot
                 | Self::ExportNetlist(_)
                 | Self::PageSetup
                 | Self::SheetFormatManager

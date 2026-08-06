@@ -729,10 +729,18 @@ impl HardcopyScene {
         Ok(())
     }
 
+    /// The flat painter's-order primitive list. The publication snapshot
+    /// builder converts this directly; render backends keep using the
+    /// page-sliced views.
     #[must_use]
-    #[cfg(test)]
-    pub fn primitives(&self) -> &[ScenePrimitive] {
+    pub(crate) fn primitives(&self) -> &[ScenePrimitive] {
         &self.primitives
+    }
+
+    /// The authenticated physical extent of the compiled scene.
+    #[must_use]
+    pub(crate) fn extent(&self) -> ContentExtent {
+        self.extent
     }
 }
 

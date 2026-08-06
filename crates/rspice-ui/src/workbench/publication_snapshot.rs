@@ -1,0 +1,1033 @@
+//! Publication snapshot builder.
+//!
+//! Resolves the open project into the sealed interchange format defined by
+//! `rspice-publication-contract`: every printable schematic sheet and result
+//! plot becomes a resolved display-list scene via the same semantic-resolution
+//! and scene-compilation pipeline hardcopy uses, and the active run's
+//! datasets, measurements, and deck become exact typed records. The builder
+//! never renders, never consults a clock, and never invents content — what it
+//! cannot faithfully capture it reports as an error instead of approximating.
+
+use rspice_publication_contract::{
+    AnalysisRecord, Dataset, Disclosure, Figure, FigureContent, Measurement, NetlistSection, Paint,
+    PaintRole, PathPrimitive, PathSegment, PlotFigure, Point, Primitive, PrimitiveGroup,
+    PublicationMetadata, PublicationSnapshot, ResultsSection, Scene, SchematicSection, SheetScene,
+    Stroke, StrokePattern, SweepAxis, TextAnchor, TextFont, TextPrimitive, Trace, TraceValues,
+    Validate as _,
+};
+
+use crate::hardcopy::HardcopyScope;
+use crate::quantity::engineering::format_engineering_value;
+use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SpecEntry};
+use crate::workbench::app_state::AppState;
+use crate::workbench::hardcopy_adapters::render::{
+    HardcopyScene, HardcopySceneMetadata, SceneFill, SceneFont, ScenePoint, ScenePrimitive,
+    SceneTextRotation, SemanticColor, StrokePattern as SceneStrokePattern, StrokeStyle,
+    TextAnchor as SceneTextAnchor, scene_from_resolved,
+};
+use crate::workbench::hardcopy_adapters::sources::{
+    HardcopySemanticDocument, enumerate_retained_hardcopy_sources,
+    prepare_retained_hardcopy_resolution,
+};
+
+/// Everything the caller decides about the publication; the builder derives
+/// the rest from project state. `created_utc` is supplied here so the
+/// builder itself stays clock-free and deterministic.
+#[derive(Debug, Clone)]
+pub(crate) struct PublicationDraft {
+    pub title: String,
+    pub description: String,
+    pub author_display: String,
+    pub created_utc: String,
+}
+
+/// Why a snapshot could not be built. Every variant names the boundary that
+/// refused, so the publish surface can show an actionable message.
+#[derive(Debug)]
+pub(crate) enum PublicationBuildError {
+    /// A printable source failed hardcopy resolution.
+    SourceResolution { source: String, reason: String },
+    /// Scene compilation failed for a resolved source.
+    SceneCompilation { source: String, reason: String },
+    /// The scene contains a primitive publication cannot carry yet.
+    UnsupportedPrimitive {
+        source: String,
+        primitive: &'static str,
+    },
+    /// A scene coordinate left the contract's integral range.
+    CoordinateRange { source: String },
+    /// A result trace carries a non-finite sample.
+    NonFiniteSample { trace: String },
+    /// The assembled snapshot failed contract validation.
+    Contract(rspice_publication_contract::ContractError),
+    /// Nothing publishable exists: no scenes, no results, no deck.
+    NothingToPublish,
+}
+
+impl std::fmt::Display for PublicationBuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SourceResolution { source, reason } => {
+                write!(f, "cannot resolve {source}: {reason}")
+            }
+            Self::SceneCompilation { source, reason } => {
+                write!(f, "cannot compile a scene for {source}: {reason}")
+            }
+            Self::UnsupportedPrimitive { source, primitive } => {
+                write!(
+                    f,
+                    "{source} uses {primitive}, which publication does not carry yet"
+                )
+            }
+            Self::CoordinateRange { source } => {
+                write!(f, "{source} has coordinates outside the publishable range")
+            }
+            Self::NonFiniteSample { trace } => {
+                write!(f, "trace {trace} carries a non-finite sample")
+            }
+            Self::Contract(error) => write!(f, "snapshot rejected by the contract: {error}"),
+            Self::NothingToPublish => {
+                write!(
+                    f,
+                    "the project has no schematic, results, or netlist to publish"
+                )
+            }
+        }
+    }
+}
+
+/// Build a complete, validated publication snapshot from the open project:
+/// every currently printable schematic sheet and plot pane, plus the active
+/// run's analyses, datasets, and measurements, plus the effective deck.
+pub(crate) fn build_publication_snapshot(
+    state: &AppState,
+    draft: &PublicationDraft,
+) -> Result<PublicationSnapshot, PublicationBuildError> {
+    let (sheets, plot_figures) = collect_scenes(state)?;
+    let netlist = effective_deck(state);
+    let results = results_section(state.simulation.active_run(), active_specs(state))?;
+
+    if sheets.is_empty() && plot_figures.is_empty() && netlist.is_none() && results.is_none() {
+        return Err(PublicationBuildError::NothingToPublish);
+    }
+
+    let mut figures = Vec::new();
+    let mut next_figure_id = 1_u64;
+    for (index, sheet) in sheets.iter().enumerate() {
+        figures.push(Figure {
+            id: next_figure_id,
+            title: sheet.name.clone(),
+            content: FigureContent::SchematicSheet {
+                sheet_index: index as u32,
+            },
+        });
+        next_figure_id += 1;
+    }
+    for (title, scene) in plot_figures {
+        figures.push(Figure {
+            id: next_figure_id,
+            title,
+            content: FigureContent::Plot(PlotFigure {
+                scene,
+                hydration: None,
+            }),
+        });
+        next_figure_id += 1;
+    }
+
+    let snapshot = PublicationSnapshot {
+        schema_version: rspice_publication_contract::PUBLICATION_SNAPSHOT_SCHEMA_VERSION,
+        metadata: PublicationMetadata {
+            title: draft.title.clone(),
+            description: draft.description.clone(),
+            author_display: draft.author_display.clone(),
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
+            created_utc: draft.created_utc.clone(),
+        },
+        disclosure: Disclosure {
+            schematic: !sheets.is_empty(),
+            netlist: netlist.is_some(),
+            results: results.is_some(),
+            archive: false,
+        },
+        schematic: if sheets.is_empty() {
+            None
+        } else {
+            Some(SchematicSection { sheets })
+        },
+        netlist,
+        results,
+        figures,
+    };
+    snapshot
+        .validate()
+        .map_err(PublicationBuildError::Contract)?;
+    Ok(snapshot)
+}
+
+// ---------------------------------------------------------------------------
+// Scenes
+// ---------------------------------------------------------------------------
+
+/// Resolve every printable schematic sheet and plot pane through the
+/// hardcopy source registry, one source at a time so no aggregate clipping
+/// is ever involved, and compile each into a contract scene.
+fn collect_scenes(
+    state: &AppState,
+) -> Result<(Vec<SheetScene>, Vec<(String, Scene)>), PublicationBuildError> {
+    let mut sheets = Vec::new();
+    let mut plots = Vec::new();
+    for descriptor in enumerate_retained_hardcopy_sources(state) {
+        let scope = if descriptor
+            .allowed_scopes
+            .contains(&HardcopyScope::CurrentSheet)
+        {
+            HardcopyScope::CurrentSheet
+        } else if descriptor
+            .allowed_scopes
+            .contains(&HardcopyScope::ActivePlotDocument)
+        {
+            HardcopyScope::ActivePlotDocument
+        } else {
+            continue;
+        };
+        let prepared =
+            match prepare_retained_hardcopy_resolution(state, &descriptor.source_key, scope) {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    return Err(PublicationBuildError::SourceResolution {
+                        source: descriptor.display_name.clone(),
+                        reason: error.to_string(),
+                    });
+                }
+            };
+        let resolved =
+            prepared
+                .resolve_owned()
+                .map_err(|error| PublicationBuildError::SourceResolution {
+                    source: descriptor.display_name.clone(),
+                    reason: error.to_string(),
+                })?;
+
+        let is_schematic = matches!(
+            resolved.semantic_document(),
+            HardcopySemanticDocument::Schematic(_)
+        );
+        let is_plot = matches!(
+            resolved.semantic_document(),
+            HardcopySemanticDocument::Plot(_)
+        );
+        if !is_schematic && !is_plot {
+            continue;
+        }
+
+        let metadata = HardcopySceneMetadata::try_new(descriptor.display_name.clone(), "RSpice")
+            .map_err(|error| PublicationBuildError::SceneCompilation {
+                source: descriptor.display_name.clone(),
+                reason: error.to_string(),
+            })?;
+        let setup = publication_schematic_setup();
+        let scene =
+            scene_from_resolved(&resolved, resolved.default_print_mapping(), setup, metadata)
+                .map_err(|error| PublicationBuildError::SceneCompilation {
+                    source: descriptor.display_name.clone(),
+                    reason: error.to_string(),
+                })?;
+        let converted = convert_scene(&scene, &descriptor.display_name)?;
+        if is_schematic {
+            sheets.push(SheetScene {
+                name: descriptor.display_name.clone(),
+                page_label: None,
+                scene: converted,
+            });
+        } else {
+            plots.push((descriptor.display_name.clone(), converted));
+        }
+    }
+    Ok((sheets, plots))
+}
+
+/// Publication compiles headlessly, so the interactive `Ask` overflow policy
+/// is replaced with `ExtendOutput`: everything the author drew is retained
+/// and the sheet extent grows if content sits outside it. Crop marks and the
+/// editing grid are print apparatus and stay off.
+fn publication_schematic_setup() -> crate::hardcopy::SchematicHardcopySetup {
+    crate::hardcopy::SchematicHardcopySetup::new(
+        crate::hardcopy::SchematicHardcopyExtent::AuthoredDrawingSheet,
+        crate::hardcopy::OutsideSheetContentPolicy::ExtendOutput,
+        false,
+        true,
+        true,
+        true,
+        true,
+        false,
+    )
+}
+
+fn point(value: ScenePoint, source: &str) -> Result<Point, PublicationBuildError> {
+    let range = |_| PublicationBuildError::CoordinateRange {
+        source: source.to_string(),
+    };
+    Ok(Point {
+        x_um: i64::try_from(value.x.micrometres()).map_err(range)?,
+        y_um: i64::try_from(value.y.micrometres()).map_err(range)?,
+    })
+}
+
+fn paint(color: SemanticColor) -> Paint {
+    match color {
+        SemanticColor::Foreground => Paint::Role(PaintRole::Foreground),
+        SemanticColor::Secondary => Paint::Role(PaintRole::Secondary),
+        SemanticColor::Grid => Paint::Role(PaintRole::Grid),
+        SemanticColor::Accent => Paint::Role(PaintRole::Accent),
+        SemanticColor::Warning => Paint::Role(PaintRole::Warning),
+        SemanticColor::Success => Paint::Role(PaintRole::Success),
+        SemanticColor::Trace(index) => Paint::Role(PaintRole::TraceSeries((index % 256) as u8)),
+        SemanticColor::Exact(rgb) => Paint::Rgba([rgb.red, rgb.green, rgb.blue, 255]),
+    }
+}
+
+fn stroke(style: &StrokeStyle) -> Stroke {
+    Stroke {
+        width_um: style.width.micrometres(),
+        paint: paint(style.color),
+        pattern: match style.pattern {
+            SceneStrokePattern::Solid => StrokePattern::Solid,
+            SceneStrokePattern::Dashed => StrokePattern::Dashed,
+            SceneStrokePattern::Dotted => StrokePattern::Dotted,
+            SceneStrokePattern::DashDot => StrokePattern::DashDot,
+        },
+    }
+}
+
+fn fill(value: &SceneFill) -> Paint {
+    match value {
+        SceneFill::Solid { color } => paint(*color),
+        // Cross-hatch is a print-redundancy affordance; the color page
+        // carries the same information as a solid fill of the mapped color.
+        SceneFill::CrossHatch { color, .. } => paint(*color),
+    }
+}
+
+fn convert_primitive(
+    primitive: &ScenePrimitive,
+    source: &str,
+    out: &mut Vec<Primitive>,
+) -> Result<(), PublicationBuildError> {
+    match primitive {
+        ScenePrimitive::Line {
+            from,
+            to,
+            stroke: style,
+        } => out.push(Primitive::Path(PathPrimitive {
+            segments: vec![
+                PathSegment::MoveTo {
+                    to: point(*from, source)?,
+                },
+                PathSegment::LineTo {
+                    to: point(*to, source)?,
+                },
+            ],
+            stroke: Some(stroke(style)),
+            fill: None,
+        })),
+        ScenePrimitive::Polyline {
+            points,
+            closed,
+            stroke: style,
+            fill: fill_style,
+        } => {
+            let mut segments = Vec::with_capacity(points.len() + usize::from(*closed));
+            for (index, vertex) in points.iter().enumerate() {
+                let to = point(*vertex, source)?;
+                segments.push(if index == 0 {
+                    PathSegment::MoveTo { to }
+                } else {
+                    PathSegment::LineTo { to }
+                });
+            }
+            if *closed {
+                segments.push(PathSegment::Close);
+            }
+            out.push(Primitive::Path(PathPrimitive {
+                segments,
+                stroke: Some(stroke(style)),
+                fill: fill_style.as_ref().map(fill),
+            }));
+        }
+        ScenePrimitive::Rect {
+            rect,
+            stroke: style,
+            fill: fill_style,
+        } => {
+            let x = i64::try_from(rect.x.micrometres());
+            let y = i64::try_from(rect.y.micrometres());
+            let width = i64::try_from(rect.width.micrometres());
+            let height = i64::try_from(rect.height.micrometres());
+            let (Ok(x), Ok(y), Ok(width), Ok(height)) = (x, y, width, height) else {
+                return Err(PublicationBuildError::CoordinateRange {
+                    source: source.to_string(),
+                });
+            };
+            out.push(Primitive::Path(PathPrimitive {
+                segments: vec![
+                    PathSegment::MoveTo {
+                        to: Point { x_um: x, y_um: y },
+                    },
+                    PathSegment::LineTo {
+                        to: Point {
+                            x_um: x + width,
+                            y_um: y,
+                        },
+                    },
+                    PathSegment::LineTo {
+                        to: Point {
+                            x_um: x + width,
+                            y_um: y + height,
+                        },
+                    },
+                    PathSegment::LineTo {
+                        to: Point {
+                            x_um: x,
+                            y_um: y + height,
+                        },
+                    },
+                    PathSegment::Close,
+                ],
+                stroke: style.as_ref().map(stroke),
+                fill: fill_style.as_ref().map(fill),
+            }));
+        }
+        ScenePrimitive::Circle {
+            center,
+            radius,
+            stroke: style,
+            fill: fill_style,
+        } => out.push(Primitive::Path(PathPrimitive {
+            segments: vec![PathSegment::Arc {
+                center: point(*center, source)?,
+                radius_um: radius.micrometres(),
+                start_millideg: 0,
+                sweep_millideg: 360_000,
+            }],
+            stroke: style.as_ref().map(stroke),
+            fill: fill_style.as_ref().map(fill),
+        })),
+        ScenePrimitive::Text {
+            origin,
+            text,
+            font,
+            size,
+            color,
+            anchor,
+            rotation,
+        } => out.push(Primitive::Text(TextPrimitive {
+            origin: point(*origin, source)?,
+            text: text.clone(),
+            height_um: size.micrometres(),
+            font: match font {
+                SceneFont::Sans => TextFont::Sans,
+                SceneFont::SansSemibold => TextFont::SansSemibold,
+                SceneFont::Monospace => TextFont::Monospace,
+            },
+            anchor: match anchor {
+                SceneTextAnchor::Start => TextAnchor::Start,
+                SceneTextAnchor::Middle => TextAnchor::Middle,
+                SceneTextAnchor::End => TextAnchor::End,
+            },
+            rotation_millideg: match rotation {
+                SceneTextRotation::Upright => 0,
+                SceneTextRotation::Clockwise90 => -90_000,
+                SceneTextRotation::CounterClockwise90 => 90_000,
+            },
+            paint: paint(*color),
+        })),
+        ScenePrimitive::RasterImage { .. } => {
+            return Err(PublicationBuildError::UnsupportedPrimitive {
+                source: source.to_string(),
+                primitive: "an embedded raster image",
+            });
+        }
+        ScenePrimitive::ClippedGroup { .. } => {
+            return Err(PublicationBuildError::UnsupportedPrimitive {
+                source: source.to_string(),
+                primitive: "a clipped composite group",
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Convert one compiled hardcopy scene into a contract scene. The compiled
+/// scene is a flat painter's-order list, so the result is a single untagged
+/// group; semantic hover tags arrive when compilation grows group identity.
+fn convert_scene(scene: &HardcopyScene, source: &str) -> Result<Scene, PublicationBuildError> {
+    let mut primitives = Vec::with_capacity(scene.primitives().len());
+    for primitive in scene.primitives() {
+        convert_primitive(primitive, source, &mut primitives)?;
+    }
+    Ok(Scene {
+        width_um: scene.extent().width().micrometres(),
+        height_um: scene.extent().height().micrometres(),
+        groups: vec![PrimitiveGroup {
+            tag: None,
+            primitives,
+        }],
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Results
+// ---------------------------------------------------------------------------
+
+fn active_specs(state: &AppState) -> &[SpecEntry] {
+    state
+        .sim_setup
+        .analysis_plan
+        .as_ref()
+        .map(|plan| state.workspace.active_specs(plan.id()))
+        .unwrap_or(&[])
+}
+
+/// The sweep-axis identity the results views derive for each analysis kind.
+fn sweep_axis_identity(analysis_type: AnalysisType) -> (&'static str, &'static str) {
+    match analysis_type {
+        AnalysisType::Ac | AnalysisType::Noise | AnalysisType::Pnoise => ("frequency", "Hz"),
+        AnalysisType::Transient => ("time", "s"),
+        AnalysisType::DcSweep => ("v-sweep", "V"),
+        _ => ("x", ""),
+    }
+}
+
+/// The unit convention results views derive from a trace name.
+fn trace_unit(name: &str) -> &'static str {
+    let lower = name.to_ascii_lowercase();
+    if lower.starts_with("i(") {
+        "A"
+    } else if lower.starts_with("v(") {
+        "V"
+    } else if lower.starts_with("p(") {
+        "W"
+    } else {
+        ""
+    }
+}
+
+fn bits_of(values: &[f64], trace: &str) -> Result<Vec<u64>, PublicationBuildError> {
+    if values.iter().any(|value| !value.is_finite()) {
+        return Err(PublicationBuildError::NonFiniteSample {
+            trace: trace.to_string(),
+        });
+    }
+    Ok(values.iter().map(|value| value.to_bits()).collect())
+}
+
+fn results_section(
+    run: Option<&SimulationRun>,
+    specs: &[SpecEntry],
+) -> Result<Option<ResultsSection>, PublicationBuildError> {
+    let Some(run) = run else {
+        return Ok(None);
+    };
+    let mut analyses = Vec::new();
+    let mut datasets = Vec::new();
+    let mut measurements = Vec::new();
+    let mut next_dataset_id = 1_u64;
+
+    for (index, analysis) in run.analyses.iter().enumerate() {
+        if !analysis.success {
+            continue;
+        }
+        let analysis_id = index as u64 + 1;
+        analyses.push(AnalysisRecord {
+            id: analysis_id,
+            label: analysis.label.clone(),
+            card: analysis.analysis_type.spice_command().to_string(),
+        });
+
+        datasets.append(&mut analysis_datasets(
+            analysis,
+            analysis_id,
+            &mut next_dataset_id,
+        )?);
+
+        for measure in &analysis.measurements {
+            let spec = specs
+                .iter()
+                .find(|entry| entry.measurement.eq_ignore_ascii_case(&measure.name));
+            measurements.push(publication_measurement(measure, spec, analysis_id));
+        }
+    }
+
+    if analyses.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(ResultsSection {
+        analyses,
+        datasets,
+        measurements,
+    }))
+}
+
+/// Group one analysis's waveforms into rectangular datasets by identical
+/// sweep vectors, preserving encounter order.
+fn analysis_datasets(
+    analysis: &AnalysisResult,
+    analysis_id: u64,
+    next_dataset_id: &mut u64,
+) -> Result<Vec<Dataset>, PublicationBuildError> {
+    let (sweep_label, sweep_unit) = sweep_axis_identity(analysis.analysis_type);
+    let mut datasets: Vec<Dataset> = Vec::new();
+    let mut sweep_keys: Vec<Vec<u64>> = Vec::new();
+
+    for waveform in &analysis.waveforms {
+        if waveform.x.is_empty() || waveform.y.len() != waveform.x.len() {
+            continue;
+        }
+        let sweep_bits = bits_of(&waveform.x, &waveform.name)?;
+        let values = match &waveform.complex {
+            Some(components) if components.real.len() == waveform.x.len() => TraceValues::Complex {
+                real_bits: bits_of(&components.real, &waveform.name)?,
+                imaginary_bits: bits_of(&components.imag, &waveform.name)?,
+            },
+            _ => TraceValues::Real {
+                bits: bits_of(&waveform.y, &waveform.name)?,
+            },
+        };
+        let trace = Trace {
+            label: waveform.name.clone(),
+            unit: trace_unit(&waveform.name).to_string(),
+            values,
+        };
+
+        if let Some(position) = sweep_keys.iter().position(|key| *key == sweep_bits) {
+            datasets[position].traces.push(trace);
+        } else {
+            datasets.push(Dataset {
+                id: *next_dataset_id,
+                analysis_id,
+                name: analysis.label.clone(),
+                variant: if sweep_keys.is_empty() {
+                    None
+                } else {
+                    Some(format!("series {}", sweep_keys.len() + 1))
+                },
+                sweep: SweepAxis {
+                    label: sweep_label.to_string(),
+                    unit: sweep_unit.to_string(),
+                    values_bits: sweep_bits.clone(),
+                },
+                traces: vec![trace],
+            });
+            sweep_keys.push(sweep_bits);
+            *next_dataset_id += 1;
+        }
+    }
+    Ok(datasets)
+}
+
+fn publication_measurement(
+    measure: &rspice_core::MeasureResult,
+    spec: Option<&SpecEntry>,
+    analysis_id: u64,
+) -> Measurement {
+    let display = match measure.value {
+        Some(value) => {
+            let formatted = format_engineering_value(value);
+            match spec {
+                Some(entry) if !entry.unit.trim().is_empty() => {
+                    format!("{formatted} {}", entry.unit.trim())
+                }
+                _ => formatted,
+            }
+        }
+        None => "not computed".to_string(),
+    };
+    let spec_display = spec.and_then(|entry| {
+        let unit = if entry.unit.trim().is_empty() {
+            String::new()
+        } else {
+            format!(" {}", entry.unit.trim())
+        };
+        match (entry.min, entry.max) {
+            (Some(min), Some(max)) => Some(format!(
+                "{}–{}{unit}",
+                format_engineering_value(min),
+                format_engineering_value(max)
+            )),
+            (Some(min), None) => Some(format!("≥ {}{unit}", format_engineering_value(min))),
+            (None, Some(max)) => Some(format!("≤ {}{unit}", format_engineering_value(max))),
+            (None, None) => None,
+        }
+    });
+    let passed = match (spec, measure.value) {
+        (Some(entry), Some(value)) => Some(entry.passes(value)),
+        (Some(_), None) => Some(false),
+        (None, _) if measure.expected.is_some() => Some(measure.passed),
+        _ => None,
+    };
+    Measurement {
+        analysis_id,
+        name: measure.name.clone(),
+        value_bits: measure
+            .value
+            .filter(|value| value.is_finite())
+            .map(f64::to_bits),
+        display,
+        spec_display,
+        passed,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Netlist
+// ---------------------------------------------------------------------------
+
+/// The deck the publication carries: the exact buffer from the last
+/// completed manual-deck run when one exists, otherwise the same effective
+/// source the run gate would execute. Line endings are normalized to the
+/// contract's canonical form.
+fn effective_deck(state: &AppState) -> Option<NetlistSection> {
+    let raw = state
+        .ui
+        .netlist
+        .last_run_buffer
+        .as_deref()
+        .or(state.workspace.netlist_source.as_deref())
+        .filter(|deck| !deck.trim().is_empty())
+        .or_else(|| {
+            let live = state.simulation.netlist_content.as_str();
+            (!live.trim().is_empty()).then_some(live)
+        })?;
+    let deck = raw.replace("\r\n", "\n").replace('\r', "\n");
+    Some(NetlistSection { deck })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hardcopy::{ContentExtent, Length};
+    use crate::state::WaveformData;
+    use crate::workbench::hardcopy_adapters::render::{ScenePrimitive, SceneRect};
+    use std::sync::Arc;
+
+    fn scene_point(x_um: u64, y_um: u64) -> ScenePoint {
+        ScenePoint {
+            x: Length::from_micrometres(x_um),
+            y: Length::from_micrometres(y_um),
+        }
+    }
+
+    fn test_scene(primitives: Vec<ScenePrimitive>) -> HardcopyScene {
+        let extent = ContentExtent::try_new(
+            Length::from_micrometres(100_000),
+            Length::from_micrometres(80_000),
+        )
+        .expect("extent");
+        let metadata = HardcopySceneMetadata::try_new("Test scene", "RSpice").expect("metadata");
+        HardcopyScene::try_new(extent, metadata, primitives, Vec::new()).expect("scene")
+    }
+
+    #[test]
+    fn scene_conversion_covers_every_supported_primitive() {
+        let stroke_style = |color| {
+            StrokeStyle::try_new(
+                color,
+                Length::from_micrometres(250),
+                SceneStrokePattern::Solid,
+                None,
+            )
+            .expect("stroke")
+        };
+        let scene = test_scene(vec![
+            ScenePrimitive::Line {
+                from: scene_point(1_000, 1_000),
+                to: scene_point(9_000, 1_000),
+                stroke: stroke_style(SemanticColor::Foreground),
+            },
+            ScenePrimitive::Polyline {
+                points: vec![
+                    scene_point(2_000, 2_000),
+                    scene_point(6_000, 2_000),
+                    scene_point(6_000, 6_000),
+                ],
+                closed: true,
+                stroke: stroke_style(SemanticColor::Secondary),
+                fill: Some(SceneFill::Solid {
+                    color: SemanticColor::Accent,
+                }),
+            },
+            ScenePrimitive::Rect {
+                rect: SceneRect {
+                    x: Length::from_micrometres(10_000),
+                    y: Length::from_micrometres(10_000),
+                    width: Length::from_micrometres(5_000),
+                    height: Length::from_micrometres(4_000),
+                },
+                stroke: Some(stroke_style(SemanticColor::Grid)),
+                fill: None,
+            },
+            ScenePrimitive::Circle {
+                center: scene_point(30_000, 30_000),
+                radius: Length::from_micrometres(2_000),
+                stroke: Some(stroke_style(SemanticColor::Trace(3))),
+                fill: None,
+            },
+            ScenePrimitive::Text {
+                origin: scene_point(40_000, 40_000),
+                text: "V(out)".to_string(),
+                font: SceneFont::SansSemibold,
+                size: Length::from_micrometres(2_800),
+                color: SemanticColor::Secondary,
+                anchor: SceneTextAnchor::Middle,
+                rotation: SceneTextRotation::Clockwise90,
+            },
+        ]);
+
+        let converted = convert_scene(&scene, "test").expect("conversion");
+        assert_eq!(converted.width_um, 100_000);
+        assert_eq!(converted.height_um, 80_000);
+        assert_eq!(converted.groups.len(), 1);
+        let primitives = &converted.groups[0].primitives;
+        assert_eq!(primitives.len(), 5);
+
+        let Primitive::Path(line) = &primitives[0] else {
+            panic!("line converts to a path");
+        };
+        assert_eq!(line.segments.len(), 2);
+
+        let Primitive::Path(polygon) = &primitives[1] else {
+            panic!("polyline converts to a path");
+        };
+        assert!(matches!(polygon.segments.last(), Some(PathSegment::Close)));
+        assert_eq!(polygon.fill, Some(Paint::Role(PaintRole::Accent)));
+
+        let Primitive::Path(rect) = &primitives[2] else {
+            panic!("rect converts to a path");
+        };
+        assert_eq!(rect.segments.len(), 5);
+
+        let Primitive::Path(circle) = &primitives[3] else {
+            panic!("circle converts to a path");
+        };
+        assert!(matches!(
+            circle.segments.as_slice(),
+            [PathSegment::Arc {
+                radius_um: 2_000,
+                sweep_millideg: 360_000,
+                ..
+            }]
+        ));
+        assert_eq!(
+            circle.stroke.as_ref().map(|s| s.paint),
+            Some(Paint::Role(PaintRole::TraceSeries(3)))
+        );
+
+        let Primitive::Text(text) = &primitives[4] else {
+            panic!("text converts to text");
+        };
+        assert_eq!(text.font, TextFont::SansSemibold);
+        assert_eq!(text.anchor, TextAnchor::Middle);
+        assert_eq!(text.rotation_millideg, -90_000);
+        assert_eq!(text.paint, Paint::Role(PaintRole::Secondary));
+    }
+
+    #[test]
+    fn unsupported_primitives_are_refused() {
+        let mut out = Vec::new();
+        let clipped = ScenePrimitive::ClippedGroup {
+            source_origin: scene_point(0, 0),
+            destination_origin: scene_point(0, 0),
+            clip_extent: ContentExtent::try_new(
+                Length::from_micrometres(1_000),
+                Length::from_micrometres(1_000),
+            )
+            .expect("extent"),
+            source_extent: ContentExtent::try_new(
+                Length::from_micrometres(1_000),
+                Length::from_micrometres(1_000),
+            )
+            .expect("extent"),
+            primitives: Vec::new(),
+        };
+        assert!(matches!(
+            convert_primitive(&clipped, "test", &mut out),
+            Err(PublicationBuildError::UnsupportedPrimitive { .. })
+        ));
+    }
+
+    fn waveform(name: &str, x: &[f64], y: &[f64]) -> WaveformData {
+        WaveformData {
+            name: name.to_string(),
+            x: Arc::new(x.to_vec()),
+            y: Arc::new(y.to_vec()),
+            color: "#000000".to_string(),
+            complex: None,
+            visible: true,
+            display_cache: None,
+        }
+    }
+
+    fn analysis(label: &str, waveforms: Vec<WaveformData>) -> AnalysisResult {
+        AnalysisResult {
+            id: 1,
+            analysis_type: AnalysisType::Transient,
+            label: label.to_string(),
+            timestamp: 0.0,
+            waveforms,
+            dc_op: None,
+            device_op: None,
+            noise_summary: None,
+            family_metadata: None,
+            result_payload: None,
+            measurements: Vec::new(),
+            saved_output_receipts: Vec::new(),
+            success: true,
+            error_message: None,
+            provenance: None,
+        }
+    }
+
+    #[test]
+    fn waveforms_group_into_datasets_by_identical_sweeps() {
+        let shared = analysis(
+            "Transient",
+            vec![
+                waveform("V(out)", &[0.0, 1.0, 2.0], &[0.0, 0.5, 0.8]),
+                waveform("I(R1)", &[0.0, 1.0, 2.0], &[0.0, 0.1, 0.2]),
+                waveform("V(mid)", &[0.0, 0.5], &[0.0, 0.3]),
+            ],
+        );
+        let mut next_id = 1;
+        let datasets = analysis_datasets(&shared, 1, &mut next_id).expect("datasets");
+        assert_eq!(datasets.len(), 2, "two distinct sweeps");
+        assert_eq!(
+            datasets[0].traces.len(),
+            2,
+            "shared sweep carries both traces"
+        );
+        assert_eq!(datasets[0].traces[0].unit, "V");
+        assert_eq!(datasets[0].traces[1].unit, "A");
+        assert_eq!(datasets[0].variant, None);
+        assert_eq!(datasets[1].variant.as_deref(), Some("series 2"));
+        assert_eq!(datasets[0].sweep.label, "time");
+        assert_eq!(datasets[0].sweep.unit, "s");
+    }
+
+    #[test]
+    fn non_finite_samples_are_refused() {
+        let bad = analysis(
+            "Transient",
+            vec![waveform("V(out)", &[0.0, 1.0], &[0.0, f64::NAN])],
+        );
+        let mut next_id = 1;
+        assert!(matches!(
+            analysis_datasets(&bad, 1, &mut next_id),
+            Err(PublicationBuildError::NonFiniteSample { .. })
+        ));
+    }
+
+    #[test]
+    fn measurements_join_specs_case_insensitively() {
+        let measure = rspice_core::MeasureResult {
+            name: "Rise_Time".to_string(),
+            value: Some(2.2e-3),
+            error: None,
+            passed: true,
+            expected: None,
+            tolerance: None,
+            event_axis: None,
+        };
+        let spec = SpecEntry {
+            measurement: "rise_time".to_string(),
+            expression: String::new(),
+            min: None,
+            max: Some(2.5e-3),
+            unit: "s".to_string(),
+        };
+        let published = publication_measurement(&measure, Some(&spec), 1);
+        assert_eq!(published.passed, Some(true));
+        assert!(
+            published
+                .spec_display
+                .as_deref()
+                .is_some_and(|s| s.starts_with('\u{2264}'))
+        );
+        assert!(published.value_bits.is_some());
+
+        let unspecified = publication_measurement(&measure, None, 1);
+        assert_eq!(unspecified.passed, None);
+        assert_eq!(unspecified.spec_display, None);
+    }
+
+    #[test]
+    fn deck_line_endings_normalize_to_canonical_form() {
+        let mut state = AppState::default();
+        state.simulation.netlist_content = "* RSpice Netlist\r\nR1 a b 1k\r\n.end".to_string();
+        let deck = effective_deck(&state).expect("deck").deck;
+        assert!(!deck.contains('\r'));
+        assert_eq!(deck.lines().count(), 3);
+    }
+
+    #[test]
+    fn empty_projects_report_nothing_to_publish() {
+        let state = AppState::default();
+        assert!(matches!(
+            build_publication_snapshot(
+                &state,
+                &PublicationDraft {
+                    title: "Empty".to_string(),
+                    description: String::new(),
+                    author_display: "Test".to_string(),
+                    created_utc: "2026-08-06T00:00:00Z".to_string(),
+                }
+            ),
+            Err(PublicationBuildError::NothingToPublish)
+        ));
+    }
+
+    #[test]
+    fn run_results_and_deck_build_a_valid_snapshot() {
+        let mut state = AppState::default();
+        state.simulation.netlist_content = "* RSpice Netlist\nR1 in out 1k\n.end".to_string();
+        let mut run = crate::state::SimulationRun::new(1);
+        run.analyses.push({
+            let mut result = analysis(
+                "Transient",
+                vec![waveform("V(out)", &[0.0, 1.0, 2.0], &[0.0, 0.5, 0.8])],
+            );
+            result.measurements.push(rspice_core::MeasureResult {
+                name: "final".to_string(),
+                value: Some(0.8),
+                error: None,
+                passed: true,
+                expected: None,
+                tolerance: None,
+                event_axis: None,
+            });
+            result
+        });
+        run.success = true;
+        state.simulation.runs.push(run);
+        state.simulation.active_run_idx = Some(0);
+
+        let snapshot = build_publication_snapshot(
+            &state,
+            &PublicationDraft {
+                title: "RC deck".to_string(),
+                description: String::new(),
+                author_display: "Test".to_string(),
+                created_utc: "2026-08-06T00:00:00Z".to_string(),
+            },
+        )
+        .expect("snapshot builds");
+        assert!(snapshot.netlist.is_some());
+        let results = snapshot.results.as_ref().expect("results");
+        assert_eq!(results.analyses.len(), 1);
+        assert_eq!(results.datasets.len(), 1);
+        assert_eq!(results.measurements.len(), 1);
+        assert!(snapshot.disclosure.netlist);
+        assert!(snapshot.disclosure.results);
+        assert!(!snapshot.disclosure.schematic);
+    }
+}

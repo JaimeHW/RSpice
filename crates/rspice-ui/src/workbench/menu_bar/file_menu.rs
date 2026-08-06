@@ -22,6 +22,7 @@ pub(crate) enum FileMenuAction {
     ImportNetlist,
     ExportSvg,
     ExportCsvWaveforms,
+    ExportPublicationSnapshot,
     ImportVerilogA,
     Exit,
 }
@@ -102,6 +103,12 @@ pub(crate) fn dispatch_file_menu_action(
         }
         FileMenuAction::ExportCsvWaveforms => {
             super::waveform_export::action_export_csv_with_io(state, export_workflow_io)
+        }
+        FileMenuAction::ExportPublicationSnapshot => {
+            super::export_actions::action_export_publication_snapshot_with_io(
+                state,
+                export_workflow_io,
+            )
         }
         FileMenuAction::ImportVerilogA => {
             state.workbench.workspace = crate::workbench::state::Workspace::Netlist;

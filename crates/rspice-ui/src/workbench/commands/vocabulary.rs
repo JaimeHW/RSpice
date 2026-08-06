@@ -65,6 +65,7 @@ pub enum Command {
     ImportResultDataset,
     ExportSchematicSvg,
     ExportWaveformsCsv,
+    ExportPublicationSnapshot,
     ExportNetlist(crate::io::NetlistFormat),
     PageSetup,
     SheetFormatManager,
@@ -329,6 +330,11 @@ impl Command {
                 spec("export-schematic-svg", "Export schematic SVG…", "File")
             }
             Self::ExportWaveformsCsv => spec("export-results", "Export dataset…", "Results"),
+            Self::ExportPublicationSnapshot => spec(
+                "export-publication-snapshot",
+                "Export publication snapshot…",
+                "File",
+            ),
             Self::ExportNetlist(crate::io::NetlistFormat::Spectre) => {
                 spec("export-netlist-spectre", "Export Spectre netlist…", "File")
             }
@@ -885,6 +891,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ImportVerilogA,
     Command::ImportResultDataset,
     Command::ExportSchematicSvg,
+    Command::ExportPublicationSnapshot,
     Command::ExportNetlist(crate::io::NetlistFormat::Spectre),
     Command::ExportNetlist(crate::io::NetlistFormat::Spice),
     Command::ExportNetlist(crate::io::NetlistFormat::Hspice),

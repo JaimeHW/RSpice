@@ -4854,6 +4854,7 @@ dependencies = [
  "resvg",
  "rfd",
  "rspice-core",
+ "rspice-publication-contract",
  "rspice-veriloga",
  "rust_xlsxwriter",
  "rustfft",

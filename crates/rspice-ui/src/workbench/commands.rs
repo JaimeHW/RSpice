@@ -910,6 +910,9 @@ impl Command {
             }
             Self::ExportSchematicSvg => file_action(app, FileMenuAction::ExportSvg),
             Self::ExportWaveformsCsv => file_action(app, FileMenuAction::ExportCsvWaveforms),
+            Self::ExportPublicationSnapshot => {
+                file_action(app, FileMenuAction::ExportPublicationSnapshot)
+            }
             Self::ExportNetlist(format) => {
                 if app.state.workbench.workspace == Workspace::Netlist {
                     app.state.ui.netlist.export_dialog.open = true;

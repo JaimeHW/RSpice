@@ -1230,6 +1230,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         | Command::ImportVerilogA
         | Command::ExportSchematicSvg
         | Command::ExportWaveformsCsv
+        | Command::ExportPublicationSnapshot
         | Command::ExportNetlist(_)
         | Command::PrintHardcopy
         | Command::ExportActiveView => WorkbenchIcon::Export,
@@ -1364,6 +1365,7 @@ fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     menu_separator(ui);
     command_item(ui, app, Command::ExportSchematicSvg);
     command_item(ui, app, Command::ExportWaveformsCsv);
+    command_item(ui, app, Command::ExportPublicationSnapshot);
     command_item(
         ui,
         app,

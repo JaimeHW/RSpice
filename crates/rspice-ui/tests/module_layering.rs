@@ -467,6 +467,10 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // needs one part of it should take that part as a parameter, which is what
     // retires the `-> app_state` entries below.
     "app_state",
+    // The publication snapshot builder: reads the session aggregate and the
+    // hardcopy adapters' resolved scenes to produce the sealed interchange
+    // snapshot. It mutates nothing, but it reads the whole session.
+    "publication_snapshot",
     // The application root. Everything above operates on it; everything below
     // is operated on by it.
     "app",

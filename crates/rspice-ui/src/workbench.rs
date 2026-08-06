@@ -56,6 +56,7 @@ pub(crate) mod menu_bar;
 pub(crate) mod platform;
 mod preferences;
 mod preflight;
+pub(crate) mod publication_snapshot;
 pub(crate) mod routing;
 pub(crate) mod shortcuts;
 pub(crate) mod simulation_analysis_tabs;
