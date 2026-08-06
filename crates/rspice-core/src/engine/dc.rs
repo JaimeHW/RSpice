@@ -1291,6 +1291,133 @@ mod tests {
         assert_voltage(&result, "out", 1.0 / 3.0);
     }
 
+    /// `.temp` is the classic spelling of the circuit temperature, and a deck
+    /// that states one gets a different answer for every temperature-dependent
+    /// device in it. Ignoring the card is therefore not a missing feature but
+    /// a wrong answer returned without complaint, so these pin the physics and
+    /// not just the parsed field.
+    #[test]
+    fn temp_directive_drives_diode_saturation_current() {
+        // ngspice-46 oracle, converged: final point of `.dc v1 0 5 0.1` with
+        // `.temp 85`. At 27 C the same deck answers 0.6929 V. Read the oracle
+        // at tightened tolerances — ngspice seeds each sweep point from the
+        // previous one and stops at RELTOL, which leaves its default-tolerance
+        // answer 8e-6 V high and would swallow a real temperature error.
+        let netlist = Netlist::parse(
+            "diode forward transfer at 85c\n\
+             v1 in 0 dc 0\n\
+             r1 in anode 1k\n\
+             d1 anode 0 dmod\n\
+             .model dmod d(is=1e-14 n=1)\n\
+             .temp 85\n\
+             .dc v1 0 5 0.1\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let points = Engine::default()
+            .run_dc_sweep_with_abort(&netlist, "v1", 0.0, 5.0, 0.1, &NoAbort)
+            .expect("hot diode sweep solves");
+        let (_, last) = points.last().expect("sweep produced points");
+        let anode = last
+            .try_voltage_named("anode")
+            .expect("missing anode voltage");
+        assert!(
+            (anode - 5.966108e-01).abs() <= 1.0e-6,
+            "expected the 85 C forward drop 5.966108e-01, got {anode:.7e}"
+        );
+    }
+
+    #[test]
+    fn temp_directive_drives_resistor_temperature_coefficients() {
+        // R(T) = R0 * (1 + TC1*dT + TC2*dT^2) with dT = 85 - TNOM(27) = 58,
+        // so the divider is exact in closed form: instance TC1 gives 1116 ohm
+        // and the model card's TC1/TC2 pair gives 1149.64 ohm.
+        for (deck, expected) in [
+            (
+                "resistor instance tc1 at 85c\n\
+                 v1 in 0 dc 1\n\
+                 r1 in out 1k tc1=0.002\n\
+                 r2 out 0 1k\n\
+                 .temp 85\n\
+                 .op\n\
+                 .end\n",
+                1000.0 / (1116.0 + 1000.0),
+            ),
+            (
+                "resistor model tc1/tc2 at 85c\n\
+                 v1 in 0 dc 1\n\
+                 r1 in out rmod 1k\n\
+                 r2 out 0 1k\n\
+                 .model rmod r(tc1=0.002 tc2=1e-5)\n\
+                 .temp 85\n\
+                 .op\n\
+                 .end\n",
+                1000.0 / (1149.64 + 1000.0),
+            ),
+        ] {
+            let netlist = Netlist::parse(deck).expect("deck parses");
+            let (result, _) = Engine::default()
+                .run_dc_op_with_report_and_abort(&netlist, &NoAbort)
+                .expect("hot divider solves");
+            assert_voltage(&result, "out", expected);
+        }
+    }
+
+    #[test]
+    fn temp_directive_outranks_options_temp_at_the_engine() {
+        // ngspice applies `.temp` after the deck is read, so it wins over
+        // `.options temp` whichever card is written first.
+        for deck in [
+            "options first\n\
+             v1 in 0 dc 1\n\
+             r1 in out 1k tc1=0.002\n\
+             r2 out 0 1k\n\
+             .options temp=27\n\
+             .temp 85\n\
+             .op\n\
+             .end\n",
+            "temp first\n\
+             v1 in 0 dc 1\n\
+             r1 in out 1k tc1=0.002\n\
+             r2 out 0 1k\n\
+             .temp 85\n\
+             .options temp=27\n\
+             .op\n\
+             .end\n",
+        ] {
+            let netlist = Netlist::parse(deck).expect("deck parses");
+            let (result, _) = Engine::default()
+                .run_dc_op_with_report_and_abort(&netlist, &NoAbort)
+                .expect("mixed temperature deck solves");
+            assert_voltage(&result, "out", 1000.0 / (1116.0 + 1000.0));
+        }
+    }
+
+    #[test]
+    fn explicit_temperature_still_outranks_the_temp_directive() {
+        // A runner that sets a temperature is sweeping or overriding on
+        // purpose; `.temp` is deck-level input and must not shadow it.
+        let netlist = Netlist::parse(
+            "explicit override\n\
+             v1 in 0 dc 1\n\
+             r1 in out 1k tc1=0.002\n\
+             r2 out 0 1k\n\
+             .temp 85\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let config = crate::engine::SimulationConfig {
+            temperature: crate::constants::celsius_to_kelvin(27.0),
+            ..Default::default()
+        };
+        let (result, _) = Engine::try_new_with_resolved_config(config)
+            .expect("resolved config is valid")
+            .run_dc_op_with_report_and_abort(&netlist, &NoAbort)
+            .expect("overridden deck solves");
+        assert_voltage(&result, "out", 0.5);
+    }
+
     #[test]
     fn forced_ic_is_a_hard_constraint_and_skips_unconstrained_polish() {
         let netlist = Netlist::parse(
