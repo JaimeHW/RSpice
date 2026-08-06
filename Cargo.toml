@@ -7,6 +7,7 @@ members = [
     "crates/rspice-veriloga-models/models/*",
     "crates/rspice-core",
     "crates/rspice-cli",
+    "crates/rspice-engine-adapter",
     "crates/rspice-publication-contract",
     "crates/rspice-publish",
     "crates/rspice-sheet-publisher",

@@ -1,0 +1,22 @@
+[package]
+name = "rspice-engine-adapter"
+description = "Self-contained RSpice engine executor for the credentialless cloud worker protocol"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rspice-core.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+thiserror.workspace = true
+uuid = { version = "1.0", default-features = false, features = ["serde", "std"] }
+
+[lints]
+workspace = true

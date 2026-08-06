@@ -4846,6 +4846,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rspice-engine-adapter"
+version = "0.1.0"
+dependencies = [
+ "rayon",
+ "rspice-core",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "rspice-matrix"
 version = "0.1.0"
 dependencies = [
