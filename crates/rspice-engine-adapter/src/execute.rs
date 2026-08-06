@@ -282,9 +282,24 @@ fn run_directive(
                 }
                 measurements.extend(Measurement::scalar(measurement_name("i", name), "A", value));
             }
+            // The operating point publishes its solution as a results table,
+            // like every sweep class: downstream evidence contracts require
+            // each successful run to retain at least one result artifact.
+            let mut content = String::from("name,unit,value\n");
+            for measurement in &measurements {
+                content.push_str(&format!(
+                    "{},{},{}\n",
+                    measurement.name, measurement.unit, measurement.value_decimal,
+                ));
+            }
+            let artifacts = vec![PendingArtifact {
+                file_name: format!("{}-{}.csv", kind.as_str(), ordinal + 1),
+                content_type: "text/csv",
+                content,
+            }];
             Ok(DirectiveOutcome {
                 measurements,
-                artifacts: Vec::new(),
+                artifacts,
             })
         }
         AnalysisCommand::Dc {
