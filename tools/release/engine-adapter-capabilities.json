@@ -1,0 +1,30 @@
+{
+  "format_version": 1,
+  "component": "rspice-engine-adapter",
+  "role": "adapter",
+  "runtime_mode": "self_contained",
+  "protocol_versions": [3],
+  "document_schemas": ["rspice-circuit-v1"],
+  "network": "none",
+  "subprocesses": "none",
+  "environment": {
+    "requires": [
+      "RSPICE_ENGINE_PROTOCOL_VERSION=3",
+      "RSPICE_ENGINE_INPUT=stdin-json",
+      "RSPICE_ENGINE_OUTPUT=stdout-json"
+    ],
+    "rejects": ["RSPICE_ENGINE_SOLVER_PATH"],
+    "optional": ["RSPICE_ENGINE_MODEL_LIBRARY_PATH"]
+  },
+  "filesystem": {
+    "reads": [
+      "artifacts/<artifact-id>/object as manifested by the request",
+      "RSPICE_ENGINE_MODEL_LIBRARY_PATH when configured"
+    ],
+    "writes": ["results/<declared-file> only"]
+  },
+  "compute": {
+    "threads": 1,
+    "internal_wall_clock_budget_seconds": 240
+  }
+}
