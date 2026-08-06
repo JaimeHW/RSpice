@@ -12,7 +12,7 @@ rust-version.workspace = true
 [dependencies]
 num-bigint = "0.4"
 rayon.workspace = true
-rspice-engine-adapter = { path = "../rspice-engine-adapter" }
+rspice-engine-adapter.workspace = true
 serde_json.workspace = true
 sha2 = "0.10"
 

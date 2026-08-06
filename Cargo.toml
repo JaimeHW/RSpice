@@ -61,6 +61,7 @@ unicode-normalization = "0.1"
 
 
 # Internal crates
+rspice-engine-adapter = { path = "crates/rspice-engine-adapter", version = "0.1.0" }
 rspice-matrix = { path = "crates/rspice-matrix", version = "0.1.0" }
 rspice-publication-contract = { path = "crates/rspice-publication-contract", version = "0.1.0" }
 rspice-publish = { path = "crates/rspice-publish", version = "0.1.0" }
