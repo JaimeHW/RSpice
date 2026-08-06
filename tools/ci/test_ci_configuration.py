@@ -338,6 +338,7 @@ class CiConfigurationTests(unittest.TestCase):
             "rspice-core",
             "rspice-cli",
             "rspice-publication-contract",
+            "rspice-publish",
             "rspice-ui",
             "rspice-veriloga",
             "rspice-python",

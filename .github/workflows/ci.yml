@@ -46,8 +46,8 @@ jobs:
         run: >
           cargo fmt
           -p rspice-matrix -p rspice-veriloga-runtime -p rspice-core
-          -p rspice-cli -p rspice-publication-contract -p rspice-ui
-          -p rspice-veriloga -p rspice-python
+          -p rspice-cli -p rspice-publication-contract -p rspice-publish
+          -p rspice-ui -p rspice-veriloga -p rspice-python
           -p rspice-wasm -p rspice-bench -p rspice-conformance
           -- --check
       - name: Lint GitHub workflows
