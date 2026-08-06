@@ -11,10 +11,7 @@
 use std::process::ExitCode;
 
 use rspice_engine_adapter::wire::digest_hex;
-use rspice_qualification_corpus::canonical::canonical_json;
-use rspice_qualification_corpus::capture::realize;
-use rspice_qualification_corpus::{contract, families};
-use serde_json::json;
+use rspice_qualification_corpus::{contract, emit};
 use sha2::{Digest, Sha256};
 
 fn main() -> ExitCode {
@@ -44,36 +41,10 @@ fn run() -> Result<(), String> {
         .build_global()
         .map_err(|error| format!("failed to pin the compute pool: {error}"))?;
 
-    let policy = contract::build_policy();
-    let policy_bytes = canonical_json(&policy)
-        .ok_or("policy must serialize canonically")?
-        .into_bytes();
+    let (policy_bytes, corpus_bytes) = emit::canonical_documents()?;
     let policy_digest: [u8; 32] = Sha256::digest(&policy_bytes).into();
     let policy_sha256 = digest_hex(&policy_digest);
-
-    let mut drafts = families::all();
-    drafts.sort_by(|left, right| left.id.cmp(&right.id));
-    let mut cases = Vec::with_capacity(drafts.len());
-    for draft in drafts {
-        cases.push(realize(draft)?);
-    }
-
-    let corpus = json!({
-        "format_version": 1,
-        "suite": contract::SUITE,
-        "suite_version": 1,
-        "profile": contract::PROFILE,
-        "profile_version": 1,
-        "policy_sha256": policy_sha256,
-        "cases": cases,
-    });
-    let corpus_bytes = canonical_json(&corpus)
-        .ok_or("corpus must serialize canonically")?
-        .into_bytes();
     let corpus_digest: [u8; 32] = Sha256::digest(&corpus_bytes).into();
-
-    // The same validation release admission applies, over the exact bytes
-    // about to be written.
     let summary = contract::validate_policy_and_corpus(&policy_bytes, &corpus_bytes)?;
 
     let directory = std::path::Path::new(&output);
