@@ -3205,6 +3205,7 @@ impl XyceTestRunner {
             max_iterations: defaults.max_iterations.max(1200),
             convergence_config,
             spice_dialect: SpiceDialect::Xyce,
+            integration_method: rspice_core::numerics::integration::IntegrationMethod::Trapezoidal,
             xyce_tra_interpolation: self.config.xyce_tra_interpolation,
             // Xyce and ngspice regression decks use 27 C unless overridden.
             temperature: 300.15,
