@@ -2592,6 +2592,11 @@ impl Engine {
 
         // Main transient loop
         let mut retry_count = 0;
+        // Xyce's OneStep/Gear12 `nef_` counts every rejected attempt, including
+        // Newton failures and LTE failures, and is reset only after a point is
+        // accepted.  Keep that integration-state counter separate from the
+        // broader recovery budget used by the native/ngspice paths.
+        let mut xyce_step_failure_count = 0_usize;
         let mut total_iterations = 0;
         let mut stale_accept_count = 0;
         let mut force_accept_cooldown = 0_usize; // Failed retries to defer dt shrink immediately after force-accept
@@ -4269,6 +4274,9 @@ impl Engine {
             let postloop_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             if !converged {
                 retry_count += 1;
+                if lte_estimator.uses_accepted_solution_reference() {
+                    xyce_step_failure_count = xyce_step_failure_count.saturating_add(1);
+                }
                 self.record_convergence(|quality| quality.record_timestep_reduction());
                 trap_order = native_order_after_restart(current_method);
 
@@ -5460,9 +5468,10 @@ impl Engine {
             };
             let xyce_rejected_order = match current_method {
                 IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear => 1,
-                IntegrationMethod::Gear2 if retry_count > 0 => 1,
+                IntegrationMethod::Gear2 if retry_count > 0 || xyce_step_failure_count > 0 => 1,
                 _ => step_trap_order,
             };
+            let xyce_first_failure = xyce_step_failure_count == 0;
             let lte_scale = if first_accepted_transient_step
                 || (is_strictly_linear_transient
                     && !lte_estimator.uses_accepted_solution_reference())
@@ -5480,7 +5489,7 @@ impl Engine {
                         lte,
                         current_method,
                         xyce_rejected_order,
-                        retry_count == 0,
+                        xyce_first_failure,
                     )
                 }
             } else {
@@ -5488,6 +5497,9 @@ impl Engine {
             };
             if !accept {
                 retry_count += 1;
+                if lte_estimator.uses_accepted_solution_reference() {
+                    xyce_step_failure_count = xyce_step_failure_count.saturating_add(1);
+                }
                 self.record_convergence(|quality| quality.record_timestep_reduction());
                 trap_order = if lte_estimator.uses_accepted_solution_reference() {
                     xyce_rejected_order
@@ -6268,6 +6280,7 @@ impl Engine {
                 lte_estimator
                     .set_method_order(effective_method_order(method_after_step, step_trap_order));
             }
+            xyce_step_failure_count = 0;
 
             solution.clone_from(&new_solution);
             circuit
