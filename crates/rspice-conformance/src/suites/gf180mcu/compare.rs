@@ -116,21 +116,7 @@ impl DeviceRunner {
             return Err("case deck does not request a DC sweep".to_string());
         };
 
-        // Each case is a characterisation point at a specific temperature, and
-        // the deck says which with a `.temp` card. Running them all at the
-        // engine's default 27°C is not a small error: these devices are swept
-        // from -40°C to 175°C, and at the cold and hot ends the mismatch shows
-        // up as hundreds of percent in subthreshold current. It also hides
-        // behind the one temperature that happens to agree — the 25°C cases
-        // pass either way, which is exactly what makes the bug look like a
-        // scattered physics disagreement rather than a missing setting.
-        let temperature_c = netlist.analyses.iter().find_map(|analysis| match analysis {
-            rspice_core::netlist::AnalysisCommand::Temp { temperatures } => {
-                temperatures.first().copied()
-            }
-            _ => None,
-        });
-        let engine = self.engine(temperature_c);
+        let engine = self.engine();
         let abort = DeadlineAbort::new(Instant::now(), self.config.max_time_per_case_ms);
         // The MOS cases are a family of curves: Id against Vds at six stepped
         // gate biases, which is one two-source sweep rather than six runs.

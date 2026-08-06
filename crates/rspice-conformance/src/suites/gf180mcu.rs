@@ -262,19 +262,16 @@ impl DeviceRunner {
 
     /// Engine used for every case.
     ///
-    /// Robust convergence, and the deck's own `.temp` left to set the
-    /// operating temperature: these cases characterise devices from -40°C to
-    /// 175°C, and a suite-level temperature override would silently compare
+    /// Robust convergence, and no temperature of its own: each case is a
+    /// characterisation point at a stated temperature, the deck says which
+    /// with a `.temp` card, and the engine resolves that card itself. A
+    /// suite-level temperature would override the card and silently compare
     /// every case against the wrong measured curve.
-    fn engine(&self, temperature_c: Option<f64>) -> Engine {
+    fn engine(&self) -> Engine {
         let defaults = SimulationConfig::default();
         Engine::new(SimulationConfig {
             max_iterations: defaults.max_iterations.max(1200),
             convergence_config: ConvergenceConfig::robust(),
-            // The deck's own `.temp`, in kelvin. Every case is a
-            // characterisation point at a stated temperature and none of them
-            // is the engine default.
-            temperature: temperature_c.map_or(defaults.temperature, |celsius| celsius + 273.15),
             // The dialect is left at its default rather than pinned to
             // `Ngspice`, which the sibling suites do. GF180MCU's MOS cards are
             // binned across dotted names (`nmos_3p3.0`, `.1`, …) selected by
