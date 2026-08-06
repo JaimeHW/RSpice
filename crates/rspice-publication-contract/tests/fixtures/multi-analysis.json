@@ -1,0 +1,1033 @@
+{
+  "schema_version": 1,
+  "metadata": {
+    "title": "Two-stage amplifier verification",
+    "description": "AC response, DC transfer at temperature corners, and load-current transient.\nSchematic withheld; netlist and results disclosed.",
+    "author_display": "James Whitfield",
+    "app_version": "0.1.0",
+    "created_utc": "2026-08-05T21:30:00Z"
+  },
+  "disclosure": {
+    "schematic": false,
+    "netlist": true,
+    "results": true,
+    "archive": false
+  },
+  "schematic": null,
+  "netlist": {
+    "deck": "* RSpice Netlist\n* Components: 9\n* Nets: 7\n\nVIN in 0 DC 1.2 AC 1\nVDD vdd 0 5\nM1 n1 in 0 0 NFET W=10u L=1u\nRD1 vdd n1 10k\nM2 out n1 0 0 NFET W=20u L=1u\nRD2 vdd out 5k\nCL out 0 2p\nRL out 0 100k\nCC n1 out 1p\n\n.MODEL NFET NMOS (LEVEL=1 VTO=0.7 KP=110u)\n\n* Analysis commands\n.ac dec 1 1 1e6\n.dc VIN 0 2.5 0.5\n.tran 1u 5u\n\n.end"
+  },
+  "results": {
+    "analyses": [
+      {
+        "id": 1,
+        "label": "AC response",
+        "card": ".ac dec 1 1 1e6"
+      },
+      {
+        "id": 2,
+        "label": "DC sweep",
+        "card": ".dc VIN 0 2.5 0.5"
+      },
+      {
+        "id": 3,
+        "label": "Transient",
+        "card": ".tran 1u 5u"
+      }
+    ],
+    "datasets": [
+      {
+        "id": 1,
+        "analysis_id": 1,
+        "name": "ac1",
+        "variant": null,
+        "sweep": {
+          "label": "frequency",
+          "unit": "Hz",
+          "values_bits": [
+            4607182418800017408,
+            4621819117588971520,
+            4636737291354636288,
+            4652007308841189376,
+            4666723172467343360,
+            4681608360884174848,
+            4696837146684686336
+          ]
+        },
+        "traces": [
+          {
+            "label": "V(out)",
+            "unit": "V",
+            "values": {
+              "complex": {
+                "real_bits": [
+                  4630798169346041446,
+                  4630791132471623680,
+                  4630713726853028250,
+                  4630178924397278003,
+                  4626604192193052672,
+                  4616977747989548237,
+                  4601237667291888353
+                ],
+                "imaginary_bits": [
+                  13821547256400052224,
+                  13833031435449846989,
+                  13841926044713903718,
+                  13848794034145643725,
+                  13849835491559473152,
+                  13844965974462378803,
+                  13834607695319426662
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "analysis_id": 2,
+        "name": "dc1",
+        "variant": "27 °C",
+        "sweep": {
+          "label": "VIN",
+          "unit": "V",
+          "values_bits": [
+            0,
+            4602678819172646912,
+            4607182418800017408,
+            4609434218613702656,
+            4611686018427387904,
+            4612811918334230528
+          ]
+        },
+        "traces": [
+          {
+            "label": "V(out)",
+            "unit": "V",
+            "values": {
+              "real": {
+                "bits": [
+                  4617292999963464172,
+                  4617214186969985188,
+                  4615333934125558006,
+                  4607542706770207048,
+                  4596734067664517857,
+                  4590429028186199163
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "analysis_id": 2,
+        "name": "dc1",
+        "variant": "85 °C",
+        "sweep": {
+          "label": "VIN",
+          "unit": "V",
+          "values_bits": [
+            0,
+            4602678819172646912,
+            4607182418800017408,
+            4609434218613702656,
+            4611686018427387904,
+            4612811918334230528
+          ]
+        },
+        "traces": [
+          {
+            "label": "V(out)",
+            "unit": "V",
+            "values": {
+              "real": {
+                "bits": [
+                  4617259222966258893,
+                  4617056560983027220,
+                  4614343142207536497,
+                  4605921410904353669,
+                  4595292915783759299,
+                  4589708452245819884
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "analysis_id": 3,
+        "name": "tran1",
+        "variant": null,
+        "sweep": {
+          "label": "time",
+          "unit": "s",
+          "values_bits": [
+            0,
+            4517329193108106637,
+            4521832792735477133,
+            4524193975976911956,
+            4526336392362847629,
+            4527516983983565041
+          ]
+        },
+        "traces": [
+          {
+            "label": "V(out)",
+            "unit": "V",
+            "values": {
+              "real": {
+                "bits": [
+                  4612834436332367380,
+                  4616054510065937285,
+                  4612766882337956823,
+                  4607272490792564818,
+                  4612879472328641085,
+                  4616099546062210990
+                ]
+              }
+            }
+          },
+          {
+            "label": "I(RL)",
+            "unit": "A",
+            "values": {
+              "real": {
+                "bits": [
+                  4538029437554720732,
+                  4540939238494122723,
+                  4537940893183166926,
+                  4532138642773007278,
+                  4538088467135756602,
+                  4540968753284640658
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "measurements": [
+      {
+        "analysis_id": 1,
+        "name": "gbw",
+        "value_bits": 4704126359021027328,
+        "display": "3.2 MHz",
+        "spec_display": "≥ 1 MHz",
+        "passed": true
+      },
+      {
+        "analysis_id": 2,
+        "name": "offset",
+        "value_bits": 4578071150808694522,
+        "display": "12 mV",
+        "spec_display": "≤ 5 mV",
+        "passed": false
+      },
+      {
+        "analysis_id": 3,
+        "name": "settling",
+        "value_bits": null,
+        "display": "not computed",
+        "spec_display": null,
+        "passed": null
+      }
+    ]
+  },
+  "figures": [
+    {
+      "id": 1,
+      "title": "Bode magnitude",
+      "content": {
+        "plot": {
+          "scene": {
+            "width_um": 152400,
+            "height_um": 101600,
+            "groups": [
+              {
+                "tag": null,
+                "primitives": [
+                  {
+                    "path": {
+                      "segments": [
+                        {
+                          "move-to": {
+                            "to": {
+                              "x_um": 15240,
+                              "y_um": 7620
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 147320,
+                              "y_um": 7620
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 147320,
+                              "y_um": 86360
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 15240,
+                              "y_um": 86360
+                            }
+                          }
+                        },
+                        "close"
+                      ],
+                      "stroke": {
+                        "width_um": 254,
+                        "paint": {
+                          "role": "plot-frame"
+                        },
+                        "pattern": "solid"
+                      },
+                      "fill": null
+                    }
+                  },
+                  {
+                    "path": {
+                      "segments": [
+                        {
+                          "move-to": {
+                            "to": {
+                              "x_um": 15240,
+                              "y_um": 46990
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 147320,
+                              "y_um": 46990
+                            }
+                          }
+                        }
+                      ],
+                      "stroke": {
+                        "width_um": 127,
+                        "paint": {
+                          "role": "plot-grid"
+                        },
+                        "pattern": "dotted"
+                      },
+                      "fill": null
+                    }
+                  },
+                  {
+                    "text": {
+                      "origin": {
+                        "x_um": 81280,
+                        "y_um": 95250
+                      },
+                      "text": "frequency (Hz)",
+                      "height_um": 2286,
+                      "anchor": "middle",
+                      "rotation_millideg": 0,
+                      "paint": {
+                        "role": "plot-axis-text"
+                      }
+                    }
+                  },
+                  {
+                    "text": {
+                      "origin": {
+                        "x_um": 5080,
+                        "y_um": 46990
+                      },
+                      "text": "dB",
+                      "height_um": 2286,
+                      "anchor": "middle",
+                      "rotation_millideg": 90000,
+                      "paint": {
+                        "role": "plot-axis-text"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "tag": null,
+                "primitives": [
+                  {
+                    "path": {
+                      "segments": [
+                        {
+                          "move-to": {
+                            "to": {
+                              "x_um": 15240,
+                              "y_um": 83820
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 48260,
+                              "y_um": 40640
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 81280,
+                              "y_um": 21590
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 114300,
+                              "y_um": 12700
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 147320,
+                              "y_um": 10160
+                            }
+                          }
+                        }
+                      ],
+                      "stroke": {
+                        "width_um": 381,
+                        "paint": {
+                          "role": {
+                            "trace-series": 0
+                          }
+                        },
+                        "pattern": "solid"
+                      },
+                      "fill": null
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "hydration": {
+            "x_scale": "logarithmic",
+            "y_scale": "linear",
+            "x_label": "frequency (Hz)",
+            "y_label": "dB",
+            "bindings": [
+              {
+                "dataset_id": 1,
+                "trace_index": 0,
+                "transform": "magnitude-db"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Bode phase",
+      "content": {
+        "plot": {
+          "scene": {
+            "width_um": 152400,
+            "height_um": 101600,
+            "groups": [
+              {
+                "tag": null,
+                "primitives": [
+                  {
+                    "path": {
+                      "segments": [
+                        {
+                          "move-to": {
+                            "to": {
+                              "x_um": 15240,
+                              "y_um": 7620
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 147320,
+                              "y_um": 7620
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 147320,
+                              "y_um": 86360
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 15240,
+                              "y_um": 86360
+                            }
+                          }
+                        },
+                        "close"
+                      ],
+                      "stroke": {
+                        "width_um": 254,
+                        "paint": {
+                          "role": "plot-frame"
+                        },
+                        "pattern": "solid"
+                      },
+                      "fill": null
+                    }
+                  },
+                  {
+                    "path": {
+                      "segments": [
+                        {
+                          "move-to": {
+                            "to": {
+                              "x_um": 15240,
+                              "y_um": 46990
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 147320,
+                              "y_um": 46990
+                            }
+                          }
+                        }
+                      ],
+                      "stroke": {
+                        "width_um": 127,
+                        "paint": {
+                          "role": "plot-grid"
+                        },
+                        "pattern": "dotted"
+                      },
+                      "fill": null
+                    }
+                  },
+                  {
+                    "text": {
+                      "origin": {
+                        "x_um": 81280,
+                        "y_um": 95250
+                      },
+                      "text": "frequency (Hz)",
+                      "height_um": 2286,
+                      "anchor": "middle",
+                      "rotation_millideg": 0,
+                      "paint": {
+                        "role": "plot-axis-text"
+                      }
+                    }
+                  },
+                  {
+                    "text": {
+                      "origin": {
+                        "x_um": 5080,
+                        "y_um": 46990
+                      },
+                      "text": "°",
+                      "height_um": 2286,
+                      "anchor": "middle",
+                      "rotation_millideg": 90000,
+                      "paint": {
+                        "role": "plot-axis-text"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "tag": null,
+                "primitives": [
+                  {
+                    "path": {
+                      "segments": [
+                        {
+                          "move-to": {
+                            "to": {
+                              "x_um": 15240,
+                              "y_um": 83820
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 48260,
+                              "y_um": 40640
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 81280,
+                              "y_um": 21590
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 114300,
+                              "y_um": 12700
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 147320,
+                              "y_um": 10160
+                            }
+                          }
+                        }
+                      ],
+                      "stroke": {
+                        "width_um": 381,
+                        "paint": {
+                          "role": {
+                            "trace-series": 1
+                          }
+                        },
+                        "pattern": "solid"
+                      },
+                      "fill": null
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "hydration": {
+            "x_scale": "logarithmic",
+            "y_scale": "linear",
+            "x_label": "frequency (Hz)",
+            "y_label": "°",
+            "bindings": [
+              {
+                "dataset_id": 1,
+                "trace_index": 0,
+                "transform": "phase-degrees"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "DC transfer at corners",
+      "content": {
+        "plot": {
+          "scene": {
+            "width_um": 152400,
+            "height_um": 101600,
+            "groups": [
+              {
+                "tag": null,
+                "primitives": [
+                  {
+                    "path": {
+                      "segments": [
+                        {
+                          "move-to": {
+                            "to": {
+                              "x_um": 15240,
+                              "y_um": 7620
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 147320,
+                              "y_um": 7620
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 147320,
+                              "y_um": 86360
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 15240,
+                              "y_um": 86360
+                            }
+                          }
+                        },
+                        "close"
+                      ],
+                      "stroke": {
+                        "width_um": 254,
+                        "paint": {
+                          "role": "plot-frame"
+                        },
+                        "pattern": "solid"
+                      },
+                      "fill": null
+                    }
+                  },
+                  {
+                    "path": {
+                      "segments": [
+                        {
+                          "move-to": {
+                            "to": {
+                              "x_um": 15240,
+                              "y_um": 46990
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 147320,
+                              "y_um": 46990
+                            }
+                          }
+                        }
+                      ],
+                      "stroke": {
+                        "width_um": 127,
+                        "paint": {
+                          "role": "plot-grid"
+                        },
+                        "pattern": "dotted"
+                      },
+                      "fill": null
+                    }
+                  },
+                  {
+                    "text": {
+                      "origin": {
+                        "x_um": 81280,
+                        "y_um": 95250
+                      },
+                      "text": "VIN (V)",
+                      "height_um": 2286,
+                      "anchor": "middle",
+                      "rotation_millideg": 0,
+                      "paint": {
+                        "role": "plot-axis-text"
+                      }
+                    }
+                  },
+                  {
+                    "text": {
+                      "origin": {
+                        "x_um": 5080,
+                        "y_um": 46990
+                      },
+                      "text": "V(out)",
+                      "height_um": 2286,
+                      "anchor": "middle",
+                      "rotation_millideg": 90000,
+                      "paint": {
+                        "role": "plot-axis-text"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "tag": null,
+                "primitives": [
+                  {
+                    "path": {
+                      "segments": [
+                        {
+                          "move-to": {
+                            "to": {
+                              "x_um": 15240,
+                              "y_um": 83820
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 48260,
+                              "y_um": 40640
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 81280,
+                              "y_um": 21590
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 114300,
+                              "y_um": 12700
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 147320,
+                              "y_um": 10160
+                            }
+                          }
+                        }
+                      ],
+                      "stroke": {
+                        "width_um": 381,
+                        "paint": {
+                          "role": {
+                            "trace-series": 2
+                          }
+                        },
+                        "pattern": "solid"
+                      },
+                      "fill": null
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "hydration": {
+            "x_scale": "linear",
+            "y_scale": "linear",
+            "x_label": "VIN (V)",
+            "y_label": "V(out)",
+            "bindings": [
+              {
+                "dataset_id": 2,
+                "trace_index": 0,
+                "transform": "identity"
+              },
+              {
+                "dataset_id": 3,
+                "trace_index": 0,
+                "transform": "identity"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Load current",
+      "content": {
+        "plot": {
+          "scene": {
+            "width_um": 152400,
+            "height_um": 101600,
+            "groups": [
+              {
+                "tag": null,
+                "primitives": [
+                  {
+                    "path": {
+                      "segments": [
+                        {
+                          "move-to": {
+                            "to": {
+                              "x_um": 15240,
+                              "y_um": 7620
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 147320,
+                              "y_um": 7620
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 147320,
+                              "y_um": 86360
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 15240,
+                              "y_um": 86360
+                            }
+                          }
+                        },
+                        "close"
+                      ],
+                      "stroke": {
+                        "width_um": 254,
+                        "paint": {
+                          "role": "plot-frame"
+                        },
+                        "pattern": "solid"
+                      },
+                      "fill": null
+                    }
+                  },
+                  {
+                    "path": {
+                      "segments": [
+                        {
+                          "move-to": {
+                            "to": {
+                              "x_um": 15240,
+                              "y_um": 46990
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 147320,
+                              "y_um": 46990
+                            }
+                          }
+                        }
+                      ],
+                      "stroke": {
+                        "width_um": 127,
+                        "paint": {
+                          "role": "plot-grid"
+                        },
+                        "pattern": "dotted"
+                      },
+                      "fill": null
+                    }
+                  },
+                  {
+                    "text": {
+                      "origin": {
+                        "x_um": 81280,
+                        "y_um": 95250
+                      },
+                      "text": "time (s)",
+                      "height_um": 2286,
+                      "anchor": "middle",
+                      "rotation_millideg": 0,
+                      "paint": {
+                        "role": "plot-axis-text"
+                      }
+                    }
+                  },
+                  {
+                    "text": {
+                      "origin": {
+                        "x_um": 5080,
+                        "y_um": 46990
+                      },
+                      "text": "A",
+                      "height_um": 2286,
+                      "anchor": "middle",
+                      "rotation_millideg": 90000,
+                      "paint": {
+                        "role": "plot-axis-text"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "tag": null,
+                "primitives": [
+                  {
+                    "path": {
+                      "segments": [
+                        {
+                          "move-to": {
+                            "to": {
+                              "x_um": 15240,
+                              "y_um": 83820
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 48260,
+                              "y_um": 40640
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 81280,
+                              "y_um": 21590
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 114300,
+                              "y_um": 12700
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 147320,
+                              "y_um": 10160
+                            }
+                          }
+                        }
+                      ],
+                      "stroke": {
+                        "width_um": 381,
+                        "paint": {
+                          "role": {
+                            "trace-series": 3
+                          }
+                        },
+                        "pattern": "solid"
+                      },
+                      "fill": null
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "hydration": null
+        }
+      }
+    }
+  ]
+}

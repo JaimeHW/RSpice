@@ -1,0 +1,747 @@
+{
+  "schema_version": 1,
+  "metadata": {
+    "title": "RC low-pass step response",
+    "description": "First-order RC low-pass driven by a 1 V pulse.\nDemonstrates the 1 ms time constant against the published rise-time spec.",
+    "author_display": "James Whitfield",
+    "app_version": "0.1.0",
+    "created_utc": "2026-08-05T21:00:00Z"
+  },
+  "disclosure": {
+    "schematic": true,
+    "netlist": true,
+    "results": true,
+    "archive": true
+  },
+  "schematic": {
+    "sheets": [
+      {
+        "name": "top",
+        "page_label": "1",
+        "scene": {
+          "width_um": 279400,
+          "height_um": 215900,
+          "groups": [
+            {
+              "tag": "sheet-frame",
+              "primitives": [
+                {
+                  "path": {
+                    "segments": [
+                      {
+                        "move-to": {
+                          "to": {
+                            "x_um": 6350,
+                            "y_um": 6350
+                          }
+                        }
+                      },
+                      {
+                        "line-to": {
+                          "to": {
+                            "x_um": 273050,
+                            "y_um": 6350
+                          }
+                        }
+                      },
+                      {
+                        "line-to": {
+                          "to": {
+                            "x_um": 273050,
+                            "y_um": 209550
+                          }
+                        }
+                      },
+                      {
+                        "line-to": {
+                          "to": {
+                            "x_um": 6350,
+                            "y_um": 209550
+                          }
+                        }
+                      },
+                      "close"
+                    ],
+                    "stroke": {
+                      "width_um": 254,
+                      "paint": {
+                        "role": "sheet-frame"
+                      },
+                      "pattern": "solid"
+                    },
+                    "fill": null
+                  }
+                }
+              ]
+            },
+            {
+              "tag": {
+                "instance": {
+                  "reference": "V1"
+                }
+              },
+              "primitives": [
+                {
+                  "path": {
+                    "segments": [
+                      {
+                        "arc": {
+                          "center": {
+                            "x_um": 50800,
+                            "y_um": 101600
+                          },
+                          "radius_um": 6350,
+                          "start_millideg": 0,
+                          "sweep_millideg": 360000
+                        }
+                      }
+                    ],
+                    "stroke": {
+                      "width_um": 381,
+                      "paint": {
+                        "role": "symbol-body"
+                      },
+                      "pattern": "solid"
+                    },
+                    "fill": null
+                  }
+                },
+                {
+                  "text": {
+                    "origin": {
+                      "x_um": 59690,
+                      "y_um": 96520
+                    },
+                    "text": "V1",
+                    "height_um": 2540,
+                    "anchor": "start",
+                    "rotation_millideg": 0,
+                    "paint": {
+                      "role": "reference-designator"
+                    }
+                  }
+                },
+                {
+                  "text": {
+                    "origin": {
+                      "x_um": 59690,
+                      "y_um": 100330
+                    },
+                    "text": "PULSE",
+                    "height_um": 2540,
+                    "anchor": "start",
+                    "rotation_millideg": 0,
+                    "paint": {
+                      "role": "component-value"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "tag": {
+                "instance": {
+                  "reference": "R1"
+                }
+              },
+              "primitives": [
+                {
+                  "path": {
+                    "segments": [
+                      {
+                        "move-to": {
+                          "to": {
+                            "x_um": 88900,
+                            "y_um": 76200
+                          }
+                        }
+                      },
+                      {
+                        "line-to": {
+                          "to": {
+                            "x_um": 88900,
+                            "y_um": 71120
+                          }
+                        }
+                      },
+                      {
+                        "line-to": {
+                          "to": {
+                            "x_um": 114300,
+                            "y_um": 71120
+                          }
+                        }
+                      },
+                      {
+                        "line-to": {
+                          "to": {
+                            "x_um": 114300,
+                            "y_um": 76200
+                          }
+                        }
+                      },
+                      "close"
+                    ],
+                    "stroke": {
+                      "width_um": 381,
+                      "paint": {
+                        "role": "symbol-body"
+                      },
+                      "pattern": "solid"
+                    },
+                    "fill": null
+                  }
+                },
+                {
+                  "text": {
+                    "origin": {
+                      "x_um": 95250,
+                      "y_um": 66040
+                    },
+                    "text": "R1",
+                    "height_um": 2540,
+                    "anchor": "start",
+                    "rotation_millideg": 0,
+                    "paint": {
+                      "role": "reference-designator"
+                    }
+                  }
+                },
+                {
+                  "text": {
+                    "origin": {
+                      "x_um": 95250,
+                      "y_um": 80010
+                    },
+                    "text": "1k",
+                    "height_um": 2540,
+                    "anchor": "start",
+                    "rotation_millideg": 0,
+                    "paint": {
+                      "role": "component-value"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "tag": {
+                "instance": {
+                  "reference": "C1"
+                }
+              },
+              "primitives": [
+                {
+                  "path": {
+                    "segments": [
+                      {
+                        "move-to": {
+                          "to": {
+                            "x_um": 146050,
+                            "y_um": 96520
+                          }
+                        }
+                      },
+                      {
+                        "line-to": {
+                          "to": {
+                            "x_um": 156210,
+                            "y_um": 96520
+                          }
+                        }
+                      },
+                      {
+                        "move-to": {
+                          "to": {
+                            "x_um": 146050,
+                            "y_um": 99060
+                          }
+                        }
+                      },
+                      {
+                        "line-to": {
+                          "to": {
+                            "x_um": 156210,
+                            "y_um": 99060
+                          }
+                        }
+                      }
+                    ],
+                    "stroke": {
+                      "width_um": 381,
+                      "paint": {
+                        "role": "symbol-body"
+                      },
+                      "pattern": "solid"
+                    },
+                    "fill": null
+                  }
+                },
+                {
+                  "text": {
+                    "origin": {
+                      "x_um": 160020,
+                      "y_um": 97790
+                    },
+                    "text": "1µ",
+                    "height_um": 2540,
+                    "anchor": "start",
+                    "rotation_millideg": -90000,
+                    "paint": {
+                      "role": "component-value"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "tag": {
+                "net": {
+                  "name": "out"
+                }
+              },
+              "primitives": [
+                {
+                  "path": {
+                    "segments": [
+                      {
+                        "move-to": {
+                          "to": {
+                            "x_um": 114300,
+                            "y_um": 73660
+                          }
+                        }
+                      },
+                      {
+                        "line-to": {
+                          "to": {
+                            "x_um": 151130,
+                            "y_um": 73660
+                          }
+                        }
+                      }
+                    ],
+                    "stroke": {
+                      "width_um": 254,
+                      "paint": {
+                        "role": "wire"
+                      },
+                      "pattern": "solid"
+                    },
+                    "fill": null
+                  }
+                },
+                {
+                  "text": {
+                    "origin": {
+                      "x_um": 129540,
+                      "y_um": 69850
+                    },
+                    "text": "out",
+                    "height_um": 2540,
+                    "anchor": "start",
+                    "rotation_millideg": 0,
+                    "paint": {
+                      "role": "net-label"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "tag": "annotation",
+              "primitives": [
+                {
+                  "path": {
+                    "segments": [
+                      {
+                        "move-to": {
+                          "to": {
+                            "x_um": 190500,
+                            "y_um": 63500
+                          }
+                        }
+                      },
+                      {
+                        "line-to": {
+                          "to": {
+                            "x_um": 241300,
+                            "y_um": 63500
+                          }
+                        }
+                      },
+                      {
+                        "line-to": {
+                          "to": {
+                            "x_um": 241300,
+                            "y_um": 83820
+                          }
+                        }
+                      },
+                      {
+                        "line-to": {
+                          "to": {
+                            "x_um": 190500,
+                            "y_um": 83820
+                          }
+                        }
+                      },
+                      "close"
+                    ],
+                    "stroke": {
+                      "width_um": 254,
+                      "paint": {
+                        "rgba": [
+                          214,
+                          138,
+                          42,
+                          255
+                        ]
+                      },
+                      "pattern": "dashed"
+                    },
+                    "fill": {
+                      "rgba": [
+                        214,
+                        138,
+                        42,
+                        24
+                      ]
+                    }
+                  }
+                },
+                {
+                  "text": {
+                    "origin": {
+                      "x_um": 193040,
+                      "y_um": 71120
+                    },
+                    "text": "τ = 1 ms",
+                    "height_um": 2540,
+                    "anchor": "start",
+                    "rotation_millideg": 0,
+                    "paint": {
+                      "rgba": [
+                        214,
+                        138,
+                        42,
+                        255
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "netlist": {
+    "deck": "* RSpice Netlist\n* Components: 3\n* Nets: 2\n\nV1 in 0 PULSE(0 1 0 1u 1u 1m 2m)\nR1 in out 1k\nC1 out 0 1u\n\n* Analysis commands\n.tran 10u 5m\n\n.end"
+  },
+  "results": {
+    "analyses": [
+      {
+        "id": 1,
+        "label": "Transient",
+        "card": ".tran 10u 5m"
+      }
+    ],
+    "datasets": [
+      {
+        "id": 1,
+        "analysis_id": 1,
+        "name": "tran1",
+        "variant": null,
+        "sweep": {
+          "label": "time",
+          "unit": "s",
+          "values_bits": [
+            0,
+            4557750909289998844,
+            4562254508917369340,
+            4564560351926583034,
+            4566758108544739836,
+            4567911030049346683,
+            4569063951553953530,
+            4570216873058560377,
+            4571261708172110332,
+            4571838168924413755,
+            4572414629676717179
+          ]
+        },
+        "traces": [
+          {
+            "label": "V(in)",
+            "unit": "V",
+            "values": {
+              "real": {
+                "bits": [
+                  0,
+                  4607182418800017408,
+                  4607182418800017408,
+                  0,
+                  0,
+                  4607182418800017408,
+                  4607182418800017408,
+                  0,
+                  0,
+                  4607182418800017408,
+                  4607182418800017408
+                ]
+              }
+            }
+          },
+          {
+            "label": "V(out)",
+            "unit": "V",
+            "values": {
+              "real": {
+                "bits": [
+                  0,
+                  4600760285731387081,
+                  4603868670194198197,
+                  4600578340306441313,
+                  4597544715597444547,
+                  4602991368986786424,
+                  4604640587170329500,
+                  4601513287589083428,
+                  4598427421124409164,
+                  4603162505772626503,
+                  4604745070681684496
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "measurements": [
+      {
+        "analysis_id": 1,
+        "name": "rise_time",
+        "value_bits": 4567219277146582575,
+        "display": "2.20 ms",
+        "spec_display": "≤ 2.5 ms",
+        "passed": true
+      }
+    ]
+  },
+  "figures": [
+    {
+      "id": 1,
+      "title": "Top sheet",
+      "content": {
+        "schematic-sheet": {
+          "sheet_index": 0
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Step response",
+      "content": {
+        "plot": {
+          "scene": {
+            "width_um": 152400,
+            "height_um": 101600,
+            "groups": [
+              {
+                "tag": null,
+                "primitives": [
+                  {
+                    "path": {
+                      "segments": [
+                        {
+                          "move-to": {
+                            "to": {
+                              "x_um": 15240,
+                              "y_um": 7620
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 147320,
+                              "y_um": 7620
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 147320,
+                              "y_um": 86360
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 15240,
+                              "y_um": 86360
+                            }
+                          }
+                        },
+                        "close"
+                      ],
+                      "stroke": {
+                        "width_um": 254,
+                        "paint": {
+                          "role": "plot-frame"
+                        },
+                        "pattern": "solid"
+                      },
+                      "fill": null
+                    }
+                  },
+                  {
+                    "path": {
+                      "segments": [
+                        {
+                          "move-to": {
+                            "to": {
+                              "x_um": 15240,
+                              "y_um": 46990
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 147320,
+                              "y_um": 46990
+                            }
+                          }
+                        }
+                      ],
+                      "stroke": {
+                        "width_um": 127,
+                        "paint": {
+                          "role": "plot-grid"
+                        },
+                        "pattern": "dotted"
+                      },
+                      "fill": null
+                    }
+                  },
+                  {
+                    "text": {
+                      "origin": {
+                        "x_um": 81280,
+                        "y_um": 95250
+                      },
+                      "text": "time (s)",
+                      "height_um": 2286,
+                      "anchor": "middle",
+                      "rotation_millideg": 0,
+                      "paint": {
+                        "role": "plot-axis-text"
+                      }
+                    }
+                  },
+                  {
+                    "text": {
+                      "origin": {
+                        "x_um": 5080,
+                        "y_um": 46990
+                      },
+                      "text": "V",
+                      "height_um": 2286,
+                      "anchor": "middle",
+                      "rotation_millideg": 90000,
+                      "paint": {
+                        "role": "plot-axis-text"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "tag": null,
+                "primitives": [
+                  {
+                    "path": {
+                      "segments": [
+                        {
+                          "move-to": {
+                            "to": {
+                              "x_um": 15240,
+                              "y_um": 83820
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 48260,
+                              "y_um": 40640
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 81280,
+                              "y_um": 21590
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 114300,
+                              "y_um": 12700
+                            }
+                          }
+                        },
+                        {
+                          "line-to": {
+                            "to": {
+                              "x_um": 147320,
+                              "y_um": 10160
+                            }
+                          }
+                        }
+                      ],
+                      "stroke": {
+                        "width_um": 381,
+                        "paint": {
+                          "role": {
+                            "trace-series": 0
+                          }
+                        },
+                        "pattern": "solid"
+                      },
+                      "fill": null
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "hydration": {
+            "x_scale": "linear",
+            "y_scale": "linear",
+            "x_label": "time (s)",
+            "y_label": "V",
+            "bindings": [
+              {
+                "dataset_id": 1,
+                "trace_index": 0,
+                "transform": "identity"
+              },
+              {
+                "dataset_id": 1,
+                "trace_index": 1,
+                "transform": "identity"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

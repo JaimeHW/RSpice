@@ -97,7 +97,14 @@ class CiConfigurationTests(unittest.TestCase):
         product, and the Verilog-A stamp bench and golden-fingerprint capture
         live with that suite rather than inside the library they measure.
         """
-        shipping = ("rspice-cli", "rspice-ui", "rspice-python", "rspice-wasm", "rspice-core")
+        shipping = (
+            "rspice-cli",
+            "rspice-ui",
+            "rspice-python",
+            "rspice-wasm",
+            "rspice-core",
+            "rspice-publication-contract",
+        )
         offenders = []
         for crate in shipping:
             manifest = ROOT / "crates" / crate / "Cargo.toml"
@@ -330,6 +337,7 @@ class CiConfigurationTests(unittest.TestCase):
             "rspice-veriloga-runtime",
             "rspice-core",
             "rspice-cli",
+            "rspice-publication-contract",
             "rspice-ui",
             "rspice-veriloga",
             "rspice-python",

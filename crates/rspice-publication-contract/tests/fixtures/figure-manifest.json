@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "figures": [
+    {
+      "figure_id": 1,
+      "dom_id": "figure-1",
+      "kind": "schematic-sheet",
+      "payload": {
+        "path": "figures/1.json",
+        "sha256_hex": "3f3b6f0f2f6a4d8c9e1b7a5c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a1b3c5d7e",
+        "byte_len": 18432
+      }
+    },
+    {
+      "figure_id": 2,
+      "dom_id": "figure-2",
+      "kind": "plot",
+      "payload": {
+        "path": "figures/2.json",
+        "sha256_hex": "9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d",
+        "byte_len": 4096
+      }
+    }
+  ]
+}
