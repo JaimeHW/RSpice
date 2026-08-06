@@ -89,7 +89,7 @@ fn capture_transient_merit_rollback(
 mod breakpoints;
 mod checkpoint;
 mod companion_stamps;
-pub(self) use companion_stamps::TwoTerminalStampSlots;
+pub(self) use companion_stamps::{CompactTwoTerminalStampSlots, TwoTerminalStampSlots};
 mod charge_stamper;
 pub(self) use charge_stamper::StaticMatrixChargeStamper;
 mod damped_status;
@@ -2548,7 +2548,7 @@ impl Engine {
         // the per-iteration charge companions then stamp through direct CSC
         // indices instead of a hash lookup per matrix entry.
         let diode_companion_slots = Self::link_diode_companion_slots(&circuit, &matrix);
-        let mosfet_companion_slots = Self::link_mosfet_companion_slots(&circuit, &matrix);
+        let mut mosfet_companion_slots = Self::link_mosfet_companion_slots(&circuit, &matrix);
         let vdmos_companion_slots = Self::link_vdmos_companion_slots(&circuit, &matrix);
         let mut mosfet_history = Self::initialize_mosfet_history(&circuit, &solution);
         mosfet_history.accepted_dt_prev = accepted_dt_seed;
@@ -2621,6 +2621,14 @@ impl Engine {
                 transient_baseline_diag_gmin,
             )
         });
+        if classic_mos_stamp_cache.as_ref().is_some_and(
+            residual::ClassicMosTransientStampCache::supports_compact_companion_stamps,
+        ) {
+            // The large classic-MOS cache owns the only companion topology
+            // representation used by its hot path. Release the checked plan
+            // rather than retaining two cache-sized streams.
+            mosfet_companion_slots = Vec::new();
+        }
         let mut diode_stamp_cache = (self.config.spice_dialect != SpiceDialect::Xyce
             && circuit.has_cacheable_diode_transient_base())
         .then(|| {

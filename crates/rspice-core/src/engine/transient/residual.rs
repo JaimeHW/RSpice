@@ -20,6 +20,12 @@ const PARALLEL_CLASSIC_MOS_RESIDUAL_THRESHOLD: usize = 4_096;
 /// Minimum population that amortizes the compact constant-stream walk over
 /// the canonical collection updater on supported desktop targets.
 pub(super) const CLASSIC_MOS_CACHED_CONSTANTS_THRESHOLD: usize = 96;
+// Small populations favor the original checked plan and its compact code path.
+// At this independently measured population crossover, cutting each companion
+// plan from 112 to 48 bytes keeps substantially more of the batch in private
+// cache. The selector depends only on generic model capability and workload
+// size, never names or topology identity.
+pub(super) const CLASSIC_MOS_COMPACT_COMPANION_THRESHOLD: usize = 512;
 // The direct proof omits the canonical sparse norm's 256-epsilon gross-term
 // cancellation allowance. Reserving three quarters of that budget for sparse
 // coefficient aggregation keeps its 2x acceptance margin conservative.
@@ -137,6 +143,7 @@ pub(super) struct ClassicMosTransientStampCache {
     attempt_values: Vec<Value>,
     attempt_rhs: Vec<Value>,
     device_constants: Vec<crate::device::mosfet::ClassicMosTransientConstants>,
+    compact_companion_slots: Vec<[CompactTwoTerminalStampSlots; 5]>,
     static_stamp_plans: Vec<crate::device::mosfet::ClassicMosStaticStampPlan>,
     stamp_pattern: Option<crate::solver::CscPatternToken>,
     cached_devices_support_direct_values: bool,
@@ -165,6 +172,15 @@ impl ClassicMosTransientStampCache {
     pub(super) fn supports_compact_candidate_static_stamps(&self) -> bool {
         self.static_stamp_plans.len() == self.device_constants.len()
             && !self.static_stamp_plans.is_empty()
+    }
+
+    #[inline]
+    pub(super) fn supports_compact_companion_stamps(&self) -> bool {
+        debug_assert!(
+            self.compact_companion_slots.is_empty()
+                || self.compact_companion_slots.len() == self.device_constants.len()
+        );
+        !self.compact_companion_slots.is_empty()
     }
 
     #[cfg(feature = "parallel")]
@@ -252,6 +268,104 @@ impl Engine {
         } else {
             Self::stamp_cached_mosfet_transient_companions(matrix, rhs, slots, terms);
         }
+    }
+
+    #[inline(never)]
+    fn stamp_cached_mosfet_compact_companions_for_pattern(
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        pattern: Option<crate::solver::CscPatternToken>,
+        slots: &[[CompactTwoTerminalStampSlots; 5]],
+        terms: &[MosfetCompanionBranchTerms],
+    ) -> bool {
+        if slots.len() != terms.len() {
+            return false;
+        }
+        let Some(values) = pattern.and_then(|pattern| matrix.values_mut_for_pattern(pattern))
+        else {
+            return false;
+        };
+        Self::stamp_cached_mosfet_transient_compact_companion_values(values, rhs, slots, terms);
+        true
+    }
+
+    #[inline(never)]
+    fn stamp_cached_mosfet_compact_companions_with_relink(
+        circuit: &crate::circuit::CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        pattern: Option<crate::solver::CscPatternToken>,
+        compact_slots: &[[CompactTwoTerminalStampSlots; 5]],
+        terms: &[MosfetCompanionBranchTerms],
+    ) {
+        debug_assert!(!compact_slots.is_empty());
+        if Self::stamp_cached_mosfet_compact_companions_for_pattern(
+            matrix,
+            rhs,
+            pattern,
+            compact_slots,
+            terms,
+        ) {
+            return;
+        }
+
+        let checked_slots = Self::link_mosfet_companion_slots(circuit, matrix);
+        Self::stamp_cached_mosfet_companions_for_pattern(
+            matrix,
+            rhs,
+            pattern,
+            &checked_slots,
+            terms,
+        );
+    }
+
+    #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
+    fn stamp_mosfet_transient_compact_companions_with_relink(
+        circuit: &crate::circuit::CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+        coeff: &CompanionCoefficients,
+        dt: Value,
+        ctx: &TransientSystemContext<'_>,
+        use_verified_cached_bias: bool,
+        pattern: Option<crate::solver::CscPatternToken>,
+        compact_slots: &[[CompactTwoTerminalStampSlots; 5]],
+        mut caps_cache_out: Option<&mut Vec<(Value, Value, Value)>>,
+    ) {
+        debug_assert!(!compact_slots.is_empty());
+        if Self::stamp_mosfet_transient_compact_companions_for_pattern(
+            circuit,
+            matrix,
+            rhs,
+            solution,
+            coeff,
+            dt,
+            ctx.mosfet_history,
+            ctx.suppress_gate_charge,
+            use_verified_cached_bias,
+            pattern,
+            compact_slots,
+            caps_cache_out.as_deref_mut(),
+        ) {
+            return;
+        }
+
+        let checked_slots = Self::link_mosfet_companion_slots(circuit, matrix);
+        Self::stamp_mosfet_transient_companions(
+            circuit,
+            matrix,
+            rhs,
+            solution,
+            coeff,
+            dt,
+            ctx.mosfet_history,
+            ctx.suppress_gate_charge,
+            use_verified_cached_bias,
+            &checked_slots,
+            caps_cache_out,
+        );
     }
 
     #[inline]
@@ -424,6 +538,10 @@ impl Engine {
                 .iter()
                 .map(crate::device::Mosfet::classic_transient_constants),
         );
+        if circuit.mosfets.len() >= CLASSIC_MOS_COMPACT_COMPANION_THRESHOLD {
+            cache.compact_companion_slots =
+                Self::link_compact_mosfet_companion_slots(circuit, matrix);
+        }
         let mut node_incidence = vec![0_usize; circuit.num_nodes().saturating_add(1)];
         cache.direct_residual_has_bounded_row_fan_in =
             circuit.mosfets.devices.iter().all(|mosfet| {
@@ -640,27 +758,54 @@ impl Engine {
             None
         };
         if let Some(terms) = reusable_companion_terms {
-            Self::stamp_cached_mosfet_companions_for_pattern(
-                matrix,
-                rhs,
-                cache.stamp_pattern,
-                ctx.mosfet_companion_slots,
-                terms,
-            );
+            if cache.compact_companion_slots.is_empty() {
+                Self::stamp_cached_mosfet_companions_for_pattern(
+                    matrix,
+                    rhs,
+                    cache.stamp_pattern,
+                    ctx.mosfet_companion_slots,
+                    terms,
+                );
+            } else {
+                Self::stamp_cached_mosfet_compact_companions_with_relink(
+                    circuit,
+                    matrix,
+                    rhs,
+                    cache.stamp_pattern,
+                    &cache.compact_companion_slots,
+                    terms,
+                );
+            }
         } else {
-            Self::stamp_mosfet_transient_companions(
-                circuit,
-                matrix,
-                rhs,
-                solution,
-                &companion_coeff,
-                dt,
-                ctx.mosfet_history,
-                ctx.suppress_gate_charge,
-                !static_probe || physical_cache_matches_probe,
-                ctx.mosfet_companion_slots,
-                caps_cache_out.take(),
-            );
+            if cache.compact_companion_slots.is_empty() {
+                Self::stamp_mosfet_transient_companions(
+                    circuit,
+                    matrix,
+                    rhs,
+                    solution,
+                    &companion_coeff,
+                    dt,
+                    ctx.mosfet_history,
+                    ctx.suppress_gate_charge,
+                    !static_probe || physical_cache_matches_probe,
+                    ctx.mosfet_companion_slots,
+                    caps_cache_out.take(),
+                );
+            } else {
+                Self::stamp_mosfet_transient_compact_companions_with_relink(
+                    circuit,
+                    matrix,
+                    rhs,
+                    solution,
+                    &companion_coeff,
+                    dt,
+                    ctx,
+                    !static_probe || physical_cache_matches_probe,
+                    cache.stamp_pattern,
+                    &cache.compact_companion_slots,
+                    caps_cache_out.take(),
+                );
+            }
         }
         let cached_static_terms = static_terms_cache.filter(|terms| {
             cached_terms_match_assembly && terms.len() == cache.static_stamp_plans.len()
@@ -1365,6 +1510,15 @@ impl Engine {
             ctx.diode_history,
             ctx.diode_companion_slots,
         );
+        let relinked_mosfet_companion_slots;
+        let mosfet_companion_slots = if ctx.mosfet_companion_slots.len()
+            == circuit.mosfets.devices.len()
+        {
+            ctx.mosfet_companion_slots
+        } else {
+            relinked_mosfet_companion_slots = Self::link_mosfet_companion_slots(circuit, matrix);
+            &relinked_mosfet_companion_slots
+        };
         Self::stamp_mosfet_transient_companions(
             circuit,
             matrix,
@@ -1375,7 +1529,7 @@ impl Engine {
             ctx.mosfet_history,
             ctx.suppress_gate_charge,
             false,
-            ctx.mosfet_companion_slots,
+            mosfet_companion_slots,
             None,
         );
         Self::stamp_vdmos_transient_companions(
@@ -1632,6 +1786,196 @@ impl Engine {
         .is_ok()
     }
 
+    #[cfg(feature = "parallel")]
+    #[allow(clippy::too_many_arguments)]
+    fn accumulate_cached_classic_mos_compact_residual_rows_parallel(
+        &self,
+        cache: &ClassicMosTransientStampCache,
+        solution: &[Value],
+        row_ax: &mut [Value],
+        row_rhs: &mut [Value],
+        companion_terms: &[MosfetCompanionBranchTerms],
+        static_terms: &[crate::device::mosfet::ClassicMosCachedStaticTerms],
+        companion_slots: &[[CompactTwoTerminalStampSlots; 5]],
+    ) -> bool {
+        use rayon::prelude::*;
+
+        let device_count = cache.direct_residual_plans.len();
+        if !cache.supports_parallel_direct_residual_proof()
+            || cache.direct_residual_row_offsets.len() != row_ax.len() + 1
+            || row_ax.len() != row_rhs.len()
+            || companion_terms.len() != device_count
+            || static_terms.len() != device_count
+            || companion_slots.len() != device_count
+        {
+            return false;
+        }
+        let Some(worker_count) = self.classic_mos_parallel_worker_count(device_count) else {
+            return false;
+        };
+        let rows_per_worker = row_ax.len().div_ceil(worker_count).max(1);
+
+        self.install_classic_mos_parallel(|| {
+            row_ax
+                .par_chunks_mut(rows_per_worker)
+                .zip(row_rhs.par_chunks_mut(rows_per_worker))
+                .enumerate()
+                .for_each(|(chunk_idx, (ax_chunk, rhs_chunk))| {
+                    let first_row = chunk_idx * rows_per_worker;
+                    for (local_row, (row_ax, row_rhs)) in
+                        ax_chunk.iter_mut().zip(rhs_chunk).enumerate()
+                    {
+                        let row = first_row + local_row;
+                        for &device_idx in cache.direct_residual_devices_for_row(row) {
+                            for (slots, &(conductance, equivalent_current)) in companion_slots
+                                [device_idx]
+                                .iter()
+                                .zip(&companion_terms[device_idx])
+                            {
+                                if conductance <= 0.0 {
+                                    continue;
+                                }
+                                let pos = slots.pos;
+                                let neg = slots.neg;
+                                let vp = if pos == 0 { 0.0 } else { solution[pos - 1] };
+                                let vn = if neg == 0 { 0.0 } else { solution[neg - 1] };
+                                if pos > 0 && row == pos - 1 {
+                                    *row_ax += conductance * vp;
+                                    if neg > 0 {
+                                        *row_ax -= conductance * vn;
+                                    }
+                                    *row_rhs += equivalent_current;
+                                }
+                                if neg > 0 && row == neg - 1 {
+                                    if pos > 0 {
+                                        *row_ax -= conductance * vp;
+                                    }
+                                    *row_ax += conductance * vn;
+                                    *row_rhs -= equivalent_current;
+                                }
+                            }
+                            crate::device::Mosfet::add_cached_physical_static_residual_row_terms(
+                                solution,
+                                &cache.direct_residual_plans[device_idx],
+                                &static_terms[device_idx],
+                                row,
+                                row_ax,
+                                row_rhs,
+                            );
+                        }
+                    }
+                });
+        })
+        .is_ok()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn accumulate_classic_mos_compact_physical_residual(
+        &self,
+        cache: &ClassicMosTransientStampCache,
+        circuit: &crate::circuit::CircuitData,
+        solution: &[Value],
+        dt: Value,
+        ctx: &TransientSystemContext<'_>,
+        row_ax: &mut [Value],
+        row_rhs: &mut [Value],
+        candidate_companion_terms: Option<&[MosfetCompanionBranchTerms]>,
+        candidate_static_terms: Option<&[crate::device::mosfet::ClassicMosCachedStaticTerms]>,
+        companion_coeff: &CompanionCoefficients,
+        companion_slots: &[[CompactTwoTerminalStampSlots; 5]],
+        mut caps_out: Option<&mut Vec<(Value, Value, Value)>>,
+    ) {
+        #[cfg(feature = "parallel")]
+        let used_parallel_rows = candidate_companion_terms
+            .zip(candidate_static_terms)
+            .is_some_and(|(companion_terms, static_terms)| {
+                self.accumulate_cached_classic_mos_compact_residual_rows_parallel(
+                    cache,
+                    solution,
+                    row_ax,
+                    row_rhs,
+                    companion_terms,
+                    static_terms,
+                    companion_slots,
+                )
+            });
+        #[cfg(not(feature = "parallel"))]
+        let used_parallel_rows = false;
+
+        let compact_static_terms = candidate_static_terms.filter(|terms| {
+            cache.supports_compact_candidate_static_stamps()
+                && terms.len() == cache.static_stamp_plans.len()
+        });
+
+        if used_parallel_rows {
+            return;
+        }
+        for (idx, slots) in companion_slots.iter().enumerate() {
+            let evaluated_terms;
+            let terms = if let Some(candidate_terms) = candidate_companion_terms {
+                &candidate_terms[idx]
+            } else {
+                let (terms, _, caps) = Self::mosfet_companion_branch_terms::<false>(
+                    &circuit.mosfets.devices[idx],
+                    idx,
+                    solution,
+                    companion_coeff,
+                    dt,
+                    ctx.mosfet_history,
+                    ctx.suppress_gate_charge,
+                    MosfetCompanionBiasSource::Solution,
+                    Some(&cache.device_constants[idx]),
+                );
+                if let Some(caps_out) = caps_out.as_deref_mut() {
+                    caps_out.push(caps);
+                }
+                evaluated_terms = terms;
+                &evaluated_terms
+            };
+            for (slots, &(conductance, equivalent_current)) in slots.iter().zip(terms) {
+                if conductance <= 0.0 {
+                    continue;
+                }
+                let pos = slots.pos;
+                let neg = slots.neg;
+                let vp = if pos == 0 { 0.0 } else { solution[pos - 1] };
+                let vn = if neg == 0 { 0.0 } else { solution[neg - 1] };
+                if pos > 0 {
+                    let row = pos - 1;
+                    row_ax[row] += conductance * vp;
+                    if neg > 0 {
+                        row_ax[row] -= conductance * vn;
+                    }
+                    row_rhs[row] += equivalent_current;
+                }
+                if neg > 0 {
+                    let row = neg - 1;
+                    if pos > 0 {
+                        row_ax[row] -= conductance * vp;
+                    }
+                    row_ax[row] += conductance * vn;
+                    row_rhs[row] -= equivalent_current;
+                }
+            }
+            if let Some(static_terms) = compact_static_terms {
+                crate::device::Mosfet::add_cached_physical_static_residual_terms(
+                    solution,
+                    &cache.static_stamp_plans[idx],
+                    &static_terms[idx],
+                    row_ax,
+                    row_rhs,
+                );
+            } else {
+                circuit.mosfets.devices[idx].add_physical_static_residual_row_terms_at(
+                    solution,
+                    &cache.device_constants[idx],
+                    row_ax,
+                    row_rhs,
+                );
+            }
+        }
+    }
+
     /// Prove a clearly converged classic-MOS candidate from its true physical
     /// linearization without materializing a sparse Jacobian that will not be
     /// solved. The direct row scaling omits the canonical norm's non-negative
@@ -1804,6 +2148,99 @@ impl Engine {
             })
     }
 
+    /// Compact-topology twin of the checked direct residual proof.
+    /// It stays outlined so sub-threshold circuits retain the original hot
+    /// function body and instruction layout.
+    #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
+    fn classic_mos_compact_physical_residual_clearly_converged(
+        &self,
+        cache: &ClassicMosTransientStampCache,
+        circuit: &crate::circuit::CircuitData,
+        matrix: &crate::solver::StaticMatrix,
+        solution: &[Value],
+        dt: Value,
+        ctx: &TransientSystemContext<'_>,
+        row_ax: &mut Vec<Value>,
+        row_rhs: &mut Vec<Value>,
+        candidate_companion_terms: Option<&[MosfetCompanionBranchTerms]>,
+        candidate_static_terms: Option<&[crate::device::mosfet::ClassicMosCachedStaticTerms]>,
+        mut caps_out: Option<&mut Vec<(Value, Value, Value)>>,
+    ) -> bool {
+        let device_count = circuit.mosfets.devices.len();
+        if cache.device_constants.len() != device_count
+            || cache.compact_companion_slots.len() != device_count
+            || device_count == 0
+            || cache.attempt_ax_into(matrix, solution, row_ax).is_err()
+        {
+            return false;
+        }
+        row_rhs.clear();
+        row_rhs.extend_from_slice(&cache.attempt_rhs);
+
+        let candidate_companion_terms = candidate_companion_terms.filter(|terms| {
+            terms.len() == circuit.mosfets.devices.len()
+                && caps_out
+                    .as_deref()
+                    .is_none_or(|caps| caps.len() == circuit.mosfets.devices.len())
+        });
+        if candidate_companion_terms.is_none()
+            && let Some(caps) = caps_out.as_deref_mut()
+        {
+            caps.clear();
+            caps.reserve(circuit.mosfets.devices.len());
+        }
+        let companion_coeff = if ctx.xyce_one_step {
+            CompanionCoefficients::backward_euler()
+        } else {
+            *ctx.coeff
+        };
+        self.accumulate_classic_mos_compact_physical_residual(
+            cache,
+            circuit,
+            solution,
+            dt,
+            ctx,
+            row_ax,
+            row_rhs,
+            candidate_companion_terms,
+            candidate_static_terms,
+            &companion_coeff,
+            &cache.compact_companion_slots,
+            caps_out,
+        );
+
+        let node_rows = circuit.num_nodes().min(row_rhs.len());
+        let configured_reltol = self.residual_reltol();
+        let reltol = if configured_reltol.is_finite() && configured_reltol > 0.0 {
+            configured_reltol
+        } else {
+            1.0e-3
+        };
+        const CLEAR_ACCEPT_MARGIN: Value = 0.5;
+        row_ax
+            .iter()
+            .zip(row_rhs.iter())
+            .enumerate()
+            .all(|(row, (&ax, &rhs))| {
+                if !ax.is_finite() || !rhs.is_finite() {
+                    return false;
+                }
+                let configured_abstol = if row < node_rows {
+                    self.current_abstol()
+                } else {
+                    self.voltage_abstol()
+                };
+                let abstol = if configured_abstol.is_finite() && configured_abstol > 0.0 {
+                    configured_abstol
+                } else {
+                    1.0e-12
+                };
+                let scale = abstol + reltol * ax.abs().max(rhs.abs());
+                (ax - rhs).abs() <= CLEAR_ACCEPT_MARGIN * scale.max(abstol)
+            })
+    }
+
     /// Capture the accepted physical static residual F(x)-B(t) used by
     /// Xyce's OneStep order-2 history term.  The transient companion matrix
     /// is deliberately omitted: it is represented by the per-device Q
@@ -1905,22 +2342,39 @@ impl Engine {
                     && circuit.mosfets.last_update_all_is_physical()
                     && terms.len() == circuit.mosfets.devices.len()
             });
-            if let Some((row_ax, row_rhs)) = classic_mos_residual_scratch
-                && self.classic_mos_physical_residual_clearly_converged(
-                    cache,
-                    circuit,
-                    matrix,
-                    solution,
-                    dt,
-                    ctx,
-                    row_ax,
-                    row_rhs,
-                    direct_companion_terms,
-                    direct_static_terms,
-                    classic_mos_caps_out.as_deref_mut(),
-                )
-            {
-                return Ok(true);
+            if let Some((row_ax, row_rhs)) = classic_mos_residual_scratch {
+                let clearly_converged = if cache.supports_compact_companion_stamps() {
+                    self.classic_mos_compact_physical_residual_clearly_converged(
+                        cache,
+                        circuit,
+                        matrix,
+                        solution,
+                        dt,
+                        ctx,
+                        row_ax,
+                        row_rhs,
+                        direct_companion_terms,
+                        direct_static_terms,
+                        classic_mos_caps_out.as_deref_mut(),
+                    )
+                } else {
+                    self.classic_mos_physical_residual_clearly_converged(
+                        cache,
+                        circuit,
+                        matrix,
+                        solution,
+                        dt,
+                        ctx,
+                        row_ax,
+                        row_rhs,
+                        direct_companion_terms,
+                        direct_static_terms,
+                        classic_mos_caps_out.as_deref_mut(),
+                    )
+                };
+                if clearly_converged {
+                    return Ok(true);
+                }
             }
             let canonical_companion_terms = classic_mos_companion_terms
                 .filter(|_| circuit.mosfets.last_update_all_is_physical());
@@ -2033,7 +2487,7 @@ mod tests {
     fn direct_classic_mos_residual_proof_is_bounded_by_row_incidence() {
         use std::fmt::Write as _;
 
-        fn supports_direct_proof(instance_count: usize) -> bool {
+        fn cache_capabilities(instance_count: usize) -> (bool, bool) {
             let mut deck = String::from(
                 "Classic MOS residual fan-in capability\nVDD d 0 1\nVG g 0 0\nR1 d 0 1k\n",
             );
@@ -2051,20 +2505,22 @@ mod tests {
             let mut matrix = engine.build_matrix(&circuit).expect("fan-in matrix builds");
             circuit.link_indices(&matrix);
             let mut rhs = vec![0.0; circuit.matrix_size()];
-            engine
-                .initialize_classic_mos_transient_stamp_cache(
-                    &circuit,
-                    &mut matrix,
-                    &mut rhs,
-                    engine.config.convergence_config.gmin_target.max(0.0),
-                )
-                .supports_direct_residual_proof()
+            let cache = engine.initialize_classic_mos_transient_stamp_cache(
+                &circuit,
+                &mut matrix,
+                &mut rhs,
+                engine.config.convergence_config.gmin_target.max(0.0),
+            );
+            (
+                cache.supports_direct_residual_proof(),
+                cache.supports_compact_companion_stamps(),
+            )
         }
 
-        assert!(supports_direct_proof(DIRECT_RESIDUAL_MAX_MOS_ROW_INCIDENCE));
-        assert!(!supports_direct_proof(
-            DIRECT_RESIDUAL_MAX_MOS_ROW_INCIDENCE + 1
-        ));
+        assert!(cache_capabilities(DIRECT_RESIDUAL_MAX_MOS_ROW_INCIDENCE).0);
+        assert!(!cache_capabilities(DIRECT_RESIDUAL_MAX_MOS_ROW_INCIDENCE + 1).0);
+        assert!(!cache_capabilities(CLASSIC_MOS_COMPACT_COMPANION_THRESHOLD - 1).1);
+        assert!(cache_capabilities(CLASSIC_MOS_COMPACT_COMPANION_THRESHOLD).1);
     }
 
     #[test]
@@ -2259,7 +2715,7 @@ M1 d g 0 0 NM W=10u L=1u
         let vdmos_companion_slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
         let coeff = CompanionCoefficients::backward_euler();
         let baseline_diag_gmin = engine.config.convergence_config.gmin_target.max(0.0);
-        let ctx = TransientSystemContext {
+        let mut ctx = TransientSystemContext {
             coeff: &coeff,
             xyce_one_step: false,
             xyce_one_step_order2: false,
@@ -2382,6 +2838,11 @@ M1 d g 0 0 NM W=10u L=1u
         assert_eq!(matrix.values_mut(), canonical_values);
         assert_eq!(rhs, canonical_rhs);
 
+        let compact_mosfet_companion_slots =
+            Engine::link_compact_mosfet_companion_slots(&circuit, &matrix);
+        cache.compact_companion_slots = compact_mosfet_companion_slots;
+        ctx.mosfet_companion_slots = &[];
+
         let mut newton_companion_terms = Vec::new();
         let mut newton_static_terms = Vec::new();
         engine
@@ -2480,6 +2941,32 @@ M1 d g 0 0 NM W=10u L=1u
                 Some(&mut companion_caps),
             )
             .expect("fused cached assembly succeeds");
+
+        assert_eq!(matrix.values_mut(), canonical_values);
+        assert_eq!(rhs, canonical_rhs);
+
+        let foreign_pattern = crate::solver::StaticMatrix::from_triplets(1, 1, &[(0, 0, 1.0)])
+            .expect("foreign matrix builds")
+            .pattern_token();
+        cache.stamp_pattern = Some(foreign_pattern);
+        engine
+            .stamp_classic_mos_transient_system_from_cache(
+                &cache,
+                &mut circuit,
+                &mut matrix,
+                &mut rhs,
+                &solution,
+                dt,
+                &ctx,
+                false,
+                crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+                Some(&companion_terms),
+                Some(&candidate_static_terms),
+                None,
+                None,
+                Some(&mut companion_caps),
+            )
+            .expect("foreign compact pattern relinks through checked slots");
 
         assert_eq!(matrix.values_mut(), canonical_values);
         assert_eq!(rhs, canonical_rhs);

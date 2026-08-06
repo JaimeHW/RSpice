@@ -45,6 +45,64 @@ impl TwoTerminalStampSlots {
     }
 }
 
+/// Pattern-local twin of [`TwoTerminalStampSlots`] for batched sparse writes.
+///
+/// One enclosing transient context owns and validates the frozen pattern
+/// token. Keeping only numeric offsets here halves the per-branch topology
+/// footprint while direct and small-device paths retain fully checked
+/// [`CscIndex`] values.
+#[derive(Clone, Copy)]
+pub(super) struct CompactTwoTerminalStampSlots {
+    pub(super) pos: usize,
+    pub(super) neg: usize,
+    pp: usize,
+    pn: usize,
+    np: usize,
+    nn: usize,
+}
+
+impl CompactTwoTerminalStampSlots {
+    const ABSENT: usize = usize::MAX;
+
+    #[inline]
+    fn linked_offset(index: Option<crate::solver::CscIndex>) -> usize {
+        index.map_or(Self::ABSENT, crate::solver::CscIndex::offset)
+    }
+
+    #[inline]
+    fn offset(slot: usize) -> Option<usize> {
+        (slot != Self::ABSENT).then_some(slot)
+    }
+
+    pub(super) fn link(
+        matrix: &crate::solver::StaticMatrix,
+        node_pos: usize,
+        node_neg: usize,
+    ) -> Self {
+        let mut slots = Self {
+            pos: node_pos,
+            neg: node_neg,
+            pp: Self::ABSENT,
+            pn: Self::ABSENT,
+            np: Self::ABSENT,
+            nn: Self::ABSENT,
+        };
+        if node_pos > 0 {
+            slots.pp = Self::linked_offset(matrix.get_index(node_pos - 1, node_pos - 1));
+            if node_neg > 0 {
+                slots.pn = Self::linked_offset(matrix.get_index(node_pos - 1, node_neg - 1));
+            }
+        }
+        if node_neg > 0 {
+            if node_pos > 0 {
+                slots.np = Self::linked_offset(matrix.get_index(node_neg - 1, node_pos - 1));
+            }
+            slots.nn = Self::linked_offset(matrix.get_index(node_neg - 1, node_neg - 1));
+        }
+        slots
+    }
+}
+
 impl Engine {
     /// Batched-stamp twin of [`Engine::stamp_two_terminal_companion_direct`].
     ///
@@ -69,6 +127,37 @@ impl Engine {
         }
         if let Some(idx) = slots.nn {
             values[idx.offset()] += geq;
+        }
+        if slots.pos > 0 {
+            rhs[slots.pos - 1] += i_eq;
+        }
+        if slots.neg > 0 {
+            rhs[slots.neg - 1] -= i_eq;
+        }
+    }
+
+    /// Pattern-local batched stamp using compact numeric offsets. The caller
+    /// must first validate the enclosing cache's frozen pattern token against
+    /// the matrix that owns `values`.
+    #[inline]
+    pub(super) fn stamp_compact_two_terminal_companion_values(
+        values: &mut [Value],
+        rhs: &mut [Value],
+        slots: &CompactTwoTerminalStampSlots,
+        geq: Value,
+        i_eq: Value,
+    ) {
+        if let Some(offset) = CompactTwoTerminalStampSlots::offset(slots.pp) {
+            values[offset] += geq;
+        }
+        if let Some(offset) = CompactTwoTerminalStampSlots::offset(slots.pn) {
+            values[offset] += -geq;
+        }
+        if let Some(offset) = CompactTwoTerminalStampSlots::offset(slots.np) {
+            values[offset] += -geq;
+        }
+        if let Some(offset) = CompactTwoTerminalStampSlots::offset(slots.nn) {
+            values[offset] += geq;
         }
         if slots.pos > 0 {
             rhs[slots.pos - 1] += i_eq;
@@ -749,6 +838,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn compact_two_terminal_stamp_slots_contain_only_offsets() {
+        let bytes = std::mem::size_of::<CompactTwoTerminalStampSlots>();
+        assert!(
+            bytes <= 48,
+            "compact two-terminal stamp plan regressed to {bytes} bytes; keep pattern identity in the enclosing cache"
+        );
+    }
+
+    #[test]
     fn shared_unit_geq_companion_matches_canonical_terms_exactly() {
         let coefficient_sets = [
             CompanionCoefficients::backward_euler(),
@@ -809,6 +907,7 @@ mod tests {
         )
         .expect("full two-node matrix");
         let slots = TwoTerminalStampSlots::link(&linked_matrix, 1, 2);
+        let compact_slots = CompactTwoTerminalStampSlots::link(&linked_matrix, 1, 2);
 
         let mut validated_matrix = linked_matrix.clone_structure();
         let mut validated_rhs = vec![0.0; 2];
@@ -829,5 +928,20 @@ mod tests {
 
         assert_eq!(batched_rhs, validated_rhs);
         assert_eq!(batched_matrix.values_mut(), validated_matrix.values_mut());
+
+        let mut compact_matrix = linked_matrix.clone_structure();
+        let mut compact_rhs = vec![0.0; 2];
+        let values = compact_matrix
+            .values_mut_for_pattern(linked_matrix.pattern_token())
+            .expect("clone retains the linked pattern");
+        Engine::stamp_compact_two_terminal_companion_values(
+            values,
+            &mut compact_rhs,
+            &compact_slots,
+            1.25,
+            -0.75,
+        );
+        assert_eq!(compact_rhs, validated_rhs);
+        assert_eq!(compact_matrix.values_mut(), validated_matrix.values_mut());
     }
 }

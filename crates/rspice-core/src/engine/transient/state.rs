@@ -926,6 +926,28 @@ impl Engine {
             .collect()
     }
 
+    pub(super) fn link_compact_mosfet_companion_slots(
+        circuit: &crate::circuit::CircuitData,
+        matrix: &crate::solver::StaticMatrix,
+    ) -> Vec<[CompactTwoTerminalStampSlots; 5]> {
+        circuit
+            .mosfets
+            .devices
+            .iter()
+            .map(|mos| {
+                let (bs_pos, bs_neg) = mos.body_source_charge_nodes();
+                let (bd_pos, bd_neg) = mos.body_drain_charge_nodes();
+                [
+                    CompactTwoTerminalStampSlots::link(matrix, mos.node_gate, mos.node_source),
+                    CompactTwoTerminalStampSlots::link(matrix, mos.node_gate, mos.node_drain),
+                    CompactTwoTerminalStampSlots::link(matrix, mos.node_gate, mos.node_bulk),
+                    CompactTwoTerminalStampSlots::link(matrix, bs_pos, bs_neg),
+                    CompactTwoTerminalStampSlots::link(matrix, bd_pos, bd_neg),
+                ]
+            })
+            .collect()
+    }
+
     pub(super) fn link_vdmos_companion_slots(
         circuit: &crate::circuit::CircuitData,
         matrix: &crate::solver::StaticMatrix,
@@ -1095,6 +1117,97 @@ impl Engine {
             for (branch, &(geq, ieq)) in device_terms.iter().enumerate() {
                 if geq > 0.0 {
                     Self::stamp_two_terminal_companion_values(
+                        values,
+                        rhs,
+                        &device_slots[branch],
+                        geq,
+                        ieq,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Compact-offset twin of [`Self::stamp_mosfet_transient_companions`].
+    /// The caller supplies the one frozen-pattern token for the whole device
+    /// batch. A mismatch leaves the matrix, RHS, and optional capacitance
+    /// cache untouched so the caller can relink and use the checked path.
+    #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn stamp_mosfet_transient_compact_companions_for_pattern(
+        circuit: &crate::circuit::CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+        coeff: &CompanionCoefficients,
+        dt: Value,
+        history: &MosfetTransientHistory,
+        suppress_gate_charge: bool,
+        use_verified_cached_bias: bool,
+        pattern: Option<crate::solver::CscPatternToken>,
+        slots: &[[CompactTwoTerminalStampSlots; 5]],
+        caps_cache_out: Option<&mut Vec<(Value, Value, Value)>>,
+    ) -> bool {
+        if slots.len() != circuit.mosfets.devices.len() {
+            return false;
+        }
+        let Some(values) = pattern.and_then(|pattern| matrix.values_mut_for_pattern(pattern))
+        else {
+            return false;
+        };
+        let mut caps_cache = caps_cache_out;
+        if let Some(cache) = caps_cache.as_deref_mut() {
+            cache.clear();
+            cache.reserve(circuit.mosfets.devices.len());
+        }
+        for (idx, mos) in circuit.mosfets.devices.iter().enumerate() {
+            let (device_terms, _charges, caps) = Self::mosfet_companion_branch_terms::<false>(
+                mos,
+                idx,
+                voltages,
+                coeff,
+                dt,
+                history,
+                suppress_gate_charge,
+                if use_verified_cached_bias {
+                    MosfetCompanionBiasSource::VerifiedPhysicalGate
+                } else {
+                    MosfetCompanionBiasSource::Solution
+                },
+                None,
+            );
+            if let Some(cache) = caps_cache.as_deref_mut() {
+                cache.push(caps);
+            }
+            for (branch, &(geq, ieq)) in device_terms.iter().enumerate() {
+                if geq > 0.0 {
+                    Self::stamp_compact_two_terminal_companion_values(
+                        values,
+                        rhs,
+                        &slots[idx][branch],
+                        geq,
+                        ieq,
+                    );
+                }
+            }
+        }
+        true
+    }
+
+    /// Compact-offset twin used only after the enclosing classic-MOS cache
+    /// validates its frozen CSC pattern once for the complete batch.
+    #[inline]
+    pub(super) fn stamp_cached_mosfet_transient_compact_companion_values(
+        values: &mut [Value],
+        rhs: &mut [Value],
+        slots: &[[CompactTwoTerminalStampSlots; 5]],
+        terms: &[MosfetCompanionBranchTerms],
+    ) {
+        debug_assert_eq!(slots.len(), terms.len());
+        for (device_slots, device_terms) in slots.iter().zip(terms) {
+            for (branch, &(geq, ieq)) in device_terms.iter().enumerate() {
+                if geq > 0.0 {
+                    Self::stamp_compact_two_terminal_companion_values(
                         values,
                         rhs,
                         &device_slots[branch],
