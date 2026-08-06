@@ -744,7 +744,12 @@ impl Engine {
             !refresh_nonlinear
         };
         let reusable_companion_terms = if let Some(terms) = companion_terms_cache {
-            debug_assert!(cached_terms_match_assembly);
+            // Static-probe charge companions are evaluated from the raw
+            // candidate branch voltages and the canonical Meyer limiter
+            // state. Their validity is independent of static channel
+            // voltage limiting; only Newton-limited assembly requires the
+            // cached static state to match.
+            debug_assert!(static_probe || cached_terms_match_assembly);
             debug_assert_eq!(terms.len(), circuit.mosfets.devices.len());
             if let Some(caps) = caps_cache_out.as_deref() {
                 debug_assert_eq!(caps.len(), terms.len());
@@ -2401,8 +2406,11 @@ impl Engine {
                     return Ok(true);
                 }
             }
-            let canonical_companion_terms = classic_mos_companion_terms
-                .filter(|_| circuit.mosfets.last_update_all_is_physical());
+            // Candidate charge companions use the exact raw branch voltages
+            // and remain canonical even when the static channel cache was
+            // voltage-limited. Reuse them independently of static-term
+            // validity and recompute only the physical conduction stamp.
+            let canonical_companion_terms = classic_mos_companion_terms;
             let canonical_static_terms = classic_mos_static_terms.filter(|terms| {
                 circuit.mosfets.last_update_all_is_physical()
                     && terms.len() == cache.static_stamp_plans.len()
@@ -3069,6 +3077,48 @@ M1 d g 0 0 NM W=10u L=1u
             assert_eq!(companion_charges[idx], canonical_charges);
             assert_eq!(companion_caps[idx], canonical_caps);
         }
+        ctx.coeff = &limited_coeff;
+        ctx.mosfet_history = &limited_history;
+        engine
+            .stamp_classic_mos_transient_system_from_cache(
+                &cache,
+                &mut circuit,
+                &mut matrix,
+                &mut rhs,
+                &limited_solution,
+                dt,
+                &ctx,
+                false,
+                crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .expect("limited canonical residual assembly succeeds");
+        let limited_canonical_values = matrix.values_mut().to_vec();
+        let limited_canonical_rhs = rhs.clone();
+        engine
+            .stamp_classic_mos_transient_system_from_cache(
+                &cache,
+                &mut circuit,
+                &mut matrix,
+                &mut rhs,
+                &limited_solution,
+                dt,
+                &ctx,
+                false,
+                crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+                Some(&companion_terms),
+                None,
+                None,
+                None,
+                None,
+            )
+            .expect("limited cached-companion residual assembly succeeds");
+        assert_eq!(matrix.values_mut(), limited_canonical_values);
+        assert_eq!(rhs, limited_canonical_rhs);
         let canonical_limit = Engine::mosfet_ngspice_truncation_limit(
             &circuit,
             &limited_solution,
