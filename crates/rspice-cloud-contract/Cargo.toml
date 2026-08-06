@@ -1,0 +1,22 @@
+# VENDORED from JaimeHW/RSpice-Cloud@5f82c3a3dccd4f420b02aead591e916701203df2 — do not edit.
+# Re-sync with: python tools/cloud/sync_vendored_client.py --source <checkout>
+# The client's native dev-dependency section is stripped: its integration
+# tests stay in RSpice-Cloud, where they run against the real API handlers.
+[package]
+name = "rspice-cloud-contract"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64.workspace = true
+rspice-cloud-domain = { path = "../rspice-cloud-domain", version = "0.1.0" }
+serde.workspace = true
+serde_json.workspace = true
+uuid = { version = "1.0", default-features = false, features = ["serde"] }
+
+[dev-dependencies]
+serde_json.workspace = true

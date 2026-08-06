@@ -1,0 +1,12 @@
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "n": "nZzV46MDm66k3p0BxTXsGi-W2yMyB8C-UTJ4iNWoS6ORe5iTWIqXcsBt1pup_rjpuZNVu3jLvcC1tGddrwLRw2VcPIP7lF_AQCKd8bWwNf3eSz4bNkRN_x-66AW9Web8hNDt9QiA79RHq3xJDZL1S-4v5sBR4mDdREuenXjGOGKwAUmmMK38tX_c8GhbC_EYrv-NvifOt9cC5Y_jnZ0tfOJ93foBYG_UuH-6up29OxuelNra9LFl-8VBKnFMYRn8Ft46gk2RVQUPt3ropV9kdKmBL3FbVZOAd5BW4D5pE0A1ZDbyeiy8Sm7BWTFhHQ-27_emTuE2OM5GIqP4De9xYw",
+      "e": "AQAB",
+      "kid": "test-license-key",
+      "use": "sig",
+      "alg": "PS256"
+    }
+  ]
+}

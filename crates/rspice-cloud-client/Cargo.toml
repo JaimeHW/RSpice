@@ -1,0 +1,42 @@
+# VENDORED from JaimeHW/RSpice-Cloud@5f82c3a3dccd4f420b02aead591e916701203df2 — do not edit.
+# Re-sync with: python tools/cloud/sync_vendored_client.py --source <checkout>
+# The client's native dev-dependency section is stripped: its integration
+# tests stay in RSpice-Cloud, where they run against the real API handlers.
+[package]
+name = "rspice-cloud-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64.workspace = true
+futures-util.workspace = true
+http.workspace = true
+mime.workspace = true
+reqwest.workspace = true
+rspice-cloud-contract = { path = "../rspice-cloud-contract", version = "0.1.0" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+time.workspace = true
+url.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+getrandom.workspace = true
+jsonwebtoken.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-timers.workspace = true
+js-sys.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+wasm-streams.workspace = true
+web-sys.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test.workspace = true

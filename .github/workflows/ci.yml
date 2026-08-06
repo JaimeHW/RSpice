@@ -57,6 +57,8 @@ jobs:
           "$GOBIN/actionlint" .github/workflows/*.yml
       - name: CI configuration tests
         run: python3 tools/ci/test_ci_configuration.py
+      - name: Vendored cloud client integrity
+        run: python3 tools/ci/test_cloud_client_vendor.py
       - name: WASM playground worker tests
         run: python3 tools/ci/test_wasm_playground.py
       - name: WASM IDE worker tests

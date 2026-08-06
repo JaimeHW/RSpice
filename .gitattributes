@@ -46,3 +46,11 @@ crates/rspice-publish/src/assets/** text eol=lf
 # adapter code now, fingerprinted by nothing, so it follows the ordinary
 # whitespace policy like the rest of rspice-core.
 crates/rspice-veriloga-models/** text eol=lf
+
+# Vendored RSpice Cloud client trees are fingerprinted by
+# tools/cloud/vendor-manifest.json (LF bytes); a CRLF checkout would fail the
+# integrity gate.
+crates/rspice-cloud-domain/** text eol=lf
+crates/rspice-cloud-contract/** text eol=lf
+crates/rspice-cloud-client/** text eol=lf
+testdata/** text eol=lf
