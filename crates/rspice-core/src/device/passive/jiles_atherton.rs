@@ -2522,6 +2522,41 @@ impl NonlinearDevice for JilesAthertonInductor {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{JilesAthertonInductor, JilesAthertonParams, XyceCoreTrial};
+
+    #[test]
+    fn xyce_level2_trial_honors_orig_flag_magnetization_limiter() {
+        let mut params = JilesAthertonParams::default();
+        params.xyce_core = true;
+        params.xyce_core_level2 = true;
+        params.ms = 100.0;
+        let mut device = JilesAthertonInductor::new("Lcore".to_owned(), 0, 0).with_params(params);
+
+        let trial = |magnetization_update| XyceCoreTrial {
+            magnetization: 0.0,
+            p: 1.0,
+            mid: 1.0,
+            applied_field: 0.0,
+            applied_ampere_turns: 0.0,
+            magnetization_update,
+            latest_magnetization: 0.0,
+            level1_rate: 0.0,
+            level1_residual: 0.0,
+            level1_rate_residual: 0.0,
+        };
+
+        // MutIndNonLin2 clears origFlag only when the increment is strictly
+        // larger than one quarter of Ms, so the boundary remains converged.
+        device.cache_xyce_core_trial(0.0, 0.0, trial(25.0));
+        assert!(device.xyce_core_trial_converged());
+
+        device.cache_xyce_core_trial(0.0, 0.0, trial(25.1));
+        assert!(!device.xyce_core_trial_converged());
+    }
+}
+
 //=============================================================================
 // Tests
 //=============================================================================

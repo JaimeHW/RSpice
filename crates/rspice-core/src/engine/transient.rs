@@ -1912,6 +1912,11 @@ impl Engine {
                     // but a level-2 Core candidate that exceeds the native
                     // quarter-Ms increment can cross a hysteresis branch and
                     // must force a smaller retry in either policy mode.
+                    && (!circuit.has_xyce_core_level2()
+                        || circuit.xyce_core_level2_trial_converged())
+                    // LEVEL=1's hidden M/R equations remain governed by the
+                    // broad device-convergence policy; they are not part of
+                    // MutIndNonLin2's unconditional LEVEL=2 origFlag veto.
                     && (!enforce_device_convergence || circuit.xyce_core_trial_converged()))
         };
         let enforce_force_candidate_safety =

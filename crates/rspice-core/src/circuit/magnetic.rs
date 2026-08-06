@@ -107,6 +107,27 @@ impl CircuitData {
                 .all(|group| group.device.xyce_core_trial_converged())
     }
 
+    /// Whether every LEVEL=2 Xyce Core trial satisfies MutIndNonLin2's
+    /// native forward-Euler magnetization limiter.
+    ///
+    /// Xyce stores this limiter in each device's inherited `origFlag`, which
+    /// participates in the device convergence status regardless of the
+    /// optional broad `ENFORCEDEVICECONV` setting.  Keep the LEVEL=1 hidden
+    /// M/R residual policy separate: callers that need the native LEVEL=2
+    /// veto must not accidentally enable those reduced-equation checks for a
+    /// mixed LEVEL=1/LEVEL=2 circuit.
+    pub(crate) fn xyce_core_level2_trial_converged(&self) -> bool {
+        self.jiles_atherton_inductors
+            .iter()
+            .filter(|binding| binding.device.is_xyce_core_level2())
+            .all(|binding| binding.device.xyce_core_trial_converged())
+            && self
+                .xyce_core_groups
+                .iter()
+                .filter(|group| group.device.is_xyce_core_level2())
+                .all(|group| group.device.xyce_core_trial_converged())
+    }
+
     /// Whether every standalone inductor in the circuit is represented by a
     /// Xyce Core binding.  OneStep can split this topology into its static
     /// Core `F` and constant-charge `Q` terms; ordinary and mutually coupled
