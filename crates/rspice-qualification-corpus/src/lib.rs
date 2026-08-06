@@ -21,3 +21,4 @@ pub mod canonical;
 pub mod capture;
 pub mod contract;
 pub mod decimal;
+pub mod families;
