@@ -13,35 +13,7 @@
 //! model specification, not an imitation of the engine.
 
 use crate::capture::{CaseDraft, Expectation, Parameter, Probe};
-
-const K_BOLTZMANN: f64 = 1.380649e-23;
-const Q_ELECTRON: f64 = 1.602176634e-19;
-const KELVIN_AT_ZERO_CELSIUS: f64 = 273.15;
-
-fn thermal_voltage(temperature_celsius: f64) -> f64 {
-    (temperature_celsius + KELVIN_AT_ZERO_CELSIUS) * K_BOLTZMANN / Q_ELECTRON
-}
-
-/// Node voltage of a source-fed diode with series resistance: the root of
-/// `(vs - v) / r = is * (exp(v / (n*vt)) - 1)`, bracketed and bisected to
-/// the last representable bit.
-fn diode_node_voltage(vs: f64, r: f64, is: f64, n: f64, temperature_celsius: f64) -> f64 {
-    let n_vt = n * thermal_voltage(temperature_celsius);
-    let residual = |v: f64| (vs - v) / r - is * ((v / n_vt).exp() - 1.0);
-    let (mut low, mut high) = (0.0_f64, vs);
-    for _ in 0..200 {
-        let middle = 0.5 * (low + high);
-        if middle <= low || middle >= high {
-            break;
-        }
-        if residual(middle) > 0.0 {
-            low = middle;
-        } else {
-            high = middle;
-        }
-    }
-    0.5 * (low + high)
-}
+use crate::families::physics::diode_node_voltage;
 
 fn volts(name: &str, expected: f64, absolute: &'static str, relative: &'static str) -> Probe {
     Probe {

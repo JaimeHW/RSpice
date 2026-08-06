@@ -1,13 +1,17 @@
 //! The corpus case families. Each module authors drafts for one analysis
 //! domain; every draft carries its own engine-independent oracle.
 
+pub mod dc;
 pub mod op;
+pub mod physics;
 
 use crate::capture::CaseDraft;
 
 /// Every draft in the corpus, unordered; the assembler sorts by identifier.
 pub fn all() -> Vec<CaseDraft> {
-    op::drafts()
+    let mut drafts = op::drafts();
+    drafts.extend(dc::drafts());
+    drafts
 }
 
 #[cfg(test)]
