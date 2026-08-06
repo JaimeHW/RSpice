@@ -4868,6 +4868,7 @@ dependencies = [
 name = "rspice-publish"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "clap",
  "rspice-publication-contract",
  "serde_json",

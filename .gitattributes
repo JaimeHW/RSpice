@@ -30,6 +30,11 @@ tests/xyce/** text=auto eol=crlf
 # CRLF materialization on Windows would fail the byte-exactness gate.
 crates/rspice-publication-contract/tests/fixtures/** text eol=lf
 
+# The hydration loader is include_str!'d and emitted byte-for-byte into
+# deterministic bundles; its subresource-integrity digest is computed from
+# exactly these bytes, so CRLF materialization would change every bundle.
+crates/rspice-publish/src/assets/** text eol=lf
+
 # Regenerated built-in Rust must stay clean after generator rewrites. The
 # manifest records a blake3 over each generated file's exact bytes and
 # `build.rs` re-derives it from the checkout, so an end-of-line translation

@@ -25,9 +25,11 @@ use rspice_publication_contract::{
 use sha2::{Digest as _, Sha256};
 use thiserror::Error;
 
+mod hydration;
 mod page;
 mod svg;
 
+pub use hydration::ViewerRuntime;
 pub use page::PAGE_STYLES;
 
 /// Everything that can stop a bundle from being produced. Contract
@@ -39,6 +41,8 @@ pub enum RenderError {
     Contract(#[from] rspice_publication_contract::ContractError),
     #[error("figure payload serialization failed: {0}")]
     Payload(String),
+    #[error("viewer runtime rejected: {0}")]
+    ViewerRuntime(String),
 }
 
 /// A rendered bundle: bundle-relative path → exact bytes. `BTreeMap` keeps
@@ -246,10 +250,13 @@ fn measurement_row(measurement: &Measurement) -> String {
 /// Render the complete page bundle from a snapshot that has already passed
 /// [`rspice_publication_contract::Validate`]. `snapshot_sha256_hex` is the
 /// digest of the exact canonical snapshot bytes, printed in the provenance
-/// footer so a published page names its sealed source.
+/// footer so a published page names its sealed source. `viewer` is the built
+/// viewer runtime sealed into every figure-bearing bundle; a snapshot with
+/// no figures emits no runtime bytes at all.
 pub fn render_bundle(
     snapshot: &PublicationSnapshot,
     snapshot_sha256_hex: &str,
+    viewer: &ViewerRuntime,
 ) -> Result<Bundle, RenderError> {
     snapshot.validate()?;
     let mut bundle = Bundle::new();
@@ -296,9 +303,27 @@ pub fn render_bundle(
             .map_err(|error| RenderError::Payload(error.to_string()))?,
     );
 
+    let emission = if manifest.figures.is_empty() {
+        None
+    } else {
+        bundle.insert(
+            hydration::LOADER_PATH.to_string(),
+            hydration::LOADER_JS.as_bytes().to_vec(),
+        );
+        bundle.insert(
+            hydration::VIEWER_JS_PATH.to_string(),
+            viewer.js_glue.clone(),
+        );
+        bundle.insert(hydration::VIEWER_WASM_PATH.to_string(), viewer.wasm.clone());
+        Some(hydration::HydrationEmission::new(
+            &manifest.figures,
+            viewer,
+        )?)
+    };
+
     bundle.insert(
         "index.html".to_string(),
-        page::document(snapshot, snapshot_sha256_hex, &bundle).into_bytes(),
+        page::document(snapshot, snapshot_sha256_hex, &bundle, emission.as_ref()).into_bytes(),
     );
     Ok(bundle)
 }

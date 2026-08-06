@@ -96,6 +96,18 @@ incremental = true
 lto = false
 codegen-units = 16
 
+# The published-page viewer runtime, built only for wasm32 by the component
+# release workflow. Size is the budget here, not build time: the dependency
+# tree is tiny, so whole-program LTO and a single codegen unit are cheap and
+# the measured bundle stays well inside the 3 MB gzip gate.
+[profile.viewer-release]
+inherits = "release"
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
 # Faster test compilation
 [profile.test]
 incremental = true
