@@ -1671,10 +1671,11 @@ impl StaticMatrix {
                             Err(_) => false,
                         });
                 if !factored {
+                    // A numeric failure belongs to this changing Jacobian,
+                    // not to the frozen sparsity pattern. Auto must retry
+                    // Circuit LU after faer's per-solve fallback; only the
+                    // measured fill policy below is a persistent rejection.
                     klu_factored_values.clear();
-                    if solver_options.real_backend == RealSolverBackend::Auto {
-                        *klu_auto_rejected = true;
-                    }
                     false
                 } else {
                     if !values_current {
@@ -2235,10 +2236,11 @@ impl StaticMatrix {
                 Err(_) => false,
             };
         if !factored {
+            // A numeric failure belongs to this changing Jacobian, not to the
+            // frozen sparsity pattern. Auto must retry Circuit LU after
+            // faer's per-solve fallback; only the measured fill policy below
+            // is a persistent rejection.
             klu_factored_values.clear();
-            if solver_options.real_backend == RealSolverBackend::Auto {
-                *klu_auto_rejected = true;
-            }
             static FALLBACK_LOGGED: std::sync::Once = std::sync::Once::new();
             FALLBACK_LOGGED.call_once(|| {
                 log::warn!("klu backend could not factor this system; using faer fallback");
@@ -4960,5 +4962,28 @@ mod tests {
             solve_gauss(vec![vec![Value::NAN]], vec![1.0]),
             Err(SolverError::Overflow)
         ));
+    }
+
+    #[test]
+    fn auto_retries_klu_after_a_numeric_factorization_failure() {
+        let mut matrix = StaticMatrix::from_triplets_with_options(
+            1,
+            1,
+            &[(0, 0, 1.0)],
+            SolverOptions {
+                real_backend: RealSolverBackend::Auto,
+                ..SolverOptions::default()
+            },
+        )
+        .unwrap();
+
+        matrix.clear_values();
+        matrix.add(0, 0, Value::NAN);
+        assert!(matches!(matrix.solve(&[1.0]), Err(SolverError::Overflow)));
+        assert!(!matrix.klu_auto_rejected);
+
+        matrix.clear_values();
+        matrix.add(0, 0, 2.0);
+        assert_relative_solution(&matrix.solve(&[4.0]).unwrap(), &[2.0]);
     }
 }
