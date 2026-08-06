@@ -398,22 +398,21 @@ impl LteEstimator {
             self.xyce_order_two_difference_dt
         };
         if self.history_count >= 3 && predictor_dt > 0.0 && predictor_prev_dt > 0.0 {
-            let dd0 = (prev - prev_prev) / predictor_dt;
-            let dd1 = self
+            // Mirror OneStep::updateCoeffs() and obtainPredictor() in their
+            // source order. Xyce forms beta1 from the timestep ratio and
+            // beta2 from three sequential divisions; algebraically reducing
+            // those products changes the low bits that decide an adaptive
+            // retry at hysteresis reversals.
+            let difference = prev - prev_prev;
+            let previous_difference = self
                 .xyce_order_two_difference
                 .get(index)
                 .copied()
-                .map(|difference| difference / predictor_prev_dt)
-                .unwrap_or_else(|| {
-                    if self.prev_prev_dt > 0.0 {
-                        (prev_prev - prev_prev_prev) / self.prev_prev_dt
-                    } else {
-                        0.0
-                    }
-                });
-            let b = -dt / (2.0 * predictor_dt);
-            let a = 1.0 - b;
-            prev + (b * dd1 + a * dd0) * dt
+                .unwrap_or_else(|| prev_prev - prev_prev_prev);
+            let ratio = dt / predictor_dt;
+            let beta1 = ratio + (ratio * ratio) / 2.0;
+            let beta2 = -(dt * dt / predictor_dt / predictor_prev_dt / 2.0);
+            prev + beta1 * difference + beta2 * previous_difference
         } else {
             self.predict_trapezoidal_order1_value(prev, prev_prev, dt)
         }
@@ -536,13 +535,18 @@ impl LteEstimator {
 
     pub(crate) fn rollback_xyce_attempt(&mut self) {
         if let Some((dt, prev_dt, prev_prev_dt, order)) = self.xyce_attempt_checkpoint.take() {
+            // `begin_xyce_attempt` mirrors OneStep::updateCoeffs before the
+            // candidate solve.  OneStep::restoreHistory shifts that
+            // post-update array in place: an order-two retry leaves
+            // (checkpoint psi0, psi1, psi1), while an order-one retry leaves
+            // (checkpoint psi0, psi0, psi1).
             self.xyce_attempt_dt = dt;
             self.xyce_attempt_prev_dt = if order >= 2 { prev_dt } else { dt };
-            // OneStep::restoreHistory shifts the order-2 coefficient history
-            // back one slot: psi0 <- psi1 and psi1 <- psi2. Because
-            // begin_xyce_attempt already performed the forward shift
-            // psi2 <- checkpoint psi1, the restored psi2 is the checkpoint's
-            // prev_dt. Order one does not touch psi2.
+            // OneStep::restoreHistory() shifts psi[0] from psi[1] for an
+            // order-one retry but leaves psi[2] untouched.  Preserve that
+            // untouched third coefficient instead of collapsing it onto
+            // psi[1]; the distinction matters when the next predictor uses
+            // variable-step order two.
             self.xyce_attempt_prev_prev_dt = if order >= 2 { prev_dt } else { prev_prev_dt };
         }
     }
@@ -839,7 +843,8 @@ impl LteEstimator {
             // Xyce's device-mask entries receive effectively infinite weights,
             // so they contribute zero to the sum but remain in the WRMS global
             // vector length used as the denominator.
-            (aggregate / len as Value).sqrt()
+            let one_over_len = 1.0 / len as Value;
+            (aggregate * one_over_len).sqrt()
         };
         let lte = raw_lte * error_coefficient;
         let accept = if self.uses_accepted_solution_reference() {
@@ -1509,6 +1514,30 @@ mod lte_estimator_tests {
                 estimator.xyce_attempt_prev_prev_dt,
             ),
             (3.0, 3.0, 2.0)
+        );
+
+        // Exercise an order-one retry without a preceding order-two shift:
+        // psi[2] must remain the checkpoint's third coefficient.
+        estimator.xyce_attempt_dt = 3.0;
+        estimator.xyce_attempt_prev_dt = 2.0;
+        estimator.xyce_attempt_prev_prev_dt = 1.0;
+        estimator.begin_xyce_attempt(5.0, 1);
+        assert_eq!(
+            (
+                estimator.xyce_attempt_dt,
+                estimator.xyce_attempt_prev_dt,
+                estimator.xyce_attempt_prev_prev_dt,
+            ),
+            (5.0, 3.0, 1.0)
+        );
+        estimator.rollback_xyce_attempt();
+        assert_eq!(
+            (
+                estimator.xyce_attempt_dt,
+                estimator.xyce_attempt_prev_dt,
+                estimator.xyce_attempt_prev_prev_dt,
+            ),
+            (3.0, 3.0, 1.0)
         );
     }
 }
