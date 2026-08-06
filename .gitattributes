@@ -25,6 +25,11 @@ models/spice/**/LICENSE -text
 # leaving binary fixtures untouched.
 tests/xyce/** text=auto eol=crlf
 
+# Publication-contract golden fixtures are compared byte-for-byte against the
+# canonical serializer's LF output and include_str!'d into the test binary, so
+# CRLF materialization on Windows would fail the byte-exactness gate.
+crates/rspice-publication-contract/tests/fixtures/** text eol=lf
+
 # Regenerated built-in Rust must stay clean after generator rewrites. The
 # manifest records a blake3 over each generated file's exact bytes and
 # `build.rs` re-derives it from the checkout, so an end-of-line translation
