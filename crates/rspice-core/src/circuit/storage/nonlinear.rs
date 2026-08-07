@@ -33,6 +33,15 @@ impl Diodes {
         self.devices.is_empty()
     }
 
+    /// Select Xyce's native transient convergence status policy for every
+    /// diode in this circuit.  The engine calls this only after the DC/startup
+    /// solve, so operating-point convergence retains the strict device check.
+    pub(crate) fn set_native_xyce_transient_convergence(&mut self, enabled: bool) {
+        for diode in &mut self.devices {
+            diode.set_native_xyce_transient_convergence(enabled);
+        }
+    }
+
     pub(crate) fn nonlinear_state_snapshot(
         &self,
     ) -> Vec<crate::device::semiconductor::DiodeNonlinearState> {

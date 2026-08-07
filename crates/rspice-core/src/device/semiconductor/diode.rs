@@ -282,6 +282,13 @@ pub struct Diode {
     /// - **Breakdown matching.** Xyce solves the knee against the bottom
     ///   saturation current alone; ngspice solves it against `totalSatCur`.
     xyce_dialect: bool,
+    /// Use Xyce's native transient device status semantics for this circuit.
+    ///
+    /// Xyce's classic diode reports only its limiter/origFlag status to the
+    /// transient `ENFORCEDEVICECONV` test.  The transient engine enables this
+    /// for an implicit Xyce run after the DC operating point is established;
+    /// explicit strict overrides and all non-transient analyses leave it off.
+    native_xyce_transient_convergence: bool,
     /// Linear temperature coefficient for the reverse breakdown voltage
     /// (Xyce TBV1, in 1/C).
     pub tbv1: Value,
@@ -427,6 +434,7 @@ impl Diode {
             level: DiodeLevel::Legacy,
             temperature_model: DiodeTemperatureModel::default(),
             xyce_dialect: false,
+            native_xyce_transient_convergence: false,
             tbv1: 0.0,
             tbv2: 0.0,
 
@@ -968,6 +976,13 @@ impl Diode {
     /// routine.  Other dialects retain ngspice's `pnjlim_new` behavior.
     pub fn set_xyce_compatibility(&mut self, enabled: bool) {
         self.xyce_dialect = enabled;
+    }
+
+    /// Select Xyce's native transient device-convergence status policy for
+    /// this run.  This is deliberately separate from the dialect selector so
+    /// DC startup and explicit `ENFORCEDEVICECONV=1` remain strict.
+    pub(crate) fn set_native_xyce_transient_convergence(&mut self, enabled: bool) {
+        self.native_xyce_transient_convergence = enabled;
     }
 
     /// Evaluate the junction limiter for a candidate without mutating the
@@ -2012,11 +2027,15 @@ impl NonlinearDevice for Diode {
 
     fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
         let tolerance = criteria.voltage_tolerance();
+        let native_xyce_transient =
+            self.xyce_dialect && self.native_xyce_transient_convergence;
         // A pnjlim-clamped step must iterate again regardless of the
         // voltage delta (ngspice `Check` semantics).
         !self.limited.get()
-            && (self.prev_vd - self.prev_vd_old).abs() < tolerance
-            && self.linearized_current_matches_candidate(criteria)
+            && (native_xyce_transient
+                || (self.prev_vd - self.prev_vd_old).abs() < tolerance)
+            && (native_xyce_transient
+                || self.linearized_current_matches_candidate(criteria))
     }
 }
 
@@ -2032,6 +2051,24 @@ mod tests {
         d.cj0 = 2e-12;
         d.m = 0.4;
         d
+    }
+
+    #[test]
+    fn xyce_transient_status_policy_is_explicit_and_limiter_owned() {
+        let mut diode = test_diode();
+        diode.set_xyce_compatibility(true);
+        diode.prev_vd = 0.8;
+        diode.prev_vd_old = 0.0;
+        diode.limited.set(false);
+
+        let criteria = NonlinearConvergenceCriteria::default();
+        assert!(!diode.is_converged(criteria));
+
+        diode.set_native_xyce_transient_convergence(true);
+        assert!(diode.is_converged(criteria));
+
+        diode.limited.set(true);
+        assert!(!diode.is_converged(criteria));
     }
 
     #[test]

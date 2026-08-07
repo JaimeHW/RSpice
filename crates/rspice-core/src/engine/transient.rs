@@ -1886,6 +1886,15 @@ impl Engine {
                 }
             }
         }
+        // Xyce's implicit transient policy uses the classic diode's native
+        // `origFlag` status (limiter activity only) for ENFORCEDEVICECONV.
+        // Keep the DC/startup solve strict, and preserve strict behavior when
+        // the deck or caller explicitly supplies ENFORCEDEVICECONV.
+        let native_xyce_transient_convergence = self.config.spice_dialect == SpiceDialect::Xyce
+            && self.config.transient_enforce_device_convergence.is_none();
+        circuit
+            .diodes
+            .set_native_xyce_transient_convergence(native_xyce_transient_convergence);
         let startup_voltage_hints_active = resume.is_none()
             && !self
                 .collect_node_voltage_hints(netlist, &circuit)
