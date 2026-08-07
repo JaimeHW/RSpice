@@ -159,18 +159,18 @@ impl Engine {
             })
     }
 
-    /// Resolve Xyce's `NONLIN-TRAN ENFORCEDEVICECONV` status-test policy.
-    /// Xyce 7.10 disables the device-local convergence test for transient
-    /// solves by default (`NONLIN-TRAN ENFORCEDEVICECONV=0`). Native and
-    /// ngspice modes preserve the stricter legacy RSpice policy unless
-    /// explicitly overridden.
+    /// Resolve the transient `ENFORCEDEVICECONV` status-test policy.
+    ///
+    /// Xyce's option metadata advertises zero for this field, but that is not
+    /// the runtime default: `NLParams` initializes device convergence to true
+    /// and its transient-default block leaves that value unchanged.  Preserve
+    /// an explicit `.OPTIONS NONLIN-TRAN ENFORCEDEVICECONV=0`, while keeping
+    /// the constructor default enabled for every dialect.
     #[inline]
     pub(crate) fn transient_enforce_device_convergence(&self) -> bool {
         self.config
             .transient_enforce_device_convergence
-            .unwrap_or_else(|| {
-                self.config.spice_dialect != SpiceDialect::Xyce
-            })
+            .unwrap_or(true)
     }
 
     /// Build Xyce's immutable transient nonlinear-update weights.
@@ -483,9 +483,11 @@ mod tests {
         assert_eq!(engine.transient_nonlinear_abstol(), 1.0e-6);
         assert_eq!(engine.transient_nonlinear_deltaxtol(), 0.33);
         assert_eq!(engine.transient_nonlinear_rhstol(), 1.0e-2);
-        assert!(!engine.transient_enforce_device_convergence());
+        assert!(engine.transient_enforce_device_convergence());
         assert_eq!(engine.transient_trtol(), 1.0);
 
+        engine.config.transient_enforce_device_convergence = Some(false);
+        assert!(!engine.transient_enforce_device_convergence());
         engine.config.transient_enforce_device_convergence = Some(true);
         assert!(engine.transient_enforce_device_convergence());
     }

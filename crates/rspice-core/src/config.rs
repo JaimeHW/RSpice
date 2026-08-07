@@ -275,9 +275,10 @@ pub struct SimulationConfig {
     /// Xyce 7.10 `NONLIN-TRAN MAXSTEP=20` default.
     pub transient_nonlinear_max_iterations: Option<usize>,
     /// Whether transient Newton acceptance additionally requires device-local
-    /// convergence flags. `None` uses Xyce 7.10's
-    /// `NONLIN-TRAN ENFORCEDEVICECONV=0` default in Xyce mode and preserves
-    /// the native/ngspice enforced-device policy in other dialects.
+    /// convergence flags. `None` preserves the enabled runtime default used by
+    /// Xyce 7.10's `NLParams` constructor and by native/ngspice operation.
+    /// An explicit `Some(false)` represents
+    /// `.OPTIONS NONLIN-TRAN ENFORCEDEVICECONV=0`.
     pub transient_enforce_device_convergence: Option<bool>,
     /// Explicit Xyce transient nonlinear solver selection. `None` preserves
     /// Xyce's default DampedNewton solver; `Some(true)` selects NOX.
