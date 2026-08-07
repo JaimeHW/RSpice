@@ -22,6 +22,69 @@ use crate::numerics::integration::{CompanionCoefficients, IntegrationMethod};
 use crate::{Netlist, Value};
 use std::collections::{HashMap, HashSet};
 
+use xyce_dae::{XyceOneStepOrder, XyceOneStepWorkspace};
+
+/// Reproduce `StaticMatrix::raw_residual_norms` for an already formed direct
+/// Xyce DAE residual.  The scaled sum-of-squares recurrence and its initial
+/// value are part of the status-test arithmetic, so this is intentionally not
+/// a generic `sqrt(sum(r*r))` helper.
+fn direct_xyce_dae_norms(residual: &[Value]) -> Result<(Value, Value), SimulationError> {
+    let mut inf_norm: Value = 0.0;
+    let mut l2_scale: Value = 0.0;
+    let mut l2_sum_squares: Value = 1.0;
+    for (index, &value) in residual.iter().enumerate() {
+        if !value.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "direct Xyce DAE residual[{index}] is non-finite: {value}"
+            )));
+        }
+        let magnitude = value.abs();
+        inf_norm = inf_norm.max(magnitude);
+        if magnitude != 0.0 {
+            if l2_scale < magnitude {
+                let ratio = l2_scale / magnitude;
+                l2_sum_squares = 1.0 + l2_sum_squares * ratio * ratio;
+                l2_scale = magnitude;
+            } else {
+                let ratio = magnitude / l2_scale;
+                l2_sum_squares += ratio * ratio;
+            }
+        }
+    }
+    let l2_norm = if l2_scale == 0.0 {
+        0.0
+    } else {
+        l2_scale * l2_sum_squares.sqrt()
+    };
+    Ok((inf_norm, l2_norm))
+}
+
+fn capture_direct_xyce_histories(
+    circuit: &crate::circuit::CircuitData,
+    solution: &[Value],
+    time: Value,
+    vectors: &mut crate::circuit::dae::XyceDaeVectors,
+    q_candidate: &mut [Value],
+    static_candidate: &mut [Value],
+) -> Result<(), String> {
+    circuit.load_direct_xyce_level2_core_dae(solution, time, 0.0, vectors)?;
+    if q_candidate.len() != vectors.q().len() || static_candidate.len() != vectors.f().len() {
+        return Err("direct Xyce history scratch has the wrong dimension".into());
+    }
+    q_candidate.copy_from_slice(vectors.q());
+    for ((static_value, &f), &b) in static_candidate
+        .iter_mut()
+        .zip(vectors.f())
+        .zip(vectors.b())
+    {
+        *static_value = f - b;
+        if !static_value.is_finite() {
+            return Err("direct Xyce accepted F-B history is non-finite".into());
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 enum TransientMeritRollback {
     ClassicMosOnly(Vec<crate::device::mosfet::MosfetNonlinearState>),
@@ -1899,6 +1962,13 @@ impl Engine {
             // that topology on correction-form Newton while retaining
             // DampedNewton for well-conditioned shared cores.
             && !has_shared_xyce_core_level1_ill_conditioned;
+        // The direct physical DAE loader is narrower than the DampedNewton
+        // solver itself.  Keep it behind the exact Xyce dialect and solver
+        // gates so NOX/rescue paths never mix matrix-reconstructed and direct
+        // residual contracts.
+        let uses_direct_xyce_dae = self.config.spice_dialect == SpiceDialect::Xyce
+            && uses_xyce_damped_solver
+            && circuit.supports_direct_xyce_level2_core_dae();
         // MutIndNonLin's hidden M/R equations are part of the physical DAE,
         // not an optional convergence hint.  A failed constitutive trial must
         // reject the Newton candidate even when Xyce's general device
@@ -1928,6 +1998,7 @@ impl Engine {
             || !circuit.multi_winding_transformers.is_empty();
         let uses_inductor_correction = uses_inductor_correction
             && (!circuit.has_only_xyce_core_inductors() || has_shared_xyce_core_level2);
+        let uses_inductor_correction = uses_inductor_correction || uses_direct_xyce_dae;
         // ngspice's flat transient Newton: when junction devices replace
         // their own iterate voltages (legacy GP pnjlim in update), the full
         // node step is the algorithm; per-iteration node-delta clamps walk
@@ -2524,6 +2595,12 @@ impl Engine {
         // not a value reconstructed from a later Newton iterate.  Seed the
         // Core snapshots only after DC/checkpoint histories are authoritative.
         circuit.initialize_xyce_core_q_histories();
+        let mut xyce_direct_accepted_q = uses_direct_xyce_dae.then(|| Vec::with_capacity(size));
+        if let Some(accepted_q) = xyce_direct_accepted_q.as_mut() {
+            circuit
+                .initialize_direct_xyce_accepted_q(accepted_q)
+                .map_err(SimulationError::Circuit)?;
+        }
 
         let tline_dc_refs = Self::initialize_tline_history(&mut circuit, &solution, resume_time);
         let coupled_tline_refs =
@@ -2589,6 +2666,9 @@ impl Engine {
         // next order-2 transient step.  The vector is refreshed only after an
         // accepted point so rejected Newton attempts never contaminate it.
         let mut xyce_static_history: Option<Vec<Value>> = None;
+        // The direct Level-2 Core path owns a separate physical history.  It
+        // must not consume the legacy matrix-probe residual above.
+        let mut xyce_direct_static_history: Option<Vec<Value>> = None;
 
         // Main transient loop
         let mut retry_count = 0;
@@ -2619,6 +2699,12 @@ impl Engine {
         let progress_logging_enabled = log::log_enabled!(log::Level::Info);
         let mut last_progress_log = progress_logging_enabled.then(crate::time_compat::Instant::now);
         let mut rhs = vec![0.0; size];
+        let mut xyce_direct_vectors = uses_direct_xyce_dae
+            .then(|| crate::circuit::dae::XyceDaeVectors::new(size));
+        let mut xyce_direct_workspace =
+            uses_direct_xyce_dae.then(|| XyceOneStepWorkspace::new(size));
+        let mut xyce_direct_q_candidate = uses_direct_xyce_dae.then(|| vec![0.0; size]);
+        let mut xyce_direct_static_candidate = uses_direct_xyce_dae.then(|| vec![0.0; size]);
         // A classic-MOS/ordinary-RC transient has a run-invariant linear
         // network. Retain it once and extend it with per-attempt source and
         // capacitor terms below instead of rebuilding it per Newton iterate.
@@ -3488,9 +3574,61 @@ impl Engine {
                 }
                 nonlinear_state_matches_new_solution = true;
 
+                // Form the source-faithful physical residual after the
+                // canonical stamp has cached the exact Core endpoint.  The
+                // matrix remains the Jacobian; this RHS is the Newton
+                // correction `-R` consumed by the direct path below.
+                let direct_correction_rhs: Option<&[Value]> = if uses_direct_xyce_dae {
+                    let vectors = xyce_direct_vectors
+                        .as_mut()
+                        .expect("direct Xyce DAE vectors are allocated for the gated path");
+                    circuit
+                        .load_direct_xyce_level2_core_dae(
+                            &new_solution,
+                            t + dt,
+                            0.0,
+                            vectors,
+                        )
+                        .map_err(SimulationError::Circuit)?;
+                    let previous_q = xyce_direct_accepted_q
+                        .as_deref()
+                        .ok_or_else(|| {
+                            SimulationError::Circuit(
+                                "direct Xyce accepted Q history is missing".into(),
+                            )
+                        })?;
+                    let previous_static = xyce_direct_static_history.as_deref();
+                    let order = if xyce_one_step_order2 {
+                        XyceOneStepOrder::Second
+                    } else {
+                        XyceOneStepOrder::First
+                    };
+                    let workspace = xyce_direct_workspace
+                        .as_mut()
+                        .expect("direct Xyce DAE workspace is allocated for the gated path");
+                    Some(
+                        workspace
+                            .form_correction_rhs(
+                                vectors,
+                                previous_q,
+                                previous_static,
+                                dt,
+                                order,
+                            )
+                            .map_err(|error| SimulationError::Circuit(error.to_string()))?,
+                    )
+                } else {
+                    None
+                };
+
                 if uses_xyce_damped_solver && _iter == 0 {
-                    let (_, predictor_residual_l2_norm) =
-                        matrix.raw_residual_norms(&new_solution, &rhs)?;
+                    let (_, predictor_residual_l2_norm) = if let Some(residual) =
+                        direct_correction_rhs
+                    {
+                        direct_xyce_dae_norms(residual)?
+                    } else {
+                        matrix.raw_residual_norms(&new_solution, &rhs)?
+                    };
                     if let Some(status) = xyce_damped_status.as_mut() {
                         status.begin_solve_with_initial_residual(
                             tran_max_iterations,
@@ -3680,7 +3818,22 @@ impl Engine {
                 // Solve and check convergence
                 let newton_solve_start = DiagnosticTimer::start(diagnostic_timing_enabled);
                 let solve_result: Result<(), rspice_matrix::SolverError> =
-                    if uses_inductor_correction {
+                    if let Some(direct_rhs) = direct_correction_rhs {
+                        if prefer_dense_solver {
+                            matrix.solve_dense(direct_rhs).map(|solution| {
+                                linear_solution = solution;
+                            })
+                        } else {
+                            matrix.solve_into(direct_rhs, &mut linear_solution)
+                        }
+                        .map(|()| {
+                            for (correction, &iterate) in
+                                linear_solution.iter_mut().zip(&new_solution)
+                            {
+                                *correction += iterate;
+                            }
+                        })
+                    } else if uses_inductor_correction {
                         matrix.correction_rhs_into(&rhs, &new_solution, &mut correction_rhs)
                             .and_then(|()| {
                                 circuit.stabilize_inductor_transient_correction_rhs(
@@ -3892,7 +4045,49 @@ impl Engine {
                             )?;
                             nonlinear_state_matches_new_solution = true;
                             let (residual_inf_norm, residual_l2_norm) =
-                                matrix.raw_residual_norms(&new_solution, &rhs)?;
+                                if uses_direct_xyce_dae {
+                                    let vectors = xyce_direct_vectors.as_mut().expect(
+                                        "direct Xyce DAE vectors are allocated for the gated path",
+                                    );
+                                    circuit
+                                        .load_direct_xyce_level2_core_dae(
+                                            &new_solution,
+                                            t + dt,
+                                            0.0,
+                                            vectors,
+                                        )
+                                        .map_err(SimulationError::Circuit)?;
+                                    let previous_q = xyce_direct_accepted_q.as_deref().ok_or_else(
+                                        || {
+                                            SimulationError::Circuit(
+                                                "direct Xyce accepted Q history is missing".into(),
+                                            )
+                                        },
+                                    )?;
+                                    let order = if xyce_one_step_order2 {
+                                        XyceOneStepOrder::Second
+                                    } else {
+                                        XyceOneStepOrder::First
+                                    };
+                                    let direct_rhs = xyce_direct_workspace
+                                        .as_mut()
+                                        .expect(
+                                            "direct Xyce DAE workspace is allocated for the gated path",
+                                        )
+                                        .form_correction_rhs(
+                                            vectors,
+                                            previous_q,
+                                            xyce_direct_static_history.as_deref(),
+                                            dt,
+                                            order,
+                                        )
+                                        .map_err(|error| {
+                                            SimulationError::Circuit(error.to_string())
+                                        })?;
+                                    direct_xyce_dae_norms(direct_rhs)?
+                                } else {
+                                    matrix.raw_residual_norms(&new_solution, &rhs)?
+                                };
                             let device_converged = core_trial_converged(&circuit)
                                 && (!enforce_device_convergence
                                     || !circuit.has_nonlinear_devices()
@@ -4336,6 +4531,7 @@ impl Engine {
                     && !circuit.has_xyce_core_level2();
                 if retry_count >= TRANSIENT_GMIN_RESCUE_MIN_RETRIES
                     && !xyce_level1_core_only
+                    && !uses_direct_xyce_dae
                     && circuit.has_nonlinear_devices()
                     && let Some(rescued) = self.rescue_transient_step_with_gmin_continuation(
                         &mut circuit,
@@ -4841,8 +5037,10 @@ impl Engine {
                     if fixed_method.is_none() {
                         trapgear.update(&new_solution, dt);
                     }
-                    let capture_xyce_static_history =
-                        self.config.spice_dialect == SpiceDialect::Xyce && xyce_one_step_order2;
+                    let capture_xyce_static_history = self.config.spice_dialect
+                        == SpiceDialect::Xyce
+                        && !uses_direct_xyce_dae
+                        && xyce_one_step_order2;
                     let mut xyce_static_history_candidate = None;
                     if capture_xyce_static_history && !circuit.has_xspice_devices() {
                         xyce_static_history_candidate = Some(self.capture_xyce_static_residual(
@@ -4852,6 +5050,23 @@ impl Engine {
                             t,
                             transient_baseline_diag_gmin,
                         )?);
+                    }
+                    if uses_direct_xyce_dae {
+                        capture_direct_xyce_histories(
+                            &circuit,
+                            &new_solution,
+                            t,
+                            xyce_direct_vectors.as_mut().expect(
+                                "direct Xyce DAE vectors are allocated for the gated path",
+                            ),
+                            xyce_direct_q_candidate.as_mut().expect(
+                                "direct Xyce Q scratch is allocated for the gated path",
+                            ),
+                            xyce_direct_static_candidate.as_mut().expect(
+                                "direct Xyce static scratch is allocated for the gated path",
+                            ),
+                        )
+                        .map_err(SimulationError::Circuit)?;
                     }
                     self.update_reactive_history(
                         &mut circuit,
@@ -4937,6 +5152,23 @@ impl Engine {
                         .map_err(SimulationError::Circuit)?;
                     if let Some(history) = xyce_static_history_candidate {
                         xyce_static_history = Some(history);
+                    }
+                    if uses_direct_xyce_dae {
+                        xyce_direct_accepted_q
+                            .as_mut()
+                            .expect("direct Xyce Q history is allocated for the gated path")
+                            .copy_from_slice(
+                                xyce_direct_q_candidate
+                                    .as_deref()
+                                    .expect("direct Xyce Q scratch is allocated for the gated path"),
+                            );
+                        xyce_direct_static_history
+                            .get_or_insert_with(|| vec![0.0; size])
+                            .copy_from_slice(
+                                xyce_direct_static_candidate.as_deref().expect(
+                                    "direct Xyce static scratch is allocated for the gated path",
+                                ),
+                            );
                     }
                     Self::backfill_initial_linear_capacitor_branch_currents(
                         &mut result,
@@ -5877,6 +6109,7 @@ impl Engine {
                     }
                     let capture_xyce_static_history = self.config.spice_dialect
                         == SpiceDialect::Xyce
+                        && !uses_direct_xyce_dae
                         && (xyce_one_step_order2 || xyce_promotes_order_two);
                     let mut xyce_static_history_candidate = None;
                     if capture_xyce_static_history && !circuit.has_xspice_devices() {
@@ -5887,6 +6120,23 @@ impl Engine {
                             t,
                             transient_baseline_diag_gmin,
                         )?);
+                    }
+                    if uses_direct_xyce_dae {
+                        capture_direct_xyce_histories(
+                            &circuit,
+                            &new_solution,
+                            t,
+                            xyce_direct_vectors.as_mut().expect(
+                                "direct Xyce DAE vectors are allocated for the gated path",
+                            ),
+                            xyce_direct_q_candidate.as_mut().expect(
+                                "direct Xyce Q scratch is allocated for the gated path",
+                            ),
+                            xyce_direct_static_candidate.as_mut().expect(
+                                "direct Xyce static scratch is allocated for the gated path",
+                            ),
+                        )
+                        .map_err(SimulationError::Circuit)?;
                     }
                     self.update_reactive_history(
                         &mut circuit,
@@ -5972,6 +6222,23 @@ impl Engine {
                         .map_err(SimulationError::Circuit)?;
                     if let Some(history) = xyce_static_history_candidate {
                         xyce_static_history = Some(history);
+                    }
+                    if uses_direct_xyce_dae {
+                        xyce_direct_accepted_q
+                            .as_mut()
+                            .expect("direct Xyce Q history is allocated for the gated path")
+                            .copy_from_slice(
+                                xyce_direct_q_candidate
+                                    .as_deref()
+                                    .expect("direct Xyce Q scratch is allocated for the gated path"),
+                            );
+                        xyce_direct_static_history
+                            .get_or_insert_with(|| vec![0.0; size])
+                            .copy_from_slice(
+                                xyce_direct_static_candidate.as_deref().expect(
+                                    "direct Xyce static scratch is allocated for the gated path",
+                                ),
+                            );
                     }
                     Self::backfill_initial_linear_capacitor_branch_currents(
                         &mut result,
@@ -6173,6 +6440,7 @@ impl Engine {
             total_trap_trial_nanos += trap_trial_phase_start.elapsed().as_nanos();
 
             let capture_xyce_static_history = self.config.spice_dialect == SpiceDialect::Xyce
+                && !uses_direct_xyce_dae
                 && (xyce_one_step_order2 || xyce_promotes_order_two);
             let mut xyce_static_history_candidate = None;
             if capture_xyce_static_history && !circuit.has_xspice_devices() {
@@ -6183,6 +6451,23 @@ impl Engine {
                     t,
                     transient_baseline_diag_gmin,
                 )?);
+            }
+            if uses_direct_xyce_dae {
+                capture_direct_xyce_histories(
+                    &circuit,
+                    &new_solution,
+                    t,
+                    xyce_direct_vectors.as_mut().expect(
+                        "direct Xyce DAE vectors are allocated for the gated path",
+                    ),
+                    xyce_direct_q_candidate.as_mut().expect(
+                        "direct Xyce Q scratch is allocated for the gated path",
+                    ),
+                    xyce_direct_static_candidate.as_mut().expect(
+                        "direct Xyce static scratch is allocated for the gated path",
+                    ),
+                )
+                .map_err(SimulationError::Circuit)?;
             }
             let history_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             let cached_mosfet_gate_companion_charges = (mosfet_companion_terms_valid
@@ -6289,6 +6574,23 @@ impl Engine {
                 .map_err(SimulationError::Circuit)?;
             if let Some(history) = xyce_static_history_candidate {
                 xyce_static_history = Some(history);
+            }
+            if uses_direct_xyce_dae {
+                xyce_direct_accepted_q
+                    .as_mut()
+                    .expect("direct Xyce Q history is allocated for the gated path")
+                    .copy_from_slice(
+                        xyce_direct_q_candidate
+                            .as_deref()
+                            .expect("direct Xyce Q scratch is allocated for the gated path"),
+                    );
+                xyce_direct_static_history
+                    .get_or_insert_with(|| vec![0.0; size])
+                    .copy_from_slice(
+                        xyce_direct_static_candidate
+                            .as_deref()
+                            .expect("direct Xyce static scratch is allocated for the gated path"),
+                    );
             }
 
             // Store results
