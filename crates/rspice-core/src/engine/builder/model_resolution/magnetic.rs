@@ -143,11 +143,10 @@ pub(in crate::engine::builder) fn resolve_xyce_core_model_params(
         factor_ms: false,
         m_var_scaling: 1.0,
         r_var_scaling: 1.0,
-        // Xyce's MutIndNonLin processParams() uses 1e-3 for the M-equation
-        // unless FACTORMS or an explicit MEQNSCALING override is present.
-        // The reduced MNA stamp normalizes the hidden R row to unit scale by
-        // default (equation scaling is algebraically invariant), while an
-        // authored REQNSCALING remains effective.
+        // MutIndNonLin's metadata defaults are 1.0.  processParams() applies
+        // its transient defaults below; notably, Xyce 7.10's second default
+        // check accidentally tests mEqScalingGiven instead of
+        // rEqScalingGiven, so the R row receives the same 1e-3 default.
         m_eq_scaling: 1.0,
         r_eq_scaling: 1.0,
         beta_h: 1.0e-4,
@@ -236,6 +235,10 @@ pub(in crate::engine::builder) fn resolve_xyce_core_model_params(
     }
     if factor_ms_given.is_none() && m_eq_scaling_given.is_none() {
         params.m_eq_scaling = 1.0e-3;
+        // Preserve the canonical Xyce 7.10 condition (which names the M
+        // given-flag twice).  This intentionally overrides an authored
+        // REQNSCALING when MEQNSCALING is absent, matching processParams().
+        params.r_eq_scaling = 1.0e-3;
     }
     if let Some(const_delta_v_scaling) =
         nonnegative_model_param(model_def, &["CONSTDELVSCALING"], "CONSTDELVSCALING")?
