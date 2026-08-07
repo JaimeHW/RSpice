@@ -33,6 +33,7 @@ mod magnetic;
 mod nonlinear;
 pub(crate) use nonlinear::NonlinearDeviceStateSnapshot;
 pub(crate) mod xyce_load;
+pub(crate) mod xyce_dae;
 
 type XspiceDriverId = (String, String, usize);
 type XspiceDigitalDrivers = HashMap<NodeId, HashMap<XspiceDriverId, DigitalValue>>;
@@ -384,6 +385,8 @@ pub struct CircuitData {
     pub(crate) xyce_topology_order: Vec<xyce_load::XyceDeviceRef>,
     /// Frozen master/instance and independent-source load order.
     pub(crate) xyce_load_plan: xyce_load::XyceLoadPlan,
+    /// Cached resistor `F*x` operator using Xyce's row arithmetic order.
+    pub(crate) xyce_linear_f_operator: xyce_load::XyceLinearDaeOperator,
 
     // Nonlinear device storage (require Newton-Raphson iteration)
     pub(crate) diodes: Diodes,

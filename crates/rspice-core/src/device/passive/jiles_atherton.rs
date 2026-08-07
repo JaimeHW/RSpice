@@ -158,6 +158,18 @@ pub struct XyceCoreTrial {
     pub level1_rate_residual: Value,
 }
 
+/// Physical `Q` and `F` entries belonging to an exact cached Core endpoint.
+///
+/// This deliberately contains no Jacobian or linearized companion data.  The
+/// transient DAE loader consumes it after `updateIntermediateVars`/Newton
+/// stamping has established the matching trial, without advancing magnetic
+/// state a second time.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct XyceCoreDaeEndpoint {
+    pub(crate) q: Value,
+    pub(crate) f: Value,
+}
+
 impl Default for JilesAthertonParams {
     fn default() -> Self {
         Self {
@@ -2086,6 +2098,26 @@ impl JilesAthertonInductor {
                     && Self::xyce_endpoint_matches(*trial_voltage, voltage))
                 .then_some(*trial)
             })
+    }
+
+    /// Return physical DAE entries only when the current Newton endpoint is
+    /// cached exactly.
+    ///
+    /// Falling back to the last accepted constitutive factor would form a
+    /// residual for a different state.  The direct loader therefore fails
+    /// closed when the cached trial is absent, stale, singular, or non-finite.
+    pub(crate) fn xyce_core_cached_dae_endpoint(
+        &self,
+        current: Value,
+        voltage: Value,
+    ) -> Option<XyceCoreDaeEndpoint> {
+        let trial = self.xyce_core_cached_trial(current, voltage)?;
+        if !trial.mid.is_finite() || trial.mid == 0.0 {
+            return None;
+        }
+        let q = self.xyce_core_q_from_current(current);
+        let f = -(voltage / trial.mid);
+        (q.is_finite() && f.is_finite()).then_some(XyceCoreDaeEndpoint { q, f })
     }
 
     /// Check the scaled residuals of LEVEL=1's explicit hidden M/R equations

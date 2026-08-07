@@ -8,7 +8,7 @@
 //! physical DAE vector loading can remain allocation-free and reproducible.
 
 use super::CircuitData;
-use crate::NodeId;
+use crate::{NodeId, Value};
 use std::collections::{HashMap, VecDeque};
 
 /// An indexed reference into one of the existing circuit device stores.
@@ -107,6 +107,114 @@ pub(crate) struct XyceLoadPlan {
     current_sources: Vec<usize>,
     cores: Vec<usize>,
     core_groups: Vec<usize>,
+}
+
+/// Allocation-free row operator matching Xyce's cached linear `F/Q` load.
+///
+/// Xyce aggregates matrix entries first, then visits each row in descending
+/// absolute-coefficient order before adding the row dot product to the target
+/// DAE vector.  The column tie-break is explicit here because Xyce's
+/// `std::sort` tie order is implementation-defined; it is part of the same
+/// deterministic MSVC compatibility profile as the topology root.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct XyceLinearDaeOperator {
+    dimension: usize,
+    row_offsets: Vec<usize>,
+    columns: Vec<usize>,
+    coefficients: Vec<Value>,
+}
+
+impl XyceLinearDaeOperator {
+    pub(crate) fn from_triplets(
+        dimension: usize,
+        triplets: &[(usize, usize, Value)],
+    ) -> Result<Self, String> {
+        let mut rows = vec![Vec::<(usize, Value)>::new(); dimension];
+        for &(row, column, value) in triplets {
+            if row >= dimension || column >= dimension {
+                return Err(format!(
+                    "Xyce linear DAE entry ({row}, {column}) exceeds dimension {dimension}"
+                ));
+            }
+            if !value.is_finite() {
+                return Err(format!(
+                    "Xyce linear DAE entry ({row}, {column}) is non-finite: {value}"
+                ));
+            }
+            if value == 0.0 {
+                continue;
+            }
+            if let Some((_, coefficient)) = rows[row]
+                .iter_mut()
+                .find(|(existing_column, _)| *existing_column == column)
+            {
+                *coefficient += value;
+                if !coefficient.is_finite() {
+                    return Err(format!(
+                        "Xyce linear DAE entry ({row}, {column}) overflowed while aggregating"
+                    ));
+                }
+            } else {
+                rows[row].push((column, value));
+            }
+        }
+
+        let mut row_offsets = Vec::with_capacity(dimension + 1);
+        let mut columns = Vec::new();
+        let mut coefficients = Vec::new();
+        row_offsets.push(0);
+        for row in &mut rows {
+            row.retain(|(_, coefficient)| *coefficient != 0.0);
+            row.sort_by(|(column_a, coefficient_a), (column_b, coefficient_b)| {
+                coefficient_b
+                    .abs()
+                    .total_cmp(&coefficient_a.abs())
+                    .then_with(|| column_a.cmp(column_b))
+            });
+            for &(column, coefficient) in row.iter() {
+                columns.push(column);
+                coefficients.push(coefficient);
+            }
+            row_offsets.push(columns.len());
+        }
+
+        Ok(Self {
+            dimension,
+            row_offsets,
+            columns,
+            coefficients,
+        })
+    }
+
+    pub(crate) fn add_product(
+        &self,
+        solution: &[Value],
+        target: &mut [Value],
+    ) -> Result<(), String> {
+        if solution.len() != self.dimension || target.len() != self.dimension {
+            return Err(format!(
+                "Xyce linear DAE operator dimension {} requires solution/target lengths {}, got {} and {}",
+                self.dimension,
+                self.dimension,
+                solution.len(),
+                target.len()
+            ));
+        }
+        for row in 0..self.dimension {
+            let mut sum = 0.0;
+            for position in self.row_offsets[row]..self.row_offsets[row + 1] {
+                sum += self.coefficients[position] * solution[self.columns[position]];
+            }
+            target[row] += sum;
+            if !target[row].is_finite() {
+                return Err(format!(
+                    "Xyce linear DAE row {row} produced non-finite value {}",
+                    target[row]
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl XyceLoadPlan {
@@ -327,6 +435,32 @@ impl CircuitData {
         }
         self.xyce_load_plan =
             XyceLoadPlan::build(&topology, XyceTopologyCompatibility::V7_10MsvcFirstInserted);
+
+        let dimension = self.matrix_size();
+        let mut linear_f_triplets = Vec::with_capacity(self.resistors.len() * 4);
+        for (stamp, &conductance) in self
+            .resistors
+            .stamps
+            .iter()
+            .zip(&self.resistors.conductances)
+        {
+            let node_pos = stamp.pp.row;
+            let node_neg = stamp.nn.row;
+            if node_pos > 0 {
+                linear_f_triplets.push((node_pos - 1, node_pos - 1, conductance));
+                if node_neg > 0 {
+                    linear_f_triplets.push((node_pos - 1, node_neg - 1, -conductance));
+                }
+            }
+            if node_neg > 0 {
+                if node_pos > 0 {
+                    linear_f_triplets.push((node_neg - 1, node_pos - 1, -conductance));
+                }
+                linear_f_triplets.push((node_neg - 1, node_neg - 1, conductance));
+            }
+        }
+        self.xyce_linear_f_operator =
+            XyceLinearDaeOperator::from_triplets(dimension, &linear_f_triplets)?;
         Ok(())
     }
 
@@ -434,5 +568,36 @@ mod tests {
 
         assert_eq!(first, second);
         assert_eq!(first.current_sources().len(), 2);
+    }
+
+    #[test]
+    fn linear_operator_aggregates_then_uses_xyce_row_order() {
+        // Deliberately insert the unit term first. Xyce's filtered matrix
+        // sorts the two large coefficients ahead of it, so their cancellation
+        // occurs before the final unit contribution.
+        let operator = XyceLinearDaeOperator::from_triplets(
+            3,
+            &[(0, 2, 1.0), (0, 1, -1.0e16), (0, 0, 1.0e16)],
+        )
+        .unwrap();
+        let mut target = vec![0.0; 3];
+
+        operator
+            .add_product(&[1.0, 1.0, 1.0], &mut target)
+            .unwrap();
+
+        assert_eq!(target[0].to_bits(), 1.0_f64.to_bits());
+        assert_eq!(target[1].to_bits(), 0.0_f64.to_bits());
+        assert_eq!(target[2].to_bits(), 0.0_f64.to_bits());
+    }
+
+    #[test]
+    fn linear_operator_rejects_invalid_dimensions_and_coefficients() {
+        assert!(XyceLinearDaeOperator::from_triplets(1, &[(1, 0, 1.0)]).is_err());
+        assert!(XyceLinearDaeOperator::from_triplets(1, &[(0, 0, Value::NAN)]).is_err());
+
+        let operator = XyceLinearDaeOperator::from_triplets(1, &[(0, 0, 1.0)]).unwrap();
+        assert!(operator.add_product(&[], &mut [0.0]).is_err());
+        assert!(operator.add_product(&[1.0], &mut []).is_err());
     }
 }
