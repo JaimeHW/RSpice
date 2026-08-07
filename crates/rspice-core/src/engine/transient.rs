@@ -1906,13 +1906,12 @@ impl Engine {
             !circuit.has_xyce_core_inductors()
                 || (!circuit.xyce_core_trial_invalid()
                     // MutIndNonLin2's forward-Euler magnetization limiter is
-                    // a timestep-safety contract, not an optional device
-                    // status hint.  Xyce normally leaves the broad
-                    // ENFORCEDEVICECONV test disabled for transient solves,
-                    // The native origFlag is consulted by Xyce only when
-                    // ENFORCEDEVICECONV is enabled.  Keep the same policy:
-                    // the broad device-convergence switch governs both the
-                    // hidden LEVEL=1 rows and MutIndNonLin2's limiter.
+                    // reported through the device's native `origFlag`.  Xyce
+                    // consults that flag when ENFORCEDEVICECONV is enabled;
+                    // its runtime transient default is enabled even though
+                    // the option metadata advertises zero.  The resolved
+                    // policy therefore governs both the hidden LEVEL=1 rows
+                    // and MutIndNonLin2's limiter here.
                     && (!enforce_device_convergence
                         || !circuit.has_xyce_core_level2()
                         || circuit.xyce_core_level2_trial_converged())
