@@ -2324,9 +2324,10 @@ impl Engine {
                 // event-driven models at the breakpoint.
                 circuit.stamp_xspice_static_residual(solution, probe_rhs);
             }
-            let residual = probe
+            let mut residual = probe
                 .residual_vector(solution, probe_rhs)
                 .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+            circuit.overwrite_xyce_core_static_residual(&mut residual, solution);
             Ok(residual)
         })
     }

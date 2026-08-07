@@ -1231,6 +1231,85 @@ impl CircuitData {
         }
     }
 
+    /// Replace reconstructed Xyce Core branch entries with the exact static
+    /// DAE `F` values loaded by the native device.
+    ///
+    /// The Core Jacobian stamps `-1/mid`, but `loadDAEFVector` evaluates the
+    /// branch contribution as `-(voltage / mid)`.  Multiplying the stamped
+    /// reciprocal by the solution is algebraically equivalent but has a
+    /// different floating-point contract, so OneStep history must retain the
+    /// directly evaluated value.
+    pub(crate) fn overwrite_xyce_core_static_residual(
+        &self,
+        residual: &mut [Value],
+        solution: &[Value],
+    ) {
+        for binding in &self.jiles_atherton_inductors {
+            if !binding.device.is_xyce_core() {
+                continue;
+            }
+            let index = binding.inductor_index;
+            let branch = self.num_nodes + self.inductors.branch_indices[index];
+            let current = solution.get(branch - 1).copied().unwrap_or(0.0);
+            let voltage = node_voltage(
+                solution,
+                self.inductors.node_pos[index],
+                self.inductors.node_neg[index],
+            );
+            let mid = binding.device.xyce_core_static_mid(current, voltage);
+            if mid.is_finite()
+                && mid.abs() > 1.0e-12
+                && let Some(entry) = residual.get_mut(branch - 1)
+            {
+                *entry = -(voltage / mid);
+            }
+        }
+
+        for group in &self.xyce_core_groups {
+            if !group.device.is_xyce_core() || group.windings.len() < 2 {
+                continue;
+            }
+            let first = &group.windings[0];
+            let ampere_turns = group
+                .windings
+                .iter()
+                .map(|winding| {
+                    let index = winding.inductor_index;
+                    let branch = self.num_nodes + self.inductors.branch_indices[index];
+                    winding.turns * solution.get(branch - 1).copied().unwrap_or(0.0)
+                })
+                .sum::<Value>();
+            let representative_current = if first.turns.abs() > 1.0e-30 {
+                ampere_turns / first.turns
+            } else {
+                0.0
+            };
+            let first_voltage = node_voltage(
+                solution,
+                self.inductors.node_pos[first.inductor_index],
+                self.inductors.node_neg[first.inductor_index],
+            );
+            let mid = group
+                .device
+                .xyce_core_static_mid(representative_current, first_voltage);
+            if !mid.is_finite() || mid.abs() <= 1.0e-12 {
+                continue;
+            }
+            for winding in &group.windings {
+                let index = winding.inductor_index;
+                let branch = self.num_nodes + self.inductors.branch_indices[index];
+                let voltage = node_voltage(
+                    solution,
+                    self.inductors.node_pos[index],
+                    self.inductors.node_neg[index],
+                );
+                if let Some(entry) = residual.get_mut(branch - 1) {
+                    *entry = -(voltage / mid);
+                }
+            }
+        }
+    }
+
     /// Replace reconstructed correction residuals for Xyce Core branch rows
     /// with the exact constitutive residual captured during stamping.
     pub(crate) fn overwrite_xyce_core_transient_correction_rhs(
