@@ -111,11 +111,11 @@ impl CircuitData {
     /// native forward-Euler magnetization limiter.
     ///
     /// Xyce stores this limiter in each device's inherited `origFlag`, which
-    /// participates in the device convergence status regardless of the
-    /// optional broad `ENFORCEDEVICECONV` setting.  Keep the LEVEL=1 hidden
-    /// M/R residual policy separate: callers that need the native LEVEL=2
-    /// veto must not accidentally enable those reduced-equation checks for a
-    /// mixed LEVEL=1/LEVEL=2 circuit.
+    /// participates in the device convergence status when
+    /// `ENFORCEDEVICECONV` is enabled (the runtime default). Keep the LEVEL=1
+    /// hidden M/R residual policy separate: callers that need the native
+    /// LEVEL=2 veto must not accidentally enable those reduced-equation checks
+    /// for a mixed LEVEL=1/LEVEL=2 circuit.
     pub(crate) fn xyce_core_level2_trial_converged(&self) -> bool {
         self.jiles_atherton_inductors
             .iter()
@@ -397,7 +397,16 @@ impl CircuitData {
                     charge_difference +=
                         coeff.coeff_v_n_minus_1 * (q_previous - q_previous_previous);
                 }
-                let charge_derivative = charge_difference / dt;
+                let charge_derivative = if one_step {
+                    // OneStep's Epetra assembly scales the already formed
+                    // Q difference by its precomputed reciprocal timestep.
+                    // Preserve that operation order; direct division is
+                    // algebraically equivalent but changes Newton residual
+                    // rounding near a constitutive cancellation.
+                    (1.0 / dt) * charge_difference
+                } else {
+                    charge_difference / dt
+                };
                 let previous_static_voltage =
                     if previous_mid.is_finite() && previous_mid.abs() > 1.0e-12 {
                         v_prev / previous_mid
@@ -890,7 +899,11 @@ impl CircuitData {
                     charge_difference +=
                         coeff.coeff_v_n_minus_1 * (q_previous - q_previous_previous);
                 }
-                let charge_derivative = charge_difference / dt;
+                let charge_derivative = if one_step {
+                    (1.0 / dt) * charge_difference
+                } else {
+                    charge_difference / dt
+                };
                 let previous_static_voltage = self.inductors.v_prev[index_i] / previous_mid;
                 let history = if one_step_order2 {
                     // The transient assembler supplies +1/2(F_n-B_n) from
