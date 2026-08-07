@@ -824,6 +824,44 @@ impl CircuitData {
                 self.xyce_core_trial_invalid = true;
                 continue;
             }
+            let hidden_rate_dae = group.hidden_r_slot.map(|_| {
+                let rate_current_derivative = if one_step_order2 {
+                    2.0 / dt
+                } else if one_step {
+                    1.0 / dt
+                } else {
+                    coeff.coeff_g / dt
+                };
+                let rate_history = if one_step_order2
+                    || (!one_step && coeff.needs_current_history)
+                {
+                    group.device.xyce_core_level1_rate_debug()
+                } else {
+                    0.0
+                };
+                let mut rate_qdot =
+                    rate_current_derivative * (ampere_turns - old_ampere_turns);
+                if !one_step && coeff.needs_two_history {
+                    let previous_previous_ampere_turns = group
+                        .windings
+                        .iter()
+                        .zip(&previous_previous)
+                        .map(|(winding, &current)| winding.turns * current)
+                        .sum::<Value>();
+                    rate_qdot += (coeff.coeff_v_n_minus_1 / dt)
+                        * (old_ampere_turns - previous_previous_ampere_turns);
+                }
+                (
+                    rate_current_derivative,
+                    hidden_rate + rate_history - rate_qdot,
+                )
+            });
+            if let Some((_, rate_residual)) = hidden_rate_dae {
+                // Device convergence must inspect the same R residual that is
+                // stamped below; retaining the constitutive helper's BE-only
+                // target would veto a correctly solved trapezoidal endpoint.
+                trial.level1_rate_residual = rate_residual;
+            }
             if advance_magvar_update {
                 group
                     .device
@@ -1106,11 +1144,16 @@ impl CircuitData {
                 matrix.add(hidden_branch - 1, hidden_branch - 1, 1.0);
             }
             if let Some(hidden_rate_branch) = hidden_rate_branch {
-                let rate_scale = if one_step_order2 { 2.0 } else { 1.0 };
+                // Xyce's hidden R row has Q_R = rEq * sum(L_i I_i) and
+                // F_R = -rEq * R.  The shared companion values above use the
+                // same integration coefficients as the winding Q rows.
+                let Some((rate_current_derivative, rate_residual)) = hidden_rate_dae else {
+                    self.xyce_core_trial_invalid = true;
+                    continue;
+                };
                 let mut current_linear = 0.0;
                 for (winding, &current) in group.windings.iter().zip(&currents) {
-                    let target_derivative = rate_scale * winding.turns / dt;
-                    let residual_derivative = -target_derivative;
+                    let residual_derivative = -rate_current_derivative * winding.turns;
                     if !residual_derivative.is_finite() {
                         self.xyce_core_trial_invalid = true;
                         continue;
@@ -1130,7 +1173,7 @@ impl CircuitData {
                     r_var_scaling * r_eq_scaling,
                 );
                 rhs[hidden_rate_branch - 1] +=
-                    r_eq_scaling * (-trial.level1_rate_residual + hidden_rate + current_linear);
+                    r_eq_scaling * (-rate_residual + hidden_rate + current_linear);
             }
             if advance_magvar_update && group.device.is_xyce_core_level2() {
                 group
