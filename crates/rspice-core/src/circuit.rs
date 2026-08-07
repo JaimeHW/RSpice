@@ -22,8 +22,8 @@ pub use storage::{
     Ekv3Mosfets, EkvMosfets, Inductors, Mosfets, ResistorBranches, Resistors, ThermalResistorState,
     Vdmoses, VoltageSources,
 };
-pub(crate) mod dae;
 mod construction;
+pub(crate) mod dae;
 mod external_models;
 mod force_accept;
 mod introspection;
@@ -32,6 +32,7 @@ mod linear_stamping;
 mod magnetic;
 mod nonlinear;
 pub(crate) use nonlinear::NonlinearDeviceStateSnapshot;
+pub(crate) mod xyce_load;
 
 type XspiceDriverId = (String, String, usize);
 type XspiceDigitalDrivers = HashMap<NodeId, HashMap<XspiceDriverId, DigitalValue>>;
@@ -378,6 +379,11 @@ pub struct CircuitData {
     pub(crate) inductors: Inductors,
     pub(crate) voltage_sources: VoltageSources,
     pub(crate) current_sources: CurrentSources,
+    /// Parser/synthesis insertion sequence used to build Xyce's logical
+    /// reversed-BFT device schedule after final node remapping.
+    pub(crate) xyce_topology_order: Vec<xyce_load::XyceDeviceRef>,
+    /// Frozen master/instance and independent-source load order.
+    pub(crate) xyce_load_plan: xyce_load::XyceLoadPlan,
 
     // Nonlinear device storage (require Newton-Raphson iteration)
     pub(crate) diodes: Diodes,

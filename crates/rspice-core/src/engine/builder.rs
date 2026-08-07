@@ -4340,6 +4340,30 @@ set auto_bridge_parm_d = vdd
             })
         ));
     }
+
+    #[test]
+    fn xyce_builder_freezes_bh_source_order_from_reversed_bft() {
+        let deck = "Xyce Core source load order\n\
+            .tran 0 4\n\
+            R1 1 0 1\n\
+            L1 1 0 20\n\
+            I1 1 0 SIN(0 .1 1 1)\n\
+            I2 1 0 SIN(0 .2 1 2)\n\
+            I3 1 0 SIN(0 .8 1 3)\n\
+            K1 L1 1 CORE_MODEL\n\
+            .model CORE_MODEL CORE (LEVEL=2 MS=510K A=62 C=.92 K=25 ALPHA=3.7e-4 AREA=1.12 GAP=0 PATH=8.49)\n\
+            .end\n";
+        let netlist = Netlist::parse(deck).expect("Core load-order fixture parses");
+        let circuit = Engine::new(
+            SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce),
+        )
+        .build_circuit(&netlist)
+        .expect("Core load-order fixture builds");
+
+        assert_eq!(circuit.xyce_load_plan().current_sources(), &[2, 1, 0]);
+        assert_eq!(circuit.xyce_load_plan().cores(), &[0]);
+        assert!(circuit.xyce_load_plan().core_groups().is_empty());
+    }
 }
 
 impl Engine {
@@ -4963,6 +4987,13 @@ impl Engine {
                         resistance,
                         small_signal_resistance,
                     );
+                    if self.config.spice_dialect == SpiceDialect::Xyce {
+                        circuit.record_xyce_topology_device(
+                            crate::circuit::xyce_load::XyceDeviceRef::Resistor(
+                                circuit.resistors.len() - 1,
+                            ),
+                        );
+                    }
                     if let Some(thermal_state) = thermal_state {
                         circuit.resistors.set_last_thermal(thermal_state);
                     }
@@ -5237,6 +5268,13 @@ impl Engine {
                         transient_spec,
                         pwl_waveform,
                     );
+                    if self.config.spice_dialect == SpiceDialect::Xyce {
+                        circuit.record_xyce_topology_device(
+                            crate::circuit::xyce_load::XyceDeviceRef::VoltageSource(
+                                circuit.voltage_sources.len() - 1,
+                            ),
+                        );
+                    }
                 }
                 ElementKind::CurrentSource(spec) => {
                     let pwl_waveform = validate_source_file_inputs(
@@ -5273,6 +5311,13 @@ impl Engine {
                         transient_spec,
                         pwl_waveform,
                     );
+                    if self.config.spice_dialect == SpiceDialect::Xyce {
+                        circuit.record_xyce_topology_device(
+                            crate::circuit::xyce_load::XyceDeviceRef::CurrentSource(
+                                circuit.current_sources.len() - 1,
+                            ),
+                        );
+                    }
                 }
                 ElementKind::VoltageSourceDeferred(_) | ElementKind::CurrentSourceDeferred(_) => {
                     return Err(SimulationError::Circuit(format!(
@@ -7973,6 +8018,29 @@ impl Engine {
             );
         }
 
+        if self.config.spice_dialect == SpiceDialect::Xyce {
+            // Xyce's pass-two parser skips the authored L/K cards and appends
+            // synthesized YMIN Core devices after the ordinary device scan.
+            // Record that insertion point explicitly instead of inheriting
+            // RSpice's inductor-family storage order.
+            let standalone_cores = circuit
+                .jiles_atherton_inductors
+                .iter()
+                .enumerate()
+                .filter_map(|(index, binding)| binding.device.is_xyce_core().then_some(index))
+                .collect::<Vec<_>>();
+            for index in standalone_cores {
+                circuit.record_xyce_topology_device(
+                    crate::circuit::xyce_load::XyceDeviceRef::Core(index),
+                );
+            }
+            for index in 0..circuit.xyce_core_groups.len() {
+                circuit.record_xyce_topology_device(
+                    crate::circuit::xyce_load::XyceDeviceRef::CoreGroup(index),
+                );
+            }
+        }
+
         check_build_abort(abort)?;
         check_circuit_resource_limits(self, &circuit)?;
 
@@ -8076,6 +8144,12 @@ impl Engine {
         }
         for dev in &mut circuit.b3soi_pd.devices {
             dev.set_eval_gmin(b3soi_gmin);
+        }
+
+        if self.config.spice_dialect == SpiceDialect::Xyce {
+            circuit
+                .finalize_xyce_load_plan()
+                .map_err(SimulationError::Circuit)?;
         }
 
         check_build_abort(abort)?;

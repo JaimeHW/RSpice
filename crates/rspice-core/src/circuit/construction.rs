@@ -30,6 +30,8 @@ impl CircuitData {
             inductors: Inductors::new(),
             voltage_sources: VoltageSources::new(),
             current_sources: CurrentSources::new(),
+            xyce_topology_order: Vec::new(),
+            xyce_load_plan: xyce_load::XyceLoadPlan::default(),
             diodes: Diodes::new(),
             bjts: Bjts::new(),
             mosfets: Mosfets::new(),
