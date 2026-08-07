@@ -397,7 +397,13 @@ impl CircuitData {
         // Xyce nonlinear-core internal probes are exposed through the
         // canonical `YMIN!<K-name>` namespace.  Xyce LEVEL=1 reports M in
         // kA/m while LEVEL=2 reports M in A/m; both use Oersted/Gauss for H/B
-        // unless BHSIUNITS=1 switches those fields back to SI units.
+        // unless BHSIUNITS=1 switches those fields back to SI units.  Keep
+        // the native model constants (and their evaluation order) here:
+        // MutIndNonLin2 initializes HCgsFactor to this decimal literal and
+        // forms B as BCgsFactor * ((4e-7*pi) * (H + M)).
+        const XYCE_H_CGS_FACTOR: Value = 0.012566370614359;
+        const XYCE_B_CGS_FACTOR: Value = 10000.0;
+        const XYCE_MU_0: Value = 4.0e-7 * std::f64::consts::PI;
         for binding in &self.jiles_atherton_inductors {
             let Some(name) = binding.core_output_name.as_deref() else {
                 continue;
@@ -410,11 +416,10 @@ impl CircuitData {
                 // default Gauss-valued B output.  Preserve that canonical
                 // Xyce conversion instead of converting the physical SI B
                 // directly; the distinction matters for high-field cores.
-                let mu_0 = 4.0 * std::f64::consts::PI * 1.0e-7;
-                1.0e4
-                    * mu_0
-                    * (h_si * (4.0 * std::f64::consts::PI / 1.0e3)
-                        + binding.device.xyce_core_reported_magnetization())
+                XYCE_B_CGS_FACTOR
+                    * (XYCE_MU_0
+                        * (XYCE_H_CGS_FACTOR * h_si
+                            + binding.device.xyce_core_reported_magnetization()))
             };
             entries.push(DeviceOpEntry {
                 name: name.to_string(),
@@ -434,7 +439,7 @@ impl CircuitData {
                         if binding.core_bh_si_units {
                             h_si
                         } else {
-                            h_si * (4.0 * std::f64::consts::PI / 1.0e3)
+                            XYCE_H_CGS_FACTOR * h_si
                         },
                     ),
                     ("b", b_output),
@@ -452,11 +457,10 @@ impl CircuitData {
             let b_output = if binding.core_bh_si_units {
                 binding.device.flux_density()
             } else {
-                let mu_0 = 4.0 * std::f64::consts::PI * 1.0e-7;
-                1.0e4
-                    * mu_0
-                    * (h_si * (4.0 * std::f64::consts::PI / 1.0e3)
-                        + binding.device.xyce_core_reported_magnetization())
+                XYCE_B_CGS_FACTOR
+                    * (XYCE_MU_0
+                        * (XYCE_H_CGS_FACTOR * h_si
+                            + binding.device.xyce_core_reported_magnetization()))
             };
             entries.push(DeviceOpEntry {
                 name: name.to_string(),
@@ -476,7 +480,7 @@ impl CircuitData {
                         if binding.core_bh_si_units {
                             h_si
                         } else {
-                            h_si * (4.0 * std::f64::consts::PI / 1.0e3)
+                            XYCE_H_CGS_FACTOR * h_si
                         },
                     ),
                     ("b", b_output),
