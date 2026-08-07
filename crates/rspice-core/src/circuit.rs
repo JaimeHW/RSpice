@@ -22,6 +22,7 @@ pub use storage::{
     Ekv3Mosfets, EkvMosfets, Inductors, Mosfets, ResistorBranches, Resistors, ThermalResistorState,
     Vdmoses, VoltageSources,
 };
+pub(crate) mod dae;
 mod construction;
 mod external_models;
 mod force_accept;

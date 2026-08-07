@@ -98,6 +98,7 @@ mod noise;
 mod nox_status;
 mod rescue;
 mod residual;
+mod xyce_dae;
 mod startup;
 mod state;
 pub(self) use state::{MosfetCompanionBranchTerms, MosfetGateCompanionCharges};
