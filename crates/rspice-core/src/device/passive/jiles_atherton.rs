@@ -742,6 +742,96 @@ impl JilesAthertonInductor {
         1.0 + (1.0 - self.params.gap / self.params.length) * p * factor
     }
 
+    /// Return the integrated LEVEL=1 `P=0` regularization term used by
+    /// MutIndNonLin's hidden M equation. Xyce adds the previous magnetic
+    /// state to the F vector (rather than replacing the physical equation),
+    /// so the term is multiplied by the active OneStep static coefficient and
+    /// by `dt` when expressed in the integrated residual used here.
+    #[inline]
+    fn xyce_core_level1_p_zero_residual(
+        &self,
+        p: Value,
+        magnetization: Value,
+        dt: Value,
+        one_step_order2: bool,
+    ) -> Value {
+        if !self.has_xyce_core_m_equation()
+            || !p.is_finite()
+            || p.abs() > self.params.p_zero_tol
+            || !magnetization.is_finite()
+            || !dt.is_finite()
+            || dt <= 0.0
+        {
+            return 0.0;
+        }
+        let factor_ms = if self.params.factor_ms {
+            self.params.ms
+        } else {
+            1.0
+        };
+        let m_eq_scaling = self.params.m_eq_scaling;
+        if !factor_ms.is_finite()
+            || factor_ms.abs() <= 1.0e-30
+            || !m_eq_scaling.is_finite()
+            || m_eq_scaling.abs() <= 1.0e-30
+        {
+            return 0.0;
+        }
+        let static_scale = if one_step_order2 { 0.5 } else { 1.0 };
+        // Xyce's current F term is -mVarScaling * x_trial. `magnetization`
+        // is physical M, so divide by Ms only when FACTORMS made x normalized.
+        let current = -static_scale * dt * (magnetization / factor_ms) / m_eq_scaling;
+        // OneStep order-2 also carries the previous accepted F-B vector. Its
+        // P=0 contribution is present only when the accepted endpoint itself
+        // was in the regularized branch.
+        let previous = if one_step_order2
+            && self.xyce_level1_p.is_finite()
+            && self.xyce_level1_p.abs() <= self.params.p_zero_tol
+        {
+            -0.5 * dt * (self.state.m / factor_ms) / m_eq_scaling
+        } else {
+            0.0
+        };
+        current + previous
+    }
+
+    /// Return the derivative of Xyce's `P=0` unit regularizer with respect to
+    /// the physical hidden M variable. The native Jacobian contributes `+1`
+    /// in the solver's scaled M coordinate; convert it to the physical
+    /// residual coordinate used by the reduced stamp.
+    #[inline]
+    fn xyce_core_level1_p_zero_jacobian(
+        &self,
+        p: Value,
+        dt: Value,
+        one_step_order2: bool,
+    ) -> Value {
+        if !self.has_xyce_core_m_equation()
+            || !p.is_finite()
+            || p.abs() > self.params.p_zero_tol
+            || !dt.is_finite()
+            || dt <= 0.0
+        {
+            return 0.0;
+        }
+        let factor_ms = if self.params.factor_ms {
+            self.params.ms
+        } else {
+            1.0
+        };
+        let m_var_scaling = self.params.m_var_scaling * factor_ms;
+        let m_eq_scaling = self.params.m_eq_scaling;
+        if !m_var_scaling.is_finite()
+            || m_var_scaling.abs() <= 1.0e-30
+            || !m_eq_scaling.is_finite()
+            || m_eq_scaling.abs() <= 1.0e-30
+        {
+            return 0.0;
+        }
+        let static_scale = if one_step_order2 { 0.5 } else { 1.0 };
+        static_scale * dt / (m_var_scaling * m_eq_scaling)
+    }
+
     /// Convert the accepted voltage drop to Xyce's smooth irreversible branch
     /// direction.  LEVEL=1 uses the adaptive `DELVSCALING/maxVoltageDrop`
     /// form unless `CONSTDELVSCALING` is set; LEVEL=2 uses its explicit
@@ -929,8 +1019,12 @@ impl JilesAthertonInductor {
             } else {
                 0.0
             };
-            let f = m - old_m - integration_scale * (p * rate + previous_product);
-            let df = 1.0 - integration_scale * rate * d_p_d_m;
+            let f = m - old_m
+                - integration_scale * (p * rate + previous_product)
+                + self.xyce_core_level1_p_zero_residual(p, m, dt, one_step_order2);
+            let df = 1.0
+                + self.xyce_core_level1_p_zero_jacobian(p, dt, one_step_order2)
+                - integration_scale * rate * d_p_d_m;
             Some((f, df))
         };
 
@@ -1163,20 +1257,12 @@ impl JilesAthertonInductor {
             (0.0, 0.0, 0.0)
         };
         let integration_scale = (if one_step_order2 { 0.5 } else { 1.0 }) * dt / self.params.length;
-        // MutIndNonLin regularizes the hidden M row near a constitutive zero
-        // crossing.  Xyce evaluates this check from the accepted state before
-        // the Newton hidden-M iterate is copied into its state vector.
-        let accepted_p = self.xyce_core_p(
-            trial.applied_field - (self.params.gap / self.params.length) * self.state.m,
-            self.state.m,
-            self.xyce_tanh_qv(voltage),
-        );
-        let p_zero_regularizer = if accepted_p.abs() <= self.params.p_zero_tol {
-            1.0
-        } else {
-            0.0
-        };
-        let g_m = 1.0 + p_zero_regularizer - integration_scale * trial.level1_rate * dp_dm;
+        // Xyce checks the current Newton trial's P, not the accepted-step P.
+        // Its extra Jacobian entry is a unit in the scaled M coordinate, so
+        // convert it before the caller multiplies by mVarScaling*mEqScaling.
+        let g_m = 1.0
+            + self.xyce_core_level1_p_zero_jacobian(trial.p, dt, one_step_order2)
+            - integration_scale * trial.level1_rate * dp_dm;
         let g_happ = -integration_scale * trial.level1_rate * dp_dhapp;
         let g_voltage = -integration_scale * trial.level1_rate * dp_dvoltage;
         let g_rate = -integration_scale * trial.p;
@@ -1258,7 +1344,14 @@ impl JilesAthertonInductor {
         // constitutive endpoint still uses that fixed magnetization, while
         // only the explicit R equation remains part of the DAE.
         let residual = if self.has_xyce_core_m_equation() {
-            magnetization - self.state.m - integration_scale * (p * rate + previous_product)
+            magnetization - self.state.m
+                - integration_scale * (p * rate + previous_product)
+                + self.xyce_core_level1_p_zero_residual(
+                    p,
+                    magnetization,
+                    dt,
+                    one_step_order2,
+                )
         } else {
             0.0
         };
