@@ -51,6 +51,8 @@ pub(crate) mod frame;
 pub(crate) mod hardcopy_adapters;
 mod layout;
 pub(crate) mod lifecycle;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod live_session;
 pub(crate) mod logging;
 pub(crate) mod menu_bar;
 pub(crate) mod platform;

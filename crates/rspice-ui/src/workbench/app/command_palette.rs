@@ -1975,6 +1975,7 @@ mod tests {
             symbol_library: None,
             simulation_controller: crate::simulation::SimulationController::new(),
             cloud_account: crate::services::cloud_account::CloudAccountService::unconfigured(),
+            live_session: crate::workbench::live_session::LiveSessionEngine::default(),
             file_workflow_io: Box::new(
                 crate::workbench::workflows::file_workflow::NativeFileWorkflowIo,
             ),

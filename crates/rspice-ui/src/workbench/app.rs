@@ -240,6 +240,10 @@ pub struct RSpiceApp {
     pub(crate) simulation_controller: crate::simulation::SimulationController,
     /// Cloud account session boundary (sign-in, entitlements, license leases).
     pub(crate) cloud_account: crate::services::cloud_account::CloudAccountService,
+    /// Live-session engine: document sync, write leases, and presence over
+    /// the relay port the cloud service hands out.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) live_session: crate::workbench::live_session::LiveSessionEngine,
     /// File workflow IO backend (native in production, injectable in tests).
     pub(crate) file_workflow_io:
         Box<dyn crate::workbench::workflows::file_workflow::FileWorkflowIo>,
@@ -303,6 +307,7 @@ impl RSpiceApp {
             symbol_library: None,
             simulation_controller: crate::simulation::SimulationController::new(),
             cloud_account: crate::services::cloud_account::CloudAccountService::unconfigured(),
+            live_session: crate::workbench::live_session::LiveSessionEngine::default(),
             file_workflow_io: Box::new(
                 crate::workbench::workflows::file_workflow::NativeFileWorkflowIo,
             ),
@@ -397,6 +402,8 @@ impl RSpiceApp {
             cloud_account: crate::services::cloud_account::CloudAccountService::new(Some(
                 cc.egui_ctx.clone(),
             )),
+            #[cfg(not(target_arch = "wasm32"))]
+            live_session: crate::workbench::live_session::LiveSessionEngine::default(),
             file_workflow_io: Box::new(
                 crate::workbench::workflows::file_workflow::NativeFileWorkflowIo,
             ),
@@ -1051,6 +1058,8 @@ impl eframe::App for RSpiceApp {
             ctx.open_url(egui::OpenUrl::new_tab(url));
         }
         self.record_publish_receipt();
+        #[cfg(not(target_arch = "wasm32"))]
+        self.live_session.pump(&mut self.state, &mut self.cloud_account);
         if let Some(text) = self.state.ui.clipboard_text_request.take() {
             ctx.copy_text(text);
         }

@@ -721,6 +721,11 @@ impl LeaseTable {
         self.held.get(doc).copied()
     }
 
+    /// Every held lease, for projecting write locks onto the UI.
+    pub(crate) fn entries(&self) -> impl Iterator<Item = (&str, PeerIdentity)> {
+        self.held.iter().map(|(doc, holder)| (doc.as_str(), *holder))
+    }
+
     /// Host-side arbitration: first holder wins, re-requests by the current
     /// holder stay granted.
     pub(crate) fn arbitrate(&mut self, doc: &str, requester: PeerIdentity) -> LeaseDecision {

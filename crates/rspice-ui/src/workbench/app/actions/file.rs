@@ -450,6 +450,7 @@ mod tests {
             symbol_library: None,
             simulation_controller: crate::simulation::SimulationController::new(),
             cloud_account: crate::services::cloud_account::CloudAccountService::unconfigured(),
+            live_session: crate::workbench::live_session::LiveSessionEngine::default(),
             file_workflow_io: Box::new(file_io),
             export_workflow_io: Box::new(TestExportWorkflowIo),
         }
