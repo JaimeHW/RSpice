@@ -31,7 +31,28 @@ pub fn invalidate_source_evidence(document: &mut NetlistDocumentState) {
 
 /// Atomically replace the exact project-owned source across the canonical
 /// document, persisted project projection, and visible editor buffer.
+///
+/// Local user edits only: while another live-session participant holds the
+/// netlist write lease, the edit is refused with a console line. Remote
+/// content arbitrated by the live session applies through
+/// [`apply_live_owned_source`] instead.
 pub fn replace_owned_source(state: &mut AppState, source: String) -> bool {
+    if let Some(holder) = state.workbench.live_write_locks.netlist.clone() {
+        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+            "{holder} holds the netlist write lease; no source was changed."
+        )));
+        return false;
+    }
+    replace_owned_source_unlocked(state, source)
+}
+
+/// Live-session apply path: the sender's write authority was already
+/// arbitrated by the session, so the local lease gate does not apply.
+pub(crate) fn apply_live_owned_source(state: &mut AppState, source: String) -> bool {
+    replace_owned_source_unlocked(state, source)
+}
+
+fn replace_owned_source_unlocked(state: &mut AppState, source: String) -> bool {
     if state.ui.netlist.active_document != ActiveNetlistDocument::OwnedSource {
         return false;
     }

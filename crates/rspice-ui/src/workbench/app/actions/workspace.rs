@@ -1219,10 +1219,22 @@ impl AppState {
         if !self.schematic_edit_read_only() {
             return false;
         }
+        let live_lock_holder = self
+            .workbench
+            .live_write_locks
+            .schematic_views
+            .get(&self.workspace.active_key())
+            .cloned();
         let message = if self.workbench.safe_mode.project_read_only() {
             "Safe mode is read-only; no design data was changed.".to_owned()
         } else if self.active_view_read_only() {
             self.read_only_master_message()
+        } else if let Some(holder) = live_lock_holder {
+            format!("{holder} holds the write lease on this schematic; no design data was changed.")
+        } else if self.workbench.live_write_locks.mirror {
+            "This is the host's working copy; request the write lease from the live session \
+             to edit."
+                .to_owned()
         } else {
             "The active schematic is read-only; no design data was changed.".to_owned()
         };

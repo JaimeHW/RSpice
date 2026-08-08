@@ -459,6 +459,14 @@ pub struct SchematicState {
     #[serde(skip)]
     topology_version: u64,
 
+    /// Content commit counter (runtime state, not persisted). Advances at
+    /// the undo commit boundaries — `end_operation`, `undo`, `redo` — so it
+    /// moves exactly when the persisted document content moves, including
+    /// property edits that `topology_version` deliberately ignores. Live
+    /// sessions use it to decide which buffers need rebroadcasting.
+    #[serde(skip)]
+    content_version: u64,
+
     /// Snap engine configuration (runtime state, not persisted)
     /// Controls cursor snapping behavior during wire drawing
     #[serde(skip)]
@@ -533,6 +541,7 @@ impl Default for SchematicState {
             read_only: false,
             needs_history_reset: false,
             topology_version: 0,
+            content_version: 0,
             snap_engine,
             selection_rect: super::selection::SelectionRect::default(),
             net_highlight: super::net_highlight::NetHighlightState::default(),

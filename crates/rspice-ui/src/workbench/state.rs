@@ -759,6 +759,22 @@ impl VerificationPage {
     }
 }
 
+/// Documents another live-session participant currently holds the write
+/// lease on, projected each frame by the live-session engine. Runtime-only:
+/// empty whenever no live session is attached. The netlist entry doubles as
+/// that document's edit gate; schematic buffers gate through their own
+/// `read_only` flag and use these entries for the deny message.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LiveWriteLocks {
+    /// Locked schematic buffers, by cell-view key → holder display name.
+    pub schematic_views: HashMap<String, String>,
+    /// Who holds netlist write authority when this install does not.
+    pub netlist: Option<String>,
+    /// This install is a live-session guest mirroring the host's project,
+    /// so documents without a held lease are read-only wholesale.
+    pub mirror: bool,
+}
+
 /// New workbench session state.  Durable layout preferences are serialized;
 /// one-frame requests and open drawers are intentionally transient.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -850,6 +866,10 @@ pub struct WorkbenchState {
     /// persisted source of truth for the next ordinary launch.
     #[serde(skip)]
     pub safe_mode: LocalSafeModeState,
+    /// Live-session write leases held by other participants, projected by
+    /// the live-session engine every frame it is attached.
+    #[serde(skip)]
+    pub live_write_locks: LiveWriteLocks,
     /// Destination owned by an in-flight close-project review. It survives an
     /// asynchronous canonical-save continuation but is never persisted.
     #[serde(skip)]
@@ -1090,6 +1110,7 @@ impl Default for WorkbenchState {
             project_launcher_page: ProjectLauncherPage::Projects,
             project_launcher_recovery: crate::workbench::lifecycle::recovery::RecoveryCatalog::default(),
             safe_mode: LocalSafeModeState::default(),
+            live_write_locks: LiveWriteLocks::default(),
             project_close_destination: ProjectCloseDestination::Launcher,
             focus_project_launcher_search: false,
             navigator_width: default_navigator_width(),

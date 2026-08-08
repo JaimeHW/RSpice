@@ -346,6 +346,25 @@ pub(crate) fn serialize_schematic_file(file: &SchematicFile) -> Result<String, S
     Ok(contents)
 }
 
+/// Compact, borrow-based serialization of one schematic buffer for the
+/// live-session wire. The output is the `SchematicFile` shape (metadata
+/// defaulted), so `load_schematic_text` reads it unchanged; saves keep
+/// their pretty-printed form via `save_schematic_file`.
+pub(crate) fn serialize_schematic_for_wire(
+    schematic: &SchematicState,
+) -> Result<Vec<u8>, SchematicIoError> {
+    #[derive(Serialize)]
+    struct WireFile<'a> {
+        version: SchematicVersion,
+        schematic: &'a SchematicState,
+    }
+    serde_json::to_vec(&WireFile {
+        version: SchematicVersion::current(),
+        schematic,
+    })
+    .map_err(|e| SchematicIoError::SerializeError(e.to_string()))
+}
+
 /// Load schematic from file
 ///
 /// Validates version compatibility and recalculates runtime state.

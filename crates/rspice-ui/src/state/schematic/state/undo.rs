@@ -49,7 +49,18 @@ impl SchematicState {
     /// `true` if an undo entry was created, `false` if nothing changed.
     pub fn end_operation(&mut self) -> bool {
         let snapshot = super::super::undo_history::SchematicSnapshot::capture(self);
-        self.undo_history.end_operation(snapshot)
+        let committed = self.undo_history.end_operation(snapshot);
+        if committed {
+            self.content_version = self.content_version.wrapping_add(1);
+        }
+        committed
+    }
+
+    /// Monotonic count of committed content changes: every `end_operation`
+    /// that created an entry, plus every applied undo or redo. The cheap
+    /// "did this document change since I last looked" signal.
+    pub fn content_version(&self) -> u64 {
+        self.content_version
     }
 
     /// Cancel a pending operation without creating an undo entry
@@ -117,6 +128,7 @@ impl SchematicState {
             snapshot.apply(self);
             self.reconcile_grid_pitch_runtime();
             self.recalculate_runtime_state();
+            self.content_version = self.content_version.wrapping_add(1);
             return true;
         }
 
@@ -138,6 +150,7 @@ impl SchematicState {
             snapshot.apply(self);
             self.reconcile_grid_pitch_runtime();
             self.recalculate_runtime_state();
+            self.content_version = self.content_version.wrapping_add(1);
             return true;
         }
 
@@ -193,6 +206,29 @@ mod tests {
         assert_eq!(state.document_policy.grid_pitch, pitch);
         assert_eq!(state.grid_size, expected);
         assert_eq!(state.snap_engine.grid_size, expected);
+    }
+
+    #[test]
+    fn content_version_advances_exactly_on_commits_undo_and_redo() {
+        let mut state = SchematicState::default();
+        state.init_undo_history();
+        let baseline = state.content_version();
+
+        assert!(state.with_undo("change schematic grid pitch", |schematic| {
+            schematic.document_policy.grid_pitch = SchematicGridPitch::Mil25;
+            schematic.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
+            schematic.snap_engine.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
+        }));
+        assert_eq!(state.content_version(), baseline + 1);
+
+        // An operation that changes nothing commits nothing and moves nothing.
+        assert!(!state.with_undo("no-op", |_| {}));
+        assert_eq!(state.content_version(), baseline + 1);
+
+        assert!(state.undo());
+        assert_eq!(state.content_version(), baseline + 2);
+        assert!(state.redo());
+        assert_eq!(state.content_version(), baseline + 3);
     }
 
     #[test]
