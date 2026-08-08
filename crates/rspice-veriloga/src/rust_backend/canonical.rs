@@ -71,9 +71,11 @@ use crate::canonical_ir::schedule::{
 use crate::canonical_ir::{
     AdSeed, BlockId, CanonicalIrArtifact, ExprId, MirEquationKind, ValueId, optimize_cfg,
 };
-use crate::metrics::{MetricsRecorder, PipelineCancelled, PipelineControl, PipelinePhase};
+use crate::metrics::{
+    CfgStructureMetrics, MetricsRecorder, PipelineCancelled, PipelineControl, PipelinePhase,
+};
 
-use super::emit::{EmitBindings, RUNTIME_PRELUDE, emit_body};
+use super::emit::{EmitBindings, emit_body};
 use super::expr::parameter_field_names;
 use super::stamp_plan::{StampPlan, StampRow, split_row};
 use super::{GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDeviceNames};
@@ -189,6 +191,37 @@ fn checkpoint_phase(
             error,
         )
     })
+}
+
+fn cfg_structure_metrics(function: &CfgFunction) -> CfgStructureMetrics {
+    CfgStructureMetrics {
+        value_count: crate::metrics::usize_to_u64(function.values.len()),
+        instruction_count: crate::metrics::usize_to_u64(
+            function
+                .blocks
+                .iter()
+                .map(|block| block.instructions.len())
+                .sum(),
+        ),
+        block_count: crate::metrics::usize_to_u64(function.blocks.len()),
+        block_parameter_count: crate::metrics::usize_to_u64(
+            function.blocks.iter().map(|block| block.params.len()).sum(),
+        ),
+        branch_count: crate::metrics::usize_to_u64(
+            function
+                .blocks
+                .iter()
+                .filter(|block| matches!(block.terminator, CfgTerminator::Branch { .. }))
+                .count(),
+        ),
+        lane_widen_count: crate::metrics::usize_to_u64(
+            function
+                .values
+                .iter()
+                .filter(|value| matches!(value.kind, CfgValueKind::LaneWiden { .. }))
+                .count(),
+        ),
+    }
 }
 
 /// Every noise magnitude the model declares, as one body.
@@ -371,6 +404,7 @@ impl ModelPlan {
         cfg.function
             .validate()
             .map_err(|error| unsupported(artifact, format!("charge recovery: {error}")))?;
+        measurements.metrics_mut().primal_cfg = cfg_structure_metrics(&cfg.function);
         record_phase(
             artifact,
             measurements,
@@ -417,6 +451,8 @@ impl ModelPlan {
                 None => Vec::new(),
             })
             .collect();
+        measurements.metrics_mut().differentiated_cfg =
+            cfg_structure_metrics(&differentiated.function);
         record_phase(
             artifact,
             measurements,
@@ -523,6 +559,7 @@ impl ModelPlan {
         metrics.packed_derivative_value_count = crate::metrics::usize_to_u64(packed_derivatives);
         metrics.derivative_lane_entry_count = crate::metrics::usize_to_u64(lane_entries);
         metrics.max_derivative_width = crate::metrics::usize_to_u64(max_width);
+        metrics.optimized_cfg = cfg_structure_metrics(&function);
         record_phase(
             artifact,
             measurements,
@@ -865,7 +902,7 @@ impl ModelPlan {
         }
         let _ = writeln!(
             out,
-            "use {}::{{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper}};",
+            "use {}::{{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, Lanes, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative}};",
             options.runtime_path
         );
         if self.model_stage().is_some() {
@@ -873,11 +910,6 @@ impl ModelPlan {
                 "use std::collections::HashMap;\n\
                  use std::sync::{Arc, Mutex, OnceLock, Weak};\n",
             );
-        }
-        out.push_str(RUNTIME_PRELUDE);
-        out.push_str(EVAL_DDT);
-        if !self.idt_slots.is_empty() {
-            out.push_str(EVAL_IDT);
         }
         if self.model_stage().is_some() {
             self.emit_model_cache_support(&mut out);
@@ -1225,26 +1257,47 @@ impl ModelPlan {
             options.runtime_path, options.runtime_path
         );
         // Emitted only where the body reaches something in it: on a model whose
-        // magnitudes are plain arithmetic it would be a page of unused types in
-        // every device. Two things reach it, and the second is what the corpus
+        // magnitudes are plain arithmetic it would be an unused import. Two
+        // things reach it, and the second is what the corpus
         // found — a resolved `ddx` is a lane read, so a magnitude using one
-        // needs the packed-value support `stamp.rs` carries, *and* the clamped
+        // needs the packed-value support `stamp.rs` imports, *and* the clamped
         // exponentials are functions in here rather than method calls, so a
-        // magnitude with a diode in it needs the prelude with no packed value
+        // magnitude with a diode in it needs the helpers with no packed value
         // anywhere. Twenty of the corpus models are the second case.
-        if function.values.iter().any(|value| {
-            value.value_type.shape().is_some()
-                || matches!(
-                    value.kind,
-                    CfgValueKind::Unary {
-                        op: CfgUnaryOp::LimExp
-                            | CfgUnaryOp::LimitedExp
-                            | CfgUnaryOp::LimitedExpDerivative,
-                        ..
-                    }
-                )
-        }) {
-            out.push_str(RUNTIME_PRELUDE);
+        let uses_lanes = function
+            .values
+            .iter()
+            .any(|value| value.value_type.shape().is_some());
+        let uses_unary = |target| {
+            function
+                .values
+                .iter()
+                .any(|value| matches!(value.kind, CfgValueKind::Unary { op, .. } if op == target))
+        };
+        let mut math_support = Vec::new();
+        if uses_lanes {
+            math_support.push("Lanes");
+        }
+        if uses_unary(CfgUnaryOp::LimExp) {
+            math_support.push("rspice_limexp");
+        }
+        if uses_unary(CfgUnaryOp::LimitedExp) {
+            math_support.push("rspice_limited_exp");
+        }
+        if uses_unary(CfgUnaryOp::LimitedExpDerivative) {
+            math_support.push("rspice_limited_exp_derivative");
+        }
+        if !math_support.is_empty() {
+            if math_support.len() == 1 {
+                let _ = writeln!(out, "use {}::{};", options.runtime_path, math_support[0]);
+            } else {
+                let _ = writeln!(
+                    out,
+                    "use {}::{{{}}};",
+                    options.runtime_path,
+                    math_support.join(", ")
+                );
+            }
         }
         out.push_str(&super::noise::descriptor_table(artifact));
         out.push_str("\nimpl Instance {\n");
@@ -1941,18 +1994,6 @@ impl ModelPlan {
     fn state_extensions(&self, artifact: &CanonicalIrArtifact) -> state_file::StateFileExtensions {
         let mut extensions = state_file::StateFileExtensions::default();
         self.push_limit_state_fields(&mut extensions);
-        if self.slots > 0 || self.reactive.width() > 0 {
-            extensions.support_types.push_str(
-                "fn canonical_boxed_zero_f64<const N: usize>() -> Box<[f64; N]> {\n\
-                 \x20   // SAFETY: every slot is an f64, and all-zero bytes are 0.0.\n\
-                 \x20   let mut boxed = Box::<[f64; N]>::new_uninit();\n\
-                 \x20   unsafe {\n\
-                 \x20       std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);\n\
-                 \x20       boxed.assume_init()\n\
-                 \x20   }\n\
-                 }\n\n",
-            );
-        }
         let reactive = self.reactive.width();
         if reactive > 0 {
             let _ = writeln!(
@@ -1964,7 +2005,7 @@ impl ModelPlan {
                 .push_str("            canonical_reactive: self.canonical_reactive.clone(),\n");
             extensions
                 .new_initializers
-                .push_str("            canonical_reactive: canonical_boxed_zero_f64(),\n");
+                .push_str("            canonical_reactive: boxed_zero_f64_array(),\n");
         }
         if self.slots == 0 {
             return extensions;
@@ -2003,7 +2044,7 @@ impl ModelPlan {
              \x20           canonical_thermal_voltage: self.canonical_thermal_voltage,\n",
         );
         extensions.new_initializers.push_str(
-            "            canonical_staged: canonical_boxed_zero_f64(),\n\
+            "            canonical_staged: boxed_zero_f64_array(),\n\
              \x20           canonical_instance_valid: false,\n\
              \x20           canonical_temperature_valid: false,\n\
              \x20           canonical_temperature: 0.0,\n\
@@ -3053,75 +3094,3 @@ fn unsupported(artifact: &CanonicalIrArtifact, feature: impl Into<String>) -> Ru
         feature,
     )
 }
-
-/// The one runtime helper an emitted body cannot express: `ddt` reads and writes
-/// per-instance history, so it is a call rather than an expression.
-/// `idt`'s counterpart, and a call for the same reason: it carries a running
-/// total across evaluations.
-///
-/// A step that is not integrating returns the initial condition and *records*
-/// it, so the next step that does integrate starts from there rather than from
-/// whatever the last operating-point solve happened to leave behind.
-const EVAL_IDT: &str = r#"
-#[inline]
-fn rspice_eval_idt<const STATE_COUNT: usize>(
-    current: &mut [f64; STATE_COUNT],
-    previous: &mut [f64; STATE_COUNT],
-    initialized: &mut [bool; STATE_COUNT],
-    active: bool,
-    step: f64,
-    slot: usize,
-    value: f64,
-    ic: f64,
-) -> f64 {
-    debug_assert!(slot < STATE_COUNT, "generated idt state slot out of range");
-    let started_from = if initialized[slot] { previous[slot] } else { ic };
-    let total = if active { started_from + value * step } else { ic };
-    current[slot] = total;
-    if !active {
-        previous[slot] = total;
-        initialized[slot] = true;
-    }
-    total
-}
-"#;
-
-const EVAL_DDT: &str = r#"
-#[inline]
-fn rspice_eval_ddt<const STATE_COUNT: usize>(
-    current: &mut [f64; STATE_COUNT],
-    previous: &mut [f64; STATE_COUNT],
-    older: &mut [f64; STATE_COUNT],
-    initialized: &mut [bool; STATE_COUNT],
-    derivative_current: &mut [f64; STATE_COUNT],
-    derivative_previous: &mut [f64; STATE_COUNT],
-    active: bool,
-    scale: f64,
-    previous_value_scale: f64,
-    older_value_scale: f64,
-    previous_derivative_scale: f64,
-    slot: usize,
-    value: f64,
-) -> f64 {
-    debug_assert!(slot < STATE_COUNT, "generated ddt state slot out of range");
-    let previous_value = if initialized[slot] { previous[slot] } else { value };
-    let older_value = if initialized[slot] { older[slot] } else { value };
-    current[slot] = value;
-    if active {
-        let result = value * scale
-            - previous_value * previous_value_scale
-            - older_value * older_value_scale
-            - derivative_previous[slot] * previous_derivative_scale;
-        derivative_current[slot] = result;
-        result
-    } else {
-        previous[slot] = value;
-        older[slot] = value;
-        derivative_current[slot] = 0.0;
-        derivative_previous[slot] = 0.0;
-        initialized[slot] = true;
-        0.0
-    }
-}
-
-"#;

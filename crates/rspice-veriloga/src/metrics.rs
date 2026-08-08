@@ -75,6 +75,21 @@ pub struct PhaseTiming {
     pub elapsed_nanos: u64,
 }
 
+/// Structural size of one CFG at a stable compiler-pipeline boundary.
+///
+/// These counts explain generated-source and compiler-cost changes without
+/// depending on wall-clock timing. They are representation-level facts rather
+/// than estimates of runtime work.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CfgStructureMetrics {
+    pub value_count: u64,
+    pub instruction_count: u64,
+    pub block_count: u64,
+    pub block_parameter_count: u64,
+    pub branch_count: u64,
+    pub lane_widen_count: u64,
+}
+
 /// Cooperative control surface for long-running compiler pipelines.
 ///
 /// Implementations must make [`Self::is_cancelled`] cheap and thread-safe.
@@ -120,6 +135,15 @@ pub struct PipelineMetrics {
     pub top_level_item_count: u64,
     pub module_count: u64,
     pub dependency_count: u64,
+    /// Primal CFG after charge recovery and before automatic differentiation.
+    #[serde(default)]
+    pub primal_cfg: CfgStructureMetrics,
+    /// Differentiated CFG after every requested Jacobian lane is extracted.
+    #[serde(default)]
+    pub differentiated_cfg: CfgStructureMetrics,
+    /// Final stamp CFG after the ordinary algebraic optimizer.
+    #[serde(default)]
+    pub optimized_cfg: CfgStructureMetrics,
     /// Model-card-controlled branches that shape Newton-stage work.
     #[serde(default)]
     pub model_structural_guard_count: u64,
@@ -432,6 +456,9 @@ mod tests {
         object.remove("packed_derivative_value_count");
         object.remove("derivative_lane_entry_count");
         object.remove("max_derivative_width");
+        object.remove("primal_cfg");
+        object.remove("differentiated_cfg");
+        object.remove("optimized_cfg");
 
         let decoded: PipelineMetrics =
             serde_json::from_value(encoded).expect("deserialize an older metrics payload");
@@ -444,5 +471,8 @@ mod tests {
         assert_eq!(decoded.packed_derivative_value_count, 0);
         assert_eq!(decoded.derivative_lane_entry_count, 0);
         assert_eq!(decoded.max_derivative_width, 0);
+        assert_eq!(decoded.primal_cfg, CfgStructureMetrics::default());
+        assert_eq!(decoded.differentiated_cfg, CfgStructureMetrics::default());
+        assert_eq!(decoded.optimized_cfg, CfgStructureMetrics::default());
     }
 }

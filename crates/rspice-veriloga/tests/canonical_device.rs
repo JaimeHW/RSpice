@@ -196,10 +196,13 @@ fn repeated_structure_source() -> String {
     let mut guarded_work = String::new();
     for branch in 0..3 {
         guarded_work.push_str("        if (mode > 0.0) begin\n");
-        for index in 0..80 {
+        for index in 0..16 {
+            // Long runtime query leaves make the byte budget meaningfully
+            // larger than the fixed indentation/scaffolding cost of the two
+            // variants, without manufacturing thousands of CFG statements.
+            let query = format!("specialization_{}_{}_{}", branch, index, "x".repeat(1024));
             guarded_work.push_str(&format!(
-                "            current = current + coefficient * V(p, n) * {}.0e-9;\n",
-                branch * 80 + index + 1
+                "            current = current + $simparam(\"{query}\", 1.0e-9) * coefficient * V(p, n);\n"
             ));
         }
         guarded_work.push_str("        end\n");
@@ -278,7 +281,10 @@ fn structural_specialization_rejects_source_growth_over_two_percent() {
     assert!(
         stamp
             .lines()
-            .filter(|line| line.trim_start().starts_with("if v"))
+            .filter(|line| {
+                let line = line.trim_start();
+                line.starts_with("if ") && line.ends_with(" != 0.0 {") && !line.contains("staged[")
+            })
             .count()
             >= 3,
         "the rejected candidate must retain its three ordinary branches"
@@ -577,6 +583,15 @@ fn transpiler_reports_hot_phases_and_exact_output_size() {
     assert!(derivative_values > 0);
     assert!(generated.metrics.derivative_lane_entry_count >= derivative_values);
     assert!(generated.metrics.max_derivative_width > 0);
+    assert!(generated.metrics.primal_cfg.value_count > 0);
+    assert!(
+        generated.metrics.differentiated_cfg.value_count
+            >= generated.metrics.primal_cfg.value_count
+    );
+    assert!(
+        generated.metrics.optimized_cfg.value_count
+            <= generated.metrics.differentiated_cfg.value_count
+    );
 }
 
 struct ImmediatePipelineCancellation;
@@ -601,14 +616,29 @@ fn transpiler_honors_cancellation_before_cfg_lowering() {
     assert!(error.message.contains("cfg_lowering"), "{error}");
 }
 
-struct CancelOnPoll {
-    polls: AtomicUsize,
-    cancel_at: usize,
+struct CancelInsideDifferentiation {
+    preparation_complete: AtomicBool,
+    polls_after_preparation: AtomicUsize,
 }
 
-impl PipelineControl for CancelOnPoll {
+impl PipelineControl for CancelInsideDifferentiation {
     fn is_cancelled(&self) -> bool {
-        self.polls.fetch_add(1, Ordering::Relaxed) + 1 >= self.cancel_at
+        if !self.preparation_complete.load(Ordering::Relaxed) {
+            return false;
+        }
+        // The first poll is the Differentiation phase boundary. Let the pass
+        // enter, then cancel at its first internal cooperative checkpoint.
+        self.polls_after_preparation.fetch_add(1, Ordering::Relaxed) >= 1
+    }
+
+    fn phase_completed(
+        &self,
+        timing: rspice_veriloga::PhaseTiming,
+        _metrics: &rspice_veriloga::PipelineMetrics,
+    ) {
+        if timing.phase == PipelinePhase::DerivativePreparation {
+            self.preparation_complete.store(true, Ordering::Relaxed);
+        }
     }
 }
 
@@ -618,9 +648,9 @@ fn transpiler_polls_for_cancellation_inside_differentiation() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(source)
         .unwrap_or_else(|error| panic!("{name}: front end: {error}"));
-    let control = CancelOnPoll {
-        polls: AtomicUsize::new(0),
-        cancel_at: 6,
+    let control = CancelInsideDifferentiation {
+        preparation_complete: AtomicBool::new(false),
+        polls_after_preparation: AtomicUsize::new(0),
     };
     let error = RustTranspiler::new(options())
         .transpile_measured_with_control(&artifact, &control)
@@ -1091,6 +1121,260 @@ const RUNTIME_STUB: &str = r#"
 
 pub mod runtime {
     pub type Value = f64;
+
+    #[derive(Clone, Copy)]
+    pub struct Lanes<const N: usize>(pub [f64; N]);
+
+    impl<const N: usize> core::ops::Add for Lanes<N> {
+        type Output = Self;
+        fn add(self, rhs: Self) -> Self {
+            let mut out = self.0;
+            let mut i = 0;
+            while i < N {
+                out[i] = self.0[i] + rhs.0[i];
+                i += 1;
+            }
+            Self(out)
+        }
+    }
+
+    impl<const N: usize> core::ops::Sub for Lanes<N> {
+        type Output = Self;
+        fn sub(self, rhs: Self) -> Self {
+            let mut out = self.0;
+            let mut i = 0;
+            while i < N {
+                out[i] = self.0[i] - rhs.0[i];
+                i += 1;
+            }
+            Self(out)
+        }
+    }
+
+    impl<const N: usize> core::ops::Mul<f64> for Lanes<N> {
+        type Output = Self;
+        fn mul(self, rhs: f64) -> Self {
+            let mut out = self.0;
+            let mut i = 0;
+            while i < N {
+                out[i] = self.0[i] * rhs;
+                i += 1;
+            }
+            Self(out)
+        }
+    }
+
+    impl<const N: usize> core::ops::Div<f64> for Lanes<N> {
+        type Output = Self;
+        fn div(self, rhs: f64) -> Self {
+            let mut out = self.0;
+            let mut i = 0;
+            while i < N {
+                out[i] = self.0[i] / rhs;
+                i += 1;
+            }
+            Self(out)
+        }
+    }
+
+    impl<const N: usize> core::ops::Index<usize> for Lanes<N> {
+        type Output = f64;
+        fn index(&self, index: usize) -> &f64 {
+            &self.0[index]
+        }
+    }
+
+    pub fn rspice_limexp(x: f64) -> f64 {
+        if x < 80.0 {
+            x.exp()
+        } else {
+            (80.0f64).exp() * (x - 80.0 + 1.0)
+        }
+    }
+
+    pub fn rspice_limited_exp(x: f64) -> f64 {
+        if x > 80.0 {
+            5.54062238439351e34 * (x - 80.0 + 1.0)
+        } else if x < -80.0 {
+            1.804851387e-35
+        } else {
+            x.exp()
+        }
+    }
+
+    pub fn rspice_limited_exp_derivative(x: f64) -> f64 {
+        if x > 80.0 {
+            5.54062238439351e34
+        } else if x < -80.0 {
+            0.0
+        } else {
+            x.exp()
+        }
+    }
+
+    pub fn rspice_eval_idt<const STATE_COUNT: usize>(
+        current: &mut [f64; STATE_COUNT],
+        previous: &mut [f64; STATE_COUNT],
+        initialized: &mut [bool; STATE_COUNT],
+        active: bool,
+        step: f64,
+        slot: usize,
+        value: f64,
+        ic: f64,
+    ) -> f64 {
+        let started_from = if initialized[slot] { previous[slot] } else { ic };
+        let total = if active { started_from + value * step } else { ic };
+        current[slot] = total;
+        if !active {
+            previous[slot] = total;
+            initialized[slot] = true;
+        }
+        total
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn rspice_eval_ddt<const STATE_COUNT: usize>(
+        current: &mut [f64; STATE_COUNT],
+        previous: &mut [f64; STATE_COUNT],
+        older: &mut [f64; STATE_COUNT],
+        initialized: &mut [bool; STATE_COUNT],
+        derivative_current: &mut [f64; STATE_COUNT],
+        derivative_previous: &mut [f64; STATE_COUNT],
+        active: bool,
+        scale: f64,
+        previous_value_scale: f64,
+        older_value_scale: f64,
+        previous_derivative_scale: f64,
+        slot: usize,
+        value: f64,
+    ) -> f64 {
+        let previous_value = if initialized[slot] { previous[slot] } else { value };
+        let older_value = if initialized[slot] { older[slot] } else { value };
+        current[slot] = value;
+        if active {
+            let result = value * scale
+                - previous_value * previous_value_scale
+                - older_value * older_value_scale
+                - derivative_previous[slot] * previous_derivative_scale;
+            derivative_current[slot] = result;
+            result
+        } else {
+            previous[slot] = value;
+            older[slot] = value;
+            derivative_current[slot] = 0.0;
+            derivative_previous[slot] = 0.0;
+            initialized[slot] = true;
+            0.0
+        }
+    }
+
+    #[derive(Copy, Clone)]
+    pub struct GeneratedParameterBound {
+        pub value: f64,
+        pub label: &'static str,
+    }
+
+    pub const GENERATED_PARAMETER_MIN_EXCLUSIVE_FLAG: u8 = 1;
+    pub const GENERATED_PARAMETER_MAX_EXCLUSIVE_FLAG: u8 = 2;
+
+    pub fn validate_generated_finite_parameter(name: &str, value: f64) -> Result<(), String> {
+        if !value.is_finite() {
+            return Err(format!("parameter '{}' must be finite, got {}", name, value));
+        }
+        Ok(())
+    }
+
+    pub fn validate_generated_parameter_bounds(
+        name: &str,
+        value: f64,
+        flags: u8,
+        min: Option<GeneratedParameterBound>,
+        max: Option<GeneratedParameterBound>,
+        excluded: &[GeneratedParameterBound],
+    ) -> Result<(), String> {
+        if let Some(min) = min {
+            let invalid = if flags & GENERATED_PARAMETER_MIN_EXCLUSIVE_FLAG != 0 {
+                value <= min.value
+            } else {
+                value < min.value
+            };
+            if invalid {
+                let operator = if flags & GENERATED_PARAMETER_MIN_EXCLUSIVE_FLAG != 0 { ">" } else { ">=" };
+                return Err(format!("parameter '{}' must be {} {}, got {}", name, operator, min.label, value));
+            }
+        }
+        if let Some(max) = max {
+            let invalid = if flags & GENERATED_PARAMETER_MAX_EXCLUSIVE_FLAG != 0 {
+                value >= max.value
+            } else {
+                value > max.value
+            };
+            if invalid {
+                let operator = if flags & GENERATED_PARAMETER_MAX_EXCLUSIVE_FLAG != 0 { "<" } else { "<=" };
+                return Err(format!("parameter '{}' must be {} {}, got {}", name, operator, max.label, value));
+            }
+        }
+        for excluded in excluded {
+            if value == excluded.value {
+                return Err(format!("parameter '{}' must not equal {}, got {}", name, excluded.label, value));
+            }
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn validate_generated_parameter(
+        name: &str,
+        value: f64,
+        integer: bool,
+        min: Option<(f64, &str)>,
+        min_exclusive: bool,
+        max: Option<(f64, &str)>,
+        max_exclusive: bool,
+        excluded: &[(f64, &str)],
+    ) -> Result<(), String> {
+        validate_generated_finite_parameter(name, value)?;
+        if integer && value.fract() != 0.0 {
+            return Err(format!("parameter '{}' must be an integer, got {}", name, value));
+        }
+        if integer && (value < i32::MIN as f64 || value > i32::MAX as f64) {
+            return Err(format!("parameter '{}' must fit in a 32-bit signed integer, got {}", name, value));
+        }
+        if let Some((min, label)) = min {
+            if (min_exclusive && value <= min) || (!min_exclusive && value < min) {
+                let operator = if min_exclusive { ">" } else { ">=" };
+                return Err(format!("parameter '{}' must be {} {}, got {}", name, operator, label, value));
+            }
+        }
+        if let Some((max, label)) = max {
+            if (max_exclusive && value >= max) || (!max_exclusive && value > max) {
+                let operator = if max_exclusive { "<" } else { "<=" };
+                return Err(format!("parameter '{}' must be {} {}, got {}", name, operator, label, value));
+            }
+        }
+        for (excluded, label) in excluded {
+            if value == *excluded {
+                return Err(format!("parameter '{}' must not equal {}, got {}", name, label, value));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn boxed_zero_f64_array<const N: usize>() -> Box<[f64; N]> {
+        let mut boxed = Box::<[f64; N]>::new_uninit();
+        unsafe {
+            std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
+            boxed.assume_init()
+        }
+    }
+
+    pub fn boxed_zero_bool_array<const N: usize>() -> Box<[bool; N]> {
+        let mut boxed = Box::<[bool; N]>::new_uninit();
+        unsafe {
+            std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
+            boxed.assume_init()
+        }
+    }
 
     #[derive(Debug, Clone, Copy, PartialEq)]
     pub struct GeneratedDdtCoefficients {

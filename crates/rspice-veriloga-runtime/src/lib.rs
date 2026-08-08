@@ -20,6 +20,365 @@
 
 pub type Value = f64;
 
+/// Packed partial derivatives used by precompiled Verilog-A model bodies.
+///
+/// This lives in the shared leaf dependency so every generated device does not
+/// have to parse its own copy. The fixed-size array and forced-inline operators
+/// preserve the same scalarized machine code at each generated call site.
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+pub struct Lanes<const N: usize>(pub [f64; N]);
+
+impl<const N: usize> core::ops::Add for Lanes<N> {
+    type Output = Self;
+
+    #[inline(always)]
+    fn add(self, rhs: Self) -> Self {
+        let mut out = self.0;
+        let mut i = 0;
+        while i < N {
+            out[i] = self.0[i] + rhs.0[i];
+            i += 1;
+        }
+        Self(out)
+    }
+}
+
+impl<const N: usize> core::ops::Sub for Lanes<N> {
+    type Output = Self;
+
+    #[inline(always)]
+    fn sub(self, rhs: Self) -> Self {
+        let mut out = self.0;
+        let mut i = 0;
+        while i < N {
+            out[i] = self.0[i] - rhs.0[i];
+            i += 1;
+        }
+        Self(out)
+    }
+}
+
+impl<const N: usize> core::ops::Mul<f64> for Lanes<N> {
+    type Output = Self;
+
+    #[inline(always)]
+    fn mul(self, rhs: f64) -> Self {
+        let mut out = self.0;
+        let mut i = 0;
+        while i < N {
+            out[i] = self.0[i] * rhs;
+            i += 1;
+        }
+        Self(out)
+    }
+}
+
+impl<const N: usize> core::ops::Div<f64> for Lanes<N> {
+    type Output = Self;
+
+    #[inline(always)]
+    fn div(self, rhs: f64) -> Self {
+        let mut out = self.0;
+        let mut i = 0;
+        while i < N {
+            out[i] = self.0[i] / rhs;
+            i += 1;
+        }
+        Self(out)
+    }
+}
+
+impl<const N: usize> core::ops::Index<usize> for Lanes<N> {
+    type Output = f64;
+
+    #[inline(always)]
+    fn index(&self, index: usize) -> &f64 {
+        &self.0[index]
+    }
+}
+
+#[doc(hidden)]
+#[inline(always)]
+pub fn rspice_limexp(x: f64) -> f64 {
+    if x < 80.0 {
+        x.exp()
+    } else {
+        (80.0f64).exp() * (x - 80.0 + 1.0)
+    }
+}
+
+#[doc(hidden)]
+#[inline(always)]
+pub fn rspice_limited_exp(x: f64) -> f64 {
+    if x > 80.0 {
+        5.54062238439351e34 * (x - 80.0 + 1.0)
+    } else if x < -80.0 {
+        1.804851387e-35
+    } else {
+        x.exp()
+    }
+}
+
+#[doc(hidden)]
+#[inline(always)]
+pub fn rspice_limited_exp_derivative(x: f64) -> f64 {
+    if x > 80.0 {
+        5.54062238439351e34
+    } else if x < -80.0 {
+        0.0
+    } else {
+        x.exp()
+    }
+}
+
+/// Evaluate one generated `idt` state slot.
+///
+/// A non-integrating step returns and records the initial condition, so the
+/// next integrating step starts there rather than at a value left by the last
+/// operating-point solve.
+#[doc(hidden)]
+#[inline]
+pub fn rspice_eval_idt<const STATE_COUNT: usize>(
+    current: &mut [f64; STATE_COUNT],
+    previous: &mut [f64; STATE_COUNT],
+    initialized: &mut [bool; STATE_COUNT],
+    active: bool,
+    step: f64,
+    slot: usize,
+    value: f64,
+    ic: f64,
+) -> f64 {
+    debug_assert!(slot < STATE_COUNT, "generated idt state slot out of range");
+    let started_from = if initialized[slot] {
+        previous[slot]
+    } else {
+        ic
+    };
+    let total = if active {
+        started_from + value * step
+    } else {
+        ic
+    };
+    current[slot] = total;
+    if !active {
+        previous[slot] = total;
+        initialized[slot] = true;
+    }
+    total
+}
+
+/// Evaluate one generated `ddt` state slot.
+#[doc(hidden)]
+#[inline]
+#[allow(clippy::too_many_arguments)]
+pub fn rspice_eval_ddt<const STATE_COUNT: usize>(
+    current: &mut [f64; STATE_COUNT],
+    previous: &mut [f64; STATE_COUNT],
+    older: &mut [f64; STATE_COUNT],
+    initialized: &mut [bool; STATE_COUNT],
+    derivative_current: &mut [f64; STATE_COUNT],
+    derivative_previous: &mut [f64; STATE_COUNT],
+    active: bool,
+    scale: f64,
+    previous_value_scale: f64,
+    older_value_scale: f64,
+    previous_derivative_scale: f64,
+    slot: usize,
+    value: f64,
+) -> f64 {
+    debug_assert!(slot < STATE_COUNT, "generated ddt state slot out of range");
+    let previous_value = if initialized[slot] {
+        previous[slot]
+    } else {
+        value
+    };
+    let older_value = if initialized[slot] {
+        older[slot]
+    } else {
+        value
+    };
+    current[slot] = value;
+    if active {
+        let result = value * scale
+            - previous_value * previous_value_scale
+            - older_value * older_value_scale
+            - derivative_previous[slot] * previous_derivative_scale;
+        derivative_current[slot] = result;
+        result
+    } else {
+        previous[slot] = value;
+        older[slot] = value;
+        derivative_current[slot] = 0.0;
+        derivative_previous[slot] = 0.0;
+        initialized[slot] = true;
+        0.0
+    }
+}
+
+/// One literal or referenced bound in generated parameter metadata.
+#[doc(hidden)]
+#[derive(Copy, Clone)]
+pub struct GeneratedParameterBound {
+    pub value: f64,
+    pub label: &'static str,
+}
+
+#[doc(hidden)]
+pub const GENERATED_PARAMETER_MIN_EXCLUSIVE_FLAG: u8 = 1;
+#[doc(hidden)]
+pub const GENERATED_PARAMETER_MAX_EXCLUSIVE_FLAG: u8 = 2;
+
+#[doc(hidden)]
+pub fn validate_generated_finite_parameter(name: &str, value: f64) -> Result<(), String> {
+    if !value.is_finite() {
+        return Err(format!(
+            "parameter '{}' must be finite, got {}",
+            name, value
+        ));
+    }
+    Ok(())
+}
+
+#[doc(hidden)]
+pub fn validate_generated_parameter_bounds(
+    name: &str,
+    value: f64,
+    flags: u8,
+    min: Option<GeneratedParameterBound>,
+    max: Option<GeneratedParameterBound>,
+    excluded: &[GeneratedParameterBound],
+) -> Result<(), String> {
+    if let Some(min) = min {
+        if flags & GENERATED_PARAMETER_MIN_EXCLUSIVE_FLAG != 0 {
+            if value <= min.value {
+                return Err(format!(
+                    "parameter '{}' must be > {}, got {}",
+                    name, min.label, value
+                ));
+            }
+        } else if value < min.value {
+            return Err(format!(
+                "parameter '{}' must be >= {}, got {}",
+                name, min.label, value
+            ));
+        }
+    }
+    if let Some(max) = max {
+        if flags & GENERATED_PARAMETER_MAX_EXCLUSIVE_FLAG != 0 {
+            if value >= max.value {
+                return Err(format!(
+                    "parameter '{}' must be < {}, got {}",
+                    name, max.label, value
+                ));
+            }
+        } else if value > max.value {
+            return Err(format!(
+                "parameter '{}' must be <= {}, got {}",
+                name, max.label, value
+            ));
+        }
+    }
+    for excluded in excluded {
+        if value == excluded.value {
+            return Err(format!(
+                "parameter '{}' must not equal {}, got {}",
+                name, excluded.label, value
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[doc(hidden)]
+pub fn validate_generated_parameter(
+    name: &str,
+    value: f64,
+    integer: bool,
+    min: Option<(f64, &str)>,
+    min_exclusive: bool,
+    max: Option<(f64, &str)>,
+    max_exclusive: bool,
+    excluded: &[(f64, &str)],
+) -> Result<(), String> {
+    validate_generated_finite_parameter(name, value)?;
+    if integer && value.fract() != 0.0 {
+        return Err(format!(
+            "parameter '{}' must be an integer, got {}",
+            name, value
+        ));
+    }
+    if integer && (value < i32::MIN as f64 || value > i32::MAX as f64) {
+        return Err(format!(
+            "parameter '{}' must fit in a 32-bit signed integer, got {}",
+            name, value
+        ));
+    }
+    if let Some((min, label)) = min {
+        if min_exclusive {
+            if value <= min {
+                return Err(format!(
+                    "parameter '{}' must be > {}, got {}",
+                    name, label, value
+                ));
+            }
+        } else if value < min {
+            return Err(format!(
+                "parameter '{}' must be >= {}, got {}",
+                name, label, value
+            ));
+        }
+    }
+    if let Some((max, label)) = max {
+        if max_exclusive {
+            if value >= max {
+                return Err(format!(
+                    "parameter '{}' must be < {}, got {}",
+                    name, label, value
+                ));
+            }
+        } else if value > max {
+            return Err(format!(
+                "parameter '{}' must be <= {}, got {}",
+                name, label, value
+            ));
+        }
+    }
+    for (excluded, label) in excluded {
+        if value == *excluded {
+            return Err(format!(
+                "parameter '{}' must not equal {}, got {}",
+                name, label, value
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Allocate a large zeroed generated state array directly on the heap.
+#[doc(hidden)]
+pub fn boxed_zero_f64_array<const N: usize>() -> Box<[f64; N]> {
+    let mut boxed = Box::<[f64; N]>::new_uninit();
+    // SAFETY: every bit pattern is written before the box is assumed
+    // initialized, and all-zero bytes are valid `0.0` values.
+    unsafe {
+        std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
+        boxed.assume_init()
+    }
+}
+
+/// Allocate a large false-filled generated state array directly on the heap.
+#[doc(hidden)]
+pub fn boxed_zero_bool_array<const N: usize>() -> Box<[bool; N]> {
+    let mut boxed = Box::<[bool; N]>::new_uninit();
+    // SAFETY: every bit pattern is written before the box is assumed
+    // initialized, and all-zero bytes are valid `false` values.
+    unsafe {
+        std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
+        boxed.assume_init()
+    }
+}
+
 use rspice_matrix::{ComplexMatrix, CscIndex, StaticMatrix};
 
 const DEFAULT_GMIN: Value = 1.0e-12;

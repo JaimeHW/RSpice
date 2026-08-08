@@ -110,7 +110,7 @@ fn generated_veriloga_devices_are_portable_direct_rust_artifacts() {
     );
 }
 
-/// Each device is self-contained, and nothing streams a shared scratch frame.
+/// Devices emit direct control flow and share only the stable, typed runtime ABI.
 ///
 /// This replaces three tests that pinned the opposite: a `StampLocals` frame
 /// ABI, `KernelAdValue`/`KernelScratch` aliases over a partitioned
@@ -118,14 +118,17 @@ fn generated_veriloga_devices_are_portable_direct_rust_artifacts() {
 /// shape, and asserting it now would assert that the rebuild has not happened —
 /// the memory-indexed interpreter they describe is the thing the whole program
 /// exists to remove. What is worth pinning is what replaced it: real control
-/// flow in one body per device, with the helpers it uses carried alongside.
+/// flow in one body per device. Small, model-independent helpers belong in the
+/// runtime crate once, rather than being copied into every generated package.
 #[test]
-fn generated_veriloga_devices_carry_their_own_helpers() {
+fn generated_veriloga_devices_use_shared_hot_helpers() {
     let generated_root = generated_veriloga_root();
 
     let mut partitioned = Vec::new();
     let mut streamed = Vec::new();
-    let mut saw_packed_lane_type = false;
+    let mut local_lane_types = Vec::new();
+    let mut packed_lane_consumers = 0usize;
+    let mut missing_lane_imports = Vec::new();
     scan_generated_rust(&generated_root, &mut |path, source| {
         let name = path.file_name().unwrap_or_default().to_string_lossy();
         if name.starts_with("stamp_blocks_") {
@@ -134,7 +137,18 @@ fn generated_veriloga_devices_carry_their_own_helpers() {
         if source.contains("KernelScratch") || source.contains("StampLocals") {
             streamed.push(display_path(path));
         }
-        saw_packed_lane_type |= source.contains("struct Lanes<const N: usize>");
+        if source.contains("struct Lanes<const N: usize>") {
+            local_lane_types.push(display_path(path));
+        }
+        if source.contains("Lanes(") || source.contains("Lanes<") {
+            packed_lane_consumers += 1;
+            let imports_lanes = source.lines().any(|line| {
+                line.starts_with("use rspice_veriloga_runtime::") && line.contains("Lanes")
+            });
+            if !imports_lanes {
+                missing_lane_imports.push(display_path(path));
+            }
+        }
     });
 
     assert!(
@@ -152,8 +166,26 @@ fn generated_veriloga_devices_carry_their_own_helpers() {
         "the obsolete shared kernel runtime must not be regenerated"
     );
     assert!(
-        saw_packed_lane_type,
-        "a differentiated device carries the packed-lane newtype it emits against"
+        packed_lane_consumers > 0,
+        "audit at least one packed-lane user"
+    );
+    assert!(
+        local_lane_types.is_empty(),
+        "generated packages must not duplicate the packed-lane implementation:\n{}",
+        local_lane_types.join("\n")
+    );
+    assert!(
+        missing_lane_imports.is_empty(),
+        "packed-lane users must import the stable runtime helper:\n{}",
+        missing_lane_imports.join("\n")
+    );
+
+    let runtime_path = workspace_root().join("crates/rspice-veriloga-runtime/src/lib.rs");
+    let runtime = fs::read_to_string(&runtime_path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", runtime_path.display()));
+    assert!(
+        runtime.contains("pub struct Lanes<const N: usize>"),
+        "the stable runtime must own the packed-lane ABI"
     );
 }
 

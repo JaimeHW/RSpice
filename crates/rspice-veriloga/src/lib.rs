@@ -119,8 +119,8 @@ pub use codegen::{CodeGenerator, CompiledModel};
 pub use error::{CompileError, CompileResult};
 pub use lexer::{Lexer, Token, TokenKind};
 pub use metrics::{
-    Measured, NoPipelineControl, PerformanceBudget, PerformanceBudgetExceeded, PhaseTiming,
-    PipelineCancelled, PipelineControl, PipelineMetrics, PipelinePhase,
+    CfgStructureMetrics, Measured, NoPipelineControl, PerformanceBudget, PerformanceBudgetExceeded,
+    PhaseTiming, PipelineCancelled, PipelineControl, PipelineMetrics, PipelinePhase,
 };
 pub use parser::Parser;
 pub use preprocessor::{

@@ -1,6 +1,7 @@
 #![allow(dead_code, non_snake_case, unused_parens, unused_variables)]
 
-use rspice_veriloga_runtime::{GeneratedDdtCoefficients, GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState};
+use rspice_veriloga_runtime::{GeneratedDdtCoefficients, GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState, boxed_zero_bool_array, boxed_zero_f64_array};
+use rspice_veriloga_runtime::{GeneratedParameterBound as ParameterBound, GENERATED_PARAMETER_MAX_EXCLUSIVE_FLAG as PARAMETER_MAX_EXCLUSIVE_FLAG, GENERATED_PARAMETER_MIN_EXCLUSIVE_FLAG as PARAMETER_MIN_EXCLUSIVE_FLAG, validate_generated_finite_parameter as validate_finite_parameter, validate_generated_parameter as validate_parameter, validate_generated_parameter_bounds as validate_parameter_bounds};
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -57,15 +58,6 @@ impl Default for Parameters {
         *Self::new_box()
     }
 }
-
-#[derive(Copy, Clone)]
-struct ParameterBound {
-    value: f64,
-    label: &'static str,
-}
-
-const PARAMETER_MIN_EXCLUSIVE_FLAG: u8 = 1;
-const PARAMETER_MAX_EXCLUSIVE_FLAG: u8 = 2;
 
 #[inline]
 fn read_parameter_slot(parameters: &Parameters, index: usize) -> f64 {
@@ -162,89 +154,6 @@ fn parameter_bound_from_reference(
     Ok(ParameterBound { value, label: name })
 }
 
-fn validate_parameter_bounds(
-    name: &str,
-    value: f64,
-    flags: u8,
-    min: Option<ParameterBound>,
-    max: Option<ParameterBound>,
-    excluded: &[ParameterBound],
-) -> Result<(), String> {
-    if let Some(min) = min {
-        if flags & PARAMETER_MIN_EXCLUSIVE_FLAG != 0 {
-            if value <= min.value {
-                return Err(format!("parameter '{}' must be > {}, got {}", name, min.label, value));
-            }
-        } else if value < min.value {
-            return Err(format!("parameter '{}' must be >= {}, got {}", name, min.label, value));
-        }
-    }
-    if let Some(max) = max {
-        if flags & PARAMETER_MAX_EXCLUSIVE_FLAG != 0 {
-            if value >= max.value {
-                return Err(format!("parameter '{}' must be < {}, got {}", name, max.label, value));
-            }
-        } else if value > max.value {
-            return Err(format!("parameter '{}' must be <= {}, got {}", name, max.label, value));
-        }
-    }
-    for excluded in excluded {
-        if value == excluded.value {
-            return Err(format!("parameter '{}' must not equal {}, got {}", name, excluded.label, value));
-        }
-    }
-    Ok(())
-}
-
-fn validate_finite_parameter(name: &str, value: f64) -> Result<(), String> {
-    if !value.is_finite() {
-        return Err(format!("parameter '{}' must be finite, got {}", name, value));
-    }
-    Ok(())
-}
-
-fn validate_parameter(
-    name: &str,
-    value: f64,
-    integer: bool,
-    min: Option<(f64, &str)>,
-    min_exclusive: bool,
-    max: Option<(f64, &str)>,
-    max_exclusive: bool,
-    excluded: &[(f64, &str)],
-) -> Result<(), String> {
-    validate_finite_parameter(name, value)?;
-    if integer && value.fract() != 0.0 {
-        return Err(format!("parameter '{}' must be an integer, got {}", name, value));
-    }
-    if integer && (value < i32::MIN as f64 || value > i32::MAX as f64) {
-        return Err(format!("parameter '{}' must fit in a 32-bit signed integer, got {}", name, value));
-    }
-    if let Some((min, label)) = min {
-        if min_exclusive {
-            if value <= min {
-                return Err(format!("parameter '{}' must be > {}, got {}", name, label, value));
-            }
-        } else if value < min {
-            return Err(format!("parameter '{}' must be >= {}, got {}", name, label, value));
-        }
-    }
-    if let Some((max, label)) = max {
-        if max_exclusive {
-            if value >= max {
-                return Err(format!("parameter '{}' must be < {}, got {}", name, label, value));
-            }
-        } else if value > max {
-            return Err(format!("parameter '{}' must be <= {}, got {}", name, label, value));
-        }
-    }
-    for (excluded, label) in excluded {
-        if value == *excluded {
-            return Err(format!("parameter '{}' must not equal {}, got {}", name, label, value));
-        }
-    }
-    Ok(())
-}
 
 const PARAMETER_NAME_LOOKUP: [(&str, usize); 103] = [
     ("noise", 0), ("selft", 1), ("trise", 2), ("temp", 3), ("idsmod", 4), ("igmod", 5), ("capmod", 6), ("noimod", 7), ("ipk0", 8), ("vpks", 9), ("dvpks", 10), ("p1", 11), ("p2", 12), ("p3", 13), ("alphar", 14), ("alphas", 15),
@@ -411,22 +320,6 @@ fn parameter_index_for_name(name: &str) -> Option<usize> {
         .find_map(|(candidate, index)| (*candidate == name).then_some(*index))
 }
 
-fn boxed_zero_f64_array<const N: usize>() -> Box<[f64; N]> {
-    let mut boxed = Box::<[f64; N]>::new_uninit();
-    unsafe {
-        std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
-        boxed.assume_init()
-    }
-}
-
-fn boxed_zero_bool_array<const N: usize>() -> Box<[bool; N]> {
-    let mut boxed = Box::<[bool; N]>::new_uninit();
-    unsafe {
-        std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
-        boxed.assume_init()
-    }
-}
-
 #[derive(Clone)]
 pub(crate) struct StampState<const DDT: usize, const IDT: usize> {
     pub(crate) ddt_current: [f64; DDT],
@@ -448,15 +341,6 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
             std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
             boxed.assume_init()
         }
-    }
-}
-
-fn canonical_boxed_zero_f64<const N: usize>() -> Box<[f64; N]> {
-    // SAFETY: every slot is an f64, and all-zero bytes are 0.0.
-    let mut boxed = Box::<[f64; N]>::new_uninit();
-    unsafe {
-        std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
-        boxed.assume_init()
     }
 }
 
@@ -515,7 +399,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 145;
     pub const DDT_STATE_COUNT: usize = 17;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "cdd046c1454e771063b97cc1125ea5ace2a10793c80cbbf4e4707aab8f22800a";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "729dae6616d5a4b18ee9affebe4a2d505602b54a42c5ab71fc213725ec1659bc";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 
@@ -533,9 +417,9 @@ impl Instance {
             time: 0.0,
             timestep: 0.0,
             ddt_coefficients: GeneratedDdtCoefficients::inactive(),
-            canonical_reactive: canonical_boxed_zero_f64(),
+            canonical_reactive: boxed_zero_f64_array(),
             canonical_model_values: None,
-            canonical_staged: canonical_boxed_zero_f64(),
+            canonical_staged: boxed_zero_f64_array(),
             canonical_instance_valid: false,
             canonical_temperature_valid: false,
             canonical_temperature: 0.0,

@@ -18,11 +18,11 @@
 //!
 //! ## Merges become bindings
 //!
-//! A block parameter is declared before the construct that merges into it and
-//! assigned on each incoming edge — `let p; if c { p = a } else { p = b }` for a
-//! diamond, `let mut p = init;` reassigned at the back edge for a loop. Rust's
-//! definite-assignment analysis then checks, for free, the property SSA was
-//! maintaining by construction.
+//! A one-value straight-line diamond is an `if` expression. Multi-value or
+//! nested diamonds retain declaration plus edge assignment, and loop-carried
+//! parameters remain mutable bindings. Rust's definite-assignment and type
+//! analyses therefore continue to check the properties SSA maintained by
+//! construction without making the common one-value merge three statements.
 //!
 //! ## Everything is `f64`
 //!
@@ -36,7 +36,7 @@
 //! ## Derivatives are scalar-or-packed, and that is where the size went
 //!
 //! A one-lane derivative emits as plain `f64`; wider derivatives use the
-//! `Lanes<N>` newtype from [`RUNTIME_PRELUDE`] over the lanes their shape names.
+//! shared runtime's `Lanes<N>` newtype over the lanes their shape names.
 //! The elementwise rules emit as `a + b` and `a * s` — one line each, whatever
 //! `N` is. That is the whole reason the IR packs: fully scalarised derivatives
 //! cost a line per lane, and the wide MOSFETs carry a hundred thousand of them.
@@ -153,11 +153,14 @@ pub fn emit_body(
         declared: HashSet::new(),
         loop_headers: back_edge_targets(function),
         post_dominators: immediate_post_dominators(function),
+        predecessor_counts: predecessor_counts(function),
         inlined: HashMap::new(),
+        names: Vec::new(),
         wanted: outputs.iter().copied().collect(),
         captured: BTreeMap::new(),
     };
     emitter.plan_inlining(outputs);
+    emitter.plan_names();
     emitter.leaves()?;
     // Captures are declared between the leaves and the body: they have to be in
     // scope for the whole body, and which of them are needed is only known once
@@ -173,7 +176,11 @@ pub fn emit_body(
     Ok((emitter.source, names))
 }
 
-/// Helpers the emitted arithmetic calls. Include once per generated module.
+/// Standalone copy of the helpers emitted arithmetic calls.
+///
+/// Generated model crates import the identical definitions from
+/// `rspice-veriloga-runtime`; this copy keeps direct-rustc emitter and benchmark
+/// programs self-contained.
 pub const RUNTIME_PRELUDE: &str = r#"
 #[inline(always)]
 fn rspice_limexp(x: f64) -> f64 {
@@ -284,6 +291,9 @@ struct Emitter<'a> {
     loop_headers: HashSet<BlockId>,
     /// Immediate post-dominators, which is what a diamond's join is.
     post_dominators: Vec<Option<BlockId>>,
+    /// Incoming edge count for each block. Expression-form arms must be owned
+    /// by exactly one branch so emitting them lexically cannot duplicate work.
+    predecessor_counts: Vec<usize>,
     /// Values emitted at their use rather than bound to a name.
     ///
     /// A compact model is mostly values read exactly once, and binding each of
@@ -292,6 +302,13 @@ struct Emitter<'a> {
     /// small, and without it the emitted source is several times larger for no
     /// difference in the compiled code.
     inlined: HashMap<ValueId, String>,
+    /// Dense local names for values that survive expression inlining.
+    ///
+    /// Scheduling keeps stable CFG ids while cutting a function into stages,
+    /// leaving large gaps in the ids one emitted Rust body actually names.
+    /// Local ordinals preserve every scope and dependency while avoiding those
+    /// gaps in source text and in rustc's identifier table.
+    names: Vec<String>,
     /// The values the caller asked for.
     wanted: HashSet<ValueId>,
     /// Wanted values that a guarded or looping region defines, and the name
@@ -377,6 +394,22 @@ impl Emitter<'_> {
             uses[usize::from(*output)] += 2;
         }
 
+        // Pure leaves can be substituted when their sole reader is an ordinary
+        // value. Unlike arithmetic, this moves no potentially trapping work
+        // across a branch. Calls such as `$simparam` and `$analysis` remain
+        // bindings because caller-provided implementations need not be pure.
+        for value in &self.function.values {
+            let index = usize::from(value.id);
+            if uses[index] == 1
+                && reader_of[index].is_some()
+                && block_of[index].is_none()
+                && Self::is_inlineable_leaf(&value.kind)
+            {
+                // Marked now, filled in by `leaves` in value-id order.
+                self.inlined.insert(value.id, String::new());
+            }
+        }
+
         for block in &self.function.blocks {
             for instruction in &block.instructions {
                 let result = instruction.result;
@@ -392,6 +425,27 @@ impl Emitter<'_> {
                 }
             }
         }
+    }
+
+    fn plan_names(&mut self) {
+        self.names = vec![String::new(); self.function.values.len()];
+        let mut ordinal = 0usize;
+        for value in &self.function.values {
+            if self.inlined.contains_key(&value.id) {
+                continue;
+            }
+            self.names[usize::from(value.id)] = compact_local_name(ordinal);
+            ordinal += 1;
+        }
+    }
+
+    fn value_name(&self, value: ValueId) -> &str {
+        let name = &self.names[usize::from(value)];
+        debug_assert!(
+            !name.is_empty(),
+            "inlined value {value} has no local binding"
+        );
+        name
     }
 
     /// Bind every value no block defines.
@@ -412,7 +466,19 @@ impl Emitter<'_> {
                 continue;
             }
             let expression = self.expression(value.id)?;
-            self.line(1, &format!("let {} = {expression};", value_name(value.id)));
+            let expression_is_atomic = self.inlined_expression_is_atomic(value.id);
+            if let Some(slot) = self.inlined.get_mut(&value.id) {
+                *slot = if expression_is_atomic {
+                    expression
+                } else {
+                    format!("({expression})")
+                };
+                continue;
+            }
+            self.line(
+                1,
+                &format!("let {} = {expression};", self.value_name(value.id)),
+            );
         }
         Ok(())
     }
@@ -478,15 +544,29 @@ impl Emitter<'_> {
         };
 
         let join = self.join_of(block);
+        if let Some(join) = join
+            && self.emit_single_value_diamond(
+                condition,
+                then_target,
+                &then_args,
+                else_target,
+                &else_args,
+                join,
+                depth,
+            )?
+        {
+            return Ok(Some(join));
+        }
         // Declared before the arms so both may assign it, which is also how
         // Rust's definite-assignment check ends up doing the SSA verification.
         if let Some(join) = join {
-            for param in &self.function.block(join).params {
-                self.declare(*param, depth);
-            }
+            self.declare_all(&self.function.block(join).params.clone(), depth);
         }
 
-        self.line(depth, &format!("if {} != 0.0 {{", value_name(condition)));
+        self.line(
+            depth,
+            &format!("if {} != 0.0 {{", self.value_name(condition)),
+        );
         self.pass_arguments(then_target, &then_args, depth + 1);
         self.block(then_target, join, depth + 1)?;
         self.line(depth, "} else {");
@@ -494,6 +574,92 @@ impl Emitter<'_> {
         self.block(else_target, join, depth + 1)?;
         self.line(depth, "}");
         Ok(join)
+    }
+
+    /// Emit a one-value, straight-line diamond as one typed `if` expression.
+    ///
+    /// Multi-value joins deliberately retain ordinary edge assignments. Tuple
+    /// expressions saved more source but did not improve the complete HiSIM-HV
+    /// leaf compile. Each non-empty arm must be a unique-predecessor block that
+    /// jumps directly to the join, so this preserves instruction order and
+    /// never moves work across a condition or loop boundary.
+    #[allow(clippy::too_many_arguments)]
+    fn emit_single_value_diamond(
+        &mut self,
+        condition: ValueId,
+        then_target: BlockId,
+        then_args: &[ValueId],
+        else_target: BlockId,
+        else_args: &[ValueId],
+        join: BlockId,
+        depth: usize,
+    ) -> Result<bool, EmitError> {
+        let params = self.function.block(join).params.clone();
+        if params.len() != 1 || self.declared.contains(&params[0]) {
+            return Ok(false);
+        }
+        let Some((then_block, then_result)) = self.single_value_arm(then_target, then_args, join)
+        else {
+            return Ok(false);
+        };
+        let Some((else_block, else_result)) = self.single_value_arm(else_target, else_args, join)
+        else {
+            return Ok(false);
+        };
+
+        let param = params[0];
+        self.declared.insert(param);
+        self.line(
+            depth,
+            &format!(
+                "let {} = if {} != 0.0 {{",
+                self.value_name(param),
+                self.value_name(condition)
+            ),
+        );
+        self.emit_single_value_arm(then_block, then_result, depth + 1)?;
+        self.line(depth, "} else {");
+        self.emit_single_value_arm(else_block, else_result, depth + 1)?;
+        self.line(depth, "};");
+        Ok(true)
+    }
+
+    /// Return the optional straight-line arm block and its one join argument.
+    fn single_value_arm(
+        &self,
+        target: BlockId,
+        edge_args: &[ValueId],
+        join: BlockId,
+    ) -> Option<(Option<BlockId>, ValueId)> {
+        if target == join {
+            return (edge_args.len() == 1).then(|| (None, edge_args[0]));
+        }
+        let block = self.function.block(target);
+        if self.loop_headers.contains(&target)
+            || self.predecessor_counts[usize::from(target)] != 1
+            || !block.params.is_empty()
+            || !edge_args.is_empty()
+        {
+            return None;
+        }
+        let CfgTerminator::Jump { target, args } = &block.terminator else {
+            return None;
+        };
+        (*target == join && args.len() == 1).then(|| (Some(block.id), args[0]))
+    }
+
+    fn emit_single_value_arm(
+        &mut self,
+        block: Option<BlockId>,
+        result: ValueId,
+        depth: usize,
+    ) -> Result<(), EmitError> {
+        if let Some(block) = block {
+            self.instructions(block, depth)?;
+        }
+        let result = self.value_name(result).to_owned();
+        self.line(depth, &result);
+        Ok(())
     }
 
     /// `loop { .. if !c { break } .. }` for the header/body/exit triple the
@@ -526,7 +692,7 @@ impl Emitter<'_> {
 
         self.line(
             depth + 1,
-            &format!("if {} == 0.0 {{", value_name(condition)),
+            &format!("if {} == 0.0 {{", self.value_name(condition)),
         );
         self.pass_arguments(exit, &exit_args, depth + 2);
         self.line(depth + 2, "break;");
@@ -594,15 +760,25 @@ impl Emitter<'_> {
         }
         for instruction in &self.function.block(block).instructions.clone() {
             let expression = self.expression(instruction.result)?;
-            // Parenthesised because it is about to be dropped into the middle of
-            // another expression, where precedence is not ours to reason about.
+            // Composite expressions are parenthesised because they are about to
+            // be dropped into the middle of another expression. Constructor,
+            // call, literal, and indexing forms are already atomic, so wrapping
+            // those only adds tokens for rustc to parse.
+            let expression_is_atomic = self.inlined_expression_is_atomic(instruction.result);
             if let Some(slot) = self.inlined.get_mut(&instruction.result) {
-                *slot = format!("({expression})");
+                *slot = if expression_is_atomic {
+                    expression
+                } else {
+                    format!("({expression})")
+                };
                 continue;
             }
             self.line(
                 depth,
-                &format!("let {} = {expression};", value_name(instruction.result)),
+                &format!(
+                    "let {} = {expression};",
+                    self.value_name(instruction.result)
+                ),
             );
             self.capture(instruction.result, depth);
         }
@@ -621,20 +797,16 @@ impl Emitter<'_> {
         if depth <= 1 || !self.wanted.contains(&value) || self.captured.contains_key(&value) {
             return;
         }
-        let name = format!("out{}", usize::from(value));
-        self.line(depth, &format!("{name} = {};", value_name(value)));
+        let name = format!("o{}", self.value_name(value));
+        self.line(depth, &format!("{name} = {};", self.value_name(value)));
         self.captured.insert(value, name);
     }
 
     fn capture_declarations(&self) -> String {
         let mut out = String::new();
-        for value in self.captured.keys() {
-            let (declared_type, initial) = self.type_and_zero(*value);
-            let _ = writeln!(
-                out,
-                "    let mut out{}: {declared_type} = {initial};",
-                usize::from(*value)
-            );
+        for (value, name) in &self.captured {
+            let initial = self.zero(*value);
+            let _ = writeln!(out, "    let mut {name} = {initial};");
         }
         out
     }
@@ -643,7 +815,7 @@ impl Emitter<'_> {
         self.captured
             .get(&value)
             .cloned()
-            .unwrap_or_else(|| value_name(value))
+            .unwrap_or_else(|| self.value_name(value).to_owned())
     }
 
     /// Assign a successor's parameters from the arguments on this edge.
@@ -664,7 +836,11 @@ impl Emitter<'_> {
             for (param, argument) in params.iter().zip(args) {
                 self.line(
                     depth,
-                    &format!("{} = {};", value_name(*param), value_name(*argument)),
+                    &format!(
+                        "{} = {};",
+                        self.value_name(*param),
+                        self.value_name(*argument)
+                    ),
                 );
             }
             return;
@@ -672,11 +848,14 @@ impl Emitter<'_> {
         for (index, argument) in args.iter().enumerate() {
             self.line(
                 depth,
-                &format!("let edge{index} = {};", value_name(*argument)),
+                &format!("let edge{index} = {};", self.value_name(*argument)),
             );
         }
         for (index, param) in params.iter().enumerate() {
-            self.line(depth, &format!("{} = edge{index};", value_name(*param)));
+            self.line(
+                depth,
+                &format!("{} = edge{index};", self.value_name(*param)),
+            );
         }
     }
 
@@ -691,43 +870,28 @@ impl Emitter<'_> {
         }
     }
 
-    fn declare(&mut self, value: ValueId, depth: usize) {
-        if self.declared.insert(value) {
-            let declared_type = self.type_name(value);
-            self.line(
-                depth,
-                &format!("let {}: {declared_type};", value_name(value)),
-            );
+    fn declare_all(&mut self, values: &[ValueId], depth: usize) {
+        for value in values {
+            if self.declared.insert(*value) {
+                self.line(depth, &format!("let {};", self.value_name(*value)));
+            }
         }
     }
 
     fn declare_mutable(&mut self, value: ValueId, depth: usize) {
         if self.declared.insert(value) {
-            let (declared_type, initial) = self.type_and_zero(value);
+            let initial = self.zero(value);
             self.line(
                 depth,
-                &format!(
-                    "let mut {}: {declared_type} = {initial};",
-                    value_name(value)
-                ),
+                &format!("let mut {} = {initial};", self.value_name(value)),
             );
         }
     }
 
-    fn type_name(&self, value: ValueId) -> String {
+    fn zero(&self, value: ValueId) -> String {
         match self.function.lanes_of(value) {
-            Some(lanes) if lanes.len() > 1 => format!("Lanes<{}>", lanes.len()),
-            Some(_) | None => "f64".to_string(),
-        }
-    }
-
-    fn type_and_zero(&self, value: ValueId) -> (String, String) {
-        match self.function.lanes_of(value) {
-            Some(lanes) if lanes.len() > 1 => (
-                format!("Lanes<{}>", lanes.len()),
-                format!("Lanes([0.0; {}])", lanes.len()),
-            ),
-            Some(_) | None => ("f64".to_string(), "0.0".to_string()),
+            Some(lanes) if lanes.len() > 1 => format!("Lanes([0.0; {}])", lanes.len()),
+            Some(_) | None => "0.0".to_string(),
         }
     }
 
@@ -744,8 +908,52 @@ impl Emitter<'_> {
     fn operand(&self, value: ValueId) -> String {
         match self.inlined.get(&value) {
             Some(expression) if !expression.is_empty() => expression.clone(),
-            _ => value_name(value),
+            _ => self.value_name(value).to_owned(),
         }
+    }
+
+    fn inlined_expression_is_atomic(&self, value: ValueId) -> bool {
+        matches!(
+            self.function.value(value).kind,
+            CfgValueKind::RealConstant(_)
+                | CfgValueKind::BooleanConstant(_)
+                | CfgValueKind::Parameter(_)
+                | CfgValueKind::Temperature
+                | CfgValueKind::ThermalVoltage
+                | CfgValueKind::Multiplicity
+                | CfgValueKind::Time
+                | CfgValueKind::NodePotential(_)
+                | CfgValueKind::BranchFlow(_)
+                | CfgValueKind::BranchUnknownFlow(_)
+                | CfgValueKind::Staged { .. }
+                | CfgValueKind::Ddt { .. }
+                | CfgValueKind::DdtScale
+                | CfgValueKind::Idt { .. }
+                | CfgValueKind::IdtScale
+                | CfgValueKind::Limit { .. }
+                | CfgValueKind::LimitPrevious { .. }
+                | CfgValueKind::LaneSplat(_)
+                | CfgValueKind::LaneWiden { .. }
+                | CfgValueKind::LaneExtract { .. }
+        )
+    }
+
+    fn is_inlineable_leaf(kind: &CfgValueKind) -> bool {
+        matches!(
+            kind,
+            CfgValueKind::RealConstant(_)
+                | CfgValueKind::BooleanConstant(_)
+                | CfgValueKind::Parameter(_)
+                | CfgValueKind::ParameterGiven(_)
+                | CfgValueKind::Temperature
+                | CfgValueKind::ThermalVoltage
+                | CfgValueKind::Multiplicity
+                | CfgValueKind::Time
+                | CfgValueKind::NodePotential(_)
+                | CfgValueKind::BranchFlow(_)
+                | CfgValueKind::BranchUnknownFlow(_)
+                | CfgValueKind::Staged { .. }
+        )
     }
 
     fn expression(&self, value: ValueId) -> Result<String, EmitError> {
@@ -759,7 +967,7 @@ impl Emitter<'_> {
                     "0.0f64".into()
                 }
             }
-            CfgValueKind::BlockParameter => value_name(value),
+            CfgValueKind::BlockParameter => self.value_name(value).to_owned(),
             CfgValueKind::Parameter(parameter) => {
                 format!("{}[{}]", bindings.parameters, usize::from(*parameter))
             }
@@ -904,6 +1112,16 @@ impl Emitter<'_> {
     }
 }
 
+fn predecessor_counts(function: &CfgFunction) -> Vec<usize> {
+    let mut counts = vec![0usize; function.blocks.len()];
+    for block in &function.blocks {
+        for successor in block.successors() {
+            counts[usize::from(successor)] += 1;
+        }
+    }
+    counts
+}
+
 /// Immediate post-dominators, by the same iteration a compiler uses for
 /// dominators, run on the reversed graph.
 ///
@@ -1046,10 +1264,6 @@ fn back_edge_targets(function: &CfgFunction) -> HashSet<BlockId> {
     headers
 }
 
-fn value_name(value: ValueId) -> String {
-    format!("v{}", usize::from(value))
-}
-
 /// A literal that reads back as exactly this value.
 fn real_literal(value: f64) -> String {
     if value.is_nan() {
@@ -1064,9 +1278,39 @@ fn real_literal(value: f64) -> String {
     }
     let mut text = String::new();
     // `{:e}` is the shortest form that round-trips, which matters: a truncated
-    // constant is a wrong model, not a smaller one.
-    let _ = write!(text, "{value:e}");
-    format!("{text}f64")
+    // constant is a wrong model, not a smaller one. The explicit type is also
+    // required when a generated binding is only used as a float-method receiver;
+    // Rust otherwise leaves that binding ambiguous between f32 and f64.
+    let _ = write!(text, "{value:e}f64");
+    text
+}
+
+/// A short, deterministic Rust identifier for an otherwise meaningless local.
+///
+/// Dense numbering already keeps IR ids that disappeared during optimization
+/// out of the source. Bijective base 26 cuts the remaining identifier bytes
+/// substantially on large models without changing the token stream's structure
+/// or relying on formatting that `rustfmt` would undo. Uppercase-only names are
+/// valid Rust identifiers, cannot be keywords, and cannot collide with the
+/// lowercase runtime bindings used by emitted expressions.
+fn compact_local_name(mut ordinal: usize) -> String {
+    // Fourteen base-26 digits cover every 64-bit usize value.
+    let mut encoded = [0u8; 14];
+    let mut cursor = encoded.len();
+    loop {
+        cursor -= 1;
+        encoded[cursor] = b'A' + (ordinal % 26) as u8;
+        ordinal /= 26;
+        if ordinal == 0 {
+            break;
+        }
+        // Make the representation bijective: there is no zero digit before
+        // the first character, so Z is followed by AA rather than BA.
+        ordinal -= 1;
+    }
+    std::str::from_utf8(&encoded[cursor..])
+        .expect("the compact local alphabet contains only ASCII")
+        .to_owned()
 }
 
 fn unary(op: CfgUnaryOp, input: &str) -> String {
@@ -1121,4 +1365,20 @@ fn binary(op: CfgBinaryOp, left: &str, right: &str) -> String {
 
 fn predicate(test: &str) -> String {
     format!("if {test} {{ 1.0 }} else {{ 0.0 }}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compact_local_name;
+
+    #[test]
+    fn compact_local_names_are_stable_across_base_26_boundaries() {
+        assert_eq!(compact_local_name(0), "A");
+        assert_eq!(compact_local_name(25), "Z");
+        assert_eq!(compact_local_name(26), "AA");
+        assert_eq!(compact_local_name(51), "AZ");
+        assert_eq!(compact_local_name(52), "BA");
+        assert_eq!(compact_local_name(701), "ZZ");
+        assert_eq!(compact_local_name(702), "AAA");
+    }
 }

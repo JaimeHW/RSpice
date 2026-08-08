@@ -1243,13 +1243,16 @@ fn generate_device_work_item(
             progress_lock,
             format!(
                 "generated Verilog-A built-in {module_index}/{total_modules}: {} :: {} \
-                 (transpile {:.2?}, differentiate {:.2?}, schedule {:.2?}, static guards {}/{} \
+                 (transpile {:.2?}, differentiate {:.2?} {}/{}, \
+                 schedule {:.2?}, static guards {}/{} \
                  over {} Newton values, {} split fallback(s), AD {} scalar/{} packed \
                  ({} seeds, max {}), {} bytes, total {:.2?})",
                 relative_source.display(),
                 item.module,
                 transpile_started.elapsed(),
                 metrics.phase_elapsed(PipelinePhase::Differentiation),
+                metrics.primal_cfg.value_count,
+                metrics.differentiated_cfg.value_count,
                 metrics.phase_elapsed(PipelinePhase::Scheduling),
                 metrics.model_structural_guard_count,
                 metrics.instance_structural_guard_count,

@@ -1,147 +1,9 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, Lanes, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-
-#[inline(always)]
-fn rspice_limexp(x: f64) -> f64 {
-    if x < 80.0 { x.exp() } else { (80.0f64).exp() * (x - 80.0 + 1.0) }
-}
-
-#[inline(always)]
-fn rspice_limited_exp(x: f64) -> f64 {
-    if x > 80.0 {
-        5.54062238439351e34 * (x - 80.0 + 1.0)
-    } else if x < -80.0 {
-        1.804851387e-35
-    } else {
-        x.exp()
-    }
-}
-
-#[inline(always)]
-fn rspice_limited_exp_derivative(x: f64) -> f64 {
-    if x > 80.0 {
-        5.54062238439351e34
-    } else if x < -80.0 {
-        0.0
-    } else {
-        x.exp()
-    }
-}
-
-/// A packed derivative: one partial per unknown the value can reach.
-///
-/// A newtype rather than a bare `[f64; N]` so the elementwise rules emit as
-/// `a + b` and `a * s` instead of named calls. That is not cosmetic — these
-/// operations are most of a large model's generated source, and an operator is
-/// a dozen characters shorter than a call at every one of them.
-#[derive(Clone, Copy)]
-struct Lanes<const N: usize>([f64; N]);
-
-impl<const N: usize> core::ops::Add for Lanes<N> {
-    type Output = Self;
-    #[inline(always)]
-    fn add(self, rhs: Self) -> Self {
-        let mut out = self.0;
-        let mut i = 0;
-        while i < N {
-            out[i] = self.0[i] + rhs.0[i];
-            i += 1;
-        }
-        Self(out)
-    }
-}
-
-impl<const N: usize> core::ops::Sub for Lanes<N> {
-    type Output = Self;
-    #[inline(always)]
-    fn sub(self, rhs: Self) -> Self {
-        let mut out = self.0;
-        let mut i = 0;
-        while i < N {
-            out[i] = self.0[i] - rhs.0[i];
-            i += 1;
-        }
-        Self(out)
-    }
-}
-
-impl<const N: usize> core::ops::Mul<f64> for Lanes<N> {
-    type Output = Self;
-    #[inline(always)]
-    fn mul(self, rhs: f64) -> Self {
-        let mut out = self.0;
-        let mut i = 0;
-        while i < N {
-            out[i] = self.0[i] * rhs;
-            i += 1;
-        }
-        Self(out)
-    }
-}
-
-impl<const N: usize> core::ops::Div<f64> for Lanes<N> {
-    type Output = Self;
-    #[inline(always)]
-    fn div(self, rhs: f64) -> Self {
-        let mut out = self.0;
-        let mut i = 0;
-        while i < N {
-            out[i] = self.0[i] / rhs;
-            i += 1;
-        }
-        Self(out)
-    }
-}
-
-impl<const N: usize> core::ops::Index<usize> for Lanes<N> {
-    type Output = f64;
-    #[inline(always)]
-    fn index(&self, index: usize) -> &f64 {
-        &self.0[index]
-    }
-}
-
-#[inline]
-fn rspice_eval_ddt<const STATE_COUNT: usize>(
-    current: &mut [f64; STATE_COUNT],
-    previous: &mut [f64; STATE_COUNT],
-    older: &mut [f64; STATE_COUNT],
-    initialized: &mut [bool; STATE_COUNT],
-    derivative_current: &mut [f64; STATE_COUNT],
-    derivative_previous: &mut [f64; STATE_COUNT],
-    active: bool,
-    scale: f64,
-    previous_value_scale: f64,
-    older_value_scale: f64,
-    previous_derivative_scale: f64,
-    slot: usize,
-    value: f64,
-) -> f64 {
-    debug_assert!(slot < STATE_COUNT, "generated ddt state slot out of range");
-    let previous_value = if initialized[slot] { previous[slot] } else { value };
-    let older_value = if initialized[slot] { older[slot] } else { value };
-    current[slot] = value;
-    if active {
-        let result = value * scale
-            - previous_value * previous_value_scale
-            - older_value * older_value_scale
-            - derivative_previous[slot] * previous_derivative_scale;
-        derivative_current[slot] = result;
-        result
-    } else {
-        previous[slot] = value;
-        older[slot] = value;
-        derivative_current[slot] = 0.0;
-        derivative_previous[slot] = 0.0;
-        initialized[slot] = true;
-        0.0
-    }
-}
-
 
 static CANONICAL_MODEL_CACHE: OnceLock<Mutex<HashMap<Box<[u64]>, Weak<CanonicalModelValues>>>> = OnceLock::new();
 
@@ -210,29 +72,20 @@ impl Instance {
             let parameter_given = &*self.param_given;
             let multiplicity = self.multiplicity;
             let staged = &*self.canonical_staged;
-                let v0 = parameters[14];
-                let v1 = 1.002e3f64;
-                let v3 = if parameter_given[10] { 1.0 } else { 0.0 };
-                let v4 = 1e-2f64;
-                let v5 = parameters[10];
-                let v7 = 1e0f64;
-                let v9 = 2.7315e2f64;
-                let v10 = parameters[15];
-                let v12 = parameters[34];
-                let v14 = parameters[28];
-                let v15 = 0e0f64;
-                let v17 = parameters[26];
-                let mut out8: f64 = 0.0;
-                let v2 = if v0 != v1 { 1.0 } else { 0.0 };
-                if v3 != 0.0 {
-                    let v8 = v7 - (v4 * v5);
-                    out8 = v8;
+                let B = if parameter_given[10] { 1.0 } else { 0.0 };
+                let C = 1e0f64;
+                let G = 0e0f64;
+                let mut oD = 0.0;
+                let A = if parameters[14] != 1.002e3f64 { 1.0 } else { 0.0 };
+                if B != 0.0 {
+                    let D = C - (1e-2f64 * parameters[10]);
+                    oD = D;
                 } else {
                 }
-                let v11 = v9 + v10;
-                let v13 = v12 + v7;
-                let v19 = if (if v14 > v15 { 1.0 } else { 0.0 }) != 0.0 || (if v17 > v15 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
-            [v2, out8, v11, v13, v19]
+                let E = 2.7315e2f64 + parameters[15];
+                let F = parameters[34] + C;
+                let H = if (if parameters[28] > G { 1.0 } else { 0.0 }) != 0.0 || (if parameters[26] > G { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+            [A, oD, E, F, H]
         };
         let values = canonical_model_cache_intern(key, Arc::new(produced));
         self.canonical_install_model_values(values);
@@ -247,66 +100,63 @@ impl Instance {
             let parameter_given = &*self.param_given;
             let multiplicity = self.multiplicity;
             let staged = &*self.canonical_staged;
-                let v0 = parameters[3];
-                let v1 = parameters[4];
-                let v3 = parameters[22];
-                let v6 = if parameter_given[1] { 1.0 } else { 0.0 };
-                let v7 = if parameter_given[2] { 1.0 } else { 0.0 };
-                let v9 = if parameter_given[0] { 1.0 } else { 0.0 };
-                let v12 = 5e-1f64;
-                let v14 = 0e0f64;
-                let v16 = parameters[2];
-                let v18 = parameters[1];
-                let v24 = parameters[0];
-                let mut out4: f64 = 0.0;
-                let mut out20: f64 = 0.0;
-                let mut out22: f64 = 0.0;
-                let mut out23: f64 = 0.0;
-                let mut out25: f64 = 0.0;
-                let mut out26: f64 = 0.0;
-                let mut out27: f64 = 0.0;
-                let v2 = if v0 != 0.0 && v1 != 0.0 { 1.0 } else { 0.0 };
-                let v5: f64;
-                if v2 != 0.0 {
-                    v5 = v3;
+                let A = parameters[3];
+                let B = parameters[4];
+                let D = parameters[22];
+                let G = if parameter_given[1] { 1.0 } else { 0.0 };
+                let H = if parameter_given[2] { 1.0 } else { 0.0 };
+                let K = 0e0f64;
+                let M = parameters[2];
+                let N = parameters[1];
+                let R = parameters[0];
+                let mut oE = 0.0;
+                let mut oO = 0.0;
+                let mut oP = 0.0;
+                let mut oQ = 0.0;
+                let mut oS = 0.0;
+                let mut oT = 0.0;
+                let mut oU = 0.0;
+                let C = if A != 0.0 && B != 0.0 { 1.0 } else { 0.0 };
+                let F;
+                if C != 0.0 {
+                    F = D;
                 } else {
-                    let v4 = if v0 != 0.0 || v1 != 0.0 { 1.0 } else { 0.0 };
-                    out4 = v4;
-                    let v15: f64;
-                    if v4 != 0.0 {
-                        let v13 = v3 * v12;
-                        v15 = v13;
+                    let E = if A != 0.0 || B != 0.0 { 1.0 } else { 0.0 };
+                    oE = E;
+                    let L = if E != 0.0 {
+                        let J = D * 5e-1f64;
+                        J
                     } else {
-                        v15 = v14;
-                    }
-                    v5 = v15;
+                        K
+                    };
+                    F = L;
                 }
-                let v11 = if (if v6 != 0.0 && v7 != 0.0 { 1.0 } else { 0.0 }) != 0.0 && (if v9 == 0.0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
-                if v11 != 0.0 {
-                    let v20 = if (if v16 == v14 { 1.0 } else { 0.0 }) != 0.0 || (if v18 == v14 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
-                    out20 = v20;
+                let I = if (if G != 0.0 && H != 0.0 { 1.0 } else { 0.0 }) != 0.0 && (if (if parameter_given[0] { 1.0 } else { 0.0 }) == 0.0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+                if I != 0.0 {
+                    let O = if (if M == K { 1.0 } else { 0.0 }) != 0.0 || (if N == K { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+                    oO = O;
                 } else {
-                    let v22 = if v7 != 0.0 && (if v6 == 0.0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
-                    out22 = v22;
-                    if v22 != 0.0 {
-                        let v23 = if v16 == v14 { 1.0 } else { 0.0 };
-                        out23 = v23;
-                        if v23 != 0.0 {
+                    let P = if H != 0.0 && (if G == 0.0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+                    oP = P;
+                    if P != 0.0 {
+                        let Q = if M == K { 1.0 } else { 0.0 };
+                        oQ = Q;
+                        if Q != 0.0 {
                         } else {
-                            let v26 = if v24 == v14 { 1.0 } else { 0.0 };
-                            out26 = v26;
+                            let T = if R == K { 1.0 } else { 0.0 };
+                            oT = T;
                         }
                     } else {
-                        let v25 = if v24 == v14 { 1.0 } else { 0.0 };
-                        out25 = v25;
-                        if v25 != 0.0 {
+                        let S = if R == K { 1.0 } else { 0.0 };
+                        oS = S;
+                        if S != 0.0 {
                         } else {
-                            let v27 = if v18 == v14 { 1.0 } else { 0.0 };
-                            out27 = v27;
+                            let U = if N == K { 1.0 } else { 0.0 };
+                            oU = U;
                         }
                     }
                 }
-            [v2, out4, v11, out20, v5, out22, out23, out26, out25, out27]
+            [C, oE, I, oO, F, oP, oQ, oT, oS, oU]
         };
         self.canonical_staged[12] = produced[0];
         self.canonical_staged[13] = produced[1];
@@ -335,43 +185,33 @@ impl Instance {
             let multiplicity = self.multiplicity;
             let temperature = ctx.temperature();
             let staged = &*self.canonical_staged;
-                let v0 = temperature;
-                let v1 = parameters[5];
-                let v3 = 2.7315e2f64;
-                let v5 = parameters[11];
-                let v7 = parameters[12];
-                let v9 = staged[0];
-                let v11 = parameters[34];
-                let v13 = 1e0f64;
-                let v17 = parameters[35];
-                let v22 = staged[1];
-                let v24 = parameters[42];
-                let v27 = parameters[29];
-                let v29 = 0e0f64;
-                let mut out19: f64 = 0.0;
-                let v4 = (v0 + v1) - v3;
-                let v6 = if v4 < v5 { 1.0 } else { 0.0 };
-                let v8 = if v4 > v7 { 1.0 } else { 0.0 };
-                let v10 = if v4 < v9 { 1.0 } else { 0.0 };
-                let v20: f64;
-                if v10 != 0.0 {
-                    let v16 = v11 + (((v4 - v11) - v13).exp());
-                    v20 = v16;
+                let A = 2.7315e2f64;
+                let F = parameters[34];
+                let G = 1e0f64;
+                let I = parameters[35];
+                let mut oJ = 0.0;
+                let B = (temperature + parameters[5]) - A;
+                let C = if B < parameters[11] { 1.0 } else { 0.0 };
+                let D = if B > parameters[12] { 1.0 } else { 0.0 };
+                let E = if B < staged[0] { 1.0 } else { 0.0 };
+                let K;
+                if E != 0.0 {
+                    let H = F + (((B - F) - G).exp());
+                    K = H;
                 } else {
-                    let v19 = if v4 > (v17 - v13) { 1.0 } else { 0.0 };
-                    out19 = v19;
-                    let v35: f64;
-                    if v19 != 0.0 {
-                        let v34 = v17 - (((v17 - v4) - v13).exp());
-                        v35 = v34;
+                    let J = if B > (I - G) { 1.0 } else { 0.0 };
+                    oJ = J;
+                    let O = if J != 0.0 {
+                        let N = I - (((I - B) - G).exp());
+                        N
                     } else {
-                        v35 = v4;
-                    }
-                    v20 = v35;
+                        B
+                    };
+                    K = O;
                 }
-                let v23 = (v20 + v3) - v22;
-                let v30 = if ((v13 + (v23 * v24)) * v27) < v29 { 1.0 } else { 0.0 };
-            [v6, v8, v10, out19, v23, v30]
+                let L = (K + A) - staged[1];
+                let M = if ((G + (L * parameters[42])) * parameters[29]) < 0e0f64 { 1.0 } else { 0.0 };
+            [C, D, E, oJ, L, M]
         };
         self.canonical_staged[7] = produced[0];
         self.canonical_staged[8] = produced[1];
@@ -393,454 +233,428 @@ impl Instance {
         let multiplicity = self.multiplicity;
         let staged = &*self.canonical_staged;
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1])];
-            let v0 = if parameter_given[9] { 1.0 } else { 0.0 };
-            let v1 = parameters[9];
-            let v2 = 1e0f64;
-            let v5 = if parameter_given[10] { 1.0 } else { 0.0 };
-            let v6 = staged[6];
-            let v7 = 0e0f64;
-            let v9 = 1e-2f64;
-            let v13 = if parameter_given[13] { 1.0 } else { 0.0 };
-            let v14 = parameters[13];
-            let v15 = 1e-3f64;
-            let v19 = 1e6f64;
-            let v21 = staged[12];
-            let v22 = staged[14];
-            let v23 = staged[15];
-            let v24 = staged[16];
-            let v31 = parameters[17];
-            let v33 = parameters[0];
-            let v35 = parameters[21];
-            let v37 = 1e99f64;
-            let v38 = parameters[1];
-            let v40 = staged[2];
-            let v50 = parameters[16];
-            let v51 = parameters[2];
-            let v63 = staged[17];
-            let v64 = staged[18];
-            let v73 = staged[19];
-            let v105 = staged[20];
-            let v135 = parameters[18];
-            let v137 = parameters[19];
-            let v139 = parameters[20];
-            let v141 = parameters[24];
-            let v142 = parameters[23];
-            let v149 = staged[3];
-            let v152 = parameters[36];
-            let v153 = parameters[37];
-            let v157 = parameters[38];
-            let v160 = parameters[39];
-            let v163 = parameters[3];
-            let v164 = parameters[4];
-            let v168 = 5e-1f64;
-            let v177 = parameters[40];
-            let v180 = parameters[41];
-            let v185 = multiplicity;
-            let v188 = staged[4];
-            let v193 = 1.1e-1f64;
-            let v196 = 1e1f64;
-            let v200 = 1e-1f64;
-            let v205 = node_potentials[0];
-            let v206 = node_potentials[1];
-            let v208 = 1e0f64;
-            let v210 = 1e0f64;
-            let v216 = parameters[27];
-            let v224 = 2e0f64;
-            let v226 = 1e0f64;
-            let v230 = 0e0f64;
-            let v235 = parameters[25];
-            let v246 = 3.333333333333333e-1f64;
-            let v248 = -6.666666666666667e-1f64;
-            let v252 = parameters[28];
-            let v254 = parameters[26];
-            let v263 = Lanes([0e0f64; 2]);
-            let v274 = parameters[33];
-            let v276 = parameters[6];
-            let v280 = parameters[32];
-            let v292 = 0e0f64;
-            let v293 = 0e0f64;
-            let v4: f64;
-            if v0 != 0.0 {
-                v4 = v1;
+            let A = if parameter_given[9] { 1.0 } else { 0.0 };
+            let B = parameters[9];
+            let C = 1e0f64;
+            let F = if parameter_given[10] { 1.0 } else { 0.0 };
+            let G = staged[6];
+            let H = 0e0f64;
+            let I = 1e-2f64;
+            let L = if parameter_given[13] { 1.0 } else { 0.0 };
+            let M = parameters[13];
+            let Q = staged[12];
+            let R = staged[14];
+            let S = staged[15];
+            let T = staged[16];
+            let AB = parameters[0];
+            let AD = parameters[21];
+            let AF = 1e99f64;
+            let AG = parameters[1];
+            let AI = staged[2];
+            let AS = parameters[16];
+            let AT = parameters[2];
+            let BE = staged[17];
+            let BF = staged[18];
+            let BO = staged[19];
+            let CT = staged[20];
+            let DZ = parameters[24];
+            let EA = parameters[23];
+            let EF = staged[3];
+            let EI = parameters[36];
+            let EJ = parameters[37];
+            let EN = parameters[38];
+            let EP = parameters[39];
+            let EU = 5e-1f64;
+            let FE = staged[4];
+            let FL = 1e0f64;
+            let FM = 1e0f64;
+            let FR = parameters[27];
+            let FV = 2e0f64;
+            let FW = 1e0f64;
+            let FX = parameters[25];
+            let GD = 3.333333333333333e-1f64;
+            let GE = parameters[28];
+            let GF = parameters[26];
+            let GI = Lanes([0e0f64; 2]);
+            let GY = 0e0f64;
+            let GZ = 0e0f64;
+            let E = if A != 0.0 {
+                B
             } else {
-                let v3 = ctx.simparam_or("scale", v2);
-                v4 = v3;
-            }
-            let v12: f64;
-            if v5 != 0.0 {
-                v12 = v6;
+                let D = ctx.simparam_or("scale", C);
+                D
+            };
+            let K = if F != 0.0 {
+                G
             } else {
-                let v11 = v2 - (v9 * (ctx.simparam_or("shrink", v7)));
-                v12 = v11;
-            }
-            let v17: f64;
-            if v13 != 0.0 {
-                v17 = v14;
+                let J = C - (I * (ctx.simparam_or("shrink", H)));
+                J
+            };
+            let O = if L != 0.0 {
+                M
             } else {
-                let v16 = ctx.simparam_or("rthresh", v15);
-                v17 = v16;
-            }
-            let v20 = (v12 * v4) * v19;
-            let v25: f64;
-            let v26: f64;
-            let v27: f64;
-            let v28: f64;
-            let v29: f64;
-            let v30: f64;
-            if v22 != 0.0 {
-                let v43: f64;
-                let v44: f64;
-                let v45: f64;
-                let v46: f64;
-                let v47: f64;
-                let v48: f64;
-                if v23 != 0.0 {
-                    let v34 = v33 * v20;
-                    let v36 = v34 + v35;
-                    v43 = v7;
-                    v44 = v34;
-                    v45 = v7;
-                    v46 = v7;
-                    v47 = v36;
-                    v48 = v37;
+                let N = ctx.simparam_or("rthresh", 1e-3f64);
+                N
+            };
+            let P = (K * E) * 1e6f64;
+            let U;
+            let V;
+            let W;
+            let X;
+            let Y;
+            let Z;
+            if R != 0.0 {
+                let AL;
+                let AM;
+                let AN;
+                let AO;
+                let AP;
+                let AQ;
+                if S != 0.0 {
+                    let AC = AB * P;
+                    let AE = AC + AD;
+                    AL = H;
+                    AM = AC;
+                    AN = H;
+                    AO = H;
+                    AP = AE;
+                    AQ = AF;
                 } else {
-                    let v39 = v38 * v20;
-                    let v41 = v39 + v40;
-                    let v42 = if v41 < v7 { 1.0 } else { 0.0 };
-                    let v49 = if v41 > v7 { 1.0 } else { 0.0 };
-                    let v58: f64;
-                    let v59: f64;
-                    let v60: f64;
-                    let v61: f64;
-                    if v49 != 0.0 {
-                        let v53 = (v50 / v51) * v41;
-                        let v54 = v53 - v35;
-                        let v55 = if v54 <= v7 { 1.0 } else { 0.0 };
-                        let v62 = v2 / v51;
-                        v58 = v54;
-                        v59 = v51;
-                        v60 = v53;
-                        v61 = v62;
+                    let AH = AG * P;
+                    let AJ = AH + AI;
+                    let AK = if AJ < H { 1.0 } else { 0.0 };
+                    let AR = if AJ > H { 1.0 } else { 0.0 };
+                    let AZ;
+                    let BA;
+                    let BB;
+                    let BC;
+                    if AR != 0.0 {
+                        let AU = (AS / AT) * AJ;
+                        let AV = AU - AD;
+                        let AW = if AV <= H { 1.0 } else { 0.0 };
+                        let BD = C / AT;
+                        AZ = AV;
+                        BA = AT;
+                        BB = AU;
+                        BC = BD;
                     } else {
-                        let v56 = v33 * v20;
-                        let v57 = v56 + v35;
-                        v58 = v56;
-                        v59 = v7;
-                        v60 = v57;
-                        v61 = v37;
+                        let AX = AB * P;
+                        let AY = AX + AD;
+                        AZ = AX;
+                        BA = H;
+                        BB = AY;
+                        BC = AF;
                     }
-                    v43 = v39;
-                    v44 = v58;
-                    v45 = v41;
-                    v46 = v59;
-                    v47 = v60;
-                    v48 = v61;
+                    AL = AH;
+                    AM = AZ;
+                    AN = AJ;
+                    AO = BA;
+                    AP = BB;
+                    AQ = BC;
                 }
-                v25 = v43;
-                v26 = v44;
-                v27 = v45;
-                v28 = v46;
-                v29 = v47;
-                v30 = v48;
+                U = AL;
+                V = AM;
+                W = AN;
+                X = AO;
+                Y = AP;
+                Z = AQ;
             } else {
-                let v65: f64;
-                let v66: f64;
-                let v67: f64;
-                let v68: f64;
-                let v69: f64;
-                let v70: f64;
-                if v24 != 0.0 {
-                    let v74: f64;
-                    let v75: f64;
-                    let v76: f64;
-                    let v77: f64;
-                    let v78: f64;
-                    let v79: f64;
-                    if v63 != 0.0 {
-                        let v71 = v33 * v20;
-                        let v72 = v71 + v35;
-                        v74 = v7;
-                        v75 = v71;
-                        v76 = v7;
-                        v77 = v7;
-                        v78 = v72;
-                        v79 = v37;
+                let BG;
+                let BH;
+                let BI;
+                let BJ;
+                let BK;
+                let BL;
+                if T != 0.0 {
+                    let BP;
+                    let BQ;
+                    let BR;
+                    let BS;
+                    let BT;
+                    let BU;
+                    if BE != 0.0 {
+                        let BM = AB * P;
+                        let BN = BM + AD;
+                        BP = H;
+                        BQ = BM;
+                        BR = H;
+                        BS = H;
+                        BT = BN;
+                        BU = AF;
                     } else {
-                        let v85: f64;
-                        let v86: f64;
-                        let v87: f64;
-                        let v88: f64;
-                        let v89: f64;
-                        let v90: f64;
-                        if v73 != 0.0 {
-                            let v80 = v38 * v20;
-                            let v81 = v80 + v40;
-                            v85 = v80;
-                            v86 = v7;
-                            v87 = v81;
-                            v88 = v37;
-                            v89 = v7;
-                            v90 = v7;
+                        let CA;
+                        let CB;
+                        let CC;
+                        let CD;
+                        let CE;
+                        let CF;
+                        if BO != 0.0 {
+                            let BV = AG * P;
+                            let BW = BV + AI;
+                            CA = BV;
+                            CB = H;
+                            CC = BW;
+                            CD = AF;
+                            CE = H;
+                            CF = H;
                         } else {
-                            let v82 = v33 * v20;
-                            let v83 = v82 + v35;
-                            let v84 = if v83 < v7 { 1.0 } else { 0.0 };
-                            let v91 = if v83 > v7 { 1.0 } else { 0.0 };
-                            let v98: f64;
-                            let v99: f64;
-                            let v100: f64;
-                            let v101: f64;
-                            if v91 != 0.0 {
-                                let v93 = (v51 / v50) * v83;
-                                let v94 = v93 - v40;
-                                let v95 = if v94 <= v7 { 1.0 } else { 0.0 };
-                                let v102 = v2 / v51;
-                                v98 = v94;
-                                v99 = v93;
-                                v100 = v51;
-                                v101 = v102;
+                            let BX = AB * P;
+                            let BY = BX + AD;
+                            let BZ = if BY < H { 1.0 } else { 0.0 };
+                            let CG = if BY > H { 1.0 } else { 0.0 };
+                            let CM;
+                            let CN;
+                            let CO;
+                            let CP;
+                            if CG != 0.0 {
+                                let CH = (AT / AS) * BY;
+                                let CI = CH - AI;
+                                let CJ = if CI <= H { 1.0 } else { 0.0 };
+                                let CQ = C / AT;
+                                CM = CI;
+                                CN = CH;
+                                CO = AT;
+                                CP = CQ;
                             } else {
-                                let v96 = v38 * v20;
-                                let v97 = v96 + v40;
-                                v98 = v96;
-                                v99 = v97;
-                                v100 = v37;
-                                v101 = v7;
+                                let CK = AG * P;
+                                let CL = CK + AI;
+                                CM = CK;
+                                CN = CL;
+                                CO = AF;
+                                CP = H;
                             }
-                            v85 = v98;
-                            v86 = v82;
-                            v87 = v99;
-                            v88 = v100;
-                            v89 = v83;
-                            v90 = v101;
+                            CA = CM;
+                            CB = BX;
+                            CC = CN;
+                            CD = CO;
+                            CE = BY;
+                            CF = CP;
                         }
-                        v74 = v85;
-                        v75 = v86;
-                        v76 = v87;
-                        v77 = v88;
-                        v78 = v89;
-                        v79 = v90;
+                        BP = CA;
+                        BQ = CB;
+                        BR = CC;
+                        BS = CD;
+                        BT = CE;
+                        BU = CF;
                     }
-                    v65 = v74;
-                    v66 = v75;
-                    v67 = v76;
-                    v68 = v77;
-                    v69 = v78;
-                    v70 = v79;
+                    BG = BP;
+                    BH = BQ;
+                    BI = BR;
+                    BJ = BS;
+                    BK = BT;
+                    BL = BU;
                 } else {
-                    let v106: f64;
-                    let v107: f64;
-                    let v108: f64;
-                    let v109: f64;
-                    let v110: f64;
-                    let v111: f64;
-                    if v64 != 0.0 {
-                        let v103 = v38 * v20;
-                        let v104 = v103 + v40;
-                        v106 = v103;
-                        v107 = v7;
-                        v108 = v104;
-                        v109 = v37;
-                        v110 = v7;
-                        v111 = v7;
+                    let CU;
+                    let CV;
+                    let CW;
+                    let CX;
+                    let CY;
+                    let CZ;
+                    if BF != 0.0 {
+                        let CR = AG * P;
+                        let CS = CR + AI;
+                        CU = CR;
+                        CV = H;
+                        CW = CS;
+                        CX = AF;
+                        CY = H;
+                        CZ = H;
                     } else {
-                        let v117: f64;
-                        let v118: f64;
-                        let v119: f64;
-                        let v120: f64;
-                        let v121: f64;
-                        let v122: f64;
-                        if v105 != 0.0 {
-                            let v112 = v33 * v20;
-                            let v113 = v112 + v35;
-                            v117 = v7;
-                            v118 = v112;
-                            v119 = v7;
-                            v120 = v7;
-                            v121 = v113;
-                            v122 = v37;
+                        let DF;
+                        let DG;
+                        let DH;
+                        let DI;
+                        let DJ;
+                        let DK;
+                        if CT != 0.0 {
+                            let DA = AB * P;
+                            let DB = DA + AD;
+                            DF = H;
+                            DG = DA;
+                            DH = H;
+                            DI = H;
+                            DJ = DB;
+                            DK = AF;
                         } else {
-                            let v114 = v33 * v20;
-                            let v115 = v114 + v35;
-                            let v116 = if v115 < v7 { 1.0 } else { 0.0 };
-                            let v123 = v38 * v20;
-                            let v124 = v123 + v40;
-                            let v125 = if v115 > v7 { 1.0 } else { 0.0 };
-                            let v127: f64;
-                            let v128: f64;
-                            if v125 != 0.0 {
-                                let v126 = if v124 < v7 { 1.0 } else { 0.0 };
-                                let v129 = if v124 > v7 { 1.0 } else { 0.0 };
-                                let v133: f64;
-                                let v134: f64;
-                                if v129 != 0.0 {
-                                    let v131 = v50 * (v124 / v115);
-                                    let v132 = v2 / v131;
-                                    v133 = v131;
-                                    v134 = v132;
+                            let DC = AB * P;
+                            let DD = DC + AD;
+                            let DE = if DD < H { 1.0 } else { 0.0 };
+                            let DL = AG * P;
+                            let DM = DL + AI;
+                            let DN = if DD > H { 1.0 } else { 0.0 };
+                            let DP;
+                            let DQ;
+                            if DN != 0.0 {
+                                let DO = if DM < H { 1.0 } else { 0.0 };
+                                let DR = if DM > H { 1.0 } else { 0.0 };
+                                let DU;
+                                let DV;
+                                if DR != 0.0 {
+                                    let DS = AS * (DM / DD);
+                                    let DT = C / DS;
+                                    DU = DS;
+                                    DV = DT;
                                 } else {
-                                    v133 = v7;
-                                    v134 = v37;
+                                    DU = H;
+                                    DV = AF;
                                 }
-                                v127 = v133;
-                                v128 = v134;
+                                DP = DU;
+                                DQ = DV;
                             } else {
-                                v127 = v37;
-                                v128 = v7;
+                                DP = AF;
+                                DQ = H;
                             }
-                            v117 = v123;
-                            v118 = v114;
-                            v119 = v124;
-                            v120 = v127;
-                            v121 = v115;
-                            v122 = v128;
+                            DF = DL;
+                            DG = DC;
+                            DH = DM;
+                            DI = DP;
+                            DJ = DD;
+                            DK = DQ;
                         }
-                        v106 = v117;
-                        v107 = v118;
-                        v108 = v119;
-                        v109 = v120;
-                        v110 = v121;
-                        v111 = v122;
+                        CU = DF;
+                        CV = DG;
+                        CW = DH;
+                        CX = DI;
+                        CY = DJ;
+                        CZ = DK;
                     }
-                    v65 = v106;
-                    v66 = v107;
-                    v67 = v108;
-                    v68 = v109;
-                    v69 = v110;
-                    v70 = v111;
+                    BG = CU;
+                    BH = CV;
+                    BI = CW;
+                    BJ = CX;
+                    BK = CY;
+                    BL = CZ;
                 }
-                v25 = v65;
-                v26 = v66;
-                v27 = v67;
-                v28 = v68;
-                v29 = v69;
-                v30 = v70;
+                U = BG;
+                V = BH;
+                W = BI;
+                X = BJ;
+                Y = BK;
+                Z = BL;
             }
-            let v32 = if v25 < v31 { 1.0 } else { 0.0 };
-            let v136 = if v25 > v135 { 1.0 } else { 0.0 };
-            let v138 = if v26 < v137 { 1.0 } else { 0.0 };
-            let v140 = if v26 > v139 { 1.0 } else { 0.0 };
-            let v145: f64;
-            if v141 != 0.0 {
-                let v143 = v27 + v142;
-                v145 = v143;
+            let AA = if U < parameters[17] { 1.0 } else { 0.0 };
+            let DW = if U > parameters[18] { 1.0 } else { 0.0 };
+            let DX = if V < parameters[19] { 1.0 } else { 0.0 };
+            let DY = if V > parameters[20] { 1.0 } else { 0.0 };
+            let ED = if DZ != 0.0 {
+                let EB = W + EA;
+                EB
             } else {
-                let v144 = v25 + v142;
-                v145 = v144;
-            }
-            let v147 = if v28 > v7 { 1.0 } else { 0.0 };
-            let v150 = if (if (if v145 <= v7 { 1.0 } else { 0.0 }) != 0.0 && v147 != 0.0 { 1.0 } else { 0.0 }) != 0.0 && v149 != 0.0 { 1.0 } else { 0.0 };
-            let v151 = if v27 > v7 { 1.0 } else { 0.0 };
-            let v154: f64;
-            let v155: f64;
-            if v151 != 0.0 {
-                let v166: f64;
-                let v167: f64;
-                if v21 != 0.0 {
-                    let v159 = v152 + (v157 / v27);
-                    let v162 = v153 + (v160 / v27);
-                    v166 = v159;
-                    v167 = v162;
+                let EC = U + EA;
+                EC
+            };
+            let EE = if X > H { 1.0 } else { 0.0 };
+            let EG = if (if (if ED <= H { 1.0 } else { 0.0 }) != 0.0 && EE != 0.0 { 1.0 } else { 0.0 }) != 0.0 && EF != 0.0 { 1.0 } else { 0.0 };
+            let EH = if W > H { 1.0 } else { 0.0 };
+            let EK;
+            let EL;
+            if EH != 0.0 {
+                let ES;
+                let ET;
+                if Q != 0.0 {
+                    let EO = EI + (EN / W);
+                    let EQ = EJ + (EP / W);
+                    ES = EO;
+                    ET = EQ;
                 } else {
-                    let v165 = if v163 != 0.0 || v164 != 0.0 { 1.0 } else { 0.0 };
-                    let v175: f64;
-                    let v176: f64;
-                    if v165 != 0.0 {
-                        let v171 = v152 + ((v168 * v157) / v27);
-                        let v174 = v153 + ((v168 * v160) / v27);
-                        v175 = v171;
-                        v176 = v174;
+                    let ER = if parameters[3] != 0.0 || parameters[4] != 0.0 { 1.0 } else { 0.0 };
+                    let EX;
+                    let EY;
+                    if ER != 0.0 {
+                        let EV = EI + ((EU * EN) / W);
+                        let EW = EJ + ((EU * EP) / W);
+                        EX = EV;
+                        EY = EW;
                     } else {
-                        v175 = v152;
-                        v176 = v153;
+                        EX = EI;
+                        EY = EJ;
                     }
-                    v166 = v175;
-                    v167 = v176;
+                    ES = EX;
+                    ET = EY;
                 }
-                v154 = v166;
-                v155 = v167;
+                EK = ES;
+                EL = ET;
             } else {
-                v154 = v152;
-                v155 = v153;
+                EK = EI;
+                EL = EJ;
             }
-            let v156 = if v29 > v7 { 1.0 } else { 0.0 };
-            let v183: f64;
-            let v184: f64;
-            if v156 != 0.0 {
-                let v179 = v154 + (v177 / v29);
-                let v182 = v155 + (v180 / v29);
-                v183 = v179;
-                v184 = v182;
+            let EM = if Y > H { 1.0 } else { 0.0 };
+            let FB;
+            let FC;
+            if EM != 0.0 {
+                let EZ = EK + (parameters[40] / Y);
+                let FA = EL + (parameters[41] / Y);
+                FB = EZ;
+                FC = FA;
             } else {
-                v183 = v154;
-                v184 = v155;
+                FB = EK;
+                FC = EL;
             }
-            let v187 = if v28 > (v17 / v185) { 1.0 } else { 0.0 };
-            let v192 = v2 + (v188 * (v183 + (v188 * v184)));
-            let v194 = if v192 < v193 { 1.0 } else { 0.0 };
-            let v203: f64;
-            if v194 != 0.0 {
-                let v202 = v9 + (v200 * (((v196 * (v192 - v9)) - v2).exp()));
-                v203 = v202;
+            let FD = if X > (O / multiplicity) { 1.0 } else { 0.0 };
+            let FF = C + (FE * (FB + (FE * FC)));
+            let FG = if FF < 1.1e-1f64 { 1.0 } else { 0.0 };
+            let FI = if FG != 0.0 {
+                let FH = I + (1e-1f64 * (((1e1f64 * (FF - I)) - C).exp()));
+                FH
             } else {
-                v203 = v192;
-            }
-            let v204 = v28 * v203;
-            let v207 = v205 - v206;
-            let v212 = (Lanes([v208, 0.0])) - (Lanes([0.0, v210]));
-            let v213 = if v147 != 0.0 && v149 != 0.0 { 1.0 } else { 0.0 };
-            let v264: f64;
-            let v265: Lanes<2>;
-            if v213 != 0.0 {
-                let v214 = v207 / v145;
-                let v215 = v212 / v145;
-                let v217 = v216 * v214;
-                let v220 = (v215 * v216) * v217;
-                let v223 = (v2 + (v217 * v217)).sqrt();
-                let v236 = v235 * (v214.abs());
-                let v237 = (v215 * ((v224 * (if v214 >= v230 { 1.0 } else { 0.0 })) - v226)) * v235;
-                let v238 = v236 * v236;
-                let v239 = v237 * v236;
-                let v245 = v2 + (v238 * v236);
-                let v261 = (((v2 - v252) - v254) + (v252 * v223)) + (v254 * (v245.powf(v246)));
-                let v262 = (((v220 + v220) * (v226 / (v224 * v223))) * v252) + (((((v239 + v239) * v236) + (v237 * v238)) * (v246 * (v245.powf(v248)))) * v254);
-                v264 = v261;
-                v265 = v262;
+                FF
+            };
+            let FJ = X * FI;
+            let FK = node_potentials[0] - node_potentials[1];
+            let FN = Lanes([FL, 0.0]) - Lanes([0.0, FM]);
+            let FO = if EE != 0.0 && EF != 0.0 { 1.0 } else { 0.0 };
+            let GJ;
+            let GK;
+            if FO != 0.0 {
+                let FP = FK / ED;
+                let FQ = FN / ED;
+                let FS = FR * FP;
+                let FT = (FQ * FR) * FS;
+                let FU = (C + (FS * FS)).sqrt();
+                let FY = FX * (FP.abs());
+                let FZ = (FQ * ((FV * (if FP >= 0e0f64 { 1.0 } else { 0.0 })) - FW)) * FX;
+                let GA = FY * FY;
+                let GB = FZ * FY;
+                let GC = C + (GA * FY);
+                let GG = (((C - GE) - GF) + (GE * FU)) + (GF * (GC.powf(GD)));
+                let GH = (((FT + FT) * (FW / (FV * FU))) * GE) + (((((GB + GB) * FY) + (FZ * GA)) * (GD * (GC.powf(-6.666666666666667e-1f64)))) * GF);
+                GJ = GG;
+                GK = GH;
             } else {
-                v264 = v2;
-                v265 = v263;
+                GJ = C;
+                GK = GI;
             }
-            let v266 = v204 * v264;
-            let v268 = v207 / v266;
-            let v271 = (v212 - ((v265 * v204) * v268)) / v266;
-            if v156 != 0.0 {
-                let v275 = if ((v268 / v29).abs()) > v274 { 1.0 } else { 0.0 };
+            let GL = FJ * GJ;
+            let GM = FK / GL;
+            let GN = (FN - ((GK * FJ) * GM)) / GL;
+            if EM != 0.0 {
+                let GO = if ((GM / Y).abs()) > parameters[33] { 1.0 } else { 0.0 };
             } else {
             }
-            let v278 = if v30 > v7 { 1.0 } else { 0.0 };
-            let v279 = if (if v276 != 0.0 && v147 != 0.0 { 1.0 } else { 0.0 }) != 0.0 && v278 != 0.0 { 1.0 } else { 0.0 };
-            if v279 != 0.0 {
-                let v282 = if (if v280 != 0.0 && v151 != 0.0 { 1.0 } else { 0.0 }) != 0.0 && v156 != 0.0 { 1.0 } else { 0.0 };
-                if v282 != 0.0 {
+            let GP = if Z > H { 1.0 } else { 0.0 };
+            let GQ = if (if parameters[6] != 0.0 && EE != 0.0 { 1.0 } else { 0.0 }) != 0.0 && GP != 0.0 { 1.0 } else { 0.0 };
+            if GQ != 0.0 {
+                let GR = if (if parameters[32] != 0.0 && EH != 0.0 { 1.0 } else { 0.0 }) != 0.0 && EM != 0.0 { 1.0 } else { 0.0 };
+                if GR != 0.0 {
                 } else {
-                    let v286 = if (if v25 > v7 { 1.0 } else { 0.0 }) != 0.0 && (if v26 > v7 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+                    let GT = if (if U > H { 1.0 } else { 0.0 }) != 0.0 && (if V > H { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
                 }
-                let v287 = if v268 < v7 { 1.0 } else { 0.0 };
+                let GU = if GM < H { 1.0 } else { 0.0 };
             } else {
             }
-            let v283 = if v147 != 0.0 && v278 != 0.0 { 1.0 } else { 0.0 };
-            if v283 != 0.0 {
-                let v289 = if (v271[0]) != v7 { 1.0 } else { 0.0 };
+            let GS = if EE != 0.0 && GP != 0.0 { 1.0 } else { 0.0 };
+            if GS != 0.0 {
+                let GV = if GN[0] != H { 1.0 } else { 0.0 };
             } else {
             }
-            let v290 = v271[0];
-            let v291 = v271[1];
+            let GW = GN[0];
+            let GX = GN[1];
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(0),
             Some(1),
-            multiplicity * (v268),
+            multiplicity * (GM),
             [0, 1],
-            [v290, v291],
+            [GW, GX],
             [],
             [],
             multiplicity,
@@ -848,7 +662,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(0),
             Some(1),
-            multiplicity * (v292),
+            multiplicity * (GY),
             [],
             [],
             [],
@@ -858,7 +672,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(0),
             Some(1),
-            multiplicity * (v293),
+            multiplicity * (GZ),
             [],
             [],
             [],

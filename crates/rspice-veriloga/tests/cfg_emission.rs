@@ -130,6 +130,35 @@ endmodule
     }
 }
 
+#[test]
+fn single_value_straight_line_merges_are_typed_if_expressions() {
+    let artifact = artifact(
+        r#"
+module expression_merge(p, n);
+    inout p, n;
+    electrical p, n;
+    real x;
+    analog begin
+        if (V(p, n) > 0.0) begin
+            x = exp(V(p, n));
+        end else begin
+            x = -V(p, n);
+        end
+        I(p, n) <+ x;
+    end
+endmodule
+"#,
+    );
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("lowers");
+    let (optimized, wanted) = optimize_cfg(&cfg.function, &cfg.residuals);
+    let (body, _) = emit_body(&optimized, &wanted, &EmitBindings::default()).expect("emits");
+
+    assert!(
+        body.lines().any(|line| line.contains(" = if ")),
+        "a single-value straight-line merge should be one typed if expression:\n{body}"
+    );
+}
+
 /// The emitter and the interpreter evaluate the same operations in the same
 /// order, so anything less than bit equality is a real difference in meaning
 /// rather than a rounding artefact.

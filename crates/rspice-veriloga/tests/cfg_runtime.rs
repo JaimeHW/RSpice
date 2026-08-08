@@ -487,16 +487,19 @@ fn compile_and_time(
     let binary = directory.join(format!("{tag}{}", std::env::consts::EXE_SUFFIX));
     std::fs::write(&source, program).expect("scratch directory is writable");
 
-    // `codegen-units=1` because the shipped build is LTO'd: measuring the
-    // emitted code under weaker optimisation than it will actually get would
-    // understate it.
+    // Match the shipping release profile. This probe is used to decide whether
+    // a source transformation belongs in generated devices, so measuring a
+    // stronger LTO/one-CGU configuration than those devices receive can select
+    // a change that regresses the real build.
     let started = Instant::now();
     let compile = Command::new("rustc")
         .arg("--edition=2021")
         .arg("-C")
         .arg("opt-level=3")
         .arg("-C")
-        .arg("codegen-units=1")
+        .arg("lto=off")
+        .arg("-C")
+        .arg("codegen-units=16")
         .arg("-o")
         .arg(&binary)
         .arg(&source)

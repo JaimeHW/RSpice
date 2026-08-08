@@ -45,17 +45,19 @@ const QUICK_CEILINGS: &[(&str, usize)] = &[
     // Both dropped again when derivative lanes were packed — r3_cmc 157,737 ->
     // 103,911, DIODE_CMC 559,701 -> 483,095. Invalidation staging and scalar
     // emission for one-lane shapes then brought them to 86,467 and 406,176.
-    // DIODE_CMC gains least from scalar lanes: most of its live sets are two
-    // wide, and its bulk is primal code from 530 source conditionals.
-    ("r3_cmc", 90_000),
-    ("DIODE_CMC", 420_000),
+    // Compact locals and single-use pure-leaf substitution reduced them again
+    // to 71,092 and 333,822. DIODE_CMC gains least from scalar lanes: most of
+    // its live sets are two wide, and its bulk is primal code from 530 source
+    // conditionals.
+    ("r3_cmc", 74_000),
+    ("DIODE_CMC", 345_000),
     // Was 6,260,006 while the function inliner still folded a branching body
     // into `guard ? value : previous`; 83,023 once it inlines as statements,
     // and 41,066 once lanes are packed, against 78,303 from the tier being
     // replaced. Current staged scalar-or-packed emission is 42,395. The
-    // ceiling is deliberately tight: this model is the corpus's canary for
-    // that class of blow-up.
-    ("EPFL_HEMT_10a", 45_000),
+    // compact-local pass brings that to 33,827. The ceiling is deliberately
+    // tight: this model is the corpus's canary for that class of blow-up.
+    ("EPFL_HEMT_10a", 36_000),
 ];
 
 #[test]
