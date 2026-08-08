@@ -4,10 +4,48 @@
 //! This is done once during setup and the structure is reused
 //! throughout simulation.
 
-use super::{Engine, SimulationError};
+use super::{Engine, SimulationError, SpiceDialect};
 use crate::device::mosfet::b3soi::common::B3SoiInstanceIc;
-use crate::solver::{SolverOptions, StaticMatrix};
+use crate::solver::{
+    CircuitLuOrientation, CircuitLuRobustness, CircuitLuRowScaling, DivisionPolicy,
+    NumericFactorizationPolicy, RealSolverBackend, SolverOptions, StaticMatrix,
+};
 use crate::{CircuitData, Value};
+
+fn apply_dialect_solver_profile(
+    dialect: SpiceDialect,
+    system_size: usize,
+    backend_selection_is_explicit: bool,
+    options: &mut SolverOptions,
+) {
+    if dialect != SpiceDialect::Xyce {
+        return;
+    }
+
+    // Xyce 7.10's serial factories bypass Amesos for a 1x1 system and use
+    // SimpleSolver's `(1 / pivot) * rhs` arithmetic. Larger systems take the
+    // Amesos/KLU path: Epetra's row-CRS storage is presented to KLU as CSC,
+    // KLU factors A^T, and Amesos dispatches the corresponding transpose solve
+    // for an ordinary A*x=b request. Xyce also disables KLU scaling, requests
+    // fresh numeric pivoting from each Newton solve, and returns backend
+    // failures without RSpice's refinement/fallback layer. Resolve only an
+    // implicit Auto to KLU; preserve explicit product/user backend selection.
+    if !backend_selection_is_explicit && options.real_backend == RealSolverBackend::Auto {
+        options.real_backend = RealSolverBackend::Klu;
+    }
+    options.numeric_factorization = NumericFactorizationPolicy::FreshPivotSelection;
+    options.circuit_lu_row_scaling = CircuitLuRowScaling::Disabled;
+    options.circuit_lu_robustness = CircuitLuRobustness::BackendFaithful;
+    if system_size == 1 {
+        options.circuit_lu_orientation = CircuitLuOrientation::Native;
+        options.factorization_division = DivisionPolicy::ReciprocalMultiplication;
+        options.diagonal_solve = DivisionPolicy::ReciprocalMultiplication;
+    } else {
+        options.circuit_lu_orientation = CircuitLuOrientation::AmesosRowCrs;
+        options.factorization_division = DivisionPolicy::DirectDivision;
+        options.diagonal_solve = DivisionPolicy::DirectDivision;
+    }
+}
 
 impl Engine {
     /// Build static matrix structure from circuit topology
@@ -1659,12 +1697,25 @@ impl Engine {
             triplets.push((i, i, 1e-12)); // GMIN for numerical stability
         }
 
+        let environment_backend_is_explicit =
+            std::env::var("RSPICE_SOLVER").ok().is_some_and(|value| {
+                value.eq_ignore_ascii_case("auto")
+                    || value.eq_ignore_ascii_case("klu")
+                    || value.eq_ignore_ascii_case("faer")
+            });
+        let configured_backend_is_explicit = self.config.matrix_solver.is_some();
         let mut solver_options = SolverOptions::from_env();
         if let Some(backend) = self.config.matrix_solver {
             solver_options.real_backend = backend;
         }
         solver_options.pivot_tolerance = self.config.matrix_pivot_tolerance;
         solver_options.absolute_pivot_tolerance = self.config.matrix_absolute_pivot_tolerance;
+        apply_dialect_solver_profile(
+            self.config.spice_dialect,
+            size,
+            configured_backend_is_explicit || environment_backend_is_explicit,
+            &mut solver_options,
+        );
         StaticMatrix::from_triplets_with_options(size, size, &triplets, solver_options)
             .map_err(SimulationError::Solver)
     }
@@ -1745,5 +1796,153 @@ fn reserve_b3soi_ic_constraint_triplets(
         // Non-operating-point stamps isolate the internal branch with an
         // identity equation, so the diagonal must exist in the static pattern.
         triplets.push((branch - 1, branch - 1, 0.0));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn xyce_profile_configures_the_serial_amesos_klu_compatibility_policy() {
+        let mut options = SolverOptions::default();
+
+        apply_dialect_solver_profile(SpiceDialect::Xyce, 2, false, &mut options);
+
+        assert_eq!(options.real_backend, RealSolverBackend::Klu);
+        assert_eq!(
+            options.numeric_factorization,
+            NumericFactorizationPolicy::FreshPivotSelection
+        );
+        assert_eq!(
+            options.factorization_division,
+            DivisionPolicy::DirectDivision
+        );
+        assert_eq!(options.diagonal_solve, DivisionPolicy::DirectDivision);
+        assert_eq!(
+            options.circuit_lu_orientation,
+            CircuitLuOrientation::AmesosRowCrs
+        );
+        assert_eq!(
+            options.circuit_lu_row_scaling,
+            CircuitLuRowScaling::Disabled
+        );
+        assert_eq!(
+            options.circuit_lu_robustness,
+            CircuitLuRobustness::BackendFaithful
+        );
+    }
+
+    #[test]
+    fn native_profile_preserves_the_optimized_matrix_policy() {
+        let mut options = SolverOptions::default();
+        let expected = options;
+
+        apply_dialect_solver_profile(SpiceDialect::BestAvailable, 2, false, &mut options);
+
+        assert_eq!(options, expected);
+    }
+
+    #[test]
+    fn xyce_profile_preserves_an_explicit_backend_override() {
+        let mut options = SolverOptions {
+            real_backend: RealSolverBackend::Faer,
+            ..SolverOptions::default()
+        };
+
+        apply_dialect_solver_profile(SpiceDialect::Xyce, 2, true, &mut options);
+
+        assert_eq!(options.real_backend, RealSolverBackend::Faer);
+        assert_eq!(
+            options.numeric_factorization,
+            NumericFactorizationPolicy::FreshPivotSelection
+        );
+        assert_eq!(
+            options.factorization_division,
+            DivisionPolicy::DirectDivision
+        );
+        assert_eq!(options.diagonal_solve, DivisionPolicy::DirectDivision);
+        assert_eq!(
+            options.circuit_lu_orientation,
+            CircuitLuOrientation::AmesosRowCrs
+        );
+        assert_eq!(
+            options.circuit_lu_row_scaling,
+            CircuitLuRowScaling::Disabled
+        );
+        assert_eq!(
+            options.circuit_lu_robustness,
+            CircuitLuRobustness::BackendFaithful
+        );
+    }
+
+    #[test]
+    fn xyce_profile_preserves_explicit_automatic_backend_selection() {
+        let mut options = SolverOptions::default();
+
+        apply_dialect_solver_profile(SpiceDialect::Xyce, 2, true, &mut options);
+
+        assert_eq!(options.real_backend, RealSolverBackend::Auto);
+        assert_eq!(
+            options.numeric_factorization,
+            NumericFactorizationPolicy::FreshPivotSelection
+        );
+        assert_eq!(
+            options.factorization_division,
+            DivisionPolicy::DirectDivision
+        );
+        assert_eq!(options.diagonal_solve, DivisionPolicy::DirectDivision);
+        assert_eq!(
+            options.circuit_lu_orientation,
+            CircuitLuOrientation::AmesosRowCrs
+        );
+        assert_eq!(
+            options.circuit_lu_row_scaling,
+            CircuitLuRowScaling::Disabled
+        );
+        assert_eq!(
+            options.circuit_lu_robustness,
+            CircuitLuRobustness::BackendFaithful
+        );
+    }
+
+    #[test]
+    fn xyce_profile_matches_simple_solver_arithmetic_for_one_unknown() {
+        let mut options = SolverOptions::default();
+
+        apply_dialect_solver_profile(SpiceDialect::Xyce, 1, false, &mut options);
+
+        assert_eq!(options.real_backend, RealSolverBackend::Klu);
+        assert_eq!(
+            options.numeric_factorization,
+            NumericFactorizationPolicy::FreshPivotSelection
+        );
+        assert_eq!(
+            options.factorization_division,
+            DivisionPolicy::ReciprocalMultiplication
+        );
+        assert_eq!(
+            options.diagonal_solve,
+            DivisionPolicy::ReciprocalMultiplication
+        );
+        assert_eq!(options.circuit_lu_orientation, CircuitLuOrientation::Native);
+        assert_eq!(
+            options.circuit_lu_row_scaling,
+            CircuitLuRowScaling::Disabled
+        );
+        assert_eq!(
+            options.circuit_lu_robustness,
+            CircuitLuRobustness::BackendFaithful
+        );
+
+        let mut matrix = StaticMatrix::from_triplets_with_options(1, 1, &[(0, 0, 3.0)], options)
+            .expect("build one-unknown Xyce matrix");
+        let mut solution = Vec::new();
+        matrix
+            .solve_into(&[5.0], &mut solution)
+            .expect("solve one-unknown Xyce matrix");
+        let simple_solver_value = (1.0_f64 / 3.0) * 5.0;
+        assert_ne!(simple_solver_value.to_bits(), (5.0_f64 / 3.0).to_bits());
+        assert_eq!(solution[0].to_bits(), simple_solver_value.to_bits());
     }
 }

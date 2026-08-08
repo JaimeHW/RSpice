@@ -49,18 +49,16 @@ mod tests {
     #[test]
     fn matrix_selection_and_pivrel_reach_core_configuration() {
         for (solver, expected) in [
-            (
-                MatrixSolver::Lu,
-                rspice_core::solver::RealSolverBackend::Auto,
-            ),
+            (MatrixSolver::Lu, None),
             (
                 MatrixSolver::SparseLu,
-                rspice_core::solver::RealSolverBackend::Faer,
+                Some(rspice_core::solver::RealSolverBackend::Faer),
             ),
             (
                 MatrixSolver::Klu,
-                rspice_core::solver::RealSolverBackend::Klu,
+                Some(rspice_core::solver::RealSolverBackend::Klu),
             ),
+            (MatrixSolver::Gmres, None),
         ] {
             let options = SimulationOptions {
                 solver,
@@ -69,7 +67,7 @@ mod tests {
                 ..SimulationOptions::default()
             };
             let config = options.resolve_simulation_config(None);
-            assert_eq!(config.matrix_solver, Some(expected));
+            assert_eq!(config.matrix_solver, expected);
             assert_eq!(config.matrix_pivot_tolerance, 0.125);
             assert_eq!(config.matrix_absolute_pivot_tolerance, 2.5e-14);
         }
@@ -282,7 +280,7 @@ impl SimulationOptions {
             .convergence_config
             .gmin_target
             .min(sim_config.convergence_config.gmin_initial);
-        sim_config.matrix_solver = Some(self.solver.core_backend());
+        sim_config.matrix_solver = self.solver.core_backend_override();
         sim_config.matrix_pivot_tolerance = self.pivrel;
         sim_config.matrix_absolute_pivot_tolerance = self.pivtol;
 

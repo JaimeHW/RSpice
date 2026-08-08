@@ -119,11 +119,16 @@ impl MatrixSolver {
         &[MatrixSolver::Lu, MatrixSolver::SparseLu, MatrixSolver::Klu]
     }
 
-    pub fn core_backend(self) -> rspice_core::solver::RealSolverBackend {
+    /// Return the explicit core-backend override selected by the user.
+    ///
+    /// `Lu` is the UI's automatic setting, so it must leave backend selection
+    /// to the simulation dialect and matrix profile. The retired `Gmres`
+    /// value is treated the same way when loading older settings.
+    pub fn core_backend_override(self) -> Option<rspice_core::solver::RealSolverBackend> {
         match self {
-            MatrixSolver::Lu | MatrixSolver::Gmres => rspice_core::solver::RealSolverBackend::Auto,
-            MatrixSolver::SparseLu => rspice_core::solver::RealSolverBackend::Faer,
-            MatrixSolver::Klu => rspice_core::solver::RealSolverBackend::Klu,
+            MatrixSolver::Lu | MatrixSolver::Gmres => None,
+            MatrixSolver::SparseLu => Some(rspice_core::solver::RealSolverBackend::Faer),
+            MatrixSolver::Klu => Some(rspice_core::solver::RealSolverBackend::Klu),
         }
     }
 }
