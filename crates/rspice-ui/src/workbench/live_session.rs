@@ -235,6 +235,12 @@ impl LiveSessionEngine {
         self.adopt_port(state, cloud);
         self.finish_mirror_entry(state);
         self.drain_inbound(state);
+        if let Some((doc, holder)) = self.take_lease_refusal() {
+            let doc = doc.strip_prefix(SCHEMATIC_DOC_PREFIX).unwrap_or(&doc).to_owned();
+            state.push_user_message(ConsoleMessage::warning(format!(
+                "{holder} holds the write lease on {doc}; ask again once it is released."
+            )));
+        }
         self.flush_pending_project(state);
         self.broadcast_local_changes(state);
         self.stream_run_status(state);
