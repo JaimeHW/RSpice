@@ -2036,15 +2036,30 @@ fn icon_action(ui: &mut Ui, icon: WorkbenchIcon, label: &str, large_target: bool
 }
 
 fn account_initials(app: &RSpiceApp) -> String {
-    let Some(name) = app
+    // The signed-in cloud identity names the account; the local license
+    // holder is the fallback identity for offline installations.
+    let cloud = app.cloud_account.snapshot();
+    let cloud_identity = cloud.signed_in().then(|| {
+        cloud.principal.as_ref().and_then(|principal| {
+            principal
+                .display_name
+                .clone()
+                .or_else(|| principal.email.clone())
+        })
+    });
+    let license_identity = app
         .state
         .license
         .as_ref()
-        .map(|license| license.licensed_to.trim())
+        .map(|license| license.licensed_to.trim().to_owned());
+    let Some(name) = cloud_identity
+        .flatten()
+        .or(license_identity)
         .filter(|name| !name.is_empty())
     else {
         return "RS".to_owned();
     };
+    let name = name.as_str();
     let words = name
         .split_whitespace()
         .filter_map(|word| word.chars().next())

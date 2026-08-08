@@ -110,8 +110,8 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
             evidence_boundary: "Versioned project-owned sheet ordering and assignment, immutable variant lineage and comparison, annotation allocation, and hierarchy audits are executable for an editable active schematic; the manager does not claim layout or sign-off authority.",
         },
         SurfaceId::AccountOrganization => SurfaceExecutionAvailability::Available {
-            executor: "rspice-ui local account, organization, and licensing boundary manager",
-            evidence_boundary: "The verified on-device license and current local application process are executable data owners; account identity, organization policy, remote sessions, server licensing, and external administration remain explicitly unconfigured and expose no speculative actions.",
+            executor: "rspice-ui account, licensing, and cloud session console",
+            evidence_boundary: "The verified on-device license, the cloud account session (server-verified principal, entitlements, and license leases when this build carries release-pinned endpoints), and the current build/process are the executable data owners; builds without cloud endpoints and browser sessions report those boundaries explicitly and expose no speculative actions.",
         },
         SurfaceId::JobsManager => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui jobs, targets, and retained run history manager",
