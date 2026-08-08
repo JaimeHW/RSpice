@@ -69,6 +69,13 @@ pub struct BehavioralVoltageSource {
     branch_partials: Vec<Value>,
     /// Affine term for the most recent expression linearization.
     linearized_affine: Value,
+    /// Exact expression value and analysis time from the latest finite linearization.
+    ///
+    /// Transient correction-form solves may reconstruct an ideal voltage as
+    /// `predictor + (target - predictor)`, losing low bits to cancellation.
+    /// Retaining the expression result lets the circuit re-project a
+    /// solution-independent voltage source without evaluating its VM twice.
+    cached_exact_constraint: Option<(Value, Value)>,
     /// Circuit temperature in degrees Celsius, surfaced as `temper`.
     temperature: Value,
     /// Active analysis frequency in hertz.
@@ -149,6 +156,7 @@ impl BehavioralVoltageSource {
             node_partials: Vec::new(),
             branch_partials: Vec::new(),
             linearized_affine: 0.0,
+            cached_exact_constraint: None,
             temperature: crate::constants::kelvin_to_celsius(crate::constants::TEMP_REFERENCE),
             frequency: 0.0,
             frequency_dependent,
@@ -168,6 +176,7 @@ impl BehavioralVoltageSource {
         FN: Fn(&str) -> Option<usize>,
         FB: Fn(&str) -> Option<usize>,
     {
+        self.invalidate_cached_exact_constraint();
         self.node_bindings = vec![None; self.program.node_map.len()];
         for (name, &local_idx) in &self.program.node_map {
             let resolved = if crate::naming::is_spice_ground_name(name) {
@@ -219,7 +228,11 @@ impl BehavioralVoltageSource {
     /// Evaluate the expression with current circuit solution.
     pub fn evaluate(&mut self, solution: &[Value], time: Value) -> Value {
         self.refresh_expression_inputs(solution);
-        self.evaluate_with_cached_inputs(time)
+        let value = self.evaluate_with_cached_inputs(time);
+        if !value.is_finite() {
+            self.invalidate_cached_exact_constraint();
+        }
+        value
     }
 
     /// Evaluate and commit stateful expression operators at an accepted point.
@@ -250,6 +263,23 @@ impl BehavioralVoltageSource {
     }
 
     #[inline]
+    fn invalidate_cached_exact_constraint(&mut self) {
+        self.cached_exact_constraint = None;
+    }
+
+    /// Return the exact voltage constraint cached by a finite linearization at
+    /// this exact transient time. Solution-dependent expressions remain Newton
+    /// equations and must never be projected as prescribed voltages.
+    pub(crate) fn cached_exact_constraint_at(&self, time: Value) -> Option<Value> {
+        if self.is_solution_dependent() {
+            return None;
+        }
+        self.cached_exact_constraint
+            .filter(|(cached_time, _)| cached_time.to_bits() == time.to_bits())
+            .map(|(_, value)| value)
+    }
+
+    #[inline]
     fn evaluate_with_cached_inputs(&mut self, time: Value) -> Value {
         let ctx = Context::transient(&self.node_values, &self.branch_values, time)
             .with_frequency(self.frequency)
@@ -261,10 +291,12 @@ impl BehavioralVoltageSource {
 
     /// Set the circuit temperature (degrees Celsius) surfaced as `temper`.
     pub fn set_temperature(&mut self, temperature: Value) {
+        self.invalidate_cached_exact_constraint();
         self.temperature = temperature;
     }
 
     pub fn set_frequency(&mut self, frequency: Value) {
+        self.invalidate_cached_exact_constraint();
         self.frequency = frequency;
     }
 
@@ -275,11 +307,13 @@ impl BehavioralVoltageSource {
     }
 
     pub fn set_gmin(&mut self, gmin: Value) {
+        self.invalidate_cached_exact_constraint();
         self.gmin = gmin;
     }
 
     /// Set dialect-specific expression-function semantics.
     pub fn set_expression_dialect(&mut self, dialect: ExpressionDialect) {
+        self.invalidate_cached_exact_constraint();
         self.expression_dialect = dialect;
     }
 
@@ -339,6 +373,7 @@ impl BehavioralVoltageSource {
     }
 
     fn linearize_expression(&mut self, solution: &[Value], time: Value) -> Value {
+        self.invalidate_cached_exact_constraint();
         self.refresh_expression_inputs(solution);
         let f0 = self.evaluate_with_cached_inputs(time);
 
@@ -399,6 +434,9 @@ impl BehavioralVoltageSource {
                 affine -= self.branch_partials[idx] * solution[*global_idx];
             }
         }
+        if affine.is_finite() {
+            self.cached_exact_constraint = Some((time, f0));
+        }
         let affine = if !affine.is_finite() { 0.0 } else { affine };
         self.linearized_affine = affine;
         affine
@@ -408,7 +446,7 @@ impl BehavioralVoltageSource {
     /// operating point for small-signal assembly. AC has no time axis;
     /// expressions see t = 0.
     pub(crate) fn linearize_at(&mut self, solution: &[Value]) {
-        self.frequency = 0.0;
+        self.set_frequency(0.0);
         let _ = self.linearize_expression(solution, 0.0);
     }
 
@@ -416,7 +454,7 @@ impl BehavioralVoltageSource {
         if !self.frequency_dependent {
             return;
         }
-        self.frequency = frequency;
+        self.set_frequency(frequency);
         let _ = self.linearize_expression(solution, 0.0);
     }
 
@@ -428,7 +466,7 @@ impl BehavioralVoltageSource {
         solution: &[Value],
         frequency: Value,
     ) {
-        self.frequency = frequency;
+        self.set_frequency(frequency);
         let _ = self.linearize_expression(solution, 0.0);
     }
 
@@ -2113,6 +2151,70 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn exact_voltage_constraint_requires_same_time_and_no_solution_dependencies() {
+        let mut prescribed = BehavioralVoltageSource::new("Bfixed".to_string(), 1, 0, 1, "3.25")
+            .expect("constant behavioral voltage source parses");
+        let time = 1.25;
+        prescribed.linearize_expression(&[], time);
+
+        assert_eq!(prescribed.cached_exact_constraint_at(time), Some(3.25));
+        assert_eq!(
+            prescribed.cached_exact_constraint_at(Value::from_bits(time.to_bits() + 1)),
+            None,
+            "a constraint from a neighboring floating-point time is stale"
+        );
+
+        let mut dependent =
+            BehavioralVoltageSource::new("Bdependent".to_string(), 1, 0, 1, "v(ctrl)+1")
+                .expect("solution-dependent behavioral voltage source parses");
+        dependent
+            .bind_references(|name| (name == "ctrl").then_some(1), |_| None)
+            .expect("solution-dependent source binds");
+        dependent.linearize_expression(&[2.0], time);
+
+        assert_eq!(dependent.cached_exact_constraint_at(time), None);
+    }
+
+    #[test]
+    fn exact_voltage_constraint_cache_is_invalidated_by_context_changes_and_nonfinite_values() {
+        let mut source =
+            BehavioralVoltageSource::new("Bcontext".to_string(), 1, 0, 1, "temper+freq+gmin")
+                .expect("context-dependent behavioral voltage source parses");
+        let time = 2.0;
+
+        source.linearize_expression(&[], time);
+        assert!(source.cached_exact_constraint_at(time).is_some());
+        source.set_temperature(50.0);
+        assert_eq!(source.cached_exact_constraint_at(time), None);
+
+        source.linearize_expression(&[], time);
+        source.set_frequency(1.0e6);
+        assert_eq!(source.cached_exact_constraint_at(time), None);
+
+        source.linearize_expression(&[], time);
+        source.set_gmin(1.0e-9);
+        assert_eq!(source.cached_exact_constraint_at(time), None);
+
+        source.linearize_expression(&[], time);
+        source.set_expression_dialect(ExpressionDialect::Xyce);
+        assert_eq!(source.cached_exact_constraint_at(time), None);
+
+        let mut nonfinite =
+            BehavioralVoltageSource::new("Binf".to_string(), 1, 0, 1, "1e308*1e308")
+                .expect("nonfinite behavioral expression parses");
+        nonfinite.linearize_expression(&[], time);
+        assert_eq!(nonfinite.cached_exact_constraint_at(time), None);
+
+        let mut later_nonfinite =
+            BehavioralVoltageSource::new("Blater".to_string(), 1, 0, 1, "exp(time*1000)")
+                .expect("time-dependent behavioral expression parses");
+        later_nonfinite.linearize_expression(&[], 0.0);
+        assert!(later_nonfinite.cached_exact_constraint_at(0.0).is_some());
+        assert!(!later_nonfinite.evaluate(&[], 1.0).is_finite());
+        assert_eq!(later_nonfinite.cached_exact_constraint_at(0.0), None);
+    }
 
     #[test]
     fn frequency_dependency_is_tracked_from_the_resolved_ast() {

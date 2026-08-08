@@ -6409,8 +6409,7 @@ impl Engine {
 
             // Keep ideal source constraints exact before LTE and state updates.
             let projected_voltage_sources = circuit
-                .voltage_sources
-                .enforce_voltage_constraints(&mut new_solution, t + dt);
+                .enforce_prescribed_transient_voltage_constraints(&mut new_solution, t + dt);
             if projected_voltage_sources {
                 nonlinear_state_matches_new_solution = false;
             }
@@ -7253,6 +7252,34 @@ mod tests {
             output.last().is_some_and(|value| *value > 0.4 && *value < 0.9),
             "diode output should settle to a physical forward voltage, got {:?}",
             output.last()
+        );
+    }
+
+    #[test]
+    fn xyce_correction_form_preserves_exact_prescribed_behavioral_voltage() {
+        let netlist = Netlist::parse(
+            "Xyce prescribed behavioral voltage projection\n\
+             BV1 1 0 V={SPICE_SIN(0,10,1kHz)}\n\
+             R1 1 0 1\n\
+             .TRAN 1u 5m\n\
+             .END\n",
+        )
+        .expect("behavioral sine deck parses");
+        let mut config =
+            SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+        config.transient_nonlinear_nox = Some(false);
+        let result = Engine::new(config)
+            .run_tran(&netlist, 5.0e-3, 1.0e-6)
+            .expect("behavioral sine transient solves");
+        let output = result
+            .try_voltage_waveform_named("1")
+            .expect("behavioral source output exists");
+
+        assert_eq!(result.time.last().copied(), Some(5.0e-3));
+        assert_eq!(
+            output.last().copied().map(Value::to_bits),
+            Some(0xbd0b_939b_afcf_cfcb),
+            "accepted output must retain the expression kernel's exact value"
         );
     }
 

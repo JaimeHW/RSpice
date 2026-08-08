@@ -501,10 +501,49 @@ impl CircuitData {
     /// timestep so the accepted state remains consistent with independent and
     /// controlled source constraints.
     pub fn enforce_ideal_voltage_constraints(&self, solution: &mut [Value], time: Value) -> bool {
+        let mut changed = self.enforce_prescribed_transient_voltage_constraints(solution, time);
+        changed |= self.enforce_dependent_voltage_constraints(solution);
+        changed
+    }
+
+    /// Re-project prescribed transient voltage equations without altering
+    /// controlled or solution-dependent equations.
+    pub(crate) fn enforce_prescribed_transient_voltage_constraints(
+        &self,
+        solution: &mut [Value],
+        time: Value,
+    ) -> bool {
         let mut changed = self
             .voltage_sources
             .enforce_voltage_constraints(solution, time);
-        changed |= self.enforce_dependent_voltage_constraints(solution);
+        changed |= self.enforce_prescribed_behavioral_voltage_constraints(solution, time);
+        changed
+    }
+
+    /// Re-project exact, solution-independent behavioral voltage equations.
+    ///
+    /// Correction-form Newton solves reconstruct a candidate as
+    /// `iterate + correction`, which can lose low bits even when the linear
+    /// branch equation was solved exactly. Keep this narrower than the general
+    /// force-accept projection so an ordinary post-solve correction never
+    /// perturbs controlled or solution-dependent voltage equations.
+    fn enforce_prescribed_behavioral_voltage_constraints(
+        &self,
+        solution: &mut [Value],
+        time: Value,
+    ) -> bool {
+        let mut changed = false;
+        for source in &self.behavioral_sources.voltage_sources {
+            let Some(target_voltage) = source.cached_exact_constraint_at(time) else {
+                continue;
+            };
+            changed |= project_two_terminal_voltage(
+                solution,
+                source.node_pos,
+                source.node_neg,
+                target_voltage,
+            );
+        }
         changed
     }
 
@@ -644,6 +683,40 @@ mod tests {
         let protected = circuit.force_accept_protected_nodes();
 
         assert!(protected[out - 1]);
+    }
+
+    #[test]
+    fn behavioral_voltage_constraint_projection_restores_exact_same_time_value() {
+        let mut circuit = CircuitData::new();
+        let out = circuit.get_or_create_node("out");
+        let mut source =
+            BehavioralVoltageSource::new("b1".to_string(), out, 0, 1, "SPICE_SIN(0,10,1kHz)")
+                .expect("behavioral sine source parses");
+        source.set_expression_dialect(crate::config::ExpressionDialect::Xyce);
+
+        let time = 0.005;
+        let predictor = 2.0_f64.powi(-20);
+        let mut matrix = StaticMatrix::from_triplets(
+            2,
+            2,
+            &[(0, 0, 0.0), (0, 1, 0.0), (1, 0, 0.0), (1, 1, 0.0)],
+        )
+        .expect("behavioral-source test matrix builds");
+        let mut rhs = vec![0.0; 2];
+        source.stamp(&mut matrix, &mut rhs, &[predictor, 0.0], 1, time);
+
+        let target = source
+            .cached_exact_constraint_at(time)
+            .expect("finite same-time source value is cached");
+        assert_eq!(target.to_bits(), 0xbd0b_939b_afcf_cfcb);
+        let reconstructed = predictor + (target - predictor);
+        assert_eq!(reconstructed.to_bits(), 0xbd0b_939b_b000_0000);
+
+        circuit.behavioral_sources.add_voltage(source);
+        let mut solution = vec![reconstructed, 0.0];
+        circuit.enforce_ideal_voltage_constraints(&mut solution, time);
+
+        assert_eq!(solution[out - 1].to_bits(), target.to_bits());
     }
 
     #[test]
