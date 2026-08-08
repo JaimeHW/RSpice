@@ -654,11 +654,11 @@ impl XyceTestRunner {
         let steps = Self::step_commands(netlist)?;
         Ok(XyceStaticTranPlan {
             deck_path: deck.path.clone(),
-            reference_path: deck.path.clone(),
+            oracle: XyceStaticTranOracle::None,
             source: source.to_string(),
-            print: XycePrintRequest {
+            print: Some(XycePrintRequest {
                 probes: output.probes,
-            },
+            }),
             output_override: false,
             timeint_conststep: false,
             tran,
@@ -1103,14 +1103,19 @@ impl XyceTestRunner {
             && !plan.timeint_conststep
             && !plan.steps.is_empty()
             && plan.wrapper_tolerance.is_none()
-            && plan.reference_path.is_file()
+            && plan.has_waveform_reference_file()
             && Self::native_transient_uses_standard_startup(netlist)
             && netlist.diagnostics.is_empty()
         {
             let scientific_precision =
                 Self::xyce_verify_step_tran_scientific_precision(&plan.source)?;
             if Self::source_has_comp_directive(&plan.source) {
-                match Self::xyce_verify_comp_tolerances(&plan.source, &plan.print.probes) {
+                match Self::xyce_verify_comp_tolerances(
+                    &plan.source,
+                    &plan
+                        .require_print("stepped integrated-RMS selector")?
+                        .probes,
+                ) {
                     Ok(tolerances) => {
                         return Ok(XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
                             scientific_precision,
@@ -1148,7 +1153,7 @@ impl XyceTestRunner {
             && !plan.timeint_conststep
             && plan.steps.is_empty()
             && plan.wrapper_tolerance.is_none()
-            && plan.reference_path.is_file()
+            && plan.has_waveform_reference_file()
             && Self::source_has_comp_directive(&plan.source)
             && Self::native_transient_uses_standard_startup(netlist)
             && netlist.diagnostics.is_empty()
@@ -1157,8 +1162,10 @@ impl XyceTestRunner {
                 XyceStaticTranPlanPurpose::AbsoluteOracle,
             )
             .is_ok()
-            && let Ok(tolerances) =
-                Self::xyce_verify_comp_tolerances(&plan.source, &plan.print.probes)
+            && let Ok(tolerances) = Self::xyce_verify_comp_tolerances(
+                &plan.source,
+                &plan.require_print("integrated-RMS COMP selector")?.probes,
+            )
         {
             return Ok(XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
                 scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
@@ -1184,7 +1191,7 @@ impl XyceTestRunner {
             && !plan.timeint_conststep
             && plan.steps.is_empty()
             && plan.wrapper_tolerance.is_none()
-            && plan.reference_path.is_file()
+            && plan.has_waveform_reference_file()
             && !Self::source_has_comp_directive(&plan.source)
             && Self::native_transient_uses_standard_startup(netlist)
             && netlist.diagnostics.is_empty()
@@ -1212,7 +1219,7 @@ impl XyceTestRunner {
             && !plan.timeint_conststep
             && plan.steps.is_empty()
             && plan.wrapper_tolerance.is_none()
-            && plan.reference_path.is_file()
+            && plan.has_waveform_reference_file()
             && !Self::source_has_comp_directive(&plan.source)
             && Self::native_transient_uses_standard_startup(netlist)
             && netlist.diagnostics.is_empty()
@@ -1236,7 +1243,7 @@ impl XyceTestRunner {
             || plan.timeint_conststep
             || !plan.steps.is_empty()
             || plan.wrapper_tolerance.is_some()
-            || !plan.reference_path.is_file()
+            || !plan.has_waveform_reference_file()
             || (Self::source_has_comp_directive(&plan.source)
                 && !Self::netlist_is_native_level9_xyce_verify_envelope(netlist))
             || !Self::native_transient_uses_standard_startup(netlist)
@@ -1282,7 +1289,12 @@ impl XyceTestRunner {
             {
                 return Ok(pointwise);
             }
-            match Self::xyce_verify_comp_tolerances(&plan.source, &plan.print.probes) {
+            match Self::xyce_verify_comp_tolerances(
+                &plan.source,
+                &plan
+                    .require_print("LEVEL=9 integrated-RMS selector")?
+                    .probes,
+            ) {
                 Ok(tolerances) => {
                     return Ok(XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
                         scientific_precision,

@@ -5,8 +5,324 @@
 //! unchanged; private ones are `pub(super)` so siblings can reach them.
 
 use super::*;
+use rspice_core::netlist::OutputRequest;
 
 impl XyceTestRunner {
+    fn physical_output_request_logical_card(
+        request: &OutputRequest,
+        request_label: &str,
+    ) -> Result<String, String> {
+        const LABEL: &str = "scalar TRAN measurement wrapper contract";
+        let origin_path = request
+            .origin
+            .path
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} {request_label} has no physical source path"))?;
+        let source = fs::read_to_string(origin_path).map_err(|error| {
+            format!(
+                "{LABEL} cannot read {request_label} source {}: {error}",
+                origin_path.display()
+            )
+        })?;
+        let physical_lines = source.lines().collect::<Vec<_>>();
+        let start = request
+            .origin
+            .line
+            .checked_sub(1)
+            .ok_or_else(|| format!("{LABEL} {request_label} has invalid source line 0"))?;
+        let first = physical_lines.get(start).ok_or_else(|| {
+            format!(
+                "{LABEL} {request_label} source line {} is outside {}",
+                request.origin.line,
+                origin_path.display()
+            )
+        })?;
+        let mut logical_card = (*first).to_string();
+        for continuation in physical_lines.iter().skip(start + 1) {
+            let continuation = continuation.trim_start();
+            let Some(continuation) = continuation.strip_prefix('+') else {
+                break;
+            };
+            logical_card.push(' ');
+            logical_card.push_str(continuation);
+        }
+        Ok(logical_card)
+    }
+
+    fn authored_measurement_file_path(
+        request: &OutputRequest,
+        measurement_name: &str,
+    ) -> Result<PathBuf, String> {
+        const LABEL: &str = "scalar TRAN measurement wrapper contract";
+        let origin_path = request.origin.path.as_deref().ok_or_else(|| {
+            format!("{LABEL} file-backed ERROR '{measurement_name}' has no physical source path")
+        })?;
+        let request_label = format!("file-backed ERROR '{measurement_name}'");
+        let logical_card = Self::physical_output_request_logical_card(request, &request_label)?;
+        let fields = Self::split_grouped_whitespace_fields(
+            &logical_card,
+            "file-backed .MEASURE ERROR statement",
+        )?;
+        if fields.len() < 5
+            || !matches!(
+                fields[0].to_ascii_uppercase().as_str(),
+                ".MEASURE" | ".MEAS"
+            )
+            || !fields[2].eq_ignore_ascii_case(measurement_name)
+            || !fields[3].eq_ignore_ascii_case("ERROR")
+        {
+            return Err(format!(
+                "{LABEL} cannot recover FILE provenance for measurement '{measurement_name}' from {}:{}",
+                origin_path.display(),
+                request.origin.line
+            ));
+        }
+
+        let mut index = 4usize;
+        while index < fields.len() {
+            let field = fields[index].trim();
+            let mut authored = None;
+            if let Some((key, value)) = field.split_once('=')
+                && key.eq_ignore_ascii_case("FILE")
+            {
+                authored = if value.is_empty() {
+                    fields.get(index + 1).map(String::as_str)
+                } else {
+                    Some(value)
+                };
+            } else if field.eq_ignore_ascii_case("FILE") {
+                authored = fields.get(index + 1).and_then(|following| {
+                    let following = following.trim();
+                    if following == "=" {
+                        fields.get(index + 2).map(String::as_str)
+                    } else if let Some(value) = following.strip_prefix('=') {
+                        if value.is_empty() {
+                            fields.get(index + 2).map(String::as_str)
+                        } else {
+                            Some(value)
+                        }
+                    } else {
+                        Some(following)
+                    }
+                });
+            }
+            if let Some(authored) = authored {
+                let authored = authored.trim();
+                let authored = if authored.len() >= 2
+                    && ((authored.starts_with('"') && authored.ends_with('"'))
+                        || (authored.starts_with('\'') && authored.ends_with('\'')))
+                {
+                    &authored[1..authored.len() - 1]
+                } else {
+                    authored
+                };
+                if authored.is_empty() || authored.contains("://") {
+                    return Err(format!(
+                        "{LABEL} file-backed ERROR '{measurement_name}' has invalid authored FILE path '{authored}'"
+                    ));
+                }
+                return Ok(PathBuf::from(authored));
+            }
+            index += 1;
+        }
+        Err(format!(
+            "{LABEL} cannot recover authored FILE path for measurement '{measurement_name}' from {}:{}",
+            origin_path.display(),
+            request.origin.line
+        ))
+    }
+
+    pub(super) fn normalize_scalar_tran_measurement_file_paths(
+        netlist: &mut Netlist,
+    ) -> Result<(), String> {
+        const LABEL: &str = "scalar TRAN measurement wrapper contract";
+        let deck_path = netlist
+            .source_path
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} has no root-deck source provenance"))?;
+        if !deck_path.is_absolute() {
+            return Err(format!(
+                "{LABEL} requires absolute root-deck source provenance, found {}",
+                deck_path.display()
+            ));
+        }
+        let measurement_requests = netlist
+            .output_requests
+            .iter()
+            .filter(|request| request.directive == OutputDirectiveKind::Measure)
+            .collect::<Vec<_>>();
+
+        for measurement in &mut netlist.measurements {
+            let rspice_core::analysis::MeasureType::FileError { file, .. } =
+                &mut measurement.measure_type
+            else {
+                continue;
+            };
+            if file.contains("://") {
+                return Err(format!(
+                    "{LABEL} file-backed ERROR '{}' does not admit virtual FILE path '{file}'",
+                    measurement.name
+                ));
+            }
+            let matching_requests = measurement_requests
+                .iter()
+                .filter(|request| {
+                    request
+                        .name
+                        .as_deref()
+                        .is_some_and(|name| name.eq_ignore_ascii_case(&measurement.name))
+                })
+                .copied()
+                .collect::<Vec<_>>();
+            let [request] = matching_requests.as_slice() else {
+                return Err(format!(
+                    "{LABEL} file-backed ERROR '{}' requires exactly one measurement provenance record, found {}",
+                    measurement.name,
+                    matching_requests.len()
+                ));
+            };
+            let origin_path = request.origin.path.as_deref().ok_or_else(|| {
+                format!(
+                    "{LABEL} file-backed ERROR '{}' has no physical source path",
+                    measurement.name
+                )
+            })?;
+            if !origin_path.is_absolute() {
+                return Err(format!(
+                    "{LABEL} file-backed ERROR '{}' requires an absolute physical source origin, found {}",
+                    measurement.name,
+                    origin_path.display()
+                ));
+            }
+            let origin_directory = origin_path.parent().ok_or_else(|| {
+                format!(
+                    "{LABEL} file-backed ERROR '{}' source origin has no parent directory",
+                    measurement.name
+                )
+            })?;
+
+            let authored_path = Self::authored_measurement_file_path(request, &measurement.name)?;
+            let resolved = if authored_path.is_absolute() {
+                authored_path
+            } else {
+                origin_directory.join(authored_path)
+            };
+            let resolved = resolved.canonicalize().unwrap_or(resolved);
+            if !resolved.is_absolute() {
+                return Err(format!(
+                    "{LABEL} file-backed ERROR '{}' did not resolve to an absolute FILE path: {}",
+                    measurement.name,
+                    resolved.display()
+                ));
+            }
+            *file = resolved.to_string_lossy().into_owned();
+        }
+        Ok(())
+    }
+
+    pub(super) fn validate_scalar_tran_measurement_wrapper_source(
+        netlist: &Netlist,
+        print: Option<&XycePrintRequest>,
+        tran: &XyceTranAnalysis,
+        steps: &[StepCommand],
+        reference_paths: &[PathBuf],
+    ) -> Result<(), String> {
+        const LABEL: &str = "scalar TRAN measurement wrapper contract";
+
+        if reference_paths.len() != 1
+            || reference_paths[0]
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_none_or(|name| !name.to_ascii_lowercase().ends_with(".mt0"))
+        {
+            return Err(format!(
+                "{LABEL} requires exactly one contiguous checked .mt0 oracle"
+            ));
+        }
+        if !steps.is_empty() {
+            return Err(format!("{LABEL} does not admit .STEP"));
+        }
+        if netlist.analyses.len() != 1 {
+            return Err(format!("{LABEL} requires exactly one .TRAN analysis"));
+        }
+        if !netlist.diagnostics.is_empty() {
+            return Err(format!(
+                "{LABEL} does not admit parser recovery or ignored directives: {:?}",
+                netlist.diagnostics
+            ));
+        }
+        if netlist.measurements.is_empty()
+            || netlist.measurements.iter().any(|measurement| {
+                !measurement.analysis.eq_ignore_ascii_case("TRAN")
+                    || measurement.print_policy != rspice_core::analysis::MeasurePrintPolicy::All
+            })
+        {
+            return Err(format!(
+                "{LABEL} requires file-emitted scalar TRAN measurements without TRAN_CONT or alternate output routing"
+            ));
+        }
+        validate_output_symbols(netlist)
+            .map_err(|error| format!("{LABEL} has an unresolved output dependency: {error}"))?;
+        let measurement_requests = netlist
+            .output_requests
+            .iter()
+            .filter(|request| request.directive == OutputDirectiveKind::Measure)
+            .collect::<Vec<_>>();
+        if measurement_requests.len() != netlist.measurements.len()
+            || netlist.output_requests.len()
+                != netlist.measurements.len() + usize::from(print.is_some())
+        {
+            return Err(format!(
+                "{LABEL} does not admit unhandled waveform or side-output routing"
+            ));
+        }
+        for request in measurement_requests {
+            for dependency in &request.dependencies {
+                if !matches!(dependency.operator.to_ascii_uppercase().as_str(), "V" | "I") {
+                    return Err(format!(
+                        "{LABEL} cannot materialize measurement dependency '{}({})'",
+                        dependency.operator, dependency.symbol
+                    ));
+                }
+            }
+        }
+        for measurement in &netlist.measurements {
+            if let rspice_core::analysis::MeasureType::FileError {
+                file,
+                independent_column,
+                dependent_column,
+                ..
+            } = &measurement.measure_type
+            {
+                let Some(independent_column) =
+                    independent_column.and_then(|column| usize::try_from(column).ok())
+                else {
+                    return Err(format!(
+                        "{LABEL} file-backed ERROR '{}' requires a non-negative INDEPVARCOL",
+                        measurement.name
+                    ));
+                };
+                let resolved_path = Path::new(file);
+                if !resolved_path.is_absolute()
+                    || independent_column == *dependent_column
+                    || !resolved_path.is_file()
+                {
+                    return Err(format!(
+                        "{LABEL} file-backed ERROR '{}' has an unavailable or invalid comparison table at {}",
+                        measurement.name,
+                        resolved_path.display()
+                    ));
+                }
+            }
+        }
+
+        Self::validate_static_tran_analysis_contract(netlist, tran, print)?;
+        Self::validate_native_transient_contract_for_purpose(
+            netlist,
+            XyceStaticTranPlanPurpose::AbsoluteOracle,
+        )
+    }
+
     pub(super) fn validate_measure_cont_step_tran_oracle(
         &self,
         deck: &XyceDeck,
@@ -293,15 +609,14 @@ impl XyceTestRunner {
         let tran = Self::single_tran_analysis(&netlist)?;
         Self::validate_measure_cont_tran_plan(&netlist, &print, &tran, kind)?;
 
-        let reference_path = kind
-            .prn()
-            .map(|(path, _)| self.root.join(path))
-            .unwrap_or_else(|| self.root.join(kind.mt0_relative_path()));
+        let reference_path = kind.prn().map(|(path, _)| self.root.join(path));
         let plan = XyceStaticTranPlan {
             deck_path: deck.path.clone(),
-            reference_path,
+            oracle: reference_path
+                .map(XyceStaticTranOracle::Waveform)
+                .unwrap_or(XyceStaticTranOracle::None),
             source,
-            print,
+            print: Some(print),
             output_override: false,
             timeint_conststep: false,
             tran,
@@ -701,7 +1016,7 @@ impl XyceTestRunner {
             .map(|probe| Self::normalize_probe(probe))
             .collect::<Vec<_>>();
         let probes = plan
-            .print
+            .require_print("ABM transient validation")?
             .probes
             .iter()
             .map(|probe| Self::normalize_probe(probe))
@@ -1037,7 +1352,10 @@ impl XyceTestRunner {
             || plan.output_override
             || plan.timeint_conststep
             || plan.wrapper_tolerance.is_some()
-            || plan.print.probes != ["V(2)".to_string(), "V(X1:2)".to_string()]
+            || plan
+                .require_print("ADDRESISTORS transient validation")?
+                .probes
+                != ["V(2)".to_string(), "V(X1:2)".to_string()]
             || !matches!(
                 plan.comparison_mode,
                 XyceStaticTranComparisonMode::Release710IntegratedRms {
@@ -1130,16 +1448,18 @@ impl XyceTestRunner {
     pub(super) fn validate_static_tran_reference_requirement(
         purpose: XyceStaticTranPlanPurpose,
         contract: XyceStaticTranContract,
-        reference_path: &Path,
+        reference_path: Option<&Path>,
     ) -> Result<(), String> {
         if purpose.requires_reference_file()
             && contract.requires_reference_file()
-            && !reference_path.is_file()
+            && reference_path.is_none_or(|path| !path.is_file())
         {
             return Err(format!(
-                "no checked-in static .{} oracle at {}",
+                "no checked-in static .{} oracle{}",
                 contract.reference_extension(),
-                reference_path.display()
+                reference_path
+                    .map(|path| format!(" at {}", path.display()))
+                    .unwrap_or_default()
             ));
         }
         Ok(())
@@ -1709,7 +2029,12 @@ impl XyceTestRunner {
         {
             return Err("capacitor primary-value parity requires finite '.TRAN step stop' values and no START, MAXSTEP, or UIC".to_string());
         }
-        if plan.print.probes.len() != 2 {
+        if plan
+            .require_print("capacitor primary-value transient validation")?
+            .probes
+            .len()
+            != 2
+        {
             return Err(
                 "capacitor primary-value parity requires exactly two ordered probes".to_string(),
             );
@@ -1751,7 +2076,11 @@ impl XyceTestRunner {
                 "{LABEL} requires a finite ordinary transient tuple with 0 <= step <= stop, positive stop, and no UIC"
             ));
         }
-        if plan.print.probes.is_empty() {
+        if plan
+            .require_print("passive temperature transient validation")?
+            .probes
+            .is_empty()
+        {
             return Err(format!(
                 "{LABEL} requires at least one ordered .PRINT TRAN probe"
             ));
@@ -1830,7 +2159,11 @@ impl XyceTestRunner {
                 "{LABEL} requires a finite nonnegative TSTEP, positive TSTOP, bounded optional TSTART, positive optional DTMAX, and no UIC"
             ));
         }
-        if plan.print.probes.is_empty() {
+        if plan
+            .require_print("transient-analysis expression validation")?
+            .probes
+            .is_empty()
+        {
             return Err(format!(
                 "{LABEL} requires at least one ordered .PRINT TRAN probe"
             ));
@@ -1865,15 +2198,16 @@ impl XyceTestRunner {
                 "{LABEL} requires finite '.TRAN step stop' values and no START, MAXSTEP, or UIC"
             ));
         }
-        if plan.print.probes.len() != 2 {
+        let print = plan.require_print("diode alias transient validation")?;
+        if print.probes.len() != 2 {
             return Err(format!("{LABEL} requires exactly two ordered probes"));
         }
         Self::diode_model_alias_source_qualification(&plan.source)?;
         let comp_targets = Self::diode_model_alias_comp_targets(&plan.source)?;
         let expected_targets = [
             "time".to_string(),
-            Self::normalize_probe(&plan.print.probes[0]),
-            Self::normalize_probe(&plan.print.probes[1]),
+            Self::normalize_probe(&print.probes[0]),
+            Self::normalize_probe(&print.probes[1]),
         ];
         if comp_targets != expected_targets
             || comp_targets.iter().collect::<BTreeSet<_>>().len() != comp_targets.len()
@@ -1913,7 +2247,12 @@ impl XyceTestRunner {
                 "{LABEL} requires finite '.TRAN step stop 0' values, positive zero START, and no MAXSTEP or UIC"
             ));
         }
-        if plan.print.probes.len() != 2 {
+        if plan
+            .require_print("switch-state transient validation")?
+            .probes
+            .len()
+            != 2
+        {
             return Err(format!("{LABEL} requires exactly two ordered probes"));
         }
         Self::switch_state_case_source_qualification(&plan.source).map(|_| ())
@@ -1944,7 +2283,12 @@ impl XyceTestRunner {
                 "{LABEL} requires finite '.TRAN step stop' values and no START, MAXSTEP, or UIC"
             ));
         }
-        if plan.print.probes.len() != 2 {
+        if plan
+            .require_print("AGE/D capacitor transient validation")?
+            .probes
+            .len()
+            != 2
+        {
             return Err(format!("{LABEL} requires exactly two ordered probes"));
         }
         Self::age_cap_source_qualification(&plan.source).map(|_| ())
@@ -1985,10 +2329,11 @@ impl XyceTestRunner {
                 plan.tran.step, plan.tran.stop, plan.tran.start, plan.tran.max_step, plan.tran.uic
             ));
         }
-        let [probe] = plan.print.probes.as_slice() else {
+        let print = plan.require_print("SIN expression transient validation")?;
+        let [probe] = print.probes.as_slice() else {
             return Err(format!(
                 "exact SIN/SPICE_SIN parity requires exactly one voltage probe, found {}",
-                plan.print.probes.len()
+                print.probes.len()
             ));
         };
         let voltage_probe = Self::parse_voltage_probe(probe).ok_or_else(|| {
@@ -2094,10 +2439,11 @@ impl XyceTestRunner {
                 plan.tran.step, plan.tran.stop, plan.tran.start, plan.tran.max_step, plan.tran.uic
             ));
         }
-        let [probe] = plan.print.probes.as_slice() else {
+        let print = plan.require_print("parameter expression transient validation")?;
+        let [probe] = print.probes.as_slice() else {
             return Err(format!(
                 "{LABEL} requires exactly one voltage probe, found {}",
-                plan.print.probes.len()
+                print.probes.len()
             ));
         };
         let voltage_probe = Self::parse_voltage_probe(probe)
@@ -2284,7 +2630,7 @@ impl XyceTestRunner {
     pub(super) fn validate_static_tran_analysis_contract(
         netlist: &Netlist,
         tran: &XyceTranAnalysis,
-        print: &XycePrintRequest,
+        print: Option<&XycePrintRequest>,
     ) -> Result<(), String> {
         if !tran.stop.is_finite() || tran.stop <= 0.0 {
             return Err(format!(
@@ -2317,8 +2663,10 @@ impl XyceTestRunner {
         let _engine_reads_uic_from_netlist = tran.uic;
 
         Self::validate_transient_preflight_execution_envelope(netlist, tran)?;
-        for probe in &print.probes {
-            Self::validate_tran_probe(probe, netlist)?;
+        if let Some(print) = print {
+            for probe in &print.probes {
+                Self::validate_tran_probe(probe, netlist)?;
+            }
         }
 
         Ok(())
@@ -3367,8 +3715,9 @@ impl XyceTestRunner {
             .static_tran_family_plan_for_path(&deck.path, purpose)
             .ok()?;
         Self::validate_transient_analysis_expression_plan(&plan).ok()?;
+        let plan_print = plan.print.as_ref()?;
         let netlist = Self::parse_xyce_netlist(&plan.source, &deck.path).ok()?;
-        let snapshot = Self::transient_analysis_expression_snapshot(&netlist, &plan.print).ok()?;
+        let snapshot = Self::transient_analysis_expression_snapshot(&netlist, plan_print).ok()?;
         let time_scale = Self::tran_print_time_scale_factor(&plan.source).ok()?;
 
         let mut matches = Vec::new();
@@ -3415,8 +3764,11 @@ impl XyceTestRunner {
             else {
                 continue;
             };
+            let Some(candidate_print) = candidate_plan.print.as_ref() else {
+                continue;
+            };
             if Self::validate_transient_analysis_expression_plan(&candidate_plan).is_err()
-                || plan.print.probes != candidate_plan.print.probes
+                || plan_print.probes != candidate_print.probes
                 || !Self::tran_analyses_match_exactly(&plan.tran, &candidate_plan.tran)
                 || plan.timeint_conststep != candidate_plan.timeint_conststep
                 || !Self::baseline_family_tran_contracts_compatible(
@@ -3443,10 +3795,9 @@ impl XyceTestRunner {
             else {
                 continue;
             };
-            let Ok(candidate_snapshot) = Self::transient_analysis_expression_snapshot(
-                &candidate_netlist,
-                &candidate_plan.print,
-            ) else {
+            let Ok(candidate_snapshot) =
+                Self::transient_analysis_expression_snapshot(&candidate_netlist, candidate_print)
+            else {
                 continue;
             };
             let semantic_match = if is_wrapper {

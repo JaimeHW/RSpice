@@ -871,7 +871,7 @@ impl XyceTestRunner {
     ) -> Result<Vec<XyceValueMismatch>, String> {
         self.compare_step_tran_runs_with_print(
             plan,
-            &plan.print,
+            plan.require_print("stepped transient comparison")?,
             step_runs,
             step_references,
             abort,
@@ -992,7 +992,10 @@ impl XyceTestRunner {
                 .file
                 .as_deref()
                 .expect("side output request has FILE= set");
-            let reference_path = Self::side_output_reference_path(&plan.reference_path, file)?;
+            let reference_path = Self::side_output_reference_path(
+                plan.require_waveform_reference_path("transient side-output comparison")?,
+                file,
+            )?;
             let reference = Self::parse_prn_file(&reference_path).map_err(|err| {
                 format!(
                     "failed to parse transient side-output oracle {}: {err}",
@@ -1039,7 +1042,10 @@ impl XyceTestRunner {
                 .file
                 .as_deref()
                 .expect("side output request has FILE= set");
-            let reference_path = Self::side_output_reference_path(&plan.reference_path, file)?;
+            let reference_path = Self::side_output_reference_path(
+                plan.require_waveform_reference_path("stepped transient side-output comparison")?,
+                file,
+            )?;
             let reference = Self::parse_prn_file(&reference_path).map_err(|err| {
                 format!(
                     "failed to parse transient side-output oracle {}: {err}",
@@ -4534,7 +4540,7 @@ impl XyceTestRunner {
         match plan.comparison_mode {
             XyceStaticTranComparisonMode::Pointwise => self.compare_tran_prn_reference(
                 reference,
-                &plan.print,
+                plan.require_print("pointwise transient primary comparison")?,
                 netlist,
                 &plan.source,
                 result,
@@ -5558,6 +5564,26 @@ impl XyceTestRunner {
         base_analysis: &str,
         continuous_analysis: &str,
     ) -> Result<Vec<XyceValueMismatch>, String> {
+        let has_continuous_declarations = declarations.iter().any(|declaration| {
+            declaration
+                .analysis
+                .eq_ignore_ascii_case(continuous_analysis)
+        });
+        if continuous_paths.is_empty() && continuous.is_empty() && !has_continuous_declarations {
+            // USE_CONT_FILES controls how continuous measures are serialized;
+            // it must not turn an otherwise scalar-only aggregate into the
+            // mixed-row model. The scalar comparator owns MEASFAIL and
+            // DEFAULT_VAL projection for failed ordinary measurements.
+            return self.compare_measurement_references(
+                scalar_paths,
+                scalar,
+                tolerance,
+                measure_fail_output,
+                measure_default_value,
+                base_analysis,
+                declarations,
+            );
+        }
         if !use_continuous_files {
             return self.compare_mixed_measurement_references(
                 scalar_paths,

@@ -221,10 +221,11 @@ impl XyceTestRunner {
     ) -> Result<XycePrnTable, String> {
         let layout = Self::transient_reference_layout(reference)?;
         let time_scale = Self::tran_print_time_scale_factor(&plan.source)?;
+        let print = plan.require_print("MEASURE_CONT PRN table generation")?;
         let measurement_traces = Self::measurement_output_traces(
             netlist,
             &result.time,
-            plan.print.probes.iter().map(String::as_str),
+            print.probes.iter().map(String::as_str),
             "TRAN",
             "TRAN_CONT",
             &[],
@@ -232,8 +233,7 @@ impl XyceTestRunner {
                 rspice_core::analysis::evaluate_tran_continuous_measurements(trace_netlist, result)
             },
         )?;
-        let mut stateful = plan
-            .print
+        let mut stateful = print
             .probes
             .iter()
             .map(|probe| Self::stateful_tran_print_expression(probe, netlist))
@@ -245,7 +245,7 @@ impl XyceTestRunner {
             })?;
             let time = printed_time / time_scale;
             let mut row = vec![row_index as Value, printed_time];
-            for (probe, stateful) in plan.print.probes.iter().zip(&mut stateful) {
+            for (probe, stateful) in print.probes.iter().zip(&mut stateful) {
                 let value = if let Some(trace) = measurement_traces.get(&probe.to_ascii_uppercase())
                 {
                     let tolerance = Self::default_prn_time_quantization_tolerance(time);
@@ -1603,9 +1603,9 @@ impl XyceTestRunner {
         output_times: &[Value],
     ) -> Result<XycePrnTable, String> {
         let time_scale = Self::tran_print_time_scale_factor(&plan.source)?;
-        let columns = Self::transient_prn_header_columns(&plan.print, true);
-        let mut stateful_expressions = plan
-            .print
+        let print = plan.require_print("transient PRN table generation")?;
+        let columns = Self::transient_prn_header_columns(print, true);
+        let mut stateful_expressions = print
             .probes
             .iter()
             .map(|probe| Self::stateful_tran_print_expression(probe, netlist))
@@ -1613,7 +1613,7 @@ impl XyceTestRunner {
         let measurement_output_traces = Self::measurement_output_traces(
             netlist,
             &result.time,
-            plan.print.probes.iter().map(String::as_str),
+            print.probes.iter().map(String::as_str),
             "TRAN",
             "TRAN_CONT",
             &[],
@@ -1627,7 +1627,7 @@ impl XyceTestRunner {
             let mut row = Vec::with_capacity(columns.len());
             row.push(index as Value);
             row.push(time * time_scale);
-            for (probe, stateful) in plan.print.probes.iter().zip(&mut stateful_expressions) {
+            for (probe, stateful) in print.probes.iter().zip(&mut stateful_expressions) {
                 let value = if let Some(trace) =
                     measurement_output_traces.get(&probe.to_ascii_uppercase())
                 {

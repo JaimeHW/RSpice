@@ -5237,7 +5237,7 @@ fn bug_61_noindex_header_wrapper_runs_without_reference_oracle() {
         .static_tran_plan_for_deck(&deck)
         .expect("header-only wrapper plan does not require a numeric oracle");
     assert_eq!(plan.contract, XyceStaticTranContract::WrapperNoIndexHeader);
-    assert!(!plan.reference_path.is_file());
+    assert!(matches!(plan.oracle, XyceStaticTranOracle::None));
     assert!(!plan.contract.requires_reference_file());
     assert_eq!(
         plan.contract.result_contract(false),
@@ -5254,6 +5254,371 @@ fn bug_61_noindex_header_wrapper_runs_without_reference_oracle() {
     assert_eq!(result.contract, "wrapper_static_prn_tran");
 
     fs::remove_dir_all(&root).expect("remove BUG_61 fixture");
+}
+
+#[test]
+fn scalar_tran_measurement_adapter_executes_one_mt0_and_fails_hard_on_bad_oracles() {
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-scalar-tran-execution-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos()
+    ));
+    let relative = "Netlists/MEASURE/scalar-adapter.cir";
+    let deck_path = root.join(relative);
+    let output_path = root.join("OutputData/MEASURE/scalar-adapter.cir.mt0");
+    fs::create_dir_all(deck_path.parent().expect("deck parent"))
+        .expect("create scalar TRAN fixture directory");
+    fs::create_dir_all(output_path.parent().expect("output parent"))
+        .expect("create scalar TRAN output directory");
+    fs::write(
+        &deck_path,
+        "scalar TRAN adapter execution\n\
+V1 out 0 1\n\
+R1 out 0 1\n\
+.TRAN 0 1m\n\
+.MEASURE TRAN AVG_OUT AVG V(out)\n\
+.END\n",
+    )
+    .expect("write scalar TRAN deck");
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!("{relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+    )
+    .expect("write scalar TRAN wrapper provenance");
+    fs::write(&output_path, "AVG_OUT = 1.000000e+00\n").expect("write matching mt0");
+
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let deck = XyceDeck {
+        path: deck_path.clone(),
+        relative_path: relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let plan = runner
+        .static_tran_plan_for_deck(&deck)
+        .expect("ordinary wrapper scalar TRAN plan qualifies");
+    assert!(plan.print.is_none());
+    let (reference_paths, tolerance) = plan
+        .scalar_measurement_oracle()
+        .expect("plan has a scalar measurement oracle");
+    assert_eq!(reference_paths.len(), 1);
+    assert!(XyceTestRunner::same_path(&reference_paths[0], &output_path));
+    assert_eq!(tolerance, XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT);
+    assert_eq!(plan.result_contract(), "wrapper_scalar_measure_tran");
+
+    let matching = runner.run_test(&deck_path);
+    assert!(
+        matching.passed && !matching.expected_unsupported,
+        "matching scalar mt0 should execute and compare: {matching:?}"
+    );
+    assert_eq!(matching.contract, "wrapper_scalar_measure_tran");
+
+    fs::write(&output_path, "AVG_OUT = 2.000000e+00\n").expect("write mismatched mt0");
+    let mismatched = runner.run_test(&deck_path);
+    assert!(
+        !mismatched.passed && !mismatched.expected_unsupported,
+        "a mismatched scalar oracle is a hard failure: {mismatched:?}"
+    );
+
+    fs::write(&output_path, "not a measurement row\n").expect("write malformed mt0");
+    let malformed = runner.run_test(&deck_path);
+    assert!(
+        !malformed.passed && !malformed.expected_unsupported,
+        "a malformed scalar oracle is executed as a hard failure: {malformed:?}"
+    );
+
+    fs::write(
+        &deck_path,
+        "scalar TRAN failed-measure default projection\n\
+V1 out 0 1\n\
+R1 out 0 1\n\
+.TRAN 0 1m\n\
+.MEASURE TRAN NEVER FIND V(out) WHEN V(out)=2\n\
+.OPTIONS MEASURE MEASFAIL=0 DEFAULT_VAL=7 USE_CONT_FILES=0\n\
+.END\n",
+    )
+    .expect("write failed-measure default fixture");
+    fs::write(&output_path, "NEVER = 7.000000e+00\n").expect("write projected failed-measure mt0");
+    let projected_default = runner.run_test(&deck_path);
+    assert!(
+        projected_default.passed && !projected_default.expected_unsupported,
+        "scalar-only USE_CONT_FILES=0 must retain MEASFAIL/DEFAULT_VAL projection: {projected_default:?}"
+    );
+
+    fs::remove_dir_all(&root).expect("remove scalar TRAN execution fixture");
+}
+
+#[test]
+fn authored_tran_waveform_format_precedes_unrelated_and_malformed_sidecars() {
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-tran-waveform-precedence-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos()
+    ));
+    let relative = "Netlists/Output/Tran/authored-format.cir";
+    let deck_path = root.join(relative);
+    let output_dir = root.join("OutputData/Output/Tran");
+    let csv_path = output_dir.join("authored-format.cir.csv");
+    fs::create_dir_all(deck_path.parent().expect("deck parent"))
+        .expect("create authored-format deck directory");
+    fs::create_dir_all(&output_dir).expect("create authored-format output directory");
+    fs::write(
+        &deck_path,
+        "authored CSV waveform precedence\n\
+V1 out 0 1\n\
+R1 out 0 1\n\
+.TRAN 0 1m\n\
+.PRINT TRAN FORMAT=CSV V(out)\n\
+.END\n",
+    )
+    .expect("write authored CSV deck");
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!("{relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+    )
+    .expect("write authored-format wrapper provenance");
+    fs::write(&csv_path, "INDEX,TIME,V(out)\n0,0,1\n").expect("write authored CSV oracle");
+    fs::write(output_dir.join("authored-format.cir.prn"), "unrelated\n")
+        .expect("write unrelated PRN oracle");
+    fs::write(
+        output_dir.join("authored-format.cir.mt1"),
+        "malformed and noncontiguous\n",
+    )
+    .expect("write malformed irrelevant measurement sidecar");
+
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let deck = XyceDeck {
+        path: deck_path,
+        relative_path: relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let plan = runner
+        .static_tran_plan_for_deck(&deck)
+        .expect("authored CSV oracle bypasses irrelevant mt sidecars");
+    assert_eq!(plan.contract, XyceStaticTranContract::WrapperCsv);
+    assert!(XyceTestRunner::same_path(
+        plan.require_waveform_reference_path("test authored waveform")
+            .expect("waveform oracle"),
+        &csv_path,
+    ));
+    assert!(!plan.is_scalar_measurement_only());
+
+    fs::remove_dir_all(&root).expect("remove waveform-precedence fixture");
+}
+
+#[test]
+fn scalar_tran_measurement_admission_rejects_unrepresented_semantics_and_resolves_files() {
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-scalar-tran-admission-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos()
+    ));
+    let relative = "Netlists/MEASURE/admission.cir";
+    let deck_path = root.join(relative);
+    let output_path = root.join("OutputData/MEASURE/admission.cir.mt0");
+    fs::create_dir_all(deck_path.parent().expect("deck parent"))
+        .expect("create scalar admission deck directory");
+    fs::create_dir_all(output_path.parent().expect("output parent"))
+        .expect("create scalar admission output directory");
+    fs::write(&output_path, "M = 1.000000e+00\n").expect("write scalar oracle");
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!("{relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+    )
+    .expect("write scalar admission wrapper provenance");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let deck = XyceDeck {
+        path: deck_path.clone(),
+        relative_path: relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let source_for = |measurement: &str, extra: &str| {
+        format!(
+            "scalar TRAN admission\nV1 out 0 1\nR1 out 0 1\n.TRAN 0 1m\n{measurement}\n{extra}.END\n"
+        )
+    };
+    let plan_error = |source: String| {
+        fs::write(&deck_path, source).expect("write scalar admission mutation");
+        runner
+            .static_tran_plan_for_deck(&deck)
+            .expect_err("mutation must fail scalar TRAN admission")
+    };
+
+    fs::write(&deck_path, source_for(".MEASURE TRAN M AVG V(out)", ""))
+        .expect("write canonical scalar admission deck");
+    runner
+        .static_tran_plan_for_deck(&deck)
+        .expect("canonical scalar measurement qualifies");
+
+    for measurement in [
+        ".MEASURE TRAN M AVG V(out) MYSTERY=1",
+        ".MEASURE TRAN M AVG V(out) MYSTERY =1",
+        ".MEASURE TRAN M AVG V(out) TOL=1e-3",
+        ".MEASURE TRAN M MAX V(out) RISE=1",
+        ".MEASURE TRAN M MAX V(out) RFC_LEVEL=0.5 RISE=1",
+        ".MEASURE TRAN M MAX V(out) FRAC_MAX=0.5",
+        ".MEASURE TRAN M MAX V(out) RFC_LEVEL 0.5",
+        ".MEASURE TRAN M MAX V(out) FRAC_MAX 0.5",
+        ".MEASURE TRAN M AVG V(out) MINVAL=1e-6",
+        ".MEASURE TRAN M AVG V(out) MAX_THRESH 0.5",
+        ".MEASURE TRAN M AVG V(out) TARG V(out) VAL=0.5",
+        ".MEASURE TRAN M AVG V(out) 2",
+        ".MEASURE TRAN M AVG V(out) foo",
+        ".MEASURE TRAN M AVG V(out) {1+2}",
+        ".MEASURE TRAN M AVG V(out) PAR('p')",
+        ".MEASURE TRAN M AVG V(out) V(extra)",
+        ".MEASURE TRAN M AVG V(out) I(V1)",
+        ".MEASURE TRAN M FIND V(out) AT=1u V(extra)",
+        ".MEASURE TRAN M DERIV V(out) AT=1u foo",
+    ] {
+        let error = plan_error(source_for(measurement, ""));
+        assert!(
+            error.to_ascii_lowercase().contains("unexpected"),
+            "{measurement} produced an unrelated admission error: {error}"
+        );
+    }
+    assert!(
+        plan_error(source_for(
+            ".MEASURE TRAN M AVG V(out)",
+            ".OPTIONS MEASURE USE_LTTM=1\n"
+        ))
+        .contains("does not admit parser recovery or ignored directives")
+    );
+    assert!(
+        plan_error(source_for(".MEASURE TRAN_CONT M WHEN V(out)=0.5", ""))
+            .contains("file-emitted scalar TRAN measurements")
+    );
+    assert!(
+        plan_error(source_for(".MEASURE TRAN M AVG V(out) PRINT=NONE", ""))
+            .contains("file-emitted scalar TRAN measurements")
+    );
+    assert!(
+        plan_error(source_for(
+            ".MEASURE TRAN M AVG V(out)",
+            ".STEP PARAM unused LIST 1\n"
+        ))
+        .contains("does not admit .STEP")
+    );
+
+    let comparison_path = deck_path
+        .parent()
+        .expect("deck parent")
+        .join("comparison.prn");
+    fs::write(&comparison_path, "TIME V(out)\n0 1\n1e-3 1\n").expect("write relative ERROR table");
+    fs::write(
+        &deck_path,
+        source_for(
+            ".MEASURE TRAN M ERROR V(out) FILE=comparison.prn COMP_FUNCTION=L2NORM INDEPVARCOL=0 DEPVARCOL=1",
+            "",
+        ),
+    )
+    .expect("write relative ERROR measurement");
+    let root_error_source = fs::read_to_string(&deck_path).expect("read root ERROR deck");
+    let mut root_error_netlist = XyceTestRunner::parse_xyce_netlist(&root_error_source, &deck_path)
+        .expect("parse root ERROR deck");
+    XyceTestRunner::normalize_scalar_tran_measurement_file_paths(&mut root_error_netlist)
+        .expect("normalize root ERROR FILE provenance");
+    let root_error_file = root_error_netlist
+        .measurements
+        .iter()
+        .find_map(|measurement| match &measurement.measure_type {
+            rspice_core::analysis::MeasureType::FileError { file, .. } => Some(PathBuf::from(file)),
+            _ => None,
+        })
+        .expect("root ERROR measurement file");
+    assert!(root_error_file.is_absolute());
+    assert!(XyceTestRunner::same_path(
+        &root_error_file,
+        &comparison_path
+    ));
+    runner
+        .static_tran_plan_for_deck(&deck)
+        .expect("ERROR FILE resolves relative to deck provenance");
+    fs::remove_file(&comparison_path).expect("remove relative ERROR table");
+    assert!(
+        runner
+            .static_tran_plan_for_deck(&deck)
+            .expect_err("missing relative ERROR table must fail admission")
+            .contains("unavailable or invalid comparison table")
+    );
+
+    let include_directory = deck_path.parent().expect("deck parent").join("sub");
+    let include_path = include_directory.join("measure.inc");
+    let included_comparison_path = include_directory.join("comparison.prn");
+    fs::create_dir_all(&include_directory).expect("create included measurement directory");
+    let include_source = "included scalar TRAN ERROR\n\
+V1 out 0 1\n\
+R1 out 0 1\n\
+.INCLUDE sub/measure.inc\n\
+.TRAN 0 1m\n\
+.END\n";
+    fs::write(&deck_path, include_source).expect("write included measurement root deck");
+    fs::write(
+        &include_path,
+        ".MEASURE TRAN M MAX V(out) RFC_LEVEL=0.5 RISE=1\n",
+    )
+    .expect("write included unrepresented qualifier");
+    assert!(
+        runner
+            .static_tran_plan_for_deck(&deck)
+            .expect_err("included unrepresented qualifier must fail admission")
+            .contains("Unexpected option 'RFC_LEVEL'")
+    );
+    fs::write(&include_path, ".MEASURE TRAN M AVG V(out)\n+ V(extra)\n")
+        .expect("write included continued extra operand");
+    assert!(
+        runner
+            .static_tran_plan_for_deck(&deck)
+            .expect_err("included continued extra operand must fail admission")
+            .contains("Unexpected token 'V'")
+    );
+    fs::write(
+        &include_path,
+        ".MEASURE TRAN M ERROR V(out) FILE=comparison.prn COMP_FUNCTION=L2NORM INDEPVARCOL=0 DEPVARCOL=1\n",
+    )
+    .expect("write included ERROR measurement");
+    fs::write(&included_comparison_path, "TIME V(out)\n0 1\n1e-3 1\n")
+        .expect("write included ERROR table");
+    fs::write(&deck_path, include_source).expect("write included ERROR root deck");
+    fs::write(&output_path, "M = 0.000000e+00\n").expect("write included ERROR mt0");
+
+    let mut included_error_netlist = XyceTestRunner::parse_xyce_netlist(include_source, &deck_path)
+        .expect("parse included ERROR deck");
+    XyceTestRunner::normalize_scalar_tran_measurement_file_paths(&mut included_error_netlist)
+        .expect("normalize included ERROR FILE provenance");
+    let included_error_file = included_error_netlist
+        .measurements
+        .iter()
+        .find_map(|measurement| match &measurement.measure_type {
+            rspice_core::analysis::MeasureType::FileError { file, .. } => Some(PathBuf::from(file)),
+            _ => None,
+        })
+        .expect("included ERROR measurement file");
+    assert!(included_error_file.is_absolute());
+    assert!(
+        XyceTestRunner::same_path(&included_error_file, &included_comparison_path),
+        "normalized included FILE {} did not match {}",
+        included_error_file.display(),
+        included_comparison_path.display()
+    );
+    runner
+        .static_tran_plan_for_deck(&deck)
+        .expect("included ERROR FILE resolves against included .MEASURE provenance");
+    let included_result = runner.run_test(&deck_path);
+    assert!(
+        included_result.passed && !included_result.expected_unsupported,
+        "included ERROR FILE must execute independently of process cwd: {included_result:?}"
+    );
+
+    fs::remove_dir_all(&root).expect("remove scalar admission fixture");
 }
 
 #[test]
@@ -8219,11 +8584,11 @@ fn analytic_integer_dc_comparison_uses_printed_inputs_and_exact_numeric_equality
 fn analytic_rc_test_plan(source: &str) -> XyceStaticTranPlan {
     XyceStaticTranPlan {
         deck_path: PathBuf::from("renamed-analytic-rc.cir"),
-        reference_path: PathBuf::from("definitely-missing-analytic-rc-reference.prn"),
+        oracle: XyceStaticTranOracle::None,
         source: source.to_string(),
-        print: XycePrintRequest {
+        print: Some(XycePrintRequest {
             probes: vec!["V(out)".to_string()],
-        },
+        }),
         output_override: false,
         timeint_conststep: false,
         tran: XyceTranAnalysis {
@@ -8408,7 +8773,12 @@ fn analytic_rc_plan_rejects_unqualified_execution_state() {
     assert!(XyceTestRunner::validate_analytic_rc_plan(&conststep, &source_contract).is_err());
 
     let mut extra_probe = plan.clone();
-    extra_probe.print.probes.push("V(source)".to_string());
+    extra_probe
+        .print
+        .as_mut()
+        .expect("analytic plan has a print request")
+        .probes
+        .push("V(source)".to_string());
     assert!(XyceTestRunner::validate_analytic_rc_plan(&extra_probe, &source_contract).is_err());
 
     let mut changed_source = plan;
@@ -8581,11 +8951,11 @@ Cload out 0 2u\n\
 fn analytic_sinusoidal_rc_test_plan(source: &str) -> XyceStaticTranPlan {
     XyceStaticTranPlan {
         deck_path: PathBuf::from("renamed-analytic-sinusoidal-rc.cir"),
-        reference_path: PathBuf::from("definitely-missing-analytic-sinusoidal-rc-reference.prn"),
+        oracle: XyceStaticTranOracle::None,
         source: source.to_string(),
-        print: XycePrintRequest {
+        print: Some(XycePrintRequest {
             probes: vec!["{v(out)+0.002}".to_string()],
-        },
+        }),
         output_override: false,
         timeint_conststep: false,
         tran: XyceTranAnalysis {
@@ -8732,7 +9102,12 @@ fn analytic_sinusoidal_rc_plan_rejects_unqualified_execution_state() {
         XyceTestRunner::validate_analytic_sinusoidal_rc_plan(&conststep, &source_contract).is_err()
     );
     let mut extra_probe = plan.clone();
-    extra_probe.print.probes.push("V(source)".to_string());
+    extra_probe
+        .print
+        .as_mut()
+        .expect("analytic plan has a print request")
+        .probes
+        .push("V(source)".to_string());
     assert!(
         XyceTestRunner::validate_analytic_sinusoidal_rc_plan(&extra_probe, &source_contract)
             .is_err()
@@ -9339,7 +9714,7 @@ fn transient_plan_purpose_keeps_absolute_and_relational_requirements_distinct() 
         XyceTestRunner::validate_static_tran_reference_requirement(
             XyceStaticTranPlanPurpose::AbsoluteOracle,
             XyceStaticTranContract::PlainStatic,
-            missing,
+            Some(missing),
         )
         .is_err(),
         "absolute plans must reject a missing checked-in reference"
@@ -9347,19 +9722,19 @@ fn transient_plan_purpose_keeps_absolute_and_relational_requirements_distinct() 
     XyceTestRunner::validate_static_tran_reference_requirement(
         XyceStaticTranPlanPurpose::RelationalFamily,
         XyceStaticTranContract::PlainStatic,
-        missing,
+        Some(missing),
     )
     .expect("relational plans use the freshly simulated baseline instead of a gold file");
     XyceTestRunner::validate_static_tran_reference_requirement(
         XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily,
         XyceStaticTranContract::WrapperStatic,
-        missing,
+        Some(missing),
     )
     .expect("generated-reference wrappers use independently simulated sibling decks");
     XyceTestRunner::validate_static_tran_reference_requirement(
         XyceStaticTranPlanPurpose::AnalyticOracle,
         XyceStaticTranContract::WrapperStatic,
-        missing,
+        Some(missing),
     )
     .expect("analytic plans generate their qualified reference on the actual time grid");
 }
@@ -9702,11 +10077,11 @@ VMON 2 3 0\n\
 .END\n";
     let cap_plan = XyceStaticTranPlan {
         deck_path: PathBuf::from("cap-plan.cir"),
-        reference_path: PathBuf::from("unused.prn"),
+        oracle: XyceStaticTranOracle::Waveform(PathBuf::from("unused.prn")),
         source: cap_source.to_string(),
-        print: XycePrintRequest {
+        print: Some(XycePrintRequest {
             probes: vec!["V(3)".to_string(), "I(VMON)".to_string()],
-        },
+        }),
         output_override: false,
         timeint_conststep: false,
         tran: XyceTranAnalysis {
@@ -9741,7 +10116,12 @@ VMON 2 3 0\n\
         "active options are outside the exact wrapper envelope"
     );
     let mut cap_one_probe = cap_plan;
-    cap_one_probe.print.probes.pop();
+    cap_one_probe
+        .print
+        .as_mut()
+        .expect("capacitor plan has a print request")
+        .probes
+        .pop();
     assert!(XyceTestRunner::validate_passive_cap_primary_transient_plan(&cap_one_probe).is_err());
 
     let res_source = "validated resistor primary-value plan\n\
@@ -10787,11 +11167,11 @@ fn reference_grid_diagnostic_does_not_replace_the_native_integrated_rms_contract
     let netlist = Netlist::parse_validated(source).expect("reference-grid fixture validates");
     let plan = XyceStaticTranPlan {
         deck_path: PathBuf::from("reference-grid.cir"),
-        reference_path: PathBuf::from("reference-grid.prn"),
+        oracle: XyceStaticTranOracle::Waveform(PathBuf::from("reference-grid.prn")),
         source: source.to_string(),
-        print: XycePrintRequest {
+        print: Some(XycePrintRequest {
             probes: vec!["V(out)".to_string()],
-        },
+        }),
         output_override: false,
         timeint_conststep: false,
         tran: XyceTranAnalysis {
@@ -10896,11 +11276,11 @@ Rload out 0 1\n\
 .end\n";
     let plan = XyceStaticTranPlan {
         deck_path: PathBuf::from("parameter.cir"),
-        reference_path: PathBuf::from("parameter.prn"),
+        oracle: XyceStaticTranOracle::Waveform(PathBuf::from("parameter.prn")),
         source: source.to_string(),
-        print: XycePrintRequest {
+        print: Some(XycePrintRequest {
             probes: vec!["V(out)".to_string()],
-        },
+        }),
         output_override: false,
         timeint_conststep: false,
         tran: XyceTranAnalysis {
@@ -10979,7 +11359,12 @@ Rload out 0 1\n\
     );
 
     let mut multiple_probes = plan.clone();
-    multiple_probes.print.probes.push("V(x)".to_string());
+    multiple_probes
+        .print
+        .as_mut()
+        .expect("parameter-expression plan has a print request")
+        .probes
+        .push("V(x)".to_string());
     assert!(
         XyceTestRunner::validate_param_expression_transient_plan(&multiple_probes).is_err(),
         "the wrapper oracle has exactly one output probe"
@@ -11017,11 +11402,11 @@ RLOAD out 0 5\n\
 .END\n";
     let plan = XyceStaticTranPlan {
         deck_path: PathBuf::from("canonical.cir"),
-        reference_path: PathBuf::from("canonical.prn"),
+        oracle: XyceStaticTranOracle::Waveform(PathBuf::from("canonical.prn")),
         source: source.to_string(),
-        print: XycePrintRequest {
+        print: Some(XycePrintRequest {
             probes: vec!["V(out)".to_string()],
-        },
+        }),
         output_override: false,
         timeint_conststep: false,
         tran: XyceTranAnalysis {
@@ -11054,7 +11439,12 @@ RLOAD out 0 5\n\
     );
 
     let mut multiple_probes = plan.clone();
-    multiple_probes.print.probes.push("V(0)".to_string());
+    multiple_probes
+        .print
+        .as_mut()
+        .expect("canonical plan has a print request")
+        .probes
+        .push("V(0)".to_string());
     assert!(
         XyceTestRunner::validate_sin_expression_transient_plan(&multiple_probes).is_err(),
         "the bounded wrapper oracle has exactly one probe"
@@ -13210,9 +13600,9 @@ R1 out 0 1k
 
     let plan = XyceStaticTranPlan {
         deck_path: PathBuf::from("member.cir"),
-        reference_path: PathBuf::new(),
+        oracle: XyceStaticTranOracle::None,
         source: direct.to_string(),
-        print: print.clone(),
+        print: Some(print.clone()),
         output_override: false,
         timeint_conststep: false,
         tran: XyceTranAnalysis {
@@ -13718,11 +14108,11 @@ fn absolute_level9_bsim3_selector_test_plan(
 ) -> XyceStaticTranPlan {
     XyceStaticTranPlan {
         deck_path: PathBuf::from("renamed-level9.cir"),
-        reference_path,
+        oracle: XyceStaticTranOracle::Waveform(reference_path),
         source: source.to_string(),
-        print: XycePrintRequest {
+        print: Some(XycePrintRequest {
             probes: vec!["V(out)".to_string()],
-        },
+        }),
         output_override: false,
         timeint_conststep: false,
         tran: XyceTranAnalysis {
@@ -13964,11 +14354,11 @@ R1 in 0 1k
     };
     let make_plan = |source: &str| XyceStaticTranPlan {
         deck_path: PathBuf::from("renamed-step-tran.cir"),
-        reference_path: reference_path.clone(),
+        oracle: XyceStaticTranOracle::Waveform(reference_path.clone()),
         source: source.to_string(),
-        print: XycePrintRequest {
+        print: Some(XycePrintRequest {
             probes: vec!["V(in)".to_string()],
-        },
+        }),
         output_override: false,
         timeint_conststep: false,
         tran: XyceTranAnalysis {
@@ -14167,7 +14557,8 @@ fn level9_xyce_verify_comparison_selector_fails_closed() {
     ));
     plan_mutations.push(tolerance);
     let mut missing_reference = plan.clone();
-    missing_reference.reference_path = reference_path.with_extension("missing");
+    missing_reference.oracle =
+        XyceStaticTranOracle::Waveform(reference_path.with_extension("missing"));
     plan_mutations.push(missing_reference);
     let mut comp = plan.clone();
     comp.source = source.replace(".END", "*COMP V(out)\n.END");
@@ -16580,15 +16971,17 @@ M1 3 4 2 0 IRF130 W=0.386 L=2.5u
 
     let plan = XyceStaticTranPlan {
         deck_path: PathBuf::from("vdmos_level18.cir"),
-        reference_path: std::env::current_exe().expect("test executable is an existing file"),
+        oracle: XyceStaticTranOracle::Waveform(
+            std::env::current_exe().expect("test executable is an existing file"),
+        ),
         source: source.to_string(),
-        print: XycePrintRequest {
+        print: Some(XycePrintRequest {
             probes: vec![
                 "V(3)".to_string(),
                 "V(4)".to_string(),
                 "{I(VID)+0.5}".to_string(),
             ],
-        },
+        }),
         output_override: false,
         timeint_conststep: false,
         tran: XyceTranAnalysis {
@@ -17567,16 +17960,23 @@ fn diode_model_alias_family_is_strict_and_fail_closed() {
         .expect("plan");
     XyceTestRunner::validate_diode_model_alias_transient_plan(&plan).expect("validate");
     let netlist = XyceTestRunner::parse_xyce_netlist(&plan.source, &path).expect("parse");
-    let baseline =
-        XyceTestRunner::diode_model_alias_family_snapshot(&netlist, &plan.print).expect("snapshot");
+    let baseline = XyceTestRunner::diode_model_alias_family_snapshot(
+        &netlist,
+        plan.require_print("test snapshot").expect("print request"),
+    )
+    .expect("snapshot");
     let alias_plan = runner
         .static_tran_family_plan_for_path(&alias_path, XyceStaticTranPlanPurpose::RelationalFamily)
         .expect("alias plan");
     let alias_netlist =
         XyceTestRunner::parse_xyce_netlist(&alias_plan.source, &alias_path).expect("alias parse");
-    let alias =
-        XyceTestRunner::diode_model_alias_family_snapshot(&alias_netlist, &alias_plan.print)
-            .expect("alias snapshot");
+    let alias = XyceTestRunner::diode_model_alias_family_snapshot(
+        &alias_netlist,
+        alias_plan
+            .require_print("test alias snapshot")
+            .expect("print request"),
+    )
+    .expect("alias snapshot");
     XyceTestRunner::compare_diode_model_alias_family_snapshots(&baseline, &alias)
         .expect("canonical and alias workers match exactly");
 
@@ -17623,7 +18023,12 @@ fn diode_model_alias_family_is_strict_and_fail_closed() {
         "invalid transient bounds are rejected"
     );
     let mut changed_probe = plan.clone();
-    changed_probe.print.probes.swap(0, 1);
+    changed_probe
+        .print
+        .as_mut()
+        .expect("diode-alias plan has a print request")
+        .probes
+        .swap(0, 1);
     assert!(
         XyceTestRunner::validate_diode_model_alias_transient_plan(&changed_probe).is_err(),
         "PRINT and *COMP target order must agree"
@@ -17637,14 +18042,24 @@ fn diode_model_alias_family_is_strict_and_fail_closed() {
     };
     *rise = 0.0;
     assert!(
-        XyceTestRunner::diode_model_alias_family_snapshot(&invalid_pulse, &plan.print).is_err(),
+        XyceTestRunner::diode_model_alias_family_snapshot(
+            &invalid_pulse,
+            plan.require_print("test invalid pulse")
+                .expect("print request"),
+        )
+        .is_err(),
         "degenerate PULSE timing is outside the periodic-source envelope"
     );
     let mut changed_topology = alias_netlist.clone();
     changed_topology.elements[1].nodes[1] = "0".to_string();
     assert!(
-        XyceTestRunner::diode_model_alias_family_snapshot(&changed_topology, &alias_plan.print,)
-            .is_err(),
+        XyceTestRunner::diode_model_alias_family_snapshot(
+            &changed_topology,
+            alias_plan
+                .require_print("test changed topology")
+                .expect("print request"),
+        )
+        .is_err(),
         "altered series topology is rejected"
     );
     let mut changed_title = alias.clone();

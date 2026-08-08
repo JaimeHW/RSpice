@@ -761,19 +761,27 @@ impl XyceTestRunner {
         start: Instant,
     ) -> XyceTestResult {
         let result_contract = contract.kind.result_contract();
-        let reference =
-            match Self::parse_xyce_verify_tran_reference_file(&contract.plan.reference_path) {
-                Ok(reference) => reference,
-                Err(error) => {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        result_contract,
-                        format!("BUG702 alias reference parse failed: {error}"),
-                        Vec::new(),
-                    );
-                }
-            };
+        let reference_path = match contract
+            .plan
+            .require_waveform_reference_path("BUG702 positive execution")
+        {
+            Ok(path) => path,
+            Err(error) => {
+                return self.failure_result(deck, start, result_contract, error, Vec::new());
+            }
+        };
+        let reference = match Self::parse_xyce_verify_tran_reference_file(reference_path) {
+            Ok(reference) => reference,
+            Err(error) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG702 alias reference parse failed: {error}"),
+                    Vec::new(),
+                );
+            }
+        };
         let result = match self.run_transient_family_netlist(
             &contract.plan,
             &contract.netlist,
@@ -3689,7 +3697,13 @@ impl XyceTestRunner {
             }
         }
 
-        let header = Self::transient_prn_header_columns(&plan.print, false).join("   ");
+        let print = match plan.require_print("NOINDEX transient header execution") {
+            Ok(print) => print,
+            Err(error) => {
+                return self.failure_result(deck, start, contract, error, Vec::new());
+            }
+        };
+        let header = Self::transient_prn_header_columns(print, false).join("   ");
         if let Err(err) = Self::validate_noindex_tran_prn_header(&header) {
             return self.failure_result(
                 deck,
@@ -3710,10 +3724,13 @@ impl XyceTestRunner {
         start: Instant,
     ) -> XyceTestResult {
         let contract = plan.result_contract();
+        if let Err(error) = plan.validate_executable_oracle_shape() {
+            return self.failure_result(deck, start, contract, error, Vec::new());
+        }
         if matches!(plan.contract, XyceStaticTranContract::WrapperNoIndexHeader) {
             return self.run_noindex_header_tran_wrapper_plan(deck, &plan, start);
         }
-        let netlist = match Self::parse_xyce_netlist(&plan.source, &plan.deck_path) {
+        let mut netlist = match Self::parse_xyce_netlist(&plan.source, &plan.deck_path) {
             Ok(netlist) => netlist,
             Err(err) => {
                 return self.failure_result(
@@ -3726,13 +3743,27 @@ impl XyceTestRunner {
             }
         };
 
+        if plan.is_scalar_measurement_only() {
+            if let Err(error) = Self::normalize_scalar_tran_measurement_file_paths(&mut netlist) {
+                return self.failure_result(deck, start, contract, error, Vec::new());
+            }
+            return self.run_static_scalar_tran_measurement_plan(deck, &plan, &netlist, start);
+        }
+
+        let reference_path =
+            match plan.require_waveform_reference_path("static transient execution") {
+                Ok(path) => path,
+                Err(error) => {
+                    return self.failure_result(deck, start, contract, error, Vec::new());
+                }
+            };
         let reference_result = match plan.comparison_mode {
             XyceStaticTranComparisonMode::Release710IntegratedRms { .. }
             | XyceStaticTranComparisonMode::Release710IntegratedRmsComp { .. } => {
-                Self::parse_xyce_verify_tran_reference_file(&plan.reference_path)
+                Self::parse_xyce_verify_tran_reference_file(reference_path)
             }
             XyceStaticTranComparisonMode::Pointwise => {
-                Self::parse_tran_reference_file(plan.contract, &plan.reference_path)
+                Self::parse_tran_reference_file(plan.contract, reference_path)
             }
         };
         let reference = match reference_result {
@@ -3750,6 +3781,12 @@ impl XyceTestRunner {
         if !plan.steps.is_empty() {
             return self.run_static_prn_step_tran_plan(deck, plan, netlist, reference, start);
         }
+        let print = match plan.require_print("static transient execution") {
+            Ok(print) => print,
+            Err(error) => {
+                return self.failure_result(deck, start, contract, error, Vec::new());
+            }
+        };
         let reference_time_grid_result = match plan.comparison_mode {
             XyceStaticTranComparisonMode::Release710IntegratedRms {
                 scientific_precision,
@@ -3928,7 +3965,7 @@ impl XyceTestRunner {
         }
 
         let capacitor_branch_print =
-            Self::transient_print_requests_linear_capacitor_branch_quantity(&netlist, &plan.print);
+            Self::transient_print_requests_linear_capacitor_branch_quantity(&netlist, print);
         let has_solution_dependent_capacitor = netlist.elements.iter().any(|element| {
             matches!(
                 &element.kind,
@@ -3946,7 +3983,7 @@ impl XyceTestRunner {
             Ok(locked_result) => {
                 match self.compare_tran_prn_reference(
                     &reference,
-                    &plan.print,
+                    print,
                     &netlist,
                     &plan.source,
                     &locked_result,
@@ -4026,7 +4063,7 @@ impl XyceTestRunner {
                 Ok(backward_euler_result) => {
                     match self.compare_tran_prn_reference(
                         &reference,
-                        &plan.print,
+                        print,
                         &netlist,
                         &plan.source,
                         &backward_euler_result,
@@ -4101,7 +4138,7 @@ impl XyceTestRunner {
                 Ok(gear12_result) => {
                     match self.compare_tran_prn_reference(
                         &reference,
-                        &plan.print,
+                        print,
                         &netlist,
                         &plan.source,
                         &gear12_result,
@@ -4163,6 +4200,140 @@ impl XyceTestRunner {
                 message.push_str(&fallback_errors.join("; "));
             }
             self.failure_result(deck, start, contract, message, Vec::new())
+        }
+    }
+
+    pub(super) fn run_static_scalar_tran_measurement_plan(
+        &self,
+        deck: &XyceDeck,
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+        start: Instant,
+    ) -> XyceTestResult {
+        let contract = plan.result_contract();
+        let Some((measurement_reference_paths, measurement_tolerance)) =
+            plan.scalar_measurement_oracle()
+        else {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                "scalar TRAN measurement execution received an invalid oracle shape".to_string(),
+                Vec::new(),
+            );
+        };
+
+        let transient = match self.run_transient_family_netlist(plan, netlist, start, None, None) {
+            Ok(transient) => transient,
+            Err(SimulationError::Aborted) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        "simulation exceeded timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ),
+                    Vec::new(),
+                );
+            }
+            Err(error) if Self::is_expected_unsupported_runtime_error(&error) => {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    "unsupported_xyce_runtime",
+                    &format!(
+                        "RSpice runtime does not yet support this scalar TRAN measurement deck: {error}"
+                    ),
+                );
+            }
+            Err(error) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("scalar TRAN measurement simulation error: {error}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if let Err(error) = Self::validate_transient_result_time_grid(&transient) {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                format!("scalar TRAN measurement result grid is invalid: {error}"),
+                Vec::new(),
+            );
+        }
+
+        // Keep post-processing inside the same per-test budget used by the
+        // adaptive transient run.  Reusing the original start instant avoids
+        // granting measurement evaluation or file comparison a fresh
+        // deadline after simulation completes.
+        let deadline = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        if deadline.is_aborted() {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                format!(
+                    "scalar TRAN measurement shared deadline expired before evaluation ({}ms)",
+                    self.config.max_time_per_test_ms
+                ),
+                Vec::new(),
+            );
+        }
+        let measurements = rspice_core::analysis::evaluate_tran_measurements(netlist, &transient);
+        let mismatches = match self.compare_analysis_measurement_outputs(
+            measurement_reference_paths,
+            &[],
+            &measurements,
+            &[],
+            measurement_tolerance,
+            netlist.options.measure_fail_output,
+            netlist.options.measure_default_value,
+            netlist.options.measure_use_cont_files(),
+            &netlist.measurements,
+            "TRAN",
+            "TRAN_CONT",
+        ) {
+            Ok(mismatches) => mismatches,
+            Err(error) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("scalar TRAN measurement reference comparison error: {error}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if deadline.is_aborted() {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                format!(
+                    "scalar TRAN measurement shared deadline expired after comparison ({}ms)",
+                    self.config.max_time_per_test_ms
+                ),
+                mismatches,
+            );
+        }
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                contract,
+                format!(
+                    "{} Xyce scalar TRAN measurement mismatch(es)",
+                    mismatches.len()
+                ),
+                mismatches,
+            )
         }
     }
 
@@ -5931,7 +6102,11 @@ impl XyceTestRunner {
                         self.display_path(member_path)
                     ));
                 }
-                if member_plan.print.probes != owner_plan.print.probes {
+                if member_plan
+                    .require_print("independent stepped transient baseline")?
+                    .probes
+                    != owner_plan.require_print("stepped transient owner")?.probes
+                {
                     return Err(format!(
                         "independent baseline {} changes the ordered .PRINT TRAN probes",
                         self.display_path(member_path)
@@ -7409,6 +7584,18 @@ impl XyceTestRunner {
                 ),
             );
         }
+        let baseline_print = match baseline_plan.require_print("transient family baseline") {
+            Ok(print) => print,
+            Err(error) => {
+                return self.baseline_family_qualification_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    contract.comparison,
+                    error,
+                );
+            }
+        };
         if contract.kind == XyceBaselineFamilyKind::SinExpression
             && let Err(err) = Self::validate_sin_expression_transient_plan(&baseline_plan)
         {
@@ -7571,7 +7758,7 @@ impl XyceTestRunner {
             match Self::strict_transient_family_snapshot(
                 &contract,
                 &baseline_netlist,
-                &baseline_plan.print,
+                baseline_print,
             ) {
                 Ok(snapshot) => Some(snapshot),
                 Err(err) => {
@@ -7735,6 +7922,18 @@ impl XyceTestRunner {
                     );
                 }
             };
+            let target_print = match target_plan.require_print("transient family member") {
+                Ok(print) => print,
+                Err(error) => {
+                    return self.baseline_family_qualification_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        contract.comparison,
+                        error,
+                    );
+                }
+            };
             if !target_plan.steps.is_empty() || target_plan.output_override {
                 return self.baseline_family_qualification_result(
                     deck,
@@ -7889,7 +8088,7 @@ impl XyceTestRunner {
                 );
             }
             if contract.comparison.requires_exact_plan_equivalence() {
-                if target_plan.print.probes != baseline_plan.print.probes {
+                if target_print.probes != baseline_print.probes {
                     return self.failure_result(
                         deck,
                         start,
@@ -8031,7 +8230,7 @@ impl XyceTestRunner {
                 let target_snapshot = match Self::strict_transient_family_snapshot(
                     &contract,
                     &target_netlist,
-                    &target_plan.print,
+                    target_print,
                 ) {
                     Ok(snapshot) => snapshot,
                     Err(err) => {
@@ -8153,7 +8352,7 @@ impl XyceTestRunner {
             } else {
                 match self.compare_tran_prn_reference(
                     &baseline_table,
-                    &target_plan.print,
+                    target_print,
                     &target_netlist,
                     &baseline_plan.source,
                     &target_result,
@@ -8185,7 +8384,7 @@ impl XyceTestRunner {
                 if let Ok((locked_netlist, locked_result)) = locked_run
                     && let Ok(locked_mismatches) = self.compare_tran_prn_reference(
                         &baseline_table,
-                        &target_plan.print,
+                        target_print,
                         &locked_netlist,
                         &baseline_plan.source,
                         &locked_result,

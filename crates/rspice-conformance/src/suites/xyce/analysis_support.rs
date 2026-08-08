@@ -1201,7 +1201,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 if !has_solution_dependent_capacitor
                     && Self::transient_print_requests_linear_capacitor_branch_quantity(
                         netlist,
-                        &plan.print,
+                        plan.require_print("pointwise transient max-step selection")?,
                     )
                 {
                     // Linear-capacitor lead currents are accepted-history

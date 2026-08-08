@@ -6651,6 +6651,28 @@ fn test_xyce_stepped_continuous_equation_measure_oracle() {
 }
 
 #[test]
+fn test_xyce_scalar_transient_measurement_artifact_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/MEASURE/DerivativeMiscTest.cir",
+        "Netlists/MEASURE/ErrorFuncTest.cir",
+        "Netlists/MEASURE/ErrorTest.cir",
+        "Netlists/MEASURE/FindWhenVariableTest.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should pass its ordered scalar transient measurement artifact, got {result:?}"
+        );
+        assert_eq!(result.contract, "wrapper_scalar_measure_tran");
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_lotka_volterra_stepped_behavioral_transient_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

@@ -254,10 +254,60 @@ impl XyceTestRunner {
         let noindex_header_wrapper = requires_wrapper
             && Self::is_native_noindex_header_tran_wrapper_candidate(&deck.relative_path, &source);
         let has_static_tran_oracle = self.has_static_tran_reference_oracle(&deck.path);
+        // Scalar measurement output is a fallback only when the deck's
+        // authored primary TRAN destination has no matching checked-in
+        // waveform.  An unrelated .prn/.csv/.csd file must neither suppress
+        // scalar admission nor steal precedence from the authored format.
+        // Resolve this before inspecting .mt* sidecars so a malformed,
+        // irrelevant measurement artifact cannot invalidate a valid primary
+        // waveform contract.
+        let authored_primary_print_output =
+            if requires_wrapper && !output_override && !noindex_header_wrapper {
+                Self::canonical_print_output_request(&source, "TRAN", false)?
+            } else {
+                None
+            };
+        let authored_primary_contract = authored_primary_print_output
+            .as_ref()
+            .map(|request| {
+                Self::static_tran_contract_for_print_format(true, request.format.as_deref())
+            })
+            .transpose()?;
+        let authored_primary_waveform = authored_primary_contract.and_then(|contract| {
+            let primary =
+                self.static_output_reference_path(&deck.path, contract.reference_extension())?;
+            if primary.is_file() {
+                return Some(primary);
+            }
+            if contract == XyceStaticTranContract::WrapperCsd {
+                return Self::tran_gsfile_reference_path(&deck.path).filter(|path| path.is_file());
+            }
+            None
+        });
+        let scalar_measurement_reference_paths = if requires_wrapper
+            && authored_primary_waveform.is_none()
+            && !output_override
+            && !noindex_header_wrapper
+            && !analytic_wrapper
+            && !generated_reference_wrapper
+        {
+            self.measurement_reference_paths(&deck.path, "mt")?
+        } else {
+            Vec::new()
+        };
+        let has_scalar_measurement_oracle = !scalar_measurement_reference_paths.is_empty();
+        let scalar_measurement_candidate = requires_wrapper
+            && has_scalar_measurement_oracle
+            && authored_primary_waveform.is_none()
+            && !output_override
+            && !noindex_header_wrapper
+            && !analytic_wrapper
+            && !generated_reference_wrapper;
         if requires_wrapper
             && !output_override
             && !noindex_header_wrapper
             && !has_static_tran_oracle
+            && !has_scalar_measurement_oracle
             && !Self::source_may_have_pwl_repeat_option(&source)
             && !analytic_wrapper
             && !generated_reference_wrapper
@@ -275,27 +325,43 @@ impl XyceTestRunner {
         let source =
             Self::source_with_wrapper_paramfile_bindings(&source, &deck.path, requires_wrapper)?;
 
-        let print_output = if output_override {
-            Self::output_override_print_output_request(&source, "TRAN")?.ok_or_else(|| {
-                "output override deck has no .PRINT TRAN statement with static columns".to_string()
-            })?
+        let print_output = if scalar_measurement_candidate {
+            authored_primary_print_output
+        } else if output_override {
+            Some(
+                Self::output_override_print_output_request(&source, "TRAN")?.ok_or_else(|| {
+                    "output override deck has no .PRINT TRAN statement with static columns"
+                        .to_string()
+                })?,
+            )
         } else {
-            Self::single_tran_print_output_request(&source)?
+            Some(Self::single_tran_print_output_request(&source)?)
         };
-        let print = XycePrintRequest {
-            probes: print_output.probes.clone(),
-        };
-        let netlist = Self::parse_xyce_netlist(&source, &deck.path)
+        let print = print_output.as_ref().map(|request| XycePrintRequest {
+            probes: request.probes.clone(),
+        });
+        let mut netlist = Self::parse_xyce_netlist(&source, &deck.path)
             .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
         let tran = Self::single_tran_analysis(&netlist)?;
         let steps = Self::step_commands(&netlist)?;
+        let scalar_measurement_only = scalar_measurement_candidate;
+        if scalar_measurement_only {
+            Self::normalize_scalar_tran_measurement_file_paths(&mut netlist)?;
+            Self::validate_scalar_tran_measurement_wrapper_source(
+                &netlist,
+                print.as_ref(),
+                &tran,
+                &steps,
+                &scalar_measurement_reference_paths,
+            )?;
+        }
         let has_prn_oracle = self
             .static_output_reference_path(
                 &deck.path,
                 XyceStaticTranContract::WrapperStatic.reference_extension(),
             )
             .is_some_and(|path| path.is_file());
-        let native_static_prn_wrapper = if analytic_wrapper {
+        let native_static_prn_wrapper = if analytic_wrapper || scalar_measurement_only {
             None
         } else if requires_wrapper {
             if output_override {
@@ -316,39 +382,53 @@ impl XyceTestRunner {
         if steps.is_empty()
             && requires_wrapper
             && native_static_prn_wrapper.is_none()
+            && !scalar_measurement_only
             && !analytic_wrapper
             && !generated_reference_wrapper
         {
             return Err(Self::upstream_wrapper_required_reason().to_string());
         }
-        let contract = if analytic_wrapper {
+        let contract = if analytic_wrapper || scalar_measurement_only {
             XyceStaticTranContract::WrapperStatic
         } else if requires_wrapper {
             native_static_prn_wrapper.unwrap_or(XyceStaticTranContract::WrapperStatic)
         } else {
-            Self::static_tran_contract_for_print_format(false, print_output.format.as_deref())?
+            Self::static_tran_contract_for_print_format(
+                false,
+                print_output
+                    .as_ref()
+                    .and_then(|request| request.format.as_deref()),
+            )?
         };
         let primary_reference_path = self
             .static_output_reference_path(&deck.path, contract.reference_extension())
             .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
-        let reference_path = if primary_reference_path.is_file() {
-            primary_reference_path
+        let reference_path = if scalar_measurement_only {
+            None
+        } else if primary_reference_path.is_file() {
+            Some(primary_reference_path)
         } else if matches!(contract, XyceStaticTranContract::WrapperCsd) {
-            Self::tran_gsfile_reference_path(&deck.path).ok_or_else(|| {
+            Some(Self::tran_gsfile_reference_path(&deck.path).ok_or_else(|| {
                 format!(
                     "no checked-in static .{} oracle at {}",
                     contract.reference_extension(),
                     self.display_path(&primary_reference_path)
                 )
-            })?
+            })?)
         } else {
-            primary_reference_path
+            None
         };
-        Self::validate_static_tran_reference_requirement(purpose, contract, &reference_path)?;
+        if !scalar_measurement_only {
+            Self::validate_static_tran_reference_requirement(
+                purpose,
+                contract,
+                reference_path.as_deref(),
+            )?;
+        }
         if !steps.is_empty() {
             Self::validate_static_step_tran_contract(&netlist)?;
         }
-        if requires_wrapper {
+        if requires_wrapper && !scalar_measurement_only {
             if analytic_wrapper {
                 Self::validate_native_static_prn_tran_wrapper_contract(&source)?;
             } else {
@@ -381,11 +461,21 @@ impl XyceTestRunner {
                 }
             }
         }
-        Self::validate_static_tran_analysis_contract(&netlist, &tran, &print)?;
+        Self::validate_static_tran_analysis_contract(&netlist, &tran, print.as_ref())?;
         let timeint_conststep = Self::source_enables_constant_time_step_output(&source);
+        let oracle = if scalar_measurement_only {
+            XyceStaticTranOracle::ScalarMeasurements {
+                reference_paths: scalar_measurement_reference_paths,
+                tolerance: XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+            }
+        } else if let Some(reference_path) = reference_path {
+            XyceStaticTranOracle::Waveform(reference_path)
+        } else {
+            XyceStaticTranOracle::None
+        };
         let mut plan = XyceStaticTranPlan {
             deck_path: deck.path.clone(),
-            reference_path,
+            oracle,
             source,
             print,
             output_override,
@@ -398,6 +488,7 @@ impl XyceTestRunner {
         };
         plan.comparison_mode =
             Self::select_static_tran_comparison_mode(&plan, &netlist, purpose, requires_wrapper)?;
+        plan.validate_oracle_contract(purpose, requires_wrapper)?;
         let validation_purpose =
             if plan.steps.is_empty() && plan.comparison_mode.uses_integrated_rms_verifier() {
                 XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle

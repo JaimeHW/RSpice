@@ -524,7 +524,7 @@ impl XyceTestRunner {
             .map(|statement| statement.name.to_ascii_uppercase())
             .collect::<BTreeSet<_>>();
         let column = plan
-            .print
+            .require_print("MEASURE_CONT PRN counterfactual")?
             .probes
             .iter()
             .position(|probe| measurement_names.contains(&probe.to_ascii_uppercase()))
@@ -3407,20 +3407,23 @@ impl XyceTestRunner {
                     alias_bytes.len()
                 ));
             }
-            let canonical_reference = fs::read(&plan.reference_path).map_err(|error| {
+            let canonical_reference_path = plan
+                .require_waveform_reference_path("BUG702 canonical reference")?
+                .to_path_buf();
+            let canonical_reference = fs::read(&canonical_reference_path).map_err(|error| {
                 format!(
                     "failed to read BUG702 canonical reference {}: {error}",
-                    plan.reference_path.display()
+                    canonical_reference_path.display()
                 )
             })?;
             if alias_bytes != canonical_reference {
                 return Err(format!(
                     "BUG702 {:?} alias reference is not byte-identical to canonical {}",
                     kind,
-                    plan.reference_path.display()
+                    canonical_reference_path.display()
                 ));
             }
-            plan.reference_path = alias_path;
+            plan.replace_waveform_reference_path(alias_path, "BUG702 alias reference")?;
             plan.comparison_mode = XyceStaticTranComparisonMode::Release710IntegratedRms {
                 scientific_precision: kind.scientific_precision(),
             };
@@ -4028,7 +4031,7 @@ impl XyceTestRunner {
             || plan.output_override
             || plan.timeint_conststep
             || plan.wrapper_tolerance.is_some()
-            || plan.reference_path.is_file()
+            || !matches!(plan.oracle, XyceStaticTranOracle::None)
         {
             return Err(format!(
                 "{LABEL} requires one unstepped default-PRN wrapper output with a generated oracle"
@@ -4048,7 +4051,11 @@ impl XyceTestRunner {
                 "{LABEL} requires the direct finite '.TRAN step stop' tuple and no START, MAXSTEP, or UIC"
             ));
         }
-        let [probe_text] = plan.print.probes.as_slice() else {
+        let [probe_text] = plan
+            .require_print("analytic RC transient validation")?
+            .probes
+            .as_slice()
+        else {
             return Err(format!("{LABEL} requires exactly one voltage probe"));
         };
         let probe = Self::parse_voltage_probe(probe_text)
@@ -4084,7 +4091,7 @@ impl XyceTestRunner {
             || plan.output_override
             || plan.timeint_conststep
             || plan.wrapper_tolerance.is_some()
-            || plan.reference_path.is_file()
+            || !matches!(plan.oracle, XyceStaticTranOracle::None)
         {
             return Err(format!(
                 "{LABEL} requires one unstepped default-PRN wrapper output with a generated oracle"
@@ -4104,7 +4111,11 @@ impl XyceTestRunner {
                 "{LABEL} requires the direct '.TRAN 0 2e-4' tuple and no START, MAXSTEP, or UIC"
             ));
         }
-        let [probe] = plan.print.probes.as_slice() else {
+        let [probe] = plan
+            .require_print("analytic sinusoidal RC transient validation")?
+            .probes
+            .as_slice()
+        else {
             return Err(format!("{LABEL} requires exactly one print expression"));
         };
         if Self::normalize_probe(probe) != Self::normalize_probe(&source.print_expression) {
@@ -4644,8 +4655,9 @@ impl XyceTestRunner {
                 )
                 .ok()?;
             Self::validate_age_cap_transient_plan(&plan).ok()?;
+            let print = plan.print.as_ref()?;
             let netlist = Self::parse_xyce_netlist(&plan.source, &path).ok()?;
-            let snapshot = Self::age_cap_family_snapshot(&netlist, &plan.print).ok()?;
+            let snapshot = Self::age_cap_family_snapshot(&netlist, print).ok()?;
             workers.push((path, plan, snapshot));
         }
         let anchor = anchor?;
@@ -4664,7 +4676,7 @@ impl XyceTestRunner {
             snapshot.representation == XyceAgeCapRepresentation::ParameterExpression
         })?;
         if Self::same_path(&aged.0, &equivalent.0)
-            || aged.1.print.probes != equivalent.1.print.probes
+            || aged.1.print.as_ref()?.probes != equivalent.1.print.as_ref()?.probes
             || !Self::tran_analyses_match_exactly(&aged.1.tran, &equivalent.1.tran)
             || aged.1.timeint_conststep != equivalent.1.timeint_conststep
             || Self::compare_age_cap_family_snapshots(&aged.2, &equivalent.2).is_err()
@@ -4771,7 +4783,7 @@ impl XyceTestRunner {
                 Self::validate_diode_model_alias_transient_plan(&plan).ok()?;
                 let netlist = Self::parse_xyce_netlist(&plan.source, &path).ok()?;
                 let snapshot =
-                    Self::diode_model_alias_family_snapshot(&netlist, &plan.print).ok()?;
+                    Self::diode_model_alias_family_snapshot(&netlist, plan.print.as_ref()?).ok()?;
                 Some((plan, snapshot))
             };
             records.push((path, wrapper, worker));
@@ -4814,7 +4826,7 @@ impl XyceTestRunner {
         }
         let (canonical_plan, canonical_snapshot) = canonical.2.as_ref()?;
         let (alias_plan, alias_snapshot) = alias.2.as_ref()?;
-        if canonical_plan.print.probes != alias_plan.print.probes
+        if canonical_plan.print.as_ref()?.probes != alias_plan.print.as_ref()?.probes
             || !Self::tran_analyses_match_exactly(&canonical_plan.tran, &alias_plan.tran)
             || canonical_plan.timeint_conststep != alias_plan.timeint_conststep
             || canonical_plan.wrapper_tolerance.is_some()
@@ -4925,7 +4937,8 @@ impl XyceTestRunner {
                 .ok()?;
             Self::validate_switch_state_case_transient_plan(&plan).ok()?;
             let netlist = Self::parse_xyce_netlist(&plan.source, &path).ok()?;
-            let snapshot = Self::switch_state_case_family_snapshot(&netlist, &plan.print).ok()?;
+            let snapshot =
+                Self::switch_state_case_family_snapshot(&netlist, plan.print.as_ref()?).ok()?;
             records.push((path, wrapper, Some((plan, snapshot))));
         }
         if records.len() != 3
@@ -5681,8 +5694,8 @@ impl XyceTestRunner {
             || !plan.steps.is_empty()
             || plan.wrapper_tolerance.is_some()
             || plan.comparison_mode != XyceStaticTranComparisonMode::Pointwise
-            || plan.print.probes != expected_probes
-            || plan.reference_path.is_file()
+            || plan.require_print("BUG667 transient member")?.probes != expected_probes
+            || !matches!(plan.oracle, XyceStaticTranOracle::None)
             || plan.tran.step.to_bits() != 0.0f64.to_bits()
             || plan.tran.stop.to_bits() != 10e-3f64.to_bits()
             || plan.tran.start.is_some()
@@ -5691,7 +5704,9 @@ impl XyceTestRunner {
         {
             return Err(format!(
                 "BUG 667 member requires one ordinary default-PRN '.TRAN 0 10ms' with the exact six ordered probes and no STEP, output override, tolerance, reference artifact, START, MAXSTEP, or UIC state: contract={:?} probes={:?} tran={:?}",
-                plan.contract, plan.print.probes, plan.tran
+                plan.contract,
+                plan.require_print("BUG667 transient member")?.probes,
+                plan.tran
             ));
         }
         if netlist.title.trim() != "*Analysis directives:"
@@ -6142,7 +6157,7 @@ impl XyceTestRunner {
             || !plan.steps.is_empty()
             || plan.wrapper_tolerance.is_some()
             || plan.comparison_mode != XyceStaticTranComparisonMode::Pointwise
-            || plan.print.probes != ["V(N14950)", "V(N15037)"]
+            || plan.require_print("BUG662 transient member")?.probes != ["V(N14950)", "V(N15037)"]
             || plan.tran.step.to_bits() != 0.0f64.to_bits()
             || plan.tran.stop.to_bits() != (100.0f64 * 1e-9).to_bits()
             || plan.tran.start.map(Value::to_bits) != Some(0.0f64.to_bits())
@@ -6156,7 +6171,7 @@ impl XyceTestRunner {
                 plan.steps.len(),
                 plan.wrapper_tolerance,
                 plan.comparison_mode,
-                plan.print.probes,
+                plan.require_print("BUG662 transient member")?.probes,
                 plan.tran
             ));
         }

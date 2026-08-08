@@ -3778,9 +3778,9 @@ struct XyceAddResistorsElementSnapshot {
 #[derive(Debug, Clone)]
 struct XyceStaticTranPlan {
     deck_path: PathBuf,
-    reference_path: PathBuf,
+    oracle: XyceStaticTranOracle,
     source: String,
-    print: XycePrintRequest,
+    print: Option<XycePrintRequest>,
     output_override: bool,
     timeint_conststep: bool,
     tran: XyceTranAnalysis,
@@ -3788,6 +3788,16 @@ struct XyceStaticTranPlan {
     contract: XyceStaticTranContract,
     wrapper_tolerance: Option<XyceComparisonTolerance>,
     comparison_mode: XyceStaticTranComparisonMode,
+}
+
+#[derive(Debug, Clone)]
+enum XyceStaticTranOracle {
+    None,
+    Waveform(PathBuf),
+    ScalarMeasurements {
+        reference_paths: Vec<PathBuf>,
+        tolerance: XyceFileCompareTolerance,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3818,7 +3828,189 @@ impl XyceStaticTranComparisonMode {
 }
 
 impl XyceStaticTranPlan {
+    fn is_scalar_measurement_only(&self) -> bool {
+        matches!(self.oracle, XyceStaticTranOracle::ScalarMeasurements { .. })
+    }
+
+    fn require_print(&self, consumer: &str) -> Result<&XycePrintRequest, String> {
+        self.print
+            .as_ref()
+            .ok_or_else(|| format!("{consumer} requires an authored primary .PRINT TRAN request"))
+    }
+
+    fn require_waveform_reference_path(&self, consumer: &str) -> Result<&Path, String> {
+        match &self.oracle {
+            XyceStaticTranOracle::Waveform(path) => Ok(path),
+            XyceStaticTranOracle::None => Err(format!(
+                "{consumer} requires a waveform oracle, but this plan has no file oracle"
+            )),
+            XyceStaticTranOracle::ScalarMeasurements { .. } => Err(format!(
+                "{consumer} requires a waveform oracle, but this plan has a scalar measurement oracle"
+            )),
+        }
+    }
+
+    fn has_waveform_reference_file(&self) -> bool {
+        matches!(&self.oracle, XyceStaticTranOracle::Waveform(path) if path.is_file())
+    }
+
+    fn replace_waveform_reference_path(
+        &mut self,
+        path: PathBuf,
+        consumer: &str,
+    ) -> Result<(), String> {
+        match &mut self.oracle {
+            XyceStaticTranOracle::Waveform(reference_path) => {
+                *reference_path = path;
+                Ok(())
+            }
+            XyceStaticTranOracle::None | XyceStaticTranOracle::ScalarMeasurements { .. } => Err(
+                format!("{consumer} cannot replace a non-waveform transient oracle"),
+            ),
+        }
+    }
+
+    fn scalar_measurement_oracle(&self) -> Option<(&[PathBuf], XyceFileCompareTolerance)> {
+        match &self.oracle {
+            XyceStaticTranOracle::ScalarMeasurements {
+                reference_paths,
+                tolerance,
+            } => Some((reference_paths, *tolerance)),
+            XyceStaticTranOracle::None | XyceStaticTranOracle::Waveform(_) => None,
+        }
+    }
+
+    fn validate_oracle_contract(
+        &self,
+        purpose: XyceStaticTranPlanPurpose,
+        requires_wrapper: bool,
+    ) -> Result<(), String> {
+        match &self.oracle {
+            XyceStaticTranOracle::ScalarMeasurements {
+                reference_paths, ..
+            } => {
+                if purpose != XyceStaticTranPlanPurpose::AbsoluteOracle
+                    || !requires_wrapper
+                    || self.contract != XyceStaticTranContract::WrapperStatic
+                    || self.output_override
+                    || !self.steps.is_empty()
+                    || self.comparison_mode != XyceStaticTranComparisonMode::Pointwise
+                    || reference_paths.len() != 1
+                    || reference_paths[0]
+                        .extension()
+                        .is_none_or(|extension| !extension.eq_ignore_ascii_case("mt0"))
+                    || !reference_paths[0].is_file()
+                {
+                    return Err(
+                        "scalar TRAN measurement oracle requires an absolute, wrapper-origin, unstepped, pointwise WrapperStatic plan with one checked-in .mt0 file and no output override"
+                            .to_string(),
+                    );
+                }
+                Ok(())
+            }
+            XyceStaticTranOracle::Waveform(path) => {
+                if !path.is_file() {
+                    return Err(format!(
+                        "transient waveform oracle does not exist at {}",
+                        path.display()
+                    ));
+                }
+                self.require_print("waveform transient plan")?;
+                Ok(())
+            }
+            XyceStaticTranOracle::None => {
+                let no_file_shape = matches!(
+                    (purpose, requires_wrapper, self.contract),
+                    (
+                        XyceStaticTranPlanPurpose::AbsoluteOracle,
+                        true,
+                        XyceStaticTranContract::WrapperNoIndexHeader
+                    ) | (
+                        XyceStaticTranPlanPurpose::AnalyticOracle,
+                        true,
+                        XyceStaticTranContract::WrapperStatic
+                    ) | (
+                        XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily,
+                        true,
+                        XyceStaticTranContract::WrapperStatic
+                            | XyceStaticTranContract::WrapperCsv
+                            | XyceStaticTranContract::WrapperCsd
+                    ) | (
+                        XyceStaticTranPlanPurpose::RelationalFamily
+                            | XyceStaticTranPlanPurpose::AgeCapRelationalFamily
+                            | XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
+                        false,
+                        XyceStaticTranContract::PlainStatic
+                            | XyceStaticTranContract::PlainCsv
+                            | XyceStaticTranContract::PlainCsd
+                    ) | (
+                        XyceStaticTranPlanPurpose::RelationalFamily
+                            | XyceStaticTranPlanPurpose::AgeCapRelationalFamily
+                            | XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
+                        true,
+                        XyceStaticTranContract::WrapperStatic
+                            | XyceStaticTranContract::WrapperCsv
+                            | XyceStaticTranContract::WrapperCsd
+                    )
+                );
+                if !no_file_shape {
+                    return Err(format!(
+                        "transient plan purpose {purpose:?} and contract {:?} require an explicit waveform or scalar oracle",
+                        self.contract
+                    ));
+                }
+                self.require_print("fileless transient plan")?;
+                Ok(())
+            }
+        }
+    }
+
+    fn validate_executable_oracle_shape(&self) -> Result<(), String> {
+        match &self.oracle {
+            XyceStaticTranOracle::Waveform(path) => {
+                if !path.is_file() {
+                    return Err(format!(
+                        "transient waveform oracle does not exist at {}",
+                        path.display()
+                    ));
+                }
+                self.require_print("waveform transient execution")?;
+                Ok(())
+            }
+            XyceStaticTranOracle::ScalarMeasurements {
+                reference_paths, ..
+            } => {
+                if reference_paths.len() != 1
+                    || !reference_paths[0].is_file()
+                    || !self.steps.is_empty()
+                    || self.output_override
+                    || self.contract != XyceStaticTranContract::WrapperStatic
+                    || self.comparison_mode != XyceStaticTranComparisonMode::Pointwise
+                {
+                    return Err(
+                        "scalar TRAN execution requires one checked oracle, no STEP/output override, and the pointwise WrapperStatic contract"
+                            .to_string(),
+                    );
+                }
+                Ok(())
+            }
+            XyceStaticTranOracle::None
+                if self.contract == XyceStaticTranContract::WrapperNoIndexHeader =>
+            {
+                self.require_print("NOINDEX transient execution")?;
+                Ok(())
+            }
+            XyceStaticTranOracle::None => Err(
+                "ordinary transient execution requires an explicit waveform or scalar oracle"
+                    .to_string(),
+            ),
+        }
+    }
+
     fn result_contract(&self) -> &'static str {
+        if self.is_scalar_measurement_only() {
+            return "wrapper_scalar_measure_tran";
+        }
         if !self.steps.is_empty() {
             // Comparison mode is an implementation detail of the upstream
             // verifier. Preserve the established stepped-output contract name
