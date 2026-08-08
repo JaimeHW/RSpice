@@ -915,6 +915,21 @@ impl Command {
                     }
                 }
             },
+            Self::LiveSession => match app.cloud_account.availability() {
+                crate::services::cloud_account::CloudAccountAvailability::UnconfiguredBuild => {
+                    "this build has no cloud endpoints pinned"
+                }
+                crate::services::cloud_account::CloudAccountAvailability::BrowserPending => {
+                    "live sessions arrive with the hosted browser deployment"
+                }
+                crate::services::cloud_account::CloudAccountAvailability::Native => {
+                    if app.cloud_account.snapshot().signed_in() {
+                        "the signed-in seat is not licensed for live collaboration"
+                    } else {
+                        "sign in to RSpice Cloud from the Account console"
+                    }
+                }
+            },
             Self::PageSetup if app.state.schematic_edit_read_only() => {
                 "the active schematic is read-only"
             }

@@ -66,6 +66,7 @@ pub enum Command {
     ExportSchematicSvg,
     ExportWaveformsCsv,
     ExportPublicationSnapshot,
+    LiveSession,
     PublishToWeb,
     ExportNetlist(crate::io::NetlistFormat),
     PageSetup,
@@ -336,6 +337,7 @@ impl Command {
                 "Export publication snapshot…",
                 "File",
             ),
+            Self::LiveSession => spec("live-session", "Live session…", "File"),
             Self::PublishToWeb => spec("publish-web", "Publish to web…", "File"),
             Self::ExportNetlist(crate::io::NetlistFormat::Spectre) => {
                 spec("export-netlist-spectre", "Export Spectre netlist…", "File")
@@ -894,6 +896,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ImportResultDataset,
     Command::ExportSchematicSvg,
     Command::ExportPublicationSnapshot,
+    Command::LiveSession,
     Command::PublishToWeb,
     Command::ExportNetlist(crate::io::NetlistFormat::Spectre),
     Command::ExportNetlist(crate::io::NetlistFormat::Spice),

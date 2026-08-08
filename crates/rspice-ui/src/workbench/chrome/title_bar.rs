@@ -1205,6 +1205,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         | Command::VerificationPage(_)
         | Command::EditSpecifications
         | Command::PublishToWeb => WorkbenchIcon::Verify,
+        Command::LiveSession => WorkbenchIcon::User,
         Command::OpenWorkspace(Workspace::Models)
         | Command::ModelsPage(_)
         | Command::ModelBrowser
@@ -1373,6 +1374,7 @@ fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         Command::ExportNetlist(crate::io::NetlistFormat::Spice),
     );
     menu_separator(ui);
+    command_item(ui, app, Command::LiveSession);
     command_item(ui, app, Command::PublishToWeb);
     menu_separator(ui);
     command_item(ui, app, Command::CloseActiveDocument);

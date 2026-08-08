@@ -357,6 +357,16 @@ impl Command {
                     .snapshot()
                     .cloud_feature_enabled(crate::services::cloud_account::CLOUD_PUBLISHING_FEATURE)
             }
+            // Hosting needs an open project, but the same dialog joins by
+            // code from any state — so the command never requires one.
+            Self::LiveSession => {
+                matches!(
+                    app.cloud_account.availability(),
+                    crate::services::cloud_account::CloudAccountAvailability::Native
+                ) && app.cloud_account.snapshot().cloud_feature_enabled(
+                    crate::services::cloud_account::LIVE_COLLABORATION_FEATURE,
+                )
+            }
             Self::PageSetup => crate::workbench::app::drawing_sheet_setup_available(app),
             Self::SheetFormatManager => {
                 crate::workbench::app::drawing_sheet_setup_available(app)
@@ -919,6 +929,7 @@ impl Command {
             }
             Self::ExportSchematicSvg => file_action(app, FileMenuAction::ExportSvg),
             Self::ExportWaveformsCsv => file_action(app, FileMenuAction::ExportCsvWaveforms),
+            Self::LiveSession => app.open_live_session_dialog(),
             Self::PublishToWeb => app.open_publish_web_dialog(),
             Self::ExportPublicationSnapshot => {
                 file_action(app, FileMenuAction::ExportPublicationSnapshot)

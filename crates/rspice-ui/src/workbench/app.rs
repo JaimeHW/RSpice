@@ -665,6 +665,7 @@ impl RSpiceApp {
         self.render_preferences_dialog(ctx);
         self.render_license_dialog(ctx);
         self.render_publish_web_dialog(ctx);
+        self.render_live_session_dialog(ctx);
         self.render_unpublish_web_dialog(ctx);
         self.render_command_palette(ctx);
         self.render_bus_tap_dialog(ctx);

@@ -682,6 +682,62 @@ impl CloudAccountService {
         });
     }
 
+    /// Go live: create a hosted session under the dialog-confirmed policy.
+    pub(crate) fn start_live_session(
+        &mut self,
+        policy: LiveSessionPolicySummary,
+        circuit_id: Option<String>,
+    ) {
+        self.send(CloudAccountCommand::StartLiveSession { policy, circuit_id });
+    }
+
+    /// Rotate the join code; current participants stay connected.
+    pub(crate) fn regenerate_live_session_code(&mut self) {
+        self.send(CloudAccountCommand::RegenerateLiveSessionCode);
+    }
+
+    pub(crate) fn join_live_session(&mut self, code: String) {
+        self.send(CloudAccountCommand::JoinLiveSession { code });
+    }
+
+    /// Re-read the roster; also the user's way back from a blocked relay.
+    pub(crate) fn refresh_live_session(&mut self) {
+        self.send(CloudAccountCommand::RefreshLiveSession);
+    }
+
+    pub(crate) fn apply_live_session_policy(&mut self, policy: LiveSessionPolicySummary) {
+        self.send(CloudAccountCommand::ApplyLiveSessionPolicy { policy });
+    }
+
+    pub(crate) fn approve_live_session_participant(&mut self, principal_id: String) {
+        self.send(CloudAccountCommand::ApproveLiveSessionParticipant { principal_id });
+    }
+
+    pub(crate) fn set_live_session_participant_editor(
+        &mut self,
+        principal_id: String,
+        editor: bool,
+    ) {
+        self.send(CloudAccountCommand::SetLiveSessionParticipantEditor {
+            principal_id,
+            editor,
+        });
+    }
+
+    pub(crate) fn remove_live_session_participant(&mut self, principal_id: String) {
+        self.send(CloudAccountCommand::RemoveLiveSessionParticipant { principal_id });
+    }
+
+    /// End the hosted session for everyone, instantly.
+    pub(crate) fn end_live_session(&mut self) {
+        self.send(CloudAccountCommand::EndLiveSession);
+    }
+
+    /// Leave a joined session locally; the roster row remains until it ends.
+    pub(crate) fn leave_live_session(&mut self) {
+        self.send(CloudAccountCommand::LeaveLiveSession);
+    }
+
     /// The receipt of a just-committed publish, at most once. The caller
     /// persists it into the project descriptor.
     pub(crate) fn take_publish_receipt(&mut self) -> Option<PublishReceipt> {

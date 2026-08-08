@@ -36,6 +36,7 @@ pub(in crate::workbench) mod placement;
 pub(in crate::workbench) mod preferences;
 pub(in crate::workbench) mod project_revision_history;
 pub(in crate::workbench) mod property_dialog;
+pub(in crate::workbench) mod live_session;
 pub(in crate::workbench) mod publish_web;
 pub(in crate::workbench) mod replace_instance;
 pub(in crate::workbench) mod review_primitives;

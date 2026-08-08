@@ -2210,6 +2210,10 @@ pub struct DialogState {
     /// Immutable cloud publication transaction.
     pub(crate) publish_web: crate::workbench::app::dialogs::publish_web::PublishWebDialogState,
 
+    /// Live-session lifecycle controls (start review, host roster, guest view).
+    pub(crate) live_session:
+        crate::workbench::app::dialogs::live_session::LiveSessionDialogState,
+
     /// Owner-confirmed publication tombstone transaction.
     pub(crate) unpublish_web:
         crate::workbench::app::dialogs::unpublish_web::UnpublishWebDialogState,
@@ -2363,6 +2367,7 @@ impl DialogState {
             || self.shortcut_editor.open
             || self.license_dialog.open
             || self.publish_web.open
+            || self.live_session.open
             || self.unpublish_web.open
             || self.command_palette.open
             || self.bus_tap.open
@@ -2445,6 +2450,7 @@ mod tests {
         assert_blocks_shortcuts(|dialogs| dialogs.shortcut_editor.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.license_dialog.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.publish_web.open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.live_session.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.unpublish_web.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.command_palette.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.bus_tap.open());
