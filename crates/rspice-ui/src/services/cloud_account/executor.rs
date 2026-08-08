@@ -1144,6 +1144,13 @@ impl Executor {
     /// only inside the socket thread's subprotocol offer.
     fn attach_live_relay(&mut self, ticket: &LiveSessionTicketProtocol) {
         self.stop_live_relay();
+        let Some(client_instance_id) = self
+            .live_session
+            .as_ref()
+            .map(|runtime| runtime.client_instance_id)
+        else {
+            return;
+        };
         let Some((url, origin)) =
             live_relay::relay_endpoint(&self.configuration.api_origin, &ticket.websocket_endpoint)
         else {
@@ -1171,6 +1178,7 @@ impl Executor {
         );
         let _ = self.relay_ports.send(LiveRelayPort {
             generation,
+            client_instance_id,
             outbound,
             inbound,
         });

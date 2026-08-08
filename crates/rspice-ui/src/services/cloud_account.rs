@@ -308,6 +308,9 @@ impl LiveFrame {
 pub(crate) struct LiveRelayPort {
     /// Monotonic connection identity, so stale ports are recognizable.
     pub generation: u64,
+    /// This install's stable per-run connection identity, echoed by the
+    /// session tickets; payload protocols stamp it on outbound messages.
+    pub client_instance_id: uuid::Uuid,
     /// Frames to broadcast to the other participants.
     pub outbound: tokio::sync::mpsc::UnboundedSender<LiveFrame>,
     /// Frames the other participants broadcast, in arrival order.
