@@ -262,6 +262,36 @@ impl Engine {
             })
     }
 
+    /// Compute Xyce DampedNewton's frozen weighted maximum norm directly from
+    /// the linear solver's Newton correction. DampedNewton norms its search
+    /// direction before adding it to the iterate; reconstructing the
+    /// correction as `candidate - iterate` can lose low bits through
+    /// cancellation. Xyce's NOX path deliberately uses that reconstructed
+    /// update instead and must continue through
+    /// [`Self::transient_newton_weighted_update_norm`].
+    pub(crate) fn transient_newton_weighted_correction_norm(
+        &self,
+        correction: &[Value],
+        xyce_weights: Option<&[Value]>,
+    ) -> Option<Value> {
+        if self.config.spice_dialect != SpiceDialect::Xyce
+            || correction.iter().any(|value| !value.is_finite())
+        {
+            return None;
+        }
+        let weights = xyce_weights.filter(|weights| weights.len() == correction.len())?;
+        correction
+            .iter()
+            .zip(weights)
+            .try_fold(0.0_f64, |norm, (&correction, &weight)| {
+                if !weight.is_finite() || weight <= 0.0 {
+                    None
+                } else {
+                    Some(norm.max(correction.abs() / weight))
+                }
+            })
+    }
+
     #[inline]
     pub(crate) fn residual_reltol(&self) -> Value {
         let configured = self.config.convergence_config.residual_reltol;
@@ -569,5 +599,38 @@ mod tests {
             Some(&weights),
             2,
         ));
+    }
+
+    #[test]
+    fn xyce_transient_norm_preserves_raw_dense_and_sparse_solver_corrections() {
+        let mut engine = Engine::default();
+        engine.config.spice_dialect = SpiceDialect::Xyce;
+        let weights = [1.0];
+        let mut matrix = crate::solver::StaticMatrix::from_triplets(1, 1, &[(0, 0, 1.0)])
+            .expect("build correction probe matrix");
+        let dense_correction = matrix.solve_dense(&[1.0]).expect("dense correction solve");
+        let mut sparse_correction = Vec::new();
+        matrix
+            .solve_into(&[1.0], &mut sparse_correction)
+            .expect("sparse correction solve");
+
+        let iterate = (1_u64 << 54) as Value;
+        for correction in [dense_correction, sparse_correction] {
+            assert_eq!(correction, [1.0]);
+            assert_eq!(
+                engine.transient_newton_weighted_correction_norm(&correction, Some(&weights)),
+                Some(1.0)
+            );
+            let candidate = [iterate + correction[0]];
+            assert_eq!(candidate, [iterate]);
+            assert_eq!(
+                engine.transient_newton_weighted_update_norm(
+                    &[iterate],
+                    &candidate,
+                    Some(&weights),
+                ),
+                Some(0.0)
+            );
+        }
     }
 }

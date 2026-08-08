@@ -59,6 +59,49 @@ fn direct_xyce_dae_norms(residual: &[Value]) -> Result<(Value, Value), Simulatio
     Ok((inf_norm, l2_norm))
 }
 
+/// Choose the update quantity used by Xyce's two transient nonlinear solvers.
+/// DampedNewton consumes the linear solver's search direction directly. NOX
+/// intentionally reconstructs `x - old_x` after its line-search update, so it
+/// must retain the candidate-difference path even when the underlying linear
+/// system happened to use correction form.
+#[inline]
+fn select_xyce_transient_update_norm(
+    uses_damped_newton: bool,
+    solved_correction_norm: Option<Value>,
+    candidate_difference_norm: impl FnOnce() -> Option<Value>,
+) -> Option<Value> {
+    if uses_damped_newton {
+        solved_correction_norm
+    } else {
+        candidate_difference_norm()
+    }
+}
+
+#[inline]
+const fn transient_newton_uses_correction_form(
+    has_direct_correction_rhs: bool,
+    uses_inductor_correction: bool,
+    uses_xyce_damped_newton: bool,
+) -> bool {
+    has_direct_correction_rhs || uses_inductor_correction || uses_xyce_damped_newton
+}
+
+/// A sanitized finite NOX candidate still has a well-defined candidate
+/// difference. A non-finite linear solution does not: carry an explicit
+/// failure sentinel into the next ordered status pass instead of reusing a
+/// stale norm from the preceding iterate.
+#[inline]
+fn xyce_nox_recovered_update_norm(
+    had_nonfinite_solution: bool,
+    candidate_difference_norm: impl FnOnce() -> Option<Value>,
+) -> Option<Value> {
+    if had_nonfinite_solution {
+        Some(Value::INFINITY)
+    } else {
+        candidate_difference_norm()
+    }
+}
+
 fn capture_direct_xyce_histories(
     circuit: &crate::circuit::CircuitData,
     solution: &[Value],
@@ -3826,6 +3869,16 @@ impl Engine {
 
                 // Solve and check convergence
                 let newton_solve_start = DiagnosticTimer::start(diagnostic_timing_enabled);
+                // Xyce's DampedNewton linear system solves for a Newton search
+                // direction on every topology.  NOX, native, and ngspice keep
+                // their established algebra except where an inductor or the
+                // direct Xyce DAE path already requires correction form.
+                let solve_produces_correction = transient_newton_uses_correction_form(
+                    direct_correction_rhs.is_some(),
+                    uses_inductor_correction,
+                    uses_xyce_damped_solver,
+                );
+                let mut solved_weighted_correction_norm = None;
                 let solve_result: Result<(), rspice_matrix::SolverError> =
                     if let Some(direct_rhs) = direct_correction_rhs {
                         if prefer_dense_solver {
@@ -3836,21 +3889,28 @@ impl Engine {
                             matrix.solve_into(direct_rhs, &mut linear_solution)
                         }
                         .map(|()| {
+                            solved_weighted_correction_norm = self
+                                .transient_newton_weighted_correction_norm(
+                                    &linear_solution,
+                                    transient_newton_update_weights.as_deref(),
+                                );
                             for (correction, &iterate) in
                                 linear_solution.iter_mut().zip(&new_solution)
                             {
                                 *correction += iterate;
                             }
                         })
-                    } else if uses_inductor_correction {
+                    } else if solve_produces_correction {
                         matrix.correction_rhs_into(&rhs, &new_solution, &mut correction_rhs)
                             .and_then(|()| {
-                                circuit.stabilize_inductor_transient_correction_rhs(
-                                    &mut correction_rhs,
-                                    &new_solution,
-                                    dt,
-                                    &coeff,
-                                );
+                                if uses_inductor_correction {
+                                    circuit.stabilize_inductor_transient_correction_rhs(
+                                        &mut correction_rhs,
+                                        &new_solution,
+                                        dt,
+                                        &coeff,
+                                    );
+                                }
                                 if circuit.has_xyce_core_inductors() {
                                     circuit.overwrite_xyce_core_transient_correction_rhs(
                                         &mut correction_rhs,
@@ -3863,6 +3923,11 @@ impl Engine {
                                 } else {
                                     matrix.solve_into(&correction_rhs, &mut linear_solution)?;
                                 }
+                                solved_weighted_correction_norm = self
+                                    .transient_newton_weighted_correction_norm(
+                                        &linear_solution,
+                                        transient_newton_update_weights.as_deref(),
+                                    );
                                 for (correction, &iterate) in
                                     linear_solution.iter_mut().zip(&new_solution)
                                 {
@@ -3905,6 +3970,7 @@ impl Engine {
                         // If we keep the previous timestep guess here, force-accept can
                         // propagate a stale state and flatten non-source traces.
                         let mut has_bad_values = false;
+                        let mut had_nonfinite_solution = false;
                         let mut logged_divergence = false;
 
                         for (i, v) in sol.iter_mut().enumerate() {
@@ -3923,6 +3989,7 @@ impl Engine {
                                 MAX_BRANCH_STATE_MAGNITUDE
                             };
                             if !v.is_finite() {
+                                had_nonfinite_solution = true;
                                 if !logged_divergence {
                                     log::debug!(
                                         "Transient: Newton divergence at t={:.3e}s, state {}: {:.3e} - reducing timestep",
@@ -3973,10 +4040,16 @@ impl Engine {
                         // NOX evaluates the unsolved predictor as iteration
                         // zero; this loop's first post-solve candidate is
                         // therefore nonlinear iteration one.
-                        let raw_weighted_update_norm = self.transient_newton_weighted_update_norm(
-                            &new_solution,
-                            sol,
-                            transient_newton_update_weights.as_deref(),
+                        let raw_weighted_update_norm = select_xyce_transient_update_norm(
+                            uses_xyce_damped_solver,
+                            solved_weighted_correction_norm,
+                            || {
+                                self.transient_newton_weighted_update_norm(
+                                    &new_solution,
+                                    sol,
+                                    transient_newton_update_weights.as_deref(),
+                                )
+                            },
                         );
 
                         if conservative_limiting_active && !junction_owns_steps {
@@ -4023,6 +4096,18 @@ impl Engine {
                                     &mut last_stamped_rollback,
                                 );
                                 total_merit_nanos += seed_start.elapsed().as_nanos();
+                            }
+                            if uses_xyce_nox_status {
+                                xyce_weighted_update_norm = xyce_nox_recovered_update_norm(
+                                    had_nonfinite_solution,
+                                    || {
+                                        self.transient_newton_weighted_update_norm(
+                                            &new_solution,
+                                            sol,
+                                            transient_newton_update_weights.as_deref(),
+                                        )
+                                    },
+                                );
                             }
                             new_solution.copy_from_slice(sol);
                             nonlinear_state_matches_new_solution = false;
@@ -7095,6 +7180,81 @@ fn validate_transient_window(tstop: Value, max_step: Value) -> Result<(), Simula
 mod tests {
     use super::*;
     use crate::{Netlist, SimulationConfig};
+    use std::cell::Cell;
+
+    #[test]
+    fn xyce_update_norm_source_distinguishes_damped_newton_from_nox() {
+        let candidate_evaluated = Cell::new(false);
+        let damped = select_xyce_transient_update_norm(true, Some(3.0), || {
+            candidate_evaluated.set(true);
+            Some(7.0)
+        });
+        assert_eq!(damped, Some(3.0));
+        assert!(!candidate_evaluated.get());
+
+        let nox = select_xyce_transient_update_norm(false, Some(3.0), || {
+            candidate_evaluated.set(true);
+            Some(7.0)
+        });
+        assert_eq!(nox, Some(7.0));
+        assert!(candidate_evaluated.get());
+    }
+
+    #[test]
+    fn xyce_damped_newton_always_solves_a_correction_system() {
+        assert!(transient_newton_uses_correction_form(false, false, true));
+        assert!(transient_newton_uses_correction_form(false, true, false));
+        assert!(transient_newton_uses_correction_form(true, false, false));
+        assert!(!transient_newton_uses_correction_form(false, false, false));
+    }
+
+    #[test]
+    fn xyce_nox_bad_candidate_recovery_never_reuses_a_stale_update_norm() {
+        let candidate_evaluated = Cell::new(false);
+        let nonfinite = xyce_nox_recovered_update_norm(true, || {
+            candidate_evaluated.set(true);
+            Some(7.0)
+        });
+        assert_eq!(nonfinite, Some(Value::INFINITY));
+        assert!(!candidate_evaluated.get());
+
+        let finite = xyce_nox_recovered_update_norm(false, || {
+            candidate_evaluated.set(true);
+            Some(7.0)
+        });
+        assert_eq!(finite, Some(7.0));
+        assert!(candidate_evaluated.get());
+    }
+
+    #[test]
+    fn xyce_damped_newton_correction_form_handles_a_noninductive_diode_step() {
+        let netlist = Netlist::parse(
+            "Xyce noninductive DampedNewton correction form\n\
+             V1 in 0 PULSE(0 1 1n 100p 100p 10n 20n)\n\
+             R1 in out 1k\n\
+             D1 out 0 DM\n\
+             .MODEL DM D(IS=1e-12 N=1)\n\
+             .TRAN 250p 3n\n\
+             .END\n",
+        )
+        .expect("diode transient deck parses");
+        let mut config =
+            SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+        config.transient_nonlinear_nox = Some(false);
+        let engine = Engine::new(config);
+        let result = engine
+            .run_tran(&netlist, 3.0e-9, 2.5e-10)
+            .expect("Xyce diode transient solves");
+        let output = result
+            .try_voltage_waveform_named("out")
+            .expect("output waveform exists");
+        assert!(output.iter().all(|value| value.is_finite()));
+        assert!(
+            output.last().is_some_and(|value| *value > 0.4 && *value < 0.9),
+            "diode output should settle to a physical forward voltage, got {:?}",
+            output.last()
+        );
+    }
 
     #[test]
     fn xyce_preserves_order_on_breakpoint_landing_then_restarts_after_acceptance() {
