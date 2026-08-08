@@ -1297,6 +1297,58 @@ mod tests {
     }
 
     #[test]
+    fn live_netlist_apply_is_view_independent_and_treats_echoes_as_converged() {
+        use crate::workbench::documents::netlist_document::{
+            ActiveNetlistDocument, apply_live_owned_source,
+        };
+
+        let authored = "* shared source\nV1 out 0 1\n.op\n.end\n";
+        let mut state = state_with_owned_strategy(
+            GENERATED_BASE,
+            authored,
+            crate::state::OwnedNetlistEditStrategy::OwnedSource,
+        );
+        // The netlist surface is showing the generated document; a
+        // session-arbitrated apply must not depend on what is on screen.
+        state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
+        let before = state
+            .workspace
+            .netlist_document
+            .as_ref()
+            .expect("owned document")
+            .revision()
+            .get();
+
+        let revised = "* shared source v2\nV1 out 0 2\n.op\n.end\n";
+        assert!(apply_live_owned_source(&mut state, revised.to_owned()));
+        assert_eq!(state.workspace.netlist_source.as_deref(), Some(revised));
+        let after = state
+            .workspace
+            .netlist_document
+            .as_ref()
+            .expect("owned document")
+            .revision()
+            .get();
+        assert!(after > before);
+        // The visible generated execution source stays untouched.
+        assert_ne!(state.simulation.netlist_content, revised);
+
+        // A host echo of content this project already holds is
+        // convergence, not failure, and must not spin the revision.
+        assert!(apply_live_owned_source(&mut state, revised.to_owned()));
+        assert_eq!(
+            state
+                .workspace
+                .netlist_document
+                .as_ref()
+                .expect("owned document")
+                .revision()
+                .get(),
+            after
+        );
+    }
+
+    #[test]
     fn owned_source_strategy_executes_exact_authored_bytes_without_generated_composition() {
         let authored = "* independently owned\r\nV9 out 0 9\r\n.tran 1n 10n\r\n.end\r\n";
         let state = state_with_owned_strategy(

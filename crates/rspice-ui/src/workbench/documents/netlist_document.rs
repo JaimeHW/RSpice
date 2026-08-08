@@ -47,9 +47,46 @@ pub fn replace_owned_source(state: &mut AppState, source: String) -> bool {
 }
 
 /// Live-session apply path: the sender's write authority was already
-/// arbitrated by the session, so the local lease gate does not apply.
+/// arbitrated by the session, so neither the local lease gate nor the
+/// currently visible netlist page applies. Content the project already
+/// holds counts as converged, not as a failure — remote echoes are normal.
 pub(crate) fn apply_live_owned_source(state: &mut AppState, source: String) -> bool {
-    replace_owned_source_unlocked(state, source)
+    let Some(current) = state.workspace.netlist_source.as_deref() else {
+        // No owned source exists here yet; the whole-project snapshot
+        // resync is what introduces one.
+        return false;
+    };
+    if current == source {
+        return true;
+    }
+    let next_document = if let Some(document) = &state.workspace.netlist_document {
+        let mut next = document.clone();
+        if next
+            .replace_editable_source(next.content_digest(), source.as_bytes().to_vec())
+            .is_err()
+        {
+            return false;
+        }
+        Some(next)
+    } else {
+        None
+    };
+    if !state
+        .workspace
+        .replace_editable_netlist_source(source.clone())
+    {
+        return false;
+    }
+    if state.ui.netlist.active_document == ActiveNetlistDocument::OwnedSource {
+        state.simulation.netlist_content = source;
+    }
+    if let Some(document) = next_document {
+        state.workspace.netlist_document = Some(document.clone());
+        state.ui.netlist.owned_document = Some(document);
+    }
+    state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
+    invalidate_source_evidence(&mut state.ui.netlist);
+    true
 }
 
 fn replace_owned_source_unlocked(state: &mut AppState, source: String) -> bool {

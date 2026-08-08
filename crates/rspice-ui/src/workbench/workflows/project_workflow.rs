@@ -22,6 +22,10 @@ use crate::workbench::state::ProjectCloseDestination;
 pub(crate) enum ProjectLoadOrigin<'a> {
     #[cfg(not(target_arch = "wasm32"))]
     PersistentPath(&'a Path),
+    /// A live-session host's project snapshot; carries the host's display
+    /// name. Never touches recent files or persistence bindings.
+    #[cfg(not(target_arch = "wasm32"))]
+    LiveSession(&'a str),
     #[cfg(any(test, target_arch = "wasm32"))]
     BrowserImport(&'a str),
     #[cfg(any(test, target_arch = "wasm32"))]
@@ -33,6 +37,8 @@ impl<'a> ProjectLoadOrigin<'a> {
         match self {
             #[cfg(not(target_arch = "wasm32"))]
             Self::PersistentPath(path) => path.display().to_string(),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::LiveSession(host) => host.to_string(),
             #[cfg(any(test, target_arch = "wasm32"))]
             Self::BrowserImport(name) | Self::BrowserCanonical(name) => name.to_string(),
         }
@@ -42,6 +48,8 @@ impl<'a> ProjectLoadOrigin<'a> {
         match self {
             #[cfg(not(target_arch = "wasm32"))]
             Self::PersistentPath(path) => Some(path),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::LiveSession(_) => None,
             #[cfg(any(test, target_arch = "wasm32"))]
             Self::BrowserImport(_) | Self::BrowserCanonical(_) => None,
         }
@@ -51,6 +59,8 @@ impl<'a> ProjectLoadOrigin<'a> {
         match self {
             #[cfg(not(target_arch = "wasm32"))]
             Self::PersistentPath(_) => "Opened project",
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::LiveSession(_) => "Synchronized live session project",
             #[cfg(any(test, target_arch = "wasm32"))]
             Self::BrowserImport(_) => "Imported project",
             #[cfg(any(test, target_arch = "wasm32"))]
@@ -188,8 +198,22 @@ pub(crate) fn save_active_for_continuation(state: &mut AppState) -> SaveRequestO
     save_scope_outcome(state, SaveScope::ActiveDocument)
 }
 
+/// While mirroring a live session whose policy withholds save-copy rights,
+/// every project persistence path refuses with this message.
+#[cfg(not(target_arch = "wasm32"))]
+fn live_mirror_save_block(state: &AppState) -> Option<&'static str> {
+    let locks = &state.workbench.live_write_locks;
+    (locks.mirror && !locks.mirror_save_copy_allowed).then_some(
+        "The live session's policy does not allow saving a copy of the host's project.",
+    )
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn save_scope_outcome(state: &mut AppState, scope: SaveScope) -> SaveRequestOutcome {
+    if let Some(message) = live_mirror_save_block(state) {
+        state.push_user_message(ConsoleMessage::warning(message));
+        return SaveRequestOutcome::Failed(message.to_owned());
+    }
     if let Some(path) = crate::workbench::lifecycle::project_lifecycle::canonical_native_path(state)
     {
         return save_native_scope(state, scope, &path, DestinationAuthority::Canonical)
@@ -693,6 +717,11 @@ fn canonical_save_continuation_event(
 }
 
 pub(crate) fn save_project_as(state: &mut AppState) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(message) = live_mirror_save_block(state) {
+        state.push_user_message(ConsoleMessage::warning(message));
+        return false;
+    }
     let default_name = project_save_dialog_default_name(state);
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -870,6 +899,14 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
                 .workbench
                 .activate(crate::workbench::state::Workspace::Project);
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        ProjectCloseDestination::LiveMirror => {
+            state.workbench.project_launcher_open = false;
+            state
+                .workbench
+                .activate(crate::workbench::state::Workspace::Project);
+            state.workbench.request_live_mirror_entry();
+        }
     }
     state.push_user_message(ConsoleMessage::info("Closed project"));
     true
@@ -980,6 +1017,13 @@ fn apply_loaded_project_authorized(
         ProjectLoadOrigin::PersistentPath(_) => {
             state.browser_project_save_name = None;
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        ProjectLoadOrigin::LiveSession(_) => {
+            // The host's on-disk location is meaningless on this machine and
+            // must never become a save target here.
+            project.workspace.project.path = None;
+            state.browser_project_save_name = None;
+        }
         #[cfg(any(test, target_arch = "wasm32"))]
         ProjectLoadOrigin::BrowserImport(name) | ProjectLoadOrigin::BrowserCanonical(name) => {
             project.workspace.project.path = None;
@@ -1030,6 +1074,59 @@ fn apply_loaded_project_authorized(
         binding,
     );
     true
+}
+
+/// Outcome of applying a live-session host's project snapshot.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) enum LiveProjectApply {
+    Applied,
+    /// A local run or lifecycle transaction owns the project right now;
+    /// the caller re-applies once it clears.
+    RetryLater,
+    Rejected,
+}
+
+/// Replace the whole workbench project with a live-session host's snapshot.
+/// The join flow already confirmed closing local work and the session
+/// arbitrates write authority, so no dialog or recent-file bookkeeping runs.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn apply_live_project_snapshot(
+    state: &mut AppState,
+    bytes: &[u8],
+    host_label: &str,
+) -> LiveProjectApply {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return LiveProjectApply::Rejected;
+    };
+    let project = match crate::io::project_io::load_project_text(text, None) {
+        Ok(project) => project,
+        Err(error) => {
+            log::warn!("live session project snapshot rejected: {error}");
+            return LiveProjectApply::Rejected;
+        }
+    };
+    let transaction =
+        match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
+            Ok(transaction) => transaction,
+            Err(ProjectLifecycleError::ActiveRun | ProjectLifecycleError::TransactionInProgress) => {
+                return LiveProjectApply::RetryLater;
+            }
+            Err(error) => {
+                lifecycle_error(state, error, "Live session mirror blocked");
+                return LiveProjectApply::Rejected;
+            }
+        };
+    if apply_loaded_project_authorized(
+        state,
+        project,
+        ProjectLoadOrigin::LiveSession(host_label),
+        None,
+        transaction,
+    ) {
+        LiveProjectApply::Applied
+    } else {
+        LiveProjectApply::Rejected
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1545,6 +1642,87 @@ mod tests {
             state.workbench.workspace,
             crate::workbench::state::Workspace::Project
         );
+    }
+
+    #[test]
+    fn close_to_live_mirror_raises_the_one_shot_engine_entry_request() {
+        let mut state = AppState::default();
+        state
+            .workbench
+            .begin_project_close(ProjectCloseDestination::LiveMirror);
+
+        assert!(close_project_discard(&mut state));
+        assert!(!state.project_lifecycle.project_open);
+        assert!(!state.workbench.project_launcher_open);
+        assert_eq!(
+            state.workbench.workspace,
+            crate::workbench::state::Workspace::Project
+        );
+        assert!(state.workbench.take_live_mirror_entry());
+        assert!(!state.workbench.take_live_mirror_entry());
+    }
+
+    #[test]
+    fn live_project_snapshot_applies_wholesale_and_never_keeps_the_host_path() {
+        let mut host = AppState::default();
+        host.workspace
+            .project
+            .set_path(std::path::PathBuf::from("C:/host-only/design.rspiceproj"));
+        let snapshot = crate::workbench::lifecycle::project_lifecycle::snapshot(&host)
+            .expect("host state snapshots");
+        let text =
+            crate::io::project_io::serialize_project_file(&snapshot).expect("snapshot serializes");
+
+        let mut guest = AppState::default();
+        assert!(matches!(
+            apply_live_project_snapshot(&mut guest, text.as_bytes(), "Jaime"),
+            LiveProjectApply::Applied
+        ));
+        assert!(guest.project_lifecycle.project_open);
+        assert_eq!(guest.workspace.project.id(), host.workspace.project.id());
+        // The host's on-disk location must never become a guest save target.
+        assert!(guest.workspace.project.path.is_none());
+        assert!(
+            crate::workbench::lifecycle::project_lifecycle::canonical_native_path(&guest)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn live_project_snapshot_waits_out_a_local_run_and_rejects_garbage() {
+        let host = AppState::default();
+        let snapshot = crate::workbench::lifecycle::project_lifecycle::snapshot(&host)
+            .expect("host state snapshots");
+        let text =
+            crate::io::project_io::serialize_project_file(&snapshot).expect("snapshot serializes");
+
+        let mut guest = AppState::default();
+        guest.simulation.is_running = true;
+        assert!(matches!(
+            apply_live_project_snapshot(&mut guest, text.as_bytes(), "Jaime"),
+            LiveProjectApply::RetryLater
+        ));
+
+        guest.simulation.is_running = false;
+        assert!(matches!(
+            apply_live_project_snapshot(&mut guest, b"not a project", "Jaime"),
+            LiveProjectApply::Rejected
+        ));
+    }
+
+    #[test]
+    fn mirror_save_copy_policy_gates_every_project_persistence_path() {
+        let mut state = AppState::default();
+        state.workbench.live_write_locks.mirror = true;
+        state.workbench.live_write_locks.mirror_save_copy_allowed = false;
+
+        assert!(!save_project(&mut state));
+        assert!(!save_all(&mut state));
+        assert!(!save_project_as(&mut state));
+        assert!(matches!(
+            save_all_for_continuation(&mut state),
+            SaveRequestOutcome::Failed(_)
+        ));
     }
 
     fn project_named_with_results(path: &str) -> ProjectFile {

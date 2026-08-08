@@ -42,8 +42,16 @@ const RUN_PROGRESS_STEP: f64 = 0.01;
 const SCHEMATIC_CONTENT_TYPE: &str = "rspice.schematic-view.v1";
 /// Wire content contract of the project-owned netlist source.
 const NETLIST_CONTENT_TYPE: &str = "rspice.netlist-source.v1";
+/// Wire content contract of the whole-project snapshot.
+const PROJECT_CONTENT_TYPE: &str = "rspice.project.v1";
 /// Wire key of the project's single owned netlist document.
 const NETLIST_DOC: &str = "netlist";
+/// Wire key of the whole-project snapshot. It carries everything a mirror
+/// cannot reconstruct from per-document replaces — libraries, hierarchy,
+/// execution context — and is sent only on sync, reconnect, and structural
+/// change, never from the per-frame scan (results are stripped; guests run
+/// the mirrored design locally).
+const PROJECT_DOC: &str = "project";
 /// Wire-key prefix of schematic buffers; the remainder is the cell-view key.
 const SCHEMATIC_DOC_PREFIX: &str = "schematic/";
 
@@ -124,6 +132,14 @@ struct GuestRole {
     /// This install adopted the host's project as its mirror; until then
     /// inbound documents are tracked but never applied.
     mirroring: bool,
+    /// The host's project snapshot has applied at least once; only the
+    /// first application moves the user onto the project surface.
+    project_synced: bool,
+    /// A project snapshot that could not apply yet because a local run or
+    /// lifecycle transaction owns the project; retried every pump.
+    pending_project: Option<CompletedContent>,
+    /// Session policy: whether this mirror may be kept as a saved copy.
+    save_copy_allowed: bool,
     /// The freshest host run report, for the session status chrome.
     run_status: Option<RunStatusPayload>,
     /// The most recent lease refusal aimed at this guest: (doc, holder).
@@ -131,7 +147,7 @@ struct GuestRole {
 }
 
 impl GuestRole {
-    fn new(session_id: String) -> Self {
+    fn new(session_id: String, save_copy_allowed: bool) -> Self {
         Self {
             session_id,
             host: None,
@@ -140,6 +156,9 @@ impl GuestRole {
             mirror_docs: HashMap::new(),
             held: HashMap::new(),
             mirroring: false,
+            project_synced: false,
+            pending_project: None,
+            save_copy_allowed,
             run_status: None,
             denied: None,
         }
@@ -174,6 +193,8 @@ pub(crate) struct LiveSessionEngine {
     active_synced_version: Option<(String, u64)>,
     /// An incompatible peer build was heard once this session.
     incompatible_peer: bool,
+    /// A policy-mandated mirror teardown waits for the local run to stop.
+    mirror_discard_pending: bool,
 }
 
 impl Default for LiveSessionEngine {
@@ -187,6 +208,7 @@ impl Default for LiveSessionEngine {
             presence_sent_at: None,
             active_synced_version: None,
             incompatible_peer: false,
+            mirror_discard_pending: false,
         }
     }
 }
@@ -196,14 +218,24 @@ impl LiveSessionEngine {
     /// inbound frames, broadcast local changes, and project write locks.
     pub(crate) fn pump(&mut self, state: &mut AppState, cloud: &mut CloudAccountService) {
         self.reconcile_role(state, cloud);
+        self.settle_mirror_discard(state);
         if matches!(self.role, Role::Idle) {
+            if state.workbench.take_live_mirror_entry() {
+                // The close-to-mirror transaction outlived its session.
+                state.workbench.open_project_launcher();
+                state.push_user_message(ConsoleMessage::warning(
+                    "The live session ended before the host's project arrived.",
+                ));
+            }
             // Ports minted for a session that no longer renders are dead
             // credentials' leftovers; drop them.
             let _ = cloud.take_live_relay_port();
             return;
         }
         self.adopt_port(state, cloud);
+        self.finish_mirror_entry(state);
         self.drain_inbound(state);
+        self.flush_pending_project(state);
         self.broadcast_local_changes(state);
         self.stream_run_status(state);
         self.send_presence_heartbeat(state);
@@ -223,6 +255,13 @@ impl LiveSessionEngine {
             .get(&identity.principal_id)
             .cloned()
             .unwrap_or_else(|| "Another participant".to_owned())
+    }
+
+    /// Roster display name of the session host.
+    fn display_name_of_host(&self) -> String {
+        self.host_principal
+            .and_then(|principal| self.roster.get(&principal).cloned())
+            .unwrap_or_else(|| "The session host".to_owned())
     }
 
     /// The freshest host run report, guest-side.
@@ -253,11 +292,15 @@ impl LiveSessionEngine {
     }
 
     /// Guest affordance: ask the host for one document's write lease.
+    /// Meaningful only on an adopted mirror — a lease licenses edits to the
+    /// mirrored document, not to unrelated local work.
     pub(crate) fn request_lease(&mut self, doc: &str) {
         let Some(identity) = self.connection.as_ref().map(|c| c.identity) else {
             return;
         };
-        if matches!(self.role, Role::Guest(_)) {
+        if let Role::Guest(guest) = &self.role
+            && guest.mirroring
+        {
             self.send(&LiveMessage::Document(DocumentMessage::LeaseRequest {
                 doc: doc.to_owned(),
                 sender: identity,
@@ -287,7 +330,9 @@ impl LiveSessionEngine {
         let Some(identity) = self.connection.as_ref().map(|c| c.identity) else {
             return;
         };
-        if matches!(self.role, Role::Guest(_)) {
+        if let Role::Guest(guest) = &self.role
+            && guest.mirroring
+        {
             self.send(&LiveMessage::RunRequest(RunRequestPayload {
                 sender: identity,
                 run: RunIntent::Simulate,
@@ -295,19 +340,125 @@ impl LiveSessionEngine {
         }
     }
 
-    /// Guest lifecycle: adopt the host's incoming documents as this
-    /// install's mirror. Called by the join flow once the user confirmed
-    /// that joining replaces the open project.
-    pub(crate) fn enter_mirror(&mut self) {
-        if let Role::Guest(guest) = &mut self.role {
-            guest.mirroring = true;
-            // Ask for everything again so adoption starts complete.
-            if let Some(identity) = self.connection.as_ref().map(|c| c.identity) {
-                self.send(&LiveMessage::Document(DocumentMessage::SyncRequest {
-                    sender: identity,
-                    docs: None,
-                }));
+    /// Guest lifecycle: begin adopting the host's project as this install's
+    /// mirror. Open local work goes through the data-safe close review
+    /// first; the engine completes adoption once the close transaction
+    /// lands, so callers need no continuation of their own.
+    pub(crate) fn request_mirror_entry(&mut self, state: &mut AppState) {
+        let Role::Guest(guest) = &self.role else {
+            return;
+        };
+        if guest.mirroring {
+            return;
+        }
+        if state.project_lifecycle.project_open {
+            state.workbench.begin_project_close(
+                crate::workbench::state::ProjectCloseDestination::LiveMirror,
+            );
+            if crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state) {
+                state.dialogs.project_review_dialog.show_close_project();
+            } else if !crate::workbench::workflows::project_workflow::close_project_discard(state)
+            {
+                state.workbench.cancel_project_close();
             }
+        } else {
+            state.workbench.request_live_mirror_entry();
+        }
+    }
+
+    /// Complete mirror adoption after the close-to-mirror transaction:
+    /// from here every host document applies, starting with a full resync.
+    fn finish_mirror_entry(&mut self, state: &mut AppState) {
+        if !state.workbench.take_live_mirror_entry() {
+            return;
+        }
+        let Role::Guest(guest) = &mut self.role else {
+            return;
+        };
+        guest.mirroring = true;
+        guest.project_synced = false;
+        guest.pending_project = None;
+        guest.reassembler = ContentReassembler::default();
+        for mirror in guest.mirror_docs.values_mut() {
+            mirror.digest.clear();
+        }
+        state.push_user_message(ConsoleMessage::info(
+            "Joined the live session; the host's project opens when its snapshot arrives.",
+        ));
+        if let Some(identity) = self.connection.as_ref().map(|c| c.identity) {
+            self.send(&LiveMessage::Document(DocumentMessage::SyncRequest {
+                sender: identity,
+                docs: None,
+            }));
+        }
+    }
+
+    /// Apply the freshest stashed project snapshot; it stays stashed while
+    /// a local run or lifecycle transaction owns the project.
+    fn flush_pending_project(&mut self, state: &mut AppState) {
+        use crate::workbench::workflows::project_workflow::{
+            LiveProjectApply, apply_live_project_snapshot,
+        };
+        let host_label = self.display_name_of_host();
+        let Role::Guest(guest) = &mut self.role else {
+            return;
+        };
+        let Some(pending) = guest.pending_project.take() else {
+            return;
+        };
+        match apply_live_project_snapshot(state, &pending.bytes, &host_label) {
+            LiveProjectApply::Applied => {
+                // The snapshot replaced every document wholesale; wire
+                // digests restart so the host's next per-document
+                // broadcasts converge idempotently.
+                for mirror in guest.mirror_docs.values_mut() {
+                    mirror.digest.clear();
+                }
+                if let Some(mirror) = guest.mirror_docs.get_mut(PROJECT_DOC) {
+                    mirror.digest = pending.digest;
+                }
+                // Re-baseline held leases so snapshot content is not
+                // proposed straight back at the host.
+                let held_docs: Vec<String> = guest.held.keys().cloned().collect();
+                for doc in held_docs {
+                    let version = guest_document_version(state, &doc).unwrap_or(0);
+                    let digest = serialize_host_document(state, &doc)
+                        .map(|bytes| content_digest(&bytes))
+                        .unwrap_or_default();
+                    if let Some(held) = guest.held.get_mut(&doc) {
+                        held.seen_version = version;
+                        held.digest = digest;
+                    }
+                }
+                if !guest.project_synced {
+                    guest.project_synced = true;
+                    state
+                        .workbench
+                        .activate(crate::workbench::state::Workspace::Project);
+                }
+            }
+            LiveProjectApply::RetryLater => {
+                guest.pending_project = Some(pending);
+            }
+            LiveProjectApply::Rejected => {
+                state.push_user_message(ConsoleMessage::warning(
+                    "The host's project snapshot could not be mirrored on this build.",
+                ));
+            }
+        }
+    }
+
+    /// Finish a policy-mandated mirror teardown that had to wait for the
+    /// local run to stop.
+    fn settle_mirror_discard(&mut self, state: &mut AppState) {
+        if !self.mirror_discard_pending || state.simulation.is_running {
+            return;
+        }
+        state
+            .workbench
+            .begin_project_close(crate::workbench::state::ProjectCloseDestination::Launcher);
+        if crate::workbench::workflows::project_workflow::close_project_discard(state) {
+            self.mirror_discard_pending = false;
         }
     }
 
@@ -344,6 +495,14 @@ impl LiveSessionEngine {
             .find(|participant| participant.is_host)
             .and_then(|participant| participant.principal_id.parse().ok());
 
+        // Policy can move mid-session (the host applies a new one); the
+        // roster poll is its authority here.
+        if let Role::Guest(guest) = &mut self.role
+            && !want_host
+        {
+            guest.save_copy_allowed = summary.policy.allow_save_copy;
+        }
+
         let current = match &self.role {
             Role::Host(host) if want_host => Some(&host.session_id),
             Role::Guest(guest) if !want_host => Some(&guest.session_id),
@@ -358,12 +517,20 @@ impl LiveSessionEngine {
         self.role = if want_host {
             Role::Host(Box::new(HostRole::new(summary.session_id.clone())))
         } else {
-            Role::Guest(Box::new(GuestRole::new(summary.session_id.clone())))
+            Role::Guest(Box::new(GuestRole::new(
+                summary.session_id.clone(),
+                summary.policy.allow_save_copy,
+            )))
         };
     }
 
     fn leave_session(&mut self, state: &mut AppState) {
-        self.role = Role::Idle;
+        let previous = std::mem::replace(&mut self.role, Role::Idle);
+        if let Role::Guest(guest) = previous
+            && guest.mirroring
+        {
+            self.retire_mirror(state, guest.save_copy_allowed);
+        }
         self.connection = None;
         self.peers.clear();
         self.presence_sent_at = None;
@@ -372,6 +539,34 @@ impl LiveSessionEngine {
         // The read-only flag is this engine's to own; clearing it never
         // unlocks library or safe-mode gates, which are separate.
         state.schematic.read_only = false;
+    }
+
+    /// The session is over: keep the mirror open as an unsaved copy when
+    /// the policy allows, otherwise close it out of this install.
+    fn retire_mirror(&mut self, state: &mut AppState, save_copy_allowed: bool) {
+        if save_copy_allowed {
+            state.push_user_message(ConsoleMessage::info(
+                "The live session ended. The mirrored project stays open; save it to keep a copy.",
+            ));
+            return;
+        }
+        state.push_user_message(ConsoleMessage::info(
+            "The live session ended; its policy does not allow keeping a copy, \
+             so the mirrored project is closing.",
+        ));
+        if state.simulation.is_running {
+            if let Err(error) = state.simulation.request_abort_active_run() {
+                state.push_sim_message(ConsoleMessage::warning(error));
+            }
+            self.mirror_discard_pending = true;
+            return;
+        }
+        state
+            .workbench
+            .begin_project_close(crate::workbench::state::ProjectCloseDestination::Launcher);
+        if !crate::workbench::workflows::project_workflow::close_project_discard(state) {
+            self.mirror_discard_pending = true;
+        }
     }
 
     fn adopt_port(&mut self, state: &mut AppState, cloud: &mut CloudAccountService) {
@@ -539,7 +734,9 @@ impl LiveSessionEngine {
         };
         match message {
             DocumentMessage::LeaseRequest { doc, sender } => {
-                let reply = if !host.tracked.contains_key(&doc) {
+                // The whole-project snapshot is never leased: structural
+                // authority stays with the host.
+                let reply = if doc == PROJECT_DOC || !host.tracked.contains_key(&doc) {
                     DocumentMessage::LeaseDeny {
                         doc,
                         requester: sender,
@@ -690,6 +887,7 @@ impl LiveSessionEngine {
         if state.workspace.netlist_document.is_some() {
             current.push(NETLIST_DOC.to_owned());
         }
+        current.push(PROJECT_DOC.to_owned());
         for doc in &current {
             host.tracked.entry(doc.clone()).or_insert_with(|| TrackedDoc {
                 content_type: content_type_for(doc),
@@ -783,18 +981,19 @@ impl LiveSessionEngine {
         let Some(tracked) = host.tracked.get(doc) else {
             return;
         };
-        if only_if_changed
-            && host_document_version(state, doc) == Some(tracked.seen_version)
-        {
+        let version = host_document_version(state, doc);
+        // Documents without a cheap change counter (the whole-project
+        // snapshot) broadcast only on explicit occasions — sync responses,
+        // reconnects, structural changes — never from the per-frame scan.
+        if only_if_changed && (version.is_none() || version == Some(tracked.seen_version)) {
             return;
         }
         let Some(bytes) = serialize_host_document(state, doc) else {
             return;
         };
         let digest = content_digest(&bytes);
-        let version = host_document_version(state, doc).unwrap_or(0);
         let tracked = host.tracked.get_mut(doc).expect("present above");
-        tracked.seen_version = version;
+        tracked.seen_version = version.unwrap_or(0);
         if digest == tracked.digest && tracked.revision > 0 && only_if_changed {
             // The counter moved but the content did not (e.g. an undo that
             // restored the broadcast state); nothing to send.
@@ -830,6 +1029,10 @@ impl LiveSessionEngine {
                     || !before.iter().all(|doc| after.contains(doc));
                 if set_changed {
                     self.broadcast_manifest();
+                    // Structural changes (cells created, deleted, renamed)
+                    // resynchronize the whole project so mirrors keep
+                    // libraries and hierarchy coherent with the catalog.
+                    self.broadcast_document(state, PROJECT_DOC, false);
                 }
                 for doc in after {
                     self.broadcast_document(state, &doc, true);
@@ -1015,6 +1218,12 @@ impl LiveSessionEngine {
             // Tracked but not applied: the user has not adopted the mirror.
             return;
         }
+        if completed.doc == PROJECT_DOC {
+            // The whole-project snapshot has its own retrying applier (the
+            // pump flushes it); the digest is recorded there on success.
+            guest.pending_project = Some(completed);
+            return;
+        }
         let applied = if completed.doc == NETLIST_DOC {
             match String::from_utf8(completed.bytes.clone()) {
                 Ok(source) => {
@@ -1052,13 +1261,18 @@ impl LiveSessionEngine {
 
     /// Send this guest's edits to documents it holds leases on.
     fn guest_send_proposals(&mut self, state: &mut AppState) {
+        let held_docs: Vec<String> = match &self.role {
+            // Leases exist only on an adopted mirror; anything else here
+            // would propose unrelated local work at the host.
+            Role::Guest(guest) if guest.mirroring => guest.held.keys().cloned().collect(),
+            _ => return,
+        };
+        if held_docs.is_empty() {
+            return;
+        }
         self.sync_active_buffer(state);
         let Some(identity) = self.connection.as_ref().map(|c| c.identity) else {
             return;
-        };
-        let held_docs: Vec<String> = match &self.role {
-            Role::Guest(guest) => guest.held.keys().cloned().collect(),
-            _ => return,
         };
         for doc in held_docs {
             let Some(version) = guest_document_version(state, &doc) else {
@@ -1136,11 +1350,9 @@ impl LiveSessionEngine {
             }
             Role::Guest(guest) => {
                 locks.mirror = guest.mirroring;
+                locks.mirror_save_copy_allowed = guest.save_copy_allowed;
                 if guest.mirroring {
-                    let host_name = self
-                        .host_principal
-                        .and_then(|principal| self.roster.get(&principal).cloned())
-                        .unwrap_or_else(|| "The host".to_owned());
+                    let host_name = self.display_name_of_host();
                     for doc in guest.mirror_docs.keys() {
                         if guest.held.contains_key(doc) {
                             continue;
@@ -1194,7 +1406,9 @@ fn install_schematic_buffer(
 }
 
 fn content_type_for(doc: &str) -> &'static str {
-    if doc == NETLIST_DOC {
+    if doc == PROJECT_DOC {
+        PROJECT_CONTENT_TYPE
+    } else if doc == NETLIST_DOC {
         NETLIST_CONTENT_TYPE
     } else {
         SCHEMATIC_CONTENT_TYPE
@@ -1225,6 +1439,28 @@ fn guest_document_version(state: &AppState, doc: &str) -> Option<u64> {
 
 /// Serialize one document's current content for the wire.
 fn serialize_host_document(state: &AppState, doc: &str) -> Option<Vec<u8>> {
+    if doc == PROJECT_DOC {
+        let mut project = match crate::workbench::lifecycle::project_lifecycle::snapshot(state) {
+            Ok(project) => project,
+            Err(error) => {
+                log::warn!("live project snapshot failed: {error}");
+                return None;
+            }
+        };
+        // Result datasets are deliberately not streamed — every participant
+        // holds a full seat and runs the mirrored design locally — and the
+        // host's on-disk path is machine-local, so neither crosses the wire.
+        project.simulation_results = Default::default();
+        project.simulation_results_warning = None;
+        project.workspace.project.path = None;
+        return match crate::io::project_io::serialize_project_file(&project) {
+            Ok(text) => Some(text.into_bytes()),
+            Err(error) => {
+                log::warn!("live project snapshot failed: {error}");
+                None
+            }
+        };
+    }
     if doc == NETLIST_DOC {
         state
             .workspace
