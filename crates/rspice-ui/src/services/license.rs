@@ -80,7 +80,7 @@ const DENYLIST: &[u64] = &[];
 pub const SAMPLE_KEY: &str = "RSPICE-K1.040MW2YJEZ0NGEMZ040011TG000F6M80003G0000047MMRB9DNJJ0NV8D5T6CTB5DHJ0.12FX61MG7FWYV6CJSBQFTGHG954N0K1FE2EQ93FG33HM6R9CPEF35VT55XFX6VYZ2SJ3WW2K34P97SRS8QPPCHM474C0M3DCNW6VW30";
 
 /// Feature bitfield labels, LSB first (spec §payload).
-const FEATURE_LABELS: &[(u32, &str)] = &[
+pub(crate) const FEATURE_LABELS: &[(u32, &str)] = &[
     (1, "RF suite — HB · PSS · PNoise · PAC"),
     (2, "Python API"),
     (4, "Encrypted models"),
@@ -615,93 +615,12 @@ fn decode_stored_key(stored: &[u8]) -> std::io::Result<(String, bool)> {
 
 #[cfg(windows)]
 fn windows_dpapi_protect(plaintext: &[u8]) -> std::io::Result<Vec<u8>> {
-    use windows_sys::Win32::Security::Cryptography::{
-        CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptProtectData,
-    };
-
-    let input_len = u32::try_from(plaintext.len())
-        .map_err(|_| std::io::Error::other("license key is too large for DPAPI"))?;
-    let input = CRYPT_INTEGER_BLOB {
-        cbData: input_len,
-        pbData: plaintext.as_ptr().cast_mut(),
-    };
-    let mut output = CRYPT_INTEGER_BLOB::default();
-    let succeeded = unsafe {
-        CryptProtectData(
-            &input,
-            std::ptr::null(),
-            std::ptr::null(),
-            std::ptr::null(),
-            std::ptr::null(),
-            CRYPTPROTECT_UI_FORBIDDEN,
-            &mut output,
-        )
-    };
-    if succeeded == 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    copy_and_free_dpapi_blob(output)
+    crate::services::dpapi::protect(plaintext)
 }
 
 #[cfg(windows)]
 fn windows_dpapi_unprotect(ciphertext: &[u8]) -> std::io::Result<Vec<u8>> {
-    use windows_sys::Win32::Security::Cryptography::{
-        CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptUnprotectData,
-    };
-
-    let input_len = u32::try_from(ciphertext.len())
-        .map_err(|_| std::io::Error::other("encrypted license is too large for DPAPI"))?;
-    let input = CRYPT_INTEGER_BLOB {
-        cbData: input_len,
-        pbData: ciphertext.as_ptr().cast_mut(),
-    };
-    let mut output = CRYPT_INTEGER_BLOB::default();
-    let succeeded = unsafe {
-        CryptUnprotectData(
-            &input,
-            std::ptr::null_mut(),
-            std::ptr::null(),
-            std::ptr::null(),
-            std::ptr::null(),
-            CRYPTPROTECT_UI_FORBIDDEN,
-            &mut output,
-        )
-    };
-    if succeeded == 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    copy_and_free_dpapi_blob(output)
-}
-
-#[cfg(windows)]
-fn copy_and_free_dpapi_blob(
-    blob: windows_sys::Win32::Security::Cryptography::CRYPT_INTEGER_BLOB,
-) -> std::io::Result<Vec<u8>> {
-    use windows_sys::Win32::Foundation::LocalFree;
-
-    struct LocalBlob(*mut u8);
-    impl Drop for LocalBlob {
-        fn drop(&mut self) {
-            if !self.0.is_null() {
-                unsafe {
-                    LocalFree(self.0.cast());
-                }
-            }
-        }
-    }
-
-    let allocation = LocalBlob(blob.pbData);
-    if blob.cbData > 0 && allocation.0.is_null() {
-        return Err(std::io::Error::other(
-            "DPAPI returned a null output allocation",
-        ));
-    }
-    let bytes = if blob.cbData == 0 {
-        &[]
-    } else {
-        unsafe { std::slice::from_raw_parts(allocation.0, blob.cbData as usize) }
-    };
-    Ok(bytes.to_vec())
+    crate::services::dpapi::unprotect(ciphertext)
 }
 
 // ---------------------------------------------------------------------------

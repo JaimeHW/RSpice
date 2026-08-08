@@ -3,6 +3,9 @@
 //! Backend services for the RSpice UI application.
 //! Contains specialized processing and analysis utilities.
 
+pub(crate) mod cloud_account;
+#[cfg(windows)]
+pub(crate) mod dpapi;
 pub(crate) mod drc;
 pub(crate) mod license;
 pub(crate) mod safety;

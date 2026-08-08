@@ -449,6 +449,7 @@ mod tests {
             last_window_title: String::new(),
             symbol_library: None,
             simulation_controller: crate::simulation::SimulationController::new(),
+            cloud_account: crate::services::cloud_account::CloudAccountService::unconfigured(),
             file_workflow_io: Box::new(file_io),
             export_workflow_io: Box::new(TestExportWorkflowIo),
         }

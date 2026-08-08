@@ -128,6 +128,16 @@ eframe = { version = "0.35.0", default-features = false, features = ["wgpu", "pe
 env_logger = "0.11"
 tokio = { version = "1", features = ["sync", "macros", "time", "rt-multi-thread"] }
 
+# Cloud account boundary: the typed RSpice Cloud client, the OIDC token
+# transport the client crate deliberately does not own, and RFC 3339 stamps
+# for session freshness. Native-only until the hosted deployment carries the
+# browser sign-in callback page.
+getrandom = { workspace = true }
+reqwest = { workspace = true }
+rspice-cloud-client = { workspace = true }
+time = { workspace = true }
+url = { workspace = true }
+
 [target.'cfg(all(not(target_arch = "wasm32"), target_arch = "x86_64"))'.dependencies]
 # Default features keep the desktop solver's parallel/SIMD paths. The native
 # Verilog-A JIT is selected only on the architecture its encoder targets.

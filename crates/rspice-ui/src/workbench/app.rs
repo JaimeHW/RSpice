@@ -238,6 +238,8 @@ pub struct RSpiceApp {
     pub(crate) symbol_library: Option<crate::schematic::symbols::SymbolLibrary>,
     /// Simulation controller for running analyses
     pub(crate) simulation_controller: crate::simulation::SimulationController,
+    /// Cloud account session boundary (sign-in, entitlements, license leases).
+    pub(crate) cloud_account: crate::services::cloud_account::CloudAccountService,
     /// File workflow IO backend (native in production, injectable in tests).
     pub(crate) file_workflow_io:
         Box<dyn crate::workbench::workflows::file_workflow::FileWorkflowIo>,
@@ -300,6 +302,7 @@ impl RSpiceApp {
             last_window_title: String::new(),
             symbol_library: None,
             simulation_controller: crate::simulation::SimulationController::new(),
+            cloud_account: crate::services::cloud_account::CloudAccountService::unconfigured(),
             file_workflow_io: Box::new(
                 crate::workbench::workflows::file_workflow::NativeFileWorkflowIo,
             ),
@@ -391,6 +394,9 @@ impl RSpiceApp {
             last_window_title: String::new(),
             symbol_library,
             simulation_controller: crate::simulation::SimulationController::new(),
+            cloud_account: crate::services::cloud_account::CloudAccountService::new(Some(
+                cc.egui_ctx.clone(),
+            )),
             file_workflow_io: Box::new(
                 crate::workbench::workflows::file_workflow::NativeFileWorkflowIo,
             ),
@@ -1038,6 +1044,10 @@ impl eframe::App for RSpiceApp {
             });
         }
         self.prepare_frame(&ctx);
+        self.cloud_account.poll();
+        if let Some(url) = self.cloud_account.take_browser_request() {
+            ctx.open_url(egui::OpenUrl::new_tab(url));
+        }
         if let Some(text) = self.state.ui.clipboard_text_request.take() {
             ctx.copy_text(text);
         }
