@@ -7,7 +7,11 @@
 //! and allows updates to values only, avoiding O(N log N) rebuild.
 
 #![allow(clippy::needless_range_loop)]
-use crate::{RealSolverBackend, SolverError, SolverOptions, Value};
+use crate::{
+    CircuitLuOrientation, CircuitLuRobustness, CircuitLuRowScaling, DivisionPolicy,
+    FactorizationRequest, NumericFactorizationPolicy, RealSolverBackend, SolverError,
+    SolverOptions, Value,
+};
 use faer::dyn_stack::{MemBuffer, MemStack};
 use faer::sparse::linalg::LuError;
 use faer::sparse::linalg::lu as sparse_lu;
@@ -251,6 +255,10 @@ pub struct StaticMatrix {
     /// Comparing one compact CSC value array is far cheaper than replaying a
     /// numeric factorization for constant-coefficient timesteps.
     klu_factored_values: Vec<Value>,
+    /// Numeric values in CSC(A^T) order for the Amesos row-CRS compatibility
+    /// path. The immutable structure and source-value map live in
+    /// `residual_layout`; this vector is reused without per-solve allocation.
+    klu_oriented_values: Vec<Value>,
     /// Auto-policy decision retained for the frozen sparsity pattern after a
     /// measured high-fill Circuit LU factorization.
     klu_auto_rejected: bool,
@@ -428,6 +436,127 @@ struct BackwardError {
 enum RealSolveOp {
     Normal,
     Transpose,
+}
+
+impl RealSolveOp {
+    #[inline]
+    fn for_circuit_lu(self, orientation: CircuitLuOrientation) -> Self {
+        match orientation {
+            CircuitLuOrientation::Native => self,
+            CircuitLuOrientation::AmesosRowCrs => match self {
+                Self::Normal => Self::Transpose,
+                Self::Transpose => Self::Normal,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KluNumericAction {
+    Reuse,
+    Refactor,
+    Factor,
+}
+
+#[inline]
+fn values_bitwise_equal(left: &[Value], right: &[Value]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(&left, &right)| left.to_bits() == right.to_bits())
+}
+
+fn klu_numeric_action(
+    backend: &crate::KluSolver,
+    values_current: bool,
+    policy: NumericFactorizationPolicy,
+    request: FactorizationRequest,
+) -> Result<KluNumericAction, SolverError> {
+    if request == FactorizationRequest::ReuseExisting {
+        return if backend.is_factored() {
+            Ok(KluNumericAction::Reuse)
+        } else {
+            Err(SolverError::InvalidCircuit(
+                "circuit-LU factor reuse was requested before numeric factorization".to_string(),
+            ))
+        };
+    }
+
+    if request == FactorizationRequest::Automatic
+        && policy == NumericFactorizationPolicy::ReusePivotSequence
+        && values_current
+        && backend.is_factored()
+    {
+        return Ok(KluNumericAction::Reuse);
+    }
+
+    Ok(match policy {
+        NumericFactorizationPolicy::FreshPivotSelection => KluNumericAction::Factor,
+        NumericFactorizationPolicy::ReusePivotSequence => KluNumericAction::Refactor,
+    })
+}
+
+fn configure_klu_backend(
+    backend: &mut crate::KluSolver,
+    options: SolverOptions,
+) -> Result<(), SolverError> {
+    backend.set_direct_factorization_division(
+        options.factorization_division == DivisionPolicy::DirectDivision,
+    );
+    backend.set_direct_diagonal_division(options.diagonal_solve == DivisionPolicy::DirectDivision);
+    backend.set_row_scaling_enabled(
+        options.circuit_lu_row_scaling == CircuitLuRowScaling::AdaptiveExtremeRows,
+    );
+    backend
+        .set_growth_retry_enabled(options.circuit_lu_robustness == CircuitLuRobustness::Enhanced);
+    backend.set_pivot_tolerance(options.pivot_tolerance)?;
+    backend.set_absolute_pivot_tolerance(options.absolute_pivot_tolerance)
+}
+
+fn prepare_klu_input<'a>(
+    orientation: CircuitLuOrientation,
+    csc: &'a SymbolicSparseColMat<usize>,
+    residual_layout: &'a ResidualLayout,
+    values: &'a [Value],
+    oriented_values: &'a mut Vec<Value>,
+    refresh_values: bool,
+) -> (&'a [usize], &'a [usize], &'a [Value]) {
+    match orientation {
+        CircuitLuOrientation::Native => (csc.col_ptr(), csc.row_idx(), values),
+        CircuitLuOrientation::AmesosRowCrs => {
+            if refresh_values || oriented_values.len() != values.len() {
+                oriented_values.resize(values.len(), 0.0);
+                for (target, &source) in oriented_values.iter_mut().zip(&residual_layout.csc_idx) {
+                    *target = values[source];
+                }
+            }
+            (
+                &residual_layout.row_ptr,
+                &residual_layout.col_idx,
+                oriented_values,
+            )
+        }
+    }
+}
+
+fn apply_klu_numeric_action(
+    backend: &mut crate::KluSolver,
+    values: &[Value],
+    action: KluNumericAction,
+    robustness: CircuitLuRobustness,
+) -> Result<(), SolverError> {
+    match action {
+        KluNumericAction::Reuse => Ok(()),
+        KluNumericAction::Factor => backend.factor(values),
+        KluNumericAction::Refactor => match backend.refactor(values) {
+            Ok(()) => Ok(()),
+            Err(SolverError::PivotGrowth) if robustness == CircuitLuRobustness::Enhanced => {
+                backend.factor(values)
+            }
+            Err(error) => Err(error),
+        },
+    }
 }
 
 impl BackwardError {
@@ -895,6 +1024,7 @@ impl StaticMatrix {
             lu: None,
             klu: None,
             klu_factored_values: Vec::new(),
+            klu_oriented_values: Vec::new(),
             klu_auto_rejected: self.klu_auto_rejected,
             solver_options: self.solver_options,
             probe_values: None,
@@ -1059,6 +1189,7 @@ impl StaticMatrix {
             lu: None,
             klu: None,
             klu_factored_values: Vec::new(),
+            klu_oriented_values: Vec::new(),
             klu_auto_rejected: false,
             solver_options,
             probe_values: None,
@@ -1089,6 +1220,12 @@ impl StaticMatrix {
             // Circuit-LU request from being honored.
             self.klu_auto_rejected = false;
             self.klu_factored_values.clear();
+            if self.solver_options.circuit_lu_orientation != solver_options.circuit_lu_orientation {
+                if let Some(backend) = self.klu.as_mut() {
+                    backend.invalidate_analysis();
+                }
+                self.klu_oriented_values.clear();
+            }
         }
         self.solver_options = solver_options;
     }
@@ -1470,8 +1607,7 @@ impl StaticMatrix {
             let mut compensation = 0.0;
             let mut denominator = rhs[row].abs();
             let mut nonzeros = 0usize;
-            for position in
-                self.residual_layout.row_ptr[row]..self.residual_layout.row_ptr[row + 1]
+            for position in self.residual_layout.row_ptr[row]..self.residual_layout.row_ptr[row + 1]
             {
                 let value = self.values[self.residual_layout.csc_idx[position]];
                 let x = solution[self.residual_layout.col_idx[position]];
@@ -1487,8 +1623,7 @@ impl StaticMatrix {
                 let product_lo = (-value).mul_add(x, -product_hi);
                 let sum = residual + product_hi;
                 let virtual_addend = sum - residual;
-                let sum_error =
-                    (residual - (sum - virtual_addend)) + (product_hi - virtual_addend);
+                let sum_error = (residual - (sum - virtual_addend)) + (product_hi - virtual_addend);
                 let tail = compensation + product_lo + sum_error;
                 let refined = sum + tail;
                 compensation = tail - (refined - sum);
@@ -1496,8 +1631,7 @@ impl StaticMatrix {
                 denominator = (denominator + magnitude).min(Value::MAX);
             }
             residual += compensation;
-            let safe_denominator =
-                (nonzeros.saturating_add(1) as Value) * Value::MIN_POSITIVE;
+            let safe_denominator = (nonzeros.saturating_add(1) as Value) * Value::MIN_POSITIVE;
             let row_error = residual.abs() / denominator.max(safe_denominator);
             let ratio = row_error / backward_error_tolerance(nonzeros);
             if !ratio.is_finite() {
@@ -1639,6 +1773,16 @@ impl StaticMatrix {
         rhs: &[Value],
         solution: &mut Vec<Value>,
     ) -> Result<(), SolverError> {
+        self.solve_transpose_into_with_factorization(rhs, solution, FactorizationRequest::Automatic)
+    }
+
+    /// Solve `A^T x = b` with an explicit numeric-factor lifecycle request.
+    pub fn solve_transpose_into_with_factorization(
+        &mut self,
+        rhs: &[Value],
+        solution: &mut Vec<Value>,
+        factorization: FactorizationRequest,
+    ) -> Result<(), SolverError> {
         let n = self.nrows;
         self.check_stamping_error()?;
         if n != rhs.len() || self.ncols != rhs.len() {
@@ -1649,11 +1793,17 @@ impl StaticMatrix {
                 rhs.len()
             )));
         }
-        if self.solver_options.real_backend != RealSolverBackend::Faer
-            && !self.klu_auto_rejected
-            && self.try_solve_klu_operation_into(rhs, solution, RealSolveOp::Transpose)
-        {
-            return Ok(());
+        if self.solver_options.real_backend != RealSolverBackend::Faer && !self.klu_auto_rejected {
+            match self.try_solve_klu_operation_into(
+                rhs,
+                solution,
+                RealSolveOp::Transpose,
+                factorization,
+            ) {
+                Ok(true) => return Ok(()),
+                Ok(false) => {}
+                Err(error) => return Err(error),
+            }
         }
         self.solve_faer_operation_into(rhs, solution, RealSolveOp::Transpose)
     }
@@ -1667,7 +1817,24 @@ impl StaticMatrix {
         rhs_count: usize,
         solution: &mut Vec<Value>,
     ) -> Result<(), SolverError> {
-        self.solve_many_operation_into(rhs, rhs_count, solution, RealSolveOp::Normal)
+        self.solve_many_into_with_factorization(
+            rhs,
+            rhs_count,
+            solution,
+            FactorizationRequest::Automatic,
+        )
+    }
+
+    /// Solve multiple real systems with an explicit numeric-factor lifecycle
+    /// request shared by the entire right-hand-side block.
+    pub fn solve_many_into_with_factorization(
+        &mut self,
+        rhs: &[Value],
+        rhs_count: usize,
+        solution: &mut Vec<Value>,
+        factorization: FactorizationRequest,
+    ) -> Result<(), SolverError> {
+        self.solve_many_operation_into(rhs, rhs_count, solution, RealSolveOp::Normal, factorization)
     }
 
     /// Solve multiple `A^T X = B` systems in one factorization and batched
@@ -1678,7 +1845,30 @@ impl StaticMatrix {
         rhs_count: usize,
         solution: &mut Vec<Value>,
     ) -> Result<(), SolverError> {
-        self.solve_many_operation_into(rhs, rhs_count, solution, RealSolveOp::Transpose)
+        self.solve_many_transpose_into_with_factorization(
+            rhs,
+            rhs_count,
+            solution,
+            FactorizationRequest::Automatic,
+        )
+    }
+
+    /// Solve multiple transposed systems with an explicit numeric-factor
+    /// lifecycle request shared by the entire right-hand-side block.
+    pub fn solve_many_transpose_into_with_factorization(
+        &mut self,
+        rhs: &[Value],
+        rhs_count: usize,
+        solution: &mut Vec<Value>,
+        factorization: FactorizationRequest,
+    ) -> Result<(), SolverError> {
+        self.solve_many_operation_into(
+            rhs,
+            rhs_count,
+            solution,
+            RealSolveOp::Transpose,
+            factorization,
+        )
     }
 
     fn solve_many_operation_into(
@@ -1687,6 +1877,7 @@ impl StaticMatrix {
         rhs_count: usize,
         solution: &mut Vec<Value>,
         operation: RealSolveOp,
+        factorization: FactorizationRequest,
     ) -> Result<(), SolverError> {
         self.check_stamping_error()?;
         let n = self.nrows;
@@ -1714,102 +1905,124 @@ impl StaticMatrix {
         }
 
         if self.solver_options.real_backend != RealSolverBackend::Faer && !self.klu_auto_rejected {
-            let klu_accepted = {
-                let Self {
-                    csc,
-                    residual_layout,
-                    values,
-                    klu,
-                    klu_factored_values,
-                    klu_auto_rejected,
-                    solver_options,
-                    residual_scratch,
-                    residual_gross_scratch,
-                    residual_compensation_scratch,
-                    residual_row_nnz_scratch,
-                    ..
-                } = self;
-                let backend = klu.get_or_insert_with(crate::KluSolver::new);
-                if backend
-                    .set_pivot_tolerance(solver_options.pivot_tolerance)
-                    .and_then(|()| {
-                        backend
-                            .set_absolute_pivot_tolerance(solver_options.absolute_pivot_tolerance)
-                    })
-                    .is_err()
-                {
-                    return Err(SolverError::InvalidCircuit(
-                        "invalid Circuit-LU pivot tolerance".to_string(),
-                    ));
-                }
-                let analyzed = backend.is_analyzed_for(n)
-                    || backend.analyze(n, csc.col_ptr(), csc.row_idx()).is_ok();
-                let values_current = klu_factored_values.as_slice() == values.as_slice();
-                let factored = analyzed
-                    && (values_current
-                        || match backend.refactor(values) {
-                            Ok(()) => true,
-                            Err(SolverError::PivotGrowth) => backend.factor(values).is_ok(),
-                            Err(_) => false,
-                        });
-                if !factored {
-                    // A numeric failure belongs to this changing Jacobian,
-                    // not to the frozen sparsity pattern. Auto must retry
-                    // Circuit LU after faer's per-solve fallback; only the
-                    // measured fill policy below is a persistent rejection.
-                    klu_factored_values.clear();
-                    false
-                } else {
-                    if !values_current {
-                        klu_factored_values.resize(values.len(), 0.0);
-                        klu_factored_values.copy_from_slice(values);
-                    }
-                    let excessive_fill = if solver_options.real_backend == RealSolverBackend::Auto {
-                        let (l_nnz, u_nnz) = backend.factor_nnz();
-                        auto_rejects_circuit_lu_fill(n, values.len(), l_nnz, u_nnz)
-                    } else {
-                        false
-                    };
-                    if excessive_fill {
-                        *klu_auto_rejected = true;
-                        backend.discard_numeric_factorization();
-                        klu_factored_values.clear();
-                        false
-                    } else if match operation {
-                        RealSolveOp::Normal => backend.solve_many(rhs, rhs_count, solution),
-                        RealSolveOp::Transpose => {
-                            backend.solve_many_transpose(rhs, rhs_count, solution)
-                        }
-                    }
-                    .is_err()
-                    {
-                        false
-                    } else {
-                        let mut accepted = true;
-                        for rhs_index in 0..rhs_count {
-                            let error = componentwise_backward_error_with_layout(
-                                csc,
-                                residual_layout,
-                                values,
-                                &solution[rhs_index * n..(rhs_index + 1) * n],
-                                &rhs[rhs_index * n..(rhs_index + 1) * n],
-                                residual_scratch,
-                                residual_gross_scratch,
-                                residual_compensation_scratch,
-                                residual_row_nnz_scratch,
-                                operation,
-                            );
-                            accepted &= error.is_ok_and(BackwardError::accepted);
-                        }
-                        accepted
-                    }
-                }
-            };
-            if klu_accepted {
-                return Ok(());
+            match self.try_solve_many_klu_operation_into(
+                rhs,
+                rhs_count,
+                solution,
+                operation,
+                factorization,
+            ) {
+                Ok(true) => return Ok(()),
+                Ok(false) => {}
+                Err(error) => return Err(error),
             }
         }
         self.solve_many_faer_operation_into(rhs, rhs_count, solution, operation)
+    }
+
+    fn try_solve_many_klu_operation_into(
+        &mut self,
+        rhs: &[Value],
+        rhs_count: usize,
+        solution: &mut Vec<Value>,
+        operation: RealSolveOp,
+        factorization: FactorizationRequest,
+    ) -> Result<bool, SolverError> {
+        let Self {
+            nrows,
+            csc,
+            residual_layout,
+            values,
+            klu,
+            klu_factored_values,
+            klu_oriented_values,
+            klu_auto_rejected,
+            solver_options,
+            residual_scratch,
+            residual_gross_scratch,
+            residual_compensation_scratch,
+            residual_row_nnz_scratch,
+            ..
+        } = self;
+        let n = *nrows;
+        let faithful = solver_options.circuit_lu_robustness == CircuitLuRobustness::BackendFaithful;
+        let backend = klu.get_or_insert_with(crate::KluSolver::new);
+        if let Err(error) = configure_klu_backend(backend, *solver_options) {
+            return if faithful { Err(error) } else { Ok(false) };
+        }
+        let values_current = values_bitwise_equal(klu_factored_values, values);
+        let action = klu_numeric_action(
+            backend,
+            values_current,
+            solver_options.numeric_factorization,
+            factorization,
+        )?;
+        let (col_ptr, row_idx, factor_values) = prepare_klu_input(
+            solver_options.circuit_lu_orientation,
+            csc,
+            residual_layout,
+            values,
+            klu_oriented_values,
+            action != KluNumericAction::Reuse,
+        );
+        if !backend.is_analyzed_for(n)
+            && let Err(error) = backend.analyze(n, col_ptr, row_idx)
+        {
+            klu_factored_values.clear();
+            return if faithful { Err(error) } else { Ok(false) };
+        }
+        if let Err(error) = apply_klu_numeric_action(
+            backend,
+            factor_values,
+            action,
+            solver_options.circuit_lu_robustness,
+        ) {
+            klu_factored_values.clear();
+            return if faithful { Err(error) } else { Ok(false) };
+        }
+        if action != KluNumericAction::Reuse && !values_current {
+            klu_factored_values.resize(values.len(), 0.0);
+            klu_factored_values.copy_from_slice(values);
+        }
+        if solver_options.real_backend == RealSolverBackend::Auto {
+            let (l_nnz, u_nnz) = backend.factor_nnz();
+            if auto_rejects_circuit_lu_fill(n, values.len(), l_nnz, u_nnz) {
+                *klu_auto_rejected = true;
+                backend.discard_numeric_factorization();
+                klu_factored_values.clear();
+                return Ok(false);
+            }
+        }
+
+        let backend_operation = operation.for_circuit_lu(solver_options.circuit_lu_orientation);
+        let solve_result = match backend_operation {
+            RealSolveOp::Normal => backend.solve_many(rhs, rhs_count, solution),
+            RealSolveOp::Transpose => backend.solve_many_transpose(rhs, rhs_count, solution),
+        };
+        if let Err(error) = solve_result {
+            return if faithful { Err(error) } else { Ok(false) };
+        }
+        if faithful {
+            return Ok(true);
+        }
+        for rhs_index in 0..rhs_count {
+            let error = componentwise_backward_error_with_layout(
+                csc,
+                residual_layout,
+                values,
+                &solution[rhs_index * n..(rhs_index + 1) * n],
+                &rhs[rhs_index * n..(rhs_index + 1) * n],
+                residual_scratch,
+                residual_gross_scratch,
+                residual_compensation_scratch,
+                residual_row_nnz_scratch,
+                operation,
+            );
+            if !error.is_ok_and(BackwardError::accepted) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     fn solve_many_faer_operation_into(
@@ -1971,6 +2184,16 @@ impl StaticMatrix {
         rhs: &[Value],
         solution: &mut Vec<Value>,
     ) -> Result<(), SolverError> {
+        self.solve_into_with_factorization(rhs, solution, FactorizationRequest::Automatic)
+    }
+
+    /// Solve `A*x=b` with an explicit numeric-factor lifecycle request.
+    pub fn solve_into_with_factorization(
+        &mut self,
+        rhs: &[Value],
+        solution: &mut Vec<Value>,
+        factorization: FactorizationRequest,
+    ) -> Result<(), SolverError> {
         let n = self.nrows;
         self.check_stamping_error()?;
 
@@ -1989,15 +2212,23 @@ impl StaticMatrix {
             )));
         }
 
-        if self.solver_options.real_backend != RealSolverBackend::Faer
-            && !self.klu_auto_rejected
-            && self.try_solve_klu_into(rhs, solution)
-        {
-            return if solution.iter().all(|value| value.is_finite()) {
-                Ok(())
-            } else {
-                Err(SolverError::SingularMatrix)
-            };
+        if self.solver_options.real_backend != RealSolverBackend::Faer && !self.klu_auto_rejected {
+            match self.try_solve_klu_operation_into(
+                rhs,
+                solution,
+                RealSolveOp::Normal,
+                factorization,
+            ) {
+                Ok(true) => {
+                    return if solution.iter().all(|value| value.is_finite()) {
+                        Ok(())
+                    } else {
+                        Err(SolverError::SingularMatrix)
+                    };
+                }
+                Ok(false) => {}
+                Err(error) => return Err(error),
+            }
         }
 
         self.solve_faer_into(rhs, solution)
@@ -2262,13 +2493,16 @@ impl StaticMatrix {
         ))
     }
 
-    /// Default KLU-class real solve: values-only
-    /// refactorization over the frozen pattern with a stored pivot
-    /// sequence; full re-pivoting only on a growth alarm. Returns `false`
-    /// on any backend failure so the caller falls through to faer —
-    /// backend fallback can degrade performance but never a result.
+    /// Default KLU-class real solve used by focused backend tests.
+    #[cfg(test)]
     fn try_solve_klu_into(&mut self, rhs: &[Value], solution: &mut Vec<Value>) -> bool {
-        self.try_solve_klu_operation_into(rhs, solution, RealSolveOp::Normal)
+        self.try_solve_klu_operation_into(
+            rhs,
+            solution,
+            RealSolveOp::Normal,
+            FactorizationRequest::Automatic,
+        )
+        .is_ok_and(|accepted| accepted)
     }
 
     fn try_solve_klu_operation_into(
@@ -2276,7 +2510,8 @@ impl StaticMatrix {
         rhs: &[Value],
         solution: &mut Vec<Value>,
         operation: RealSolveOp,
-    ) -> bool {
+        factorization: FactorizationRequest,
+    ) -> Result<bool, SolverError> {
         let Self {
             nrows,
             csc,
@@ -2284,6 +2519,7 @@ impl StaticMatrix {
             values,
             klu,
             klu_factored_values,
+            klu_oriented_values,
             klu_auto_rejected,
             solver_options,
             residual_scratch,
@@ -2294,42 +2530,54 @@ impl StaticMatrix {
             ..
         } = self;
         let n = *nrows;
-        let col_ptr = csc.col_ptr();
-        let row_idx = csc.row_idx();
+        let faithful = solver_options.circuit_lu_robustness == CircuitLuRobustness::BackendFaithful;
 
         let backend = klu.get_or_insert_with(crate::KluSolver::new);
-        if backend
-            .set_pivot_tolerance(solver_options.pivot_tolerance)
-            .and_then(|()| {
-                backend.set_absolute_pivot_tolerance(solver_options.absolute_pivot_tolerance)
-            })
-            .is_err()
+        if let Err(error) = configure_klu_backend(backend, *solver_options) {
+            return if faithful { Err(error) } else { Ok(false) };
+        }
+        let values_current = values_bitwise_equal(klu_factored_values, values);
+        let action = klu_numeric_action(
+            backend,
+            values_current,
+            solver_options.numeric_factorization,
+            factorization,
+        )?;
+        let (col_ptr, row_idx, factor_values) = prepare_klu_input(
+            solver_options.circuit_lu_orientation,
+            csc,
+            residual_layout,
+            values,
+            klu_oriented_values,
+            action != KluNumericAction::Reuse,
+        );
+        if !backend.is_analyzed_for(n)
+            && let Err(error) = backend.analyze(n, col_ptr, row_idx)
         {
-            return false;
+            klu_factored_values.clear();
+            return if faithful { Err(error) } else { Ok(false) };
         }
-        if !backend.is_analyzed_for(n) && backend.analyze(n, col_ptr, row_idx).is_err() {
-            return false;
-        }
-        let values_current = klu_factored_values.as_slice() == values.as_slice();
-        let factored = values_current
-            || match backend.refactor(values) {
-                Ok(()) => true,
-                Err(SolverError::PivotGrowth) => backend.factor(values).is_ok(),
-                Err(_) => false,
-            };
-        if !factored {
+        if let Err(error) = apply_klu_numeric_action(
+            backend,
+            factor_values,
+            action,
+            solver_options.circuit_lu_robustness,
+        ) {
             // A numeric failure belongs to this changing Jacobian, not to the
             // frozen sparsity pattern. Auto must retry Circuit LU after
             // faer's per-solve fallback; only the measured fill policy below
             // is a persistent rejection.
             klu_factored_values.clear();
+            if faithful {
+                return Err(error);
+            }
             static FALLBACK_LOGGED: std::sync::Once = std::sync::Once::new();
             FALLBACK_LOGGED.call_once(|| {
                 log::warn!("klu backend could not factor this system; using faer fallback");
             });
-            return false;
+            return Ok(false);
         }
-        if !values_current {
+        if action != KluNumericAction::Reuse && !values_current {
             klu_factored_values.resize(values.len(), 0.0);
             klu_factored_values.copy_from_slice(values);
         }
@@ -2348,15 +2596,19 @@ impl StaticMatrix {
                     factor_nnz,
                     values.len()
                 );
-                return false;
+                return Ok(false);
             }
         }
-        let solve_result = match operation {
+        let backend_operation = operation.for_circuit_lu(solver_options.circuit_lu_orientation);
+        let solve_result = match backend_operation {
             RealSolveOp::Normal => backend.solve(rhs, solution),
             RealSolveOp::Transpose => backend.solve_transpose(rhs, solution),
         };
-        if solve_result.is_err() {
-            return false;
+        if let Err(error) = solve_result {
+            return if faithful { Err(error) } else { Ok(false) };
+        }
+        if faithful {
+            return Ok(true);
         }
         let mut backward_error = match componentwise_backward_error_with_layout(
             csc,
@@ -2371,10 +2623,10 @@ impl StaticMatrix {
             operation,
         ) {
             Ok(error) => error,
-            Err(_) => return false,
+            Err(_) => return Ok(false),
         };
         if backward_error.accepted() {
-            return true;
+            return Ok(true);
         }
 
         // KLU's unscaled factors are substantially faster on the ordinary
@@ -2387,19 +2639,19 @@ impl StaticMatrix {
         const MAX_KLU_REFINEMENTS: usize = 5;
         const MIN_IMPROVEMENT_FACTOR: Value = 0.5;
         for _ in 0..MAX_KLU_REFINEMENTS {
-            let correction_result = match operation {
+            let correction_result = match backend_operation {
                 RealSolveOp::Normal => backend.solve(residual_scratch, klu_correction_scratch),
                 RealSolveOp::Transpose => {
                     backend.solve_transpose(residual_scratch, klu_correction_scratch)
                 }
             };
             if correction_result.is_err() {
-                return false;
+                return Ok(false);
             }
             for (value, &delta) in solution.iter_mut().zip(klu_correction_scratch.iter()) {
                 let refined = *value + delta;
                 if !delta.is_finite() || !refined.is_finite() {
-                    return false;
+                    return Ok(false);
                 }
                 *value = refined;
             }
@@ -2416,10 +2668,10 @@ impl StaticMatrix {
                 operation,
             ) {
                 Ok(error) => error,
-                Err(_) => return false,
+                Err(_) => return Ok(false),
             };
             if refined_error.accepted() {
-                return true;
+                return Ok(true);
             }
             if refined_error.acceptance_ratio
                 >= backward_error.acceptance_ratio * MIN_IMPROVEMENT_FACTOR
@@ -2428,7 +2680,7 @@ impl StaticMatrix {
             }
             backward_error = refined_error;
         }
-        false
+        Ok(false)
     }
 
     /// Solve Ax = b via dense Gaussian elimination.
@@ -4399,6 +4651,251 @@ mod tests {
         )
         .unwrap();
         assert!(backward_error.accepted());
+    }
+
+    fn amesos_klu_options() -> SolverOptions {
+        SolverOptions {
+            real_backend: RealSolverBackend::Klu,
+            numeric_factorization: NumericFactorizationPolicy::FreshPivotSelection,
+            factorization_division: DivisionPolicy::DirectDivision,
+            diagonal_solve: DivisionPolicy::DirectDivision,
+            circuit_lu_orientation: CircuitLuOrientation::AmesosRowCrs,
+            circuit_lu_row_scaling: CircuitLuRowScaling::Disabled,
+            circuit_lu_robustness: CircuitLuRobustness::BackendFaithful,
+            ..SolverOptions::default()
+        }
+    }
+
+    #[test]
+    fn amesos_row_crs_orientation_matches_transposed_factor_and_inverted_solves() {
+        // Nonsymmetric in both structure and values. Amesos_Klu presents
+        // Epetra's row CRS arrays to KLU as CSC, so the numeric object is for
+        // A^T and an ordinary A solve uses KLU's transpose solve.
+        let triplets = [
+            (0, 0, 3.0),
+            (1, 0, 5.0),
+            (0, 1, 1.0),
+            (1, 1, 2.0),
+            (1, 2, 7.0),
+            (2, 2, 11.0),
+        ];
+        let rhs = [13.0, 17.0, 19.0];
+        let mut matrix =
+            StaticMatrix::from_triplets_with_options(3, 3, &triplets, amesos_klu_options())
+                .expect("build Amesos-orientation probe");
+
+        let transpose_col_ptr = matrix.residual_layout.row_ptr.clone();
+        let transpose_row_idx = matrix.residual_layout.col_idx.clone();
+        let transpose_values = matrix
+            .residual_layout
+            .csc_idx
+            .iter()
+            .map(|&source| matrix.values[source])
+            .collect::<Vec<_>>();
+        let mut reference = crate::KluSolver::new();
+        reference.set_direct_factorization_division(true);
+        reference.set_direct_diagonal_division(true);
+        reference.set_row_scaling_enabled(false);
+        reference.set_growth_retry_enabled(false);
+        reference
+            .analyze(3, &transpose_col_ptr, &transpose_row_idx)
+            .expect("analyze explicit A^T reference");
+        reference
+            .factor(&transpose_values)
+            .expect("factor explicit A^T reference");
+
+        let mut expected_normal = Vec::new();
+        reference
+            .solve_transpose(&rhs, &mut expected_normal)
+            .expect("reference A solve through factors of A^T");
+        let mut actual_normal = Vec::new();
+        matrix
+            .solve_into(&rhs, &mut actual_normal)
+            .expect("Amesos-oriented normal solve");
+        assert_eq!(
+            actual_normal
+                .iter()
+                .map(|v| v.to_bits())
+                .collect::<Vec<_>>(),
+            expected_normal
+                .iter()
+                .map(|v| v.to_bits())
+                .collect::<Vec<_>>()
+        );
+
+        let mut expected_transpose = Vec::new();
+        reference
+            .solve(&rhs, &mut expected_transpose)
+            .expect("reference transpose solve through factors of A^T");
+        let mut actual_transpose = Vec::new();
+        matrix
+            .solve_transpose_into_with_factorization(
+                &rhs,
+                &mut actual_transpose,
+                FactorizationRequest::ReuseExisting,
+            )
+            .expect("Amesos-oriented transpose solve");
+        assert_eq!(
+            actual_transpose
+                .iter()
+                .map(|v| v.to_bits())
+                .collect::<Vec<_>>(),
+            expected_transpose
+                .iter()
+                .map(|v| v.to_bits())
+                .collect::<Vec<_>>()
+        );
+
+        let batch_rhs = [13.0, 17.0, 19.0, 5.0, 23.0, 29.0];
+        let mut expected_batch = Vec::new();
+        reference
+            .solve_many_transpose(&batch_rhs, 2, &mut expected_batch)
+            .expect("reference batched A solve through factors of A^T");
+        let mut actual_batch = Vec::new();
+        matrix
+            .solve_many_into_with_factorization(
+                &batch_rhs,
+                2,
+                &mut actual_batch,
+                FactorizationRequest::ReuseExisting,
+            )
+            .expect("Amesos-oriented batched normal solve");
+        assert_eq!(
+            actual_batch.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            expected_batch
+                .iter()
+                .map(|v| v.to_bits())
+                .collect::<Vec<_>>()
+        );
+
+        let mut native_options = amesos_klu_options();
+        native_options.circuit_lu_orientation = CircuitLuOrientation::Native;
+        let mut native =
+            StaticMatrix::from_triplets_with_options(3, 3, &triplets, native_options).unwrap();
+        let mut native_solution = Vec::new();
+        native.solve_into(&rhs, &mut native_solution).unwrap();
+        assert!(
+            native_solution
+                .iter()
+                .zip(&actual_normal)
+                .any(|(native, amesos)| native.to_bits() != amesos.to_bits()),
+            "the nonsymmetric probe must distinguish factor(A) from the Amesos factor(A^T) path"
+        );
+    }
+
+    #[test]
+    fn fresh_policy_factors_each_ordinary_call_and_explicit_reuse_does_not() {
+        let options = SolverOptions {
+            real_backend: RealSolverBackend::Klu,
+            numeric_factorization: NumericFactorizationPolicy::FreshPivotSelection,
+            circuit_lu_row_scaling: CircuitLuRowScaling::Disabled,
+            circuit_lu_robustness: CircuitLuRobustness::BackendFaithful,
+            ..SolverOptions::default()
+        };
+        let mut matrix = StaticMatrix::from_triplets_with_options(
+            2,
+            2,
+            &[(0, 0, 3.0), (1, 0, 5.0), (0, 1, 1.0), (1, 1, 2.0)],
+            options,
+        )
+        .unwrap();
+        let rhs = [7.0, 11.0];
+        let mut first = Vec::new();
+        matrix.solve_into(&rhs, &mut first).unwrap();
+        assert_eq!(matrix.klu.as_ref().unwrap().full_factorization_count(), 1);
+
+        let mut second = Vec::new();
+        matrix.solve_into(&rhs, &mut second).unwrap();
+        assert_eq!(
+            matrix.klu.as_ref().unwrap().full_factorization_count(),
+            2,
+            "FreshPivotSelection must honor an ordinary numeric-solve request even for identical values"
+        );
+        assert_eq!(
+            first.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            second.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+        );
+
+        let mut reused = Vec::new();
+        matrix
+            .solve_into_with_factorization(&rhs, &mut reused, FactorizationRequest::ReuseExisting)
+            .unwrap();
+        assert_eq!(matrix.klu.as_ref().unwrap().full_factorization_count(), 2);
+        assert_eq!(
+            second.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            reused.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn changing_orientation_invalidates_and_rebuilds_symbolic_analysis() {
+        let triplets = [
+            (0, 0, 3.0),
+            (1, 0, 5.0),
+            (0, 1, 1.0),
+            (1, 1, 2.0),
+            (1, 2, 7.0),
+            (2, 2, 11.0),
+        ];
+        let rhs = [13.0, 17.0, 19.0];
+        let mut native_options = amesos_klu_options();
+        native_options.circuit_lu_orientation = CircuitLuOrientation::Native;
+        let mut switched =
+            StaticMatrix::from_triplets_with_options(3, 3, &triplets, native_options).unwrap();
+        let mut solution = Vec::new();
+        switched.solve_into(&rhs, &mut solution).unwrap();
+        assert!(switched.klu.as_ref().unwrap().is_analyzed_for(3));
+
+        switched.set_solver_options(amesos_klu_options());
+        assert!(
+            !switched.klu.as_ref().unwrap().is_analyzed_for(3),
+            "orientation changes must not reuse symbolic analysis for the prior CSC pattern"
+        );
+        switched.solve_into(&rhs, &mut solution).unwrap();
+
+        let mut direct =
+            StaticMatrix::from_triplets_with_options(3, 3, &triplets, amesos_klu_options())
+                .unwrap();
+        let mut expected = Vec::new();
+        direct.solve_into(&rhs, &mut expected).unwrap();
+        assert_eq!(
+            solution.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            expected.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn backend_faithful_refactor_does_not_escalate_pivot_growth() {
+        let mut backend = crate::KluSolver::new();
+        backend.set_growth_retry_enabled(false);
+        backend.analyze(2, &[0, 2, 4], &[0, 1, 0, 1]).unwrap();
+        backend.factor(&[1.0, 1.0, 1.0, 2.0]).unwrap();
+        assert_eq!(backend.full_factorization_count(), 1);
+
+        let changed = [1.0e-20, 1.0, 1.0, 1.0e-20];
+        assert!(matches!(
+            apply_klu_numeric_action(
+                &mut backend,
+                &changed,
+                KluNumericAction::Refactor,
+                CircuitLuRobustness::BackendFaithful,
+            ),
+            Err(SolverError::PivotGrowth)
+        ));
+        assert_eq!(
+            backend.full_factorization_count(),
+            1,
+            "BackendFaithful must return the refactor failure without a hidden full factor"
+        );
+
+        apply_klu_numeric_action(
+            &mut backend,
+            &changed,
+            KluNumericAction::Refactor,
+            CircuitLuRobustness::Enhanced,
+        )
+        .unwrap();
+        assert_eq!(backend.full_factorization_count(), 2);
     }
 
     #[test]

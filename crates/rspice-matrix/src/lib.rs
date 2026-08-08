@@ -41,6 +41,75 @@ pub enum RealSolverBackend {
     Faer,
 }
 
+/// Numeric-factorization lifecycle for RSpice's circuit LU backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NumericFactorizationPolicy {
+    /// Reuse the established pivot sequence while the changing numeric values
+    /// remain safe for values-only refactorization.
+    ReusePivotSequence,
+    /// Select a fresh pivot sequence for every ordinary numeric solve request.
+    /// Callers solving another right-hand side against the same factors can use
+    /// an explicit [`FactorizationRequest::ReuseExisting`] solve.
+    FreshPivotSelection,
+}
+
+/// Arithmetic used for a circuit-LU division site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DivisionPolicy {
+    /// Multiply by a cached reciprocal on the ordinary finite path.
+    ReciprocalMultiplication,
+    /// Perform the hardware division directly.
+    DirectDivision,
+}
+
+/// Matrix orientation presented to the circuit-LU numeric factorization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CircuitLuOrientation {
+    /// Factor the matrix's native compressed-column representation and use the
+    /// matching normal/transpose triangular solve.
+    Native,
+    /// Match Trilinos Amesos_Klu's serial Epetra adapter: factor the row-CRS
+    /// arrays as CSC (therefore factor `A^T`) and invert the KLU solve choice so
+    /// the public normal and transpose systems remain `A*x=b` and `A^T*x=b`.
+    AmesosRowCrs,
+}
+
+/// Row scaling applied before circuit-LU factorization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CircuitLuRowScaling {
+    /// Retain RSpice's protective scaling for values near the floating-point
+    /// range limits.
+    AdaptiveExtremeRows,
+    /// Do not scale matrix rows, matching Amesos `ScaleMethod=0`.
+    Disabled,
+}
+
+/// Error-handling behavior around the circuit-LU backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CircuitLuRobustness {
+    /// Retry dangerous growth, refine inaccurate solutions, and fall back to
+    /// the supernodal backend when circuit LU cannot certify a result.
+    Enhanced,
+    /// Return the circuit-LU result or error directly, without RSpice-specific
+    /// growth retries, iterative refinement, or backend fallback.
+    BackendFaithful,
+}
+
+/// Per-solve numeric-factorization lifecycle request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FactorizationRequest {
+    /// Follow the matrix's [`NumericFactorizationPolicy`]. Fresh-pivot matrices
+    /// factor on every call; reuse-pivot matrices reuse factors for
+    /// bit-identical values and refactor changed values.
+    Automatic,
+    /// Run numeric factorization for this solve even when values are unchanged.
+    Factorize,
+    /// Reuse the existing numeric factors without consulting current values.
+    /// This mirrors Xyce's `reuse_factors=true` contract; callers must ensure
+    /// the matrix represented by the factors is still the intended matrix.
+    ReuseExisting,
+}
+
 /// Per-matrix solver policy.
 ///
 /// Commercial embedding code should pass this explicitly through
@@ -57,6 +126,19 @@ pub struct SolverOptions {
     /// Absolute minimum accepted pivot magnitude in original matrix units.
     /// Zero disables the absolute threshold.
     pub absolute_pivot_tolerance: Value,
+    /// Whether changing matrix values reuse the prior pivot sequence or run a
+    /// fresh numeric pivot search.
+    pub numeric_factorization: NumericFactorizationPolicy,
+    /// Arithmetic used to form lower-triangular factors from pivot columns.
+    pub factorization_division: DivisionPolicy,
+    /// Arithmetic used for circuit-LU diagonal triangular solves.
+    pub diagonal_solve: DivisionPolicy,
+    /// Orientation presented to circuit LU and corresponding solve dispatch.
+    pub circuit_lu_orientation: CircuitLuOrientation,
+    /// Circuit-LU row-scaling policy.
+    pub circuit_lu_row_scaling: CircuitLuRowScaling,
+    /// Circuit-LU retry, refinement, and fallback policy.
+    pub circuit_lu_robustness: CircuitLuRobustness,
 }
 
 impl SolverOptions {
@@ -83,6 +165,12 @@ impl SolverOptions {
             real_backend,
             pivot_tolerance,
             absolute_pivot_tolerance,
+            numeric_factorization: NumericFactorizationPolicy::ReusePivotSequence,
+            factorization_division: DivisionPolicy::ReciprocalMultiplication,
+            diagonal_solve: DivisionPolicy::ReciprocalMultiplication,
+            circuit_lu_orientation: CircuitLuOrientation::Native,
+            circuit_lu_row_scaling: CircuitLuRowScaling::AdaptiveExtremeRows,
+            circuit_lu_robustness: CircuitLuRobustness::Enhanced,
         }
     }
 }
@@ -93,6 +181,12 @@ impl Default for SolverOptions {
             real_backend: RealSolverBackend::Auto,
             pivot_tolerance: 1.0e-3,
             absolute_pivot_tolerance: 0.0,
+            numeric_factorization: NumericFactorizationPolicy::ReusePivotSequence,
+            factorization_division: DivisionPolicy::ReciprocalMultiplication,
+            diagonal_solve: DivisionPolicy::ReciprocalMultiplication,
+            circuit_lu_orientation: CircuitLuOrientation::Native,
+            circuit_lu_row_scaling: CircuitLuRowScaling::AdaptiveExtremeRows,
+            circuit_lu_robustness: CircuitLuRobustness::Enhanced,
         }
     }
 }

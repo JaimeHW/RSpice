@@ -149,6 +149,18 @@ pub struct KluSolver {
     /// False only when a finite, nonzero subnormal pivot has an infinite
     /// reciprocal. That rare scale is still solved correctly with division.
     use_diag_recip: bool,
+    /// Force SuiteSparse-style direct division while forming L, rather than
+    /// multiplying every entry by one cached pivot reciprocal.
+    direct_factorization_division: bool,
+    /// Force SuiteSparse-style direct division in triangular diagonal solves
+    /// even when every cached reciprocal is finite.
+    direct_diagonal_division: bool,
+    /// Disable RSpice's protective extreme-row equilibration. Amesos_Klu sets
+    /// SuiteSparse KLU's scale method to zero in Xyce's default configuration.
+    row_scaling_disabled: bool,
+    /// Disable RSpice's second full factorization at maximum pivot tolerance
+    /// after a severe reciprocal-pivot-growth measurement.
+    growth_retry_disabled: bool,
     /// Refactor scatter targets: pivot-space destination for every entry
     /// of A's value array (aligned to the original CSC value index), so
     /// the refactor scatter is one indexed load + store per nonzero with
@@ -166,6 +178,9 @@ pub struct KluSolver {
     /// Retained row-major workspace for multi-right-hand-side solves.
     batch_work: Vec<Value>,
     diagnostics: KluDiagnostics,
+    /// Successful full numeric factorizations performed by this solver.
+    #[cfg(test)]
+    full_factorization_count: u64,
     condition_rhs: Vec<Value>,
     condition_solution: Vec<Value>,
     condition_transpose: Vec<Value>,
@@ -214,6 +229,43 @@ impl KluSolver {
         Ok(())
     }
 
+    /// Select direct diagonal division instead of cached reciprocal
+    /// multiplication for subsequent triangular solves.
+    ///
+    /// This changes only solve arithmetic; an existing numeric factor remains
+    /// valid and is deliberately retained.
+    pub fn set_direct_diagonal_division(&mut self, enabled: bool) {
+        self.direct_diagonal_division = enabled;
+    }
+
+    /// Select direct pivot division while forming lower-triangular factors.
+    /// Changing the arithmetic invalidates an existing numeric factor while
+    /// preserving symbolic analysis and allocated workspaces.
+    pub fn set_direct_factorization_division(&mut self, enabled: bool) {
+        if self.direct_factorization_division != enabled {
+            self.direct_factorization_division = enabled;
+            self.factored = false;
+        }
+    }
+
+    /// Enable or disable protective row scaling for subsequent factors.
+    pub fn set_row_scaling_enabled(&mut self, enabled: bool) {
+        let disabled = !enabled;
+        if self.row_scaling_disabled != disabled {
+            self.row_scaling_disabled = disabled;
+            self.factored = false;
+        }
+    }
+
+    /// Enable or disable the RSpice-specific maximum-pivot growth retry.
+    pub fn set_growth_retry_enabled(&mut self, enabled: bool) {
+        let disabled = !enabled;
+        if self.growth_retry_disabled != disabled {
+            self.growth_retry_disabled = disabled;
+            self.factored = false;
+        }
+    }
+
     #[inline]
     fn effective_pivot_tolerance(&self) -> Value {
         if self.pivot_tolerance > 0.0 {
@@ -228,7 +280,7 @@ impl KluSolver {
     /// Drop every symbolic and numeric association with the prior pattern.
     /// Capacities are retained so a caller that rebuilds a same-sized circuit
     /// does not pay avoidable allocator traffic.
-    fn invalidate_analysis(&mut self) {
+    pub(crate) fn invalidate_analysis(&mut self) {
         self.n = 0;
         self.a_col_ptr.clear();
         self.a_rows.clear();
@@ -261,6 +313,11 @@ impl KluSolver {
     /// Whether the symbolic analysis matches this pattern instance.
     pub(crate) fn is_analyzed_for(&self, n: usize) -> bool {
         self.n == n && self.a_col_ptr.len() == n.saturating_add(1)
+    }
+
+    /// Whether a valid numeric factorization is currently available.
+    pub(crate) fn is_factored(&self) -> bool {
+        self.factored
     }
 
     /// Release factor-sized numeric storage while preserving the symbolic
@@ -303,6 +360,11 @@ impl KluSolver {
     /// Numeric quality indicators for the current factorization.
     pub fn diagnostics(&self) -> KluDiagnostics {
         self.diagnostics
+    }
+
+    #[cfg(test)]
+    pub(crate) fn full_factorization_count(&self) -> u64 {
+        self.full_factorization_count
     }
 
     /// Recompute reciprocal pivot growth for the current values on demand.
@@ -502,7 +564,9 @@ impl KluSolver {
         // systems to the independently equilibrated supernodal backend.
         const ROW_SCALING_SMALL_LIMIT: Value = 1.0e-150;
         const ROW_SCALING_LARGE_LIMIT: Value = 1.0e150;
-        if smallest < ROW_SCALING_SMALL_LIMIT || largest > ROW_SCALING_LARGE_LIMIT {
+        if !self.row_scaling_disabled
+            && (smallest < ROW_SCALING_SMALL_LIMIT || largest > ROW_SCALING_LARGE_LIMIT)
+        {
             for scale in &mut self.row_scale {
                 *scale = finite_reciprocal_scale(*scale);
             }
@@ -522,7 +586,9 @@ impl KluSolver {
         // Preserve the sparse diagonal on the normal path, but rebuild once
         // with maximum partial pivoting when measured element growth shows
         // that threshold pivoting selected a numerically damaging sequence.
-        if self.diagnostics.reciprocal_pivot_growth < Value::EPSILON.sqrt() {
+        if !self.growth_retry_disabled
+            && self.diagnostics.reciprocal_pivot_growth < Value::EPSILON.sqrt()
+        {
             self.factor_with_pivot_tolerance(values, 1.0)?;
         }
         Ok(())
@@ -630,6 +696,7 @@ impl KluSolver {
             nonpivot_rows,
         } = ws;
 
+        let direct_factorization_division = self.direct_factorization_division;
         for j in 0..n {
             let a_col = self.col_perm[j] as usize;
             let stamp = j + 1;
@@ -748,9 +815,10 @@ impl KluSolver {
                 reciprocal_pivot_growth = reciprocal_pivot_growth.min(input_col_max / u_col_max);
             }
 
-            // Emit L column (unpivoted rows except the pivot), scaled by
-            // the pivot reciprocal (one divide per column; the multiplies
-            // autovectorize). Numeric zeros are kept: the pattern is
+            // Emit L column (unpivoted rows except the pivot). The native
+            // optimized profile scales by one cached reciprocal; compatibility
+            // profiles may request SuiteSparse's direct division per entry.
+            // Numeric zeros are kept: the pattern is
             // *symbolic* — a value that cancels at this factorization can
             // be nonzero at the next refactor, which replays these slots.
             for &row in nonpivot_rows.iter() {
@@ -764,7 +832,9 @@ impl KluSolver {
                     continue;
                 }
                 l_rows.push(row as u32);
-                let factor_value = if pivot_recip.is_finite() {
+                let factor_value = if direct_factorization_division {
+                    v / pivot_val
+                } else if pivot_recip.is_finite() {
                     v * pivot_recip
                 } else {
                     v / pivot_val
@@ -821,6 +891,10 @@ impl KluSolver {
             max_abs_pivot,
         };
         self.factored = true;
+        #[cfg(test)]
+        {
+            self.full_factorization_count = self.full_factorization_count.saturating_add(1);
+        }
         Ok(())
     }
 
@@ -922,6 +996,7 @@ impl KluSolver {
         let reciprocal_pivot_growth = self.diagnostics.reciprocal_pivot_growth;
         let mut min_abs_pivot = Value::INFINITY;
         let mut max_abs_pivot: Value = 0.0;
+        let direct_factorization_division = self.direct_factorization_division;
 
         for j in 0..n {
             let a_col = self.col_perm[j] as usize;
@@ -1018,11 +1093,15 @@ impl KluSolver {
             min_abs_pivot = min_abs_pivot.min(pivot_abs);
             max_abs_pivot = max_abs_pivot.max(pivot_abs);
             self.u_vals[u_end - 1] = pivot;
-            // One divide per column; the contiguous multiplies vectorize.
+            // Cache the pivot reciprocal for the optimized factor/solve path.
             let pivot_recip = 1.0 / pivot;
             use_diag_recip &= pivot_recip.is_finite();
             self.u_diag_recip[j] = pivot_recip;
-            if pivot_recip.is_finite() {
+            if direct_factorization_division {
+                for value in &mut self.l_vals[ls..le] {
+                    *value /= pivot;
+                }
+            } else if pivot_recip.is_finite() {
                 for value in &mut self.l_vals[ls..le] {
                     *value *= pivot_recip;
                 }
@@ -1087,7 +1166,7 @@ impl KluSolver {
         // divide per unknown. Keep an exact-division path for subnormal pivots
         // whose reciprocal overflows even though the original system may be
         // representable.
-        if self.use_diag_recip {
+        if self.use_diag_recip && !self.direct_diagonal_division {
             for j in (0..n).rev() {
                 let u_begin = self.u_col_ptr[j];
                 let u_end = self.u_col_ptr[j + 1];
@@ -1219,7 +1298,7 @@ impl KluSolver {
                     }
                 }
                 for rhs in 0..rhs_count {
-                    let solved = if self.use_diag_recip {
+                    let solved = if self.use_diag_recip && !self.direct_diagonal_division {
                         work[target + rhs] * self.u_diag_recip[j]
                     } else {
                         work[target + rhs] / self.u_vals[ue - 1]
@@ -1283,7 +1362,7 @@ impl KluSolver {
                 let (us, ue) = (self.u_col_ptr[j], self.u_col_ptr[j + 1]);
                 let source = j * rhs_count;
                 for rhs in 0..rhs_count {
-                    let solved = if self.use_diag_recip {
+                    let solved = if self.use_diag_recip && !self.direct_diagonal_division {
                         work[source + rhs] * self.u_diag_recip[j]
                     } else {
                         work[source + rhs] / self.u_vals[ue - 1]
@@ -2056,6 +2135,124 @@ mod tests {
         let mut solution = Vec::new();
         default_solver.solve(&[4.0], &mut solution).unwrap();
         assert_eq!(solution, [2.0]);
+    }
+
+    #[test]
+    fn direct_division_controls_factor_and_every_solve_kernel() {
+        let direct = 5.0_f64 / 3.0;
+        let reciprocal_product = 5.0_f64 * (1.0_f64 / 3.0);
+        assert_ne!(direct.to_bits(), reciprocal_product.to_bits());
+
+        // This irreducible 2x2 pattern retains row zero as the preferred first
+        // pivot, making L(1,0) exactly the policy-sensitive 5/3 operation.
+        let mut factor = KluSolver::new();
+        factor
+            .analyze(2, &[0, 2, 4], &[0, 1, 0, 1])
+            .expect("analyze factor probe");
+        factor
+            .factor(&[3.0, 5.0, 1.0, 2.0])
+            .expect("reciprocal factor");
+        assert_eq!(factor.l_vals, [reciprocal_product]);
+
+        factor.set_direct_factorization_division(true);
+        assert!(!factor.factored);
+        factor.factor(&[3.0, 5.0, 1.0, 2.0]).expect("direct factor");
+        assert_eq!(factor.l_vals, [direct]);
+
+        factor
+            .refactor(&[3.0, 5.0, 1.0, 3.0])
+            .expect("direct refactor");
+        assert_eq!(factor.l_vals, [direct]);
+
+        // A scalar diagonal exercises the normal, transpose, and batched
+        // triangular kernels without other arithmetic obscuring the division.
+        let mut solve = KluSolver::new();
+        solve
+            .analyze(1, &[0, 1], &[0])
+            .expect("analyze solve probe");
+        solve.factor(&[3.0]).expect("factor solve probe");
+
+        for direct_division in [false, true] {
+            solve.set_direct_diagonal_division(direct_division);
+            let expected = if direct_division {
+                direct
+            } else {
+                reciprocal_product
+            };
+            let mut output = Vec::new();
+            solve.solve(&[5.0], &mut output).expect("normal solve");
+            assert_eq!(output, [expected]);
+            solve
+                .solve_transpose(&[5.0], &mut output)
+                .expect("transpose solve");
+            assert_eq!(output, [expected]);
+            solve
+                .solve_many(&[5.0, 5.0], 2, &mut output)
+                .expect("batched normal solve");
+            assert_eq!(output, [expected, expected]);
+            solve
+                .solve_many_transpose(&[5.0, 5.0], 2, &mut output)
+                .expect("batched transpose solve");
+            assert_eq!(output, [expected, expected]);
+        }
+    }
+
+    #[test]
+    fn full_factor_reselects_a_pivot_that_refactor_safely_reuses() {
+        let mut solver = KluSolver::new();
+        solver
+            .analyze(2, &[0, 2, 4], &[0, 1, 0, 1])
+            .expect("analyze pivot lifecycle probe");
+
+        let first_column = solver.col_perm[0] as usize;
+        let preferred_row = solver.matched_row_for_col[first_column] as usize;
+        let alternate_row = 1 - preferred_row;
+        let other_column = 1 - first_column;
+        let offset = |row: usize, column: usize| column * 2 + row;
+
+        // The preferred row is the strongest scaled entry in the first
+        // eliminated column, and the second column keeps the matrix
+        // nonsingular regardless of the symbolic matching orientation.
+        let mut values = vec![0.0; 4];
+        values[offset(preferred_row, first_column)] = 1.0;
+        values[offset(alternate_row, first_column)] = 1.0;
+        values[offset(preferred_row, other_column)] = 1.0;
+        values[offset(alternate_row, other_column)] = 2.0;
+        solver.factor(&values).expect("initial full factor");
+        assert_eq!(solver.row_perm[0] as usize, preferred_row);
+
+        // The stored pivot remains far above the conservative refactor alarm,
+        // but falls below the ordinary full-factor threshold. A values-only
+        // refactor must retain it; a new numeric factorization must reselect
+        // the alternate row.
+        values[offset(preferred_row, first_column)] = 1.0e-4;
+        solver.refactor(&values).expect("safe values-only refactor");
+        assert_eq!(solver.row_perm[0] as usize, preferred_row);
+
+        solver.factor(&values).expect("fresh numeric factor");
+        assert_eq!(solver.row_perm[0] as usize, alternate_row);
+    }
+
+    #[test]
+    fn row_scaling_can_match_amesos_scale_method_zero() {
+        let mut adaptive = KluSolver::new();
+        adaptive
+            .analyze(1, &[0, 1], &[0])
+            .expect("analyze adaptive scaling probe");
+        adaptive
+            .factor(&[1.0e200])
+            .expect("factor adaptively scaled probe");
+        assert_ne!(adaptive.row_scale, [1.0]);
+
+        let mut disabled = KluSolver::new();
+        disabled.set_row_scaling_enabled(false);
+        disabled.set_growth_retry_enabled(false);
+        disabled
+            .analyze(1, &[0, 1], &[0])
+            .expect("analyze unscaled probe");
+        disabled.factor(&[1.0e200]).expect("factor unscaled probe");
+        assert_eq!(disabled.row_scale, [1.0]);
+        assert!(disabled.growth_retry_disabled);
     }
 
     #[test]
