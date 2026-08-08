@@ -459,7 +459,11 @@ fn render_hosting(
                 } else {
                     "reconnecting…"
                 },
-                if summary.relay_connected { c.ok } else { c.warn },
+                if summary.relay_connected {
+                    c.ok
+                } else {
+                    c.warn
+                },
             );
             kv_row(ui, "Live since", &summary.started_at, c.text);
             kv_row(ui, "Stored on the service", "nothing · relayed only", c.ok);
@@ -541,7 +545,11 @@ fn render_participating(
         } else {
             "reconnecting…"
         },
-        if summary.relay_connected { c.ok } else { c.warn },
+        if summary.relay_connected {
+            c.ok
+        } else {
+            c.warn
+        },
     );
     if let Some(line) = host_run {
         kv_row(ui, "Host run", &line, c.text);
@@ -622,7 +630,11 @@ fn render_participant_row(
                 );
                 return;
             }
-            let current = if participant.editor { "Editor" } else { "Viewer" };
+            let current = if participant.editor {
+                "Editor"
+            } else {
+                "Viewer"
+            };
             egui::ComboBox::from_id_salt(("live-session-capability", &participant.principal_id))
                 .selected_text(current)
                 .show_ui(ui, |ui| {
@@ -652,11 +664,7 @@ fn render_participant_row(
 }
 
 /// The three host-controlled policy selects, mockup labels verbatim.
-fn render_policy_fields(
-    ui: &mut egui::Ui,
-    draft: &mut LiveSessionPolicySummary,
-    id_salt: &str,
-) {
+fn render_policy_fields(ui: &mut egui::Ui, draft: &mut LiveSessionPolicySummary, id_salt: &str) {
     field_label(ui, "Guests join as");
     egui::ComboBox::from_id_salt((id_salt, "guests"))
         .width(ui.available_width())

@@ -1060,7 +1060,8 @@ impl eframe::App for RSpiceApp {
         }
         self.record_publish_receipt();
         #[cfg(not(target_arch = "wasm32"))]
-        self.live_session.pump(&mut self.state, &mut self.cloud_account);
+        self.live_session
+            .pump(&mut self.state, &mut self.cloud_account);
         if let Some(text) = self.state.ui.clipboard_text_request.take() {
             ctx.copy_text(text);
         }

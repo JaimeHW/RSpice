@@ -306,8 +306,6 @@ impl LiveFrame {
 /// A reconnection delivers a fresh port that supersedes any earlier one;
 /// sends into a superseded port are silently dropped with its dead socket.
 pub(crate) struct LiveRelayPort {
-    /// Monotonic connection identity, so stale ports are recognizable.
-    pub generation: u64,
     /// This install's stable per-run connection identity, echoed by the
     /// session tickets; payload protocols stamp it on outbound messages.
     pub client_instance_id: uuid::Uuid,
@@ -823,7 +821,10 @@ mod tests {
             (LiveFrameClass::Presence, LiveSessionFrameClass::Presence),
             (LiveFrameClass::Cursor, LiveSessionFrameClass::Cursor),
             (LiveFrameClass::Document, LiveSessionFrameClass::Document),
-            (LiveFrameClass::RunRequest, LiveSessionFrameClass::RunRequest),
+            (
+                LiveFrameClass::RunRequest,
+                LiveSessionFrameClass::RunRequest,
+            ),
             (LiveFrameClass::RunStatus, LiveSessionFrameClass::RunStatus),
         ] {
             assert_eq!(ours.as_byte(), contract as u8);

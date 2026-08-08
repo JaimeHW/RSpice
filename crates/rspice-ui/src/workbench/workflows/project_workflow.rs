@@ -203,9 +203,8 @@ pub(crate) fn save_active_for_continuation(state: &mut AppState) -> SaveRequestO
 #[cfg(not(target_arch = "wasm32"))]
 fn live_mirror_save_block(state: &AppState) -> Option<&'static str> {
     let locks = &state.workbench.live_write_locks;
-    (locks.mirror && !locks.mirror_save_copy_allowed).then_some(
-        "The live session's policy does not allow saving a copy of the host's project.",
-    )
+    (locks.mirror && !locks.mirror_save_copy_allowed)
+        .then_some("The live session's policy does not allow saving a copy of the host's project.")
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1108,7 +1107,9 @@ pub(crate) fn apply_live_project_snapshot(
     let transaction =
         match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
             Ok(transaction) => transaction,
-            Err(ProjectLifecycleError::ActiveRun | ProjectLifecycleError::TransactionInProgress) => {
+            Err(
+                ProjectLifecycleError::ActiveRun | ProjectLifecycleError::TransactionInProgress,
+            ) => {
                 return LiveProjectApply::RetryLater;
             }
             Err(error) => {
@@ -1683,8 +1684,7 @@ mod tests {
         // The host's on-disk location must never become a guest save target.
         assert!(guest.workspace.project.path.is_none());
         assert!(
-            crate::workbench::lifecycle::project_lifecycle::canonical_native_path(&guest)
-                .is_none()
+            crate::workbench::lifecycle::project_lifecycle::canonical_native_path(&guest).is_none()
         );
     }
 

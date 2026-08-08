@@ -12,11 +12,11 @@ use std::sync::mpsc::Sender;
 
 use futures_util::{SinkExt, StreamExt};
 use rspice_cloud_client::contract::LIVE_SESSION_PROTOCOL;
+use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http;
-use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
 use super::{CloudAccountCommand, LiveFrame, LiveRelayClosure, MAX_LIVE_FRAME_BYTES};
 
@@ -78,9 +78,9 @@ pub(super) fn spawn(
                 .enable_all()
                 .build()
             {
-                Ok(runtime) => {
-                    runtime.block_on(pump(connection, outbound, inbound, stop, &commands, repaint))
-                }
+                Ok(runtime) => runtime.block_on(pump(
+                    connection, outbound, inbound, stop, &commands, repaint,
+                )),
                 Err(_) => LiveRelayClosure::Interrupted,
             };
             let _ = commands.send(CloudAccountCommand::LiveRelayClosed {
@@ -245,8 +245,9 @@ mod tests {
         );
         assert_eq!(origin, "https://api.rspice.app");
 
-        let (url, origin) = relay_endpoint("http://127.0.0.1:8080", "/api/v1/live-sessions/x/connect")
-            .expect("loopback endpoint");
+        let (url, origin) =
+            relay_endpoint("http://127.0.0.1:8080", "/api/v1/live-sessions/x/connect")
+                .expect("loopback endpoint");
         assert_eq!(
             url.as_str(),
             "ws://127.0.0.1:8080/api/v1/live-sessions/x/connect"

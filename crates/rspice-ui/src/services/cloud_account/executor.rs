@@ -26,8 +26,8 @@ use super::{
     CloudAccountCommand, CloudAccountEvent, CloudSessionPhase, CloudSessionSnapshot,
     EntitlementSummary, LeaseSummary, LiveParticipantSummary, LiveRelayClosure, LiveRelayPort,
     LiveSessionPolicySummary, LiveSessionState, LiveSessionSummary, NativeLicenseSummary,
-    PrincipalSummary, PublicationSummary, PublishState, WorkspaceSummary, live_relay,
-    native_login, oidc, publish, store,
+    PrincipalSummary, PublicationSummary, PublishState, WorkspaceSummary, live_relay, native_login,
+    oidc, publish, store,
 };
 
 /// Collection page size for bootstrap reads.
@@ -868,8 +868,7 @@ impl Executor {
                     true,
                     Some(created.join_code),
                 );
-                summary.relay_connected =
-                    self.relay.as_ref().is_some_and(|relay| relay.attached);
+                summary.relay_connected = self.relay.as_ref().is_some_and(|relay| relay.attached);
                 self.snapshot.live_session = Some(LiveSessionState::Hosting(summary));
                 self.publish();
                 // A rotation keeps current participants connected, but an
@@ -1177,7 +1176,6 @@ impl Executor {
             self.repaint.clone(),
         );
         let _ = self.relay_ports.send(LiveRelayPort {
-            generation,
             client_instance_id,
             outbound,
             inbound,

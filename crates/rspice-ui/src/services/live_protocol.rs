@@ -134,7 +134,10 @@ pub(crate) enum RunStatusMessage {
     Status(RunStatusPayload),
     /// One chunk of a result dataset, using the same chunk contract as
     /// document replaces (`doc` names the result, e.g. `results/<run_id>`).
-    ResultChunk { header: ChunkHeader, chunk: Vec<u8> },
+    ResultChunk {
+        header: ChunkHeader,
+        chunk: Vec<u8>,
+    },
 }
 
 /// Header of one document (or result) chunk. `revision` is monotonic per
@@ -215,7 +218,11 @@ fn encode_envelope(class: LiveFrameClass, kind: u8, header: &[u8], body: &[u8]) 
     let mut payload = Vec::with_capacity(ENVELOPE_PREFIX_BYTES + header.len() + body.len());
     payload.push(LIVE_PROTOCOL_VERSION);
     payload.push(kind);
-    payload.extend_from_slice(&u32::try_from(header.len()).expect("bounded header").to_be_bytes());
+    payload.extend_from_slice(
+        &u32::try_from(header.len())
+            .expect("bounded header")
+            .to_be_bytes(),
+    );
     payload.extend_from_slice(header);
     payload.extend_from_slice(body);
     LiveFrame { class, payload }
@@ -309,9 +316,7 @@ impl LiveMessage {
         match self {
             Self::Presence(payload) => json_frame(LiveFrameClass::Presence, KIND_ONLY, payload),
             Self::Cursor(payload) => json_frame(LiveFrameClass::Cursor, KIND_ONLY, payload),
-            Self::RunRequest(payload) => {
-                json_frame(LiveFrameClass::RunRequest, KIND_ONLY, payload)
-            }
+            Self::RunRequest(payload) => json_frame(LiveFrameClass::RunRequest, KIND_ONLY, payload),
             Self::RunStatus(RunStatusMessage::Status(payload)) => {
                 json_frame(LiveFrameClass::RunStatus, RUN_STATUS_REPORT, payload)
             }
@@ -536,21 +541,6 @@ pub(crate) fn replace_messages(
     )
 }
 
-/// A complete result dataset as run-status-class chunk messages.
-pub(crate) fn result_messages(
-    sender: PeerIdentity,
-    doc: &str,
-    revision: u64,
-    bytes: &[u8],
-) -> Option<Vec<RunStatusMessage>> {
-    Some(
-        chunk_parts(sender, doc, revision, bytes)?
-            .into_iter()
-            .map(|(header, chunk)| RunStatusMessage::ResultChunk { header, chunk })
-            .collect(),
-    )
-}
-
 /// Why a chunk was refused.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ReassemblyError {
@@ -663,8 +653,7 @@ impl ContentReassembler {
         for piece in finished.chunks.into_iter().flatten() {
             bytes.extend_from_slice(&piece);
         }
-        if bytes.len() as u64 != finished.total_bytes || content_digest(&bytes) != finished.digest
-        {
+        if bytes.len() as u64 != finished.total_bytes || content_digest(&bytes) != finished.digest {
             return Err(ReassemblyError::DigestMismatch);
         }
         let _ = finished.chunk_count;
@@ -723,7 +712,9 @@ impl LeaseTable {
 
     /// Every held lease, for projecting write locks onto the UI.
     pub(crate) fn entries(&self) -> impl Iterator<Item = (&str, PeerIdentity)> {
-        self.held.iter().map(|(doc, holder)| (doc.as_str(), *holder))
+        self.held
+            .iter()
+            .map(|(doc, holder)| (doc.as_str(), *holder))
     }
 
     /// Host-side arbitration: first holder wins, re-requests by the current
@@ -776,10 +767,6 @@ impl LeaseTable {
     /// Guest-side mirror of a release announcement.
     pub(crate) fn apply_release(&mut self, doc: &str) {
         self.held.remove(doc);
-    }
-
-    pub(crate) fn clear(&mut self) {
-        self.held.clear();
     }
 }
 
@@ -852,10 +839,7 @@ mod tests {
                 doc: "sheet/abc".to_owned(),
                 holder: sender,
             }),
-            LiveMessage::Document(DocumentMessage::SyncRequest {
-                sender,
-                docs: None,
-            }),
+            LiveMessage::Document(DocumentMessage::SyncRequest { sender, docs: None }),
             LiveMessage::Document(DocumentMessage::Manifest {
                 sender,
                 docs: vec![ManifestEntry {
@@ -881,8 +865,7 @@ mod tests {
     fn replace_and_result_chunks_round_trip_with_bodies() {
         let sender = peer(3);
         let content = vec![7u8; DOCUMENT_CHUNK_BYTES + 17];
-        let replaces =
-            replace_messages(sender, "sheet/abc", 5, &content).expect("bounded content");
+        let replaces = replace_messages(sender, "sheet/abc", 5, &content).expect("bounded content");
         assert_eq!(replaces.len(), 2);
         for message in replaces {
             let frame = LiveMessage::Document(message.clone()).encode();
@@ -892,13 +875,18 @@ mod tests {
                 LiveMessage::Document(message)
             );
         }
-        let results = result_messages(sender, "results/7", 1, b"dataset").expect("bounded");
-        assert_eq!(results.len(), 1);
-        let frame = LiveMessage::RunStatus(results[0].clone()).encode();
+        // Nothing in this build sends a result chunk — participants run the
+        // mirrored design themselves — but the kind stays decodable so a
+        // peer that streams one is understood rather than disconnected.
+        let (header, chunk) = chunk_parts(sender, "results/7", 1, b"dataset")
+            .expect("bounded")
+            .remove(0);
+        let result = RunStatusMessage::ResultChunk { header, chunk };
+        let frame = LiveMessage::RunStatus(result.clone()).encode();
         assert_eq!(frame.class, LiveFrameClass::RunStatus);
         assert_eq!(
             LiveMessage::decode(&frame).expect("round trip"),
-            LiveMessage::RunStatus(results[0].clone())
+            LiveMessage::RunStatus(result)
         );
     }
 
@@ -1110,9 +1098,6 @@ mod tests {
         mirror.apply_grant("sheet/c", editor);
         assert_eq!(mirror.holder("sheet/c"), Some(editor));
         mirror.apply_release("sheet/c");
-        assert_eq!(mirror.holder("sheet/c"), None);
-        mirror.apply_grant("sheet/c", editor);
-        mirror.clear();
         assert_eq!(mirror.holder("sheet/c"), None);
     }
 }
