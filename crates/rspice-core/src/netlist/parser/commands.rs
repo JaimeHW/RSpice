@@ -1520,12 +1520,8 @@ pub(super) fn parse_options_command(
                 consume_output_initial_interval_schedule(stream, line_num, params)?;
             }
             (Some("OUTPUT"), "SNAPSHOTS") => {
-                options.output_snapshots = Some(parse_boolean_option(
-                    stream,
-                    line_num,
-                    params,
-                    has_equals,
-                )?);
+                options.output_snapshots =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
             }
             (_, "INTERP" | "NOACCT") => {
                 // Ngspice compatibility flags. INTERP affects rawfile storage
@@ -2592,12 +2588,21 @@ fn parse_point_measure_options(
         occurrence_given: false,
     };
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        if consume_meas_statement_qualifier(stream, line_num, params)?.is_some() {
+        if consume_meas_statement_qualifier(stream, line_num, params, true)?.is_some() {
+            continue;
+        }
+        if matches!(stream.peek().kind, TokenKind::Comma) {
+            stream.advance();
             continue;
         }
         let TokenKind::Ident(keyword) = &stream.peek().kind else {
-            stream.advance();
-            continue;
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Unexpected token '{}' in .MEAS {measure_type}",
+                    stream.peek().kind
+                ),
+            });
         };
         let keyword = keyword.to_ascii_uppercase();
         match keyword.as_str() {
@@ -2679,11 +2684,11 @@ fn parse_point_measure_options(
                 options.occurrence_given = true;
             }
             "GOAL" | "TOL" | "DEFAULT_VAL" => break,
-            // Preserve the legacy parser's tolerance of analysis-specific
-            // qualifiers that are modeled by other measurement families.
-            // Their tokens remain outside this DC point-event contract.
             _ => {
-                stream.advance();
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("Unexpected option '{keyword}' in .MEAS {measure_type}"),
+                });
             }
         }
     }
@@ -2771,7 +2776,7 @@ fn parse_measure_error_function_options(
         weight: None,
     };
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        if let Some(qualifier) = consume_meas_statement_qualifier(stream, line_num, params)? {
+        if let Some(qualifier) = consume_meas_statement_qualifier(stream, line_num, params, true)? {
             if let ParsedMeasStatementQualifier::Numeric { key, value } = qualifier
                 && key == "MINVAL"
             {
@@ -2861,7 +2866,7 @@ fn parse_measure_file_error_options(
     let mut seen = std::collections::HashSet::new();
 
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        if consume_meas_statement_qualifier(stream, line_num, params)?.is_some() {
+        if consume_meas_statement_qualifier(stream, line_num, params, false)?.is_some() {
             continue;
         }
         let TokenKind::Ident(keyword) = &stream.peek().kind else {
@@ -2989,8 +2994,16 @@ fn parse_measure_file_path(
         return Ok(path);
     }
 
+    let first = stream.peek().clone();
+    let source_line = first.span.line;
+    let mut previous_end = first.span.start;
     let mut path = String::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        if !path.is_empty()
+            && (stream.peek().span.line != source_line || stream.peek().span.start != previous_end)
+        {
+            break;
+        }
         if measure_file_option_ahead(stream) {
             break;
         }
@@ -2998,6 +3011,7 @@ fn parse_measure_file_path(
             TokenKind::Equals | TokenKind::StringLit(_) | TokenKind::Expression(_) => break,
             _ => {
                 path.push_str(&stream.peek().lexeme);
+                previous_end = stream.peek().span.end;
                 stream.advance();
             }
         }
@@ -3048,7 +3062,7 @@ fn parse_measure_when_event_options(
     let mut occurrence_given = false;
 
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        if consume_meas_statement_qualifier(stream, line_num, params)?.is_some() {
+        if consume_meas_statement_qualifier(stream, line_num, params, true)?.is_some() {
             continue;
         }
         let TokenKind::Ident(keyword) = &stream.peek().kind else {
@@ -3153,11 +3167,10 @@ fn collect_measure_equation_expression(
             TokenKind::Newline | TokenKind::Eof => break,
             TokenKind::Ident(name)
                 if depth == 0
-                    && matches!(stream.peek_n(1).kind, TokenKind::Equals)
-                    && matches!(
-                        name.to_ascii_uppercase().as_str(),
-                        "FROM" | "TO" | "TD" | "DEFAULT_VAL" | "GOAL" | "TOL" | "PRINT" | "MINVAL"
-                    ) =>
+                    && crate::netlist::measure::XYCE_MEASURE_QUALIFIER_KEYWORDS
+                        .iter()
+                        .chain(crate::netlist::measure::XYCE_MEASURE_TYPE_KEYWORDS)
+                        .any(|keyword| name.eq_ignore_ascii_case(keyword)) =>
             {
                 break;
             }
@@ -3206,7 +3219,7 @@ fn scan_meas_statement_options(
             && matches!(stream.peek_n(1).kind, TokenKind::Equals);
         if base_assignment_ahead {
             if let Some(qualifier) =
-                consume_meas_statement_qualifier(&mut stream, line_num, params)?
+                consume_meas_statement_qualifier(&mut stream, line_num, params, true)?
             {
                 match qualifier {
                     ParsedMeasStatementQualifier::Numeric { key, value } => match key.as_str() {
@@ -3235,6 +3248,7 @@ fn consume_meas_statement_qualifier(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
+    allow_minval: bool,
 ) -> Result<Option<ParsedMeasStatementQualifier>, ParseError> {
     let TokenKind::Ident(key) = &stream.peek().kind else {
         return Ok(None);
@@ -3243,7 +3257,9 @@ fn consume_meas_statement_qualifier(
     if !matches!(
         key.as_str(),
         "GOAL" | "TOL" | "DEFAULT_VAL" | "PRINT" | "MINVAL"
-    ) {
+    ) || key == "MINVAL" && !allow_minval
+        || key == "TOL" && params.expression_dialect() == crate::config::ExpressionDialect::Xyce
+    {
         return Ok(None);
     }
     stream.advance();
@@ -3324,7 +3340,7 @@ pub(super) fn parse_meas_delay_spec(
     let mut occurrence_given = false;
 
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        if consume_meas_statement_qualifier(stream, line_num, params)?.is_some() {
+        if consume_meas_statement_qualifier(stream, line_num, params, true)?.is_some() {
             continue;
         }
         match &stream.peek().kind {
@@ -3450,10 +3466,13 @@ pub(super) fn parse_measure_range_options(
     let mut to = None;
 
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        if consume_meas_statement_qualifier(stream, line_num, params)?.is_some() {
+        if consume_meas_statement_qualifier(stream, line_num, params, false)?.is_some() {
             continue;
         }
         match &stream.peek().kind {
+            TokenKind::Comma => {
+                stream.advance();
+            }
             TokenKind::Ident(s)
                 if s.eq_ignore_ascii_case("GOAL")
                     || s.eq_ignore_ascii_case("TOL")
@@ -3480,7 +3499,13 @@ pub(super) fn parse_measure_range_options(
                 }
             }
             _ => {
-                stream.advance();
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "Unexpected token '{}' after .MEAS range operand",
+                        stream.peek().kind
+                    ),
+                });
             }
         }
     }
@@ -3506,21 +3531,33 @@ fn parse_measure_extrema_options(
     let mut to = None;
     let mut output = ExtremaOutput::Value;
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        if consume_meas_statement_qualifier(stream, line_num, params)?.is_some() {
+        if consume_meas_statement_qualifier(stream, line_num, params, false)?.is_some() {
+            continue;
+        }
+        if matches!(stream.peek().kind, TokenKind::Comma) {
+            stream.advance();
             continue;
         }
         let TokenKind::Ident(key) = &stream.peek().kind else {
-            stream.advance();
-            continue;
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Unexpected token '{}' after .MEAS extrema operand",
+                    stream.peek().kind
+                ),
+            });
         };
         let key = key.to_ascii_uppercase();
         if matches!(key.as_str(), "GOAL" | "TOL" | "DEFAULT_VAL") {
             break;
         }
-        stream.advance();
         if !matches!(key.as_str(), "FROM" | "TO" | "OUTPUT") {
-            continue;
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unexpected option '{key}' after .MEAS extrema operand"),
+            });
         }
+        stream.advance();
         let has_equals = stream.consume(&TokenKind::Equals);
         if key != "OUTPUT" && !has_equals {
             return Err(ParseError::Syntax {
@@ -3562,7 +3599,7 @@ fn parse_measure_equation_options(
     let mut td = None;
 
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        if consume_meas_statement_qualifier(stream, line_num, params)?.is_some() {
+        if consume_meas_statement_qualifier(stream, line_num, params, false)?.is_some() {
             continue;
         }
         let TokenKind::Ident(key) = &stream.peek().kind else {
@@ -4861,6 +4898,162 @@ mod tests {
         };
         assert_eq!(signal, "V(DEFAULT_VAL)");
         assert_eq!((*from, *to), (Some(0.25), Some(0.75)));
+    }
+
+    #[test]
+    fn measure_option_parsers_reject_unrepresented_trailing_operands() {
+        let aggregate_types = ["AVG", "PP", "RMS", "INTEG", "MAX", "MIN"];
+        let point_types = ["FIND", "DERIV"];
+        let trailing_operands = [
+            "2",
+            "foo",
+            "{1+2}",
+            "PAR('p')",
+            "V(extra)",
+            "I(V1)",
+            "MYSTERY=1",
+        ];
+
+        for measure_type in aggregate_types {
+            for trailing in trailing_operands {
+                let statement = format!(".measure tran sample {measure_type} V(out) {trailing}");
+                let deck = format!(
+                    "strict aggregate measure\nV1 out 0 1\n.tran 1n 2n\n{statement}\n.end\n"
+                );
+                let error = Netlist::parse(&deck)
+                    .expect_err("an unrepresented aggregate operand must fail parsing");
+                assert!(
+                    error.to_string().contains("Unexpected"),
+                    "{statement} produced an unrelated error: {error}"
+                );
+            }
+        }
+
+        for measure_type in point_types {
+            for trailing in trailing_operands {
+                let statement =
+                    format!(".measure tran sample {measure_type} V(out) AT=1n {trailing}");
+                let deck =
+                    format!("strict point measure\nV1 out 0 1\n.tran 1n 2n\n{statement}\n.end\n");
+                let error = Netlist::parse(&deck)
+                    .expect_err("an unrepresented point operand must fail parsing");
+                assert!(
+                    error.to_string().contains("Unexpected"),
+                    "{statement} produced an unrelated error: {error}"
+                );
+            }
+        }
+
+        for statement in [
+            ".measure tran sample AVG V(out) AVG V(out)",
+            ".measure tran sample MAX V(out) TARG V(extra)",
+            ".measure tran sample FIND V(out) AT=1n FIND V(extra)",
+        ] {
+            let deck =
+                format!("strict repeated type\nV1 out 0 1\n.tran 1n 2n\n{statement}\n.end\n");
+            Netlist::parse(&deck).expect_err("a repeated measure type must fail parsing");
+        }
+    }
+
+    #[test]
+    fn measure_options_accept_only_typed_minval_owners() {
+        for statement in [
+            ".measure tran sample AVG V(out) MINVAL=1e-9",
+            ".measure tran sample MAX V(out) MINVAL=1e-9",
+            ".measure tran sample ERROR V(out) FILE=data.csv INDEPVARCOL=0 DEPVARCOL=1 MINVAL=1e-9",
+            ".measure tran sample EQN {V(out)} MINVAL=1e-9",
+        ] {
+            let deck =
+                format!("strict minval ownership\nV1 out 0 1\n.tran 1n 2n\n{statement}\n.end\n");
+            Netlist::parse(&deck)
+                .expect_err("MINVAL must not be consumed by a type that cannot represent it");
+        }
+
+        for statement in [
+            ".measure tran sample FIND V(out) AT=1n MINVAL=1e-9",
+            ".measure tran sample DERIV V(out) AT=1n MINVAL=1e-9",
+            ".measure tran sample WHEN V(out)=0.5 MINVAL=1e-9",
+            ".measure tran sample TRIG V(out)=0.5 MINVAL=1e-9 TARG V(out)=0.75",
+            ".measure tran sample ERR V(out) V(out) MINVAL=1e-9",
+        ] {
+            let deck =
+                format!("typed minval ownership\nV1 out 0 1\n.tran 1n 2n\n{statement}\n.end\n");
+            Netlist::parse(&deck).unwrap_or_else(|error| {
+                panic!("typed MINVAL owner failed to parse: {statement}: {error}")
+            });
+        }
+    }
+
+    #[test]
+    fn xyce_measure_keyword_boundaries_match_release_710() {
+        let xyce_options = crate::netlist::NetlistParseOptions {
+            expression_dialect: crate::config::ExpressionDialect::Xyce,
+            ..Default::default()
+        };
+        let tol_deck = "Xyce does not define a TOL measure qualifier\n\
+                        V1 out 0 1\n\
+                        .tran 1n 2n\n\
+                        .measure tran sample AVG V(out) GOAL=1 TOL=0.1\n\
+                        .end\n";
+        Netlist::parse_with_options(tol_deck, xyce_options.clone())
+            .expect_err("Xyce must parse TOL as an extra operand, not a represented qualifier");
+        let generic = Netlist::parse(tol_deck).expect("the generic SPICE dialect retains TOL");
+        assert_eq!(generic.measurements[0].tolerance, Some(0.1));
+
+        let equation = Netlist::parse_with_options(
+            "VAL remains an equation identifier\n\
+             V1 out 0 1\n\
+             .param VAL=2\n\
+             .tran 1n 2n\n\
+             .measure tran sample EQN VAL+1\n\
+             .end\n",
+            xyce_options.clone(),
+        )
+        .expect("VAL is special only inside TRIG/TARG syntax");
+        let crate::netlist::measure::MeasureType::Equation { expression, .. } =
+            &equation.measurements[0].measure_type
+        else {
+            panic!("expected an equation measurement");
+        };
+        assert_eq!(expression, "VAL+1");
+
+        Netlist::parse_with_options(
+            "type marker cannot join equation text\n\
+             V1 out 0 1\n\
+             .tran 1n 2n\n\
+             .measure tran sample EQN V(out) AVG\n\
+             .end\n",
+            xyce_options,
+        )
+        .expect_err("a second Xyce measure type must remain outside equation text");
+    }
+
+    #[test]
+    fn file_measure_path_is_one_authored_whitespace_field() {
+        let valid = Netlist::parse(
+            "file measure path\n\
+             V1 out 0 1\n\
+             .tran 1n 2n\n\
+             .measure tran sample ERROR V(out) FILE=fixtures/data.csv COMP_FUNCTION=L2NORM INDEPVARCOL=0 DEPVARCOL=1\n\
+             .end\n",
+        )
+        .expect("a punctuation-bearing unquoted FILE field parses");
+        let crate::netlist::measure::MeasureType::FileError { file, .. } =
+            &valid.measurements[0].measure_type
+        else {
+            panic!("expected a file-backed ERROR measurement");
+        };
+        assert_eq!(file, "fixtures/data.csv");
+
+        let error = Netlist::parse(
+            "file measure trailing operand\n\
+             V1 out 0 1\n\
+             .tran 1n 2n\n\
+             .measure tran sample ERROR V(out) FILE=fixtures/data.csv stray INDEPVARCOL=0 DEPVARCOL=1\n\
+             .end\n",
+        )
+        .expect_err("a second whitespace field after FILE must not join the path");
+        assert!(error.to_string().contains("Unexpected option 'STRAY'"));
     }
 
     #[test]

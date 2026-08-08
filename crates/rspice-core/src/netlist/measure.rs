@@ -74,6 +74,83 @@ pub enum MeasureOperand {
 /// Xyce's default absolute equality tolerance for conditional measurements.
 pub const XYCE_DEFAULT_MEASURE_MINVAL: Value = 1.0e-12;
 
+/// Complete Xyce 7.10 `.MEASURE` type-keyword vocabulary.
+pub const XYCE_MEASURE_TYPE_KEYWORDS: &[&str] = &[
+    "TRIG",
+    "TARG",
+    "AVG",
+    "MAX",
+    "MIN",
+    "PP",
+    "RMS",
+    "FREQ",
+    "FIND",
+    "WHEN",
+    "PARAM",
+    "EQN",
+    "DERIVATIVE",
+    "DERIV",
+    "DUTY",
+    "INTEGRAL",
+    "INTEG",
+    "ERROR",
+    "ON_TIME",
+    "OFF_TIME",
+    "FOUR",
+    "ERR",
+    "ERR1",
+    "ERR2",
+    "ENOB",
+    "SFDR",
+    "SNDR",
+    "SNR",
+    "THD",
+];
+
+/// Complete Xyce 7.10 `.MEASURE` qualifier-keyword vocabulary.
+///
+/// This includes measure families not yet executable in RSpice. Recognizing
+/// the full vocabulary is still essential: unsupported qualifiers must never
+/// be mistaken for equation text or discarded as anonymous operands.
+pub const XYCE_MEASURE_QUALIFIER_KEYWORDS: &[&str] = &[
+    "GOAL",
+    "DEFAULT_VAL",
+    "PRINT",
+    "MINVAL",
+    "FROM",
+    "TO",
+    "OUTPUT",
+    "AT",
+    "WHEN",
+    "TD",
+    "RISE",
+    "FALL",
+    "CROSS",
+    "YMIN",
+    "YMAX",
+    "IGNOR",
+    "IGNORE",
+    "WEIGHT",
+    "ON",
+    "OFF",
+    "MIN_THRESH",
+    "MAX_THRESH",
+    "NUMFREQ",
+    "GRIDSIZE",
+    "FILE",
+    "COMP_FUNCTION",
+    "INDEPVARCOL",
+    "INDEPVAR2COL",
+    "DEPVARCOL",
+    "RFC_LEVEL",
+    "FRAC_MAX",
+    "BINSIZ",
+    "MINFREQ",
+    "MAXFREQ",
+    "NBHARM",
+    "PRECISION",
+];
+
 /// Selects a particular conditional crossing in accepted-point order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EventOccurrence {
