@@ -180,8 +180,10 @@ pub(crate) enum DocumentMessage {
         requester: PeerIdentity,
         holder: PeerIdentity,
     },
-    /// The lease returns to the host (voluntarily or by revocation).
-    LeaseRelease { doc: String },
+    /// The lease returns to the host. Guests send it to give a lease back
+    /// (`holder` = themselves, verified against the table); the host sends
+    /// it to announce any release, voluntary or revoked.
+    LeaseRelease { doc: String, holder: PeerIdentity },
     /// A guest asks the host to resend its manifest and the named
     /// documents (`None` = everything), e.g. after (re)attaching.
     SyncRequest {
@@ -286,6 +288,7 @@ struct LeaseDenyHeader {
 #[derive(Deserialize, Serialize)]
 struct LeaseReleaseHeader {
     doc: String,
+    holder: PeerIdentity,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -390,10 +393,13 @@ impl DocumentMessage {
                     holder: *holder,
                 },
             ),
-            Self::LeaseRelease { doc } => json_frame(
+            Self::LeaseRelease { doc, holder } => json_frame(
                 class,
                 DOCUMENT_LEASE_RELEASE,
-                &LeaseReleaseHeader { doc: doc.clone() },
+                &LeaseReleaseHeader {
+                    doc: doc.clone(),
+                    holder: *holder,
+                },
             ),
             Self::SyncRequest { sender, docs } => json_frame(
                 class,
@@ -444,7 +450,10 @@ impl DocumentMessage {
             }
             DOCUMENT_LEASE_RELEASE => {
                 let parsed: LeaseReleaseHeader = parse_header(header)?;
-                Ok(Self::LeaseRelease { doc: parsed.doc })
+                Ok(Self::LeaseRelease {
+                    doc: parsed.doc,
+                    holder: parsed.holder,
+                })
             }
             DOCUMENT_SYNC_REQUEST => {
                 let parsed: SyncRequestHeader = parse_header(header)?;
@@ -836,6 +845,7 @@ mod tests {
             }),
             LiveMessage::Document(DocumentMessage::LeaseRelease {
                 doc: "sheet/abc".to_owned(),
+                holder: sender,
             }),
             LiveMessage::Document(DocumentMessage::SyncRequest {
                 sender,
@@ -937,6 +947,7 @@ mod tests {
             class: LiveFrameClass::Cursor,
             payload: LiveMessage::Document(DocumentMessage::LeaseRelease {
                 doc: "sheet/abc".to_owned(),
+                holder: sender,
             })
             .encode()
             .payload,
