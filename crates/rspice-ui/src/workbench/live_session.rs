@@ -236,7 +236,10 @@ impl LiveSessionEngine {
         self.finish_mirror_entry(state);
         self.drain_inbound(state);
         if let Some((doc, holder)) = self.take_lease_refusal() {
-            let doc = doc.strip_prefix(SCHEMATIC_DOC_PREFIX).unwrap_or(&doc).to_owned();
+            let doc = doc
+                .strip_prefix(SCHEMATIC_DOC_PREFIX)
+                .unwrap_or(&doc)
+                .to_owned();
             state.push_user_message(ConsoleMessage::warning(format!(
                 "{holder} holds the write lease on {doc}; ask again once it is released."
             )));
@@ -358,13 +361,12 @@ impl LiveSessionEngine {
             return;
         }
         if state.project_lifecycle.project_open {
-            state.workbench.begin_project_close(
-                crate::workbench::state::ProjectCloseDestination::LiveMirror,
-            );
+            state
+                .workbench
+                .begin_project_close(crate::workbench::state::ProjectCloseDestination::LiveMirror);
             if crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state) {
                 state.dialogs.project_review_dialog.show_close_project();
-            } else if !crate::workbench::workflows::project_workflow::close_project_discard(state)
-            {
+            } else if !crate::workbench::workflows::project_workflow::close_project_discard(state) {
                 state.workbench.cancel_project_close();
             }
         } else {
@@ -750,7 +752,10 @@ impl LiveSessionEngine {
                     }
                 } else {
                     match host.leases.arbitrate(&doc, sender) {
-                        LeaseDecision::Granted => DocumentMessage::LeaseGrant { doc, holder: sender },
+                        LeaseDecision::Granted => DocumentMessage::LeaseGrant {
+                            doc,
+                            holder: sender,
+                        },
                         LeaseDecision::Held(holder) => DocumentMessage::LeaseDeny {
                             doc,
                             requester: sender,
@@ -770,12 +775,9 @@ impl LiveSessionEngine {
                 }
             }
             DocumentMessage::Replace { header, chunk } => {
-                let authorized = host
-                    .leases
-                    .holder(&header.doc)
-                    .is_some_and(|holder| {
-                        holder.client_instance_id == header.sender.client_instance_id
-                    });
+                let authorized = host.leases.holder(&header.doc).is_some_and(|holder| {
+                    holder.client_instance_id == header.sender.client_instance_id
+                });
                 if !authorized {
                     log::warn!(
                         "live replace for {} dropped: sender holds no lease",
@@ -786,10 +788,9 @@ impl LiveSessionEngine {
                 match host.reassembler.accept(&header, &chunk) {
                     Ok(Some(completed)) => self.host_apply_proposal(state, completed),
                     Ok(None) => {}
-                    Err(error) => log::warn!(
-                        "live proposal for {} rejected: {error:?}",
-                        header.doc
-                    ),
+                    Err(error) => {
+                        log::warn!("live proposal for {} rejected: {error:?}", header.doc)
+                    }
                 }
             }
             DocumentMessage::SyncRequest { docs, .. } => {
@@ -895,14 +896,16 @@ impl LiveSessionEngine {
         }
         current.push(PROJECT_DOC.to_owned());
         for doc in &current {
-            host.tracked.entry(doc.clone()).or_insert_with(|| TrackedDoc {
-                content_type: content_type_for(doc),
-                // A fresh document is behind every version, so the change
-                // scan below broadcasts it.
-                seen_version: u64::MAX,
-                revision: 0,
-                digest: String::new(),
-            });
+            host.tracked
+                .entry(doc.clone())
+                .or_insert_with(|| TrackedDoc {
+                    content_type: content_type_for(doc),
+                    // A fresh document is behind every version, so the change
+                    // scan below broadcasts it.
+                    seen_version: u64::MAX,
+                    revision: 0,
+                    digest: String::new(),
+                });
         }
         let removed: Vec<String> = host
             .tracked
@@ -1031,8 +1034,8 @@ impl LiveSessionEngine {
                     Role::Host(host) => host.tracked.keys().cloned().collect(),
                     _ => return,
                 };
-                let set_changed = before.len() != after.len()
-                    || !before.iter().all(|doc| after.contains(doc));
+                let set_changed =
+                    before.len() != after.len() || !before.iter().all(|doc| after.contains(doc));
                 if set_changed {
                     self.broadcast_manifest();
                     // Structural changes (cells created, deleted, renamed)
@@ -1123,9 +1126,7 @@ impl LiveSessionEngine {
                 }
                 guest.host = Some(sender);
                 let named: Vec<String> = docs.iter().map(|entry| entry.doc.clone()).collect();
-                guest
-                    .mirror_docs
-                    .retain(|doc, _| named.contains(doc));
+                guest.mirror_docs.retain(|doc, _| named.contains(doc));
                 for entry in docs {
                     guest
                         .mirror_docs
@@ -1196,7 +1197,10 @@ impl LiveSessionEngine {
             // Replaces may outrun the manifest on a fresh connection; the
             // sync response's manifest lands first in send order, so an
             // unknown document here is a stale or misordered stream.
-            log::debug!("live document {} not in the manifest; dropped", completed.doc);
+            log::debug!(
+                "live document {} not in the manifest; dropped",
+                completed.doc
+            );
             return;
         };
         if mirror.digest == completed.digest {
@@ -1332,9 +1336,58 @@ impl LiveSessionEngine {
         self.presence_sent_at = Some(Instant::now());
     }
 
+    /// Retire peers whose presence went quiet, reclaiming whatever they left
+    /// half-sent. A departed peer that also held write leases frees them:
+    /// otherwise a document stays locked behind someone who is gone.
     fn prune_peers(&mut self) {
-        self.peers
-            .retain(|_, presence| presence.seen_at.elapsed() < PEER_TIMEOUT);
+        let departed: Vec<PeerIdentity> = self
+            .peers
+            .values()
+            .filter(|presence| presence.seen_at.elapsed() >= PEER_TIMEOUT)
+            .map(|presence| presence.identity)
+            .collect();
+        if departed.is_empty() {
+            return;
+        }
+        for identity in &departed {
+            self.peers.remove(identity);
+        }
+        let mut freed = Vec::new();
+        match &mut self.role {
+            Role::Host(host) => {
+                for identity in &departed {
+                    host.reassembler
+                        .forget_instance(identity.client_instance_id);
+                    // Only a principal with no remaining presence loses its
+                    // leases: a second window of the same person still holds.
+                    if self
+                        .peers
+                        .keys()
+                        .any(|peer| peer.principal_id == identity.principal_id)
+                    {
+                        continue;
+                    }
+                    for doc in host.leases.revoke_principal(identity.principal_id) {
+                        freed.push((doc, *identity));
+                    }
+                }
+            }
+            Role::Guest(guest) => {
+                for identity in &departed {
+                    guest
+                        .reassembler
+                        .forget_instance(identity.client_instance_id);
+                }
+            }
+            Role::Idle => {}
+        }
+        // Announce host-side revocations so every mirror agrees.
+        for (doc, holder) in freed {
+            self.send(&LiveMessage::Document(DocumentMessage::LeaseRelease {
+                doc,
+                holder,
+            }));
+        }
     }
 
     /// Project lease state onto the UI's write gates.
