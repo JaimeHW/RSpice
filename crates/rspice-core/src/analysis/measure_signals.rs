@@ -74,21 +74,28 @@ pub fn transient_signal_map(result: &TransientResult) -> HashMap<String, &[Value
     // The time axis itself, so `FIND TIME WHEN V(out)=...` works.
     insert_case_variants(&mut signals, "Time", result.time.as_slice());
 
+    let authoritative_node_names = result
+        .node_names
+        .iter()
+        .filter(|name| !name.is_empty())
+        .map(|name| name.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
     for (index, waveform) in result.voltages.iter().enumerate() {
         let fallback = (index + 1).to_string();
-        let raw = result
-            .node_names
-            .get(index)
-            .filter(|name| !name.is_empty())
-            .cloned()
-            .unwrap_or_else(|| fallback.clone());
+        let raw = if let Some(name) = result.node_names.get(index).filter(|name| !name.is_empty()) {
+            name.clone()
+        } else {
+            // An ordinal is a last-resort name only when result metadata is
+            // absent. It must never replace an authoritative numeric SPICE
+            // node that happens to occupy a different solver position.
+            if authoritative_node_names.contains(&fallback.to_ascii_lowercase()) {
+                continue;
+            }
+            fallback
+        };
 
         insert_wrapped_variants(&mut signals, 'V', &raw, waveform.as_slice());
         insert_case_variants(&mut signals, &raw, waveform.as_slice());
-        if raw != fallback {
-            insert_wrapped_variants(&mut signals, 'V', &fallback, waveform.as_slice());
-            insert_case_variants(&mut signals, &fallback, waveform.as_slice());
-        }
     }
 
     for (index, waveform) in result.branch_currents.iter().enumerate() {
@@ -1822,6 +1829,84 @@ mod tests {
         assert!(signals.contains_key("v(OUT)"));
         assert!(signals.contains_key("I(v1)"));
         assert_eq!(signals["TIME"], result.time.as_slice());
+    }
+
+    #[test]
+    fn transient_map_keeps_numeric_node_names_authoritative_over_solver_ordinals() {
+        let mut result = tran_result();
+        result.voltages = vec![
+            vec![1.0, 1.1, 1.2, 1.3],
+            vec![3.0, 3.1, 3.2, 3.3],
+            vec![4.0, 4.1, 4.2, 4.3],
+        ];
+        result.node_names = vec!["1".to_string(), "3".to_string(), "4".to_string()];
+        result.num_nodes = 3;
+
+        let signals = transient_signal_map(&result);
+        assert_eq!(signals["V(1)"], result.voltages[0].as_slice());
+        assert_eq!(signals["V(3)"], result.voltages[1].as_slice());
+        assert_eq!(signals["V(4)"], result.voltages[2].as_slice());
+        assert!(
+            !signals.contains_key("V(2)"),
+            "solver position two is not an authored node alias"
+        );
+    }
+
+    #[test]
+    fn transient_map_uses_ordinals_only_for_missing_collision_free_metadata() {
+        let mut missing = tran_result();
+        missing.node_names.clear();
+        let signals = transient_signal_map(&missing);
+        assert_eq!(signals["V(1)"], missing.voltages[0].as_slice());
+
+        let mut partial = tran_result();
+        partial.voltages = vec![vec![9.0; 4], vec![1.0; 4]];
+        partial.node_names = vec![String::new(), "1".to_string()];
+        partial.num_nodes = 2;
+        let signals = transient_signal_map(&partial);
+        assert_eq!(
+            signals["V(1)"],
+            partial.voltages[1].as_slice(),
+            "a missing-name fallback must not shadow authoritative numeric node 1"
+        );
+    }
+
+    #[test]
+    fn transient_measurements_keep_sparse_numeric_nodes_distinct() {
+        let netlist = Netlist::parse(
+            "* sparse numeric transient measurement names\n\
+             V1 1 0 0\n\
+             V3 3 0 0\n\
+             V4 4 0 0\n\
+             .tran 1 3\n\
+             .measure tran crossing WHEN V(3)=V(4)\n\
+             .measure tran difference MAX {V(3)-V(4)}\n\
+             .end\n",
+        )
+        .expect("sparse numeric measurements parse");
+        let result = TransientResult {
+            time: vec![0.0, 1.0, 2.0, 3.0],
+            step_sizes: vec![0.0; 4],
+            voltages: vec![
+                vec![0.0; 4],
+                vec![0.0, 0.25, 0.5, 0.75],
+                vec![1.0, 0.75, 0.5, 0.25],
+            ],
+            branch_currents: Vec::new(),
+            num_nodes: 3,
+            node_names: vec!["1".to_string(), "3".to_string(), "4".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+
+        let measurements = evaluate_tran_measurements(&netlist, &result);
+        assert_eq!(measurements.len(), 2);
+        assert!(measurements.iter().all(|measurement| measurement.passed));
+        assert_eq!(measurements[0].value, Some(2.0));
+        assert_eq!(measurements[1].value, Some(0.5));
     }
 
     #[test]
