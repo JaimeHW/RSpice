@@ -59,7 +59,6 @@ class NativeReleasePackageTests(unittest.TestCase):
                 "LICENSE",
                 "NOTICE",
                 "README.md",
-                "production.toml",
             ]:
                 self.assertIn(required, payload_paths)
 

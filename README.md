@@ -324,16 +324,18 @@ a before/after scoreboard.
 
 ## Operations
 
-The native backend is a stateless, one-shot worker process. Service operators
-should start from the conservative worker profile in
-[config/production.toml](config/production.toml), which documents the isolation,
-admission, observability, and capacity settings a deployment is expected to pin.
+The native backend is a stateless, one-shot worker process. Deployments pin
+admission limits through the `[resources]` table of an operator-supplied config
+file, or the matching `RSPICE_*` variables; both are documented per key in
+[the CLI reference](crates/rspice-cli/README.md). Derive the ceilings from the
+deployment's own deck mix and container quotas — the defaults assume a
+workstation, not an isolated worker.
 
 Releases are cut from annotated version tags for six Linux, macOS, and Windows
 target triples, bound to deterministic archives, SHA-256 sidecars, CycloneDX
 SBOMs, and GitHub artifact attestations, and published without permitting an
-existing asset to be replaced. Archives carry the production profile and a
-manifest recording the exact source commit and payload hashes.
+existing asset to be replaced. Archives carry a manifest recording the exact
+source commit and payload hashes.
 
 ## Repository
 

@@ -131,7 +131,7 @@ jobs:
             *windows*) binary="${binary}.exe" ;;
           esac
           "$binary" --version
-          "$binary" --config config/production.toml health --json > health.json
+          "$binary" health --json > health.json
           python - <<'PY'
           import json
           import os
