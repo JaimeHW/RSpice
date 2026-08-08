@@ -20,6 +20,8 @@ pub(crate) mod config;
 #[cfg(not(target_arch = "wasm32"))]
 mod executor;
 #[cfg(not(target_arch = "wasm32"))]
+mod live_relay;
+#[cfg(not(target_arch = "wasm32"))]
 mod native_login;
 #[cfg(not(target_arch = "wasm32"))]
 mod oidc;
@@ -227,9 +229,89 @@ pub(crate) struct LiveSessionSummary {
     pub policy: LiveSessionPolicySummary,
     pub participants: Vec<LiveParticipantSummary>,
     pub started_at: String,
+    /// Whether the relay socket is attached and streaming right now. False
+    /// while connecting, reconnecting, or awaiting approval.
+    pub relay_connected: bool,
     /// The most recent host action that failed, presentation-safe; cleared
     /// by the next successful action or roster refresh.
     pub notice: Option<String>,
+}
+
+/// Payload class of one live-relay frame, mirroring the relay's class byte.
+/// The relay enforces capability by class alone: everyone sends presence and
+/// cursor frames, editors add document and run-request frames, and run-status
+/// frames are host-only.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum LiveFrameClass {
+    Presence,
+    Cursor,
+    Document,
+    RunRequest,
+    RunStatus,
+}
+
+impl LiveFrameClass {
+    pub(crate) const fn as_byte(self) -> u8 {
+        match self {
+            Self::Presence => 0,
+            Self::Cursor => 1,
+            Self::Document => 2,
+            Self::RunRequest => 3,
+            Self::RunStatus => 4,
+        }
+    }
+
+    pub(crate) const fn from_byte(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Presence),
+            1 => Some(Self::Cursor),
+            2 => Some(Self::Document),
+            3 => Some(Self::RunRequest),
+            4 => Some(Self::RunStatus),
+            _ => None,
+        }
+    }
+}
+
+/// Hard per-frame bound: the relay closes the connection over anything
+/// larger, so senders must chunk beneath it.
+pub(crate) const MAX_LIVE_FRAME_BYTES: usize = 1024 * 1024;
+
+/// One live-relay frame: a class byte followed by an opaque payload the
+/// relay never interprets. Payload protocols are peer-owned.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct LiveFrame {
+    pub class: LiveFrameClass,
+    pub payload: Vec<u8>,
+}
+
+impl LiveFrame {
+    pub(crate) fn encode(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(1 + self.payload.len());
+        bytes.push(self.class.as_byte());
+        bytes.extend_from_slice(&self.payload);
+        bytes
+    }
+
+    pub(crate) fn decode(bytes: &[u8]) -> Option<Self> {
+        let (class_byte, payload) = bytes.split_first()?;
+        Some(Self {
+            class: LiveFrameClass::from_byte(*class_byte)?,
+            payload: payload.to_vec(),
+        })
+    }
+}
+
+/// Duplex port to one relay connection, delivered when the socket attaches.
+/// A reconnection delivers a fresh port that supersedes any earlier one;
+/// sends into a superseded port are silently dropped with its dead socket.
+pub(crate) struct LiveRelayPort {
+    /// Monotonic connection identity, so stale ports are recognizable.
+    pub generation: u64,
+    /// Frames to broadcast to the other participants.
+    pub outbound: tokio::sync::mpsc::UnboundedSender<LiveFrame>,
+    /// Frames the other participants broadcast, in arrival order.
+    pub inbound: std::sync::mpsc::Receiver<LiveFrame>,
 }
 
 /// Lifecycle of the live session, dialog- and chrome-rendered.
@@ -379,6 +461,31 @@ pub(crate) enum CloudAccountCommand {
     /// The loopback listener failed or timed out.
     #[cfg(not(target_arch = "wasm32"))]
     SignInFailed { reason: String },
+    /// The relay socket attached (sent by the socket thread, never the UI).
+    #[cfg(not(target_arch = "wasm32"))]
+    LiveRelayAttached { generation: u64 },
+    /// The relay socket ended (sent by the socket thread, never the UI).
+    #[cfg(not(target_arch = "wasm32"))]
+    LiveRelayClosed {
+        generation: u64,
+        closure: LiveRelayClosure,
+    },
+}
+
+/// Why a relay socket ended, as the socket thread reports it.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum LiveRelayClosure {
+    /// The executor asked the socket to stop; no state change follows.
+    Local,
+    /// The server declared the session over, with the presentation-safe
+    /// reading of its close reason.
+    SessionOver { message: String },
+    /// The server refused a frame or broke the handshake contract — a
+    /// defect, so reconnecting would loop. Fail visible instead.
+    Rejected,
+    /// The connection dropped (network, relay restart); reconnectable.
+    Interrupted,
 }
 
 /// Events the executor posts back to the UI thread.
@@ -398,10 +505,14 @@ pub(crate) struct CloudAccountService {
     snapshot: CloudSessionSnapshot,
     pending_browser_url: Option<String>,
     pending_publish_receipt: Option<PublishReceipt>,
+    /// The newest relay port awaiting pickup by the workbench.
+    pending_live_relay: Option<LiveRelayPort>,
     #[cfg(not(target_arch = "wasm32"))]
     commands: Option<std::sync::mpsc::Sender<CloudAccountCommand>>,
     #[cfg(not(target_arch = "wasm32"))]
     events: Option<std::sync::mpsc::Receiver<CloudAccountEvent>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    relay_ports: Option<std::sync::mpsc::Receiver<LiveRelayPort>>,
 }
 
 impl CloudAccountService {
@@ -416,20 +527,23 @@ impl CloudAccountService {
                 snapshot: CloudSessionSnapshot::default(),
                 pending_browser_url: None,
                 pending_publish_receipt: None,
+                pending_live_relay: None,
             }
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
             match config::CloudAccountConfig::resolve() {
                 Some(configuration) => {
-                    let (commands, events) = executor::spawn(configuration, repaint);
+                    let (commands, events, relay_ports) = executor::spawn(configuration, repaint);
                     Self {
                         availability: CloudAccountAvailability::Native,
                         snapshot: CloudSessionSnapshot::default(),
                         pending_browser_url: None,
                         pending_publish_receipt: None,
+                        pending_live_relay: None,
                         commands: Some(commands),
                         events: Some(events),
+                        relay_ports: Some(relay_ports),
                     }
                 }
                 None => Self {
@@ -437,8 +551,10 @@ impl CloudAccountService {
                     snapshot: CloudSessionSnapshot::default(),
                     pending_browser_url: None,
                     pending_publish_receipt: None,
+                    pending_live_relay: None,
                     commands: None,
                     events: None,
+                    relay_ports: None,
                 },
             }
         }
@@ -453,10 +569,13 @@ impl CloudAccountService {
             snapshot: CloudSessionSnapshot::default(),
             pending_browser_url: None,
             pending_publish_receipt: None,
+            pending_live_relay: None,
             #[cfg(not(target_arch = "wasm32"))]
             commands: None,
             #[cfg(not(target_arch = "wasm32"))]
             events: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            relay_ports: None,
         }
     }
 
@@ -476,10 +595,18 @@ impl CloudAccountService {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let Some(events) = self.events.as_ref() else {
-                return false;
-            };
             let mut changed = false;
+            if let Some(ports) = self.relay_ports.as_ref() {
+                // Newest wins: a reconnection's port supersedes its
+                // predecessor before the workbench ever saw it.
+                while let Ok(port) = ports.try_recv() {
+                    self.pending_live_relay = Some(port);
+                    changed = true;
+                }
+            }
+            let Some(events) = self.events.as_ref() else {
+                return changed;
+            };
             while let Ok(event) = events.try_recv() {
                 match event {
                     CloudAccountEvent::Snapshot(snapshot) => {
@@ -558,6 +685,13 @@ impl CloudAccountService {
         self.pending_publish_receipt.take()
     }
 
+    /// The duplex port of a just-attached relay connection, at most once per
+    /// connection. The workbench pumps live frames through it and replaces
+    /// any port it already holds: a fresh port means the old socket is dead.
+    pub(crate) fn take_live_relay_port(&mut self) -> Option<LiveRelayPort> {
+        self.pending_live_relay.take()
+    }
+
     #[allow(unused_variables)]
     fn send(&mut self, command: CloudAccountCommand) {
         #[cfg(not(target_arch = "wasm32"))]
@@ -595,6 +729,49 @@ mod tests {
         assert!(snapshot.signed_in());
         snapshot.phase = CloudSessionPhase::OfflineLicensed;
         assert!(snapshot.signed_in());
+    }
+
+    #[test]
+    fn live_frames_round_trip_their_class_byte() {
+        for (class, byte) in [
+            (LiveFrameClass::Presence, 0u8),
+            (LiveFrameClass::Cursor, 1),
+            (LiveFrameClass::Document, 2),
+            (LiveFrameClass::RunRequest, 3),
+            (LiveFrameClass::RunStatus, 4),
+        ] {
+            let frame = LiveFrame {
+                class,
+                payload: vec![9, 8, 7],
+            };
+            let encoded = frame.encode();
+            assert_eq!(encoded[0], byte);
+            assert_eq!(LiveFrame::decode(&encoded), Some(frame));
+        }
+        assert_eq!(LiveFrame::decode(&[]), None, "no class byte");
+        assert_eq!(LiveFrame::decode(&[7]), None, "unknown class");
+        let empty = LiveFrame::decode(&[3]).expect("class byte alone is a frame");
+        assert_eq!(empty.class, LiveFrameClass::RunRequest);
+        assert!(empty.payload.is_empty());
+    }
+
+    /// The UI-facing class enum must stay byte-for-byte the relay contract's.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn live_frame_classes_match_the_relay_contract() {
+        use rspice_cloud_client::contract::LiveSessionFrameClass;
+        for (ours, contract) in [
+            (LiveFrameClass::Presence, LiveSessionFrameClass::Presence),
+            (LiveFrameClass::Cursor, LiveSessionFrameClass::Cursor),
+            (LiveFrameClass::Document, LiveSessionFrameClass::Document),
+            (LiveFrameClass::RunRequest, LiveSessionFrameClass::RunRequest),
+            (LiveFrameClass::RunStatus, LiveSessionFrameClass::RunStatus),
+        ] {
+            assert_eq!(ours.as_byte(), contract as u8);
+            assert_eq!(LiveFrameClass::from_byte(contract as u8), Some(ours));
+        }
+        assert_eq!(LiveSessionFrameClass::from_byte(5), None);
+        assert_eq!(LiveFrameClass::from_byte(5), None);
     }
 
     #[test]

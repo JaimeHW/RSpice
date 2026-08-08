@@ -127,6 +127,11 @@ eframe = { version = "0.35.0", default-features = false, features = ["wgpu", "pe
 
 env_logger = "0.11"
 tokio = { version = "1", features = ["sync", "macros", "time", "rt-multi-thread"] }
+# Live-session relay socket (ADR 0082). rustls + webpki roots keep the
+# banned native-tls/openssl stacks out and share reqwest's TLS provider;
+# futures-util supplies the Stream/Sink adapters the socket pump drives.
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
 
 # Cloud account boundary: the typed RSpice Cloud client, the OIDC token
 # transport the client crate deliberately does not own, and RFC 3339 stamps
