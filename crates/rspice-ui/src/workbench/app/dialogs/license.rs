@@ -92,7 +92,7 @@ impl RSpiceApp {
                         "Key verified on this machine. Activating stores it locally; nothing is sent anywhere."
                     }
                     _ => {
-                        "Paste the key from your purchase email. Verification happens on this machine — RSpice never phones home."
+                        "Paste the key from your purchase email. License verification happens entirely on this machine."
                     }
                 };
                 ui.label(
