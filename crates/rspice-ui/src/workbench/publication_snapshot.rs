@@ -9,11 +9,11 @@
 //! cannot faithfully capture it reports as an error instead of approximating.
 
 use rspice_publication_contract::{
-    AnalysisRecord, Dataset, Disclosure, Figure, FigureContent, Measurement, NetlistSection, Paint,
-    PaintRole, PathPrimitive, PathSegment, PlotFigure, Point, Primitive, PrimitiveGroup,
-    PublicationMetadata, PublicationSnapshot, ResultsSection, Scene, SchematicSection, SheetScene,
-    Stroke, StrokePattern, SweepAxis, TextAnchor, TextFont, TextPrimitive, Trace, TraceValues,
-    Validate as _,
+    AnalysisRecord, AxisScale, Dataset, Disclosure, Figure, FigureContent, Measurement,
+    NetlistSection, Paint, PaintRole, PathPrimitive, PathSegment, PlotFigure, PlotHydration,
+    PlotTraceBinding, Point, Primitive, PrimitiveGroup, PublicationMetadata, PublicationSnapshot,
+    ResultsSection, Scene, SchematicSection, SheetScene, Stroke, StrokePattern, SweepAxis,
+    TextAnchor, TextFont, TextPrimitive, Trace, TraceTransform, TraceValues, Validate as _,
 };
 
 use crate::hardcopy::HardcopyScope;
@@ -139,13 +139,14 @@ pub(crate) fn build_publication_snapshot(
         });
         next_figure_id += 1;
     }
-    for (title, scene) in plot_figures {
+    for plot in plot_figures {
+        let hydration = hydrate_plot(&plot.traces, results.as_ref());
         figures.push(Figure {
             id: next_figure_id,
-            title,
+            title: plot.title,
             content: FigureContent::Plot(PlotFigure {
-                scene,
-                hydration: None,
+                scene: plot.scene,
+                hydration,
             }),
         });
         next_figure_id += 1;
@@ -185,12 +186,28 @@ pub(crate) fn build_publication_snapshot(
 // Scenes
 // ---------------------------------------------------------------------------
 
+/// One retained result trace of a resolved plot pane, kept alongside the
+/// compiled scene so hydration can bind it to the published datasets by
+/// exact sample identity.
+struct PlotTraceSource {
+    label: String,
+    x_bits: Vec<u64>,
+    y_bits: Vec<u64>,
+}
+
+/// A compiled plot scene plus the semantic trace samples it was drawn from.
+struct PlotSceneSource {
+    title: String,
+    scene: Scene,
+    traces: Vec<PlotTraceSource>,
+}
+
 /// Resolve every printable schematic sheet and plot pane through the
 /// hardcopy source registry, one source at a time so no aggregate clipping
 /// is ever involved, and compile each into a contract scene.
 fn collect_scenes(
     state: &AppState,
-) -> Result<(Vec<SheetScene>, Vec<(String, Scene)>), PublicationBuildError> {
+) -> Result<(Vec<SheetScene>, Vec<PlotSceneSource>), PublicationBuildError> {
     let mut sheets = Vec::new();
     let mut plots = Vec::new();
     for descriptor in enumerate_retained_hardcopy_sources(state) {
@@ -257,10 +274,140 @@ fn collect_scenes(
                 scene: converted,
             });
         } else {
-            plots.push((descriptor.display_name.clone(), converted));
+            let traces = match resolved.semantic_document() {
+                HardcopySemanticDocument::Plot(plot) => plot
+                    .traces
+                    .iter()
+                    .map(|trace| PlotTraceSource {
+                        label: trace.label.clone(),
+                        x_bits: trace.source_samples.iter().map(|(x, _)| *x).collect(),
+                        y_bits: trace.source_samples.iter().map(|(_, y)| *y).collect(),
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
+            plots.push(PlotSceneSource {
+                title: descriptor.display_name.clone(),
+                scene: converted,
+                traces,
+            });
         }
     }
     Ok((sheets, plots))
+}
+
+// ---------------------------------------------------------------------------
+// Plot hydration
+// ---------------------------------------------------------------------------
+
+/// Bind a plot figure's drawn traces to the published datasets, or return
+/// `None` and leave the figure a static scene.
+///
+/// A binding is emitted only when the published dataset values reproduce the
+/// drawn ordinates bit-exactly under one declared transform, so a hydrated
+/// figure can never disagree with the reviewed static scene. Traces the
+/// datasets cannot reproduce exactly — a pane bound to a non-active run, or
+/// a derived trace such as a differential probe's magnitude difference —
+/// fail the whole figure closed to its static scene.
+fn hydrate_plot(
+    traces: &[PlotTraceSource],
+    results: Option<&ResultsSection>,
+) -> Option<PlotHydration> {
+    let results = results?;
+    if traces.is_empty() {
+        return None;
+    }
+    let mut bindings = Vec::with_capacity(traces.len());
+    let mut x_axis: Option<&SweepAxis> = None;
+    let mut y_unit: Option<&str> = None;
+    for trace in traces {
+        let (dataset, trace_index, transform) = bind_trace(trace, results)?;
+        x_axis.get_or_insert(&dataset.sweep);
+        let unit = dataset.traces[trace_index as usize].unit.as_str();
+        y_unit = match y_unit {
+            None => Some(unit),
+            Some(existing) if existing == unit => Some(existing),
+            Some(_) => Some(""),
+        };
+        bindings.push(PlotTraceBinding {
+            dataset_id: dataset.id,
+            trace_index,
+            transform,
+        });
+    }
+    let sweep = x_axis?;
+    // The compiled scene maps both axes linearly (`map_plot_point`), so the
+    // hydrated instrument declares exactly that mapping.
+    Some(PlotHydration {
+        x_scale: AxisScale::Linear,
+        y_scale: AxisScale::Linear,
+        x_label: if sweep.unit.is_empty() {
+            sweep.label.clone()
+        } else {
+            format!("{} ({})", sweep.label, sweep.unit)
+        },
+        y_label: y_unit.unwrap_or_default().to_owned(),
+        bindings,
+    })
+}
+
+/// Locate the one published trace whose values reproduce this drawn trace.
+fn bind_trace<'results>(
+    trace: &PlotTraceSource,
+    results: &'results ResultsSection,
+) -> Option<(&'results Dataset, u32, TraceTransform)> {
+    for dataset in &results.datasets {
+        if dataset.sweep.values_bits != trace.x_bits {
+            continue;
+        }
+        for (index, candidate) in dataset.traces.iter().enumerate() {
+            if candidate.label != trace.label {
+                continue;
+            }
+            if let Some(transform) = verify_transform(candidate, &trace.y_bits) {
+                return Some((dataset, index as u32, transform));
+            }
+        }
+    }
+    None
+}
+
+/// The transform under which `candidate`'s stored values reproduce the drawn
+/// ordinates bit-for-bit, if one exists. Formulas match the run-ingestion
+/// producers exactly (`results_convert::build_ac_waveforms_owned`), so a
+/// faithful pairing verifies and everything else is rejected.
+fn verify_transform(candidate: &Trace, y_bits: &[u64]) -> Option<TraceTransform> {
+    match &candidate.values {
+        TraceValues::Real { bits } => (bits == y_bits).then_some(TraceTransform::Identity),
+        TraceValues::Complex {
+            real_bits,
+            imaginary_bits,
+        } => {
+            if real_bits.len() != y_bits.len() || imaginary_bits.len() != y_bits.len() {
+                return None;
+            }
+            type TransformFormula = fn(f64, f64) -> f64;
+            const CANDIDATES: [(TraceTransform, TransformFormula); 5] = [
+                (TraceTransform::Magnitude, |r, i| (r * r + i * i).sqrt()),
+                (TraceTransform::MagnitudeDb, |r, i| {
+                    20.0 * (r * r + i * i).sqrt().log10()
+                }),
+                (TraceTransform::PhaseDegrees, |r, i| i.atan2(r).to_degrees()),
+                (TraceTransform::RealPart, |r, _| r),
+                (TraceTransform::ImaginaryPart, |_, i| i),
+            ];
+            CANDIDATES.iter().find_map(|(transform, formula)| {
+                real_bits
+                    .iter()
+                    .zip(imaginary_bits)
+                    .zip(y_bits)
+                    .all(|((real, imaginary), y)| {
+                        formula(f64::from_bits(*real), f64::from_bits(*imaginary)).to_bits() == *y
+                    })
+                    .then_some(*transform)
+            })
+        }
+    }
 }
 
 /// Publication compiles headlessly, so the interactive `Ask` overflow policy
@@ -1000,6 +1147,143 @@ mod tests {
             ),
             Err(PublicationBuildError::NothingToPublish)
         ));
+    }
+
+    #[test]
+    fn hydration_binds_bit_exact_traces_and_fails_closed() {
+        let x = [1.0_f64, 10.0, 100.0];
+        let real = [3.0_f64, 0.5, -2.0];
+        let imag = [4.0_f64, 0.25, 1.5];
+        let magnitude: Vec<f64> = real
+            .iter()
+            .zip(&imag)
+            .map(|(r, i)| (r * r + i * i).sqrt())
+            .collect();
+        let results = ResultsSection {
+            analyses: vec![AnalysisRecord {
+                id: 1,
+                label: "AC".to_string(),
+                card: ".ac".to_string(),
+            }],
+            datasets: vec![Dataset {
+                id: 7,
+                analysis_id: 1,
+                name: "AC".to_string(),
+                variant: None,
+                sweep: SweepAxis {
+                    label: "frequency".to_string(),
+                    unit: "Hz".to_string(),
+                    values_bits: x.iter().map(|value| value.to_bits()).collect(),
+                },
+                traces: vec![Trace {
+                    label: "|V(out)|".to_string(),
+                    unit: "V".to_string(),
+                    values: TraceValues::Complex {
+                        real_bits: real.iter().map(|value| value.to_bits()).collect(),
+                        imaginary_bits: imag.iter().map(|value| value.to_bits()).collect(),
+                    },
+                }],
+            }],
+            measurements: Vec::new(),
+        };
+
+        let drawn = PlotTraceSource {
+            label: "|V(out)|".to_string(),
+            x_bits: x.iter().map(|value| value.to_bits()).collect(),
+            y_bits: magnitude.iter().map(|value| value.to_bits()).collect(),
+        };
+        let hydration = hydrate_plot(std::slice::from_ref(&drawn), Some(&results))
+            .expect("magnitude trace binds");
+        assert_eq!(
+            hydration.bindings,
+            vec![PlotTraceBinding {
+                dataset_id: 7,
+                trace_index: 0,
+                transform: TraceTransform::Magnitude,
+            }]
+        );
+        assert_eq!(hydration.x_label, "frequency (Hz)");
+        assert_eq!(hydration.y_label, "V");
+        assert!(matches!(hydration.x_scale, AxisScale::Linear));
+
+        // An ordinate no transform reproduces (a differential probe's
+        // magnitude difference) fails the whole figure closed.
+        let unreproducible = PlotTraceSource {
+            label: "|V(out)|".to_string(),
+            x_bits: x.iter().map(|value| value.to_bits()).collect(),
+            y_bits: magnitude
+                .iter()
+                .map(|value| (value - 0.125).to_bits())
+                .collect(),
+        };
+        assert!(hydrate_plot(&[drawn, unreproducible], Some(&results)).is_none());
+        assert!(hydrate_plot(&[], Some(&results)).is_none());
+    }
+
+    #[test]
+    fn transform_verification_matches_the_producer_formulas_exactly() {
+        let bits = |values: &[f64]| {
+            values
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        };
+        let phase_trace = Trace {
+            label: "phase(V(out))".to_string(),
+            unit: String::new(),
+            values: TraceValues::Real {
+                bits: bits(&[45.0, -90.0]),
+            },
+        };
+        assert_eq!(
+            verify_transform(&phase_trace, &bits(&[45.0, -90.0])),
+            Some(TraceTransform::Identity)
+        );
+        assert_eq!(verify_transform(&phase_trace, &bits(&[45.0, -91.0])), None);
+
+        let real = [3.0_f64, -1.0];
+        let imag = [4.0_f64, 2.0];
+        let complex_trace = Trace {
+            label: "|V(out)|".to_string(),
+            unit: "V".to_string(),
+            values: TraceValues::Complex {
+                real_bits: bits(&real),
+                imaginary_bits: bits(&imag),
+            },
+        };
+        let apply = |formula: fn(f64, f64) -> f64| {
+            bits(
+                &real
+                    .iter()
+                    .zip(&imag)
+                    .map(|(r, i)| formula(*r, *i))
+                    .collect::<Vec<_>>(),
+            )
+        };
+        assert_eq!(
+            verify_transform(&complex_trace, &apply(|r, i| (r * r + i * i).sqrt())),
+            Some(TraceTransform::Magnitude)
+        );
+        assert_eq!(
+            verify_transform(
+                &complex_trace,
+                &apply(|r, i| 20.0 * (r * r + i * i).sqrt().log10())
+            ),
+            Some(TraceTransform::MagnitudeDb)
+        );
+        assert_eq!(
+            verify_transform(&complex_trace, &apply(|r, i| i.atan2(r).to_degrees())),
+            Some(TraceTransform::PhaseDegrees)
+        );
+        assert_eq!(
+            verify_transform(&complex_trace, &apply(|r, _| r)),
+            Some(TraceTransform::RealPart)
+        );
+        assert_eq!(
+            verify_transform(&complex_trace, &apply(|_, i| i)),
+            Some(TraceTransform::ImaginaryPart)
+        );
+        assert_eq!(verify_transform(&complex_trace, &apply(|r, i| r + i)), None);
     }
 
     #[test]
