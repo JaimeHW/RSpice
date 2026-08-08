@@ -14,11 +14,11 @@
 //! `cargo test -p rspice-publication-contract --test golden regenerate_fixtures -- --ignored`
 
 use rspice_publication_contract::{
-    AnalysisRecord, AxisScale, Dataset, Disclosure, FIGURE_MANIFEST_SCHEMA_VERSION, Figure,
-    FigureContent, FigureManifest, GroupTag, ManifestEntry, ManifestFigureKind, Measurement,
-    NetlistSection, PUBLICATION_SNAPSHOT_SCHEMA_VERSION, Paint, PaintRole, PathPrimitive,
-    PathSegment, PayloadRef, PlotFigure, PlotHydration, PlotTraceBinding, Point, Primitive,
-    PrimitiveGroup, PublicationMetadata, PublicationSnapshot, ResultsSection, Scene,
+    AnalysisRecord, AxisScale, ContentLicense, Dataset, Disclosure, FIGURE_MANIFEST_SCHEMA_VERSION,
+    Figure, FigureContent, FigureManifest, GroupTag, ManifestEntry, ManifestFigureKind,
+    Measurement, NetlistSection, PUBLICATION_SNAPSHOT_SCHEMA_VERSION, Paint, PaintRole,
+    PathPrimitive, PathSegment, PayloadRef, PlotFigure, PlotHydration, PlotTraceBinding, Point,
+    Primitive, PrimitiveGroup, PublicationMetadata, PublicationSnapshot, ResultsSection, Scene,
     SchematicSection, SheetScene, Stroke, StrokePattern, SweepAxis, TextAnchor, TextFont,
     TextPrimitive, Trace, TraceTransform, TraceValues, Validate,
 };
@@ -317,6 +317,7 @@ fn rc_lowpass_snapshot() -> PublicationSnapshot {
             author_display: "James Whitfield".to_string(),
             app_version: "0.1.0".to_string(),
             created_utc: "2026-08-05T21:00:00Z".to_string(),
+            license: ContentLicense::CernOhlP2,
         },
         disclosure: Disclosure {
             schematic: true,
@@ -429,6 +430,7 @@ fn multi_analysis_snapshot() -> PublicationSnapshot {
             author_display: "James Whitfield".to_string(),
             app_version: "0.1.0".to_string(),
             created_utc: "2026-08-05T21:30:00Z".to_string(),
+            license: ContentLicense::AllRightsReserved,
         },
         disclosure: Disclosure {
             schematic: false,

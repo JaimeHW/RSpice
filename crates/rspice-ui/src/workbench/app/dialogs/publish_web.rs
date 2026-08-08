@@ -49,6 +49,8 @@ pub(crate) struct PublishWebDialogState {
     pub author_credit: String,
     /// First-publish page visibility; the service pins it on the circuit.
     pub public_visibility: bool,
+    /// Content license sealed into this version's snapshot.
+    pub license: rspice_publication_contract::ContentLicense,
     /// Selected workspace for a first publish (index into the session list).
     pub workspace_index: usize,
     pub scope: Option<Result<PublishScope, String>>,
@@ -346,6 +348,7 @@ impl RSpiceApp {
             description: description.clone(),
             author_display: author,
             created_utc: publication_timestamp_utc(),
+            license: dialog.license,
         };
         let built = build_publication_snapshot(&self.state, &draft)
             .map_err(|error| error.to_string())
@@ -416,6 +419,7 @@ fn build_scope(state: &AppState, title: &str, author: &str) -> Result<PublishSco
             author.to_owned()
         },
         created_utc: publication_timestamp_utc(),
+        license: rspice_publication_contract::ContentLicense::default(),
     };
     let snapshot = build_publication_snapshot(state, &draft).map_err(|error| error.to_string())?;
     let payload_bytes = snapshot
@@ -535,6 +539,23 @@ fn render_page_column(
             .desired_rows(2)
             .desired_width(f32::INFINITY),
     );
+
+    field_label(ui, "Content license");
+    {
+        use rspice_publication_contract::ContentLicense;
+        egui::ComboBox::from_id_salt("publish-web-license")
+            .width(ui.available_width())
+            .selected_text(dialog.license.display_name())
+            .show_ui(ui, |ui| {
+                for license in [
+                    ContentLicense::CernOhlP2,
+                    ContentLicense::CcBy40,
+                    ContentLicense::AllRightsReserved,
+                ] {
+                    ui.selectable_value(&mut dialog.license, license, license.display_name());
+                }
+            });
+    }
 
     if !bound {
         field_label(ui, "Visibility");

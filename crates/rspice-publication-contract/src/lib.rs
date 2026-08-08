@@ -34,7 +34,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Exact schema version a conforming snapshot must declare.
-pub const PUBLICATION_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
+/// Version 2 added the required [`PublicationMetadata::license`] field.
+pub const PUBLICATION_SNAPSHOT_SCHEMA_VERSION: u32 = 2;
 /// Exact schema version a conforming figure manifest must declare.
 pub const FIGURE_MANIFEST_SCHEMA_VERSION: u32 = 1;
 /// Hard upper bound on canonical snapshot bytes, matching the hardcopy
@@ -239,6 +240,35 @@ pub struct PublicationMetadata {
     pub app_version: String,
     /// RFC 3339 UTC creation instant supplied by the producing client.
     pub created_utc: String,
+    /// The author's chosen terms for the published content.
+    pub license: ContentLicense,
+}
+
+/// The author's chosen content license, sealed into the snapshot so every
+/// copy of the bytes carries its terms. A closed set: the page renders the
+/// exact name, so free-form license text can never smuggle markup.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ContentLicense {
+    /// CERN Open Hardware Licence Version 2 — Permissive.
+    CernOhlP2,
+    /// Creative Commons Attribution 4.0 International.
+    CcBy40,
+    /// No reuse terms granted; the page is view-only.
+    #[default]
+    AllRightsReserved,
+}
+
+impl ContentLicense {
+    /// Presentation name rendered on the published page.
+    #[must_use]
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::CernOhlP2 => "CERN-OHL-P-2.0",
+            Self::CcBy40 => "CC-BY-4.0",
+            Self::AllRightsReserved => "All rights reserved",
+        }
+    }
 }
 
 /// What the author chose to reveal. Sections withheld here are absent from
@@ -1288,6 +1318,7 @@ mod tests {
                 author_display: "Test Author".to_string(),
                 app_version: "0.1.0".to_string(),
                 created_utc: "2026-08-05T21:00:00Z".to_string(),
+                license: ContentLicense::AllRightsReserved,
             },
             disclosure: Disclosure {
                 schematic: true,

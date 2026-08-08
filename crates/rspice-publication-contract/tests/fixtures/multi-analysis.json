@@ -1,11 +1,12 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "metadata": {
     "title": "Two-stage amplifier verification",
     "description": "AC response, DC transfer at temperature corners, and load-current transient.\nSchematic withheld; netlist and results disclosed.",
     "author_display": "James Whitfield",
     "app_version": "0.1.0",
-    "created_utc": "2026-08-05T21:30:00Z"
+    "created_utc": "2026-08-05T21:30:00Z",
+    "license": "all-rights-reserved"
   },
   "disclosure": {
     "schematic": false,

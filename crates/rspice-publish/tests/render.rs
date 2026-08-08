@@ -237,6 +237,7 @@ fn author_text_cannot_smuggle_markup() {
         author_display: "\"quoted\" & <tagged>".to_string(),
         app_version: value.metadata.app_version.clone(),
         created_utc: value.metadata.created_utc.clone(),
+        license: value.metadata.license,
     };
     let bundle = render_bundle(&value, "0".repeat(64).as_str(), &viewer()).expect("render");
     let page = utf8(&bundle["index.html"]);

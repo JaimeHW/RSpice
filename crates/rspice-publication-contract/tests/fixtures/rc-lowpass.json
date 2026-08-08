@@ -1,11 +1,12 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "metadata": {
     "title": "RC low-pass step response",
     "description": "First-order RC low-pass driven by a 1 V pulse.\nDemonstrates the 1 ms time constant against the published rise-time spec.",
     "author_display": "James Whitfield",
     "app_version": "0.1.0",
-    "created_utc": "2026-08-05T21:00:00Z"
+    "created_utc": "2026-08-05T21:00:00Z",
+    "license": "cern-ohl-p2"
   },
   "disclosure": {
     "schematic": true,

@@ -116,9 +116,10 @@ pub fn document(
     {
         let _ = writeln!(html, "<p class=\"description\">{}</p>", escape_html(line));
     }
+    let license = escape_html(snapshot.metadata.license.display_name());
     let _ = write!(
         html,
-        "<p class=\"byline\">{author} · {created}</p>\n</header>\n<main>\n"
+        "<p class=\"byline\">{author} · {created} · {license}</p>\n</header>\n<main>\n"
     );
 
     // Figures. The canvas and activation control are inert until the loader

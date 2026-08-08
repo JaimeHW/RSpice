@@ -39,6 +39,7 @@ pub(crate) struct PublicationDraft {
     pub description: String,
     pub author_display: String,
     pub created_utc: String,
+    pub license: rspice_publication_contract::ContentLicense,
 }
 
 /// UTC RFC 3339 stamp for snapshot provenance, from the wasm-safe clock and
@@ -160,6 +161,7 @@ pub(crate) fn build_publication_snapshot(
             author_display: draft.author_display.clone(),
             app_version: env!("CARGO_PKG_VERSION").to_string(),
             created_utc: draft.created_utc.clone(),
+            license: draft.license,
         },
         disclosure: Disclosure {
             schematic: !sheets.is_empty(),
@@ -1143,6 +1145,7 @@ mod tests {
                     description: String::new(),
                     author_display: "Test".to_string(),
                     created_utc: "2026-08-06T00:00:00Z".to_string(),
+                    license: rspice_publication_contract::ContentLicense::AllRightsReserved,
                 }
             ),
             Err(PublicationBuildError::NothingToPublish)
@@ -1318,6 +1321,7 @@ mod tests {
                 description: String::new(),
                 author_display: "Test".to_string(),
                 created_utc: "2026-08-06T00:00:00Z".to_string(),
+                license: rspice_publication_contract::ContentLicense::CcBy40,
             },
         )
         .expect("snapshot builds");
