@@ -24,7 +24,13 @@ mod native_login;
 #[cfg(not(target_arch = "wasm32"))]
 mod oidc;
 #[cfg(not(target_arch = "wasm32"))]
+mod publish;
+#[cfg(not(target_arch = "wasm32"))]
 mod store;
+
+/// Entitlement feature key the service requires before accepting a
+/// publication. Must match the API's `require_cloud_publishing_entitlement`.
+pub(crate) const CLOUD_PUBLISHING_FEATURE: &str = "cloud_publishing";
 
 /// Whether this build can operate a cloud account session at all.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -105,14 +111,88 @@ pub(crate) struct LeaseSummary {
     pub this_device: bool,
 }
 
+/// A workspace the principal can publish into.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct WorkspaceSummary {
+    pub id: String,
+    pub name: String,
+}
+
+/// Where a publication's circuit lives, as the publish dialog resolved it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum PublishTarget {
+    /// This project already published before: reuse its bound circuit.
+    ExistingCircuit {
+        workspace_id: uuid::Uuid,
+        circuit_id: uuid::Uuid,
+    },
+    /// First publication: create a circuit in this workspace.
+    NewCircuit {
+        workspace_id: uuid::Uuid,
+        /// `true` publishes a listed, indexable page; `false` stays unlisted.
+        public: bool,
+    },
+}
+
+/// One publish command as the dialog confirmed it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PublishRequest {
+    pub target: PublishTarget,
+    pub title: String,
+    pub description: String,
+    /// Canonical publication snapshot bytes (`.rspicepub`).
+    pub snapshot_bytes: Vec<u8>,
+}
+
+/// The receipt the UI persists into the project descriptor.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PublishReceipt {
+    pub workspace_id: String,
+    pub circuit_id: String,
+    pub publication_id: String,
+    pub slug: String,
+    pub url_path: String,
+    /// `preparing` | `live` | `failed` at creation time (always `preparing`).
+    pub page_status: String,
+}
+
+/// Progress of the publish in flight, rendered by the dialog.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum PublishState {
+    /// Uploading the snapshot and sealing the circuit revision.
+    Publishing,
+    /// The publication exists; the page render is still preparing.
+    AwaitingPage { url_path: String },
+    /// The page answered live.
+    Live { url_path: String },
+    /// The publish failed with a presentation-safe reason.
+    Failed { message: String },
+}
+
+/// One publication of the bound circuit, for the Published band.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PublicationSummary {
+    pub id: String,
+    pub title: String,
+    pub url_path: String,
+    pub page_status: String,
+    pub published_at: String,
+    pub unpublished_at: Option<String>,
+}
+
 /// Everything the UI may render about the cloud session. Carries no secrets.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CloudSessionSnapshot {
     pub phase: CloudSessionPhase,
     pub principal: Option<PrincipalSummary>,
     pub entitlements: Vec<EntitlementSummary>,
+    pub workspaces: Vec<WorkspaceSummary>,
     pub native_license: Option<NativeLicenseSummary>,
     pub device_leases: Vec<LeaseSummary>,
+    /// The publish currently in flight or just finished, dialog-rendered.
+    pub publish: Option<PublishState>,
+    /// Publications of the project's bound circuit (Published band).
+    pub publications: Vec<PublicationSummary>,
     /// RFC 3339 stamp of the last successful server contact this run.
     pub verified_at: Option<String>,
     /// Sign-in URL while [`CloudSessionPhase::WaitingForBrowser`], so the
@@ -126,11 +206,39 @@ impl Default for CloudSessionSnapshot {
             phase: CloudSessionPhase::SignedOut { last_error: None },
             principal: None,
             entitlements: Vec::new(),
+            workspaces: Vec::new(),
             native_license: None,
             device_leases: Vec::new(),
+            publish: None,
+            publications: Vec::new(),
             verified_at: None,
             authorization_url: None,
         }
+    }
+}
+
+impl CloudSessionSnapshot {
+    /// Whether the active entitlements grant `feature` explicitly. Checks
+    /// the server projection first, then the verified native lease (the
+    /// offline authority). Absence is denial.
+    pub(crate) fn cloud_feature_enabled(&self, feature: &str) -> bool {
+        if !self.signed_in() {
+            return false;
+        }
+        let now_active = |summary: &EntitlementSummary| {
+            summary.status == "active" || summary.status == "grace_period"
+        };
+        if self
+            .entitlements
+            .iter()
+            .filter(|summary| now_active(summary))
+            .any(|summary| summary.granted_features.iter().any(|name| name == feature))
+        {
+            return true;
+        }
+        self.native_license
+            .as_ref()
+            .is_some_and(|license| license.granted_features.iter().any(|name| name == feature))
     }
 }
 
@@ -157,6 +265,15 @@ pub(crate) enum CloudAccountCommand {
     Refresh,
     /// Revoke one license lease (a device session) by its public ID.
     RevokeLease { lease_id: String },
+    /// Publish a snapshot to a `/c/` page (dialog-confirmed).
+    PublishSnapshot { request: Box<PublishRequest> },
+    /// Re-read the bound circuit's publications (page status, band rows).
+    RefreshPublications { circuit_id: String },
+    /// Soft-unpublish one publication (tombstone; slug never reissued).
+    Unpublish {
+        circuit_id: String,
+        publication_id: String,
+    },
     /// Authorization code + state delivered by the loopback listener.
     #[cfg(not(target_arch = "wasm32"))]
     CompleteSignIn { code: String, state: String },
@@ -172,6 +289,8 @@ pub(crate) enum CloudAccountEvent {
     Snapshot(Box<CloudSessionSnapshot>),
     /// Ask the UI to open the sign-in page in the system browser.
     OpenBrowser(String),
+    /// A publish committed: the UI persists this binding into the project.
+    PublishCompleted(Box<PublishReceipt>),
 }
 
 /// The application-facing service. Owns the executor and the latest snapshot.
@@ -179,6 +298,7 @@ pub(crate) struct CloudAccountService {
     availability: CloudAccountAvailability,
     snapshot: CloudSessionSnapshot,
     pending_browser_url: Option<String>,
+    pending_publish_receipt: Option<PublishReceipt>,
     #[cfg(not(target_arch = "wasm32"))]
     commands: Option<std::sync::mpsc::Sender<CloudAccountCommand>>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -196,6 +316,7 @@ impl CloudAccountService {
                 availability: CloudAccountAvailability::BrowserPending,
                 snapshot: CloudSessionSnapshot::default(),
                 pending_browser_url: None,
+                pending_publish_receipt: None,
             }
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -207,6 +328,7 @@ impl CloudAccountService {
                         availability: CloudAccountAvailability::Native,
                         snapshot: CloudSessionSnapshot::default(),
                         pending_browser_url: None,
+                        pending_publish_receipt: None,
                         commands: Some(commands),
                         events: Some(events),
                     }
@@ -215,6 +337,7 @@ impl CloudAccountService {
                     availability: CloudAccountAvailability::UnconfiguredBuild,
                     snapshot: CloudSessionSnapshot::default(),
                     pending_browser_url: None,
+                    pending_publish_receipt: None,
                     commands: None,
                     events: None,
                 },
@@ -230,6 +353,7 @@ impl CloudAccountService {
             availability: CloudAccountAvailability::UnconfiguredBuild,
             snapshot: CloudSessionSnapshot::default(),
             pending_browser_url: None,
+            pending_publish_receipt: None,
             #[cfg(not(target_arch = "wasm32"))]
             commands: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -265,6 +389,10 @@ impl CloudAccountService {
                     }
                     CloudAccountEvent::OpenBrowser(url) => {
                         self.pending_browser_url = Some(url);
+                        changed = true;
+                    }
+                    CloudAccountEvent::PublishCompleted(receipt) => {
+                        self.pending_publish_receipt = Some(*receipt);
                         changed = true;
                     }
                 }
@@ -303,6 +431,32 @@ impl CloudAccountService {
 
     pub(crate) fn revoke_lease(&mut self, lease_id: String) {
         self.send(CloudAccountCommand::RevokeLease { lease_id });
+    }
+
+    /// Publish a snapshot to a `/c/` page; progress arrives via the snapshot.
+    pub(crate) fn publish_snapshot(&mut self, request: PublishRequest) {
+        self.send(CloudAccountCommand::PublishSnapshot {
+            request: Box::new(request),
+        });
+    }
+
+    /// Re-read the bound circuit's publications (Published band, page status).
+    pub(crate) fn refresh_publications(&mut self, circuit_id: String) {
+        self.send(CloudAccountCommand::RefreshPublications { circuit_id });
+    }
+
+    /// Soft-unpublish one publication of the bound circuit.
+    pub(crate) fn unpublish(&mut self, circuit_id: String, publication_id: String) {
+        self.send(CloudAccountCommand::Unpublish {
+            circuit_id,
+            publication_id,
+        });
+    }
+
+    /// The receipt of a just-committed publish, at most once. The caller
+    /// persists it into the project descriptor.
+    pub(crate) fn take_publish_receipt(&mut self) -> Option<PublishReceipt> {
+        self.pending_publish_receipt.take()
     }
 
     #[allow(unused_variables)]

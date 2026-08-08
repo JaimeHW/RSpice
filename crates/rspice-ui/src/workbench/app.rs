@@ -657,6 +657,8 @@ impl RSpiceApp {
         self.render_simulation_options_dialog(ctx);
         self.render_preferences_dialog(ctx);
         self.render_license_dialog(ctx);
+        self.render_publish_web_dialog(ctx);
+        self.render_unpublish_web_dialog(ctx);
         self.render_command_palette(ctx);
         self.render_bus_tap_dialog(ctx);
         self.render_net_label_dialog(ctx);
@@ -1048,6 +1050,7 @@ impl eframe::App for RSpiceApp {
         if let Some(url) = self.cloud_account.take_browser_request() {
             ctx.open_url(egui::OpenUrl::new_tab(url));
         }
+        self.record_publish_receipt();
         if let Some(text) = self.state.ui.clipboard_text_request.take() {
             ctx.copy_text(text);
         }

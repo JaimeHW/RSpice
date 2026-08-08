@@ -758,6 +758,19 @@ impl ProjectWorkspace {
         Ok((revision, receipt))
     }
 
+    /// Record the cloud circuit this project publishes to.
+    pub fn bind_cloud_publication(
+        &mut self,
+        binding: ProjectCloudPublicationBinding,
+    ) -> Result<ObjectRevision, ProjectDescriptorError> {
+        let before = self.project.revision();
+        let revision = self.project.bind_cloud_publication(binding)?;
+        if revision != before {
+            self.project_metadata_dirty = true;
+        }
+        Ok(revision)
+    }
+
     fn validate_physical_layout_technology_change(
         &self,
         binding: &ProjectTechnologyBinding,

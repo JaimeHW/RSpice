@@ -1787,6 +1787,56 @@ fn technology_attachment_is_atomic_revisioned_and_idempotent() {
 }
 
 #[test]
+fn cloud_publication_binding_is_revisioned_idempotent_and_validated() {
+    let mut project = ProjectDescriptor::default();
+    let initial_revision = project.revision();
+    let binding = ProjectCloudPublicationBinding::new(
+        "0198c1c2-aaaa-7000-8000-000000000001".to_owned(),
+        "0198c1c2-bbbb-7000-8000-000000000002".to_owned(),
+    )
+    .expect("service identifiers validate");
+
+    let committed = project
+        .bind_cloud_publication(binding.clone())
+        .expect("binding commits");
+    assert_eq!(committed.get(), initial_revision.get() + 1);
+    assert_eq!(project.cloud_publication(), Some(&binding));
+    project.validate().expect("bound project validates");
+    assert_eq!(
+        project
+            .bind_cloud_publication(binding.clone())
+            .expect("identical binding is a no-op"),
+        committed
+    );
+
+    let mut value = serde_json::to_value(&project).expect("descriptor serializes");
+    let restored: ProjectDescriptor =
+        serde_json::from_value(value.clone()).expect("descriptor round trips");
+    assert_eq!(restored.cloud_publication(), Some(&binding));
+    // Legacy descriptors without the field restore to an unbound project.
+    value
+        .as_object_mut()
+        .expect("descriptor object")
+        .remove("cloud_publication");
+    let unbound: ProjectDescriptor =
+        serde_json::from_value(value).expect("legacy shape deserializes");
+    assert_eq!(unbound.cloud_publication(), None);
+
+    assert!(matches!(
+        ProjectCloudPublicationBinding::new(String::new(), "circuit".to_owned()),
+        Err(ProjectDescriptorError::InvalidCloudPublicationBinding(
+            "workspace_id"
+        ))
+    ));
+    assert!(matches!(
+        ProjectCloudPublicationBinding::new("workspace".to_owned(), "has space".to_owned()),
+        Err(ProjectDescriptorError::InvalidCloudPublicationBinding(
+            "circuit_id"
+        ))
+    ));
+}
+
+#[test]
 fn technology_change_receipts_are_checkpoint_bound_atomic_and_tamper_evident() {
     let mut project = ProjectDescriptor::default();
     let initial_revision = project.revision();

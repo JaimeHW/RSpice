@@ -449,6 +449,7 @@ impl Command {
                 | Self::ExportSchematicSvg
                 | Self::ExportWaveformsCsv
                 | Self::ExportPublicationSnapshot
+                | Self::PublishToWeb
                 | Self::ExportNetlist(_)
                 | Self::PageSetup
                 | Self::SheetFormatManager
@@ -899,6 +900,21 @@ impl Command {
             | Self::MirrorSelectionVertical => "select an editable object",
             Self::ConnectivityManager => "open a schematic or testbench",
             Self::DesignManagement => "open an editable schematic",
+            Self::PublishToWeb => match app.cloud_account.availability() {
+                crate::services::cloud_account::CloudAccountAvailability::UnconfiguredBuild => {
+                    "this build has no cloud endpoints pinned"
+                }
+                crate::services::cloud_account::CloudAccountAvailability::BrowserPending => {
+                    "publishing arrives with the hosted browser deployment"
+                }
+                crate::services::cloud_account::CloudAccountAvailability::Native => {
+                    if app.cloud_account.snapshot().signed_in() {
+                        "the signed-in plan does not include cloud publishing"
+                    } else {
+                        "sign in to RSpice Cloud from the Account console"
+                    }
+                }
+            },
             Self::PageSetup if app.state.schematic_edit_read_only() => {
                 "the active schematic is read-only"
             }

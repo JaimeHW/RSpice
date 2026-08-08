@@ -1203,7 +1203,8 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         | Command::FamilySlicing => WorkbenchIcon::Results,
         Command::OpenWorkspace(Workspace::Verify)
         | Command::VerificationPage(_)
-        | Command::EditSpecifications => WorkbenchIcon::Verify,
+        | Command::EditSpecifications
+        | Command::PublishToWeb => WorkbenchIcon::Verify,
         Command::OpenWorkspace(Workspace::Models)
         | Command::ModelsPage(_)
         | Command::ModelBrowser
@@ -1371,6 +1372,8 @@ fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         app,
         Command::ExportNetlist(crate::io::NetlistFormat::Spice),
     );
+    menu_separator(ui);
+    command_item(ui, app, Command::PublishToWeb);
     menu_separator(ui);
     command_item(ui, app, Command::CloseActiveDocument);
     command_item(ui, app, Command::CloseProject);

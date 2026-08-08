@@ -1454,7 +1454,7 @@ pub(super) fn action_export_publication_snapshot_with_io(
             .unwrap_or_else(|| "Untitled project".to_string()),
         description: String::new(),
         author_display: "Local export".to_string(),
-        created_utc: publication_export_timestamp(),
+        created_utc: crate::workbench::publication_snapshot::publication_timestamp_utc(),
     };
     let built = crate::workbench::publication_snapshot::build_publication_snapshot(state, &draft)
         .map_err(|error| error.to_string())
@@ -1518,20 +1518,4 @@ pub(super) fn action_export_publication_snapshot_with_io(
             )));
         }
     }
-}
-
-/// UTC RFC 3339 stamp for snapshot provenance, from the wasm-safe clock and
-/// the hardcopy pipeline's exact civil-date transform.
-fn publication_export_timestamp() -> String {
-    let seconds = crate::time_compat::unix_epoch().as_secs();
-    crate::workbench::hardcopy_adapters::render::HardcopyPublicationTimestamp::from_unix_seconds(
-        seconds,
-    )
-    .map(|stamp| {
-        format!(
-            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-            stamp.year, stamp.month, stamp.day, stamp.hour, stamp.minute, stamp.second
-        )
-    })
-    .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }

@@ -2207,6 +2207,13 @@ pub struct DialogState {
     /// License activation dialog state
     pub license_dialog: LicenseDialogState,
 
+    /// Immutable cloud publication transaction.
+    pub(crate) publish_web: crate::workbench::app::dialogs::publish_web::PublishWebDialogState,
+
+    /// Owner-confirmed publication tombstone transaction.
+    pub(crate) unpublish_web:
+        crate::workbench::app::dialogs::unpublish_web::UnpublishWebDialogState,
+
     /// Command palette state
     pub command_palette: CommandPaletteState,
 
@@ -2355,6 +2362,8 @@ impl DialogState {
             || self.shortcut_portability.application_modal_open()
             || self.shortcut_editor.open
             || self.license_dialog.open
+            || self.publish_web.open
+            || self.unpublish_web.open
             || self.command_palette.open
             || self.bus_tap.open
             || self.net_label_placement.open
@@ -2435,6 +2444,8 @@ mod tests {
         assert_blocks_shortcuts(|dialogs| dialogs.shortcut_portability.open_export());
         assert_blocks_shortcuts(|dialogs| dialogs.shortcut_editor.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.license_dialog.open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.publish_web.open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.unpublish_web.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.command_palette.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.bus_tap.open());
         assert_blocks_shortcuts(|dialogs| dialogs.net_label_placement.open = true);

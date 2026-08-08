@@ -11,6 +11,7 @@ pub const PROJECT_TECHNOLOGY_CHANGE_RECEIPT_SCHEMA_VERSION: u16 = 1;
 pub const MAX_PROJECT_TECHNOLOGY_CHANGE_RECEIPTS: usize = 4_096;
 pub const PROJECT_LIBRARY_MUTATION_RECEIPT_SCHEMA_VERSION: u16 = 1;
 pub const MAX_PROJECT_LIBRARY_MUTATION_RECEIPTS: usize = 16_384;
+pub const PROJECT_CLOUD_PUBLICATION_BINDING_SCHEMA_VERSION: u16 = 1;
 
 /// Persisted, content-addressed project pin to one signed PDK package.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1088,6 +1089,64 @@ pub enum TechnologyBindingError {
     SignedPackageRuntime(String),
 }
 
+/// Exact attachment of this project to its RSpice Cloud publication lineage:
+/// the circuit whose `/c/` page this project publishes to. Recorded on the
+/// first successful publish so every later publish seals a new version of the
+/// same page instead of minting a parallel one. Identifiers are the service's
+/// own; the binding asserts lineage, never entitlement or reachability.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectCloudPublicationBinding {
+    pub(super) schema_version: u16,
+    pub(super) workspace_id: String,
+    pub(super) circuit_id: String,
+}
+
+impl ProjectCloudPublicationBinding {
+    pub fn new(workspace_id: String, circuit_id: String) -> Result<Self, ProjectDescriptorError> {
+        let binding = Self {
+            schema_version: PROJECT_CLOUD_PUBLICATION_BINDING_SCHEMA_VERSION,
+            workspace_id,
+            circuit_id,
+        };
+        binding.validate()?;
+        Ok(binding)
+    }
+
+    pub fn validate(&self) -> Result<(), ProjectDescriptorError> {
+        if self.schema_version != PROJECT_CLOUD_PUBLICATION_BINDING_SCHEMA_VERSION {
+            return Err(ProjectDescriptorError::UnsupportedCloudPublicationSchema {
+                found: self.schema_version,
+                supported: PROJECT_CLOUD_PUBLICATION_BINDING_SCHEMA_VERSION,
+            });
+        }
+        for (field, value) in [
+            ("workspace_id", &self.workspace_id),
+            ("circuit_id", &self.circuit_id),
+        ] {
+            if value.is_empty()
+                || value.len() > 128
+                || !value.chars().all(|ch| ch.is_ascii_graphic())
+            {
+                return Err(ProjectDescriptorError::InvalidCloudPublicationBinding(
+                    field,
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn workspace_id(&self) -> &str {
+        &self.workspace_id
+    }
+
+    #[must_use]
+    pub fn circuit_id(&self) -> &str {
+        &self.circuit_id
+    }
+}
+
 /// Metadata for the active RSpice project.
 #[derive(Debug, Clone, Serialize)]
 pub struct ProjectDescriptor {
@@ -1116,6 +1175,8 @@ pub struct ProjectDescriptor {
     pub(super) library_mutation_audit: Vec<ProjectLibraryMutationReceipt>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) library_publications: Vec<ProjectLibraryPublicationReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) cloud_publication: Option<ProjectCloudPublicationBinding>,
     pub description: String,
 }
 
@@ -1146,6 +1207,8 @@ impl<'de> Deserialize<'de> for ProjectDescriptor {
             library_mutation_audit: Vec<ProjectLibraryMutationReceipt>,
             #[serde(default)]
             library_publications: Vec<ProjectLibraryPublicationReceipt>,
+            #[serde(default)]
+            cloud_publication: Option<ProjectCloudPublicationBinding>,
             description: String,
         }
 
@@ -1215,6 +1278,7 @@ impl<'de> Deserialize<'de> for ProjectDescriptor {
             technology_change_audit: descriptor.technology_change_audit,
             library_mutation_audit: descriptor.library_mutation_audit,
             library_publications: descriptor.library_publications,
+            cloud_publication: descriptor.cloud_publication,
             description: descriptor.description,
         })
     }
@@ -1235,6 +1299,7 @@ impl Default for ProjectDescriptor {
             technology_change_audit: Vec::new(),
             library_mutation_audit: Vec::new(),
             library_publications: Vec::new(),
+            cloud_publication: None,
             description: String::new(),
         }
     }
@@ -1314,12 +1379,38 @@ impl ProjectDescriptor {
         self.validate_technology_change_audit()?;
         self.validate_library_mutation_audit()?;
         self.validate_library_publications()?;
+        if let Some(binding) = &self.cloud_publication {
+            binding.validate()?;
+        }
         Ok(())
     }
 
     #[must_use]
     pub fn technology_binding(&self) -> Option<&ProjectTechnologyBinding> {
         self.technology_binding.as_ref()
+    }
+
+    #[must_use]
+    pub fn cloud_publication(&self) -> Option<&ProjectCloudPublicationBinding> {
+        self.cloud_publication.as_ref()
+    }
+
+    /// Record the cloud circuit this project publishes to as one atomic
+    /// project metadata revision. Re-recording the identical binding is a
+    /// no-op; a different circuit replaces the lineage (the service keeps the
+    /// old page's history — this binding only selects future publish targets).
+    pub(crate) fn bind_cloud_publication(
+        &mut self,
+        binding: ProjectCloudPublicationBinding,
+    ) -> Result<ObjectRevision, ProjectDescriptorError> {
+        binding.validate()?;
+        if self.cloud_publication.as_ref() == Some(&binding) {
+            return Ok(self.revision);
+        }
+        let next_revision = self.revision.next()?;
+        self.cloud_publication = Some(binding);
+        self.revision = next_revision;
+        Ok(next_revision)
     }
 
     #[must_use]
@@ -1852,6 +1943,12 @@ pub enum ProjectDescriptorError {
     RequiredField(&'static str),
     #[error("legacy technology label does not match the exact project technology binding")]
     TechnologyLabelMismatch,
+    #[error(
+        "cloud publication binding schema {found} is unsupported; this build supports {supported}"
+    )]
+    UnsupportedCloudPublicationSchema { found: u16, supported: u16 },
+    #[error("cloud publication binding field {0} is not a valid service identifier")]
+    InvalidCloudPublicationBinding(&'static str),
     #[error("technology changes require an audited checkpoint-backed transaction")]
     TechnologyAuditRequired,
     #[error(

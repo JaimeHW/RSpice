@@ -1184,6 +1184,9 @@ mod tests {
                     this_device: false,
                 },
             ],
+            publish: None,
+            publications: Vec::new(),
+            workspaces: Vec::new(),
             verified_at: Some("2026-08-06T13:41:00Z".to_owned()),
             authorization_url: None,
         }

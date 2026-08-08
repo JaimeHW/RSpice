@@ -348,6 +348,15 @@ impl Command {
                     && state.simulation.active_execution.is_none()
                     && !state.simulation.is_running
             }
+            Self::PublishToWeb => {
+                matches!(
+                    app.cloud_account.availability(),
+                    crate::services::cloud_account::CloudAccountAvailability::Native
+                ) && app
+                    .cloud_account
+                    .snapshot()
+                    .cloud_feature_enabled(crate::services::cloud_account::CLOUD_PUBLISHING_FEATURE)
+            }
             Self::PageSetup => crate::workbench::app::drawing_sheet_setup_available(app),
             Self::SheetFormatManager => {
                 crate::workbench::app::drawing_sheet_setup_available(app)
@@ -910,6 +919,7 @@ impl Command {
             }
             Self::ExportSchematicSvg => file_action(app, FileMenuAction::ExportSvg),
             Self::ExportWaveformsCsv => file_action(app, FileMenuAction::ExportCsvWaveforms),
+            Self::PublishToWeb => app.open_publish_web_dialog(),
             Self::ExportPublicationSnapshot => {
                 file_action(app, FileMenuAction::ExportPublicationSnapshot)
             }

@@ -20,8 +20,8 @@ use rspice_cloud_client::{
 use super::config::CloudAccountConfig;
 use super::{
     CloudAccountCommand, CloudAccountEvent, CloudSessionPhase, CloudSessionSnapshot,
-    EntitlementSummary, LeaseSummary, NativeLicenseSummary, PrincipalSummary, native_login, oidc,
-    store,
+    EntitlementSummary, LeaseSummary, NativeLicenseSummary, PrincipalSummary, PublicationSummary,
+    PublishState, WorkspaceSummary, native_login, oidc, publish, store,
 };
 
 /// Collection page size for bootstrap reads.
@@ -36,6 +36,9 @@ const LEASE_RENEWAL_WINDOW_SECONDS: i64 = 3 * 24 * 60 * 60;
 const IDLE_PERIOD: std::time::Duration = std::time::Duration::from_secs(3600);
 /// Retry period after an unreachable-network refresh failure.
 const OFFLINE_RETRY_PERIOD: std::time::Duration = std::time::Duration::from_secs(120);
+/// Poll cadence while a just-published page is still preparing (the server's
+/// own placeholder advertises `Retry-After: 5`).
+const PAGE_POLL_PERIOD: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Spawn the executor thread; it restores any stored session immediately.
 pub(super) fn spawn(
@@ -102,6 +105,7 @@ fn run(
         record: store::load(),
         access: None,
         pending_sign_in: None,
+        page_poll: None,
         snapshot: CloudSessionSnapshot::default(),
         next_deadline: None,
         listener_commands,
@@ -159,6 +163,8 @@ struct Executor {
     record: Option<store::CloudSessionRecord>,
     access: Option<AccessToken>,
     pending_sign_in: Option<PendingSignIn>,
+    /// A published page whose render is still preparing: (circuit, url_path).
+    page_poll: Option<(uuid::Uuid, String)>,
     snapshot: CloudSessionSnapshot,
     next_deadline: Option<std::time::Instant>,
     listener_commands: Sender<CloudAccountCommand>,
@@ -262,6 +268,16 @@ impl Executor {
             CloudAccountCommand::SignOut => self.sign_out(),
             CloudAccountCommand::Refresh => self.establish_online(),
             CloudAccountCommand::RevokeLease { lease_id } => self.revoke_lease(&lease_id),
+            CloudAccountCommand::PublishSnapshot { request } => self.publish_snapshot(&request),
+            CloudAccountCommand::RefreshPublications { circuit_id } => {
+                if let Ok(parsed) = circuit_id.parse() {
+                    self.refresh_publications(parsed);
+                }
+            }
+            CloudAccountCommand::Unpublish {
+                circuit_id,
+                publication_id,
+            } => self.unpublish(&circuit_id, &publication_id),
             CloudAccountCommand::CompleteSignIn { code, state } => {
                 self.complete_sign_in(&code, &state);
             }
@@ -477,6 +493,9 @@ impl Executor {
 
     fn on_deadline(&mut self) {
         self.next_deadline = None;
+        if let Some((circuit_id, _)) = self.page_poll {
+            self.refresh_publications(circuit_id);
+        }
         let due = self
             .access
             .as_ref()
@@ -485,6 +504,116 @@ impl Executor {
             self.establish_online();
         } else {
             self.next_deadline = self.access.as_ref().map(|access| access.refresh_at);
+        }
+        self.arm_page_poll();
+    }
+
+    /// Keep the wake-up early enough for a pending page-status poll.
+    fn arm_page_poll(&mut self) {
+        if self.page_poll.is_some() {
+            let poll_at = std::time::Instant::now() + PAGE_POLL_PERIOD;
+            self.next_deadline = Some(match self.next_deadline {
+                Some(existing) => existing.min(poll_at),
+                None => poll_at,
+            });
+        }
+    }
+
+    // -- publishing ----------------------------------------------------------
+
+    fn publish_snapshot(&mut self, request: &super::PublishRequest) {
+        let Some(access) = self.access.as_ref().map(|access| access.token.clone()) else {
+            self.snapshot.publish = Some(PublishState::Failed {
+                message: "Sign in before publishing.".to_owned(),
+            });
+            self.publish();
+            return;
+        };
+        self.snapshot.publish = Some(PublishState::Publishing);
+        self.publish();
+        let outcome = self
+            .runtime
+            .block_on(publish::publish(&self.cloud, &access, request));
+        match outcome {
+            Ok(receipt) => {
+                self.snapshot.publish = Some(PublishState::AwaitingPage {
+                    url_path: receipt.url_path.clone(),
+                });
+                if let Ok(circuit_id) = receipt.circuit_id.parse() {
+                    self.page_poll = Some((circuit_id, receipt.url_path.clone()));
+                }
+                let _ = self
+                    .events
+                    .send(CloudAccountEvent::PublishCompleted(Box::new(receipt)));
+                self.publish();
+                if let Some((circuit_id, _)) = self.page_poll {
+                    self.refresh_publications(circuit_id);
+                }
+                self.arm_page_poll();
+            }
+            Err(error) => {
+                self.snapshot.publish = Some(PublishState::Failed {
+                    message: error.to_string(),
+                });
+                self.publish();
+            }
+        }
+    }
+
+    fn refresh_publications(&mut self, circuit_id: uuid::Uuid) {
+        let Some(access) = self.access.as_ref().map(|access| access.token.clone()) else {
+            return;
+        };
+        let Some(rows) = self
+            .runtime
+            .block_on(read_publications(&self.cloud, &access, circuit_id))
+        else {
+            return;
+        };
+        if let Some((_, url_path)) = self.page_poll.clone() {
+            let status = rows
+                .iter()
+                .find(|publication| publication.url_path == url_path)
+                .map(|publication| publication.page_status.clone());
+            match status.as_deref() {
+                Some("live") => {
+                    self.snapshot.publish = Some(PublishState::Live { url_path });
+                    self.page_poll = None;
+                }
+                Some("failed") => {
+                    self.snapshot.publish = Some(PublishState::Failed {
+                        message: "The page could not be rendered; the publication was not \
+                                  taken live."
+                            .to_owned(),
+                    });
+                    self.page_poll = None;
+                }
+                _ => {}
+            }
+        }
+        self.snapshot.publications = rows;
+        self.publish();
+    }
+
+    fn unpublish(&mut self, circuit_id: &str, publication_id: &str) {
+        let (Ok(circuit), Ok(publication)) = (
+            circuit_id.parse::<uuid::Uuid>(),
+            publication_id.parse::<uuid::Uuid>(),
+        ) else {
+            return;
+        };
+        let Some(access) = self.access.as_ref().map(|access| access.token.clone()) else {
+            return;
+        };
+        let revoked = self.runtime.block_on(async {
+            let token = BearerToken::new(&access).map_err(|_| ())?;
+            self.cloud
+                .unpublish_circuit_publication(&token, circuit, publication)
+                .await
+                .map_err(|_| ())
+        });
+        if revoked.is_ok() {
+            self.refresh_publications(circuit);
         }
     }
 
@@ -614,8 +743,11 @@ impl Executor {
             phase: CloudSessionPhase::Active,
             principal: Some(reads.principal),
             entitlements: reads.entitlements,
+            workspaces: reads.workspaces,
             native_license,
             device_leases,
+            publish: self.snapshot.publish.clone(),
+            publications: std::mem::take(&mut self.snapshot.publications),
             verified_at: now_rfc3339(),
             authorization_url: None,
         };
@@ -713,6 +845,7 @@ impl Executor {
 struct BootstrapReads {
     principal: PrincipalSummary,
     entitlements: Vec<EntitlementSummary>,
+    workspaces: Vec<WorkspaceSummary>,
 }
 
 enum BootstrapError {
@@ -764,13 +897,75 @@ async fn bootstrap_reads(
         }
     }
 
+    let mut workspaces = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let request = match cursor.as_deref() {
+            Some(value) => PageRequest::after(PAGE_LIMIT, value),
+            None => PageRequest::first(PAGE_LIMIT),
+        }
+        .map_err(|_| BootstrapError::Contract)?;
+        let page = cloud
+            .list_workspaces(&token, request)
+            .await
+            .map_err(|error| classify(&error))?
+            .into_body();
+        workspaces.extend(page.items.into_iter().map(|workspace| WorkspaceSummary {
+            id: workspace.id.to_string(),
+            name: workspace.name,
+        }));
+        match page.next_cursor {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+
     Ok(BootstrapReads {
         principal: PrincipalSummary {
             email: principal.email,
             display_name: principal.display_name,
         },
         entitlements: entitlements.iter().map(entitlement_summary).collect(),
+        workspaces,
     })
+}
+
+async fn read_publications(
+    cloud: &CloudClient,
+    access: &str,
+    circuit_id: uuid::Uuid,
+) -> Option<Vec<PublicationSummary>> {
+    let token = BearerToken::new(access).ok()?;
+    let mut publications = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let request = match cursor.as_deref() {
+            Some(value) => PageRequest::after(PAGE_LIMIT, value).ok()?,
+            None => PageRequest::first(PAGE_LIMIT).ok()?,
+        };
+        let page = cloud
+            .list_circuit_publications(&token, circuit_id, request)
+            .await
+            .ok()?
+            .into_body();
+        publications.extend(
+            page.items
+                .into_iter()
+                .map(|publication| PublicationSummary {
+                    id: publication.id.to_string(),
+                    title: publication.title,
+                    url_path: publication.url_path,
+                    page_status: publish::page_status_str(publication.page_status).to_owned(),
+                    published_at: publication.published_at,
+                    unpublished_at: publication.unpublished_at,
+                }),
+        );
+        match page.next_cursor {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+    Some(publications)
 }
 
 async fn read_leases(cloud: &CloudClient, access: &str) -> Option<Vec<LicenseLease>> {
