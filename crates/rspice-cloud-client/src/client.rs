@@ -11,12 +11,14 @@ use rspice_cloud_contract::{
     API_VERSION, Artifact, ArtifactDownload, ArtifactState, ArtifactUpload, AuditEvent, BuildInfo,
     Circuit, CircuitRevision, CircuitShare, CollaborationTicketProtocol,
     CreateArtifactUploadRequest, CreateCircuitRequest, CreateCircuitRevisionRequest,
-    CreateCollaborationTicketRequest, CreatePublicationRequest, CreateSimulationRunRequest,
-    CreateWorkspaceRequest, CreatedCircuitShare, CreatedWorkspaceInvitation, CurrentPrincipal,
-    Entitlement, IssueLicenseLeaseRequest, IssuedLicenseLease, LicenseJwkSet, LicenseLeaseList,
-    Page, ProblemDetails, PublicPublication, Publication, SharedCircuit, SimulationRun,
-    UpdateCircuitRequest, UpdateWorkspaceMemberRequest, UpdateWorkspaceRequest, Uuid, Workspace,
-    WorkspaceInvitation, WorkspaceMember,
+    CreateCollaborationTicketRequest, CreateLiveSessionRequest, CreatePublicationRequest,
+    CreateSimulationRunRequest, CreateWorkspaceRequest, CreatedCircuitShare, CreatedLiveSession,
+    CreatedWorkspaceInvitation, CurrentPrincipal, Entitlement, IssueLicenseLeaseRequest,
+    IssuedLicenseLease, JoinLiveSessionRequest, JoinedLiveSession, LicenseJwkSet, LicenseLeaseList,
+    LiveSession, LiveSessionPolicy, Page, ProblemDetails, PublicPublication, Publication,
+    SharedCircuit, SimulationRun, UpdateCircuitRequest, UpdateLiveSessionParticipantRequest,
+    UpdateLiveSessionPolicyRequest, UpdateWorkspaceMemberRequest, UpdateWorkspaceRequest, Uuid,
+    Workspace, WorkspaceInvitation, WorkspaceMember,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use url::Url;
@@ -45,6 +47,10 @@ use crate::{
     licensing::{
         issued_license_lease_matches_request, valid_entitlement_list, valid_license_jwks,
         valid_license_lease_list,
+    },
+    live_sessions::{
+        LiveSessionTicketFailure, joined_session_is_coherent, valid_join_code, valid_live_session,
+        validate_live_session_ticket,
     },
     pagination::{valid_page_parts, valid_page_shape},
     publications::{
@@ -880,6 +886,254 @@ impl CloudClient {
             });
         }
         Ok(response)
+    }
+
+    /// Goes live: creates the caller's single live session, or exactly
+    /// replays it with a freshly rotated join code under the same key. A
+    /// creation under a new key supersedes whatever session the host still
+    /// had open. The response carries the once-only join code and a bearer
+    /// connect ticket and is therefore redacted from diagnostic formatting.
+    pub async fn create_live_session_idempotent(
+        &self,
+        token: &BearerToken<'_>,
+        key: &IdempotencyKey<'_>,
+        policy: LiveSessionPolicy,
+        circuit_id: Option<Uuid>,
+        client_instance_id: Uuid,
+    ) -> Result<CloudResponse<CreatedLiveSession>, CloudError> {
+        let url = self.url(["api", API_VERSION, "live-sessions"])?;
+        let request = CreateLiveSessionRequest {
+            policy,
+            circuit_id,
+            client_instance_id: Some(client_instance_id),
+        };
+        let http_request = self
+            .request(Method::POST, url.clone(), Some(token))
+            .header(IDEMPOTENCY_KEY, key.value())
+            .json(&request);
+        let response: CloudResponse<CreatedLiveSession> = self
+            .execute_json(http_request, url, &[StatusCode::CREATED])
+            .await?;
+        let Some(replayed) = response.metadata.idempotency_replayed() else {
+            return Err(CloudError::Protocol {
+                failure: ProtocolFailure::InvalidMetadata,
+                status: Some(StatusCode::CREATED.as_u16()),
+                metadata: response.metadata,
+            });
+        };
+        // A replay may legitimately carry a policy the host has since
+        // revised; only a fresh creation must echo the requested policy.
+        if !valid_live_session(&response.body.session)
+            || (!replayed && response.body.session.policy != policy)
+            || !valid_join_code(&response.body.join_code)
+        {
+            return Err(CloudError::Protocol {
+                failure: ProtocolFailure::InvalidSuccessResponse,
+                status: Some(StatusCode::CREATED.as_u16()),
+                metadata: response.metadata,
+            });
+        }
+        if let Err(failure) = validate_live_session_ticket(
+            &response.body.ticket,
+            response.body.session.id,
+            client_instance_id,
+        ) {
+            return Err(CloudError::Protocol {
+                failure: live_session_ticket_protocol_failure(failure),
+                status: Some(StatusCode::CREATED.as_u16()),
+                metadata: response.metadata,
+            });
+        }
+        Ok(response)
+    }
+
+    /// Presents a join code. An admitted join carries a validated connect
+    /// ticket; a pending join carries none and the caller polls the session
+    /// and joins again after the host approves. The response is redacted
+    /// from diagnostic formatting.
+    pub async fn join_live_session(
+        &self,
+        token: &BearerToken<'_>,
+        join_code: &str,
+        client_instance_id: Uuid,
+    ) -> Result<CloudResponse<JoinedLiveSession>, CloudError> {
+        let url = self.url(["api", API_VERSION, "live-sessions", "join"])?;
+        let request = JoinLiveSessionRequest {
+            join_code: join_code.to_owned(),
+            client_instance_id: Some(client_instance_id),
+        };
+        let response: CloudResponse<JoinedLiveSession> = self
+            .mutation_json(Method::POST, url, token, &request, &[StatusCode::OK])
+            .await?;
+        if !valid_live_session(&response.body.session)
+            || !joined_session_is_coherent(&response.body)
+        {
+            return Err(CloudError::Protocol {
+                failure: ProtocolFailure::InvalidSuccessResponse,
+                status: Some(StatusCode::OK.as_u16()),
+                metadata: response.metadata,
+            });
+        }
+        if let Some(ticket) = &response.body.ticket
+            && let Err(failure) =
+                validate_live_session_ticket(ticket, response.body.session.id, client_instance_id)
+        {
+            return Err(CloudError::Protocol {
+                failure: live_session_ticket_protocol_failure(failure),
+                status: Some(StatusCode::OK.as_u16()),
+                metadata: response.metadata,
+            });
+        }
+        Ok(response)
+    }
+
+    /// Reads one live session's roster, including pending admissions.
+    pub async fn get_live_session(
+        &self,
+        token: &BearerToken<'_>,
+        session_id: Uuid,
+    ) -> Result<CloudResponse<LiveSession>, CloudError> {
+        let session_id_path = session_id.to_string();
+        let url = self.url([
+            "api",
+            API_VERSION,
+            "live-sessions",
+            session_id_path.as_str(),
+        ])?;
+        let response: CloudResponse<LiveSession> =
+            self.get_json(url, Some(token), &[StatusCode::OK]).await?;
+        if !valid_live_session(&response.body) || response.body.id != session_id {
+            return Err(CloudError::Protocol {
+                failure: ProtocolFailure::InvalidSuccessResponse,
+                status: Some(StatusCode::OK.as_u16()),
+                metadata: response.metadata,
+            });
+        }
+        Ok(response)
+    }
+
+    /// Revises the host-controlled session policy for guests who join after
+    /// the change.
+    pub async fn update_live_session_policy(
+        &self,
+        token: &BearerToken<'_>,
+        session_id: Uuid,
+        policy: LiveSessionPolicy,
+    ) -> Result<CloudResponse<LiveSession>, CloudError> {
+        let session_id_path = session_id.to_string();
+        let url = self.url([
+            "api",
+            API_VERSION,
+            "live-sessions",
+            session_id_path.as_str(),
+        ])?;
+        let request = UpdateLiveSessionPolicyRequest { policy };
+        let response: CloudResponse<LiveSession> = self
+            .mutation_json(Method::PATCH, url, token, &request, &[StatusCode::OK])
+            .await?;
+        if !valid_live_session(&response.body)
+            || response.body.id != session_id
+            || response.body.policy != policy
+        {
+            return Err(CloudError::Protocol {
+                failure: ProtocolFailure::InvalidSuccessResponse,
+                status: Some(StatusCode::OK.as_u16()),
+                metadata: response.metadata,
+            });
+        }
+        Ok(response)
+    }
+
+    /// Admits one pending participant; the guest then joins again to mint
+    /// their connect ticket.
+    pub async fn approve_live_session_participant(
+        &self,
+        token: &BearerToken<'_>,
+        session_id: Uuid,
+        principal_id: Uuid,
+    ) -> Result<CloudResponse<()>, CloudError> {
+        let session_id_path = session_id.to_string();
+        let principal_id_path = principal_id.to_string();
+        let url = self.url([
+            "api",
+            API_VERSION,
+            "live-sessions",
+            session_id_path.as_str(),
+            "participants",
+            principal_id_path.as_str(),
+            "approve",
+        ])?;
+        let request = self.request(Method::POST, url.clone(), Some(token));
+        self.execute_empty(request, url, &[StatusCode::NO_CONTENT])
+            .await
+    }
+
+    /// Changes one participant's capability; the relay applies the change
+    /// to any connected socket immediately.
+    pub async fn update_live_session_participant(
+        &self,
+        token: &BearerToken<'_>,
+        session_id: Uuid,
+        principal_id: Uuid,
+        request: &UpdateLiveSessionParticipantRequest,
+    ) -> Result<CloudResponse<()>, CloudError> {
+        let session_id_path = session_id.to_string();
+        let principal_id_path = principal_id.to_string();
+        let url = self.url([
+            "api",
+            API_VERSION,
+            "live-sessions",
+            session_id_path.as_str(),
+            "participants",
+            principal_id_path.as_str(),
+        ])?;
+        let http_request = self
+            .request(Method::PATCH, url.clone(), Some(token))
+            .json(request);
+        self.execute_empty(http_request, url, &[StatusCode::NO_CONTENT])
+            .await
+    }
+
+    /// Removes one participant: the join code never readmits them and the
+    /// relay terminates their sockets.
+    pub async fn remove_live_session_participant(
+        &self,
+        token: &BearerToken<'_>,
+        session_id: Uuid,
+        principal_id: Uuid,
+    ) -> Result<CloudResponse<()>, CloudError> {
+        let session_id_path = session_id.to_string();
+        let principal_id_path = principal_id.to_string();
+        let url = self.url([
+            "api",
+            API_VERSION,
+            "live-sessions",
+            session_id_path.as_str(),
+            "participants",
+            principal_id_path.as_str(),
+        ])?;
+        let request = self.request(Method::DELETE, url.clone(), Some(token));
+        self.execute_empty(request, url, &[StatusCode::NO_CONTENT])
+            .await
+    }
+
+    /// Ends the caller's live session instantly: the code and outstanding
+    /// tickets die and the relay terminates every peer.
+    pub async fn end_live_session(
+        &self,
+        token: &BearerToken<'_>,
+        session_id: Uuid,
+    ) -> Result<CloudResponse<()>, CloudError> {
+        let session_id_path = session_id.to_string();
+        let url = self.url([
+            "api",
+            API_VERSION,
+            "live-sessions",
+            session_id_path.as_str(),
+        ])?;
+        let request = self.request(Method::DELETE, url.clone(), Some(token));
+        self.execute_empty(request, url, &[StatusCode::NO_CONTENT])
+            .await
     }
 
     /// Lists durable remote-simulation runs for one visible circuit.
@@ -1943,6 +2197,13 @@ pub(super) fn parse_metadata(
         idempotency_replayed,
         location,
     })
+}
+
+fn live_session_ticket_protocol_failure(failure: LiveSessionTicketFailure) -> ProtocolFailure {
+    match failure {
+        LiveSessionTicketFailure::Invalid => ProtocolFailure::InvalidSuccessResponse,
+        LiveSessionTicketFailure::CapabilityExpired => ProtocolFailure::CapabilityExpired,
+    }
 }
 
 fn single_header(

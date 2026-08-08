@@ -20,6 +20,7 @@ mod idempotency;
 mod identity;
 mod invitations;
 mod licensing;
+mod live_sessions;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_licensing;
 #[cfg(not(target_arch = "wasm32"))]

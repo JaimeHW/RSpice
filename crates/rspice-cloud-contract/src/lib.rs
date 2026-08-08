@@ -416,7 +416,8 @@ pub enum LiveSessionAdmission {
     Removed,
 }
 
-/// Host-declared policy for one live session, fixed at creation.
+/// Host-declared policy for one live session, set at creation and revisable
+/// by the host while the session runs.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LiveSessionPolicy {
     pub default_capability: LiveSessionCapability,
@@ -484,6 +485,21 @@ pub struct JoinedLiveSession {
     pub capability: LiveSessionCapability,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ticket: Option<LiveSessionTicketProtocol>,
+}
+
+/// Host-applied mid-session policy revision. The new policy governs guests
+/// who join after the change; participants already in the roster keep their
+/// per-row capability.
+#[derive(Deserialize, Eq, PartialEq, Serialize)]
+pub struct UpdateLiveSessionPolicyRequest {
+    pub policy: LiveSessionPolicy,
+}
+
+/// Host-applied capability change for one participant. The relay applies the
+/// change to any connected socket immediately.
+#[derive(Deserialize, Eq, PartialEq, Serialize)]
+pub struct UpdateLiveSessionParticipantRequest {
+    pub capability: LiveSessionCapability,
 }
 
 /// Connect credential for the live-session relay.
