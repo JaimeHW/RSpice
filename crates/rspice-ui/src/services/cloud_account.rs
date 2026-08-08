@@ -32,6 +32,11 @@ mod store;
 /// publication. Must match the API's `require_cloud_publishing_entitlement`.
 pub(crate) const CLOUD_PUBLISHING_FEATURE: &str = "cloud_publishing";
 
+/// Entitlement feature key for hosting or joining live sessions. Must match
+/// the API's live-collaboration entitlement checks; every participant —
+/// host and guest alike — needs it.
+pub(crate) const LIVE_COLLABORATION_FEATURE: &str = "live_collaboration";
+
 /// Whether this build can operate a cloud account session at all.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CloudAccountAvailability {
@@ -180,6 +185,71 @@ pub(crate) struct PublicationSummary {
     pub unpublished_at: Option<String>,
 }
 
+/// One roster row of the live session, rendered fields only.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct LiveParticipantSummary {
+    pub principal_id: String,
+    pub display_name: String,
+    /// Whether this row is the session host (a fixed editor).
+    pub is_host: bool,
+    /// Whether this row is the signed-in principal.
+    pub is_self: bool,
+    /// Whether the participant may edit and trigger runs.
+    pub editor: bool,
+    /// Whether the participant still waits for the host's approval.
+    pub pending: bool,
+    pub joined_at: String,
+}
+
+/// Host-controlled session policy, as the dialog renders and applies it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct LiveSessionPolicySummary {
+    /// Guests joining by code become editors (`true`) or viewers (`false`).
+    pub guests_edit: bool,
+    /// Whether each join waits for the host's approval.
+    pub approve_joins: bool,
+    /// Whether participants may fork the session's work.
+    pub allow_save_copy: bool,
+}
+
+/// The live session as the UI renders it. Carries no connect credential.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct LiveSessionSummary {
+    pub session_id: String,
+    /// The human-relayable join code, held only while hosting: the server
+    /// returns it exactly once per creation or rotation and stores only a
+    /// digest.
+    pub join_code: Option<String>,
+    /// Whether this install hosts the session.
+    pub hosting: bool,
+    /// Whether the signed-in participant may edit and trigger runs.
+    pub editor: bool,
+    pub policy: LiveSessionPolicySummary,
+    pub participants: Vec<LiveParticipantSummary>,
+    pub started_at: String,
+    /// The most recent host action that failed, presentation-safe; cleared
+    /// by the next successful action or roster refresh.
+    pub notice: Option<String>,
+}
+
+/// Lifecycle of the live session, dialog- and chrome-rendered.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum LiveSessionState {
+    /// Going live: the creation is in flight.
+    Starting,
+    /// This install hosts the session.
+    Hosting(LiveSessionSummary),
+    /// A join by code is in flight.
+    Joining,
+    /// Joined, pending the host's approval; the roster poll watches for it.
+    AwaitingApproval(LiveSessionSummary),
+    /// Joined and admitted as a guest.
+    Participating(LiveSessionSummary),
+    /// The session could not be started or joined, or it ended from the
+    /// server side; presentation-safe.
+    Failed { message: String },
+}
+
 /// Everything the UI may render about the cloud session. Carries no secrets.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CloudSessionSnapshot {
@@ -193,6 +263,8 @@ pub(crate) struct CloudSessionSnapshot {
     pub publish: Option<PublishState>,
     /// Publications of the project's bound circuit (Published band).
     pub publications: Vec<PublicationSummary>,
+    /// The live session this install hosts or participates in, if any.
+    pub live_session: Option<LiveSessionState>,
     /// RFC 3339 stamp of the last successful server contact this run.
     pub verified_at: Option<String>,
     /// Sign-in URL while [`CloudSessionPhase::WaitingForBrowser`], so the
@@ -211,6 +283,7 @@ impl Default for CloudSessionSnapshot {
             device_leases: Vec::new(),
             publish: None,
             publications: Vec::new(),
+            live_session: None,
             verified_at: None,
             authorization_url: None,
         }
@@ -274,6 +347,32 @@ pub(crate) enum CloudAccountCommand {
         circuit_id: String,
         publication_id: String,
     },
+    /// Go live: create a session under the dialog-confirmed policy.
+    StartLiveSession {
+        policy: LiveSessionPolicySummary,
+        /// Cloud circuit binding for provenance, when the project has one.
+        circuit_id: Option<String>,
+    },
+    /// Rotate the join code. The old code dies for anyone who has not yet
+    /// joined; current participants stay in the roster.
+    RegenerateLiveSessionCode,
+    /// Join a session by its human-relayable code.
+    JoinLiveSession { code: String },
+    /// Re-read the roster and admission state now.
+    RefreshLiveSession,
+    /// Apply a revised session policy (host only).
+    ApplyLiveSessionPolicy { policy: LiveSessionPolicySummary },
+    /// Admit a pending participant (host only).
+    ApproveLiveSessionParticipant { principal_id: String },
+    /// Make one participant an editor or a viewer (host only).
+    SetLiveSessionParticipantEditor { principal_id: String, editor: bool },
+    /// Remove one participant; the code never readmits them (host only).
+    RemoveLiveSessionParticipant { principal_id: String },
+    /// End the hosted session for everyone, instantly.
+    EndLiveSession,
+    /// Leave a joined session locally. Guests hold no end authority and the
+    /// roster keeps their row; presence leaves with the relay connection.
+    LeaveLiveSession,
     /// Authorization code + state delivered by the loopback listener.
     #[cfg(not(target_arch = "wasm32"))]
     CompleteSignIn { code: String, state: String },

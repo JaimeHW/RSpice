@@ -1186,6 +1186,7 @@ mod tests {
             ],
             publish: None,
             publications: Vec::new(),
+            live_session: None,
             workspaces: Vec::new(),
             verified_at: Some("2026-08-06T13:41:00Z".to_owned()),
             authorization_url: None,

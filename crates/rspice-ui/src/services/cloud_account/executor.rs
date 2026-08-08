@@ -11,17 +11,21 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 
-use rspice_cloud_client::contract::{Entitlement, IssueLicenseLeaseRequest, LicenseLease};
+use rspice_cloud_client::contract::{
+    Entitlement, IssueLicenseLeaseRequest, LicenseLease, LiveSession, LiveSessionAdmission,
+    LiveSessionCapability, LiveSessionPolicy, UpdateLiveSessionParticipantRequest,
+};
 use rspice_cloud_client::{
-    BearerToken, ClientConfig, CloudClient, NativeLicenseVerifier, PageRequest,
-    VerifiedNativeLicense,
+    BearerToken, ClientConfig, CloudClient, CloudError, IdempotencyKey, NativeLicenseVerifier,
+    PageRequest, VerifiedNativeLicense,
 };
 
 use super::config::CloudAccountConfig;
 use super::{
     CloudAccountCommand, CloudAccountEvent, CloudSessionPhase, CloudSessionSnapshot,
-    EntitlementSummary, LeaseSummary, NativeLicenseSummary, PrincipalSummary, PublicationSummary,
-    PublishState, WorkspaceSummary, native_login, oidc, publish, store,
+    EntitlementSummary, LeaseSummary, LiveParticipantSummary, LiveSessionPolicySummary,
+    LiveSessionState, LiveSessionSummary, NativeLicenseSummary, PrincipalSummary,
+    PublicationSummary, PublishState, WorkspaceSummary, native_login, oidc, publish, store,
 };
 
 /// Collection page size for bootstrap reads.
@@ -39,6 +43,10 @@ const OFFLINE_RETRY_PERIOD: std::time::Duration = std::time::Duration::from_secs
 /// Poll cadence while a just-published page is still preparing (the server's
 /// own placeholder advertises `Retry-After: 5`).
 const PAGE_POLL_PERIOD: std::time::Duration = std::time::Duration::from_secs(5);
+/// Roster poll cadence while a live session is hosted or joined. Presence
+/// and streaming arrive over the relay connection; this poll carries only
+/// membership, admissions, and policy.
+const LIVE_SESSION_POLL_PERIOD: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Spawn the executor thread; it restores any stored session immediately.
 pub(super) fn spawn(
@@ -106,6 +114,8 @@ fn run(
         access: None,
         pending_sign_in: None,
         page_poll: None,
+        principal_id: None,
+        live_session: None,
         snapshot: CloudSessionSnapshot::default(),
         next_deadline: None,
         listener_commands,
@@ -155,6 +165,23 @@ struct PendingSignIn {
     cancel: Arc<AtomicBool>,
 }
 
+/// Executor-held live-session facts that must never reach the UI: the
+/// replay handle, the presented join code, and the connection identity.
+struct LiveSessionRuntime {
+    session_id: uuid::Uuid,
+    hosting: bool,
+    /// Idempotency key of this hosting run: replaying it rotates the join
+    /// code, so it lives exactly as long as the hosted session.
+    create_key: Option<String>,
+    /// The code this guest presented, held for the admitted re-join that
+    /// mints a connect ticket when the relay connection is established.
+    presented_code: Option<String>,
+    /// Stable per-run connection identity echoed by every issued ticket.
+    client_instance_id: uuid::Uuid,
+    /// The display-form join code, held only while hosting.
+    join_code: Option<String>,
+}
+
 struct Executor {
     configuration: CloudAccountConfig,
     http: reqwest::Client,
@@ -165,6 +192,9 @@ struct Executor {
     pending_sign_in: Option<PendingSignIn>,
     /// A published page whose render is still preparing: (circuit, url_path).
     page_poll: Option<(uuid::Uuid, String)>,
+    /// The signed-in principal, for marking the roster's self and host rows.
+    principal_id: Option<uuid::Uuid>,
+    live_session: Option<LiveSessionRuntime>,
     snapshot: CloudSessionSnapshot,
     next_deadline: Option<std::time::Instant>,
     listener_commands: Sender<CloudAccountCommand>,
@@ -194,6 +224,8 @@ impl Executor {
 
     fn set_signed_out(&mut self, error: Option<String>) {
         self.access = None;
+        self.principal_id = None;
+        self.live_session = None;
         self.snapshot = CloudSessionSnapshot {
             phase: CloudSessionPhase::SignedOut { last_error: error },
             ..CloudSessionSnapshot::default()
@@ -278,6 +310,27 @@ impl Executor {
                 circuit_id,
                 publication_id,
             } => self.unpublish(&circuit_id, &publication_id),
+            CloudAccountCommand::StartLiveSession { policy, circuit_id } => {
+                self.start_live_session(policy, circuit_id.as_deref());
+            }
+            CloudAccountCommand::RegenerateLiveSessionCode => self.regenerate_live_session_code(),
+            CloudAccountCommand::JoinLiveSession { code } => self.join_live_session(&code),
+            CloudAccountCommand::RefreshLiveSession => self.refresh_live_session(),
+            CloudAccountCommand::ApplyLiveSessionPolicy { policy } => {
+                self.apply_live_session_policy(policy);
+            }
+            CloudAccountCommand::ApproveLiveSessionParticipant { principal_id } => {
+                self.approve_live_session_participant(&principal_id);
+            }
+            CloudAccountCommand::SetLiveSessionParticipantEditor {
+                principal_id,
+                editor,
+            } => self.set_live_session_participant_editor(&principal_id, editor),
+            CloudAccountCommand::RemoveLiveSessionParticipant { principal_id } => {
+                self.remove_live_session_participant(&principal_id);
+            }
+            CloudAccountCommand::EndLiveSession => self.end_live_session(),
+            CloudAccountCommand::LeaveLiveSession => self.leave_live_session(),
             CloudAccountCommand::CompleteSignIn { code, state } => {
                 self.complete_sign_in(&code, &state);
             }
@@ -496,6 +549,9 @@ impl Executor {
         if let Some((circuit_id, _)) = self.page_poll {
             self.refresh_publications(circuit_id);
         }
+        if self.live_session.is_some() {
+            self.refresh_live_session();
+        }
         let due = self
             .access
             .as_ref()
@@ -506,12 +562,24 @@ impl Executor {
             self.next_deadline = self.access.as_ref().map(|access| access.refresh_at);
         }
         self.arm_page_poll();
+        self.arm_live_session_poll();
     }
 
     /// Keep the wake-up early enough for a pending page-status poll.
     fn arm_page_poll(&mut self) {
         if self.page_poll.is_some() {
             let poll_at = std::time::Instant::now() + PAGE_POLL_PERIOD;
+            self.next_deadline = Some(match self.next_deadline {
+                Some(existing) => existing.min(poll_at),
+                None => poll_at,
+            });
+        }
+    }
+
+    /// Keep the wake-up early enough for the live-session roster poll.
+    fn arm_live_session_poll(&mut self) {
+        if self.live_session.is_some() {
+            let poll_at = std::time::Instant::now() + LIVE_SESSION_POLL_PERIOD;
             self.next_deadline = Some(match self.next_deadline {
                 Some(existing) => existing.min(poll_at),
                 None => poll_at,
@@ -617,10 +685,368 @@ impl Executor {
         }
     }
 
+    // -- live sessions -------------------------------------------------------
+
+    fn start_live_session(&mut self, policy: LiveSessionPolicySummary, circuit_id: Option<&str>) {
+        let Some(access) = self.access.as_ref().map(|access| access.token.clone()) else {
+            self.snapshot.live_session = Some(LiveSessionState::Failed {
+                message: "Sign in before going live.".to_owned(),
+            });
+            self.publish();
+            return;
+        };
+        // The binding is provenance only and grants nothing; a malformed one
+        // must not block going live on a local project.
+        let circuit = circuit_id.and_then(|raw| raw.parse().ok());
+        let create_key = uuid::Uuid::now_v7().to_string();
+        let client_instance_id = uuid::Uuid::now_v7();
+        self.snapshot.live_session = Some(LiveSessionState::Starting);
+        self.publish();
+        let outcome = self.runtime.block_on(create_live_session(
+            &self.cloud,
+            &access,
+            &create_key,
+            contract_policy(policy),
+            circuit,
+            client_instance_id,
+        ));
+        match outcome {
+            Ok(created) => {
+                self.live_session = Some(LiveSessionRuntime {
+                    session_id: created.session.id,
+                    hosting: true,
+                    create_key: Some(create_key),
+                    presented_code: None,
+                    client_instance_id,
+                    join_code: Some(created.join_code.clone()),
+                });
+                // The creation ticket is deliberately dropped: tickets are
+                // single-use with a short lifetime, and the relay connection
+                // phase mints a fresh one at connect time.
+                let summary = live_session_summary(
+                    &created.session,
+                    self.principal_id,
+                    true,
+                    Some(created.join_code),
+                );
+                self.snapshot.live_session = Some(LiveSessionState::Hosting(summary));
+                self.publish();
+                self.arm_live_session_poll();
+            }
+            Err(message) => {
+                self.snapshot.live_session = Some(LiveSessionState::Failed { message });
+                self.publish();
+            }
+        }
+    }
+
+    /// Replay the hosting run's idempotency key: the server rotates the join
+    /// code, and an over-age session is superseded by a fresh one instead.
+    fn regenerate_live_session_code(&mut self) {
+        let Some(runtime) = self.live_session.as_ref() else {
+            return;
+        };
+        if !runtime.hosting {
+            return;
+        }
+        let Some(create_key) = runtime.create_key.clone() else {
+            return;
+        };
+        let client_instance_id = runtime.client_instance_id;
+        let Some(access) = self.access.as_ref().map(|access| access.token.clone()) else {
+            return;
+        };
+        let policy = match &self.snapshot.live_session {
+            Some(
+                LiveSessionState::Hosting(summary)
+                | LiveSessionState::AwaitingApproval(summary)
+                | LiveSessionState::Participating(summary),
+            ) => summary.policy,
+            _ => return,
+        };
+        let outcome = self.runtime.block_on(create_live_session(
+            &self.cloud,
+            &access,
+            &create_key,
+            contract_policy(policy),
+            None,
+            client_instance_id,
+        ));
+        match outcome {
+            Ok(created) => {
+                if let Some(runtime) = self.live_session.as_mut() {
+                    runtime.session_id = created.session.id;
+                    runtime.join_code = Some(created.join_code.clone());
+                }
+                let summary = live_session_summary(
+                    &created.session,
+                    self.principal_id,
+                    true,
+                    Some(created.join_code),
+                );
+                self.snapshot.live_session = Some(LiveSessionState::Hosting(summary));
+                self.publish();
+            }
+            Err(message) => self.set_live_notice(message),
+        }
+    }
+
+    fn join_live_session(&mut self, code: &str) {
+        let Some(access) = self.access.as_ref().map(|access| access.token.clone()) else {
+            self.snapshot.live_session = Some(LiveSessionState::Failed {
+                message: "Sign in before joining a live session.".to_owned(),
+            });
+            self.publish();
+            return;
+        };
+        let client_instance_id = uuid::Uuid::now_v7();
+        self.snapshot.live_session = Some(LiveSessionState::Joining);
+        self.publish();
+        let outcome = self.runtime.block_on(join_live_session(
+            &self.cloud,
+            &access,
+            code,
+            client_instance_id,
+        ));
+        match outcome {
+            Ok(joined) => {
+                self.live_session = Some(LiveSessionRuntime {
+                    session_id: joined.session.id,
+                    hosting: false,
+                    create_key: None,
+                    presented_code: Some(code.to_owned()),
+                    client_instance_id,
+                    join_code: None,
+                });
+                let summary = live_session_summary(&joined.session, self.principal_id, false, None);
+                let state = if joined.admission == LiveSessionAdmission::Pending {
+                    LiveSessionState::AwaitingApproval(summary)
+                } else {
+                    LiveSessionState::Participating(summary)
+                };
+                self.snapshot.live_session = Some(state);
+                self.publish();
+                self.arm_live_session_poll();
+            }
+            Err(message) => {
+                self.snapshot.live_session = Some(LiveSessionState::Failed { message });
+                self.publish();
+            }
+        }
+    }
+
+    fn refresh_live_session(&mut self) {
+        let Some(runtime) = self.live_session.as_ref() else {
+            return;
+        };
+        let session_id = runtime.session_id;
+        let Some(access) = self.access.as_ref().map(|access| access.token.clone()) else {
+            return;
+        };
+        let outcome = self
+            .runtime
+            .block_on(read_live_session(&self.cloud, &access, session_id));
+        match outcome {
+            Ok(session) => self.publish_live_state_from(&session),
+            Err(LiveSessionReadFailure::Gone) => {
+                // The server no longer admits us: the session ended, aged
+                // out, or we were removed — indistinguishable by design.
+                self.live_session = None;
+                self.snapshot.live_session = Some(LiveSessionState::Failed {
+                    message: "This live session has ended.".to_owned(),
+                });
+                self.publish();
+            }
+            Err(LiveSessionReadFailure::Transient) => {}
+        }
+    }
+
+    fn apply_live_session_policy(&mut self, policy: LiveSessionPolicySummary) {
+        let Some(runtime) = self.live_session.as_ref() else {
+            return;
+        };
+        if !runtime.hosting {
+            return;
+        }
+        let session_id = runtime.session_id;
+        let Some(access) = self.access.as_ref().map(|access| access.token.clone()) else {
+            return;
+        };
+        let outcome = self.runtime.block_on(async {
+            let token =
+                BearerToken::new(&access).map_err(|_| LIVE_SESSION_UNREACHABLE.to_owned())?;
+            self.cloud
+                .update_live_session_policy(&token, session_id, contract_policy(policy))
+                .await
+                .map(rspice_cloud_client::CloudResponse::into_body)
+                .map_err(|error| live_session_error_message(&error))
+        });
+        match outcome {
+            Ok(session) => self.publish_live_state_from(&session),
+            Err(message) => self.set_live_notice(message),
+        }
+    }
+
+    fn approve_live_session_participant(&mut self, principal_id: &str) {
+        self.manage_live_participant(principal_id, LiveParticipantAction::Approve);
+    }
+
+    fn set_live_session_participant_editor(&mut self, principal_id: &str, editor: bool) {
+        self.manage_live_participant(principal_id, LiveParticipantAction::SetEditor(editor));
+    }
+
+    fn remove_live_session_participant(&mut self, principal_id: &str) {
+        self.manage_live_participant(principal_id, LiveParticipantAction::Remove);
+    }
+
+    fn manage_live_participant(&mut self, principal_id: &str, action: LiveParticipantAction) {
+        let Some(runtime) = self.live_session.as_ref() else {
+            return;
+        };
+        if !runtime.hosting {
+            return;
+        }
+        let session_id = runtime.session_id;
+        let Ok(participant) = principal_id.parse::<uuid::Uuid>() else {
+            return;
+        };
+        let Some(access) = self.access.as_ref().map(|access| access.token.clone()) else {
+            return;
+        };
+        let outcome = self.runtime.block_on(async {
+            let token =
+                BearerToken::new(&access).map_err(|_| LIVE_SESSION_UNREACHABLE.to_owned())?;
+            let result = match action {
+                LiveParticipantAction::Approve => {
+                    self.cloud
+                        .approve_live_session_participant(&token, session_id, participant)
+                        .await
+                }
+                LiveParticipantAction::SetEditor(editor) => {
+                    self.cloud
+                        .update_live_session_participant(
+                            &token,
+                            session_id,
+                            participant,
+                            &UpdateLiveSessionParticipantRequest {
+                                capability: if editor {
+                                    LiveSessionCapability::Edit
+                                } else {
+                                    LiveSessionCapability::View
+                                },
+                            },
+                        )
+                        .await
+                }
+                LiveParticipantAction::Remove => {
+                    self.cloud
+                        .remove_live_session_participant(&token, session_id, participant)
+                        .await
+                }
+            };
+            result
+                .map(|_| ())
+                .map_err(|error| live_session_error_message(&error))
+        });
+        match outcome {
+            Ok(()) => self.refresh_live_session(),
+            Err(message) => self.set_live_notice(message),
+        }
+    }
+
+    fn end_live_session(&mut self) {
+        let Some(runtime) = self.live_session.as_ref() else {
+            return;
+        };
+        if !runtime.hosting {
+            return;
+        }
+        let session_id = runtime.session_id;
+        let Some(access) = self.access.as_ref().map(|access| access.token.clone()) else {
+            return;
+        };
+        let outcome = self.runtime.block_on(async {
+            let token =
+                BearerToken::new(&access).map_err(|_| LIVE_SESSION_UNREACHABLE.to_owned())?;
+            self.cloud
+                .end_live_session(&token, session_id)
+                .await
+                .map(|_| ())
+                .map_err(|error| live_session_error_message(&error))
+        });
+        match outcome {
+            Ok(()) => {
+                self.live_session = None;
+                self.snapshot.live_session = None;
+                self.publish();
+            }
+            Err(message) => self.set_live_notice(message),
+        }
+    }
+
+    fn leave_live_session(&mut self) {
+        let Some(runtime) = self.live_session.as_ref() else {
+            return;
+        };
+        if runtime.hosting {
+            return;
+        }
+        // Guests hold no end authority and the service has no leave route by
+        // design: membership is the roster's record, presence leaves with
+        // the relay connection.
+        self.live_session = None;
+        self.snapshot.live_session = None;
+        self.publish();
+    }
+
+    /// Rebuild the rendered state from a fresh server projection.
+    fn publish_live_state_from(&mut self, session: &LiveSession) {
+        let Some(runtime) = self.live_session.as_ref() else {
+            return;
+        };
+        let summary = live_session_summary(
+            session,
+            self.principal_id,
+            runtime.hosting,
+            runtime.join_code.clone(),
+        );
+        let self_pending = self.principal_id.is_some_and(|own| {
+            session.participants.iter().any(|participant| {
+                participant.principal_id == own
+                    && participant.admission == LiveSessionAdmission::Pending
+            })
+        });
+        let state = if runtime.hosting {
+            LiveSessionState::Hosting(summary)
+        } else if self_pending {
+            LiveSessionState::AwaitingApproval(summary)
+        } else {
+            LiveSessionState::Participating(summary)
+        };
+        self.snapshot.live_session = Some(state);
+        self.publish();
+    }
+
+    /// Surface a failed host action on the current summary without losing
+    /// the session view.
+    fn set_live_notice(&mut self, message: String) {
+        if let Some(
+            LiveSessionState::Hosting(summary)
+            | LiveSessionState::AwaitingApproval(summary)
+            | LiveSessionState::Participating(summary),
+        ) = self.snapshot.live_session.as_mut()
+        {
+            summary.notice = Some(message);
+            self.publish();
+        }
+    }
+
     fn sign_out(&mut self) {
         if let Some(pending) = self.pending_sign_in.take() {
             pending.cancel.store(true, Ordering::Relaxed);
         }
+        // A hosted session dies with the account session that owns it.
+        self.end_live_session();
         // Best-effort server-side cleanup before wiping local state.
         if let Some(lease_id) = self
             .snapshot
@@ -739,6 +1165,7 @@ impl Executor {
             .map(|lease| lease_summary(&lease, native_license.as_ref()))
             .collect();
 
+        self.principal_id = Some(reads.principal_id);
         self.snapshot = CloudSessionSnapshot {
             phase: CloudSessionPhase::Active,
             principal: Some(reads.principal),
@@ -748,6 +1175,7 @@ impl Executor {
             device_leases,
             publish: self.snapshot.publish.clone(),
             publications: std::mem::take(&mut self.snapshot.publications),
+            live_session: self.snapshot.live_session.clone(),
             verified_at: now_rfc3339(),
             authorization_url: None,
         };
@@ -843,6 +1271,7 @@ impl Executor {
 // -- bootstrap reads (pure client calls) ------------------------------------
 
 struct BootstrapReads {
+    principal_id: uuid::Uuid,
     principal: PrincipalSummary,
     entitlements: Vec<EntitlementSummary>,
     workspaces: Vec<WorkspaceSummary>,
@@ -921,6 +1350,7 @@ async fn bootstrap_reads(
     }
 
     Ok(BootstrapReads {
+        principal_id: principal.id,
         principal: PrincipalSummary {
             email: principal.email,
             display_name: principal.display_name,
@@ -989,6 +1419,132 @@ async fn read_leases(cloud: &CloudClient, access: &str) -> Option<Vec<LicenseLea
         }
     }
     Some(leases)
+}
+
+// -- live sessions -------------------------------------------------------------
+
+/// Presentation fallback when the service cannot be reached at all.
+const LIVE_SESSION_UNREACHABLE: &str = "The live-session service could not be reached.";
+
+enum LiveParticipantAction {
+    Approve,
+    SetEditor(bool),
+    Remove,
+}
+
+enum LiveSessionReadFailure {
+    /// The server refused the read: ended, aged out, or removed —
+    /// indistinguishable by design.
+    Gone,
+    /// Transport or token trouble; the next poll retries.
+    Transient,
+}
+
+async fn create_live_session(
+    cloud: &CloudClient,
+    access: &str,
+    create_key: &str,
+    policy: LiveSessionPolicy,
+    circuit_id: Option<uuid::Uuid>,
+    client_instance_id: uuid::Uuid,
+) -> Result<rspice_cloud_client::contract::CreatedLiveSession, String> {
+    let token = BearerToken::new(access).map_err(|_| LIVE_SESSION_UNREACHABLE.to_owned())?;
+    let key = IdempotencyKey::new(create_key).map_err(|_| LIVE_SESSION_UNREACHABLE.to_owned())?;
+    cloud
+        .create_live_session_idempotent(&token, &key, policy, circuit_id, client_instance_id)
+        .await
+        .map(rspice_cloud_client::CloudResponse::into_body)
+        .map_err(|error| live_session_error_message(&error))
+}
+
+async fn join_live_session(
+    cloud: &CloudClient,
+    access: &str,
+    code: &str,
+    client_instance_id: uuid::Uuid,
+) -> Result<rspice_cloud_client::contract::JoinedLiveSession, String> {
+    let token = BearerToken::new(access).map_err(|_| LIVE_SESSION_UNREACHABLE.to_owned())?;
+    cloud
+        .join_live_session(&token, code, client_instance_id)
+        .await
+        .map(rspice_cloud_client::CloudResponse::into_body)
+        .map_err(|error| live_session_error_message(&error))
+}
+
+async fn read_live_session(
+    cloud: &CloudClient,
+    access: &str,
+    session_id: uuid::Uuid,
+) -> Result<LiveSession, LiveSessionReadFailure> {
+    let token = BearerToken::new(access).map_err(|_| LiveSessionReadFailure::Transient)?;
+    match cloud.get_live_session(&token, session_id).await {
+        Ok(response) => Ok(response.into_body()),
+        Err(CloudError::Problem { .. }) => Err(LiveSessionReadFailure::Gone),
+        Err(_) => Err(LiveSessionReadFailure::Transient),
+    }
+}
+
+fn contract_policy(policy: LiveSessionPolicySummary) -> LiveSessionPolicy {
+    LiveSessionPolicy {
+        default_capability: if policy.guests_edit {
+            LiveSessionCapability::Edit
+        } else {
+            LiveSessionCapability::View
+        },
+        approve_joins: policy.approve_joins,
+        allow_save_copy: policy.allow_save_copy,
+    }
+}
+
+fn live_session_summary(
+    session: &LiveSession,
+    self_principal: Option<uuid::Uuid>,
+    hosting: bool,
+    join_code: Option<String>,
+) -> LiveSessionSummary {
+    let participants: Vec<LiveParticipantSummary> = session
+        .participants
+        .iter()
+        .map(|participant| {
+            let is_host = participant.principal_id == session.host_principal_id;
+            LiveParticipantSummary {
+                principal_id: participant.principal_id.to_string(),
+                display_name: participant.display_name.clone(),
+                is_host,
+                is_self: self_principal.is_some_and(|own| own == participant.principal_id),
+                editor: is_host || participant.capability == LiveSessionCapability::Edit,
+                pending: participant.admission == LiveSessionAdmission::Pending,
+                joined_at: participant.joined_at.clone(),
+            }
+        })
+        .collect();
+    let editor = hosting
+        || participants
+            .iter()
+            .any(|participant| participant.is_self && participant.editor);
+    LiveSessionSummary {
+        session_id: session.id.to_string(),
+        join_code,
+        hosting,
+        editor,
+        policy: LiveSessionPolicySummary {
+            guests_edit: session.policy.default_capability == LiveSessionCapability::Edit,
+            approve_joins: session.policy.approve_joins,
+            allow_save_copy: session.policy.allow_save_copy,
+        },
+        participants,
+        started_at: session.created_at.clone(),
+        notice: None,
+    }
+}
+
+/// Presentation-safe failure text: the service's own problem title when the
+/// server answered deliberately, a fixed line otherwise.
+fn live_session_error_message(error: &CloudError) -> String {
+    match error {
+        CloudError::Problem { details, .. } => details.title.clone(),
+        _ => LIVE_SESSION_UNREACHABLE.to_owned(),
+    }
 }
 
 // -- mapping -----------------------------------------------------------------
@@ -1061,6 +1617,95 @@ mod tests {
         });
         assert_eq!(granted_features(&features), vec!["cloud_publishing"]);
         assert!(granted_features(&serde_json::json!([])).is_empty());
+    }
+
+    #[test]
+    fn live_session_summaries_mark_host_self_pending_and_editors() {
+        use rspice_cloud_client::contract::LiveSessionParticipant;
+        let host = uuid::Uuid::from_u128(1);
+        let guest = uuid::Uuid::from_u128(2);
+        let session = LiveSession {
+            id: uuid::Uuid::from_u128(9),
+            host_principal_id: host,
+            circuit_id: None,
+            policy: LiveSessionPolicy {
+                default_capability: LiveSessionCapability::View,
+                approve_joins: true,
+                allow_save_copy: false,
+            },
+            created_at: "2026-08-08T00:00:00Z".to_owned(),
+            participants: vec![
+                LiveSessionParticipant {
+                    principal_id: host,
+                    display_name: "Host".to_owned(),
+                    capability: LiveSessionCapability::Edit,
+                    admission: LiveSessionAdmission::Admitted,
+                    joined_at: "2026-08-08T00:00:00Z".to_owned(),
+                },
+                LiveSessionParticipant {
+                    principal_id: guest,
+                    display_name: "Guest".to_owned(),
+                    capability: LiveSessionCapability::View,
+                    admission: LiveSessionAdmission::Pending,
+                    joined_at: "2026-08-08T00:01:00Z".to_owned(),
+                },
+            ],
+        };
+
+        let summary = live_session_summary(&session, Some(guest), false, None);
+        assert!(!summary.hosting);
+        assert!(!summary.editor, "a viewer guest is not an editor");
+        assert!(!summary.policy.guests_edit);
+        assert!(summary.policy.approve_joins);
+        assert!(summary.join_code.is_none());
+        let host_row = &summary.participants[0];
+        assert!(host_row.is_host && host_row.editor && !host_row.is_self);
+        let guest_row = &summary.participants[1];
+        assert!(guest_row.is_self && guest_row.pending && !guest_row.editor);
+
+        let hosted =
+            live_session_summary(&session, Some(host), true, Some("ABCDE-FGHJK".to_owned()));
+        assert!(hosted.hosting && hosted.editor);
+        assert_eq!(hosted.join_code.as_deref(), Some("ABCDE-FGHJK"));
+    }
+
+    #[test]
+    fn live_session_policy_maps_editors_to_the_contract_capability() {
+        let editors = contract_policy(LiveSessionPolicySummary {
+            guests_edit: true,
+            approve_joins: false,
+            allow_save_copy: true,
+        });
+        assert_eq!(editors.default_capability, LiveSessionCapability::Edit);
+        assert!(!editors.approve_joins);
+        assert!(editors.allow_save_copy);
+        let viewers = contract_policy(LiveSessionPolicySummary {
+            guests_edit: false,
+            approve_joins: true,
+            allow_save_copy: false,
+        });
+        assert_eq!(viewers.default_capability, LiveSessionCapability::View);
+    }
+
+    #[test]
+    fn live_session_errors_surface_only_deliberate_problem_titles() {
+        let details: rspice_cloud_client::contract::ProblemDetails =
+            serde_json::from_value(serde_json::json!({
+                "type": "about:blank",
+                "title": "Live collaboration requires an active entitlement.",
+                "status": 403,
+                "detail": "internal wording that stays out of the summary line",
+                "instance": "about:blank",
+            }))
+            .expect("problem details");
+        let problem = CloudError::Problem {
+            details: Box::new(details),
+            metadata: rspice_cloud_client::ResponseMetadata::default(),
+        };
+        assert_eq!(
+            live_session_error_message(&problem),
+            "Live collaboration requires an active entitlement."
+        );
     }
 
     #[test]
