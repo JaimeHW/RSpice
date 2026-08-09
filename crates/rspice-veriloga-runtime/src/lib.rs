@@ -20,6 +20,80 @@
 
 pub type Value = f64;
 
+/// Version of the immutable catalog contract emitted beside generated models.
+///
+/// This is intentionally independent of checkpoint and stamp-workspace
+/// versions: consumers use it to decide whether a persisted schematic binding
+/// can be reconstructed from the compiled model catalog.
+pub const GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneratedVerilogAParameterScope {
+    Model,
+    Instance,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneratedVerilogATerminalDirection {
+    Input,
+    Output,
+    InOut,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GeneratedVerilogATerminalDescriptor {
+    pub name: &'static str,
+    pub direction: GeneratedVerilogATerminalDirection,
+    pub discipline: &'static str,
+}
+
+/// A static numeric range endpoint from a Verilog-A parameter declaration.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeneratedVerilogAParameterBound {
+    pub value: Value,
+    pub exclusive: bool,
+}
+
+/// Immutable, engine-neutral parameter metadata emitted by the compiler.
+///
+/// `default` is `None` when the source default is an expression rather than a
+/// source-level numeric literal. `has_dynamic_constraints` tells editors that
+/// the generated model remains the final authority because at least one range
+/// condition depends on another parameter or a compiled expression.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeneratedVerilogAParameterDescriptor {
+    pub name: &'static str,
+    pub aliases: &'static [&'static str],
+    pub scope: GeneratedVerilogAParameterScope,
+    pub is_integer: bool,
+    pub default: Option<Value>,
+    pub minimum: Option<GeneratedVerilogAParameterBound>,
+    pub maximum: Option<GeneratedVerilogAParameterBound>,
+    pub excluded_values: &'static [Value],
+    pub has_dynamic_constraints: bool,
+}
+
+/// Stable identity and exact external contract for one compiled Verilog-A
+/// catalog entry.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeneratedVerilogAModelDescriptor {
+    pub abi_version: u32,
+    /// Case-preserving name accepted by the generated model registry.
+    pub model_name: &'static str,
+    /// Module name written in the Verilog-A source.
+    pub module_name: &'static str,
+    /// Digest of the preprocessed source closure used for generation.
+    pub source_digest: &'static str,
+    /// Digest covering the executable instance/checkpoint layout.
+    pub checkpoint_identity: &'static str,
+    /// External terminals in the exact positional order expected by netlists.
+    pub terminals: &'static [GeneratedVerilogATerminalDescriptor],
+    pub parameters: &'static [GeneratedVerilogAParameterDescriptor],
+    pub total_node_count: usize,
+    pub internal_node_names: &'static [&'static str],
+    pub branch_count: usize,
+}
+
 /// Packed partial derivatives used by precompiled Verilog-A model bodies.
 ///
 /// This lives in the shared leaf dependency so every generated device does not

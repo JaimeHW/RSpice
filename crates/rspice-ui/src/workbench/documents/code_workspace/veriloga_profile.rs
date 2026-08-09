@@ -180,6 +180,9 @@ impl VerilogABuildProfile {
         RuntimeQualificationOptions {
             generated_rust: self.targets.generated_rust,
             native_x64_jit: self.targets.native_x64_jit,
+            // The build profile does not yet expose wasm qualification;
+            // requesting none preserves the schema's exact prior behavior.
+            wasm_jit: false,
             interpreter_fallback: match self.targets.fallback {
                 VerilogAFallbackPolicy::Allow => InterpreterFallbackPolicy::Allow,
                 VerilogAFallbackPolicy::Reject => InterpreterFallbackPolicy::Reject,

@@ -31,15 +31,19 @@ use std::sync::Arc;
 pub use rspice_veriloga_models::registry as builtins;
 
 pub use rspice_veriloga_runtime::{
-    GENERATED_PERSISTENT_STATE_VERSION, GeneratedAnalysisKind, GeneratedDdtCoefficients,
-    GeneratedDerivative, GeneratedEvalContext, GeneratedEvaluationError, GeneratedEvaluationMode,
-    GeneratedMappedNoiseDescriptor, GeneratedNoiseDescriptor, GeneratedNoiseEndpoint,
-    GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef,
-    GeneratedNoiseInjection, GeneratedNoiseKind, GeneratedNoiseTopologyError,
-    GeneratedReactiveStamper, GeneratedSimulationParameters, GeneratedStampLane, GeneratedStamper,
+    GENERATED_PERSISTENT_STATE_VERSION, GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION,
+    GeneratedAnalysisKind, GeneratedDdtCoefficients, GeneratedDerivative, GeneratedEvalContext,
+    GeneratedEvaluationError, GeneratedEvaluationMode, GeneratedMappedNoiseDescriptor,
+    GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation,
+    GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseInjection,
+    GeneratedNoiseKind, GeneratedNoiseTopologyError, GeneratedReactiveStamper,
+    GeneratedSimulationParameters, GeneratedStampLane, GeneratedStamper,
     GeneratedStaticStampCache, GeneratedVerilogAEvaluationError,
-    GeneratedVerilogAInstanceCheckpoint, GeneratedVerilogAPersistentState,
-    GeneratedVerilogARollbackState, Value,
+    GeneratedVerilogAInstanceCheckpoint, GeneratedVerilogAModelDescriptor,
+    GeneratedVerilogAParameterBound, GeneratedVerilogAParameterDescriptor,
+    GeneratedVerilogAParameterScope, GeneratedVerilogAPersistentState,
+    GeneratedVerilogARollbackState, GeneratedVerilogATerminalDescriptor,
+    GeneratedVerilogATerminalDirection, Value,
 };
 
 /// Exact catalog contracts compiled into this build.
