@@ -2415,6 +2415,17 @@ fn show_unit_pane_header(
                         // The instrument idiom: a trace states its own value
                         // at cursor A right where its name is, so reading one
                         // curve never costs a trip to the readout register.
+                        // A hidden trace keeps its chip so it can be brought
+                        // back, but must not read as a curve on the canvas:
+                        // the mockup strikes its name through.
+                        let name = if trace.visible {
+                            elide(&trace.name, 20)
+                        } else {
+                            elide(&trace.name, 20)
+                                .chars()
+                                .flat_map(|glyph| [glyph, '\u{0336}'])
+                                .collect()
+                        };
                         let label = match &cursor_a_value {
                             Some((x, presentation, quantity_policy)) if trace.visible => {
                                 let value = sample_at_with(
@@ -2436,7 +2447,7 @@ fn show_unit_pane_header(
                                     )
                                 )
                             }
-                            _ => elide(&trace.name, 20),
+                            _ => name,
                         };
                         if ui
                             .selectable_label(selected, label)
@@ -3002,6 +3013,9 @@ fn show_unit_pane(
     let significant_digits = usize::from(presentation.displayed_significant_digits().get());
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
     let (x0, x1) = x_domain;
+    // The pane's own top edge, kept so the active rail can span header and
+    // canvas together once the pane's full height is known.
+    let pane_top = ui.available_rect_before_wrap().top();
 
     let pane_range = pane_y_range(&mut state.ui.results.derived, model, &pane.traces);
     let specification_limits = if state.ui.results.show_spec_limits {
@@ -3378,6 +3392,26 @@ fn show_unit_pane(
         if let Some(y) = response.view.y {
             view.y = Some(y);
         }
+    }
+
+    // The mockup's `.plot-pane.active::before`: a 2 px rail down the pane
+    // that received the instrument's actions. Painted last so it reads over
+    // the header fill and the canvas alike.
+    let pane_active = state.ui.results.active_wave_pane.as_ref()
+        == Some(&WavePanePresentationKey {
+            analysis: model.analysis_key,
+            unit: pane.unit.to_owned(),
+        });
+    if pane_active {
+        let bottom = ui.min_rect().bottom().max(pane_top);
+        ui.painter().rect_filled(
+            egui::Rect::from_min_max(
+                egui::pos2(ui.min_rect().left(), pane_top),
+                egui::pos2(ui.min_rect().left() + 2.0, bottom),
+            ),
+            0.0,
+            t.color.accent,
+        );
     }
 }
 
