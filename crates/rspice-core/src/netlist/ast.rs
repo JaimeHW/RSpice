@@ -631,12 +631,30 @@ impl SaveSet {
         self.is_empty() || self.signals.iter().any(|s| matches!(s, SaveSignal::All))
     }
 
-    /// Whether the saved-vector contract retains the voltage operand for a
-    /// node.  Transient result projection uses this typed query so a current
-    /// or device-parameter save cannot accidentally retain unrelated node
+    /// Whether the saved-vector contract retains `node` as a voltage operand.
+    ///
+    /// Differential probes retain both of their node operands because result
+    /// projection needs both waveforms to construct the requested voltage.
+    /// Transient result projection uses this typed query so a current or
+    /// device-parameter save cannot accidentally retain unrelated node
     /// waveforms.
-    pub(crate) fn retains_voltage_operand(&self, node: &str) -> bool {
-        self.selects(&format!("V({node})"))
+    pub fn retains_voltage_operand(&self, node: &str) -> bool {
+        if self.keeps_everything() {
+            return true;
+        }
+
+        let node = node.trim().to_ascii_lowercase();
+        self.signals.iter().any(|signal| match signal {
+            SaveSignal::All => true,
+            SaveSignal::Voltage(saved) | SaveSignal::Raw(saved) => {
+                pattern_selects(&saved.to_ascii_lowercase(), &node)
+            }
+            SaveSignal::VoltageDiff(pos, neg) => {
+                pattern_selects(&pos.to_ascii_lowercase(), &node)
+                    || pattern_selects(&neg.to_ascii_lowercase(), &node)
+            }
+            SaveSignal::Current(_) | SaveSignal::DeviceParam { .. } => false,
+        })
     }
 
     /// Whether an output vector named `variable` is selected.
