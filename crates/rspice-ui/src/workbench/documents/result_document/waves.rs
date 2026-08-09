@@ -1214,6 +1214,37 @@ fn signal_unit(name: &str, kind: TraceKind, analysis_unit: &'static str) -> &'st
     }
 }
 
+/// Unit for a raw dataset waveform name in the results data browser, which
+/// carries no trace-kind projection: the name's accessor decides, however
+/// wrapped, and the analysis default applies only where there is none.
+pub(crate) fn browser_signal_unit(name: &str, analysis_unit: &'static str) -> &'static str {
+    let name = name.trim_start();
+    if starts_with_accessor(name, "phase(") {
+        return "°";
+    }
+    let name = unwrap_projection(name);
+    if starts_with_accessor(name, "i(") {
+        "A"
+    } else if starts_with_accessor(name, "v(") {
+        "V"
+    } else if starts_with_accessor(name, "p(") {
+        "W"
+    } else {
+        analysis_unit
+    }
+}
+
+/// Whether a raw dataset waveform name reads a current, however wrapped.
+pub(crate) fn browser_signal_is_current(name: &str) -> bool {
+    let name = name.trim_start();
+    let name = if starts_with_accessor(name, "phase(") {
+        name["phase(".len()..].trim_start()
+    } else {
+        name
+    };
+    starts_with_accessor(unwrap_projection(name), "i(")
+}
+
 /// One Y axis of a strip: the traces measured in a single unit.
 ///
 /// Panes of a strip always share the strip's X domain — they are one
@@ -2265,7 +2296,19 @@ fn show_unit_pane_header(
     };
     let active = state.ui.results.active_wave_pane.as_ref() == Some(&pane_key);
     let action_width = 58.0;
-    let unit_width = 46.0;
+    // Fit the pane's actual unit tag: nV/√Hz is wider than the quantity tags
+    // the old fixed 46 px assumed, and a clipped unit misreads as a new unit.
+    let unit_label_width = ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(
+                pane.unit.to_owned(),
+                theme::mono(tokens::FS_0, FontWeight::Regular),
+                c.text,
+            )
+            .size()
+            .x
+    });
+    let unit_width = (unit_label_width + 28.0).max(46.0);
     let unit_rect = egui::Rect::from_min_max(
         egui::pos2(rect.left() + 5.0, rect.top() + 1.5),
         egui::pos2(

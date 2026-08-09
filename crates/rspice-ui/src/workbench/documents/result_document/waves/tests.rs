@@ -1293,3 +1293,20 @@ fn cursor_copy_uses_explicit_scientific_si_policy() {
     assert!(copied.contains("onoise = 2."));
     assert!(copied.contains("e0 nV/√Hz"));
 }
+
+#[test]
+fn browser_classification_reads_the_accessor_through_derived_wrappers() {
+    for (name, unit, current) in [
+        ("V(out)", "V", false),
+        ("I(C1)", "A", true),
+        ("|V(OUT)|", "V", false),
+        ("|I(VIN)|", "A", true),
+        ("phase(V(OUT))", "°", false),
+        ("phase(I(VIN))", "°", true),
+        ("re(I(R1))", "A", true),
+        ("onoise", "V^2/Hz", false),
+    ] {
+        assert_eq!(browser_signal_unit(name, "V^2/Hz"), unit, "{name}");
+        assert_eq!(browser_signal_is_current(name), current, "{name}");
+    }
+}

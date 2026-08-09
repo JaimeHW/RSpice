@@ -64,6 +64,7 @@ pub(crate) fn open_create_document(app: &mut RSpiceApp) {
 mod strip;
 mod waves;
 pub(crate) use waves::copy_cursor_text;
+pub(crate) use waves::{browser_signal_is_current, browser_signal_unit};
 
 pub(crate) use waves::toggle_visibility;
 

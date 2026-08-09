@@ -883,7 +883,10 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             query.is_empty() || waveform.name.to_lowercase().contains(&query)
                         })
                         .filter(|(_, waveform)| {
-                            let current = waveform.name.trim_start().starts_with("I(");
+                            let current =
+                                crate::workbench::documents::result_document::browser_signal_is_current(
+                                    &waveform.name,
+                                );
                             match kind {
                                 ResultsBrowserKind::All => true,
                                 ResultsBrowserKind::Current => current,
@@ -891,11 +894,11 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             }
                         })
                         .map(|(waveform_index, waveform)| {
-                            let unit = if waveform.name.trim_start().starts_with("I(") {
-                                "A"
-                            } else {
-                                analysis.analysis_type.axis_info().3
-                            };
+                            let unit =
+                                crate::workbench::documents::result_document::browser_signal_unit(
+                                    &waveform.name,
+                                    analysis.analysis_type.axis_info().3,
+                                );
                             ResultSignal {
                                 waveform_index,
                                 name: waveform.name.clone(),
@@ -907,7 +910,15 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                     .rev()
                                     .copied()
                                     .find(|value| value.is_finite())
-                                    .map(|value| crate::ui::plot::fmt_si(value, unit, 3)),
+                                    .map(|value| {
+                                        // Degrees carry no SI prefix; a
+                                        // near-zero phase as "f°" misreads.
+                                        if unit == "°" {
+                                            format!("{value:.3} °")
+                                        } else {
+                                            crate::ui::plot::fmt_si(value, unit, 3)
+                                        }
+                                    }),
                             }
                         })
                         .collect::<Vec<_>>();
