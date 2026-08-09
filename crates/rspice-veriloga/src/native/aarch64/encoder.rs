@@ -794,7 +794,7 @@ fn expand_fmov_imm8(immediate: u8) -> u64 {
     let sign = u64::from(immediate >> 7) << 63;
     let exponent_selector = u64::from((immediate >> 6) & 1);
     let exponent = ((exponent_selector ^ 1) << 10)
-        | (exponent_selector * 0xff << 2)
+        | ((exponent_selector * 0xff) << 2)
         | u64::from((immediate >> 4) & 0x3);
     let fraction = u64::from(immediate & 0xf) << 48;
     sign | (exponent << 52) | fraction

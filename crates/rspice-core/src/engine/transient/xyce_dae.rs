@@ -135,7 +135,7 @@ impl XyceOneStepWorkspace {
             .iter_mut()
             .zip(dae.q().iter().zip(previous_q))
         {
-            *rhs = q + (-1.0 * q_previous);
+            *rhs = q - q_previous;
         }
 
         let inverse_time_step = 1.0 / time_step;
@@ -145,7 +145,7 @@ impl XyceOneStepWorkspace {
                 for ((rhs, &f), &b) in self.correction_rhs.iter_mut().zip(dae.f()).zip(dae.b()) {
                     let scaled_charge = inverse_time_step * *rhs;
                     let with_static = scaled_charge + f;
-                    *rhs = with_static + (-1.0 * b);
+                    *rhs = with_static - b;
                 }
             }
             XyceOneStepOrder::Second => {
@@ -169,7 +169,7 @@ impl XyceOneStepWorkspace {
 
         // Xyce's nonlinear solver expects the negative residual.
         for rhs in &mut self.correction_rhs {
-            *rhs = -1.0 * *rhs;
+            *rhs *= -1.0;
         }
 
         validate_finite(XyceDaeVectorKind::CorrectionRhs, &self.correction_rhs)?;

@@ -408,7 +408,7 @@ impl LteEstimator {
                 .xyce_order_two_difference
                 .get(index)
                 .copied()
-                .unwrap_or_else(|| prev_prev - prev_prev_prev);
+                .unwrap_or(prev_prev - prev_prev_prev);
             let ratio = dt / predictor_dt;
             let beta1 = ratio + (ratio * ratio) / 2.0;
             let beta2 = -(dt * dt / predictor_dt / predictor_prev_dt / 2.0);

@@ -265,7 +265,11 @@ impl StampAuditEntry {
     /// at the same time, which is exactly the case this has to exclude from
     /// comparison rather than let through as a tight failure.
     pub fn unverifiable(&self) -> bool {
-        self.discontinuous || !(self.uncertainty <= AUDIT_MAX_USABLE_UNCERTAINTY)
+        self.discontinuous
+            || !matches!(
+                self.uncertainty.partial_cmp(&AUDIT_MAX_USABLE_UNCERTAINTY),
+                Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+            )
     }
 
     /// Whether either side of this entry is large enough for a solver to act on.

@@ -2132,8 +2132,7 @@ impl JilesAthertonInductor {
         } else {
             None
         };
-        let mid = cached_mid.unwrap_or(self.xyce_accepted_mid);
-        mid
+        cached_mid.unwrap_or(self.xyce_accepted_mid)
     }
 
     /// Cache the pure endpoint used by the current Newton stamp. The
@@ -2244,12 +2243,11 @@ impl JilesAthertonInductor {
             .abs()
             .max(trial.level1_rate.abs())
             .max(1.0);
-        let converged = (!self.has_xyce_core_m_equation()
+        (!self.has_xyce_core_m_equation()
             || (trial.level1_residual.is_finite()
                 && trial.level1_residual.abs() <= Self::XYCE_CORE_DEVICE_RELTOL * scale))
             && trial.level1_rate_residual.is_finite()
-            && trial.level1_rate_residual.abs() <= Self::XYCE_CORE_DEVICE_RELTOL * rate_scale;
-        converged
+            && trial.level1_rate_residual.abs() <= Self::XYCE_CORE_DEVICE_RELTOL * rate_scale
     }
 
     pub fn current_value(&self) -> Value {

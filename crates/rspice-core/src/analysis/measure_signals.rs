@@ -745,7 +745,7 @@ enum LiveMeasureState {
     Point {
         signal: Option<LiveMeasureOperand>,
         at: Option<Value>,
-        condition: Option<LiveCondition>,
+        condition: Option<Box<LiveCondition>>,
         lower: Value,
         upper: Value,
         minval: Value,
@@ -754,14 +754,7 @@ enum LiveMeasureState {
         negative_results: VecDeque<LivePointCandidate>,
         complete: bool,
     },
-    Delay {
-        trigger: LiveDelayClause,
-        target: LiveDelayClause,
-        frac_tracker: Option<LegacyFracDelayTracker>,
-        axis_ascending: bool,
-        axis_minimum: Value,
-        axis_maximum: Value,
-    },
+    Delay(Box<LiveDelayState>),
     RiseFall {
         signal: LiveMeasureOperand,
         samples: Vec<Value>,
@@ -1002,6 +995,15 @@ struct LiveDelayClause {
     negative_events: VecDeque<Value>,
     minval: Value,
     legacy: bool,
+}
+
+struct LiveDelayState {
+    trigger: LiveDelayClause,
+    target: LiveDelayClause,
+    frac_tracker: Option<LegacyFracDelayTracker>,
+    axis_ascending: bool,
+    axis_minimum: Value,
+    axis_maximum: Value,
 }
 
 struct LiveDelayCondition {
@@ -1545,7 +1547,8 @@ fn compile_live_measure_state(
                 condition: when
                     .as_ref()
                     .map(|condition| LiveCondition::compile(condition, *minval, params))
-                    .transpose()?,
+                    .transpose()?
+                    .map(Box::new),
                 lower,
                 upper,
                 minval: *minval,
@@ -1570,7 +1573,9 @@ fn compile_live_measure_state(
             LiveMeasureState::Point {
                 signal: None,
                 at: None,
-                condition: Some(LiveCondition::compile(condition, *minval, params)?),
+                condition: Some(Box::new(LiveCondition::compile(
+                    condition, *minval, params,
+                )?)),
                 lower,
                 upper,
                 minval: *minval,
@@ -1616,7 +1621,7 @@ fn compile_live_measure_state(
             } else {
                 targ.td.or(trig.td)
             };
-            LiveMeasureState::Delay {
+            LiveMeasureState::Delay(Box::new(LiveDelayState {
                 frac_tracker: (legacy && (trig.frac_max.is_some() || targ.frac_max.is_some()))
                     .then(|| LegacyFracDelayTracker::new(trig, targ, *minval)),
                 trigger: LiveDelayClause::compile(
@@ -1628,7 +1633,7 @@ fn compile_live_measure_state(
                 axis_ascending,
                 axis_minimum,
                 axis_maximum,
-            }
+            }))
         }
         MeasureType::RiseTime {
             signal,
@@ -2079,11 +2084,9 @@ impl LiveMeasureState {
                     condition.dependencies(&mut names);
                 }
             }
-            Self::Delay {
-                trigger, target, ..
-            } => {
-                trigger.dependencies(&mut names);
-                target.dependencies(&mut names);
+            Self::Delay(state) => {
+                state.trigger.dependencies(&mut names);
+                state.target.dependencies(&mut names);
             }
         }
         names.sort();
@@ -2444,14 +2447,15 @@ impl LiveMeasureState {
                 }
                 Ok(None)
             }
-            Self::Delay {
-                trigger,
-                target,
-                frac_tracker,
-                axis_ascending,
-                axis_minimum,
-                axis_maximum,
-            } => {
+            Self::Delay(state) => {
+                let LiveDelayState {
+                    trigger,
+                    target,
+                    frac_tracker,
+                    axis_ascending,
+                    axis_minimum,
+                    axis_maximum,
+                } = state.as_mut();
                 if let Some(frac_tracker) = frac_tracker {
                     if !super::measure::legacy_delay_accepts_sample(
                         axis_value,

@@ -950,6 +950,11 @@ fn compensated_componentwise_backward_error(
     })
 }
 
+struct CorrectionRhsWorkspace<'a> {
+    correction: &'a mut Vec<Value>,
+    low_components: &'a mut Vec<Value>,
+}
+
 fn fill_correction_rhs(
     csc: &SymbolicSparseColMat<usize>,
     values: &[Value],
@@ -957,9 +962,12 @@ fn fill_correction_rhs(
     ncols: usize,
     rhs: &[Value],
     iterate: &[Value],
-    correction: &mut Vec<Value>,
-    correction_lo: &mut Vec<Value>,
+    workspace: CorrectionRhsWorkspace<'_>,
 ) -> Result<(), SolverError> {
+    let CorrectionRhsWorkspace {
+        correction,
+        low_components: correction_lo,
+    } = workspace;
     if rhs.len() != nrows || iterate.len() != ncols {
         return Err(SolverError::InvalidCircuit(format!(
             "Correction system requires RHS/iterate dimensions {} and {}, got {} and {}",
@@ -2258,8 +2266,10 @@ impl StaticMatrix {
             self.ncols,
             rhs,
             iterate,
-            &mut correction,
-            &mut correction_lo,
+            CorrectionRhsWorkspace {
+                correction: &mut correction,
+                low_components: &mut correction_lo,
+            },
         )?;
         Ok(correction)
     }
@@ -2286,8 +2296,10 @@ impl StaticMatrix {
             self.ncols,
             rhs,
             iterate,
-            correction,
-            &mut self.correction_rhs_lo_scratch,
+            CorrectionRhsWorkspace {
+                correction,
+                low_components: &mut self.correction_rhs_lo_scratch,
+            },
         )
     }
 

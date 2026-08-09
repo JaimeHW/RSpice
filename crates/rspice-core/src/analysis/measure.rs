@@ -1154,10 +1154,7 @@ impl MeasureEngine {
                         .to_string(),
                 );
             }
-            let interpolator = match AkimaInterpolator::new(axis, signal) {
-                Ok(interpolator) => interpolator,
-                Err(error) => return Err(error),
-            };
+            let interpolator = AkimaInterpolator::new(axis, signal)?;
             reference_axis
                 .into_iter()
                 .zip(comparison.dependent)
@@ -2517,9 +2514,7 @@ impl DelayConditionTracker {
         td: Option<Value>,
     ) -> Option<Value> {
         let previous = self.previous.replace((axis, value, target));
-        let Some((previous_axis, previous_value, previous_target)) = previous else {
-            return None;
-        };
+        let (previous_axis, previous_value, previous_target) = previous?;
         match self.mode {
             DelayTrackerMode::Modern => self.update_modern(
                 previous_axis,
@@ -2701,7 +2696,7 @@ fn delay_at_is_reached(
 }
 
 pub(crate) fn delay_td_accepts_sample(axis: Value, td: Option<Value>, minval: Value) -> bool {
-    td.is_none_or(|td| !(axis < td * (1.0 - minval)))
+    td.is_none_or(|td| axis.partial_cmp(&(td * (1.0 - minval))) != Some(std::cmp::Ordering::Less))
 }
 
 pub(crate) fn legacy_delay_accepts_sample(
@@ -2712,8 +2707,12 @@ pub(crate) fn legacy_delay_accepts_sample(
     minval: Value,
 ) -> bool {
     delay_td_accepts_sample(axis, td, minval)
-        && from.is_none_or(|from| !(axis < from * (1.0 - minval)))
-        && to.is_none_or(|to| !(axis > to * (1.0 + minval)))
+        && from.is_none_or(|from| {
+            axis.partial_cmp(&(from * (1.0 - minval))) != Some(std::cmp::Ordering::Less)
+        })
+        && to.is_none_or(|to| {
+            axis.partial_cmp(&(to * (1.0 + minval))) != Some(std::cmp::Ordering::Greater)
+        })
 }
 
 fn delay_td_accepts_modern_event(axis: Value, td: Option<Value>, minval: Value) -> bool {

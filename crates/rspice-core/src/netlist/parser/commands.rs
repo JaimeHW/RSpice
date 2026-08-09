@@ -5308,7 +5308,7 @@ mod tests {
                         .tran 1n 2n\n\
                         .measure tran sample AVG V(out) GOAL=1 TOL=0.1\n\
                         .end\n";
-        Netlist::parse_with_options(tol_deck, xyce_options.clone())
+        Netlist::parse_with_options(tol_deck, xyce_options)
             .expect_err("Xyce must parse TOL as an extra operand, not a represented qualifier");
         let generic = Netlist::parse(tol_deck).expect("the generic SPICE dialect retains TOL");
         assert_eq!(generic.measurements[0].tolerance, Some(0.1));
@@ -5320,7 +5320,7 @@ mod tests {
              .tran 1n 2n\n\
              .measure tran sample EQN VAL+1\n\
              .end\n",
-            xyce_options.clone(),
+            xyce_options,
         )
         .expect_err("Xyce requires arithmetic EQN/PARAM expressions to be braced or quoted");
         let equation = Netlist::parse_with_options(
@@ -5330,7 +5330,7 @@ mod tests {
              .tran 1n 2n\n\
              .measure tran sample EQN {VAL+1}\n\
              .end\n",
-            xyce_options.clone(),
+            xyce_options,
         )
         .expect("braced arithmetic remains a Xyce ExpressionOp");
         let crate::netlist::measure::MeasureType::Equation { expression, .. } =

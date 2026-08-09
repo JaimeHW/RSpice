@@ -2814,7 +2814,7 @@ fn compare_condition(op: CompareOp) -> Condition {
 }
 
 fn logical_register(index: usize) -> JitResult<DReg> {
-    if index >= A64_ALLOCATABLE_VALUE_REGISTERS && index < LOGICAL_VALUE_REGISTER_COUNT {
+    if (A64_ALLOCATABLE_VALUE_REGISTERS..LOGICAL_VALUE_REGISTER_COUNT).contains(&index) {
         // Temporary logical registers are legal here, but allocator-owned
         // values must remain in the shared prefix. The caller-specific checks
         // distinguish those cases before reaching this physical map.
