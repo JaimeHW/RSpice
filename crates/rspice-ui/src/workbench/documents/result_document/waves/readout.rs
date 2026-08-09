@@ -645,8 +645,126 @@ pub(super) fn marker_section(ui: &mut Ui, state: &mut AppState) {
 ///
 /// The A/B/Δ readout itself lives in the stage's readout strip; repeating it
 /// one panel away is what the results de-duplication pass removed.
+/// What the instrument is currently showing, above where it came from.
+///
+/// The mockup leads its results context with the active pane rather than the
+/// dataset: a reader who has just zoomed or switched scale needs the pane's
+/// own axes and bindings, and the dataset identity below it is unchanged by
+/// any of that.
+pub(crate) fn active_pane_section(ui: &mut Ui, state: &mut AppState) {
+    let t = Tokens::get(ui.ctx());
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let significant_digits = usize::from(presentation.displayed_significant_digits().get());
+    let Some(pane_key) = state.ui.results.active_wave_pane.clone() else {
+        return;
+    };
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &t,
+    );
+    let Some(model) = models
+        .iter()
+        .find(|model| model.analysis_key == pane_key.analysis)
+    else {
+        return;
+    };
+    let panes = model.unit_panes();
+    let Some((ordinal, pane)) = panes
+        .iter()
+        .enumerate()
+        .find(|(_, pane)| pane.unit == pane_key.unit)
+    else {
+        return;
+    };
+    let Some(full_domain) = x_range(model) else {
+        return;
+    };
+
+    let bound = pane.traces.len();
+    let visible = pane
+        .traces
+        .iter()
+        .filter_map(|index| model.traces.get(*index))
+        .filter(|trace| trace.visible)
+        .count();
+    let families = pane
+        .traces
+        .iter()
+        .filter_map(|index| model.traces.get(*index))
+        .filter(|trace| trace.family_group_ordinal.is_some())
+        .count();
+    let (x0, x1) =
+        shared_x_view(&state.ui.results, model.analysis_key, panes.len()).unwrap_or(full_domain);
+    let pane_view =
+        state
+            .ui
+            .results
+            .analysis_plot_view_pane(super::super::ResultViewer::Waves, pane_key.analysis, ordinal);
+
+    section_header(ui, "Active pane", Some(pane.unit));
+    crate::workbench::design_system::property_row(
+        ui,
+        "Traces",
+        &format!("{visible} visible · {bound} bound"),
+    );
+    crate::workbench::design_system::property_row(
+        ui,
+        "X viewport",
+        &format!(
+            "{} … {}",
+            model.format_x(x0, significant_digits, quantity_policy),
+            model.format_x(x1, significant_digits, quantity_policy)
+        ),
+    );
+    crate::workbench::design_system::property_row(
+        ui,
+        "Y viewport",
+        &match pane_view.y {
+            Some((y0, y1)) => format!(
+                "{} … {}",
+                fmt_si_significant(y0, pane.unit, significant_digits),
+                fmt_si_significant(y1, pane.unit, significant_digits)
+            ),
+            None => "auto · fits visible traces".to_owned(),
+        },
+    );
+    crate::workbench::design_system::property_row(
+        ui,
+        "Scale",
+        if pane_log_y(ui, model, pane) {
+            "logarithmic"
+        } else {
+            "linear"
+        },
+    );
+    crate::workbench::design_system::property_row(
+        ui,
+        "Limit mask",
+        if state.ui.results.show_spec_limits {
+            "project specification limits"
+        } else {
+            "none bound"
+        },
+    );
+    if families > 0 {
+        crate::workbench::design_system::property_row(
+            ui,
+            "Families",
+            &format!(
+                "{families} corner family trace{}",
+                if families == 1 { "" } else { "s" }
+            ),
+        );
+    }
+    ui.add_space(4.0);
+}
+
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
+    active_pane_section(ui, state);
 
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();

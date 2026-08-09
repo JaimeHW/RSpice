@@ -41,6 +41,7 @@ fn selected_summary(state: &AppState) -> Option<(&NoiseSummary, &str)> {
 /// Render spectrum provenance and the full contributor table for the exact
 /// analysis shown in the center instrument (the waves pane-stack).
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+    super::waves::active_pane_section(ui, state);
     super::bode::noise_spectrum_right_panel(ui, state);
 
     let Some((summary, label)) = selected_summary(state) else {
