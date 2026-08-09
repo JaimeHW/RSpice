@@ -8179,7 +8179,7 @@ fn is_static_condition_op(op: &NativeOp) -> bool {
         )
 }
 
-pub(super) fn native_op_name(op: &NativeOp) -> &'static str {
+pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
     match op {
         NativeOp::Const(_) => "Const",
         NativeOp::LoadParam(_) => "LoadParam",
@@ -8989,14 +8989,14 @@ fn constant_logical(op: LogicalOp, left: f64, right: f64) -> bool {
     }
 }
 
-fn constant_extremum(op: ExtremumOp, left: f64, right: f64) -> f64 {
+pub(crate) fn constant_extremum(op: ExtremumOp, left: f64, right: f64) -> f64 {
     match op {
         ExtremumOp::Min => left.min(right),
         ExtremumOp::Max => left.max(right),
     }
 }
 
-fn constant_binary_math(op: BinaryMathOp, left: f64, right: f64) -> f64 {
+pub(crate) fn constant_binary_math(op: BinaryMathOp, left: f64, right: f64) -> f64 {
     match op {
         BinaryMathOp::Pow => left.powf(right),
         BinaryMathOp::Atan2 => left.atan2(right),
@@ -9005,7 +9005,7 @@ fn constant_binary_math(op: BinaryMathOp, left: f64, right: f64) -> f64 {
     }
 }
 
-fn constant_integer_binary(op: IntegerBinaryOp, left: f64, right: f64) -> Option<f64> {
+pub(crate) fn constant_integer_binary(op: IntegerBinaryOp, left: f64, right: f64) -> Option<f64> {
     let left = left as i64;
     let right = right as i64;
     let value = match op {
@@ -9023,7 +9023,7 @@ fn constant_shift_count(value: f64) -> Option<u8> {
     (0..64).contains(&count).then_some(count as u8)
 }
 
-fn constant_unary_math(op: UnaryMathOp, value: f64) -> f64 {
+pub(crate) fn constant_unary_math(op: UnaryMathOp, value: f64) -> f64 {
     match op {
         UnaryMathOp::Exp => value.exp(),
         UnaryMathOp::Log => value.ln(),
@@ -9071,7 +9071,7 @@ fn constant_limited_exp(value: f64) -> f64 {
     }
 }
 
-pub(super) fn constant_dynamic_variable_slot(
+pub(crate) fn constant_dynamic_variable_slot(
     raw_index: f64,
     base: usize,
     len: usize,

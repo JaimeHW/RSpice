@@ -286,13 +286,32 @@ mod browser {
     fn handle_worker_message(state: &Rc<RefCell<WorkerState>>, data: JsValue) {
         let message_type = string_property(&data, "type").unwrap_or_default();
         match message_type.as_str() {
-            "ready" => {
-                web_sys::console::log_1(&JsValue::from_str("RSpice simulation worker ready"))
-            }
+            "ready" => handle_ready_message(&data),
             "progress" => handle_progress_message(state, &data),
             "result" => handle_result_message(state, &data),
             "error" => handle_error_message(state, &data),
             _ => {}
+        }
+    }
+
+    fn handle_ready_message(data: &JsValue) {
+        let capability = Reflect::get(data, &JsValue::from_str("wasmJit")).unwrap_or(JsValue::NULL);
+        let available = Reflect::get(&capability, &JsValue::from_str("available"))
+            .ok()
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        if available {
+            let abi = numeric_property(&capability, "abiVersion").unwrap_or(0);
+            let bytes = numeric_property(&capability, "moduleBytes").unwrap_or(0);
+            web_sys::console::log_1(&JsValue::from_str(&format!(
+                "RSpice simulation worker ready; WASM JIT ABI {abi} architecture probe qualified ({bytes} bytes)"
+            )));
+        } else {
+            let reason = string_property(&capability, "reason")
+                .unwrap_or_else(|| "browser capability qualification failed".to_owned());
+            web_sys::console::warn_1(&JsValue::from_str(&format!(
+                "RSpice simulation worker ready; WASM JIT unavailable: {reason}"
+            )));
         }
     }
 

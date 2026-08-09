@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en" data-rspice-wasm-jit-status="pending">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RSpice WASM JIT qualification</title>
+</head>
+<body>
+<p id="status" role="status">RSpice WASM JIT qualification is running.</p>
+<script type="module">
+  const root = document.documentElement;
+  const status = document.getElementById("status");
+  const workerUrl = new URL("./simulation-worker.js", import.meta.url);
+  workerUrl.searchParams.set("v", `qualification-${Date.now()}`);
+  const worker = new Worker(workerUrl, { type: "module" });
+  const timeout = setTimeout(() => finish("timeout", "Worker qualification timed out."), 30000);
+
+  function finish(result, message, capability = null) {
+    clearTimeout(timeout);
+    root.setAttribute("data-rspice-wasm-jit-status", result);
+    status.textContent = message;
+    if (capability) {
+      root.setAttribute("data-rspice-wasm-jit-abi", String(capability.abiVersion));
+      root.setAttribute(
+        "data-rspice-wasm-jit-solver-result",
+        String(capability.solverResult),
+      );
+    }
+    worker.terminate();
+  }
+
+  worker.addEventListener("message", (event) => {
+    const message = event.data || {};
+    if (message.type === "ready") {
+      const capability = message.wasmJit || {};
+      if (
+        capability.available === true &&
+        capability.abiVersion === 2 &&
+        capability.result === 42 &&
+        capability.solverResult === 15
+      ) {
+        finish("qualified", "RSpice WASM JIT qualification passed.", capability);
+      } else {
+        finish("rejected", capability.reason || "Worker capability evidence was incomplete.");
+      }
+    } else if (message.type === "error" && (!message.id || message.id === 0)) {
+      finish("error", message.error || "Worker initialization failed.");
+    }
+  });
+  worker.addEventListener("error", (event) => {
+    finish("error", event.message || "Worker module failed to load.");
+  });
+</script>
+</body>
+</html>

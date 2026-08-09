@@ -96,7 +96,8 @@ UI's waveform containers. Platform differences are set in `Cargo.toml`:
   default features (parallel + SIMD solver paths) plus `veriloga-native`
   (RSpice-owned native JIT contract for Verilog-A devices; full JIT or typed construction error); multi-threaded tokio runtime.
 - **wasm32**: `rspice-core` with `default-features = false` and the
-  `veriloga` + `wasm` features — interpreted Verilog-A, no rayon/SIMD;
+  `veriloga-wasm-jit` + `wasm` features — portable Verilog-A plus the
+  separately qualified browser JIT, no rayon/SIMD;
   current-thread tokio runtime; `web-sys`/`wasm-bindgen` for the DOM. Runs
   execute in a module worker, so cancellation terminates the worker and does
   not leave detached computation.
@@ -128,6 +129,7 @@ screen-reader and device qualification remains a release gate.
 | :--- | :--- | :--- |
 | `desktop` | off | Compatibility marker for native desktop builds; desktop-only behavior is selected by target-specific dependencies and `cfg(not(target_arch = "wasm32"))` code paths |
 | `veriloga` | off | Lets the Verilog-A dialog (`panels/veriloga_dialog/`) build its module info from a real `rspice_veriloga::CompiledModel`; without it a mock constructor is compiled for testing |
+| `browser-worker` | off | Builds the isolated browser simulation/compiler/hardcopy worker entry image; never enable this on the interactive UI image because it defeats code-size separation |
 
 `default = []`. Note that the engine's Verilog-A support is wired through
 the **target-specific** `rspice-core` features above, not through this
@@ -141,7 +143,20 @@ cargo run -p rspice-ui --release
 
 # Unit tests (inline #[cfg(test)] modules across the crate)
 cargo test -p rspice-ui
+
+# Browser release images are deliberately built separately so Cargo feature
+# unification cannot pull worker execution paths back into the UI image.
+cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui --target wasm32-unknown-unknown
+cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui-worker --features browser-worker --target wasm32-unknown-unknown
+wasm-bindgen --target web --out-name rspice-ui --out-dir web/pkg target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
+wasm-bindgen --target web --out-name rspice-ui-worker --out-dir web/pkg target/wasm32-unknown-unknown/web-release/rspice-ui-worker.wasm
+python3 ../../tools/ci/check_wasm_jit_browser.py --web-root web
 ```
+
+The browser qualification page starts only the optimized simulation worker
+and fails unless its secondary-module ABI probe and real Verilog-A transient
+solver/Jacobian/matrix/RHS probe both pass. CI also enforces 64 MiB raw / 16
+MiB gzip limits for the UI image and 24 MiB raw / 8 MiB gzip for the worker.
 
 The default test suite is self-contained. Cross-repository parity checks for
 the separately governed `rspice-workbench-host` mockup sources are ignored by

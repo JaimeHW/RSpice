@@ -40,6 +40,11 @@
 
 // Temporary allowance for existing external/SPICE naming conventions.
 #![allow(non_snake_case)]
+// The browser UI and simulation worker are deliberately disjoint feature
+// slices of this application crate. Each wasm32 image leaves the other
+// image's entrypoints unreachable so LTO can remove them; desktop and test
+// builds still diagnose ordinary dead code.
+#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 // A rendering or transaction entry point takes one parameter per thing the
 // caller independently varies: the `Ui`, the state it may mutate, the layout
 // it must respect, the identity it acts on. Fifty call sites had already
@@ -229,21 +234,275 @@ pub use state::{
     SavedOutputPrecision, SavedOutputStreaming, SimulationPlanPayload, SimulationPlanPayloadRecord,
 };
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+static WASM_JIT_ARCHITECTURE_PROBE_FRAME: std::sync::Mutex<[f64; 2]> =
+    std::sync::Mutex::new([0.0, 0.0]);
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+const WASM_JIT_ARCHITECTURE_PROBE_INPUT: f64 = 21.0;
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub fn rspice_ui_wasm_jit_probe_module() -> Result<Vec<u8>, String> {
+    rspice_veriloga::wasm_jit::emit_architecture_probe()
+        .map(|artifact| artifact.into_bytes())
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub const fn rspice_ui_wasm_jit_abi_version() -> u32 {
+    rspice_veriloga::wasm_jit::WASM_JIT_ABI_VERSION
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub const fn rspice_ui_wasm_jit_emitter_version() -> u32 {
+    rspice_veriloga::wasm_jit::WASM_JIT_EMITTER_VERSION
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+#[allow(clippy::too_many_arguments)]
+pub fn rspice_ui_wasm_jit_eval_op_v1(
+    frame_offset: u32,
+    opcode: i32,
+    aux0: i32,
+    aux1: i32,
+    aux2: i64,
+    operand0: f64,
+    operand1: f64,
+    operand2: f64,
+    operand3: f64,
+    operand4: f64,
+) -> f64 {
+    rspice_veriloga::wasm_jit::eval_op_v1(
+        frame_offset,
+        opcode,
+        aux0,
+        aux1,
+        aux2,
+        operand0,
+        operand1,
+        operand2,
+        operand3,
+        operand4,
+    )
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub fn prepare_rspice_ui_wasm_jit_probe() -> Result<u32, String> {
+    let mut frame = WASM_JIT_ARCHITECTURE_PROBE_FRAME
+        .lock()
+        .map_err(|_| "WASM JIT architecture-probe frame lock is poisoned".to_owned())?;
+    *frame = [WASM_JIT_ARCHITECTURE_PROBE_INPUT, 0.0];
+    let offset = frame.as_ptr() as usize;
+    u32::try_from(offset)
+        .map_err(|_| "WASM JIT architecture-probe frame is outside wasm32 memory".to_owned())
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub fn finish_rspice_ui_wasm_jit_probe(frame_offset: u32, status: i32) -> Result<f64, String> {
+    if status != 0 {
+        return Err(format!(
+            "WASM JIT architecture probe returned status {status}"
+        ));
+    }
+    let frame = WASM_JIT_ARCHITECTURE_PROBE_FRAME
+        .lock()
+        .map_err(|_| "WASM JIT architecture-probe frame lock is poisoned".to_owned())?;
+    let expected_offset = u32::try_from(frame.as_ptr() as usize)
+        .map_err(|_| "WASM JIT architecture-probe frame is outside wasm32 memory".to_owned())?;
+    if frame_offset != expected_offset {
+        return Err("WASM JIT architecture probe used an unowned memory frame".to_owned());
+    }
+    let expected = WASM_JIT_ARCHITECTURE_PROBE_INPUT * 2.0;
+    if frame[1].to_bits() != expected.to_bits() {
+        return Err(format!(
+            "WASM JIT architecture probe produced {}, expected {expected}",
+            frame[1]
+        ));
+    }
+    Ok(frame[1])
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+const WASM_JIT_SOLVER_PROBE_SOURCE: &str = r#"
+`include "disciplines.vams"
+module rspice_wasm_solver_probe(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real gain = 2.0;
+  real bias;
+  analog begin
+    bias = analysis("tran") ? ($param_given(gain) ? 100.0 : 1.0) : -1000.0;
+    I(p, n) <+ bias + gain * V(p, n) + ddt(V(p, n));
+  end
+endmodule
+"#;
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+fn compile_wasm_jit_solver_probe() -> Result<rspice_veriloga::RuntimeCompileReport, String> {
+    rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions::default())
+        .compile_runtime(
+            WASM_JIT_SOLVER_PROBE_SOURCE,
+            Some("rspice_wasm_solver_probe"),
+        )
+        .map_err(|error| format!("WASM JIT solver probe compilation failed: {error}"))
+}
+
+/// Emit a real canonical model used to qualify the installed-module solver
+/// bridge in the browser engine, not merely WebAssembly compilation support.
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub fn rspice_ui_wasm_jit_solver_probe_artifact()
+-> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    let report =
+        compile_wasm_jit_solver_probe().map_err(|error| wasm_bindgen::JsValue::from_str(&error))?;
+    let artifact =
+        rspice_veriloga::wasm_jit::compile_model_value_module(&report.model, &report.canonical_ir)
+            .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))?;
+    let artifact = simulation::veriloga::WasmJitWorkerArtifact::from_compiled(&artifact);
+    serde_wasm_bindgen::to_value(&artifact)
+        .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))
+}
+
+/// Exercise parameter, analysis, assignment, stateful transient, value,
+/// Jacobian, matrix, and RHS dispatch through an installed secondary module.
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub fn rspice_ui_wasm_jit_run_solver_probe() -> Result<f64, String> {
+    let report = compile_wasm_jit_solver_probe()?;
+    let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+        "WASMJITPROBE1",
+        std::sync::Arc::new(report.model),
+        &report.canonical_ir,
+        &[1, 0],
+    )
+    .map_err(|error| error.to_string())?;
+    device
+        .try_set_analysis_type(2)
+        .map_err(|error| error.to_string())?;
+    device
+        .try_set_timestep(0.5)
+        .map_err(|error| error.to_string())?;
+    device
+        .try_update_all_voltages(&[3.0])
+        .map_err(|error| error.to_string())?;
+
+    let initial_currents = device.try_evaluate().map_err(|error| error.to_string())?;
+    if initial_currents.len() != 1 || initial_currents[0].to_bits() != 7.0_f64.to_bits() {
+        return Err(format!(
+            "WASM JIT solver probe initial current mismatch: {initial_currents:?}, expected [7.0]"
+        ));
+    }
+    device.advance_state();
+    device
+        .try_set_time(0.5)
+        .map_err(|error| error.to_string())?;
+    device
+        .try_update_all_voltages(&[5.0])
+        .map_err(|error| error.to_string())?;
+
+    let currents = device.try_evaluate().map_err(|error| error.to_string())?;
+    if currents.len() != 1 || currents[0].to_bits() != 15.0_f64.to_bits() {
+        return Err(format!(
+            "WASM JIT solver probe committed-state current mismatch: {currents:?}, expected [15.0]"
+        ));
+    }
+    let jacobian = device
+        .try_compute_jacobian()
+        .map_err(|error| error.to_string())?;
+    let expected_jacobian = [4.0_f64, -4.0, -4.0, 4.0];
+    if jacobian.len() != expected_jacobian.len()
+        || jacobian
+            .iter()
+            .zip(expected_jacobian)
+            .any(|(entry, expected)| entry.value.to_bits() != expected.to_bits())
+    {
+        return Err(format!(
+            "WASM JIT solver probe Jacobian mismatch: {jacobian:?}, expected values {expected_jacobian:?}"
+        ));
+    }
+
+    let mut matrix = Vec::new();
+    let mut rhs = Vec::new();
+    device
+        .try_stamp(
+            &[5.0],
+            |row, col, value| matrix.push((row, col, value)),
+            |row, value| rhs.push((row, value)),
+        )
+        .map_err(|error| error.to_string())?;
+    if !matrix
+        .iter()
+        .any(|&(row, col, value)| row == 0 && col == 0 && value.to_bits() == 4.0_f64.to_bits())
+        || !rhs
+            .iter()
+            .any(|&(row, value)| row == 0 && value.to_bits() == 5.0_f64.to_bits())
+    {
+        return Err(format!(
+            "WASM JIT solver probe stamp mismatch: matrix={matrix:?}, rhs={rhs:?}"
+        ));
+    }
+    Ok(currents[0])
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub fn run_rspice_ui_worker_request(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
     simulation::runner::worker_contract::run_worker_request_value(value)
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub fn prepare_rspice_ui_wasm_jit_request(
+    value: wasm_bindgen::JsValue,
+) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    simulation::runner::worker_contract::prepare_wasm_jit_request_value(value)
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub fn install_rspice_ui_wasm_jit_dispatcher(dispatcher: js_sys::Function) {
+    rspice_veriloga::wasm_jit::install_browser_dispatcher(
+        move |cache_key, export_name, frame_offset| {
+            let value = dispatcher
+                .call3(
+                    &wasm_bindgen::JsValue::UNDEFINED,
+                    &wasm_bindgen::JsValue::from_str(cache_key),
+                    &wasm_bindgen::JsValue::from_str(export_name),
+                    &wasm_bindgen::JsValue::from_f64(f64::from(frame_offset)),
+                )
+                .map_err(|error| format!("browser WASM JIT dispatch threw: {error:?}"))?;
+            let status = value
+                .as_f64()
+                .filter(|value| {
+                    value.fract() == 0.0
+                        && *value >= f64::from(i32::MIN)
+                        && *value <= f64::from(i32::MAX)
+                })
+                .ok_or_else(|| "browser WASM JIT dispatch returned a non-i32 status".to_owned())?;
+            Ok(status as i32)
+        },
+    );
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub fn run_prepared_rspice_ui_wasm_jit_request(
+    dispatch_token: u32,
+) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    simulation::runner::worker_contract::run_prepared_wasm_jit_request_value(dispatch_token)
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub fn cancel_prepared_rspice_ui_wasm_jit_request(
+    dispatch_token: u32,
+) -> Result<(), wasm_bindgen::JsValue> {
+    simulation::runner::worker_contract::cancel_prepared_wasm_jit_request_value(dispatch_token)
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub fn run_rspice_ui_veriloga_compile_request(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
     workbench::documents::code_workspace::run_veriloga_worker_request_value(value)
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub fn run_rspice_ui_hardcopy_request(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {

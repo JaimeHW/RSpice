@@ -5,39 +5,48 @@
 //! immutable value-entry ABI is identical, so both native backends can safely
 //! point them at one authenticated function body.
 
+#![cfg_attr(not(feature = "native"), allow(dead_code))]
+
 use super::expr::{NativeOp, NativeProgram};
-use super::model::CodeOffset;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 #[derive(Debug)]
-struct CachedValueEntry {
+struct CachedValueEntry<ArtifactId> {
     ops: Box<[NativeOp]>,
-    offset: CodeOffset,
+    artifact_id: ArtifactId,
 }
 
-#[derive(Debug, Default)]
-pub(super) struct ValueEntryCache {
-    buckets: HashMap<u64, Vec<CachedValueEntry>>,
+#[derive(Debug)]
+pub(crate) struct ValueEntryCache<ArtifactId> {
+    buckets: HashMap<u64, Vec<CachedValueEntry<ArtifactId>>>,
 }
 
-impl ValueEntryCache {
-    pub(super) fn lookup(&self, program: &NativeProgram) -> Option<CodeOffset> {
+impl<ArtifactId> Default for ValueEntryCache<ArtifactId> {
+    fn default() -> Self {
+        Self {
+            buckets: HashMap::new(),
+        }
+    }
+}
+
+impl<ArtifactId: Copy> ValueEntryCache<ArtifactId> {
+    pub(crate) fn lookup(&self, program: &NativeProgram) -> Option<ArtifactId> {
         self.buckets
             .get(&program_hash(program))?
             .iter()
             .find(|entry| ops_are_codegen_identical(&entry.ops, program.ops()))
-            .map(|entry| entry.offset)
+            .map(|entry| entry.artifact_id)
     }
 
-    pub(super) fn insert(&mut self, program: &NativeProgram, offset: CodeOffset) {
+    pub(crate) fn insert(&mut self, program: &NativeProgram, artifact_id: ArtifactId) {
         self.buckets
             .entry(program_hash(program))
             .or_default()
             .push(CachedValueEntry {
                 ops: program.ops().into(),
-                offset,
+                artifact_id,
             });
     }
 }
@@ -58,7 +67,7 @@ fn ops_are_codegen_identical(left: &[NativeOp], right: &[NativeOp]) -> bool {
             .all(|(left, right)| native_ops_are_codegen_identical(*left, *right))
 }
 
-pub(super) fn native_op_hash(op: NativeOp, operands: impl IntoIterator<Item = usize>) -> u64 {
+pub(crate) fn native_op_hash(op: NativeOp, operands: impl IntoIterator<Item = usize>) -> u64 {
     let mut hasher = DefaultHasher::new();
     hash_native_op(op, &mut hasher);
     for operand in operands {
@@ -81,7 +90,7 @@ fn hash_native_op(op: NativeOp, hasher: &mut DefaultHasher) {
     write!(&mut writer, "{op:?};").expect("hash writer cannot fail");
 }
 
-pub(super) fn native_ops_are_codegen_identical(left: NativeOp, right: NativeOp) -> bool {
+pub(crate) fn native_ops_are_codegen_identical(left: NativeOp, right: NativeOp) -> bool {
     match (left, right) {
         (NativeOp::Const(left), NativeOp::Const(right))
         | (NativeOp::AddConst(left), NativeOp::AddConst(right))
@@ -107,8 +116,7 @@ pub(super) fn native_ops_are_codegen_identical(left: NativeOp, right: NativeOp) 
 #[cfg(test)]
 mod tests {
     use super::ValueEntryCache;
-    use crate::native::expr::{NativeOp, NativeProgram};
-    use crate::native::model::CodeOffset;
+    use crate::jit::expr::{NativeOp, NativeProgram};
 
     fn program(value: f64) -> NativeProgram {
         NativeProgram::from_ops_for_test(vec![NativeOp::Const(value)], 1, Vec::new(), Vec::new())
@@ -119,15 +127,15 @@ mod tests {
         let mut cache = ValueEntryCache::default();
         let positive_zero = program(0.0);
         let negative_zero = program(-0.0);
-        cache.insert(&positive_zero, CodeOffset::new(16));
-        assert_eq!(cache.lookup(&positive_zero), Some(CodeOffset::new(16)));
+        cache.insert(&positive_zero, 16_usize);
+        assert_eq!(cache.lookup(&positive_zero), Some(16_usize));
         assert_eq!(cache.lookup(&negative_zero), None);
 
         let nan = program(f64::from_bits(0x7ff8_0000_0000_0042));
         let same_nan = program(f64::from_bits(0x7ff8_0000_0000_0042));
         let other_nan = program(f64::from_bits(0x7ff8_0000_0000_0043));
-        cache.insert(&nan, CodeOffset::new(32));
-        assert_eq!(cache.lookup(&same_nan), Some(CodeOffset::new(32)));
+        cache.insert(&nan, 32_usize);
+        assert_eq!(cache.lookup(&same_nan), Some(32_usize));
         assert_eq!(cache.lookup(&other_nan), None);
     }
 }

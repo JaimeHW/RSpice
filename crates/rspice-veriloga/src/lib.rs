@@ -98,6 +98,17 @@ pub mod stdlib;
 pub mod types;
 pub mod virtual_source;
 
+#[cfg(any(feature = "native", feature = "wasm-jit"))]
+pub(crate) mod jit;
+
+/// Deterministic standard-WebAssembly JIT compiler and verifier.
+///
+/// The generated modules are instantiated by the browser worker. Keeping the
+/// emitter host-testable lets release qualification validate every emitted
+/// byte without requiring a browser process.
+#[cfg(feature = "wasm-jit")]
+pub mod wasm_jit;
+
 /// Laplace (s-domain) filters for transient analysis
 pub mod laplace;
 

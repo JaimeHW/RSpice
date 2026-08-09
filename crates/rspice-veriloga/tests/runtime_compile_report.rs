@@ -66,14 +66,14 @@ fn target_matrix_is_exhaustive_and_truthful() {
         .compile_runtime(SENSOR_BRIDGE_SOURCE, None)
         .expect("compile workbench model");
     let targets = report.targets.all();
-    assert_eq!(targets.len(), 5);
+    assert_eq!(targets.len(), 6);
     assert_eq!(
         targets
             .iter()
             .map(|entry| entry.target)
             .collect::<HashSet<_>>()
             .len(),
-        5
+        6
     );
 
     for target in [
@@ -97,6 +97,11 @@ fn target_matrix_is_exhaustive_and_truthful() {
     assert_eq!(native.maturity, RuntimeTargetMaturity::Preview);
     assert_eq!(native.readiness, RuntimeTargetReadiness::Unavailable);
     assert!(native.detail.contains("not requested"));
+
+    let wasm_jit = report.targets.get(RuntimeTarget::WasmJit);
+    assert_eq!(wasm_jit.maturity, RuntimeTargetMaturity::QualificationOnly);
+    assert_eq!(wasm_jit.readiness, RuntimeTargetReadiness::Unavailable);
+    assert!(wasm_jit.detail.contains("not requested"));
 }
 
 #[test]

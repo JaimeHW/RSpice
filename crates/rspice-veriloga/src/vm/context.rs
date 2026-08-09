@@ -175,7 +175,9 @@ pub struct VmContext {
     /// Parameter values (indexed by parameter)
     pub parameters: Vec<f64>,
     /// Whether each parameter was explicitly set on the instance
-    pub param_given: Vec<bool>,
+    /// One byte per parameter, rather than `Vec<bool>`'s packed bit storage.
+    /// Native and secondary-WASM JIT ABIs both address this as a `u8` array.
+    pub param_given: Vec<u8>,
     /// Variable values (indexed by variable)
     pub variables: Vec<f64>,
     /// Current simulation time
@@ -657,15 +659,15 @@ impl VmContext {
     /// Mark a parameter as explicitly given by the instance.
     pub fn mark_param_given(&mut self, index: usize) {
         if index >= self.param_given.len() {
-            self.param_given.resize(index + 1, false);
+            self.param_given.resize(index + 1, 0);
         }
-        self.param_given[index] = true;
+        self.param_given[index] = 1;
     }
 
     /// Whether a parameter was explicitly given by the instance.
     #[inline]
     pub fn is_param_given(&self, index: usize) -> bool {
-        self.param_given.get(index).copied().unwrap_or(false)
+        self.param_given.get(index).copied().unwrap_or(0) != 0
     }
 
     /// Set a variable value.

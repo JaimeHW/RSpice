@@ -21,10 +21,17 @@ name = "rspice-ui"
 path = "src/main.rs"
 test = false
 
+[[bin]]
+name = "rspice-ui-worker"
+path = "src/worker_main.rs"
+test = false
+required-features = ["browser-worker"]
+
 [features]
 default = []
 desktop = []
 veriloga = []
+browser-worker = []
 
 [dependencies]
 # RSpice core simulation engine lives in the target sections below: native
@@ -183,7 +190,7 @@ eframe = { version = "0.35.0", default-features = false, features = ["wgpu", "pe
 
 # No rayon/simd on wasm; the "wasm" feature wires up wasm-bindgen and the
 # browser entropy source (getrandom/js) that faer needs on this target.
-rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga", "wasm"] }
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga-wasm-jit", "wasm"] }
 tokio = { version = "1", features = ["sync", "macros", "rt", "time"] }
 wasm-bindgen = "0.2"
 serde-wasm-bindgen = "0.6"

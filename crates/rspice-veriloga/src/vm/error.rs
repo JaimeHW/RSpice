@@ -11,6 +11,9 @@ pub enum VmError {
     InvalidInstruction(&'static str),
     /// Native JIT compilation failed while native execution was required.
     NativeJit(String),
+    /// Browser secondary-WASM compilation or dispatch failed while WASM JIT
+    /// execution was required.
+    WasmJit(String),
     /// Invalid model or instance parameter value.
     ParameterValue(String),
     /// A model expression produced NaN or infinity at a solver boundary.
@@ -31,6 +34,7 @@ impl std::fmt::Display for VmError {
             VmError::StackUnderflow(msg) => write!(f, "Stack underflow: {}", msg),
             VmError::InvalidInstruction(msg) => write!(f, "Invalid instruction: {}", msg),
             VmError::NativeJit(msg) => write!(f, "native JIT error: {}", msg),
+            VmError::WasmJit(msg) => write!(f, "browser WASM JIT error: {msg}"),
             VmError::ParameterValue(msg) => write!(f, "parameter value error: {msg}"),
             VmError::InvalidNumericResult(msg) => write!(f, "invalid numeric result: {msg}"),
             VmError::InvalidRuntimeConfiguration(msg) => {

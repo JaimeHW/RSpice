@@ -135,13 +135,16 @@ class IdeWorkerRoutingTests(unittest.TestCase):
                 )
                 self.assertIn('type: "module"', index)
                 self.assertIn("__RSPICE_SIM_WORKER", index)
+                self.assertIn("data-rspice-wasm-jit-status", index)
+                self.assertIn('capability.available ? "qualified" : "rejected"', index)
+                self.assertIn("data-rspice-wasm-jit-solver-result", index)
 
                 worker = worker_path.read_text(encoding="utf-8")
                 self.assertIn(
-                    'import(executableAsset("rspice-ui.js").href)', worker
+                    'import(executableAsset("rspice-ui-worker.js").href)', worker
                 )
                 self.assertIn(
-                    'executableAsset("rspice-ui_bg.wasm")', worker
+                    'executableAsset("rspice-ui-worker_bg.wasm")', worker
                 )
                 self.assertIn("runRspiceUiWorkerRequest", worker)
                 self.assertRegex(
@@ -220,6 +223,68 @@ class IdeWorkerRoutingTests(unittest.TestCase):
                     "requests arriving before ready must share the eager init() promise",
                 )
 
+    def test_worker_installs_verified_wasm_jit_models_with_bounded_cache(self) -> None:
+        worker = (IDE_DIRS[0] / "simulation-worker.js").read_text(encoding="utf-8")
+        self.assertIn('"rspiceUiWasmJitEvalOpV1"', worker)
+        self.assertIn('"rspiceUiWasmJitEmitterVersion"', worker)
+        self.assertIn('"rspiceUiWasmJitSolverProbeArtifact"', worker)
+        self.assertIn('"rspiceUiWasmJitRunSolverProbe"', worker)
+        self.assertIn("await installWasmJitArtifact(module, solverArtifact)", worker)
+        self.assertIn("async function installWasmJitModel(module, response)", worker)
+        self.assertIn("async function installWasmJitArtifact(module, artifact)", worker)
+        self.assertIn("async function prepareWasmJitSimulationRequest(module, request)", worker)
+        self.assertIn("module.prepareRspiceUiWasmJitRequest(request)", worker)
+        self.assertIn("workerModule.runPreparedRspiceUiWasmJitRequest(dispatchToken)", worker)
+        self.assertIn("module.cancelPreparedRspiceUiWasmJitRequest(candidateToken)", worker)
+        self.assertIn("function dispatchWasmJitEntry(cacheKey, exportName, frameOffset)", worker)
+        self.assertIn("module.installRspiceUiWasmJitDispatcher(dispatchWasmJitEntry)", worker)
+        self.assertIn("WebAssembly.compile(bytes)", worker)
+        self.assertIn("memory: primaryWasmExports.memory", worker)
+        self.assertIn("eval_op_v1: module.rspiceUiWasmJitEvalOpV1", worker)
+        self.assertIn("artifact.valueExports", worker)
+        self.assertIn("instance.exports[artifact.assignmentExport]", worker)
+        self.assertIn("instance.exports[artifact.postAssignmentExport]", worker)
+        self.assertIn("const WASM_JIT_CACHE_MAX_MODELS = 64", worker)
+        self.assertIn("const WASM_JIT_CACHE_MAX_BYTES = 64 * 1024 * 1024", worker)
+        self.assertIn("const WASM_JIT_MODEL_MAX_BYTES = 32 * 1024 * 1024", worker)
+        self.assertIn("WASM_JIT_IDENTITY.test(artifact.digest", worker)
+        self.assertIn("artifact.abiVersion !== module.rspiceUiWasmJitAbiVersion()", worker)
+        self.assertIn(
+            "artifact.emitterVersion !== module.rspiceUiWasmJitEmitterVersion()",
+            worker,
+        )
+        self.assertIn("uniqueValueExports.size !== artifact.valueExports.length", worker)
+        self.assertIn("wasmJitCacheBytes -= oldest.moduleBytes", worker)
+        self.assertIn("await installWasmJitModel(workerModule, response)", worker)
+        self.assertIn("delete response.wasmJitArtifact", worker)
+        self.assertIn("delete response.wasmJitError", worker)
+        self.assertNotRegex(
+            worker,
+            re.compile(
+                r'if\s*\(message\.type\s*!==\s*"run"\).*?'
+                r"runWorkerRequest\(request\)",
+                re.S,
+            ),
+            "simulation requests must consume the one decoded prepared request instead of copying transfer buffers twice",
+        )
+
+        qualification = (IDE_DIRS[0] / "wasm-jit-qualification.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('data-rspice-wasm-jit-status="pending"', qualification)
+        self.assertIn("capability.solverResult === 15", qualification)
+        self.assertIn('finish("qualified"', qualification)
+        self.assertRegex(
+            worker,
+            re.compile(
+                r"initializeWorkerModule\(\)\.catch\(\(error\) => \{"
+                r".*wasmJitModelCache\.clear\(\);"
+                r".*wasmJitCacheBytes\s*=\s*0;",
+                re.S,
+            ),
+            "worker initialization failure must discard every compiled model and byte charge",
+        )
+
     def test_hardcopy_worker_transport_is_stale_bound_and_transferable(self) -> None:
         worker = (IDE_DIRS[0] / "simulation-worker.js").read_text(encoding="utf-8")
         bridge = HARDCOPY_WORKER.read_text(encoding="utf-8")
@@ -263,10 +328,10 @@ class IdeWorkerRoutingTests(unittest.TestCase):
                 )
                 self.assertIn('searchParams.get("v")', worker)
                 self.assertIn(
-                    'import(executableAsset("rspice-ui.js").href)', worker
+                    'import(executableAsset("rspice-ui-worker.js").href)', worker
                 )
                 self.assertIn(
-                    'executableAsset("rspice-ui_bg.wasm")', worker
+                    'executableAsset("rspice-ui-worker_bg.wasm")', worker
                 )
 
         main = MAIN.read_text(encoding="utf-8")

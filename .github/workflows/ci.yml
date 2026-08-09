@@ -467,6 +467,10 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --locked -p rspice-ui --target wasm32-unknown-unknown
+      - name: Check rspice-ui browser worker
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check --locked -p rspice-ui --bin rspice-ui-worker --features browser-worker --target wasm32-unknown-unknown
       - name: Check rspice-publication-contract
         env:
           RUSTFLAGS: -D warnings
@@ -484,6 +488,46 @@ jobs:
           --no-default-features
           --features veriloga-model-diode-cmc,veriloga-builtins-noise
 
+  wasm-ui-size:
+    name: Browser WASM image budgets
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --target wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Build size-qualified browser UI image
+        run: cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui --target wasm32-unknown-unknown
+      - name: Enforce browser UI image budget
+        run: >-
+          python3 tools/ci/check_wasm_artifact_size.py
+          target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
+          --label rspice-ui
+          --max-raw 67108864
+          --max-gzip 16777216
+      - name: Build size-qualified browser worker image
+        run: >-
+          cargo build --locked --profile web-release -p rspice-ui
+          --bin rspice-ui-worker --features browser-worker
+          --target wasm32-unknown-unknown
+      - name: Enforce browser worker image budget
+        run: >-
+          python3 tools/ci/check_wasm_artifact_size.py
+          target/wasm32-unknown-unknown/web-release/rspice-ui-worker.wasm
+          --label rspice-ui-worker
+          --max-raw 25165824
+          --max-gzip 8388608
+      - name: Install pinned wasm-bindgen CLI
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
+      - name: Generate optimized browser worker bindings
+        run: >-
+          wasm-bindgen --target web
+          --out-name rspice-ui-worker
+          --out-dir crates/rspice-ui/web/pkg
+          target/wasm32-unknown-unknown/web-release/rspice-ui-worker.wasm
+      - name: Qualify browser WASM JIT solver bridge in Chromium
+        run: python3 tools/ci/check_wasm_jit_browser.py
   veriloga-mobile:
     name: Check generated Verilog-A (${{ matrix.label }})
     runs-on: ${{ matrix.os }}

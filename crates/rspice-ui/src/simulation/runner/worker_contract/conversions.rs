@@ -747,6 +747,8 @@ pub(super) fn worker_response_from_request_with_progress(
 #[cfg(target_arch = "wasm32")]
 thread_local! {
     static ACTIVE_WORKER_PROGRESS_ID: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+    static PENDING_WASM_JIT_REQUEST: std::cell::RefCell<Option<(u32, WorkerRequest)>> = const { std::cell::RefCell::new(None) };
+    static NEXT_WASM_JIT_DISPATCH_TOKEN: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -789,12 +791,119 @@ pub(crate) fn run_worker_request_value(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
     let request = worker_request_from_value(value)?;
+    run_decoded_worker_request(request)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn run_decoded_worker_request(
+    request: WorkerRequest,
+) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
     let id = request.id;
     ACTIVE_WORKER_PROGRESS_ID.with(|active| active.set(Some(id)));
     let response =
         worker_response_from_request_with_progress(request, Some(emit_worker_progress_snapshot));
     ACTIVE_WORKER_PROGRESS_ID.with(|active| active.set(None));
     worker_response_transport_value(response)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WasmJitRequestPreparation {
+    dispatch_token: u32,
+    artifacts: Vec<crate::simulation::veriloga::WasmJitWorkerArtifact>,
+    errors: Vec<String>,
+}
+
+/// Compile every sealed Verilog-A runtime required by a simulation request
+/// before the synchronous solver begins. The JavaScript worker installs these
+/// modules into its persistent, capability-limited instance cache.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn prepare_wasm_jit_request_value(
+    value: wasm_bindgen::JsValue,
+) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    if PENDING_WASM_JIT_REQUEST.with(|pending| pending.borrow().is_some()) {
+        return Err(wasm_bindgen::JsValue::from_str(
+            "a prepared browser simulation request is already pending",
+        ));
+    }
+    let request = worker_request_from_value(value)?;
+    let dispatch_token = NEXT_WASM_JIT_DISPATCH_TOKEN.with(|next| {
+        let token = next.get().wrapping_add(1).max(1);
+        next.set(token);
+        token
+    });
+    let mut preparation = WasmJitRequestPreparation {
+        dispatch_token,
+        artifacts: Vec::with_capacity(request.project_veriloga_runtimes.iter().len()),
+        errors: Vec::new(),
+    };
+    for runtime in request.project_veriloga_runtimes.iter() {
+        match runtime.compile_wasm_jit_artifact() {
+            Ok(artifact) => preparation.artifacts.push(artifact),
+            Err(error) => preparation.errors.push(format!(
+                "Verilog-A runtime '{}' could not qualify for the browser JIT: {error}",
+                runtime.netlist_alias()
+            )),
+        }
+    }
+    let value = serde_wasm_bindgen::to_value(&preparation)
+        .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))?;
+    PENDING_WASM_JIT_REQUEST.with(|pending| {
+        *pending.borrow_mut() = Some((dispatch_token, request));
+    });
+    Ok(value)
+}
+
+/// Consume exactly the request decoded by `prepare_wasm_jit_request_value`.
+/// This avoids a second copy of every transferred numerical dependency.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn run_prepared_wasm_jit_request_value(
+    dispatch_token: u32,
+) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    let request = PENDING_WASM_JIT_REQUEST.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        let Some((expected_token, _)) = pending.as_ref() else {
+            return Err(wasm_bindgen::JsValue::from_str(
+                "no prepared browser simulation request is pending",
+            ));
+        };
+        if dispatch_token == 0 || dispatch_token != *expected_token {
+            return Err(wasm_bindgen::JsValue::from_str(
+                "stale browser simulation dispatch token",
+            ));
+        }
+        Ok(pending
+            .take()
+            .expect("validated prepared request must remain present")
+            .1)
+    })?;
+    run_decoded_worker_request(request)
+}
+
+/// Discard a prepared request only when the caller presents its exact token.
+///
+/// This closes the one failure path between request decoding and synchronous
+/// dispatch without allowing a stale JavaScript caller to cancel newer work.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn cancel_prepared_wasm_jit_request_value(
+    dispatch_token: u32,
+) -> Result<(), wasm_bindgen::JsValue> {
+    PENDING_WASM_JIT_REQUEST.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        let Some((expected_token, _)) = pending.as_ref() else {
+            return Err(wasm_bindgen::JsValue::from_str(
+                "no prepared browser simulation request is pending",
+            ));
+        };
+        if dispatch_token == 0 || dispatch_token != *expected_token {
+            return Err(wasm_bindgen::JsValue::from_str(
+                "stale browser simulation dispatch token",
+            ));
+        }
+        pending.take();
+        Ok(())
+    })
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -175,6 +175,7 @@
 
   function recordWorkerStartupError(message) {
     window.__RSPICE_SIM_WORKER_ERROR = message;
+    document.documentElement.setAttribute("data-rspice-wasm-jit-status", "error");
   }
 
   function reportSimulationWorkerStartupError(error) {
@@ -205,6 +206,33 @@
       });
       worker.addEventListener("message", (event) => {
         const message = event.data || {};
+        if (message.type === "ready") {
+          window.__RSPICE_WASM_JIT_CAPABILITY = message.wasmJit || {
+            available: false,
+            reason: "Simulation worker omitted its WASM JIT capability report.",
+          };
+          const capability = window.__RSPICE_WASM_JIT_CAPABILITY;
+          document.documentElement.setAttribute(
+            "data-rspice-wasm-jit-status",
+            capability.available ? "qualified" : "rejected",
+          );
+          if (Number.isFinite(capability.solverResult)) {
+            document.documentElement.setAttribute(
+              "data-rspice-wasm-jit-solver-result",
+              String(capability.solverResult),
+            );
+          }
+          if (window.__RSPICE_WASM_JIT_CAPABILITY.available) {
+            console.info(
+              `RSpice WASM JIT architecture qualified ${JSON.stringify(window.__RSPICE_WASM_JIT_CAPABILITY)}`,
+            );
+          } else {
+            console.warn(
+              "RSpice WASM JIT architecture unavailable",
+              window.__RSPICE_WASM_JIT_CAPABILITY.reason,
+            );
+          }
+        }
         if (message.type === "error" && (!message.id || message.id === 0)) {
           reportSimulationWorkerStartupError(
             message.error || message.message || "Browser simulation worker failed to initialize.",

@@ -13,6 +13,7 @@
 use super::runtime::ExecutableMemory;
 use super::{EvalContext, JitError, JitResult};
 use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, Instruction};
+pub(crate) use crate::jit::current_dependencies::JitCurrentDependencies as NativeCurrentDependencies;
 use crate::vm::terminal_pair_current_endpoints;
 
 type AssignmentEntry = unsafe extern "C" fn(*const EvalContext, *mut f64);
@@ -97,32 +98,6 @@ pub(crate) struct NativeEntryOffsets {
     pub reactive_jacobians: Vec<Vec<CodeOffset>>,
     pub noise_psd: Vec<CodeOffset>,
     pub noise_exponents: Vec<Option<CodeOffset>>,
-}
-
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub(crate) struct NativeCurrentDependencies {
-    pub assignment_current_pairs: Vec<usize>,
-    pub assignment_prior_currents: Vec<usize>,
-    pub assignment_branch_unknowns: Vec<usize>,
-    pub post_assignment_current_pairs: Vec<usize>,
-    pub post_assignment_prior_currents: Vec<usize>,
-    pub post_assignment_branch_unknowns: Vec<usize>,
-    pub static_condition_branch_unknowns: Vec<Vec<usize>>,
-    pub stamp_values: Vec<Vec<usize>>,
-    pub stamp_value_prior_currents: Vec<Vec<usize>>,
-    pub stamp_value_branch_unknowns: Vec<Vec<usize>>,
-    pub jacobians: Vec<Vec<Vec<usize>>>,
-    pub jacobian_prior_currents: Vec<Vec<Vec<usize>>>,
-    pub jacobian_branch_unknowns: Vec<Vec<Vec<usize>>>,
-    pub reactive_jacobians: Vec<Vec<Vec<usize>>>,
-    pub reactive_jacobian_prior_currents: Vec<Vec<Vec<usize>>>,
-    pub reactive_jacobian_branch_unknowns: Vec<Vec<Vec<usize>>>,
-    pub noise_psd: Vec<Vec<usize>>,
-    pub noise_psd_prior_currents: Vec<Vec<usize>>,
-    pub noise_psd_branch_unknowns: Vec<Vec<usize>>,
-    pub noise_exponents: Vec<Vec<usize>>,
-    pub noise_exponent_prior_currents: Vec<Vec<usize>>,
-    pub noise_exponent_branch_unknowns: Vec<Vec<usize>>,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]

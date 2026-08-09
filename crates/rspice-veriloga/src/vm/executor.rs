@@ -71,7 +71,7 @@ impl<'a> Vm<'a> {
 
     /// Execute a single instruction.
     #[inline]
-    fn execute_instruction(&mut self, instruction: &Instruction) -> Result<(), VmError> {
+    pub(crate) fn execute_instruction(&mut self, instruction: &Instruction) -> Result<(), VmError> {
         match instruction {
             Instruction::PushConst(v) => {
                 self.stack.push(*v);
@@ -92,7 +92,7 @@ impl<'a> Vm<'a> {
                     .get(*idx)
                     .copied()
                     .ok_or(VmError::InvalidInstruction("missing parameter-given slot"))?;
-                let v = if given { 1.0 } else { 0.0 };
+                let v = if given != 0 { 1.0 } else { 0.0 };
                 self.stack.push(v);
             }
             Instruction::PushVoltage(pos, neg) => {

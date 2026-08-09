@@ -12,7 +12,7 @@ mod page;
 mod veriloga;
 #[cfg(any(target_arch = "wasm32", test))]
 mod veriloga_worker;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub(crate) use veriloga_worker::run_worker_request_value as run_veriloga_worker_request_value;
 
 pub use automation::{

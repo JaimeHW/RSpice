@@ -4,9 +4,11 @@
 //! native backends consume this exact recursive plan, preserving source order
 //! and the bounded runtime-loop contract.
 
+#![cfg_attr(not(feature = "native"), allow(dead_code))]
+
 use super::expr::{NativeOp, NativeProgram};
 use std::collections::HashSet;
-pub(super) const MAX_ASSIGNMENT_CHUNK_OPERATIONS: usize = 12 * 1024;
+pub(crate) const MAX_ASSIGNMENT_CHUNK_OPERATIONS: usize = 12 * 1024;
 
 #[derive(Debug)]
 pub(crate) enum NativeAssignment {
@@ -27,7 +29,7 @@ pub(crate) enum NativeAssignment {
     },
 }
 
-pub(super) fn operation_count(assignment: &NativeAssignment) -> usize {
+pub(crate) fn operation_count(assignment: &NativeAssignment) -> usize {
     match assignment {
         NativeAssignment::Direct { program, .. } => program.ops().len(),
         NativeAssignment::Indexed { index, value, .. } => {
@@ -41,7 +43,7 @@ pub(super) fn operation_count(assignment: &NativeAssignment) -> usize {
     }
 }
 
-pub(super) fn chunk_ranges(assignments: &[NativeAssignment]) -> Vec<std::ops::Range<usize>> {
+pub(crate) fn chunk_ranges(assignments: &[NativeAssignment]) -> Vec<std::ops::Range<usize>> {
     let mut ranges = Vec::new();
     let mut start = 0_usize;
     let mut operations = 0_usize;
@@ -65,7 +67,7 @@ pub(super) fn chunk_ranges(assignments: &[NativeAssignment]) -> Vec<std::ops::Ra
 /// Indexed assignments and loops remain singleton barriers. A later direct
 /// assignment starts a new batch whenever it reads or rewrites a variable
 /// published earlier in the current batch.
-pub(super) fn shareable_batch_ranges(
+pub(crate) fn shareable_batch_ranges(
     assignments: &[NativeAssignment],
 ) -> Vec<std::ops::Range<usize>> {
     let mut ranges = Vec::new();
@@ -118,7 +120,7 @@ mod tests {
         MAX_ASSIGNMENT_CHUNK_OPERATIONS, NativeAssignment, chunk_ranges, operation_count,
         shareable_batch_ranges,
     };
-    use crate::native::expr::{NativeOp, NativeProgram};
+    use crate::jit::expr::{NativeOp, NativeProgram};
 
     fn constant_assignment(var_index: usize) -> NativeAssignment {
         NativeAssignment::Direct {

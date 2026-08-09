@@ -9,6 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{SelectedVerilogASource, VerilogACompileOutcome};
+use crate::simulation::veriloga::WasmJitWorkerArtifact;
 
 const VERILOGA_WORKER_PROTOCOL_VERSION: u32 = 1;
 const MAX_VERILOGA_WORKER_RESPONSE_BYTES: usize = 128 * 1024 * 1024;
@@ -67,18 +68,58 @@ pub(crate) struct VerilogAWorkerResponse {
     protocol: u32,
     id: u32,
     outcome: VerilogACompileOutcome,
+    #[serde(rename = "wasmJitArtifact", skip_serializing_if = "Option::is_none")]
+    wasm_jit_artifact: Option<WasmJitWorkerArtifact>,
+    #[serde(rename = "wasmJitError", skip_serializing_if = "Option::is_none")]
+    wasm_jit_error: Option<String>,
 }
 
 impl VerilogAWorkerResponse {
     fn from_request(request: VerilogAWorkerRequest) -> Result<Self, String> {
         request.validate()?;
+        let outcome = super::veriloga::compile_project_bundle_source(
+            &request.bundle,
+            request.selected_module.as_deref(),
+        );
+        #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+        let (wasm_jit_artifact, wasm_jit_error) = match &outcome {
+            VerilogACompileOutcome::Success(report) => {
+                match rspice_veriloga::wasm_jit::compile_model_value_module(
+                    &report.model,
+                    &report.canonical_ir,
+                ) {
+                    Ok(artifact) => (
+                        Some(WasmJitWorkerArtifact {
+                            abi_version: artifact.module().abi_version(),
+                            emitter_version: artifact.module().emitter_version(),
+                            cache_key: artifact.cache_key().to_owned(),
+                            digest: artifact.module().digest().to_owned(),
+                            module_bytes: artifact.module().bytes().to_vec(),
+                            value_exports: artifact
+                                .entries()
+                                .iter()
+                                .map(|entry| entry.export_name().to_owned())
+                                .collect(),
+                            assignment_export: artifact.assignment_export().to_owned(),
+                            post_assignment_export: artifact
+                                .post_assignment_export()
+                                .map(str::to_owned),
+                        }),
+                        None,
+                    ),
+                    Err(error) => (None, Some(error.to_string())),
+                }
+            }
+            VerilogACompileOutcome::Failure(_) => (None, None),
+        };
+        #[cfg(not(all(target_arch = "wasm32", feature = "browser-worker")))]
+        let (wasm_jit_artifact, wasm_jit_error) = (None, None);
         let response = Self {
             protocol: VERILOGA_WORKER_PROTOCOL_VERSION,
             id: request.id,
-            outcome: super::veriloga::compile_project_bundle_source(
-                &request.bundle,
-                request.selected_module.as_deref(),
-            ),
+            outcome,
+            wasm_jit_artifact,
+            wasm_jit_error,
         };
         response.validate_transfer_size()?;
         Ok(response)

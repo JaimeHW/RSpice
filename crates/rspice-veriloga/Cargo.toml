@@ -20,6 +20,8 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 blake3 = "1.5"
 web-time = "1.1"
+wasm-encoder = { workspace = true, optional = true }
+wasmparser = { workspace = true, optional = true }
 
 # Parsing - using nom for professional-grade parsing
 nom.workspace = true
@@ -40,12 +42,22 @@ libc = { version = "0.2", optional = true }
 blake3 = "1.5"
 cc = "1.2"
 
+[dev-dependencies]
+# Execution-level conformance tests run emitted secondary modules in an
+# independent WebAssembly engine. This is test-only and cannot inflate either
+# browser code image.
+wasmi = { version = "1.1.0", default-features = false, features = ["std", "extra-checks", "prefer-btree-collections"] }
+
 [features]
 default = []
 # Enable Verilog-AMS mixed-signal support
 ams = []
 # Enable RSpice native JIT compilation. Native mode is full JIT or error.
 native = ["dep:windows-sys", "dep:libc"]
+# Compile deterministic standard WebAssembly modules from the canonical JIT
+# plan. The emitter and verifier are host-testable; browser instantiation lives
+# in the UI worker and is selected separately from the portable interpreter.
+wasm-jit = ["dep:wasm-encoder", "dep:wasmparser"]
 # Internal contract-test surface for the bytecode-native backend. Production
 # native users must supply canonical IR and must not enable this feature.
 native-bytecode-contract-tests = ["native"]

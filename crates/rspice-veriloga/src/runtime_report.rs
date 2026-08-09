@@ -57,6 +57,12 @@ pub struct RuntimeQualificationOptions {
     /// the original x86-64-only backend. It now selects either x86-64 or
     /// AArch64 machine code according to the host target.
     pub native_x64_jit: bool,
+    /// Compile and verify a standard-WebAssembly model artifact.
+    ///
+    /// Browser instantiation is a separate worker capability check; this flag
+    /// qualifies the deterministic compiler product for the exact model.
+    #[serde(default)]
+    pub wasm_jit: bool,
     /// Whether failure of a requested optimized backend may fall back to the
     /// portable bytecode interpreter.
     #[serde(default)]
@@ -82,6 +88,7 @@ impl RuntimeQualificationOptions {
     pub const NONE: Self = Self {
         generated_rust: false,
         native_x64_jit: false,
+        wasm_jit: false,
         interpreter_fallback: InterpreterFallbackPolicy::Allow,
     };
 
@@ -89,6 +96,7 @@ impl RuntimeQualificationOptions {
     pub const ALL: Self = Self {
         generated_rust: true,
         native_x64_jit: true,
+        wasm_jit: true,
         interpreter_fallback: InterpreterFallbackPolicy::Allow,
     };
 
@@ -96,6 +104,7 @@ impl RuntimeQualificationOptions {
     pub const GENERATED_RUST_REQUIRED: Self = Self {
         generated_rust: true,
         native_x64_jit: false,
+        wasm_jit: false,
         interpreter_fallback: InterpreterFallbackPolicy::Reject,
     };
 
@@ -103,6 +112,7 @@ impl RuntimeQualificationOptions {
     pub const NATIVE_X64_REQUIRED: Self = Self {
         generated_rust: false,
         native_x64_jit: true,
+        wasm_jit: false,
         interpreter_fallback: InterpreterFallbackPolicy::Reject,
     };
 
@@ -110,6 +120,15 @@ impl RuntimeQualificationOptions {
     ///
     /// This architecture-neutral name is preferred for new callers.
     pub const NATIVE_REQUIRED: Self = Self::NATIVE_X64_REQUIRED;
+
+    /// Require a verified browser WebAssembly JIT artifact; never silently
+    /// accept the portable interpreter.
+    pub const WASM_JIT_REQUIRED: Self = Self {
+        generated_rust: false,
+        native_x64_jit: false,
+        wasm_jit: true,
+        interpreter_fallback: InterpreterFallbackPolicy::Reject,
+    };
 
     /// Require every requested backend to qualify.
     pub const fn rejecting_interpreter_fallback(mut self) -> Self {
@@ -222,6 +241,7 @@ impl RuntimeCompileReport {
         for (requested, target) in [
             (options.generated_rust, RuntimeTarget::GeneratedRust),
             (options.native_x64_jit, RuntimeTarget::NativeX64Jit),
+            (options.wasm_jit, RuntimeTarget::WasmJit),
         ] {
             let qualification = self.targets.get(target);
             if requested && !qualification.is_available() {
@@ -321,6 +341,7 @@ pub enum RuntimeTarget {
     SemanticIr,
     BytecodeVm,
     NativeX64Jit,
+    WasmJit,
     WasmInterpreter,
     GeneratedRust,
 }
@@ -338,6 +359,7 @@ impl RuntimeTarget {
             Self::SemanticIr => "semantic IR",
             Self::BytecodeVm => "bytecode VM",
             Self::NativeX64Jit => "host-native JIT",
+            Self::WasmJit => "browser WebAssembly JIT",
             Self::WasmInterpreter => "WebAssembly interpreter",
             Self::GeneratedRust => "generated Rust",
         }
@@ -392,7 +414,7 @@ pub struct RuntimeTargetQualifications {
 
 impl RuntimeTargetQualifications {
     fn new(entries: Vec<RuntimeTargetQualification>) -> Self {
-        debug_assert_eq!(entries.len(), 5);
+        debug_assert_eq!(entries.len(), 6);
         Self { entries }
     }
 
@@ -412,10 +434,11 @@ impl RuntimeTargetQualifications {
     }
 
     fn is_exhaustive(&self) -> bool {
-        const TARGETS: [RuntimeTarget; 5] = [
+        const TARGETS: [RuntimeTarget; 6] = [
             RuntimeTarget::SemanticIr,
             RuntimeTarget::BytecodeVm,
             RuntimeTarget::NativeX64Jit,
+            RuntimeTarget::WasmJit,
             RuntimeTarget::WasmInterpreter,
             RuntimeTarget::GeneratedRust,
         ];
@@ -496,6 +519,7 @@ fn qualify_runtime_targets(
             "compiled bytecode model available",
         ),
         qualify_native_if_requested(model, canonical_ir, options.native_x64_jit),
+        qualify_wasm_jit_if_requested(model, canonical_ir, options.wasm_jit),
         qualification(
             RuntimeTarget::WasmInterpreter,
             RuntimeTargetReadiness::Available,
@@ -506,6 +530,65 @@ fn qualify_runtime_targets(
     ];
 
     (RuntimeTargetQualifications::new(entries), generated_rust)
+}
+
+fn qualify_wasm_jit_if_requested(
+    model: &CompiledModel,
+    canonical_ir: &CanonicalIrArtifact,
+    requested: bool,
+) -> RuntimeTargetQualification {
+    if requested {
+        qualify_wasm_jit(model, canonical_ir)
+    } else {
+        qualification(
+            RuntimeTarget::WasmJit,
+            RuntimeTargetReadiness::Unavailable,
+            RuntimeTargetMaturity::QualificationOnly,
+            "browser WebAssembly JIT qualification was not requested",
+        )
+    }
+}
+
+#[cfg(feature = "wasm-jit")]
+fn qualify_wasm_jit(
+    model: &CompiledModel,
+    canonical_ir: &CanonicalIrArtifact,
+) -> RuntimeTargetQualification {
+    match (
+        crate::wasm_jit::emit_architecture_probe(),
+        crate::wasm_jit::compile_model_value_module(model, canonical_ir),
+    ) {
+        (Ok(probe), Ok(model_artifact)) => qualification(
+            RuntimeTarget::WasmJit,
+            RuntimeTargetReadiness::Rejected,
+            RuntimeTargetMaturity::QualificationOnly,
+            format!(
+                "secondary-module architecture qualified with {} probe bytes and {} deterministic scalar entries plus assignment kernels in a {}-byte verified model module; pure and stateful helpers, owned re-entrant sessions, and the fail-closed solver dispatch bridge are installed, with browser startup solver/stamp qualification required before use; broader differential, performance, and release gates remain pending",
+                probe.bytes().len(),
+                model_artifact.entries().len(),
+                model_artifact.module().bytes().len(),
+            ),
+        ),
+        (Err(error), _) | (_, Err(error)) => qualification(
+            RuntimeTarget::WasmJit,
+            RuntimeTargetReadiness::Rejected,
+            RuntimeTargetMaturity::QualificationOnly,
+            error.to_string(),
+        ),
+    }
+}
+
+#[cfg(not(feature = "wasm-jit"))]
+fn qualify_wasm_jit(
+    _model: &CompiledModel,
+    _canonical_ir: &CanonicalIrArtifact,
+) -> RuntimeTargetQualification {
+    qualification(
+        RuntimeTarget::WasmJit,
+        RuntimeTargetReadiness::Unavailable,
+        RuntimeTargetMaturity::QualificationOnly,
+        "browser WebAssembly JIT compiler feature is disabled in this build",
+    )
 }
 
 fn qualify_native_if_requested(

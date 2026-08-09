@@ -5,25 +5,21 @@
 
 pub(crate) mod aarch64;
 mod abi;
-mod assignment;
 pub mod bench;
-mod error;
-mod expr;
 mod model;
-mod model_plan;
 mod runtime;
-mod ssa;
 mod target;
-mod value_cache;
 pub mod x64;
 
+pub(crate) use crate::jit::{assignment, expr, model_plan, ssa, value_cache};
+
+pub use crate::jit::{JitError, JitResult};
 pub(crate) use abi::NativeRuntimeErrorKind;
 pub use abi::{
     EvalContext, rspice_absdelay_state_native, rspice_laplace_step_native, rspice_limexp,
     rspice_limited_exp, rspice_slew_state_native, rspice_timer_state_native,
     rspice_transition_state_native, rspice_zi_step_native,
 };
-pub use error::{JitError, JitResult};
 pub(crate) use model::NativeRequiredStorage;
 pub(crate) use model::NativeStampKernelIo;
 pub use model::{NativeModel, PlanStats};
@@ -36,7 +32,7 @@ pub use target::{Architecture, TargetSpec};
 pub const SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES: usize = 60 * 1024 * 1024;
 
 use crate::canonical_ir::CanonicalIrArtifact;
-use crate::codegen::{AssignmentStep, CompiledModel};
+use crate::codegen::CompiledModel;
 
 #[cfg(feature = "native-bytecode-contract-tests")]
 pub fn compile_native(model: &CompiledModel) -> JitResult<NativeModel> {
@@ -84,7 +80,8 @@ pub fn compile_native_with_canonical_ir(
         Architecture::AArch64 => {
             #[cfg(target_arch = "aarch64")]
             {
-                let plan = x64::build_model_plan_with_canonical_ir(model, artifact)?;
+                let plan =
+                    crate::jit::plan_builder::build_model_plan_with_canonical_ir(model, artifact)?;
                 aarch64::compile_model_plan(model, &plan)
             }
             #[cfg(not(target_arch = "aarch64"))]
@@ -100,43 +97,7 @@ pub fn compile_native_with_canonical_ir(
 }
 
 fn validate_native_coverage(model: &CompiledModel) -> JitResult<()> {
-    for step in &model.assignment_steps {
-        validate_assignment_coverage(model, step)?;
-    }
-
-    Ok(())
-}
-
-fn validate_assignment_coverage(model: &CompiledModel, step: &AssignmentStep) -> JitResult<()> {
-    match step {
-        AssignmentStep::Assign(_) => Ok(()),
-        AssignmentStep::AssignIndexed { base, len, .. } => {
-            validate_assignment_range(model, *base, *len)
-        }
-        AssignmentStep::Loop { body, .. } => {
-            for step in body {
-                validate_assignment_coverage(model, step)?;
-            }
-            Ok(())
-        }
-    }
-}
-
-fn validate_assignment_range(model: &CompiledModel, base: usize, len: usize) -> JitResult<()> {
-    let Some(end) = base.checked_add(len) else {
-        return Err(JitError::unsupported_native_coverage(
-            model.name.clone(),
-            "AssignIndexedRangeOverflow",
-        ));
-    };
-    if len == 0 || end > model.num_variables {
-        return Err(JitError::unsupported_native_coverage(
-            model.name.clone(),
-            "AssignIndexedRange",
-        ));
-    }
-
-    Ok(())
+    crate::jit::coverage::validate_jit_coverage(model)
 }
 
 #[cfg(test)]

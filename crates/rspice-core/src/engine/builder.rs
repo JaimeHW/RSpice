@@ -6924,7 +6924,36 @@ impl Engine {
                                 ))
                             })?;
 
-                            #[cfg(not(feature = "veriloga-native"))]
+                            #[cfg(all(
+                                not(feature = "veriloga-native"),
+                                feature = "veriloga-wasm-jit",
+                                target_arch = "wasm32"
+                            ))]
+                            let mut device = {
+                                let canonical_ir = entry.canonical_ir.as_deref().ok_or_else(|| {
+                                    SimulationError::Circuit(format!(
+                                        "Verilog-A device '{}' browser WASM JIT requires canonical IR for model '{}' (no interpreter fallback)",
+                                        element.name, model.name
+                                    ))
+                                })?;
+                                crate::device::veriloga::VerilogADevice::try_new_with_canonical_ir(
+                                    element.name.clone(),
+                                    std::sync::Arc::clone(model),
+                                    canonical_ir,
+                                    &node_ids,
+                                )
+                            }
+                            .map_err(|err| {
+                                SimulationError::Circuit(format!(
+                                    "Verilog-A device '{}' parameter default resolution failed: {}",
+                                    element.name, err
+                                ))
+                            })?;
+
+                            #[cfg(all(
+                                not(feature = "veriloga-native"),
+                                not(all(feature = "veriloga-wasm-jit", target_arch = "wasm32"))
+                            ))]
                             let mut device = crate::device::veriloga::VerilogADevice::try_new(
                                 element.name.clone(),
                                 std::sync::Arc::clone(model),

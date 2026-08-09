@@ -595,7 +595,7 @@ fn benchmark_context(model: &CompiledModel) -> VmContext {
         .iter()
         .map(|parameter| parameter.default)
         .collect();
-    context.param_given = vec![false; model.parameters.len()];
+    context.param_given = vec![0; model.parameters.len()];
     context.variables = vec![0.0; model.num_variables.max(1)];
     context.currents = vec![0.0; model.stamp_programs.len()];
     context.branch_current_values = vec![0.0; model.branch_sources.len()];
@@ -1273,7 +1273,7 @@ fn eval_context_from_vm_context(context: &mut VmContext) -> EvalContext {
             context.laplace_filters.as_mut_ptr()
         },
         laplace_filters_len: context.laplace_filters.len(),
-        param_given: context.param_given.as_ptr() as *const u8,
+        param_given: context.param_given.as_ptr(),
         param_given_len: context.param_given.len(),
         branch_unknowns: if context.branch_current_values.is_empty() {
             std::ptr::null()

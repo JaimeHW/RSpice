@@ -6,6 +6,8 @@
 //! could not be lowered, so an unsupported model is an actionable report
 //! instead of a silent drop to a slower path.
 
+#![cfg_attr(not(feature = "native"), allow(dead_code))]
+
 use smol_str::SmolStr;
 
 pub type JitResult<T> = Result<T, JitError>;

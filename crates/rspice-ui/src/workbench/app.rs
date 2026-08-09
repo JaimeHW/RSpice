@@ -138,7 +138,7 @@ pub(crate) use dialogs::symbol_definition::{
     open_symbol_import_dialog_for, open_symbol_parameter_form_dialog_for,
 };
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub(crate) use dialogs::hardcopy::run_worker_request_value as run_hardcopy_worker_request_value;
 pub(crate) use dialogs::hardcopy::{HardcopyDialogState, HardcopyWorkflow, open_hardcopy_workflow};
 

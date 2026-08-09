@@ -25,7 +25,7 @@ mod render;
 #[cfg(any(test, target_arch = "wasm32"))]
 mod worker;
 pub(crate) use publish::open_hardcopy_workflow;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub(crate) use worker::run_worker_request_value;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

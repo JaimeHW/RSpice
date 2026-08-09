@@ -41,7 +41,7 @@ struct FunctionLayout {
 pub(super) struct A64ImageBuilder {
     image: Vec<u8>,
     functions: Vec<FunctionLayout>,
-    value_entries: ValueEntryCache,
+    value_entries: ValueEntryCache<CodeOffset>,
 }
 
 impl A64ImageBuilder {

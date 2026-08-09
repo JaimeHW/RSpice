@@ -30,6 +30,10 @@ veriloga = [
 ]
 # Native JIT for Verilog-A devices (native targets only). Native mode is full JIT or error.
 veriloga-native = ["veriloga", "rspice-veriloga/native"]
+# Browser JIT compiler. Runtime module compilation/instantiation is performed
+# by the owning Web Worker; the core retains the authenticated artifacts and
+# synchronous solver integration.
+veriloga-wasm-jit = ["veriloga", "rspice-veriloga/wasm-jit"]
 # Runtime integration shared by every build-time generated Verilog-A model.
 # Prefer a `veriloga-model-*` feature for small production binaries and fast builds.
 veriloga-builtins-base = ["dep:rspice-veriloga-models"]

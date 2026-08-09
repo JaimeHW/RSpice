@@ -41,6 +41,8 @@ use smol_str::SmolStr;
 
 #[cfg(feature = "native")]
 use crate::native::{NativeModel, NativeRequiredStorage, NativeStampKernelIo};
+#[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+use crate::wasm_jit::{WasmJitExecutable, WasmJitExecutableEntry};
 
 #[cfg(feature = "native")]
 #[derive(Clone, Copy)]
@@ -183,6 +185,9 @@ pub struct VerilogADevice {
     /// Flat, model-order Jacobian output storage for the fused stamp driver.
     #[cfg(feature = "native")]
     native_stamp_jacobians: Vec<f64>,
+    /// Dense semantic export table for the worker-installed secondary module.
+    #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+    wasm_jit_model: std::sync::Arc<WasmJitExecutable>,
     /// $discontinuity level at the last accepted timestep (edge detector)
     prev_discontinuity: bool,
 }
@@ -300,7 +305,7 @@ impl VerilogADevice {
     /// Checked constructor that compiles stamp values from canonical MIR when
     /// the native backend is available. Unsupported MIR is a construction
     /// error; the bytecode stamp path is not used as a fallback.
-    #[cfg(feature = "native")]
+    #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
     pub fn try_new_with_canonical_ir(
         name: impl Into<SmolStr>,
         model: impl Into<std::sync::Arc<CompiledModel>>,
@@ -317,7 +322,10 @@ impl VerilogADevice {
         nodes: &[usize],
         canonical_artifact: Option<&CanonicalIrArtifact>,
     ) -> Result<Self, VmError> {
-        #[cfg(not(feature = "native"))]
+        #[cfg(all(
+            not(feature = "native"),
+            not(all(feature = "wasm-jit", target_arch = "wasm32"))
+        ))]
         let _ = canonical_artifact;
 
         let num_terminals = model.num_terminals;
@@ -343,7 +351,7 @@ impl VerilogADevice {
         for (i, param) in model.parameters.iter().enumerate() {
             context.set_param(i, param.default);
         }
-        context.param_given = vec![false; model.parameters.len()];
+        context.param_given = vec![0; model.parameters.len()];
         context.variables.resize(model.num_variables, 0.0);
         // Stateful runtime data referenced by the bytecode lives in the
         // per-instance context (the model stays immutable and shared)
@@ -360,6 +368,17 @@ impl VerilogADevice {
             #[cfg(not(feature = "native-bytecode-contract-tests"))]
             None => {
                 return Err(Self::missing_canonical_ir_native_error());
+            }
+        };
+
+        #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+        let wasm_jit_model = match canonical_artifact {
+            Some(artifact) => Self::try_wasm_compile_with_canonical_ir(&model, artifact)?,
+            None => {
+                return Err(VmError::WasmJit(
+                    "VerilogADevice::try_new requires canonical IR when browser WASM JIT execution is enabled; use try_new_with_canonical_ir; no interpreter fallback"
+                        .to_owned(),
+                ));
             }
         };
 
@@ -390,6 +409,8 @@ impl VerilogADevice {
             native_program_active: vec![1; num_stamp_programs],
             #[cfg(feature = "native")]
             native_stamp_jacobians: vec![0.0; native_jacobian_count],
+            #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+            wasm_jit_model,
             prev_discontinuity: false,
         };
         device.context.branch_current_values = vec![0.0; num_branch_unknowns];
@@ -600,6 +621,43 @@ impl VerilogADevice {
         };
         cache.push((Arc::downgrade(model), cache_key, compiled.clone()));
         compiled.map_err(VmError::NativeJit)
+    }
+
+    #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+    fn try_wasm_compile_with_canonical_ir(
+        model: &std::sync::Arc<CompiledModel>,
+        artifact: &CanonicalIrArtifact,
+    ) -> Result<std::sync::Arc<WasmJitExecutable>, VmError> {
+        use std::cell::RefCell;
+        use std::sync::{Arc, Weak};
+
+        type CacheEntry = (
+            Weak<CompiledModel>,
+            SmolStr,
+            Result<Arc<WasmJitExecutable>, String>,
+        );
+        thread_local! {
+            static WASM_CACHE: RefCell<Vec<CacheEntry>> = const { RefCell::new(Vec::new()) };
+        }
+
+        let cache_key = artifact.mir_digest.clone();
+        WASM_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            cache.retain(|(weak, _, _)| weak.strong_count() > 0);
+            if let Some((_, _, cached)) = cache
+                .iter()
+                .find(|(weak, key, _)| weak.as_ptr() == Arc::as_ptr(model) && *key == cache_key)
+            {
+                return cached.clone().map_err(VmError::WasmJit);
+            }
+
+            let compiled = crate::wasm_jit::compile_model_value_module(model, artifact)
+                .and_then(|module| WasmJitExecutable::from_artifact(model, &module))
+                .map(Arc::new)
+                .map_err(|error| error.to_string());
+            cache.push((Arc::downgrade(model), cache_key, compiled.clone()));
+            compiled.map_err(VmError::WasmJit)
+        })
     }
 
     /// Check if this device is using native compiled code.
@@ -1041,7 +1099,13 @@ impl VerilogADevice {
             #[cfg(feature = "native")]
             let value = self.run_native_parameter_default(i)?;
 
-            #[cfg(not(feature = "native"))]
+            #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+            let value = self.run_wasm_parameter_default(i)?;
+
+            #[cfg(all(
+                not(feature = "native"),
+                not(all(feature = "wasm-jit", target_arch = "wasm32"))
+            ))]
             let value = {
                 let default_program = self.model.parameters[i]
                     .default_program
@@ -1092,6 +1156,19 @@ impl VerilogADevice {
             native.as_ref(),
             NativeValueEntry::ParameterDefault(index),
         )
+    }
+
+    #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+    fn run_wasm_parameter_default(&mut self, index: usize) -> Result<f64, VmError> {
+        if self.context.variables.len() < self.model.num_variables {
+            self.context.variables.resize(self.model.num_variables, 0.0);
+        }
+        self.wasm_jit_model
+            .run_entry(
+                WasmJitExecutableEntry::ParameterDefault(index),
+                &mut self.context,
+            )
+            .map_err(VmError::WasmJit)
     }
 
     /// Set simulation temperature in Kelvin
@@ -1437,6 +1514,58 @@ impl VerilogADevice {
         Ok(())
     }
 
+    #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+    fn try_refresh_static_conditions(&mut self) -> Result<(), VmError> {
+        let model = &self.model;
+        let wasm = self.wasm_jit_model.as_ref();
+        let mut program_active = vec![true; model.stamp_programs.len()];
+        let mut branch_active = vec![false; model.branch_sources.len()];
+        let has_static_conditions = model
+            .stamp_programs
+            .iter()
+            .any(|program| program.static_condition.is_some());
+
+        if has_static_conditions {
+            let context = &mut self.context;
+            let mut vm = Vm::new(context);
+            Self::run_assignment_pass(&mut vm, model, wasm)?;
+            for (idx, program) in model.stamp_programs.iter().enumerate() {
+                let active = if program.static_condition.is_some() {
+                    let condition = Self::run_value_program(
+                        &mut vm,
+                        program
+                            .static_condition
+                            .as_ref()
+                            .expect("static condition checked above"),
+                        wasm,
+                        WasmJitExecutableEntry::StaticCondition(idx),
+                    )?;
+                    Self::finite_result(condition, format!("static condition {idx}"))? != 0.0
+                } else {
+                    true
+                };
+                program_active[idx] = active;
+                if active
+                    && let Some(ordinal) = program.branch_ordinal
+                    && ordinal < branch_active.len()
+                {
+                    branch_active[ordinal] = true;
+                }
+            }
+        } else {
+            for program in &model.stamp_programs {
+                if let Some(ordinal) = program.branch_ordinal
+                    && ordinal < branch_active.len()
+                {
+                    branch_active[ordinal] = true;
+                }
+            }
+        }
+        self.program_active = program_active;
+        self.branch_active = branch_active;
+        Ok(())
+    }
+
     #[cfg(feature = "native")]
     fn missing_native_static_condition_entry(index: usize) -> VmError {
         VmError::NativeJit(format!(
@@ -1556,7 +1685,10 @@ impl VerilogADevice {
         ))
     }
 
-    #[cfg(not(feature = "native"))]
+    #[cfg(all(
+        not(feature = "native"),
+        not(all(feature = "wasm-jit", target_arch = "wasm32"))
+    ))]
     fn try_refresh_static_conditions(&mut self) -> Result<(), VmError> {
         let model = &self.model;
         let mut program_active = vec![true; model.stamp_programs.len()];
@@ -1784,6 +1916,8 @@ impl VerilogADevice {
         let program_active = &self.program_active;
         #[cfg(feature = "native")]
         let native = self.native_model.as_ref();
+        #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+        let wasm = self.wasm_jit_model.as_ref();
 
         context.clear_currents();
 
@@ -1793,6 +1927,8 @@ impl VerilogADevice {
             model,
             #[cfg(feature = "native")]
             native,
+            #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+            wasm,
         )?;
 
         let m = vm.context.multiplicity;
@@ -1816,6 +1952,21 @@ impl VerilogADevice {
                     native,
                     #[cfg(feature = "native")]
                     NativeValueEntry::ReactiveJacobian {
+                        stamp: program_idx,
+                        entry: entry.jacobian_idx,
+                    },
+                    #[cfg(all(
+                        not(feature = "native"),
+                        feature = "wasm-jit",
+                        target_arch = "wasm32"
+                    ))]
+                    wasm,
+                    #[cfg(all(
+                        not(feature = "native"),
+                        feature = "wasm-jit",
+                        target_arch = "wasm32"
+                    ))]
+                    WasmJitExecutableEntry::ReactiveJacobian {
                         stamp: program_idx,
                         entry: entry.jacobian_idx,
                     },
@@ -1962,6 +2113,8 @@ impl VerilogADevice {
         let program_active = &self.program_active;
         #[cfg(feature = "native")]
         let native = self.native_model.as_ref();
+        #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+        let wasm = self.wasm_jit_model.as_ref();
         let context = &mut self.context;
         let mut vm = Vm::new(context);
         Self::run_assignment_pass(
@@ -1969,6 +2122,8 @@ impl VerilogADevice {
             &self.model,
             #[cfg(feature = "native")]
             native,
+            #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+            wasm,
         )?;
         let mut currents = Vec::with_capacity(self.model.stamp_programs.len());
 
@@ -1985,6 +2140,10 @@ impl VerilogADevice {
                 native,
                 #[cfg(feature = "native")]
                 NativeValueEntry::StampValue(program_idx),
+                #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+                wasm,
+                #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+                WasmJitExecutableEntry::StampValue(program_idx),
             )?;
             let value = Self::finite_result(
                 value,
@@ -2000,6 +2159,8 @@ impl VerilogADevice {
         }
         #[cfg(feature = "native")]
         Self::run_post_assignment_pass(&mut vm, &self.model, native)?;
+        #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+        Self::run_post_assignment_pass(&mut vm, &self.model, wasm)?;
 
         Ok(currents)
     }
@@ -2141,7 +2302,7 @@ impl VerilogADevice {
                 context.laplace_filters.as_mut_ptr()
             },
             laplace_filters_len: context.laplace_filters.len(),
-            param_given: context.param_given.as_ptr() as *const u8,
+            param_given: context.param_given.as_ptr(),
             param_given_len: context.param_given.len(),
             branch_unknowns: if context.branch_current_values.is_empty() {
                 std::ptr::null()
@@ -2621,8 +2782,22 @@ impl VerilogADevice {
         Ok(())
     }
 
+    /// Dispatch one value entry through the required worker-installed module.
+    #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+    fn run_value_program(
+        vm: &mut Vm<'_>,
+        _program: &crate::codegen::BytecodeProgram,
+        wasm: &WasmJitExecutable,
+        entry: WasmJitExecutableEntry,
+    ) -> Result<f64, VmError> {
+        wasm.run_entry(entry, vm.context).map_err(VmError::WasmJit)
+    }
+
     /// Run one value-returning bytecode program.
-    #[cfg(not(feature = "native"))]
+    #[cfg(all(
+        not(feature = "native"),
+        not(all(feature = "wasm-jit", target_arch = "wasm32"))
+    ))]
     fn run_value_program(
         vm: &mut Vm<'_>,
         program: &crate::codegen::BytecodeProgram,
@@ -2702,8 +2877,36 @@ impl VerilogADevice {
         Ok(())
     }
 
+    #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+    fn run_assignment_pass(
+        vm: &mut Vm<'_>,
+        model: &CompiledModel,
+        wasm: &WasmJitExecutable,
+    ) -> Result<(), VmError> {
+        if vm.context.variables.len() < model.num_variables {
+            vm.context.variables.resize(model.num_variables, 0.0);
+        }
+        wasm.run_assignments(vm.context).map_err(VmError::WasmJit)
+    }
+
+    #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+    fn run_post_assignment_pass(
+        vm: &mut Vm<'_>,
+        model: &CompiledModel,
+        wasm: &WasmJitExecutable,
+    ) -> Result<(), VmError> {
+        if vm.context.variables.len() < model.num_variables {
+            vm.context.variables.resize(model.num_variables, 0.0);
+        }
+        wasm.run_post_assignments(vm.context)
+            .map_err(VmError::WasmJit)
+    }
+
     /// Execute the assignment pass through the bytecode interpreter.
-    #[cfg(not(feature = "native"))]
+    #[cfg(all(
+        not(feature = "native"),
+        not(all(feature = "wasm-jit", target_arch = "wasm32"))
+    ))]
     fn run_assignment_pass(vm: &mut Vm<'_>, model: &CompiledModel) -> Result<(), VmError> {
         if vm.context.variables.len() < model.num_variables {
             vm.context.variables.resize(model.num_variables, 0.0);
@@ -2739,7 +2942,38 @@ impl VerilogADevice {
         Ok(())
     }
 
-    #[cfg(not(feature = "native"))]
+    #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+    fn populate_noise_current_probe_cache(
+        vm: &mut Vm<'_>,
+        model: &CompiledModel,
+        program_active: &[bool],
+        wasm: &WasmJitExecutable,
+    ) -> Result<(), VmError> {
+        for (program_idx, program) in model.stamp_programs.iter().enumerate() {
+            let active = program_active.get(program_idx).copied().unwrap_or(true);
+            let value = if active {
+                let value = Self::run_value_program(
+                    vm,
+                    &program.value_program,
+                    wasm,
+                    WasmJitExecutableEntry::StampValue(program_idx),
+                )?;
+                Self::finite_result(
+                    value,
+                    format!("contribution {program_idx} during noise evaluation"),
+                )?
+            } else {
+                0.0
+            };
+            Self::cache_current_probe_value(vm.context, program, value, active);
+        }
+        Ok(())
+    }
+
+    #[cfg(all(
+        not(feature = "native"),
+        not(all(feature = "wasm-jit", target_arch = "wasm32"))
+    ))]
     fn populate_noise_current_probe_cache(
         vm: &mut Vm<'_>,
         model: &CompiledModel,
@@ -2778,11 +3012,17 @@ impl VerilogADevice {
 
     /// Safety cap on runtime-loop iterations per evaluation (a model bug
     /// must not hang the Newton loop)
-    #[cfg(not(feature = "native"))]
+    #[cfg(all(
+        not(feature = "native"),
+        not(all(feature = "wasm-jit", target_arch = "wasm32"))
+    ))]
     const MAX_RUNTIME_LOOP_ITERATIONS: usize = 100_000;
 
     /// Execute assignment programs and update VM variable storage.
-    #[cfg(not(feature = "native"))]
+    #[cfg(all(
+        not(feature = "native"),
+        not(all(feature = "wasm-jit", target_arch = "wasm32"))
+    ))]
     fn execute_assignment_programs(vm: &mut Vm<'_>, model: &CompiledModel) -> Result<(), VmError> {
         if vm.context.variables.len() < model.num_variables {
             vm.context.variables.resize(model.num_variables, 0.0);
@@ -2793,7 +3033,10 @@ impl VerilogADevice {
 
     /// Execute a sequence of evaluation steps (assignments and runtime
     /// loops), recursively
-    #[cfg(not(feature = "native"))]
+    #[cfg(all(
+        not(feature = "native"),
+        not(all(feature = "wasm-jit", target_arch = "wasm32"))
+    ))]
     fn execute_assignment_steps(
         vm: &mut Vm<'_>,
         steps: &[crate::codegen::AssignmentStep],
@@ -2868,6 +3111,8 @@ impl VerilogADevice {
         let model = &self.model;
         #[cfg(feature = "native")]
         let native = self.native_model.as_ref();
+        #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+        let wasm = self.wasm_jit_model.as_ref();
 
         context.clear_currents();
         context.currents.reserve(model.stamp_programs.len());
@@ -2879,6 +3124,8 @@ impl VerilogADevice {
             model,
             #[cfg(feature = "native")]
             native,
+            #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+            wasm,
         )?;
         let mut entries = Vec::new();
 
@@ -2894,6 +3141,10 @@ impl VerilogADevice {
                 native,
                 #[cfg(feature = "native")]
                 NativeValueEntry::StampValue(prog_idx),
+                #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+                wasm,
+                #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+                WasmJitExecutableEntry::StampValue(prog_idx),
             )?;
             let value = Self::finite_result(
                 value,
@@ -2917,6 +3168,21 @@ impl VerilogADevice {
                         stamp: prog_idx,
                         entry: jac_idx,
                     },
+                    #[cfg(all(
+                        not(feature = "native"),
+                        feature = "wasm-jit",
+                        target_arch = "wasm32"
+                    ))]
+                    wasm,
+                    #[cfg(all(
+                        not(feature = "native"),
+                        feature = "wasm-jit",
+                        target_arch = "wasm32"
+                    ))]
+                    WasmJitExecutableEntry::Jacobian {
+                        stamp: prog_idx,
+                        entry: jac_idx,
+                    },
                 )?;
                 let value = Self::finite_result(value, format!("Jacobian {prog_idx}:{jac_idx}"))?;
                 entries.push(JacobianEntry {
@@ -2930,6 +3196,8 @@ impl VerilogADevice {
         }
         #[cfg(feature = "native")]
         Self::run_post_assignment_pass(&mut vm, model, native)?;
+        #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+        Self::run_post_assignment_pass(&mut vm, model, wasm)?;
 
         Ok(entries)
     }
@@ -3247,6 +3515,8 @@ impl VerilogADevice {
         let matrix_indices = &self.matrix_indices;
         #[cfg(feature = "native")]
         let native = self.native_model.as_ref();
+        #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+        let wasm = self.wasm_jit_model.as_ref();
         // Instance multiplicity: m parallel copies scale every flow
         // (current) stamp by m; potential and constraint rows stay
         // per-copy, as do probed currents and internal node voltages
@@ -3263,6 +3533,8 @@ impl VerilogADevice {
             model,
             #[cfg(feature = "native")]
             native,
+            #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+            wasm,
         )?;
 
         // Buffer structural branch stamps with the computed entries. Nothing
@@ -3298,6 +3570,10 @@ impl VerilogADevice {
                 native,
                 #[cfg(feature = "native")]
                 NativeValueEntry::StampValue(program_idx),
+                #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+                wasm,
+                #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+                WasmJitExecutableEntry::StampValue(program_idx),
             )?;
             let value = Self::finite_result(value, format!("contribution {program_idx}"))?;
 
@@ -3340,6 +3616,21 @@ impl VerilogADevice {
                     native,
                     #[cfg(feature = "native")]
                     NativeValueEntry::Jacobian {
+                        stamp: program_idx,
+                        entry: jacobian_entry.jacobian_idx,
+                    },
+                    #[cfg(all(
+                        not(feature = "native"),
+                        feature = "wasm-jit",
+                        target_arch = "wasm32"
+                    ))]
+                    wasm,
+                    #[cfg(all(
+                        not(feature = "native"),
+                        feature = "wasm-jit",
+                        target_arch = "wasm32"
+                    ))]
+                    WasmJitExecutableEntry::Jacobian {
                         stamp: program_idx,
                         entry: jacobian_entry.jacobian_idx,
                     },
@@ -3390,6 +3681,8 @@ impl VerilogADevice {
         }
         #[cfg(feature = "native")]
         Self::run_post_assignment_pass(&mut vm, model, native)?;
+        #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+        Self::run_post_assignment_pass(&mut vm, model, wasm)?;
         for &(row, col, value) in &self.stamp_matrix_buffer {
             matrix_add(row, col, value);
         }
@@ -3422,7 +3715,7 @@ impl VerilogADevice {
 
     /// Checked noise-source evaluation path for callers that can surface
     /// runtime model diagnostics instead of panicking or dropping sources.
-    #[cfg(feature = "native")]
+    #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
     pub fn try_noise_sources(
         &mut self,
         circuit_voltages: &[f64],
@@ -3433,14 +3726,39 @@ impl VerilogADevice {
         let context = &mut self.context;
         let model = &self.model;
         let program_active = &self.program_active;
+        #[cfg(feature = "native")]
         let native = self.native_model.as_ref();
+        #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+        let wasm = self.wasm_jit_model.as_ref();
 
         context.clear_currents();
         context.currents.reserve(model.stamp_programs.len());
         let mut vm = Vm::new(context);
-        Self::run_assignment_pass(&mut vm, model, native)?;
-        Self::populate_noise_current_probe_cache(&mut vm, model, program_active, native)?;
-        Self::run_post_assignment_pass(&mut vm, model, native)?;
+        Self::run_assignment_pass(
+            &mut vm,
+            model,
+            #[cfg(feature = "native")]
+            native,
+            #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+            wasm,
+        )?;
+        Self::populate_noise_current_probe_cache(
+            &mut vm,
+            model,
+            program_active,
+            #[cfg(feature = "native")]
+            native,
+            #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+            wasm,
+        )?;
+        Self::run_post_assignment_pass(
+            &mut vm,
+            model,
+            #[cfg(feature = "native")]
+            native,
+            #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+            wasm,
+        )?;
 
         let circuit_node = |index: &StampIndex| -> usize {
             match index {
@@ -3463,8 +3781,14 @@ impl VerilogADevice {
             let psd = Self::run_value_program(
                 &mut vm,
                 &source.psd_program,
+                #[cfg(feature = "native")]
                 native,
+                #[cfg(feature = "native")]
                 NativeValueEntry::NoisePsd(idx),
+                #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+                wasm,
+                #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+                WasmJitExecutableEntry::NoisePsd(idx),
             )?;
             let psd = Self::noise_power(psd, idx)?;
             if psd == 0.0 {
@@ -3480,8 +3804,22 @@ impl VerilogADevice {
                     Self::run_value_program(
                         &mut vm,
                         program,
+                        #[cfg(feature = "native")]
                         native,
+                        #[cfg(feature = "native")]
                         NativeValueEntry::NoiseExponent(idx),
+                        #[cfg(all(
+                            not(feature = "native"),
+                            feature = "wasm-jit",
+                            target_arch = "wasm32"
+                        ))]
+                        wasm,
+                        #[cfg(all(
+                            not(feature = "native"),
+                            feature = "wasm-jit",
+                            target_arch = "wasm32"
+                        ))]
+                        WasmJitExecutableEntry::NoiseExponent(idx),
                     )
                 })
                 .transpose()?
@@ -3517,7 +3855,10 @@ impl VerilogADevice {
 
     /// Checked noise-source evaluation path for callers that can surface
     /// runtime model diagnostics instead of panicking or dropping sources.
-    #[cfg(not(feature = "native"))]
+    #[cfg(all(
+        not(feature = "native"),
+        not(all(feature = "wasm-jit", target_arch = "wasm32"))
+    ))]
     pub fn try_noise_sources(
         &mut self,
         circuit_voltages: &[f64],
@@ -3896,7 +4237,7 @@ mod tests {
         for (i, param) in model.parameters.iter().enumerate() {
             context.set_param(i, param.default);
         }
-        context.param_given = vec![false; model.parameters.len()];
+        context.param_given = vec![0; model.parameters.len()];
         context.variables.resize(model.num_variables, 0.0);
         context.lookup_tables = model.lookup_tables.clone();
         context.laplace_filters = model.laplace_filters.clone();

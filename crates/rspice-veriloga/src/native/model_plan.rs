@@ -4,29 +4,31 @@
 //! dependency metadata exactly once. Machine backends only decide how those
 //! entries are encoded, laid out, verified, and published.
 
+#![cfg_attr(not(feature = "native"), allow(dead_code))]
+
 use super::assignment::NativeAssignment;
+use super::current_dependencies::JitCurrentDependencies;
 use super::expr::NativeProgram;
-use super::model::NativeCurrentDependencies;
 use super::{JitError, JitResult};
 use crate::codegen::CompiledModel;
 
 #[derive(Debug)]
-pub(super) struct NativeModelPlan {
-    pub(super) assignments: Vec<NativeAssignment>,
-    pub(super) post_assignments: Vec<NativeAssignment>,
-    pub(super) parameter_defaults: Vec<Option<NativeProgram>>,
-    pub(super) static_conditions: Vec<Option<NativeProgram>>,
-    pub(super) stamp_values: Vec<NativeProgram>,
-    pub(super) jacobians: Vec<Vec<NativeProgram>>,
-    pub(super) reactive_jacobians: Vec<Vec<NativeProgram>>,
-    pub(super) noise_psd: Vec<NativeProgram>,
-    pub(super) noise_exponents: Vec<Option<NativeProgram>>,
-    pub(super) published_current_pairs: Vec<Option<(usize, usize)>>,
-    pub(super) current_dependencies: NativeCurrentDependencies,
+pub(crate) struct NativeModelPlan {
+    pub(crate) assignments: Vec<NativeAssignment>,
+    pub(crate) post_assignments: Vec<NativeAssignment>,
+    pub(crate) parameter_defaults: Vec<Option<NativeProgram>>,
+    pub(crate) static_conditions: Vec<Option<NativeProgram>>,
+    pub(crate) stamp_values: Vec<NativeProgram>,
+    pub(crate) jacobians: Vec<Vec<NativeProgram>>,
+    pub(crate) reactive_jacobians: Vec<Vec<NativeProgram>>,
+    pub(crate) noise_psd: Vec<NativeProgram>,
+    pub(crate) noise_exponents: Vec<Option<NativeProgram>>,
+    pub(crate) published_current_pairs: Vec<Option<(usize, usize)>>,
+    pub(crate) current_dependencies: JitCurrentDependencies,
 }
 
 impl NativeModelPlan {
-    pub(super) fn validate_shape(&self, model: &CompiledModel) -> JitResult<()> {
+    pub(crate) fn validate_shape(&self, model: &CompiledModel) -> JitResult<()> {
         let stamp_count = model.stamp_programs.len();
         let noise_count = model.noise_sources.len();
         if self.parameter_defaults.len() != model.parameters.len() {

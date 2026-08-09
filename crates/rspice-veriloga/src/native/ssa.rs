@@ -6,18 +6,20 @@
 //! are single-block today; keeping the block and terminator explicit makes
 //! control-flow extension possible without changing the value model.
 
-use crate::native::expr::{
+#![cfg_attr(not(feature = "native"), allow(dead_code))]
+
+use crate::jit::expr::{
     IntegerBinaryOp, NativeOp, NativeProgram, UnaryMathOp, native_op_stack_effect,
 };
-use crate::native::value_cache::{native_op_hash, native_ops_are_codegen_identical};
-use crate::native::{JitError, JitResult};
+use crate::jit::value_cache::{native_op_hash, native_ops_are_codegen_identical};
+use crate::jit::{JitError, JitResult};
 use std::collections::HashMap;
 
 const MODEL: &str = "native-ssa";
-pub(super) const INLINE_DYNAMIC_LOWER_ABS_LIMIT: i64 = 1_i64 << 51;
+pub(crate) const INLINE_DYNAMIC_LOWER_ABS_LIMIT: i64 = 1_i64 << 51;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(super) struct ValueId(u32);
+pub(crate) struct ValueId(u32);
 
 impl ValueId {
     fn new(index: usize) -> JitResult<Self> {
@@ -29,26 +31,26 @@ impl ValueId {
             })
     }
 
-    pub(super) fn index(self) -> usize {
+    pub(crate) fn index(self) -> usize {
         self.0 as usize
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ValueType {
+pub(crate) enum ValueType {
     F64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct BlockId(u32);
+pub(crate) struct BlockId(u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Terminator {
+pub(crate) enum Terminator {
     Return(ValueId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct Effects(u16);
+pub(crate) struct Effects(u16);
 
 impl Effects {
     const READ_CONTEXT: u16 = 1 << 0;
@@ -60,7 +62,7 @@ impl Effects {
     const CLOBBER_CONTEXT_CACHE: u16 = 1 << 6;
     const INTERNAL_CALL_CONTINUATION: u16 = 1 << 7;
 
-    pub(super) fn for_op(op: NativeOp) -> Self {
+    pub(crate) fn for_op(op: NativeOp) -> Self {
         let mut bits = 0;
         if op_reads_context(op) {
             bits |= Self::READ_CONTEXT;
@@ -89,23 +91,23 @@ impl Effects {
         Self(bits)
     }
 
-    pub(super) fn may_call(self) -> bool {
+    pub(crate) fn may_call(self) -> bool {
         self.contains(Self::MAY_CALL)
     }
 
-    pub(super) fn may_fail(self) -> bool {
+    pub(crate) fn may_fail(self) -> bool {
         self.contains(Self::MAY_FAIL)
     }
 
-    pub(super) fn reads_entry_args(self) -> bool {
+    pub(crate) fn reads_entry_args(self) -> bool {
         self.contains(Self::READ_ENTRY_ARGS)
     }
 
-    pub(super) fn clobbers_context_pointer_cache(self) -> bool {
+    pub(crate) fn clobbers_context_pointer_cache(self) -> bool {
         self.contains(Self::CLOBBER_CONTEXT_CACHE)
     }
 
-    pub(super) fn needs_saved_entry_args_for_internal_continuation(self) -> bool {
+    pub(crate) fn needs_saved_entry_args_for_internal_continuation(self) -> bool {
         self.contains(Self::INTERNAL_CALL_CONTINUATION)
     }
 
@@ -132,7 +134,7 @@ impl Effects {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct Instruction {
+pub(crate) struct Instruction {
     result: ValueId,
     value_type: ValueType,
     op: NativeOp,
@@ -141,29 +143,29 @@ pub(super) struct Instruction {
 }
 
 impl Instruction {
-    pub(super) fn result(&self) -> ValueId {
+    pub(crate) fn result(&self) -> ValueId {
         self.result
     }
 
-    pub(super) fn value_type(&self) -> ValueType {
+    pub(crate) fn value_type(&self) -> ValueType {
         self.value_type
     }
 
-    pub(super) fn op(&self) -> NativeOp {
+    pub(crate) fn op(&self) -> NativeOp {
         self.op
     }
 
-    pub(super) fn operands(&self) -> &[ValueId] {
+    pub(crate) fn operands(&self) -> &[ValueId] {
         &self.operands
     }
 
-    pub(super) fn effects(&self) -> Effects {
+    pub(crate) fn effects(&self) -> Effects {
         self.effects
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct BasicBlock {
+pub(crate) struct BasicBlock {
     id: BlockId,
     instruction_start: usize,
     instruction_end: usize,
@@ -178,7 +180,7 @@ impl BasicBlock {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct Program {
+pub(crate) struct Program {
     entry: BlockId,
     block: BasicBlock,
     instructions: Vec<Instruction>,
@@ -186,14 +188,14 @@ pub(super) struct Program {
 }
 
 impl Program {
-    pub(super) fn lower(program: &NativeProgram) -> JitResult<Self> {
+    pub(crate) fn lower(program: &NativeProgram) -> JitResult<Self> {
         let mut lowerer = ProgramLowerer::with_capacity(program.ops().len());
         let (result, maximum_stack_depth) = lowerer.append(program)?;
         eliminate_dead_instructions(lowerer.finish(result, maximum_stack_depth)?, &mut [])
     }
 
     #[cfg(all(test, target_arch = "x86_64"))]
-    pub(super) fn from_ssa_for_test(
+    pub(crate) fn from_ssa_for_test(
         operations: Vec<(NativeOp, Vec<usize>)>,
         result: usize,
     ) -> JitResult<Self> {
@@ -231,33 +233,33 @@ impl Program {
         Ok(program)
     }
 
-    pub(super) fn instructions(&self) -> &[Instruction] {
+    pub(crate) fn instructions(&self) -> &[Instruction] {
         &self.instructions
     }
 
-    pub(super) fn result(&self) -> ValueId {
+    pub(crate) fn result(&self) -> ValueId {
         match self.block.terminator {
             Terminator::Return(value) => value,
         }
     }
 
-    pub(super) fn maximum_stack_depth(&self) -> usize {
+    pub(crate) fn maximum_stack_depth(&self) -> usize {
         self.maximum_stack_depth
     }
 
-    pub(super) fn uses_helper_calls(&self) -> bool {
+    pub(crate) fn uses_helper_calls(&self) -> bool {
         self.instructions
             .iter()
             .any(|instruction| instruction.effects.may_call())
     }
 
-    pub(super) fn requires_call_frame(&self) -> bool {
+    pub(crate) fn requires_call_frame(&self) -> bool {
         self.instructions
             .iter()
             .any(|instruction| instruction.effects.may_call() || instruction.effects.may_fail())
     }
 
-    pub(super) fn needs_saved_entry_args(&self) -> bool {
+    pub(crate) fn needs_saved_entry_args(&self) -> bool {
         let mut helper_seen = false;
         for instruction in &self.instructions {
             let effects = instruction.effects;
@@ -521,22 +523,22 @@ impl ProgramLowerer {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct AssignmentOutput {
+pub(crate) struct AssignmentOutput {
     variable_index: usize,
     instruction_end: usize,
     value: ValueId,
 }
 
 impl AssignmentOutput {
-    pub(super) fn variable_index(self) -> usize {
+    pub(crate) fn variable_index(self) -> usize {
         self.variable_index
     }
 
-    pub(super) fn instruction_end(self) -> usize {
+    pub(crate) fn instruction_end(self) -> usize {
         self.instruction_end
     }
 
-    pub(super) fn value(self) -> ValueId {
+    pub(crate) fn value(self) -> ValueId {
         self.value
     }
 }
@@ -545,13 +547,13 @@ impl AssignmentOutput {
 /// assignments. Stores are deliberately not represented as movable SSA ops:
 /// each output boundary remains observable before any later failing program.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct AssignmentProgram {
+pub(crate) struct AssignmentProgram {
     program: Program,
     outputs: Box<[AssignmentOutput]>,
 }
 
 impl AssignmentProgram {
-    pub(super) fn lower(assignments: &[(usize, &NativeProgram)]) -> JitResult<Self> {
+    pub(crate) fn lower(assignments: &[(usize, &NativeProgram)]) -> JitResult<Self> {
         if assignments.is_empty() {
             return Err(JitError::Verifier {
                 model: MODEL.into(),
@@ -600,11 +602,11 @@ impl AssignmentProgram {
         })
     }
 
-    pub(super) fn program(&self) -> &Program {
+    pub(crate) fn program(&self) -> &Program {
         &self.program
     }
 
-    pub(super) fn outputs(&self) -> &[AssignmentOutput] {
+    pub(crate) fn outputs(&self) -> &[AssignmentOutput] {
         &self.outputs
     }
 }
@@ -722,22 +724,22 @@ fn eliminate_dead_instructions(
 /// Exact SSA equality plus the formal effect gate makes that one computation
 /// with two stores without changing numerical semantics.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct SharedOutputGroup {
+pub(crate) struct SharedOutputGroup {
     representative: usize,
     outputs: Box<[usize]>,
 }
 
 impl SharedOutputGroup {
-    pub(super) fn representative(&self) -> usize {
+    pub(crate) fn representative(&self) -> usize {
         self.representative
     }
 
-    pub(super) fn outputs(&self) -> &[usize] {
+    pub(crate) fn outputs(&self) -> &[usize] {
         &self.outputs
     }
 }
 
-pub(super) fn plan_shared_outputs(programs: &[Program]) -> Vec<SharedOutputGroup> {
+pub(crate) fn plan_shared_outputs(programs: &[Program]) -> Vec<SharedOutputGroup> {
     let mut groups: Vec<SharedOutputGroup> = Vec::with_capacity(programs.len());
     for (output, program) in programs.iter().enumerate() {
         let reusable = program.permits_result_sharing();
@@ -765,38 +767,38 @@ pub(super) fn plan_shared_outputs(programs: &[Program]) -> Vec<SharedOutputGroup
 /// caller- or callee-saved machine registers according to their host ABI. Six
 /// logical registers remain available for materializing the widest native
 /// operation's five spilled operands plus one instruction-specific scratch.
-pub(super) const ALLOCATABLE_VALUE_REGISTERS: usize = 10;
-pub(super) const LOGICAL_VALUE_REGISTER_COUNT: usize = 21;
+pub(crate) const ALLOCATABLE_VALUE_REGISTERS: usize = 10;
+pub(crate) const LOGICAL_VALUE_REGISTER_COUNT: usize = 21;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ValueLocation {
+pub(crate) enum ValueLocation {
     Register(usize),
     Spill(usize),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct AllocatedInstruction {
+pub(crate) struct AllocatedInstruction {
     operands: Box<[ValueLocation]>,
     result: ValueLocation,
     live_register_mask: u32,
 }
 
 impl AllocatedInstruction {
-    pub(super) fn operands(&self) -> &[ValueLocation] {
+    pub(crate) fn operands(&self) -> &[ValueLocation] {
         &self.operands
     }
 
-    pub(super) fn result(&self) -> ValueLocation {
+    pub(crate) fn result(&self) -> ValueLocation {
         self.result
     }
 
-    pub(super) fn live_register_mask(&self) -> u32 {
+    pub(crate) fn live_register_mask(&self) -> u32 {
         self.live_register_mask
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct RegisterAllocation {
+pub(crate) struct RegisterAllocation {
     instructions: Vec<AllocatedInstruction>,
     result: ValueLocation,
     value_locations: Vec<ValueLocation>,
@@ -806,16 +808,16 @@ pub(super) struct RegisterAllocation {
 }
 
 impl RegisterAllocation {
-    pub(super) fn build(program: &Program) -> JitResult<Self> {
+    pub(crate) fn build(program: &Program) -> JitResult<Self> {
         Self::build_with_register_count_and_output_uses(program, ALLOCATABLE_VALUE_REGISTERS, &[])
     }
 
     #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
-    pub(super) fn build_for_assignments(program: &AssignmentProgram) -> JitResult<Self> {
+    pub(crate) fn build_for_assignments(program: &AssignmentProgram) -> JitResult<Self> {
         Self::build_for_assignments_with_register_count(program, ALLOCATABLE_VALUE_REGISTERS)
     }
 
-    pub(super) fn build_for_assignments_with_register_count(
+    pub(crate) fn build_for_assignments_with_register_count(
         program: &AssignmentProgram,
         allocatable_register_count: usize,
     ) -> JitResult<Self> {
@@ -835,7 +837,7 @@ impl RegisterAllocation {
     /// register bank. This entry point is primarily an architecture bring-up
     /// and qualification seam; production backends use the shared default so
     /// allocation choices remain directly comparable across targets.
-    pub(super) fn build_with_register_count(
+    pub(crate) fn build_with_register_count(
         program: &Program,
         allocatable_register_count: usize,
     ) -> JitResult<Self> {
@@ -1053,15 +1055,15 @@ impl RegisterAllocation {
         })
     }
 
-    pub(super) fn instructions(&self) -> &[AllocatedInstruction] {
+    pub(crate) fn instructions(&self) -> &[AllocatedInstruction] {
         &self.instructions
     }
 
-    pub(super) fn result(&self) -> ValueLocation {
+    pub(crate) fn result(&self) -> ValueLocation {
         self.result
     }
 
-    pub(super) fn location(&self, value: ValueId) -> JitResult<ValueLocation> {
+    pub(crate) fn location(&self, value: ValueId) -> JitResult<ValueLocation> {
         self.value_locations
             .get(value.index())
             .copied()
@@ -1072,16 +1074,16 @@ impl RegisterAllocation {
             })
     }
 
-    pub(super) fn spill_slot_count(&self) -> usize {
+    pub(crate) fn spill_slot_count(&self) -> usize {
         self.spill_slot_count
     }
 
     #[cfg(test)]
-    pub(super) fn used_register_count(&self) -> usize {
+    pub(crate) fn used_register_count(&self) -> usize {
         self.used_register_count
     }
 
-    pub(super) fn required_register_count(&self) -> usize {
+    pub(crate) fn required_register_count(&self) -> usize {
         self.required_register_count
     }
 }
@@ -1136,7 +1138,7 @@ fn take_free_register(used: &mut [bool; LOGICAL_VALUE_REGISTER_COUNT]) -> Option
     used.iter().position(|occupied| !occupied)
 }
 
-pub(super) fn dynamic_variable_inline_supported(len: usize, lower: i64) -> bool {
+pub(crate) fn dynamic_variable_inline_supported(len: usize, lower: i64) -> bool {
     let Ok(len_i64) = i64::try_from(len) else {
         return false;
     };
@@ -1360,7 +1362,7 @@ mod tests {
         Program, RegisterAllocation, Terminator, ValueId, ValueLocation, ValueType,
         plan_shared_outputs, required_register_count,
     };
-    use crate::native::expr::{NativeOp, NativeProgram, native_op_stack_effect};
+    use crate::jit::expr::{NativeOp, NativeProgram, native_op_stack_effect};
 
     fn program(ops: Vec<NativeOp>, max_stack_depth: usize) -> NativeProgram {
         NativeProgram::from_ops_for_test(ops, max_stack_depth, Vec::new(), Vec::new())
@@ -1396,7 +1398,7 @@ mod tests {
     fn formal_effects_distinguish_pure_math_from_state_and_calls() {
         assert!(Effects::for_op(NativeOp::Mul).is_semantically_pure());
         assert!(
-            Effects::for_op(NativeOp::UnaryMath(crate::native::expr::UnaryMathOp::Exp)).may_call()
+            Effects::for_op(NativeOp::UnaryMath(crate::jit::expr::UnaryMathOp::Exp)).may_call()
         );
         let state = Effects::for_op(NativeOp::IdtState(0));
         assert!(state.may_call());
@@ -1544,7 +1546,7 @@ mod tests {
     fn never_shares_calls_failures_or_state_writes() {
         for op in [
             NativeOp::LoadParamGiven(0),
-            NativeOp::UnaryMath(crate::native::expr::UnaryMathOp::Exp),
+            NativeOp::UnaryMath(crate::jit::expr::UnaryMathOp::Exp),
             NativeOp::LimitState(0),
         ] {
             let operand_count = native_op_stack_effect(&op).0;
@@ -1657,11 +1659,9 @@ mod tests {
             Instruction {
                 result: ValueId(2),
                 value_type: ValueType::F64,
-                op: NativeOp::UnaryMath(crate::native::expr::UnaryMathOp::Exp),
+                op: NativeOp::UnaryMath(crate::jit::expr::UnaryMathOp::Exp),
                 operands: Box::new([ValueId(1)]),
-                effects: Effects::for_op(NativeOp::UnaryMath(
-                    crate::native::expr::UnaryMathOp::Exp,
-                )),
+                effects: Effects::for_op(NativeOp::UnaryMath(crate::jit::expr::UnaryMathOp::Exp)),
             },
             Instruction {
                 result: ValueId(3),

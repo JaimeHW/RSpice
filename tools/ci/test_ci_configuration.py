@@ -661,9 +661,21 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("cargo check --locked -p rspice-wasm --target wasm32-unknown-unknown", workflow)
         self.assertIn("cargo check --locked -p rspice-ui --target wasm32-unknown-unknown", workflow)
         self.assertIn(
+            "cargo check --locked -p rspice-ui --bin rspice-ui-worker --features browser-worker --target wasm32-unknown-unknown",
+            workflow,
+        )
+        self.assertIn(
             "cargo build --locked -p rspice-wasm --lib --target wasm32-unknown-unknown --release",
             workflow,
         )
+        self.assertIn(
+            "cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui --target wasm32-unknown-unknown",
+            workflow,
+        )
+        self.assertIn("--bin rspice-ui-worker --features browser-worker", workflow)
+        self.assertIn("tools/ci/check_wasm_artifact_size.py", workflow)
+        self.assertIn("--max-raw 67108864", workflow)
+        self.assertIn("--max-raw 25165824", workflow)
         self.assertGreaterEqual(
             workflow.count("RUSTFLAGS: -D warnings"),
             2,
