@@ -422,7 +422,9 @@ pub(super) fn parse_four_command(
         if matches!(stream.peek().kind, TokenKind::Ident(_)) {
             // Probe specs like V(out) span several tokens; reuse the .MEAS
             // signal parser so the node is not silently dropped.
-            outputs.push(super::commands::parse_meas_signal(stream, line_num)?);
+            outputs.push(super::commands::parse_meas_signal(
+                stream, line_num, params,
+            )?);
         } else {
             break;
         }

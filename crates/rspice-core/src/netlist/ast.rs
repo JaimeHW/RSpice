@@ -2661,6 +2661,10 @@ pub struct SimulationOptions {
     /// records to per-measure files instead of the aggregate measurement
     /// file. Xyce enables this by default.
     pub measure_use_cont_files: Option<bool>,
+    /// Xyce `.OPTIONS MEASURE USE_LTTM`: select the pre-7.5 legacy
+    /// RiseFallDelay implementation for non-continuous transient TRIG/TARG
+    /// measurements. Xyce disables this compatibility mode by default.
+    pub measure_use_lttm: Option<bool>,
     /// Xyce `.OPTIONS OUTPUT SNAPSHOTS`: replace each transient print list
     /// with every solved node voltage and MNA branch-current variable.
     ///
@@ -2816,6 +2820,11 @@ impl SimulationOptions {
         self.measure_use_cont_files.unwrap_or(true)
     }
 
+    /// Effective Xyce legacy TRIG/TARG compatibility policy.
+    pub fn measure_use_lttm(&self) -> bool {
+        self.measure_use_lttm.unwrap_or(false)
+    }
+
     /// Merge another options set, preferring values from `other`
     pub fn merge(&mut self, other: &SimulationOptions) {
         if other.replace_ground.is_some() {
@@ -2835,6 +2844,9 @@ impl SimulationOptions {
         }
         if other.measure_use_cont_files.is_some() {
             self.measure_use_cont_files = other.measure_use_cont_files;
+        }
+        if other.measure_use_lttm.is_some() {
+            self.measure_use_lttm = other.measure_use_lttm;
         }
         if other.output_snapshots.is_some() {
             self.output_snapshots = other.output_snapshots;

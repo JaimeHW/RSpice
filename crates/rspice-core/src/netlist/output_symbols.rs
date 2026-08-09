@@ -236,11 +236,18 @@ impl OutputRequest {
         origin: NetlistSourceLocation,
         authored_source: &str,
     ) -> Self {
-        let mut sources = Vec::<&str>::new();
+        let mut sources = Vec::new();
         collect_measure_sources(statement, &mut sources);
         let mut dependencies = Vec::new();
         for source in sources {
-            dependencies.extend(extract_output_dependencies(source));
+            let (source, expression_context) = match source {
+                MeasureDependencySource::Direct(source) => (source, false),
+                MeasureDependencySource::Expression(source) => (source, true),
+            };
+            dependencies.extend(extract_output_dependencies_with_context(
+                source,
+                expression_context,
+            ));
         }
         let dependencies = retain_authored_dependency_spelling(
             dependencies,
@@ -278,11 +285,26 @@ impl OutputRequest {
     }
 }
 
+/// Canonical current-projection output operators supported by Xyce.
+pub(crate) fn is_current_projection_accessor(operator: &str) -> bool {
+    matches!(operator, "I" | "IR" | "II" | "IM" | "IP" | "IDB")
+}
+
+/// Xyce's device-lead syntax is `I?`, where `?` is an arbitrary one-byte
+/// terminal designator (`ID`, `IT`, `I1`, and so on). The caller must already
+/// have canonicalized the operator.
+pub(crate) fn is_device_lead_current_accessor(operator: &str) -> bool {
+    operator.len() == 2 && operator.starts_with('I')
+}
+
+/// Direct/raw Xyce current-output grammar. Expression callers must reserve
+/// builtin function names such as `IF` using their expression context.
+pub(crate) fn is_current_output_accessor(operator: &str) -> bool {
+    is_current_projection_accessor(operator) || is_device_lead_current_accessor(operator)
+}
+
 fn is_transient_device_current_operator(operator: &str) -> bool {
-    matches!(
-        operator,
-        "I" | "IR" | "II" | "IM" | "IP" | "IDB" | "P" | "W"
-    )
+    matches!(operator, "P" | "W") || is_current_output_accessor(operator)
 }
 
 fn retain_authored_dependency_spelling(
@@ -1091,6 +1113,13 @@ fn hierarchy_pattern_matches(pattern: &str, candidate: &str) -> bool {
 /// Unknown operators are deliberately excluded: operator support and symbol
 /// existence are independent diagnostics.
 pub(crate) fn extract_output_dependencies(source: &str) -> Vec<OutputSymbolDependency> {
+    extract_output_dependencies_with_context(source, false)
+}
+
+fn extract_output_dependencies_with_context(
+    source: &str,
+    inherited_expression_context: bool,
+) -> Vec<OutputSymbolDependency> {
     let bytes = source.as_bytes();
     // Determine expression membership once for the whole source. The previous
     // implementation rescanned `source[..operator_start]` for every accessor,
@@ -1136,6 +1165,12 @@ pub(crate) fn extract_output_dependencies(source: &str) -> Vec<OutputSymbolDepen
         };
         let args = split_top_level_args(&source[open + 1..close]);
         let first_new_dependency = dependencies.len();
+        let expression = inherited_expression_context || expression_context[operator_start];
+        // `IF(device)` is a valid direct Xyce lead-current request, while
+        // `IF(condition, then, else)` inside an authored expression is the
+        // expression builtin and must be traversed recursively.
+        let current_accessor =
+            is_current_output_accessor(&operator) && !(expression && operator.as_str() == "IF");
         match operator.as_str() {
             "V" | "VR" | "VI" | "VM" | "VP" | "VDB" => {
                 for arg in args.into_iter().take(2) {
@@ -1147,14 +1182,18 @@ pub(crate) fn extract_output_dependencies(source: &str) -> Vec<OutputSymbolDepen
                     push_dependency(&mut dependencies, &operator, arg, OutputSymbolKind::Node);
                 }
             }
-            "I" | "IR" | "II" | "IM" | "IP" | "IDB" | "DNO" | "DNI" | "P" | "W" => {
+            "DNO" | "DNI" | "P" | "W" => {
+                if let Some(arg) = args.first() {
+                    push_dependency(&mut dependencies, &operator, arg, OutputSymbolKind::Device);
+                }
+            }
+            _ if current_accessor => {
                 if let Some(arg) = args.first() {
                     push_dependency(&mut dependencies, &operator, arg, OutputSymbolKind::Device);
                 }
             }
             _ => {}
         }
-        let expression = expression_context[operator_start];
         for dependency in &mut dependencies[first_new_dependency..] {
             dependency.expression = expression;
         }
@@ -1162,24 +1201,13 @@ pub(crate) fn extract_output_dependencies(source: &str) -> Vec<OutputSymbolDepen
         // ordinary arithmetic functions retain their circuit dependencies.
         if !matches!(
             operator.as_str(),
-            "V" | "VR"
-                | "VI"
-                | "VM"
-                | "VP"
-                | "VDB"
-                | "N"
-                | "I"
-                | "IR"
-                | "II"
-                | "IM"
-                | "IP"
-                | "IDB"
-                | "DNO"
-                | "DNI"
-                | "P"
-                | "W"
-        ) {
-            dependencies.extend(extract_output_dependencies(&source[open + 1..close]));
+            "V" | "VR" | "VI" | "VM" | "VP" | "VDB" | "N" | "DNO" | "DNI" | "P" | "W"
+        ) && !current_accessor
+        {
+            dependencies.extend(extract_output_dependencies_with_context(
+                &source[open + 1..close],
+                expression,
+            ));
         }
         index = close + 1;
     }
@@ -1192,20 +1220,30 @@ fn push_dependency(
     symbol: &str,
     kind: OutputSymbolKind,
 ) {
-    let compact;
-    let symbol = if symbol.chars().any(char::is_whitespace) {
-        compact = symbol
-            .chars()
-            .filter(|ch| !ch.is_whitespace())
-            .collect::<String>();
-        compact.as_str()
+    // Whitespace around hierarchy separators and wildcards is lexical, not
+    // part of a circuit symbol. Xyce's legacy `I(YDEVICE BRANCH)` spelling is
+    // the sole exception: its two tokens form one logical branch-current name.
+    let authored = symbol.trim();
+    let mut parts = authored.split_whitespace();
+    let first = parts.next();
+    let second = parts.next();
+    let preserve_legacy_branch = operator == "I"
+        && first.is_some()
+        && second.is_some_and(|part| part.eq_ignore_ascii_case("BRANCH"))
+        && parts.next().is_none();
+    let symbol = if preserve_legacy_branch {
+        format!(
+            "{} {}",
+            first.expect("checked above"),
+            second.expect("checked above")
+        )
     } else {
-        symbol.trim()
+        authored.split_whitespace().collect::<String>()
     };
     if !symbol.is_empty() {
         dependencies.push(OutputSymbolDependency {
             operator: operator.to_string(),
-            symbol: symbol.to_string(),
+            symbol,
             kind,
             expression: false,
         });
@@ -1272,19 +1310,31 @@ fn is_symbol_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || matches!(ch, '_' | '$' | '.' | ':' | '!' | '*' | '?')
 }
 
-fn collect_measure_sources<'a>(statement: &'a MeasureStatement, output: &mut Vec<&'a str>) {
+#[derive(Clone, Copy)]
+enum MeasureDependencySource<'a> {
+    Direct(&'a str),
+    Expression(&'a str),
+}
+
+fn collect_measure_sources<'a>(
+    statement: &'a MeasureStatement,
+    output: &mut Vec<MeasureDependencySource<'a>>,
+) {
     use crate::netlist::measure::{MeasureOperand, MeasureType, TriggerEvent};
 
     fn condition<'a>(
         condition: &'a crate::netlist::measure::WhenCondition,
-        output: &mut Vec<&'a str>,
+        output: &mut Vec<MeasureDependencySource<'a>>,
     ) {
-        output.push(condition.left.as_str());
+        output.push(MeasureDependencySource::Direct(condition.left.as_str()));
         if let MeasureOperand::Waveform(source) = &condition.right {
-            output.push(source.as_str());
+            output.push(MeasureDependencySource::Direct(source.as_str()));
         }
     }
-    fn trigger<'a>(trigger: &'a crate::netlist::measure::TrigSpec, output: &mut Vec<&'a str>) {
+    fn trigger<'a>(
+        trigger: &'a crate::netlist::measure::TrigSpec,
+        output: &mut Vec<MeasureDependencySource<'a>>,
+    ) {
         if let TriggerEvent::When(when) = &trigger.event {
             condition(when, output);
         }
@@ -1295,7 +1345,7 @@ fn collect_measure_sources<'a>(statement: &'a MeasureStatement, output: &mut Vec
             trigger(targ, output);
         }
         MeasureType::Find { signal, when, .. } | MeasureType::Derivative { signal, when, .. } => {
-            output.push(signal);
+            output.push(MeasureDependencySource::Direct(signal));
             if let Some(when) = when {
                 condition(when, output);
             }
@@ -1303,16 +1353,23 @@ fn collect_measure_sources<'a>(statement: &'a MeasureStatement, output: &mut Vec
         MeasureType::When {
             condition: when, ..
         } => condition(when, output),
-        MeasureType::Param { expression } | MeasureType::Equation { expression, .. } => {
-            output.push(expression)
-        }
+        MeasureType::Param { expression } | MeasureType::Equation { expression, .. } => output
+            .push(match expression.kind {
+                crate::netlist::measure::MeasureExpressionKind::Expression => {
+                    MeasureDependencySource::Expression(&expression.text)
+                }
+                crate::netlist::measure::MeasureExpressionKind::RawReference
+                | crate::netlist::measure::MeasureExpressionKind::RawOutputOperator => {
+                    MeasureDependencySource::Direct(&expression.text)
+                }
+            }),
         MeasureType::ErrorFunction {
             measured,
             comparison,
             ..
         } => {
-            output.push(measured);
-            output.push(comparison);
+            output.push(MeasureDependencySource::Direct(measured));
+            output.push(MeasureDependencySource::Direct(comparison));
         }
         MeasureType::FileError { signal, .. }
         | MeasureType::Min { signal, .. }
@@ -1322,7 +1379,7 @@ fn collect_measure_sources<'a>(statement: &'a MeasureStatement, output: &mut Vec
         | MeasureType::Rms { signal, .. }
         | MeasureType::RiseTime { signal, .. }
         | MeasureType::FallTime { signal, .. }
-        | MeasureType::Integ { signal, .. } => output.push(signal),
+        | MeasureType::Integ { signal, .. } => output.push(MeasureDependencySource::Direct(signal)),
     }
 }
 
@@ -1448,6 +1505,86 @@ mod tests {
                 ("DNO", "X6:R6", OutputSymbolKind::Device),
                 ("DNI", "X7:R7", OutputSymbolKind::Device),
             ]
+        );
+    }
+
+    #[test]
+    fn direct_current_accessors_accept_arbitrary_leads_without_capturing_expression_builtins() {
+        for operator in [
+            "I", "IR", "II", "IM", "IP", "IDB", "ID", "IG", "IS", "IB", "IC", "IE", "IA", "IT",
+            "I1", "IF",
+        ] {
+            assert!(is_current_output_accessor(operator), "{operator}");
+        }
+        for function in ["IMG", "INT"] {
+            assert!(!is_current_output_accessor(function), "{function}");
+        }
+
+        let dependencies =
+            extract_output_dependencies("IA(XA) I1(X1) IF(XF) {IF(V(A), IMG(V(B)), INT(V(C)))}");
+        assert_eq!(
+            dependencies
+                .iter()
+                .map(|dependency| (
+                    dependency.operator.as_str(),
+                    dependency.symbol.as_str(),
+                    dependency.kind,
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("IA", "XA", OutputSymbolKind::Device),
+                ("I1", "X1", OutputSymbolKind::Device),
+                ("IF", "XF", OutputSymbolKind::Device),
+                ("V", "A", OutputSymbolKind::Node),
+                ("V", "B", OutputSymbolKind::Node),
+                ("V", "C", OutputSymbolKind::Node),
+            ]
+        );
+    }
+
+    #[test]
+    fn parsed_measure_expressions_preserve_builtin_context_in_output_requests() {
+        let netlist = Netlist::parse_with_options(
+            "typed expression dependencies\n\
+             V1 out 0 0\n\
+             .TRAN 1 1\n\
+             .MEASURE TRAN collision EQN {IF(V(out)>0,INT(V(out)),IMG(V(out)))}\n\
+             .END\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("typed expression measure parses");
+        let request = netlist
+            .output_requests
+            .iter()
+            .find(|request| {
+                request
+                    .name
+                    .as_deref()
+                    .is_some_and(|name| name.eq_ignore_ascii_case("collision"))
+            })
+            .expect("measure output request retained");
+        assert!(request.dependencies.iter().any(|dependency| {
+            dependency.operator == "V"
+                && dependency.symbol.eq_ignore_ascii_case("out")
+                && dependency.kind == OutputSymbolKind::Node
+        }));
+        assert!(request.dependencies.iter().all(|dependency| {
+            !(dependency.operator == "IF" && dependency.kind == OutputSymbolKind::Device)
+        }));
+    }
+
+    #[test]
+    fn dependency_symbols_compact_lexical_whitespace_except_legacy_branch_names() {
+        let dependencies = extract_output_dependencies("V(XTOP. *) I(XTOP:R ?) I(YDEVICE BRANCH)");
+        assert_eq!(
+            dependencies
+                .iter()
+                .map(|dependency| dependency.symbol.as_str())
+                .collect::<Vec<_>>(),
+            vec!["XTOP.*", "XTOP:R?", "YDEVICE BRANCH"]
         );
     }
 
@@ -2044,7 +2181,7 @@ mod tests {
         else {
             panic!("expected PARAM measurement");
         };
-        assert_eq!(expression, "{V(0)+V(0)}");
+        assert_eq!(expression.text, "{V(0)+V(0)}");
         let outputs = netlist
             .analyses
             .iter()

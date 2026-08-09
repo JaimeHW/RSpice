@@ -193,6 +193,14 @@ pub struct TrigSpec {
     /// Optional numeric-axis lower bound. Xyce copies an explicitly supplied
     /// TRIG TD to TARG when TARG omits TD.
     pub td: Option<Value>,
+    /// Fraction of the dynamically observed maximum used as the crossing
+    /// level by Xyce's legacy transient RiseFallDelay implementation.
+    pub frac_max: Option<Value>,
+    /// Whether the deck explicitly authored RISE/FALL/CROSS. Xyce's delay
+    /// detector leaves the RFC-count window unrestricted when the qualifier
+    /// is omitted; that is observably different from explicit `CROSS=1` for
+    /// raw IEEE NaN history.
+    pub occurrence_explicit: bool,
 }
 
 impl TrigSpec {
@@ -207,8 +215,59 @@ impl TrigSpec {
                 },
             }),
             td: None,
+            frac_max: None,
+            occurrence_explicit: false,
         }
     }
+}
+
+/// Authored scalar source for Xyce `PARAM`/`EQN` measures.
+///
+/// Xyce routes bare parameter/measurement references and most unbraced output
+/// operators through raw `Op` getters, preserving their IEEE values.  These
+/// two forms remain distinct because an output operator is a direct circuit
+/// lookup (and may contain syntax that is not a generic expression), whereas a
+/// bare reference first addresses the live measurement namespace.  Braced and
+/// quoted forms route through `ExpressionOp`, whose root applies
+/// `fixNan`/`fixInf`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeasureExpression {
+    pub text: String,
+    pub kind: MeasureExpressionKind,
+}
+
+impl MeasureExpression {
+    pub fn raw_reference(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            kind: MeasureExpressionKind::RawReference,
+        }
+    }
+
+    pub fn raw_output_operator(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            kind: MeasureExpressionKind::RawOutputOperator,
+        }
+    }
+
+    pub fn expression(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            kind: MeasureExpressionKind::Expression,
+        }
+    }
+
+    pub fn is_expression(&self) -> bool {
+        self.kind == MeasureExpressionKind::Expression
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MeasureExpressionKind {
+    RawReference,
+    RawOutputOperator,
+    Expression,
 }
 
 /// Type of measurement to perform
@@ -219,6 +278,10 @@ pub enum MeasureType {
     Delay {
         trig: TrigSpec,
         targ: TrigSpec,
+        /// Global legacy RiseFallDelay measurement window. Modern TrigTarg
+        /// accepts the syntax but does not apply it to WHEN clauses.
+        from: Option<Value>,
+        to: Option<Value>,
         minval: Value,
     },
 
@@ -259,14 +322,14 @@ pub enum MeasureType {
 
     /// Expression over previously evaluated measurement results
     /// .MEAS TRAN name PARAM='expr'
-    Param { expression: String },
+    Param { expression: MeasureExpression },
 
     /// Xyce continuous equation measure. `PARAM` and `EQN` are aliases in
     /// Xyce mode: the expression is evaluated at every accepted analysis
     /// point and its current value can be consumed by later equation measures
     /// and output probes.
     Equation {
-        expression: String,
+        expression: MeasureExpression,
         from: Option<Value>,
         to: Option<Value>,
         td: Option<Value>,
@@ -437,7 +500,7 @@ impl MeasureStatement {
             }
             MeasureType::When { condition, .. } => rewrite_condition(condition, policy),
             MeasureType::Param { expression } | MeasureType::Equation { expression, .. } => {
-                rewrite(expression, policy);
+                rewrite(&mut expression.text, policy);
             }
             MeasureType::ErrorFunction {
                 measured,

@@ -1165,6 +1165,31 @@ pub(super) fn parse_options_command(
                 }
                 options.measure_use_cont_files = Some(value.trunc() != 0.0);
             }
+            (Some("MEASURE"), "USE_LTTM") => {
+                let value = expect_value(stream, line_num, params)?;
+                if !value.is_finite() {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!("MEASURE.USE_LTTM must be finite, found {value}"),
+                    });
+                }
+                options.measure_use_lttm = Some(match value.trunc() {
+                    0.0 => false,
+                    1.0 => true,
+                    _ => {
+                        let message = format!(
+                            "MEASURE.USE_LTTM expects 0 or 1; defaulting invalid value {value} to 1"
+                        );
+                        log::warn!("line {line_num}: {message}");
+                        diagnostics.push(ParseDiagnostic::warning(
+                            line_num,
+                            "invalid-option-defaulted",
+                            message,
+                        ));
+                        true
+                    }
+                });
+            }
             (Some("MEASURE"), _) => {
                 let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
                 ignore_unknown_option(
@@ -1981,7 +2006,7 @@ fn parse_fft_command(
             FftOutput::Expression(expression)
         }
         TokenKind::Ident(_) => {
-            let probe = parse_meas_signal(stream, line_num)?;
+            let probe = parse_meas_signal(stream, line_num, params)?;
             validate_fft_probe(&probe, line_num)?;
             FftOutput::Probe(probe)
         }
@@ -2122,7 +2147,8 @@ fn validate_fft_probe(probe: &str, line_num: usize) -> Result<(), ParseError> {
         });
     }
     let operator = operator.to_ascii_uppercase();
-    let allowed = operator.starts_with('I') || matches!(operator.as_str(), "V" | "P" | "W" | "N");
+    let allowed = crate::netlist::is_current_output_accessor(&operator)
+        || matches!(operator.as_str(), "V" | "P" | "W" | "N");
     if !allowed {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -2223,11 +2249,17 @@ fn non_finite_fft_qualifier(line_num: usize, key: &str, value: Value) -> ParseEr
 pub(super) fn parse_meas_signal(
     stream: &mut TokenStream,
     line_num: usize,
+    params: &ParamContext,
 ) -> Result<String, ParseError> {
-    if let TokenKind::Expression(expression) = &stream.peek().kind {
-        let expression = format!("{{{expression}}}");
-        stream.advance();
+    if let Some(expression) = parse_measure_expression_operand(stream, line_num)? {
         return Ok(expression);
+    }
+    if params.expression_dialect() == crate::config::ExpressionDialect::Xyce
+        && let TokenKind::Ident(name) = &stream.peek().kind
+        && matches!(stream.peek_n(1).kind, TokenKind::LParen)
+        && is_xyce_measure_output_operator(name)
+    {
+        return parse_xyce_measure_raw_output_operator(stream, line_num);
     }
     let mut signal = expect_ident(stream, line_num)?;
 
@@ -2236,7 +2268,7 @@ pub(super) fn parse_meas_signal(
         loop {
             let arg = match &stream.peek().kind {
                 TokenKind::Ident(s) => s.clone(),
-                TokenKind::Number(v) => format!("{}", v),
+                TokenKind::Number(_) => stream.peek().lexeme.clone(),
                 _ => {
                     return Err(ParseError::Syntax {
                         line: line_num,
@@ -2251,6 +2283,18 @@ pub(super) fn parse_meas_signal(
             if stream.consume(&TokenKind::Comma) {
                 continue;
             }
+            // The generic dialect also accepts Xyce's established
+            // `I(YDEVICE BRANCH)` branch-current spelling, but it retains the
+            // generic parser's canonical identifier casing. Raw authored
+            // lexemes remain an explicitly Xyce-dialect behavior above.
+            if signal == "I"
+                && args.len() == 1
+                && matches!(&stream.peek().kind, TokenKind::Ident(part) if part == "BRANCH")
+            {
+                args[0].push(' ');
+                args[0].push_str("BRANCH");
+                stream.advance();
+            }
             if stream.consume(&TokenKind::RParen) {
                 break;
             }
@@ -2264,6 +2308,57 @@ pub(super) fn parse_meas_signal(
     }
 
     Ok(signal)
+}
+
+fn measure_expression_operand_ahead(stream: &TokenStream) -> bool {
+    matches!(
+        stream.peek().kind,
+        TokenKind::Expression(_) | TokenKind::StringLit(_)
+    ) || matches!(&stream.peek().kind, TokenKind::Ident(name) if name.eq_ignore_ascii_case("PAR"))
+        && matches!(stream.peek_n(1).kind, TokenKind::LParen)
+        || matches!(stream.peek().kind, TokenKind::LParen)
+            && matches!(
+                stream.peek_n(1).kind,
+                TokenKind::Expression(_) | TokenKind::StringLit(_)
+            )
+}
+
+fn parse_measure_expression_operand(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<Option<String>, ParseError> {
+    if !measure_expression_operand_ahead(stream) {
+        return Ok(None);
+    }
+    let wrapped =
+        matches!(&stream.peek().kind, TokenKind::Ident(name) if name.eq_ignore_ascii_case("PAR"));
+    let parenthesized = wrapped || matches!(stream.peek().kind, TokenKind::LParen);
+    if wrapped {
+        stream.advance();
+    }
+    if parenthesized {
+        stream.advance();
+    }
+    let expression = match &stream.peek().kind {
+        TokenKind::Expression(expression) | TokenKind::StringLit(expression) => {
+            let expression = expression.clone();
+            stream.advance();
+            expression
+        }
+        _ => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: "Expected quoted or braced expression in .MEAS operand".to_string(),
+            });
+        }
+    };
+    if parenthesized && !stream.consume(&TokenKind::RParen) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "Expected ')' after .MEAS expression operand".to_string(),
+        });
+    }
+    Ok(Some(format!("{{{expression}}}")))
 }
 
 /// Parse .MEAS/.MEASURE statement
@@ -2334,7 +2429,8 @@ pub(super) fn parse_meas_command(
     // Create the measurement type based on keyword
     let measure_type = match measure_type_key.as_str() {
         "TRIG" => {
-            let trig = parse_meas_delay_spec(stream, line_num, params, "TRIG", true)?;
+            let mut window = (None, None);
+            let trig = parse_meas_delay_spec(stream, line_num, params, "TRIG", true, &mut window)?;
             let targ_keyword = expect_ident(stream, line_num)?;
             if !targ_keyword.eq_ignore_ascii_case("TARG") {
                 return Err(ParseError::Syntax {
@@ -2345,8 +2441,15 @@ pub(super) fn parse_meas_command(
                     ),
                 });
             }
-            let targ = parse_meas_delay_spec(stream, line_num, params, "TARG", false)?;
-            MeasureType::Delay { trig, targ, minval }
+            let targ = parse_meas_delay_spec(stream, line_num, params, "TARG", false, &mut window)?;
+            let (from, to) = window;
+            MeasureType::Delay {
+                trig,
+                targ,
+                from,
+                to,
+                minval,
+            }
         }
         "PARAM" | "EQN" => {
             // .MEAS <an> name PARAM='expr' — an expression over previously
@@ -2356,15 +2459,69 @@ pub(super) fn parse_meas_command(
                 TokenKind::Expression(expr) => {
                     let expr = expr.clone();
                     stream.advance();
-                    expr
+                    crate::netlist::measure::MeasureExpression::expression(expr)
                 }
                 TokenKind::StringLit(expr) => {
                     let expr = expr.clone();
                     stream.advance();
-                    expr
+                    crate::netlist::measure::MeasureExpression::expression(expr)
                 }
-                _ if params.expression_dialect() == crate::config::ExpressionDialect::Xyce => {
-                    collect_measure_equation_expression(stream, line_num)?
+                TokenKind::Number(_) | TokenKind::Plus | TokenKind::Minus
+                    if (measure_type_key == "EQN"
+                        || params.expression_dialect()
+                            == crate::config::ExpressionDialect::Xyce)
+                        && measure_equation_literal_ends_at_next_token(stream) =>
+                {
+                    let mut literal = String::new();
+                    if matches!(stream.peek().kind, TokenKind::Plus | TokenKind::Minus) {
+                        literal.push_str(&stream.peek().lexeme);
+                        stream.advance();
+                    }
+                    literal.push_str(&stream.peek().lexeme);
+                    stream.advance();
+                    crate::netlist::measure::MeasureExpression::expression(literal)
+                }
+                TokenKind::Ident(operator)
+                    if (measure_type_key == "EQN"
+                        || params.expression_dialect()
+                            == crate::config::ExpressionDialect::Xyce)
+                        && matches!(stream.peek_n(1).kind, TokenKind::LParen)
+                        && is_xyce_measure_output_operator(operator) =>
+                {
+                    let operator = parse_xyce_measure_raw_output_operator(stream, line_num)?;
+                    // Xyce extracts the first output operator as the EQN/PARAM
+                    // operand.  Adjacent arithmetic fields are not folded into
+                    // an implicit expression; authored arithmetic requires
+                    // braces or quotes.
+                    discard_xyce_measure_output_operator_arithmetic(stream);
+                    if is_xyce_measure_raw_output_operator(
+                        operator.split_once('(').map_or("", |(name, _)| name),
+                    ) {
+                        crate::netlist::measure::MeasureExpression::raw_output_operator(operator)
+                    } else {
+                        // RF accessors are the source-level exception: MeasureBase
+                        // rebuilds them as an ExpressionOp even without braces.
+                        crate::netlist::measure::MeasureExpression::expression(operator)
+                    }
+                }
+                TokenKind::Ident(name)
+                    if (measure_type_key == "EQN"
+                        || params.expression_dialect()
+                            == crate::config::ExpressionDialect::Xyce)
+                        && measure_equation_raw_reference_ends_at_next_token(stream) =>
+                {
+                    let name = name.clone();
+                    stream.advance();
+                    crate::netlist::measure::MeasureExpression::raw_reference(name)
+                }
+                _ if measure_type_key == "EQN"
+                    || params.expression_dialect() == crate::config::ExpressionDialect::Xyce =>
+                {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: ".MEAS EQN/PARAM arithmetic expressions must be braced or quoted"
+                            .to_string(),
+                    });
                 }
                 other => {
                     return Err(ParseError::Syntax {
@@ -2411,7 +2568,7 @@ pub(super) fn parse_meas_command(
             }
         }
         "ERROR" => {
-            let signal = parse_meas_signal(stream, line_num)?;
+            let signal = parse_meas_signal(stream, line_num, params)?;
             let options = parse_measure_file_error_options(stream, line_num, params)?;
             MeasureType::FileError {
                 signal,
@@ -2423,7 +2580,7 @@ pub(super) fn parse_meas_command(
         }
         _ => {
             // Parse signal name - handle V(node), V(pos,neg), or just node
-            let signal = parse_meas_signal(stream, line_num)?;
+            let signal = parse_meas_signal(stream, line_num, params)?;
 
             match measure_type_key.as_str() {
                 "AVG" => {
@@ -2547,6 +2704,158 @@ pub(super) fn parse_meas_command(
     })
 }
 
+fn measure_equation_raw_reference_ends_at_next_token(stream: &TokenStream) -> bool {
+    match &stream.peek_n(1).kind {
+        TokenKind::Newline | TokenKind::Eof => true,
+        TokenKind::Ident(name) => crate::netlist::measure::XYCE_MEASURE_QUALIFIER_KEYWORDS
+            .iter()
+            .chain(crate::netlist::measure::XYCE_MEASURE_TYPE_KEYWORDS)
+            .any(|keyword| name.eq_ignore_ascii_case(keyword)),
+        _ => false,
+    }
+}
+
+fn measure_equation_literal_ends_at_next_token(stream: &TokenStream) -> bool {
+    let number_offset = usize::from(matches!(
+        stream.peek().kind,
+        TokenKind::Plus | TokenKind::Minus
+    ));
+    matches!(stream.peek_n(number_offset).kind, TokenKind::Number(_))
+        && match &stream.peek_n(number_offset + 1).kind {
+            TokenKind::Newline | TokenKind::Eof => true,
+            TokenKind::Ident(name) => crate::netlist::measure::XYCE_MEASURE_QUALIFIER_KEYWORDS
+                .iter()
+                .chain(crate::netlist::measure::XYCE_MEASURE_TYPE_KEYWORDS)
+                .any(|keyword| name.eq_ignore_ascii_case(keyword)),
+            _ => false,
+        }
+}
+
+fn is_xyce_measure_output_operator(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    let first = upper.as_bytes().first().copied();
+    matches!(upper.as_str(), "N" | "P" | "W")
+        || crate::netlist::is_current_output_accessor(&upper)
+        || (matches!(first, Some(b'V' | b'S' | b'Y' | b'Z')) && upper.len() <= 3)
+        || (first == Some(b'D') && upper.len() == 3)
+}
+
+fn is_xyce_measure_raw_output_operator(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    matches!(upper.as_str(), "N" | "P" | "W" | "DNO" | "DNI")
+        || crate::netlist::is_current_output_accessor(&upper)
+        || matches!(upper.as_str(), "V" | "VR" | "VI" | "VM" | "VP" | "VDB")
+}
+
+fn discard_xyce_measure_output_operator_arithmetic(stream: &mut TokenStream) {
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        if matches!(&stream.peek().kind, TokenKind::Ident(name)
+            if crate::netlist::measure::XYCE_MEASURE_QUALIFIER_KEYWORDS
+                .iter()
+                .chain(crate::netlist::measure::XYCE_MEASURE_TYPE_KEYWORDS)
+                .any(|keyword| name.eq_ignore_ascii_case(keyword)))
+        {
+            break;
+        }
+        // Stop at an identifier instead of hiding a second operand or a typo.
+        // Xyce's ignored tail in this grammar is the adjacent arithmetic field.
+        if matches!(stream.peek().kind, TokenKind::Ident(_)) {
+            break;
+        }
+        stream.advance();
+    }
+}
+
+fn parse_xyce_measure_raw_output_operator(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<String, ParseError> {
+    let name = expect_ident(stream, line_num)?;
+    if !is_xyce_measure_output_operator(&name) || !stream.consume(&TokenKind::LParen) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "Expected a Xyce .MEAS output operator".to_string(),
+        });
+    }
+    let mut arguments = Vec::new();
+    loop {
+        let token = stream.peek().clone();
+        match token.kind {
+            TokenKind::Ident(_) | TokenKind::Number(_) => {
+                arguments.push(token.lexeme);
+                stream.advance();
+            }
+            _ => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("Invalid argument in .MEAS output operator '{name}'"),
+                });
+            }
+        }
+        if stream.consume(&TokenKind::Comma) {
+            continue;
+        }
+        // Xyce accepts the legacy branch-current spelling I(YSOMETHING NAME)
+        // and stores the two whitespace-separated tokens as one branch name.
+        if crate::netlist::is_current_output_accessor(&name.to_ascii_uppercase())
+            && arguments.len() == 1
+            && matches!(stream.peek().kind, TokenKind::Ident(_))
+        {
+            let token = stream.peek().clone();
+            arguments[0].push(' ');
+            arguments[0].push_str(&token.lexeme);
+            stream.advance();
+        }
+        if stream.consume(&TokenKind::RParen) {
+            break;
+        }
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("Expected closing parenthesis for .MEAS output operator '{name}'"),
+        });
+    }
+    let operator = format!("{name}({})", arguments.join(","));
+    validate_xyce_measure_output_operator(&operator, line_num)?;
+    Ok(operator)
+}
+
+fn validate_xyce_measure_output_operator(
+    operator: &str,
+    line_num: usize,
+) -> Result<(), ParseError> {
+    let Some((name, arguments)) = operator.split_once('(').and_then(|(name, arguments)| {
+        arguments
+            .strip_suffix(')')
+            .map(|arguments| (name, arguments))
+    }) else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("Malformed .MEAS output operator '{operator}'"),
+        });
+    };
+    let arity = if arguments.is_empty() {
+        0
+    } else {
+        arguments.split(',').count()
+    };
+    let upper = name.to_ascii_uppercase();
+    let valid = match upper.as_bytes().first().copied() {
+        Some(b'V') => (1..=2).contains(&arity),
+        Some(b'D') => (1..=2).contains(&arity),
+        Some(b'S' | b'Y' | b'Z') => arity == 2,
+        Some(b'I') => arity == 1,
+        _ => matches!(upper.as_str(), "N" | "P" | "W") && arity == 1,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("Invalid argument count for .MEAS output operator '{operator}'"),
+        })
+    }
+}
+
 struct PointMeasureOptions {
     at: Option<Value>,
     when: Option<crate::netlist::measure::WhenCondition>,
@@ -2634,7 +2943,7 @@ fn parse_point_measure_options(
             }
             "WHEN" => {
                 stream.advance();
-                let left = parse_meas_signal(stream, line_num)?;
+                let left = parse_meas_signal(stream, line_num, params)?;
                 if !stream.consume(&TokenKind::Equals) {
                     return Err(ParseError::Syntax {
                         line: line_num,
@@ -2702,15 +3011,20 @@ fn parse_measure_when_operand(
 ) -> Result<crate::netlist::measure::MeasureOperand, ParseError> {
     use crate::netlist::measure::MeasureOperand;
 
+    if measure_expression_operand_ahead(stream) {
+        return Ok(MeasureOperand::Waveform(parse_meas_signal(
+            stream, line_num, params,
+        )?));
+    }
     match &stream.peek().kind {
         TokenKind::Expression(_) => Ok(MeasureOperand::Waveform(parse_meas_signal(
-            stream, line_num,
+            stream, line_num, params,
         )?)),
         TokenKind::Ident(_) if matches!(stream.peek_n(1).kind, TokenKind::LParen) => Ok(
-            MeasureOperand::Waveform(parse_meas_signal(stream, line_num)?),
+            MeasureOperand::Waveform(parse_meas_signal(stream, line_num, params)?),
         ),
         TokenKind::Ident(name) if params.get(name).is_none() => Ok(MeasureOperand::Waveform(
-            parse_meas_signal(stream, line_num)?,
+            parse_meas_signal(stream, line_num, params)?,
         )),
         _ => Ok(MeasureOperand::Constant(expect_value(
             stream, line_num, params,
@@ -2721,36 +3035,9 @@ fn parse_measure_when_operand(
 fn parse_measure_error_operand(
     stream: &mut TokenStream,
     line_num: usize,
-    _params: &ParamContext,
+    params: &ParamContext,
 ) -> Result<String, ParseError> {
-    if matches!(&stream.peek().kind, TokenKind::Ident(name) if name.eq_ignore_ascii_case("PAR"))
-        && matches!(stream.peek_n(1).kind, TokenKind::LParen)
-    {
-        stream.advance();
-        stream.advance();
-        let expression = match &stream.peek().kind {
-            TokenKind::StringLit(expression) | TokenKind::Expression(expression) => {
-                let expression = expression.clone();
-                stream.advance();
-                expression
-            }
-            _ => {
-                return Err(ParseError::Syntax {
-                    line: line_num,
-                    message: "Expected quoted or braced expression inside PAR(...) in .MEAS ERR"
-                        .to_string(),
-                });
-            }
-        };
-        if !stream.consume(&TokenKind::RParen) {
-            return Err(ParseError::Syntax {
-                line: line_num,
-                message: "Expected ')' after PAR expression in .MEAS ERR".to_string(),
-            });
-        }
-        return Ok(format!("{{{expression}}}"));
-    }
-    parse_meas_signal(stream, line_num)
+    parse_meas_signal(stream, line_num, params)
 }
 
 struct ErrorFunctionOptions {
@@ -3154,43 +3441,6 @@ fn parse_measure_name(stream: &mut TokenStream, line_num: usize) -> Result<Strin
     Ok(name.to_ascii_uppercase())
 }
 
-fn collect_measure_equation_expression(
-    stream: &mut TokenStream,
-    line_num: usize,
-) -> Result<String, ParseError> {
-    let mut expression = String::new();
-    let mut depth = 0usize;
-
-    loop {
-        let token = stream.peek().clone();
-        match &token.kind {
-            TokenKind::Newline | TokenKind::Eof => break,
-            TokenKind::Ident(name)
-                if depth == 0
-                    && crate::netlist::measure::XYCE_MEASURE_QUALIFIER_KEYWORDS
-                        .iter()
-                        .chain(crate::netlist::measure::XYCE_MEASURE_TYPE_KEYWORDS)
-                        .any(|keyword| name.eq_ignore_ascii_case(keyword)) =>
-            {
-                break;
-            }
-            TokenKind::LParen | TokenKind::LBracket => depth += 1,
-            TokenKind::RParen | TokenKind::RBracket => depth = depth.saturating_sub(1),
-            _ => {}
-        }
-        append_param_rhs_token(&mut expression, &token.kind, &token.lexeme);
-        stream.advance();
-    }
-
-    if expression.is_empty() {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: ".MEAS EQN expects an expression".to_string(),
-        });
-    }
-    Ok(expression)
-}
-
 /// Scan statement-wide Xyce measurement qualifiers without disturbing the
 /// type-specific parser. Xyce accepts these qualifiers in any order relative
 /// to measurement-specific qualifiers, and the last duplicate wins.
@@ -3303,6 +3553,7 @@ pub(super) fn parse_meas_delay_spec(
     params: &ParamContext,
     section_name: &str,
     stop_at_targ: bool,
+    window: &mut (Option<Value>, Option<Value>),
 ) -> Result<crate::netlist::measure::TrigSpec, ParseError> {
     use crate::netlist::measure::{
         EdgeType, EventOccurrence, TrigSpec, TriggerEvent, WhenCondition,
@@ -3315,9 +3566,23 @@ pub(super) fn parse_meas_delay_spec(
         stream.advance();
         TriggerEvent::At(expect_value(stream, line_num, params)?)
     } else {
-        let left = parse_meas_signal(stream, line_num)?;
+        let left = parse_meas_signal(stream, line_num, params)?;
         let right = if stream.consume(&TokenKind::Equals) {
             parse_measure_when_operand(stream, line_num, params)?
+        } else if matches!(
+            stream.peek().kind,
+            TokenKind::Number(_) | TokenKind::Expression(_) | TokenKind::Plus | TokenKind::Minus
+        ) || measure_expression_operand_ahead(stream)
+        {
+            // Legacy Xyce/HSpice TRIG/TARG syntax permits the target value as
+            // the next field without an intervening '=' or VAL keyword.
+            parse_measure_when_operand(stream, line_num, params)?
+        } else if matches!(&stream.peek().kind, TokenKind::Ident(keyword)
+            if keyword.eq_ignore_ascii_case("FRAC_MAX"))
+        {
+            // FRAC_MAX supplies the legacy detector's dynamic target after
+            // the waveform maximum is known.
+            crate::netlist::measure::MeasureOperand::Constant(0.0)
         } else {
             let keyword = expect_ident(stream, line_num)?;
             if !keyword.eq_ignore_ascii_case("VAL") || !stream.consume(&TokenKind::Equals) {
@@ -3336,7 +3601,12 @@ pub(super) fn parse_meas_delay_spec(
             occurrence: EventOccurrence::default(),
         })
     };
-    let mut spec = TrigSpec { event, td: None };
+    let mut spec = TrigSpec {
+        event,
+        td: None,
+        frac_max: None,
+        occurrence_explicit: false,
+    };
     let mut occurrence_given = false;
 
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
@@ -3367,6 +3637,47 @@ pub(super) fn parse_meas_delay_spec(
                 stream.advance();
                 let _optional_equals = stream.consume(&TokenKind::Equals);
                 spec.td = Some(expect_finite_measure_td(stream, line_num, params)?);
+            }
+            TokenKind::Ident(s)
+                if s.eq_ignore_ascii_case("FROM") || s.eq_ignore_ascii_case("TO") =>
+            {
+                let key = s.to_ascii_uppercase();
+                stream.advance();
+                let _optional_equals = stream.consume(&TokenKind::Equals);
+                let value = expect_value(stream, line_num, params)?;
+                if !value.is_finite() {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(".MEAS {key} must be finite, found {value}"),
+                    });
+                }
+                if key == "FROM" {
+                    window.0 = Some(value);
+                } else {
+                    window.1 = Some(value);
+                }
+            }
+            TokenKind::Ident(s) if s.eq_ignore_ascii_case("FRAC_MAX") => {
+                if spec.frac_max.is_some() {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "Duplicate FRAC_MAX option in .MEAS {section_name} specification"
+                        ),
+                    });
+                }
+                stream.advance();
+                let _optional_equals = stream.consume(&TokenKind::Equals);
+                let value = expect_value(stream, line_num, params)?;
+                if !value.is_finite() {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "FRAC_MAX must be finite in .MEAS {section_name} specification"
+                        ),
+                    });
+                }
+                spec.frac_max = Some(value);
             }
             TokenKind::Ident(s)
                 if s.eq_ignore_ascii_case("RISE")
@@ -3410,6 +3721,7 @@ pub(super) fn parse_meas_delay_spec(
                     number: parse_measure_event_occurrence(stream, line_num, params, &keyword)?,
                 };
                 occurrence_given = true;
+                spec.occurrence_explicit = true;
             }
             _ => {
                 return Err(ParseError::Syntax {
@@ -3440,21 +3752,22 @@ fn parse_measure_event_occurrence(
         return Ok(-1);
     }
     let value = expect_value(stream, line_num, params)?;
-    let rounded = value.round();
+    let truncated = value.trunc();
     if !value.is_finite()
-        || value == 0.0
-        || (value - rounded).abs() > 1e-12
-        || rounded < isize::MIN as crate::Value
-        || rounded > isize::MAX as crate::Value
+        || truncated < isize::MIN as crate::Value
+        || truncated > isize::MAX as crate::Value
     {
         return Err(ParseError::Syntax {
             line: line_num,
             message: format!(
-                "Expected a non-zero integer occurrence or LAST for {keyword} in .MEAS, found {value}"
+                "Expected a finite in-range occurrence or LAST for {keyword} in .MEAS, found {value}"
             ),
         });
     }
-    Ok(rounded as isize)
+    // Xyce stores the parsed numeric value with static_cast<int>, truncating
+    // toward zero. Zero is meaningful: scalar modern selectors take the
+    // first requested edge and continuous selectors emit from the start.
+    Ok(truncated as isize)
 }
 
 pub(super) fn parse_measure_range_options(
@@ -5000,8 +5313,8 @@ mod tests {
         let generic = Netlist::parse(tol_deck).expect("the generic SPICE dialect retains TOL");
         assert_eq!(generic.measurements[0].tolerance, Some(0.1));
 
-        let equation = Netlist::parse_with_options(
-            "VAL remains an equation identifier\n\
+        Netlist::parse_with_options(
+            "unbraced Xyce arithmetic is not an expression\n\
              V1 out 0 1\n\
              .param VAL=2\n\
              .tran 1n 2n\n\
@@ -5009,13 +5322,27 @@ mod tests {
              .end\n",
             xyce_options.clone(),
         )
-        .expect("VAL is special only inside TRIG/TARG syntax");
+        .expect_err("Xyce requires arithmetic EQN/PARAM expressions to be braced or quoted");
+        let equation = Netlist::parse_with_options(
+            "braced Xyce arithmetic\n\
+             V1 out 0 1\n\
+             .param VAL=2\n\
+             .tran 1n 2n\n\
+             .measure tran sample EQN {VAL+1}\n\
+             .end\n",
+            xyce_options.clone(),
+        )
+        .expect("braced arithmetic remains a Xyce ExpressionOp");
         let crate::netlist::measure::MeasureType::Equation { expression, .. } =
             &equation.measurements[0].measure_type
         else {
             panic!("expected an equation measurement");
         };
-        assert_eq!(expression, "VAL+1");
+        assert_eq!(expression.text, "VAL+1");
+        assert_eq!(
+            expression.kind,
+            crate::netlist::measure::MeasureExpressionKind::Expression
+        );
 
         Netlist::parse_with_options(
             "type marker cannot join equation text\n\
@@ -5026,6 +5353,161 @@ mod tests {
             xyce_options,
         )
         .expect_err("a second Xyce measure type must remain outside equation text");
+    }
+
+    #[test]
+    fn explicit_eqn_accepts_a_bare_measure_reference_in_generic_dialect() {
+        let netlist = Netlist::parse(
+            "explicit EQN selects Xyce equation grammar\n\
+             V1 out 0 1\n\
+             .tran 1n 2n\n\
+             .measure tran DMAX MAX V(out)\n\
+             .measure tran EQN1 EQN DMAX\n\
+             .measure tran EQN2 EQN {DMAX}\n\
+             .end\n",
+        )
+        .expect("an explicit EQN keyword accepts its unquoted expression");
+        let crate::netlist::measure::MeasureType::Equation { expression, .. } =
+            &netlist.measurements[1].measure_type
+        else {
+            panic!("explicit EQN must produce an equation measurement");
+        };
+        assert_eq!(expression.text, "DMAX");
+        assert_eq!(
+            expression.kind,
+            crate::netlist::measure::MeasureExpressionKind::RawReference
+        );
+        let crate::netlist::measure::MeasureType::Equation { expression, .. } =
+            &netlist.measurements[2].measure_type
+        else {
+            panic!("braced EQN must produce an equation measurement");
+        };
+        assert_eq!(expression.text, "DMAX");
+        assert_eq!(
+            expression.kind,
+            crate::netlist::measure::MeasureExpressionKind::Expression
+        );
+    }
+
+    #[test]
+    fn xyce_eqn_and_param_preserve_raw_output_operator_provenance() {
+        let netlist = Netlist::parse_with_options(
+            "raw Xyce measure output operators\n\
+             V1 1 0 AC 1\n\
+             .ac lin 2 1 2\n\
+             .measure ac raw_v EQN V(1,0) FROM=1 TO=2\n\
+             .measure ac raw_i EQN IP(V1)\n\
+             .measure ac raw_dno EQN DNO(M1,thermal)\n\
+             .measure ac raw_dni EQN DNI(M1)\n\
+             .measure ac raw_device EQN N(X1:M1:id)\n\
+             .measure ac raw_power EQN P(R1)\n\
+             .measure ac raw_watt EQN W(R1)\n\
+             .measure ac raw_network EQN SDB(1,2)\n\
+             .measure ac raw_param PARAM VDB(0) FROM=1\n\
+             .measure ac compound EQN VDB(0)+1\n\
+             .measure ac braced EQN {VDB(0)}\n\
+             .measure ac quoted PARAM='VDB(0)'\n\
+             .end\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("Xyce raw output-operator deck parses");
+
+        for (index, expected) in [
+            (0, "V(1,0)"),
+            (1, "IP(V1)"),
+            (2, "DNO(M1,thermal)"),
+            (3, "DNI(M1)"),
+            (4, "N(X1:M1:id)"),
+            (5, "P(R1)"),
+            (6, "W(R1)"),
+            (8, "VDB(0)"),
+            // Xyce extracts the first output operator and ignores the
+            // adjacent unbraced arithmetic field.
+            (9, "VDB(0)"),
+        ] {
+            let statement = &netlist.measurements[index];
+            let crate::netlist::measure::MeasureType::Equation { expression, .. } =
+                &statement.measure_type
+            else {
+                panic!("Xyce PARAM/EQN output operator must be an equation measure");
+            };
+            assert_eq!(expression.text, expected);
+            assert_eq!(
+                expression.kind,
+                crate::netlist::measure::MeasureExpressionKind::RawOutputOperator
+            );
+        }
+        let crate::netlist::measure::MeasureType::Equation { expression, .. } =
+            &netlist.measurements[7].measure_type
+        else {
+            panic!("RF output operator must be an equation measure");
+        };
+        assert_eq!(expression.text, "SDB(1,2)");
+        assert_eq!(
+            expression.kind,
+            crate::netlist::measure::MeasureExpressionKind::Expression
+        );
+        let crate::netlist::measure::MeasureType::Equation { from, to, .. } =
+            &netlist.measurements[0].measure_type
+        else {
+            unreachable!()
+        };
+        assert_eq!((*from, *to), (Some(1.0), Some(2.0)));
+        let crate::netlist::measure::MeasureType::Equation { from, .. } =
+            &netlist.measurements[8].measure_type
+        else {
+            unreachable!()
+        };
+        assert_eq!(*from, Some(1.0));
+
+        for statement in &netlist.measurements[10..] {
+            let crate::netlist::measure::MeasureType::Equation { expression, .. } =
+                &statement.measure_type
+            else {
+                panic!("braced/quoted Xyce PARAM/EQN must be equation measures");
+            };
+            assert_eq!(expression.text, "VDB(0)");
+            assert_eq!(
+                expression.kind,
+                crate::netlist::measure::MeasureExpressionKind::Expression
+            );
+        }
+    }
+
+    #[test]
+    fn xyce_raw_output_operator_preserves_legacy_current_and_numeric_lexemes() {
+        let netlist = Netlist::parse_with_options(
+            "raw Xyce operator spelling\n\
+             V1 1 0 1\n\
+             .tran 1 2\n\
+             .measure tran legacy EQN I(YPDE BRANCH)\n\
+             .measure tran numeric EQN V(2e3)\n\
+             .end\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("legacy and numeric raw operator spellings parse");
+        for (statement, expected) in netlist
+            .measurements
+            .iter()
+            .zip(["I(YPDE BRANCH)", "V(2e3)"])
+        {
+            let crate::netlist::measure::MeasureType::Equation { expression, .. } =
+                &statement.measure_type
+            else {
+                panic!("raw output operator must be an equation measure");
+            };
+            assert_eq!(expression.text, expected);
+            assert_eq!(
+                expression.kind,
+                crate::netlist::measure::MeasureExpressionKind::RawOutputOperator
+            );
+        }
     }
 
     #[test]

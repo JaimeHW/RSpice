@@ -58,8 +58,9 @@ pub use initcond::{
 };
 pub use mutual_inductor::validate_mutual_inductor_references;
 pub(crate) use output_symbols::{
-    InterfaceNodeAliases, canonical_symbol, collect_requested_interface_node_aliases,
-    collect_output_node_namespace_from_elements_with_abort,
+    InterfaceNodeAliases, canonical_symbol, collect_output_node_namespace_from_elements_with_abort,
+    collect_requested_interface_node_aliases, is_current_output_accessor,
+    is_device_lead_current_accessor,
 };
 pub use output_symbols::{
     OutputAnalysisKind, OutputDirectiveKind, OutputRequest, OutputSymbolDependency,
@@ -2822,6 +2823,41 @@ mod tests {
     }
 
     #[test]
+    fn measure_output_lexemes_follow_the_selected_expression_dialect() {
+        let source = "dialect-specific measurement output spelling\n\
+                      V1 out 0 AC 1\n\
+                      .ac dec 5 1 1k\n\
+                      .measure ac area integral vm(out) from=10 to=100\n\
+                      .end\n";
+        let generic = Netlist::parse(source).expect("generic measurement parses");
+        let xyce = Netlist::parse_with_options(
+            source,
+            NetlistParseOptions {
+                expression_dialect: ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("Xyce measurement parses");
+
+        let crate::netlist::measure::MeasureType::Integ {
+            signal: generic_signal,
+            ..
+        } = &generic.measurements[0].measure_type
+        else {
+            panic!("expected generic INTEG measurement");
+        };
+        let crate::netlist::measure::MeasureType::Integ {
+            signal: xyce_signal,
+            ..
+        } = &xyce.measurements[0].measure_type
+        else {
+            panic!("expected Xyce INTEG measurement");
+        };
+        assert_eq!(generic_signal, "VM(OUT)");
+        assert_eq!(xyce_signal, "VM(out)");
+    }
+
+    #[test]
     fn measurement_names_preserve_one_punctuated_source_field() {
         let netlist = Netlist::parse(
             "punctuated measurement names\n\
@@ -3020,6 +3056,228 @@ mod tests {
     }
 
     #[test]
+    fn legacy_delay_parses_bare_targets_and_structural_global_windows() {
+        let netlist = Netlist::parse(
+            "legacy trigger target syntax\n\
+             V1 FROM 0 0\n\
+             V2 TO 0 0\n\
+             .tran 1 10\n\
+             .measure tran delay TRIG V(FROM) 0.1 FROM=2 RISE=1 TARG V(TO) {0.2} TO=9 FALL=2\n\
+             .end\n",
+        )
+        .expect("legacy delay syntax parses without confusing node names for qualifiers");
+
+        let crate::netlist::measure::MeasureType::Delay {
+            trig,
+            targ,
+            from,
+            to,
+            ..
+        } = &netlist.measurements[0].measure_type
+        else {
+            panic!("expected delay measurement");
+        };
+        assert_eq!((*from, *to), (Some(2.0), Some(9.0)));
+        let crate::netlist::measure::TriggerEvent::When(trig) = &trig.event else {
+            panic!("expected conditional trigger");
+        };
+        assert_eq!(trig.left, "V(FROM)");
+        assert_eq!(
+            trig.right,
+            crate::netlist::measure::MeasureOperand::Constant(0.1)
+        );
+        let crate::netlist::measure::TriggerEvent::When(targ) = &targ.event else {
+            panic!("expected conditional target");
+        };
+        assert_eq!(targ.left, "V(TO)");
+        assert_eq!(
+            targ.right,
+            crate::netlist::measure::MeasureOperand::Waveform("{0.2}".to_string())
+        );
+    }
+
+    #[test]
+    fn measure_operands_share_expression_output_and_lexeme_parsing() {
+        let netlist = Netlist::parse(
+            "shared measurement operands\n\
+             V1 1 0 0\n\
+             .tran 1 2\n\
+             .measure tran par_find FIND PAR('V(1)+1') WHEN V(1)=('0.5')\n\
+             .measure tran par_delay TRIG PAR('V(1)-0.1') VAL=PAR('0.1') TARG ('V(1)-0.5') VAL=('0.3')\n\
+             .measure tran spaced MAX I(YPDE BRANCH)\n\
+             .measure tran scientific MAX V(2e3)\n\
+             .measure tran numeric_when WHEN V(2e3)=0\n\
+             .measure tran quoted MAX 'V(1)+2'\n\
+             .measure tran spaced_find FIND I(YPDE BRANCH) AT=1\n\
+             .measure tran spaced_when WHEN I(YPDE BRANCH)=0\n\
+             .measure tran spaced_delay TRIG I(YPDE BRANCH)=0 TARG I(YPDE BRANCH)=1\n\
+             .measure tran spaced_err ERR I(YPDE BRANCH) I(YPDE BRANCH)\n\
+             .measure tran spaced_file ERROR I(YPDE BRANCH) FILE=reference.prn DEPVARCOL=1\n\
+             .end\n",
+        )
+        .expect("shared measurement operand spellings parse");
+
+        let crate::netlist::measure::MeasureType::Find {
+            signal,
+            when: Some(when),
+            ..
+        } = &netlist.measurements[0].measure_type
+        else {
+            panic!("expected FIND-WHEN");
+        };
+        assert_eq!(signal, "{V(1)+1}");
+        assert_eq!(
+            when.right,
+            crate::netlist::measure::MeasureOperand::Waveform("{0.5}".to_string())
+        );
+        let crate::netlist::measure::MeasureType::Delay { trig, targ, .. } =
+            &netlist.measurements[1].measure_type
+        else {
+            panic!("expected delay");
+        };
+        let crate::netlist::measure::TriggerEvent::When(trig) = &trig.event else {
+            panic!("expected conditional trigger");
+        };
+        let crate::netlist::measure::TriggerEvent::When(targ) = &targ.event else {
+            panic!("expected conditional target");
+        };
+        assert_eq!(trig.left, "{V(1)-0.1}");
+        assert_eq!(targ.left, "{V(1)-0.5}");
+        assert_eq!(
+            trig.right,
+            crate::netlist::measure::MeasureOperand::Waveform("{0.1}".to_string())
+        );
+        assert_eq!(
+            targ.right,
+            crate::netlist::measure::MeasureOperand::Waveform("{0.3}".to_string())
+        );
+        let crate::netlist::measure::MeasureType::Max { signal, .. } =
+            &netlist.measurements[2].measure_type
+        else {
+            panic!("expected MAX");
+        };
+        assert_eq!(signal, "I(YPDE BRANCH)");
+        let crate::netlist::measure::MeasureType::Max { signal, .. } =
+            &netlist.measurements[3].measure_type
+        else {
+            panic!("expected MAX");
+        };
+        assert_eq!(signal, "V(2e3)");
+        let crate::netlist::measure::MeasureType::When { condition, .. } =
+            &netlist.measurements[4].measure_type
+        else {
+            panic!("expected WHEN");
+        };
+        assert_eq!(condition.left, "V(2e3)");
+        let crate::netlist::measure::MeasureType::Max { signal, .. } =
+            &netlist.measurements[5].measure_type
+        else {
+            panic!("expected quoted MAX expression");
+        };
+        assert_eq!(signal, "{V(1)+2}");
+        let crate::netlist::measure::MeasureType::Find { signal, .. } =
+            &netlist.measurements[6].measure_type
+        else {
+            panic!("expected spaced FIND");
+        };
+        assert_eq!(signal, "I(YPDE BRANCH)");
+        let crate::netlist::measure::MeasureType::When { condition, .. } =
+            &netlist.measurements[7].measure_type
+        else {
+            panic!("expected spaced WHEN");
+        };
+        assert_eq!(condition.left, "I(YPDE BRANCH)");
+        let crate::netlist::measure::MeasureType::Delay { trig, targ, .. } =
+            &netlist.measurements[8].measure_type
+        else {
+            panic!("expected spaced delay");
+        };
+        for clause in [trig, targ] {
+            let crate::netlist::measure::TriggerEvent::When(condition) = &clause.event else {
+                panic!("expected conditional spaced-current clause");
+            };
+            assert_eq!(condition.left, "I(YPDE BRANCH)");
+        }
+        let crate::netlist::measure::MeasureType::ErrorFunction {
+            measured,
+            comparison,
+            ..
+        } = &netlist.measurements[9].measure_type
+        else {
+            panic!("expected spaced ERR");
+        };
+        assert_eq!(measured, "I(YPDE BRANCH)");
+        assert_eq!(comparison, "I(YPDE BRANCH)");
+        let crate::netlist::measure::MeasureType::FileError { signal, .. } =
+            &netlist.measurements[10].measure_type
+        else {
+            panic!("expected spaced ERROR");
+        };
+        assert_eq!(signal, "I(YPDE BRANCH)");
+    }
+
+    #[test]
+    fn measure_occurrences_accept_zero_and_truncate_finite_values_toward_zero() {
+        let netlist = Netlist::parse(
+            "measurement occurrence conversion\n\
+             V1 one 0 0\n\
+             .tran 1 4\n\
+             .measure tran found FIND V(one) WHEN V(one)=0 CROSS=0.9\n\
+             .measure tran event WHEN V(one)=0 RISE=-2.9\n\
+             .measure tran slope DERIV V(one) WHEN V(one)=0 FALL=3.8\n\
+             .measure tran delay TRIG V(one)=0 CROSS=0 TARG V(one)=0 FALL=-3.8\n\
+             .end\n",
+        )
+        .expect("finite fractional occurrence values parse");
+
+        let occurrence = |index: usize| match &netlist.measurements[index].measure_type {
+            crate::netlist::measure::MeasureType::Find {
+                when: Some(condition),
+                ..
+            }
+            | crate::netlist::measure::MeasureType::Derivative {
+                when: Some(condition),
+                ..
+            }
+            | crate::netlist::measure::MeasureType::When { condition, .. } => {
+                condition.occurrence.number
+            }
+            other => panic!("expected point occurrence, got {other:?}"),
+        };
+        assert_eq!(occurrence(0), 0);
+        assert_eq!(occurrence(1), -2);
+        assert_eq!(occurrence(2), 3);
+        let crate::netlist::measure::MeasureType::Delay { trig, targ, .. } =
+            &netlist.measurements[3].measure_type
+        else {
+            panic!("expected delay occurrence");
+        };
+        let clause_number = |clause: &crate::netlist::measure::TrigSpec| {
+            let crate::netlist::measure::TriggerEvent::When(condition) = &clause.event else {
+                panic!("expected conditional delay clause");
+            };
+            condition.occurrence.number
+        };
+        assert_eq!(clause_number(trig), 0);
+        assert_eq!(clause_number(targ), -3);
+
+        for value in ["1e999", "1e30", "-1e30"] {
+            let error = Netlist::parse(&format!(
+                "invalid measurement occurrence\n\
+                 V1 one 0 0\n\
+                 .tran 1 2\n\
+                 .measure tran invalid WHEN V(one)=0 CROSS={value}\n\
+                 .end\n"
+            ))
+            .expect_err("non-finite or out-of-range occurrence must fail");
+            assert!(
+                error.to_string().contains("finite in-range occurrence"),
+                "{value}: {error}"
+            );
+        }
+    }
+
+    #[test]
     fn conditional_measurements_preserve_statement_wide_minval() {
         let netlist = Netlist::parse(
             "statement-wide conditional minval\n\
@@ -3050,8 +3308,9 @@ mod tests {
         };
         assert_eq!(*minval, 3.0e-15);
 
-        let crate::netlist::measure::MeasureType::Delay { trig, targ, minval } =
-            &netlist.measurements[2].measure_type
+        let crate::netlist::measure::MeasureType::Delay {
+            trig, targ, minval, ..
+        } = &netlist.measurements[2].measure_type
         else {
             panic!("expected TRIG/TARG measurement");
         };
