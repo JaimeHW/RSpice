@@ -803,12 +803,12 @@ impl CircuitData {
                 group
                     .device
                     .xyce_core_trial_from_happ_with_update_and_ampere_turn_delta(
-                    happ,
-                    delta_happ,
-                    ampere_turns - old_ampere_turns,
-                    first_voltage,
-                    carried_mag_update,
-                )
+                        happ,
+                        delta_happ,
+                        ampere_turns - old_ampere_turns,
+                        first_voltage,
+                        carried_mag_update,
+                    )
             }) else {
                 self.xyce_core_trial_invalid = true;
                 continue;
@@ -832,15 +832,13 @@ impl CircuitData {
                 } else {
                     coeff.coeff_g / dt
                 };
-                let rate_history = if one_step_order2
-                    || (!one_step && coeff.needs_current_history)
+                let rate_history = if one_step_order2 || (!one_step && coeff.needs_current_history)
                 {
                     group.device.xyce_core_level1_rate_debug()
                 } else {
                     0.0
                 };
-                let mut rate_qdot =
-                    rate_current_derivative * (ampere_turns - old_ampere_turns);
+                let mut rate_qdot = rate_current_derivative * (ampere_turns - old_ampere_turns);
                 if !one_step && coeff.needs_two_history {
                     let previous_previous_ampere_turns = group
                         .windings
@@ -1544,10 +1542,7 @@ impl CircuitData {
                     group
                         .device
                         .xyce_core_happ_from_ampere_turns(previous_ampere_turns),
-                    Some((
-                        ampere_turns,
-                        ampere_turns - previous_ampere_turns,
-                    )),
+                    Some((ampere_turns, ampere_turns - previous_ampere_turns)),
                 )
             } else {
                 let previous_ampere_turns = first.turns * group.device.current_value();

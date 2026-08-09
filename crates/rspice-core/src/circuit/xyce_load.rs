@@ -597,9 +597,7 @@ mod tests {
         .unwrap();
         let mut target = vec![0.0; 3];
 
-        operator
-            .add_product(&[1.0, 1.0, 1.0], &mut target)
-            .unwrap();
+        operator.add_product(&[1.0, 1.0, 1.0], &mut target).unwrap();
 
         assert_eq!(target[0].to_bits(), 1.0_f64.to_bits());
         assert_eq!(target[1].to_bits(), 0.0_f64.to_bits());

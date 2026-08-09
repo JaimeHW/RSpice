@@ -32,8 +32,8 @@ mod linear_stamping;
 mod magnetic;
 mod nonlinear;
 pub(crate) use nonlinear::NonlinearDeviceStateSnapshot;
-pub(crate) mod xyce_load;
 pub(crate) mod xyce_dae;
+pub(crate) mod xyce_load;
 
 type XspiceDriverId = (String, String, usize);
 type XspiceDigitalDrivers = HashMap<NodeId, HashMap<XspiceDriverId, DigitalValue>>;

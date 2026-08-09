@@ -225,8 +225,7 @@ pub(in crate::engine::builder) fn resolve_xyce_core_model_params(
             params.r_var_scaling = 1.0e3;
         }
     }
-    let m_eq_scaling_given =
-        positive_model_param(model_def, &["MEQNSCALING"], "MEQNSCALING")?;
+    let m_eq_scaling_given = positive_model_param(model_def, &["MEQNSCALING"], "MEQNSCALING")?;
     if let Some(m_eq_scaling) = m_eq_scaling_given {
         params.m_eq_scaling = m_eq_scaling;
     }

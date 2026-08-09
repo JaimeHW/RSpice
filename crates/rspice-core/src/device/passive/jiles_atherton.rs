@@ -1019,11 +1019,9 @@ impl JilesAthertonInductor {
             } else {
                 0.0
             };
-            let f = m - old_m
-                - integration_scale * (p * rate + previous_product)
+            let f = m - old_m - integration_scale * (p * rate + previous_product)
                 + self.xyce_core_level1_p_zero_residual(p, m, dt, one_step_order2);
-            let df = 1.0
-                + self.xyce_core_level1_p_zero_jacobian(p, dt, one_step_order2)
+            let df = 1.0 + self.xyce_core_level1_p_zero_jacobian(p, dt, one_step_order2)
                 - integration_scale * rate * d_p_d_m;
             Some((f, df))
         };
@@ -1260,8 +1258,7 @@ impl JilesAthertonInductor {
         // Xyce checks the current Newton trial's P, not the accepted-step P.
         // Its extra Jacobian entry is a unit in the scaled M coordinate, so
         // convert it before the caller multiplies by mVarScaling*mEqScaling.
-        let g_m = 1.0
-            + self.xyce_core_level1_p_zero_jacobian(trial.p, dt, one_step_order2)
+        let g_m = 1.0 + self.xyce_core_level1_p_zero_jacobian(trial.p, dt, one_step_order2)
             - integration_scale * trial.level1_rate * dp_dm;
         let g_happ = -integration_scale * trial.level1_rate * dp_dhapp;
         let g_voltage = -integration_scale * trial.level1_rate * dp_dvoltage;
@@ -1344,14 +1341,8 @@ impl JilesAthertonInductor {
         // constitutive endpoint still uses that fixed magnetization, while
         // only the explicit R equation remains part of the DAE.
         let residual = if self.has_xyce_core_m_equation() {
-            magnetization - self.state.m
-                - integration_scale * (p * rate + previous_product)
-                + self.xyce_core_level1_p_zero_residual(
-                    p,
-                    magnetization,
-                    dt,
-                    one_step_order2,
-                )
+            magnetization - self.state.m - integration_scale * (p * rate + previous_product)
+                + self.xyce_core_level1_p_zero_residual(p, magnetization, dt, one_step_order2)
         } else {
             0.0
         };

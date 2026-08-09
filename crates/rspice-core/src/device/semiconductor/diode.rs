@@ -483,9 +483,7 @@ impl Diode {
                 if self.xyce_dialect {
                     Self::limit_xyce_pnjlim(candidate, previous, thermal, critical)
                 } else {
-                    super::limiting::pnjlim_new(
-                        candidate, previous, thermal, critical,
-                    )
+                    super::limiting::pnjlim_new(candidate, previous, thermal, critical)
                 }
             };
 
@@ -1000,9 +998,7 @@ impl Diode {
                 if self.xyce_dialect {
                     Self::limit_xyce_pnjlim(candidate, previous, thermal, critical)
                 } else {
-                    super::limiting::pnjlim_new(
-                        candidate, previous, thermal, critical,
-                    )
+                    super::limiting::pnjlim_new(candidate, previous, thermal, critical)
                 }
             };
         if let Some(bv) = self.active_breakdown_voltage() {
@@ -2027,15 +2023,12 @@ impl NonlinearDevice for Diode {
 
     fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
         let tolerance = criteria.voltage_tolerance();
-        let native_xyce_transient =
-            self.xyce_dialect && self.native_xyce_transient_convergence;
+        let native_xyce_transient = self.xyce_dialect && self.native_xyce_transient_convergence;
         // A pnjlim-clamped step must iterate again regardless of the
         // voltage delta (ngspice `Check` semantics).
         !self.limited.get()
-            && (native_xyce_transient
-                || (self.prev_vd - self.prev_vd_old).abs() < tolerance)
-            && (native_xyce_transient
-                || self.linearized_current_matches_candidate(criteria))
+            && (native_xyce_transient || (self.prev_vd - self.prev_vd_old).abs() < tolerance)
+            && (native_xyce_transient || self.linearized_current_matches_candidate(criteria))
     }
 }
 

@@ -1299,16 +1299,19 @@ impl Engine {
                 .ok()
                 .is_some_and(|residual| {
                     let tolerance = circuit.xyce_core_branch_residual_tolerance();
-                    circuit.xyce_core_transient_residuals.iter().all(|&(row, _)| {
-                        residual
-                            .get(row)
-                            .is_some_and(|value| value.abs() <= tolerance)
-                    })
+                    circuit
+                        .xyce_core_transient_residuals
+                        .iter()
+                        .all(|&(row, _)| {
+                            residual
+                                .get(row)
+                                .is_some_and(|value| value.abs() <= tolerance)
+                        })
                 });
             physical_residual_converged
                 && matrix
-                .componentwise_backward_error_by_rows(solution, rhs, &rows)
-                .is_ok_and(|ratio| ratio <= 1.0)
+                    .componentwise_backward_error_by_rows(solution, rhs, &rows)
+                    .is_ok_and(|ratio| ratio <= 1.0)
         } else {
             true
         };

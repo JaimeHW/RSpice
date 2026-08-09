@@ -4354,11 +4354,10 @@ set auto_bridge_parm_d = vdd
             .model CORE_MODEL CORE (LEVEL=2 MS=510K A=62 C=.92 K=25 ALPHA=3.7e-4 AREA=1.12 GAP=0 PATH=8.49)\n\
             .end\n";
         let netlist = Netlist::parse(deck).expect("Core load-order fixture parses");
-        let circuit = Engine::new(
-            SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce),
-        )
-        .build_circuit(&netlist)
-        .expect("Core load-order fixture builds");
+        let circuit =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+                .build_circuit(&netlist)
+                .expect("Core load-order fixture builds");
 
         assert_eq!(circuit.xyce_load_plan().current_sources(), &[2, 1, 0]);
         assert_eq!(circuit.xyce_load_plan().cores(), &[0]);

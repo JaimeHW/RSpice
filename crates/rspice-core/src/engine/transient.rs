@@ -204,9 +204,9 @@ mod noise;
 mod nox_status;
 mod rescue;
 mod residual;
-mod xyce_dae;
 mod startup;
 mod state;
+mod xyce_dae;
 pub(self) use state::{MosfetCompanionBranchTerms, MosfetGateCompanionCharges};
 mod state_advanced_mos;
 mod state_commit;
@@ -2751,8 +2751,8 @@ impl Engine {
         let progress_logging_enabled = log::log_enabled!(log::Level::Info);
         let mut last_progress_log = progress_logging_enabled.then(crate::time_compat::Instant::now);
         let mut rhs = vec![0.0; size];
-        let mut xyce_direct_vectors = uses_direct_xyce_dae
-            .then(|| crate::circuit::dae::XyceDaeVectors::new(size));
+        let mut xyce_direct_vectors =
+            uses_direct_xyce_dae.then(|| crate::circuit::dae::XyceDaeVectors::new(size));
         let mut xyce_direct_workspace =
             uses_direct_xyce_dae.then(|| XyceOneStepWorkspace::new(size));
         let mut xyce_direct_q_candidate = uses_direct_xyce_dae.then(|| vec![0.0; size]);
@@ -2770,9 +2770,10 @@ impl Engine {
                 transient_baseline_diag_gmin,
             )
         });
-        if classic_mos_stamp_cache.as_ref().is_some_and(
-            residual::ClassicMosTransientStampCache::supports_compact_companion_stamps,
-        ) {
+        if classic_mos_stamp_cache
+            .as_ref()
+            .is_some_and(residual::ClassicMosTransientStampCache::supports_compact_companion_stamps)
+        {
             // The large classic-MOS cache owns the only companion topology
             // representation used by its hot path. Release the checked plan
             // rather than retaining two cache-sized streams.
@@ -3635,20 +3636,11 @@ impl Engine {
                         .as_mut()
                         .expect("direct Xyce DAE vectors are allocated for the gated path");
                     circuit
-                        .load_direct_xyce_level2_core_dae(
-                            &new_solution,
-                            t + dt,
-                            0.0,
-                            vectors,
-                        )
+                        .load_direct_xyce_level2_core_dae(&new_solution, t + dt, 0.0, vectors)
                         .map_err(SimulationError::Circuit)?;
-                    let previous_q = xyce_direct_accepted_q
-                        .as_deref()
-                        .ok_or_else(|| {
-                            SimulationError::Circuit(
-                                "direct Xyce accepted Q history is missing".into(),
-                            )
-                        })?;
+                    let previous_q = xyce_direct_accepted_q.as_deref().ok_or_else(|| {
+                        SimulationError::Circuit("direct Xyce accepted Q history is missing".into())
+                    })?;
                     let previous_static = xyce_direct_static_history.as_deref();
                     let order = if xyce_one_step_order2 {
                         XyceOneStepOrder::Second
@@ -3660,13 +3652,7 @@ impl Engine {
                         .expect("direct Xyce DAE workspace is allocated for the gated path");
                     Some(
                         workspace
-                            .form_correction_rhs(
-                                vectors,
-                                previous_q,
-                                previous_static,
-                                dt,
-                                order,
-                            )
+                            .form_correction_rhs(vectors, previous_q, previous_static, dt, order)
                             .map_err(|error| SimulationError::Circuit(error.to_string()))?,
                     )
                 } else {
@@ -3674,13 +3660,12 @@ impl Engine {
                 };
 
                 if uses_xyce_damped_solver && _iter == 0 {
-                    let (_, predictor_residual_l2_norm) = if let Some(residual) =
-                        direct_correction_rhs
-                    {
-                        direct_xyce_dae_norms(residual)?
-                    } else {
-                        matrix.raw_residual_norms(&new_solution, &rhs)?
-                    };
+                    let (_, predictor_residual_l2_norm) =
+                        if let Some(residual) = direct_correction_rhs {
+                            direct_xyce_dae_norms(residual)?
+                        } else {
+                            matrix.raw_residual_norms(&new_solution, &rhs)?
+                        };
                     if let Some(status) = xyce_damped_status.as_mut() {
                         status.begin_solve_with_initial_residual(
                             tran_max_iterations,
@@ -3879,16 +3864,51 @@ impl Engine {
                     uses_xyce_damped_solver,
                 );
                 let mut solved_weighted_correction_norm = None;
-                let solve_result: Result<(), rspice_matrix::SolverError> =
-                    if let Some(direct_rhs) = direct_correction_rhs {
-                        if prefer_dense_solver {
-                            matrix.solve_dense(direct_rhs).map(|solution| {
-                                linear_solution = solution;
-                            })
-                        } else {
-                            matrix.solve_into(direct_rhs, &mut linear_solution)
+                let solve_result: Result<(), rspice_matrix::SolverError> = if let Some(direct_rhs) =
+                    direct_correction_rhs
+                {
+                    if prefer_dense_solver {
+                        matrix.solve_dense(direct_rhs).map(|solution| {
+                            linear_solution = solution;
+                        })
+                    } else {
+                        matrix.solve_into(direct_rhs, &mut linear_solution)
+                    }
+                    .map(|()| {
+                        solved_weighted_correction_norm = self
+                            .transient_newton_weighted_correction_norm(
+                                &linear_solution,
+                                transient_newton_update_weights.as_deref(),
+                            );
+                        for (correction, &iterate) in linear_solution.iter_mut().zip(&new_solution)
+                        {
+                            *correction += iterate;
                         }
-                        .map(|()| {
+                    })
+                } else if solve_produces_correction {
+                    matrix
+                        .correction_rhs_into(&rhs, &new_solution, &mut correction_rhs)
+                        .and_then(|()| {
+                            if uses_inductor_correction {
+                                circuit.stabilize_inductor_transient_correction_rhs(
+                                    &mut correction_rhs,
+                                    &new_solution,
+                                    dt,
+                                    &coeff,
+                                );
+                            }
+                            if circuit.has_xyce_core_inductors() {
+                                circuit.overwrite_xyce_core_transient_correction_rhs(
+                                    &mut correction_rhs,
+                                    xyce_one_step_order2,
+                                    xyce_static_history.as_deref(),
+                                );
+                            }
+                            if prefer_dense_solver {
+                                linear_solution = matrix.solve_dense(&correction_rhs)?;
+                            } else {
+                                matrix.solve_into(&correction_rhs, &mut linear_solution)?;
+                            }
                             solved_weighted_correction_norm = self
                                 .transient_newton_weighted_correction_norm(
                                     &linear_solution,
@@ -3899,49 +3919,15 @@ impl Engine {
                             {
                                 *correction += iterate;
                             }
+                            Ok(())
                         })
-                    } else if solve_produces_correction {
-                        matrix.correction_rhs_into(&rhs, &new_solution, &mut correction_rhs)
-                            .and_then(|()| {
-                                if uses_inductor_correction {
-                                    circuit.stabilize_inductor_transient_correction_rhs(
-                                        &mut correction_rhs,
-                                        &new_solution,
-                                        dt,
-                                        &coeff,
-                                    );
-                                }
-                                if circuit.has_xyce_core_inductors() {
-                                    circuit.overwrite_xyce_core_transient_correction_rhs(
-                                        &mut correction_rhs,
-                                        xyce_one_step_order2,
-                                        xyce_static_history.as_deref(),
-                                    );
-                                }
-                                if prefer_dense_solver {
-                                    linear_solution = matrix.solve_dense(&correction_rhs)?;
-                                } else {
-                                    matrix.solve_into(&correction_rhs, &mut linear_solution)?;
-                                }
-                                solved_weighted_correction_norm = self
-                                    .transient_newton_weighted_correction_norm(
-                                        &linear_solution,
-                                        transient_newton_update_weights.as_deref(),
-                                    );
-                                for (correction, &iterate) in
-                                    linear_solution.iter_mut().zip(&new_solution)
-                                {
-                                    *correction += iterate;
-                                }
-                                Ok(())
-                            })
-                    } else if prefer_dense_solver {
-                        matrix.solve_dense(&rhs).map(|solution| {
-                            linear_solution = solution;
-                        })
-                    } else {
-                        matrix.solve_into(&rhs, &mut linear_solution)
-                    };
+                } else if prefer_dense_solver {
+                    matrix.solve_dense(&rhs).map(|solution| {
+                        linear_solution = solution;
+                    })
+                } else {
+                    matrix.solve_into(&rhs, &mut linear_solution)
+                };
                 let newton_solve_elapsed = newton_solve_start.elapsed();
                 total_solve_nanos += newton_solve_elapsed.as_nanos();
                 static TRANSIENT_NEWTON_SOLVE_LOG_COUNT: std::sync::atomic::AtomicUsize =
@@ -4098,16 +4084,14 @@ impl Engine {
                                 total_merit_nanos += seed_start.elapsed().as_nanos();
                             }
                             if uses_xyce_nox_status {
-                                xyce_weighted_update_norm = xyce_nox_recovered_update_norm(
-                                    had_nonfinite_solution,
-                                    || {
+                                xyce_weighted_update_norm =
+                                    xyce_nox_recovered_update_norm(had_nonfinite_solution, || {
                                         self.transient_newton_weighted_update_norm(
                                             &new_solution,
                                             sol,
                                             transient_newton_update_weights.as_deref(),
                                         )
-                                    },
-                                );
+                                    });
                             }
                             new_solution.copy_from_slice(sol);
                             nonlinear_state_matches_new_solution = false;
@@ -4138,50 +4122,46 @@ impl Engine {
                                 crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
                             )?;
                             nonlinear_state_matches_new_solution = true;
-                            let (residual_inf_norm, residual_l2_norm) =
-                                if uses_direct_xyce_dae {
-                                    let vectors = xyce_direct_vectors.as_mut().expect(
-                                        "direct Xyce DAE vectors are allocated for the gated path",
-                                    );
-                                    circuit
-                                        .load_direct_xyce_level2_core_dae(
-                                            &new_solution,
-                                            t + dt,
-                                            0.0,
-                                            vectors,
+                            let (residual_inf_norm, residual_l2_norm) = if uses_direct_xyce_dae {
+                                let vectors = xyce_direct_vectors.as_mut().expect(
+                                    "direct Xyce DAE vectors are allocated for the gated path",
+                                );
+                                circuit
+                                    .load_direct_xyce_level2_core_dae(
+                                        &new_solution,
+                                        t + dt,
+                                        0.0,
+                                        vectors,
+                                    )
+                                    .map_err(SimulationError::Circuit)?;
+                                let previous_q =
+                                    xyce_direct_accepted_q.as_deref().ok_or_else(|| {
+                                        SimulationError::Circuit(
+                                            "direct Xyce accepted Q history is missing".into(),
                                         )
-                                        .map_err(SimulationError::Circuit)?;
-                                    let previous_q = xyce_direct_accepted_q.as_deref().ok_or_else(
-                                        || {
-                                            SimulationError::Circuit(
-                                                "direct Xyce accepted Q history is missing".into(),
-                                            )
-                                        },
-                                    )?;
-                                    let order = if xyce_one_step_order2 {
-                                        XyceOneStepOrder::Second
-                                    } else {
-                                        XyceOneStepOrder::First
-                                    };
-                                    let direct_rhs = xyce_direct_workspace
-                                        .as_mut()
-                                        .expect(
-                                            "direct Xyce DAE workspace is allocated for the gated path",
-                                        )
-                                        .form_correction_rhs(
-                                            vectors,
-                                            previous_q,
-                                            xyce_direct_static_history.as_deref(),
-                                            dt,
-                                            order,
-                                        )
-                                        .map_err(|error| {
-                                            SimulationError::Circuit(error.to_string())
-                                        })?;
-                                    direct_xyce_dae_norms(direct_rhs)?
+                                    })?;
+                                let order = if xyce_one_step_order2 {
+                                    XyceOneStepOrder::Second
                                 } else {
-                                    matrix.raw_residual_norms(&new_solution, &rhs)?
+                                    XyceOneStepOrder::First
                                 };
+                                let direct_rhs = xyce_direct_workspace
+                                    .as_mut()
+                                    .expect(
+                                        "direct Xyce DAE workspace is allocated for the gated path",
+                                    )
+                                    .form_correction_rhs(
+                                        vectors,
+                                        previous_q,
+                                        xyce_direct_static_history.as_deref(),
+                                        dt,
+                                        order,
+                                    )
+                                    .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                                direct_xyce_dae_norms(direct_rhs)?
+                            } else {
+                                matrix.raw_residual_norms(&new_solution, &rhs)?
+                            };
                             let device_converged = core_trial_converged(&circuit)
                                 && (!enforce_device_convergence
                                     || !circuit.has_nonlinear_devices()
@@ -5150,12 +5130,12 @@ impl Engine {
                             &circuit,
                             &new_solution,
                             t,
-                            xyce_direct_vectors.as_mut().expect(
-                                "direct Xyce DAE vectors are allocated for the gated path",
-                            ),
-                            xyce_direct_q_candidate.as_mut().expect(
-                                "direct Xyce Q scratch is allocated for the gated path",
-                            ),
+                            xyce_direct_vectors
+                                .as_mut()
+                                .expect("direct Xyce DAE vectors are allocated for the gated path"),
+                            xyce_direct_q_candidate
+                                .as_mut()
+                                .expect("direct Xyce Q scratch is allocated for the gated path"),
                             xyce_direct_static_candidate.as_mut().expect(
                                 "direct Xyce static scratch is allocated for the gated path",
                             ),
@@ -5252,17 +5232,15 @@ impl Engine {
                             .as_mut()
                             .expect("direct Xyce Q history is allocated for the gated path")
                             .copy_from_slice(
-                                xyce_direct_q_candidate
-                                    .as_deref()
-                                    .expect("direct Xyce Q scratch is allocated for the gated path"),
+                                xyce_direct_q_candidate.as_deref().expect(
+                                    "direct Xyce Q scratch is allocated for the gated path",
+                                ),
                             );
                         xyce_direct_static_history
                             .get_or_insert_with(|| vec![0.0; size])
-                            .copy_from_slice(
-                                xyce_direct_static_candidate.as_deref().expect(
-                                    "direct Xyce static scratch is allocated for the gated path",
-                                ),
-                            );
+                            .copy_from_slice(xyce_direct_static_candidate.as_deref().expect(
+                                "direct Xyce static scratch is allocated for the gated path",
+                            ));
                     }
                     Self::backfill_initial_linear_capacitor_branch_currents(
                         &mut result,
@@ -6220,12 +6198,12 @@ impl Engine {
                             &circuit,
                             &new_solution,
                             t,
-                            xyce_direct_vectors.as_mut().expect(
-                                "direct Xyce DAE vectors are allocated for the gated path",
-                            ),
-                            xyce_direct_q_candidate.as_mut().expect(
-                                "direct Xyce Q scratch is allocated for the gated path",
-                            ),
+                            xyce_direct_vectors
+                                .as_mut()
+                                .expect("direct Xyce DAE vectors are allocated for the gated path"),
+                            xyce_direct_q_candidate
+                                .as_mut()
+                                .expect("direct Xyce Q scratch is allocated for the gated path"),
                             xyce_direct_static_candidate.as_mut().expect(
                                 "direct Xyce static scratch is allocated for the gated path",
                             ),
@@ -6322,17 +6300,15 @@ impl Engine {
                             .as_mut()
                             .expect("direct Xyce Q history is allocated for the gated path")
                             .copy_from_slice(
-                                xyce_direct_q_candidate
-                                    .as_deref()
-                                    .expect("direct Xyce Q scratch is allocated for the gated path"),
+                                xyce_direct_q_candidate.as_deref().expect(
+                                    "direct Xyce Q scratch is allocated for the gated path",
+                                ),
                             );
                         xyce_direct_static_history
                             .get_or_insert_with(|| vec![0.0; size])
-                            .copy_from_slice(
-                                xyce_direct_static_candidate.as_deref().expect(
-                                    "direct Xyce static scratch is allocated for the gated path",
-                                ),
-                            );
+                            .copy_from_slice(xyce_direct_static_candidate.as_deref().expect(
+                                "direct Xyce static scratch is allocated for the gated path",
+                            ));
                     }
                     Self::backfill_initial_linear_capacitor_branch_currents(
                         &mut result,
@@ -6408,8 +6384,8 @@ impl Engine {
             retry_count = 0;
 
             // Keep ideal source constraints exact before LTE and state updates.
-            let projected_voltage_sources = circuit
-                .enforce_prescribed_transient_voltage_constraints(&mut new_solution, t + dt);
+            let projected_voltage_sources =
+                circuit.enforce_prescribed_transient_voltage_constraints(&mut new_solution, t + dt);
             if projected_voltage_sources {
                 nonlinear_state_matches_new_solution = false;
             }
@@ -6550,15 +6526,15 @@ impl Engine {
                     &circuit,
                     &new_solution,
                     t,
-                    xyce_direct_vectors.as_mut().expect(
-                        "direct Xyce DAE vectors are allocated for the gated path",
-                    ),
-                    xyce_direct_q_candidate.as_mut().expect(
-                        "direct Xyce Q scratch is allocated for the gated path",
-                    ),
-                    xyce_direct_static_candidate.as_mut().expect(
-                        "direct Xyce static scratch is allocated for the gated path",
-                    ),
+                    xyce_direct_vectors
+                        .as_mut()
+                        .expect("direct Xyce DAE vectors are allocated for the gated path"),
+                    xyce_direct_q_candidate
+                        .as_mut()
+                        .expect("direct Xyce Q scratch is allocated for the gated path"),
+                    xyce_direct_static_candidate
+                        .as_mut()
+                        .expect("direct Xyce static scratch is allocated for the gated path"),
                 )
                 .map_err(SimulationError::Circuit)?;
             }
@@ -7237,8 +7213,7 @@ mod tests {
              .END\n",
         )
         .expect("diode transient deck parses");
-        let mut config =
-            SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+        let mut config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
         config.transient_nonlinear_nox = Some(false);
         let engine = Engine::new(config);
         let result = engine
@@ -7249,7 +7224,9 @@ mod tests {
             .expect("output waveform exists");
         assert!(output.iter().all(|value| value.is_finite()));
         assert!(
-            output.last().is_some_and(|value| *value > 0.4 && *value < 0.9),
+            output
+                .last()
+                .is_some_and(|value| *value > 0.4 && *value < 0.9),
             "diode output should settle to a physical forward voltage, got {:?}",
             output.last()
         );
@@ -7265,8 +7242,7 @@ mod tests {
              .END\n",
         )
         .expect("behavioral sine deck parses");
-        let mut config =
-            SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+        let mut config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
         config.transient_nonlinear_nox = Some(false);
         let result = Engine::new(config)
             .run_tran(&netlist, 5.0e-3, 1.0e-6)
