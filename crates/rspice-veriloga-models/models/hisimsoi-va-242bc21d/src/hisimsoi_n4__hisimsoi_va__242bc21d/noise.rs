@@ -26,8 +26,8 @@ impl Instance {
         let temperature = ctx.temperature();
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14]), ctx.node_voltage(self.nodes[15]), ctx.node_voltage(self.nodes[16]), ctx.node_voltage(self.nodes[17]), ctx.node_voltage(self.nodes[18])];
 			let A = 0f64;
-			let B = parameters[43];
-			let C = 1f64;
+			let B = 1f64;
+			let C = parameters[43];
 			let E = 1e-12f64;
 			let F = parameters[237];
 			let G = 0.5f64;
@@ -362,7 +362,7 @@ impl Instance {
 			let DNU = parameters[260];
 			let DNW = false;
 			let DPV = parameters[231];
-			let D = B == C;
+			let D = C == B;
 			let I = (parameters[51] * H) % H;
 			let L = parameters[52] * K;
 			let N = parameters[73] / M;
@@ -420,7 +420,7 @@ impl Instance {
 				if BG {
 					let BR;
 					if BH {
-						BR = C;
+						BR = B;
 					} else {
 						let BS;
 						if BI {
@@ -449,7 +449,7 @@ impl Instance {
 							break;
 						}
 						let BP = BO.sqrt();
-						let BQ = BM + C;
+						let BQ = BM + B;
 						BM = BQ;
 						BO = BP;
 					}
@@ -458,14 +458,14 @@ impl Instance {
 					let BV = BE.powf(0.25f64);
 					BW = BV;
 				}
-				let BX = 2.1f64 - ((BC * BA) * (C / BW));
+				let BX = 2.1f64 - ((BC * BA) * (B / BW));
 				BWA = BX;
 			} else {
 				BWA = AY;
 			}
 			let BZ = parameters[55] - (AR * (9.025e-5f64 + (AR * BY)));
 			let CC = CB / F;
-			let CD = C / CC;
+			let CD = B / CC;
 			let CF = CE / CA;
 			let CG = CA / CE;
 			let CI = CE / CH;
@@ -481,7 +481,7 @@ impl Instance {
 			};
 			let CR = CQ * AP;
 			let CT = parameters[1] / CS;
-			let CV = I < C;
+			let CV = I < B;
 			let CX = if CV {
 				A
 			} else {
@@ -492,7 +492,7 @@ impl Instance {
 			} else {
 				CY
 			};
-			let DA = B == A;
+			let DA = C == A;
 			let DI;
 			let DK;
 			if DA {
@@ -512,7 +512,7 @@ impl Instance {
 			let DL = DK * CS;
 			let DM = CT * AP;
 			let DN = DM * CR;
-			let DO = (parameters[107] * (C + (parameters[108] / (CR.powf(parameters[111]))))) * (C + (parameters[109] / (DM.powf(parameters[110]))));
+			let DO = (parameters[107] * (B + (parameters[108] / (CR.powf(parameters[111]))))) * (B + (parameters[109] / (DM.powf(parameters[110]))));
 			let DP = I > BK;
 			let DR = DQ > A;
 			let DS = (DP && (N < V)) && DR;
@@ -521,21 +521,21 @@ impl Instance {
 			} else {
 				N
 			};
-			let DU = DT * (C + (parameters[74] / (DM.powf(parameters[75]))));
+			let DU = DT * (B + (parameters[74] / (DM.powf(parameters[75]))));
 			let DV = G * CL;
-			let DW = AZ / ((C / (parameters[62] + DV)) + (C / (parameters[63] + DV)));
+			let DW = AZ / ((B / (parameters[62] + DV)) + (B / (parameters[63] + DV)));
 			let DZ = DX / (DY * AR);
 			let EA = (DX * W) * CB;
 			let EC = EB * (CR.powf((-parameters[247])));
 			let ED = parameters[251] * (CR.powf((-parameters[252])));
 			let EF = EE * ((CR + AQ).powf((-parameters[249])));
 			let EG = ((3.2043836e-19f64 * AA) * CB).sqrt();
-			let EH = C / (AA * AA);
-			let EJ = ((C + (C / CR)).powf(parameters[91])) * EI;
+			let EH = B / (AA * AA);
+			let EJ = ((B + (B / CR)).powf(parameters[91])) * EI;
 			let EL = CQ + (parameters[76] / (DN.powf(parameters[77])));
 			let EM = parameters[78] / (DN.powf(parameters[79]));
-			let EN = (parameters[149] * (C + (parameters[150] / ((EL * AP).powf(parameters[151]))))) + (parameters[152] / (DM.powf(parameters[153])));
-			let EO = C + ((CR.powf(parameters[192])) * parameters[193]);
+			let EN = (parameters[149] * (B + (parameters[150] / ((EL * AP).powf(parameters[151]))))) + (parameters[152] / (DM.powf(parameters[153])));
+			let EO = B + ((CR.powf(parameters[192])) * parameters[193]);
 			let EP = parameters[44] <= A;
 			let AFO;
 			let AFW;
@@ -544,11 +544,11 @@ impl Instance {
 			let AHS;
 			let AHT;
 			if EP {
-				let ES = C + (EQ / (DM.powf(ER)));
-				let EW = ET * (C + (EU / (CR.powf(EV))));
+				let ES = B + (EQ / (DM.powf(ER)));
+				let EW = ET * (B + (EU / (CR.powf(EV))));
 				let EY = CR / (CR + EX);
-				let FC = EZ * (C + (FA / (CR.powf(FB))));
-				let FF = FD * (C + (FE / CR));
+				let FC = EZ * (B + (FA / (CR.powf(FB))));
+				let FF = FD * (B + (FE / CR));
 				AFO = EW;
 				AFW = EY;
 				AFX = ES;
@@ -557,11 +557,11 @@ impl Instance {
 				AHT = FC;
 			} else {
 				let FG = DM.powf(ER);
-				let FK = (FH * (C + (FI / (CR.powf(FJ))))) * (FG / (FG + EQ));
-				let FL = ET * (C + (EU / (CR.powf(EV))));
-				let FM = EX * (C + (parameters[132] / (CR.powf(parameters[133]))));
-				let FN = EZ * (C + (FA / (CR.powf(FB))));
-				let FO = FD * (C + (FE / CR));
+				let FK = (FH * (B + (FI / (CR.powf(FJ))))) * (FG / (FG + EQ));
+				let FL = ET * (B + (EU / (CR.powf(EV))));
+				let FM = EX * (B + (parameters[132] / (CR.powf(parameters[133]))));
+				let FN = EZ * (B + (FA / (CR.powf(FB))));
+				let FO = FD * (B + (FE / CR));
 				AFO = FL;
 				AFW = FM;
 				AFX = AFY;
@@ -569,9 +569,9 @@ impl Instance {
 				AHS = FO;
 				AHT = FN;
 			}
-			let FP = parameters[134] * (C + (parameters[135] / (CR.powf(parameters[136]))));
+			let FP = parameters[134] * (B + (parameters[135] / (CR.powf(parameters[136]))));
 			let AFT = if EP {
-				let FQ = FH * (C + (FI / (CR.powf(FJ))));
+				let FQ = FH * (B + (FI / (CR.powf(FJ))));
 				FQ
 			} else {
 				AFU
@@ -589,10 +589,10 @@ impl Instance {
 			let GC = if GB {
 				A
 			} else {
-				C
+				B
 			};
 			let GD = parameters[16] + 273.15f64;
-			let GH = ((GE > A) && (GF > A)) && ((CS == C) || ((CS > C) && (GG > A)));
+			let GH = ((GE > A) && (GF > A)) && ((CS == B) || ((CS > B) && (GG > A)));
 			let GP;
 			if GH {
 				let mut GI = A;
@@ -603,8 +603,8 @@ impl Instance {
 						break;
 					}
 					let GL = GI * (GG + CL);
-					let GM = (GK + (C / ((GE + DV) + GL))) + (C / ((GF + DV) + GL));
-					let GN = GI + C;
+					let GM = (GK + (B / ((GE + DV) + GL))) + (B / ((GF + DV) + GL));
+					let GN = GI + B;
 					GI = GN;
 					GK = GM;
 				}
@@ -615,14 +615,14 @@ impl Instance {
 			}
 			let GQ = GP > A;
 			let HI = if GQ {
-				let GR = C / (C + parameters[162]);
-				let GU = (DU * (C + (GR * ((GS / GP).powf(GT))))) / (C + (GR * ((GS / DW).powf(GT))));
+				let GR = B / (B + parameters[162]);
+				let GU = (DU * (B + (GR * ((GS / GP).powf(GT))))) / (B + (GR * ((GS / DW).powf(GT))));
 				GU
 			} else {
 				DU
 			};
 			let GV = P / V;
-			let GW = (GV - ((C + (parameters[199] / (DM.powf(parameters[200])))) * (C + (parameters[202] / (CR.powf(parameters[203])))))) - K;
+			let GW = (GV - ((B + (parameters[199] / (DM.powf(parameters[200])))) * (B + (parameters[202] / (CR.powf(parameters[203])))))) - K;
 			let GX = (BF * GV) * K;
 			let GY = GX > A;
 			let HA = if GY {
@@ -633,8 +633,8 @@ impl Instance {
 			};
 			let HB = V * (GV - (G * (GW + (((GW * GW) + HA).sqrt()))));
 			let HH = if GQ {
-				let HC = C / (C + parameters[165]);
-				let HF = (HB * (C + (HC * ((HD / GP).powf(HE))))) / (C + (HC * ((HD / DW).powf(HE))));
+				let HC = B / (B + parameters[165]);
+				let HF = (HB * (B + (HC * ((HD / GP).powf(HE))))) / (B + (HC * ((HD / DW).powf(HE))));
 				HF
 			} else {
 				HB
@@ -660,7 +660,7 @@ impl Instance {
 			let HR = 0.051702525384001115f64 * ((HL / 1.04e16f64).ln());
 			let HS = 0.051702525384001115f64 * ((HH / 1.04e16f64).ln());
 			let HT = (1291908996.1638799f64 / HL).sqrt();
-			let HU = (C + (parameters[194] / (CR.powf(parameters[195])))) * (C + (parameters[196] / (DN.powf(parameters[197]))));
+			let HU = (B + (parameters[194] / (CR.powf(parameters[195])))) * (B + (parameters[196] / (DN.powf(parameters[197]))));
 			let HX = (G * (HU + (((HU * HU) + 4e-6f64).sqrt()))) + 1e-13f64;
 			let HY = HX < A;
 			let JQ = if HY {
@@ -695,9 +695,9 @@ impl Instance {
 				LA = IF;
 				MC = ID;
 				MG = IE;
-				CPH = C;
+				CPH = B;
 				CPI = A;
-				DHW = C;
+				DHW = B;
 			} else {
 				let IQ = -ID;
 				let IR = IE - ID;
@@ -706,7 +706,7 @@ impl Instance {
 				MC = IQ;
 				MG = IR;
 				CPH = A;
-				CPI = C;
+				CPI = B;
 				DHW = IP;
 			}
 			let IW = if parameter_given[16] {
@@ -725,22 +725,22 @@ impl Instance {
 			let JB = (BZ - (parameters[53] * JA)) - (parameters[54] * (JA * (IZ + AR)));
 			let JC = DX / (DY * IZ);
 			let JD = JC * JC;
-			let JE = C / JC;
-			let JF = ((parameters[254] * (C + (parameters[98] / (DM.powf(parameters[99]))))) * (C + (parameters[100] / (CR.powf(parameters[101]))))) * (C + (parameters[102] / (DN.powf(parameters[103]))));
-			let JG = C / (C + parameters[159]);
+			let JE = B / JC;
+			let JF = ((parameters[254] * (B + (parameters[98] / (DM.powf(parameters[99]))))) * (B + (parameters[100] / (CR.powf(parameters[101]))))) * (B + (parameters[102] / (DN.powf(parameters[103]))));
+			let JG = B / (B + parameters[159]);
 			let JH = parameters[158] / AU;
 			let JJ = (JH == A) && (JI == A);
 			let JL = if JJ {
-				C
+				B
 			} else {
 				let JK = JH.powf(JI);
 				JK
 			};
 			let JM = IZ / AR;
-			let JN = (JM.powf(parameters[112])) / (JF * (C + (JG * JL)));
+			let JN = (JM.powf(parameters[112])) / (JF * (B + (JG * JL)));
 			let JP = JO * JE;
 			let JS = (1.8f64 + (JR * JM)) + ((BA * JM) * JM);
-			let JT = C - JM;
+			let JT = B - JM;
 			let JU = (JQ * L) / (JS - (O * JT));
 			let JV = JB.sqrt();
 			let JW = JB * JV;
@@ -811,7 +811,7 @@ impl Instance {
 				if LJ {
 					let LT;
 					if LK {
-						LT = C;
+						LT = B;
 					} else {
 						let LU;
 						if LL {
@@ -840,7 +840,7 @@ impl Instance {
 							break;
 						}
 						let LR = LQ.sqrt();
-						let LS = LO + C;
+						let LS = LO + B;
 						LO = LS;
 						LQ = LR;
 					}
@@ -849,14 +849,14 @@ impl Instance {
 					let LX = LI.powf(0.125f64);
 					LY = LX;
 				}
-				let LZ = C / LY;
+				let LZ = B / LY;
 				let MA = ((LE * LH) * LZ) / LI;
 				let MB = LB + ((LD * LE) * LZ);
 				MM = MB;
 				MQ = MA;
 			} else {
 				MM = LA;
-				MQ = C;
+				MQ = B;
 			}
 			let ME = MC > MD;
 			let MF = if ME {
@@ -884,7 +884,7 @@ impl Instance {
 			};
 			let MR = AZ * ((MQ * MF) / AZ);
 			let MT = MR / MS;
-			let MU = MS / (C + (MT * (0.5f64 + (MT * (0.16666666666666666f64 + (MT * (0.041666666666666664f64 + (MT * (0.008333333333333333f64 + (MT * (0.001388888888888889f64 + (MT * 1.984126984126984e-4f64))))))))))));
+			let MU = MS / (B + (MT * (0.5f64 + (MT * (0.16666666666666666f64 + (MT * (0.041666666666666664f64 + (MT * (0.008333333333333333f64 + (MT * (0.001388888888888889f64 + (MT * 1.984126984126984e-4f64))))))))))));
 			let MW = MU < MV;
 			let MX = if MW {
 				MV
@@ -917,7 +917,7 @@ impl Instance {
 			let NE = (AZ * HM) * CB;
 			let NF = (NE * CG) * CG;
 			let NG = ML - EK;
-			let NI = C + ((AZ / NF) * ((NG - JE) - NH));
+			let NI = B + ((AZ / NF) * ((NG - JE) - NH));
 			let NJ = (G * (NI + (((NI * NI) + 4e-6f64).sqrt()))) + 1e-13f64;
 			let NK = NJ < A;
 			let NL = if NK {
@@ -925,7 +925,7 @@ impl Instance {
 			} else {
 				NJ
 			};
-			let NM = (((NG + (NF * (C - ((NL + FT).sqrt())))) - KS) - BA) - 0.05f64;
+			let NM = (((NG + (NF * (B - ((NL + FT).sqrt())))) - KS) - BA) - 0.05f64;
 			let NQ = if NO {
 				NN
 			} else {
@@ -933,13 +933,13 @@ impl Instance {
 			};
 			let NR = MF / (BA + (G * (NM + (((NM * NM) + NQ).sqrt()))));
 			let NS = NR * NR;
-			let NT = C - (C / ((((C + NR) + NS) + (NS * NR)) + (NS * NS)));
+			let NT = B - (B / ((((B + NR) + NS) + (NS * NR)) + (NS * NS)));
 			let NU = NT * NT;
 			let NY = ((NV == A) && (NW == A)) || (NX == A);
 			let OB = if NY {
 				A
 			} else {
-				C
+				B
 			};
 			let NZ = HR + EK;
 			let OA = NZ + (((NE * HR).sqrt()) / CF);
@@ -961,7 +961,7 @@ impl Instance {
 				} else {
 					OF
 				};
-				let OI = C / OH;
+				let OI = B / OH;
 				let OJ = AZ * (OA.abs());
 				let OK = (EK - OA) + NX;
 				let OL = OK > OJ;
@@ -970,7 +970,7 @@ impl Instance {
 				} else {
 					OJ
 				};
-				let ON = C / OM;
+				let ON = B / OM;
 				let OO = (ON - OI) - R;
 				let OP = (BF * ON) * R;
 				let OQ = OP > A;
@@ -1066,14 +1066,14 @@ impl Instance {
 					let QL = (QJ * (HS - PW)).sqrt();
 					QL
 				};
-				let QP = ((QD - ((HS + EK) + (QM * QC))) * (((CB * QC) * ((AZ * QN) * (C / (DQ * DQ)))) * (QO - HR))) * ((AJ + ((AO / DQ) * QG)) + (AM * MZ));
+				let QP = ((QD - ((HS + EK) + (QM * QC))) * (((CB * QC) * ((AZ * QN) * (B / (DQ * DQ)))) * (QO - HR))) * ((AJ + ((AO / DQ) * QG)) + (AM * MZ));
 				QY = QP;
 			} else {
 				QY = A;
 			}
 			let QQ = QO - HR;
 			let QS = CQ - QR;
-			let QT = (((QC * ((CB * QN) * AZ)) * QQ) * (C / (QS * QS))) * ((AD + ((AI / CQ) * QG)) + (AG * MZ));
+			let QT = (((QC * ((CB * QN) * AZ)) * QQ) * (B / (QS * QS))) * ((AD + ((AI / CQ) * QG)) + (AG * MZ));
 			let QV = QU > A;
 			let QZ = if QV {
 				let QW = (((JB + KS) - (AZ * parameters[88])) + (parameters[87] * MZ)) * ((QU * F) / ((CQ * G) + AC));
@@ -1081,13 +1081,13 @@ impl Instance {
 			} else {
 				A
 			};
-			let RA = (((QT + QY) + ((QB * (QC - (C / (QX + (AB / DI))))) + (parameters[105] / DM))) + QZ) + EM;
+			let RA = (((QT + QY) + ((QB * (QC - (B / (QX + (AB / DI))))) + (parameters[105] / DM))) + QZ) + EM;
 			let RB = QD - RA;
 			let RC = EI == A;
 			let RD = if RC {
 				A
 			} else {
-				C
+				B
 			};
 			let RE = RD == A;
 			let RW;
@@ -1102,15 +1102,15 @@ impl Instance {
 				} else {
 					let RH = RF < A;
 					let RL = if RH {
-						let RI = C + (RF * (C + (RF * (0.3333333333333333f64 + (RF * 0.037037037037037035f64)))));
+						let RI = B + (RF * (B + (RF * (0.3333333333333333f64 + (RF * 0.037037037037037035f64)))));
 						RI
 					} else {
-						let RJ = C + (RF * (C + (RF * (0.3333333333333333f64 + (RF * (0.0402052934513951f64 + (RF * 0.148148111111111f64)))))));
+						let RJ = B + (RF * (B + (RF * (0.3333333333333333f64 + (RF * (0.0402052934513951f64 + (RF * 0.148148111111111f64)))))));
 						RJ
 					};
 					RK = RL;
 				}
-				let RM = RK - C;
+				let RM = RK - B;
 				let RN = (G * (RM + (((RM * RM) + 0.04000000000000001f64).sqrt()))) + 1.0000000000000001e-11f64;
 				let RO = RN < A;
 				let RP = if RO {
@@ -1118,13 +1118,13 @@ impl Instance {
 				} else {
 					RN
 				};
-				let RQ = (C - (RP * EJ)) - 0.05f64;
+				let RQ = (B - (RP * EJ)) - 0.05f64;
 				let RU = if RS {
 					RR
 				} else {
 					RT
 				};
-				let RV = C - (G * (RQ + (((RQ * RQ) + RU).sqrt())));
+				let RV = B - (G * (RQ + (((RQ * RQ) + RU).sqrt())));
 				RW = RV;
 			}
 			let RX = (NG + RA) - RW;
@@ -1154,8 +1154,8 @@ impl Instance {
 			let CND;
 			let DIW;
 			if DA {
-				let SD = KS + C;
-				let SF = (C / KP) / SE;
+				let SD = KS + B;
+				let SF = (B / KP) / SE;
 				let SG = (KR * ((((SF * SD) * SD).ln()) / (JC + (AZ / SD)))).sqrt();
 				let SH = SG > F;
 				let SI = if SH {
@@ -1223,8 +1223,8 @@ impl Instance {
 					let UR;
 					if TT {
 						let TU = TR.exp();
-						let TV = (-SS) * ((((TS + TR) - C) + (TE * (TU - C))).sqrt());
-						let TW = (EA / TV) * (((-TS) + C) + (TE * TU));
+						let TV = (-SS) * ((((TS + TR) - B) + (TE * (TU - B))).sqrt());
+						let TW = (EA / TV) * (((-TS) + B) + (TE * TU));
 						UC = TV;
 						UR = TW;
 					} else {
@@ -1232,8 +1232,8 @@ impl Instance {
 						let UD;
 						let US;
 						if TX {
-							let TY = SS * (((TS + TR) - C).sqrt());
-							let TZ = (EA / TY) * ((-TS) + C);
+							let TY = SS * (((TS + TR) - B).sqrt());
+							let TZ = (EA / TY) * ((-TS) + B);
 							UD = TY;
 							US = TZ;
 						} else {
@@ -1246,7 +1246,7 @@ impl Instance {
 						UR = US;
 					}
 					let UE = ((UC * UC) + ((BF * SM) * SM)).sqrt();
-					let UF = G * (C + (UC / UE));
+					let UF = G * (B + (UC / UE));
 					let UG = (G * (UC + UE)) + (HW * SM);
 					let UH = UG < A;
 					let UI;
@@ -1270,7 +1270,7 @@ impl Instance {
 					let UO = ((UJ * UJ) + UN).sqrt();
 					let UP = SL - (G * (UJ + UO));
 					let UT = ((((UP * UP) / AZ) / CB) / DX) / HH;
-					let UU = ((((-TQ) + (UC / CI)) - SU) + UT) / ((-1f64 + (UR / CI)) + (((AZ * UT) * (UQ * (UR * (G * (C + (UJ / UO)))))) / UP));
+					let UU = ((((-TQ) + (UC / CI)) - SU) + UT) / ((-1f64 + (UR / CI)) + (((AZ * UT) * (UQ * (UR * (G * (B + (UJ / UO)))))) / UP));
 					let UV = TQ - UU;
 					let UW = ((UV - TQ).abs()) < MV;
 					let UX = if UW {
@@ -1278,7 +1278,7 @@ impl Instance {
 					} else {
 						TO
 					};
-					let UY = UX + C;
+					let UY = UX + B;
 					TO = UY;
 					TQ = UV;
 					VA = UT;
@@ -1288,11 +1288,11 @@ impl Instance {
 				let YC;
 				let ACZ;
 				if VB {
-					let VC = C / QX;
+					let VC = B / QX;
 					let VD = F / CB;
-					let VE = C / CI;
-					let VF = C / ((VC + VD) + VE);
-					let VG = (VC * (VF * (SV + ((VE + (G * VD)) * SL)))) / (C - (VF * VC));
+					let VE = B / CI;
+					let VF = B / ((VC + VD) + VE);
+					let VG = (VC * (VF * (SV + ((VE + (G * VD)) * SL)))) / (B - (VF * VC));
 					let VH = RZ + VG;
 					YC = VG;
 					ACZ = VH;
@@ -1301,7 +1301,7 @@ impl Instance {
 					ACZ = RZ;
 				}
 				let VI = MR / BA;
-				let VJ = BA / (C + (VI * (0.5f64 + (VI * (0.16666666666666666f64 + (VI * (0.041666666666666664f64 + (VI * (0.008333333333333333f64 + (VI * (0.001388888888888889f64 + (VI * 1.984126984126984e-4f64))))))))))));
+				let VJ = BA / (B + (VI * (0.5f64 + (VI * (0.16666666666666666f64 + (VI * (0.041666666666666664f64 + (VI * (0.008333333333333333f64 + (VI * (0.001388888888888889f64 + (VI * 1.984126984126984e-4f64))))))))))));
 				let VK = VJ < MV;
 				let VL = if VK {
 					MV
@@ -1321,7 +1321,7 @@ impl Instance {
 					if VT {
 						let WD;
 						if VU {
-							WD = C;
+							WD = B;
 						} else {
 							let WE;
 							if VV {
@@ -1350,7 +1350,7 @@ impl Instance {
 								break;
 							}
 							let WB = WA.sqrt();
-							let WC = VY + C;
+							let WC = VY + B;
 							VY = WC;
 							WA = WB;
 						}
@@ -1359,7 +1359,7 @@ impl Instance {
 						let WH = VS.powf(0.25f64);
 						WI = WH;
 					}
-					let WJ = VN - ((VP * VN) * (C / WI));
+					let WJ = VN - ((VP * VN) * (B / WI));
 					WK = WJ;
 				} else {
 					WK = VM;
@@ -1376,7 +1376,7 @@ impl Instance {
 					if WR {
 						let XB;
 						if WS {
-							XB = C;
+							XB = B;
 						} else {
 							let XC;
 							if WT {
@@ -1405,7 +1405,7 @@ impl Instance {
 								break;
 							}
 							let WZ = WY.sqrt();
-							let XA = WW + C;
+							let XA = WW + B;
 							WW = XA;
 							WY = WZ;
 						}
@@ -1414,7 +1414,7 @@ impl Instance {
 						let XF = WQ.powf(0.25f64);
 						XG = XF;
 					}
-					let XH = WL + ((WN * F) * (C / XG));
+					let XH = WL + ((WN * F) * (B / XG));
 					XI = XH;
 				} else {
 					XI = WK;
@@ -1437,18 +1437,18 @@ impl Instance {
 					BEC = A;
 					CGH = A;
 				} else {
-					let XN = C + ((BF * ((JC * RX) - C)) / (SB * JD));
+					let XN = B + ((BF * ((JC * RX) - B)) / (SB * JD));
 					let XO = XN >= 2.220446049250313e-15f64;
 					let XQ = if XO {
 						XN
 					} else {
 						XP
 					};
-					let XR = RX + (((SB * JC) * G) * (C - (XQ.sqrt())));
+					let XR = RX + (((SB * JC) * G) * (B - (XQ.sqrt())));
 					let XS = (JC * XR) < BK;
 					let YP;
 					if XS {
-						let XT = C / ((0.013094570021973102f64 * JC) * SA);
+						let XT = B / ((0.013094570021973102f64 * JC) * SA);
 						let XV = XU + (BK * XT);
 						let XW = (27f64 * XT) * (JC * (RX - MP));
 						let XX = (1458f64 - (XU * (54f64 + XT))) + XW;
@@ -1460,8 +1460,8 @@ impl Instance {
 						let YQ;
 						if YD {
 							let YE = F / CB;
-							let YF = C / CI;
-							let YG = RX - (((C / (((C / QX) + YE) + YF)) * ((RX - SU) + ((YF + (G * YE)) * (-XJ)))) / QX);
+							let YF = B / CI;
+							let YG = RX - (((B / (((B / QX) + YE) + YF)) * ((RX - SU) + ((YF + (G * YE)) * (-XJ)))) / QX);
 							YQ = YG;
 						} else {
 							let YH = RX - YC;
@@ -1492,14 +1492,14 @@ impl Instance {
 					let AAD;
 					if YU {
 						let YV = F / CB;
-						let YW = C / CI;
-						let YX = RX - (((C / (((C / QX) + YV) + YW)) * ((RX - SU) + ((YW + (G * YV)) * (-XJ)))) / QX);
+						let YW = B / CI;
+						let YX = RX - (((B / (((B / QX) + YV) + YW)) * ((RX - SU) + ((YW + (G * YV)) * (-XJ)))) / QX);
 						AAA = YX;
 						AAD = YX;
 					} else {
 						let YY = F / CB;
-						let YZ = C / CI;
-						let ZA = RX - (((C / (((C / QX) + YY) + YZ)) * ((RX - SU) + ((YZ + (G * YY)) * (-XJ)))) / QX);
+						let YZ = B / CI;
+						let ZA = RX - (((B / (((B / QX) + YY) + YZ)) * ((RX - SU) + ((YZ + (G * YY)) * (-XJ)))) / QX);
 						let ZB = RX - YC;
 						let ZC = ZB > A;
 						let AAB;
@@ -1516,7 +1516,7 @@ impl Instance {
 								if ZJ {
 									let ZT;
 									if ZK {
-										ZT = C;
+										ZT = B;
 									} else {
 										let ZU;
 										if ZL {
@@ -1545,7 +1545,7 @@ impl Instance {
 											break;
 										}
 										let ZR = ZQ.sqrt();
-										let ZS = ZO + C;
+										let ZS = ZO + B;
 										ZO = ZS;
 										ZQ = ZR;
 									}
@@ -1554,7 +1554,7 @@ impl Instance {
 									let ZX = ZI.powf(0.25f64);
 									ZY = ZX;
 								}
-								let ZZ = ZE + ((ZG * JR) * (C / ZY));
+								let ZZ = ZE + ((ZG * JR) * (B / ZY));
 								AAC = ZZ;
 							} else {
 								AAC = ZA;
@@ -1585,7 +1585,7 @@ impl Instance {
 							AAO
 						};
 						let AAQ = (AAI * (AAJ - (G * (AAL + (((AAL * AAL) + AAP).sqrt()))))) * JD;
-						let AAR = (AAF * (C - (AAQ.sqrt()))) / (C - AAQ);
+						let AAR = (AAF * (B - (AAQ.sqrt()))) / (B - AAQ);
 						ACT = AAR;
 					} else {
 						let AAS = -((SU - AAA) - (((SK / AZ) * F) / CB));
@@ -1634,8 +1634,8 @@ impl Instance {
 						let ACL;
 						if ABN {
 							let ABO = ABL.exp();
-							let ABP = (-SS) * ((((ABM + ABL) - C) + (TE * (ABO - C))).sqrt());
-							let ABQ = (EA / ABP) * (((-ABM) + C) + (TE * ABO));
+							let ABP = (-SS) * ((((ABM + ABL) - B) + (TE * (ABO - B))).sqrt());
+							let ABQ = (EA / ABP) * (((-ABM) + B) + (TE * ABO));
 							ABW = ABP;
 							ACL = ABQ;
 						} else {
@@ -1643,8 +1643,8 @@ impl Instance {
 							let ABX;
 							let ACM;
 							if ABR {
-								let ABS = SS * (((ABM + ABL) - C).sqrt());
-								let ABT = (EA / ABS) * ((-ABM) + C);
+								let ABS = SS * (((ABM + ABL) - B).sqrt());
+								let ABT = (EA / ABS) * ((-ABM) + B);
 								ABX = ABS;
 								ACM = ABT;
 							} else {
@@ -1657,7 +1657,7 @@ impl Instance {
 							ACL = ACM;
 						}
 						let ABY = ((ABW * ABW) + ((BF * SM) * SM)).sqrt();
-						let ABZ = G * (C + (ABW / ABY));
+						let ABZ = G * (B + (ABW / ABY));
 						let ACA = (G * (ABW + ABY)) + (HW * SM);
 						let ACB = ACA < A;
 						let ACC;
@@ -1681,7 +1681,7 @@ impl Instance {
 						let ACI = ((ACD * ACD) + ACH).sqrt();
 						let ACJ = SL - (G * (ACD + ACI));
 						let ACN = ((((ACJ * ACJ) / AZ) / CB) / DX) / HH;
-						let ACO = (((((AAA - ABK) + (ABW / CI)) + (((ABW + (SK / AZ)) * F) / CB)) - SU) + ACN) / (((-1f64 + (ACL / CI)) + ((ACL * F) / CB)) + (((AZ * ACN) * (ACK * (ACL * (G * (C + (ACD / ACI)))))) / ACJ));
+						let ACO = (((((AAA - ABK) + (ABW / CI)) + (((ABW + (SK / AZ)) * F) / CB)) - SU) + ACN) / (((-1f64 + (ACL / CI)) + ((ACL * F) / CB)) + (((AZ * ACN) * (ACK * (ACL * (G * (B + (ACD / ACI)))))) / ACJ));
 						let ACP = ABK - ACO;
 						let ACQ = ((ACP - ABK).abs()) < HV;
 						let ACR = if ACQ {
@@ -1689,7 +1689,7 @@ impl Instance {
 						} else {
 							ABI
 						};
-						let ACS = ACR + C;
+						let ACS = ACR + B;
 						ABI = ACS;
 						ABK = ACP;
 						ACW = ABW;
@@ -1704,7 +1704,7 @@ impl Instance {
 					BEC = YT;
 					CGH = AAA;
 				}
-				let ADA = (ACY == C) && (ML > (ACZ + 0.2f64));
+				let ADA = (ACY == B) && (ML > (ACZ + 0.2f64));
 				let APH;
 				let ARL;
 				let CAZ;
@@ -1716,11 +1716,11 @@ impl Instance {
 					let ADE = (KC / HH) / HH;
 					let ADF = ((ADD * ADD) / QX) / QX;
 					let ADG = (ADF * JC) / AZ;
-					let ADH = ((((C / ADE) / ADF) * (ADB * ADB)).ln()) / (JC + (AZ / ADB));
-					let ADI = (ADH - (ADB + (ADG * (C - ((C + ((BF * ((JC * ADB) - C)) / ((ADG * JC) * AZ))).sqrt()))))) - ADC;
+					let ADH = ((((B / ADE) / ADF) * (ADB * ADB)).ln()) / (JC + (AZ / ADB));
+					let ADI = (ADH - (ADB + (ADG * (B - ((B + ((BF * ((JC * ADB) - B)) / ((ADG * JC) * AZ))).sqrt()))))) - ADC;
 					let ADJ = ADH - (G * (ADI + (((ADI * ADI) + ((BF * ADC) * ADH)).sqrt())));
 					let ADK = JC * ADJ;
-					let ADL = ADK - C;
+					let ADL = ADK - B;
 					let ADM = ADL + (ADE * (ADK.exp()));
 					let ADN = (ADM > A) && (ADL > A);
 					let API;
@@ -1728,15 +1728,15 @@ impl Instance {
 					let CNF;
 					if ADN {
 						let ADP = -JC;
-						let ADQ = (((((AZ * DI) / JC) * ADO) * (ADD * ((ADM.sqrt()) - (ADL.sqrt())))) * (-(((ADP * MZ).exp()) - C))) * (C / CN);
-						let ADR = C + ((BF * ((JC * RX) - C)) / (SB * JD));
+						let ADQ = (((((AZ * DI) / JC) * ADO) * (ADD * ((ADM.sqrt()) - (ADL.sqrt())))) * (-(((ADP * MZ).exp()) - B))) * (B / CN);
+						let ADR = B + ((BF * ((JC * RX) - B)) / (SB * JD));
 						let ADS = ADR < 2.220446049250313e-15f64;
 						let ADU = if ADS {
 							ADT
 						} else {
 							ADR
 						};
-						let ADV = RX + (((SB * JC) * G) * (C - (ADU.sqrt())));
+						let ADV = RX + (((SB * JC) * G) * (B - (ADU.sqrt())));
 						let ADW = ADV - ADJ;
 						let ADX = ADW < A;
 						let ADY = if ADX {
@@ -1772,7 +1772,7 @@ impl Instance {
 									break;
 								}
 								let AEO = (RX + MX) - ((AEE * (AEM / AT)) + ADJ);
-								let AEP = C - (AEO / 4.12f64);
+								let AEP = B - (AEO / 4.12f64);
 								let AEQ = AEL + (AEO / AEF);
 								let AER = AEQ * AEQ;
 								let AES = (G * (AEP + (((AEP * AEP) + 4e-6f64).sqrt()))) + 1e-13f64;
@@ -1782,7 +1782,7 @@ impl Instance {
 								} else {
 									AES
 								};
-								let AEV = parameters[143] * (C - ((AEU.sqrt()) * AEU));
+								let AEV = parameters[143] * (B - ((AEU.sqrt()) * AEU));
 								let AEW = (-AEV) / AEQ;
 								let AEX = AEW < -34f64;
 								let AFB = if AEX {
@@ -1813,7 +1813,7 @@ impl Instance {
 								} else {
 									AEM
 								};
-								let AFK = AFJ + C;
+								let AFK = AFJ + B;
 								AEM = AFK;
 								AFE = AFH;
 							}
@@ -1828,7 +1828,7 @@ impl Instance {
 							if EP {
 								let AFM = QX * QX;
 								let AFN = HN / AFM;
-								let AFP = C + (((AZ / HN) * AFM) * ((ADB - JE) - (AFO * PC)));
+								let AFP = B + (((AZ / HN) * AFM) * ((ADB - JE) - (AFO * PC)));
 								let AFQ = (G * (AFP + (((AFP * AFP) + 4e-6f64).sqrt()))) + 1e-13f64;
 								let AFR = AFQ < A;
 								let AFS = if AFR {
@@ -1836,7 +1836,7 @@ impl Instance {
 								} else {
 									AFQ
 								};
-								let AFZ = ((AFV * MZ) + ADJ) - ((AFW * AFX) * ((ADB * AFT) + (AFN * (C - ((AFS + FT).sqrt())))));
+								let AFZ = ((AFV * MZ) + ADJ) - ((AFW * AFX) * ((ADB * AFT) + (AFN * (B - ((AFS + FT).sqrt())))));
 								let AGA = (G * (AFZ + (((AFZ * AFZ) + 4e-4f64).sqrt()))) + 1e-12f64;
 								let AGB = AGA < A;
 								let AHP = if AGB {
@@ -1850,8 +1850,8 @@ impl Instance {
 								let AGF = QX * QX;
 								let AGG = HN / AGF;
 								let AGH = (AZ / HN) * AGF;
-								let AGI = C + (AGH * ((AGE - JE) - (AFO * PC)));
-								let AGJ = AZ * (C + AGH);
+								let AGI = B + (AGH * ((AGE - JE) - (AFO * PC)));
+								let AGJ = AZ * (B + AGH);
 								let AGK = FT + AGJ;
 								let AGL = (AGI < AGK) && (AGJ >= A);
 								let AHH;
@@ -1864,7 +1864,7 @@ impl Instance {
 									if AGQ {
 										let AHA;
 										if AGR {
-											AHA = C;
+											AHA = B;
 										} else {
 											let AHB;
 											if AGS {
@@ -1893,7 +1893,7 @@ impl Instance {
 												break;
 											}
 											let AGY = AGX.sqrt();
-											let AGZ = AGV + C;
+											let AGZ = AGV + B;
 											AGV = AGZ;
 											AGX = AGY;
 										}
@@ -1902,7 +1902,7 @@ impl Instance {
 										let AHE = AGP.powf(0.125f64);
 										AHF = AHE;
 									}
-									let AHG = AGK - ((AGM * AGJ) * (C / AHF));
+									let AHG = AGK - ((AGM * AGJ) * (B / AHF));
 									AHH = AHG;
 								} else {
 									AHH = AGI;
@@ -1914,7 +1914,7 @@ impl Instance {
 									let AHJ = AHH.sqrt();
 									AHJ
 								};
-								let AHL = ((AFV * MZ) + C) - ((CR / (AFW + CR)) * (AGE + (AGG * (C - AHK))));
+								let AHL = ((AFV * MZ) + B) - ((CR / (AFW + CR)) * (AGE + (AGG * (B - AHK))));
 								let AHM = (G * (AHL + (((AHL * AHL) + 4e-6f64).sqrt()))) + 1e-13f64;
 								let AHN = AHM < A;
 								let AHQ = if AHN {
@@ -1928,11 +1928,11 @@ impl Instance {
 							let AHU = ((AHT * AHR) * ADQ) * (((-AHS) / AHR).exp());
 							AHX = AHU;
 						}
-						let AHW = AHV == C;
+						let AHW = AHV == B;
 						let APJ;
 						if AHW {
-							let AHZ = ADJ - ((parameters[140] * JE) * ((C + ((AHX + AHY) * (0.021633307652783932f64 / ((((DX * F) * DJ) * ((ADP * parameters[141]).exp())) * (4.1046315303568966e26f64 + (2.4665765749313358f64 * HH)))))).ln()));
-							let AIA = (-(((3.3163543761348e-29f64 * HH) * JE).sqrt())) * ((((((ADP * AHZ).exp()) - C) + (JC * AHZ)).sqrt()) - (((((ADP * ADJ).exp()) - C) + ADK).sqrt()));
+							let AHZ = ADJ - ((parameters[140] * JE) * ((B + ((AHX + AHY) * (0.021633307652783932f64 / ((((DX * F) * DJ) * ((ADP * parameters[141]).exp())) * (4.1046315303568966e26f64 + (2.4665765749313358f64 * HH)))))).ln()));
+							let AIA = (-(((3.3163543761348e-29f64 * HH) * JE).sqrt())) * ((((((ADP * AHZ).exp()) - B) + (JC * AHZ)).sqrt()) - (((((ADP * ADJ).exp()) - B) + ADK).sqrt()));
 							let APK = if AIB != 0.0 {
 								let AID = 1e-5f64 * AIC;
 								AID
@@ -1963,7 +1963,7 @@ impl Instance {
 					CBN = KA;
 					CNE = A;
 				}
-				let mut AIH = C;
+				let mut AIH = B;
 				let mut AIJ = AIG;
 				let mut AIX = AIE;
 				let mut AJE = AIF;
@@ -1984,8 +1984,8 @@ impl Instance {
 					let AMY;
 					let ANF;
 					if AIN {
-						let AIO = SS * (((AIM + AIL) - C).sqrt());
-						let AIP = (EA * ((-AIM) + C)) / AIO;
+						let AIO = SS * (((AIM + AIL) - B).sqrt());
+						let AIP = (EA * ((-AIM) + B)) / AIO;
 						AMY = AIO;
 						ANF = AIP;
 					} else {
@@ -1994,8 +1994,8 @@ impl Instance {
 						let ANG;
 						if AIQ {
 							let AIR = AIL.exp();
-							let AIS = (-SS) * ((((AIM + AIL) - C) + (TE * ((AIR + AIL) - C))).sqrt());
-							let AIT = (EA * (((-AIM) + C) + (TE * (AIR + C)))) / AIS;
+							let AIS = (-SS) * ((((AIM + AIL) - B) + (TE * ((AIR + AIL) - B))).sqrt());
+							let AIT = (EA * (((-AIM) + B) + (TE * (AIR + B)))) / AIS;
 							AMZ = AIS;
 							ANG = AIT;
 						} else {
@@ -2010,10 +2010,10 @@ impl Instance {
 					}
 					let AIY = JC * AIX;
 					let AIZ = AIY.exp();
-					let AJA = (((XJ * XJ) / (KI * KI)) + ((AZ * KP) * ((AIZ + AIY) - C))).sqrt();
+					let AJA = (((XJ * XJ) / (KI * KI)) + ((AZ * KP) * ((AIZ + AIY) - B))).sqrt();
 					let AJB = -KI;
 					let AJC = (AJB * AJA) - XJ;
-					let AJD = AJB * ((((AZ * JC) * KP) * (AIZ + C)) / (AZ * AJA));
+					let AJD = AJB * ((((AZ * JC) * KP) * (AIZ + B)) / (AZ * AJA));
 					let AJF = (AJE - AIX) / SC;
 					let AJG = JC * AJF;
 					let AJH = -AJG;
@@ -2023,7 +2023,7 @@ impl Instance {
 						AJU = AJJ;
 					} else {
 						let mut AJK = AJH;
-						let mut AJM = C;
+						let mut AJM = B;
 						loop {
 							let AJL = AJK >= 60f64;
 							if !AJL {
@@ -2037,14 +2037,14 @@ impl Instance {
 						let AJQ = AJM * (AJK.exp());
 						AJU = AJQ;
 					}
-					let AJR = (((AJH.exp()) + AJG) - C).sqrt();
+					let AJR = (((AJH.exp()) + AJG) - B).sqrt();
 					let AJS = AJF < -1e-9f64;
 					let AKE;
 					let ALH;
 					let ALL;
 					if AJS {
 						let AJT = KI * AJR;
-						let AJV = (((KI * JC) * ((-AJU) + C)) / (AZ * AJR)) / SC;
+						let AJV = (((KI * JC) * ((-AJU) + B)) / (AZ * AJR)) / SC;
 						let AJW = -AJV;
 						AKE = AJT;
 						ALH = AJV;
@@ -2056,7 +2056,7 @@ impl Instance {
 						let ALM;
 						if AJX {
 							let AJY = AJB * AJR;
-							let AJZ = (((AJB * JC) * ((-AJU) + C)) / (AZ * AJR)) / SC;
+							let AJZ = (((AJB * JC) * ((-AJU) + B)) / (AZ * AJR)) / SC;
 							let AKA = -AJZ;
 							AKF = AJY;
 							ALI = AJZ;
@@ -2088,7 +2088,7 @@ impl Instance {
 						if AKO {
 							let AKY;
 							if AKP {
-								AKY = C;
+								AKY = B;
 							} else {
 								let AKZ;
 								if AKQ {
@@ -2117,7 +2117,7 @@ impl Instance {
 									break;
 								}
 								let AKW = AKV.sqrt();
-								let AKX = AKT + C;
+								let AKX = AKT + B;
 								AKT = AKX;
 								AKV = AKW;
 							}
@@ -2126,13 +2126,13 @@ impl Instance {
 							let ALC = AKN.powf(0.25f64);
 							ALD = ALC;
 						}
-						let ALE = C / ALD;
+						let ALE = B / ALD;
 						let ALF = ((AKG * AKM) * ALE) / AKN;
 						let ALG = AKH + ((AKJ * AKG) * ALE);
 						ALJ = ALF;
 						ALO = ALG;
 					} else {
-						ALJ = C;
+						ALJ = B;
 						ALO = AKE;
 					}
 					let ALK = ALH * ALJ;
@@ -2153,7 +2153,7 @@ impl Instance {
 						if ALY {
 							let AMI;
 							if ALZ {
-								AMI = C;
+								AMI = B;
 							} else {
 								let AMJ;
 								if AMA {
@@ -2182,7 +2182,7 @@ impl Instance {
 									break;
 								}
 								let AMG = AMF.sqrt();
-								let AMH = AMD + C;
+								let AMH = AMD + B;
 								AMD = AMH;
 								AMF = AMG;
 							}
@@ -2191,19 +2191,19 @@ impl Instance {
 							let AMM = ALX.powf(0.25f64);
 							AMN = AMM;
 						}
-						let AMO = C / AMN;
+						let AMO = B / AMN;
 						let AMP = ((ALQ * ALW) * AMO) / ALX;
 						let AMQ = ALR - ((ALT * ALQ) * AMO);
 						AMR = AMP;
 						AMU = AMQ;
 					} else {
-						AMR = C;
+						AMR = B;
 						AMU = ALO;
 					}
 					let AMS = ALN * AMR;
 					let AMT = ALK * AMR;
 					let AMV = XJ + AMU;
-					let AMX = AMW == C;
+					let AMX = AMW == B;
 					let APA;
 					let APC;
 					let APD;
@@ -2218,19 +2218,19 @@ impl Instance {
 					} else {
 						let ANA = (((AMY + XJ) + AJC) + AMU) + APH;
 						let ANB = (AIX - RX) - (QC * ANA);
-						let ANC = C - (QC * (AJD + AMS));
+						let ANC = B - (QC * (AJD + AMS));
 						let AND = -QC;
 						let ANE = AND * AMT;
 						let ANH = AND * ANF;
 						let ANI = AJE - (AIX + (CD * ((G * SK) + AMY)));
 						let ANJ = -(CD * ANF);
 						let ANK = (AIJ - AJE) - (CJ * AMY);
-						let ANM = C - (CJ * ANF);
+						let ANM = B - (CJ * ANF);
 						let ANN = ANC * ANM;
 						let ANO = ANC * ANJ;
 						let ANP = ANE * -1f64;
 						let ANQ = ANH * -1f64;
-						let ANR = -(C / ((((ANN - (ANO * ANL)) - (ANP * ANM)) + (ANQ * ANL)) + FT));
+						let ANR = -(B / ((((ANN - (ANO * ANL)) - (ANP * ANM)) + (ANQ * ANL)) + FT));
 						let ANS = ANR * ((((ANM - (ANJ * ANL)) * ANB) + (((ANH * ANL) - (ANE * ANM)) * ANI)) + (((ANE * ANJ) - ANH) * ANK));
 						let ANT = ANR * (((ANM * ANB) + (ANN * ANI)) + ((ANQ - ANO) * ANK));
 						let ANU = ANR * ((ANB + (((-ANC) * ANL) * ANI)) + ((ANC - ANP) * ANK));
@@ -2268,7 +2268,7 @@ impl Instance {
 									let AOM = if AOH {
 										IT
 									} else {
-										C
+										B
 									};
 									AOL = AOM;
 								}
@@ -2299,7 +2299,7 @@ impl Instance {
 						let AOY = AIJ + AOX;
 						let AOZ = AOI < (MV * AOJ);
 						let APG = if AOZ {
-							C
+							B
 						} else {
 							AMW
 						};
@@ -2309,7 +2309,7 @@ impl Instance {
 						APE = AOW;
 						APF = APG;
 					}
-					let APB = APA + C;
+					let APB = APA + B;
 					AIH = APB;
 					AIJ = APC;
 					AIX = APD;
@@ -2354,7 +2354,7 @@ impl Instance {
 				if APS {
 					let APV = -0.5f64 * ((XJ + APT) + APU);
 					BVI = A;
-					BVL = C;
+					BVL = B;
 					BVS = APM;
 					BWM = A;
 					BXD = APV;
@@ -2365,8 +2365,8 @@ impl Instance {
 				} else {
 					let AQA = HN / (QX * QX);
 					let AQB = AZ / AQA;
-					let AQC = C + (AQB * (RX - FT));
-					let AQD = C + AQB;
+					let AQC = B + (AQB * (RX - FT));
+					let AQD = B + AQB;
 					let AQE = (AQC < AQD) && (AQD >= A);
 					let ARA;
 					if AQE {
@@ -2378,7 +2378,7 @@ impl Instance {
 						if AQJ {
 							let AQT;
 							if AQK {
-								AQT = C;
+								AQT = B;
 							} else {
 								let AQU;
 								if AQL {
@@ -2407,7 +2407,7 @@ impl Instance {
 									break;
 								}
 								let AQR = AQQ.sqrt();
-								let AQS = AQO + C;
+								let AQS = AQO + B;
 								AQO = AQS;
 								AQQ = AQR;
 							}
@@ -2416,12 +2416,12 @@ impl Instance {
 							let AQX = AQI.powf(0.125f64);
 							AQY = AQX;
 						}
-						let AQZ = AQD - ((AQF * AQD) * (C / AQY));
+						let AQZ = AQD - ((AQF * AQD) * (B / AQY));
 						ARA = AQZ;
 					} else {
 						ARA = AQC;
 					}
-					let ARB = RX + (AQA * (C - (ARA.sqrt())));
+					let ARB = RX + (AQA * (B - (ARA.sqrt())));
 					let ARC = (G * (ARB + (((ARB * ARB) + 4e-4f64).sqrt()))) + 1e-12f64;
 					let ARD = ARC < A;
 					let ARE = if ARD {
@@ -2430,8 +2430,8 @@ impl Instance {
 						ARC
 					};
 					let ARF = MF / ARE;
-					let ARH = C + ((ARF.powf((ARG - C))) * ARF);
-					let ARI = MF / ((ARH.powf(((C / ARG) - C))) * ARH);
+					let ARH = B + ((ARF.powf((ARG - B))) * ARF);
+					let ARI = MF / ((ARH.powf(((B / ARG) - B))) * ARH);
 					let ARJ = ARI < A;
 					let AWR;
 					let AWW;
@@ -2581,8 +2581,8 @@ impl Instance {
 									let AUM;
 									if ATO {
 										let ATP = ATM.exp();
-										let ATQ = (-SS) * ((((ATN + ATM) - C) + (TE * (ATP - C))).sqrt());
-										let ATR = (EA / ATQ) * (((-ATN) + C) + (TE * ATP));
+										let ATQ = (-SS) * ((((ATN + ATM) - B) + (TE * (ATP - B))).sqrt());
+										let ATR = (EA / ATQ) * (((-ATN) + B) + (TE * ATP));
 										ATX = ATQ;
 										AUM = ATR;
 									} else {
@@ -2590,8 +2590,8 @@ impl Instance {
 										let ATY;
 										let AUN;
 										if ATS {
-											let ATT = SS * (((ATN + ATM) - C).sqrt());
-											let ATU = (EA / ATT) * ((-ATN) + C);
+											let ATT = SS * (((ATN + ATM) - B).sqrt());
+											let ATU = (EA / ATT) * ((-ATN) + B);
 											ATY = ATT;
 											AUN = ATU;
 										} else {
@@ -2604,7 +2604,7 @@ impl Instance {
 										AUM = AUN;
 									}
 									let ATZ = ((ATX * ATX) + ((BF * SM) * SM)).sqrt();
-									let AUA = G * (C + (ATX / ATZ));
+									let AUA = G * (B + (ATX / ATZ));
 									let AUB = (G * (ATX + ATZ)) + (HW * SM);
 									let AUC = AUB < A;
 									let AUD;
@@ -2628,7 +2628,7 @@ impl Instance {
 									let AUJ = ((AUE * AUE) + AUI).sqrt();
 									let AUK = SL - (G * (AUE + AUJ));
 									let AUO = ((((AUK * AUK) / AZ) / CB) / DX) / HH;
-									let AUP = ((((-ATL) + (ATX / CI)) - SU) + AUO) / ((-1f64 + (AUM / CI)) + (((AZ * AUO) * (AUL * (AUM * (G * (C + (AUE / AUJ)))))) / AUK));
+									let AUP = ((((-ATL) + (ATX / CI)) - SU) + AUO) / ((-1f64 + (AUM / CI)) + (((AZ * AUO) * (AUL * (AUM * (G * (B + (AUE / AUJ)))))) / AUK));
 									let AUQ = ATL - AUP;
 									let AUR = ((AUQ - ATL).abs()) < MV;
 									let AUS = if AUR {
@@ -2636,7 +2636,7 @@ impl Instance {
 									} else {
 										ATJ
 									};
-									let AUT = AUS + C;
+									let AUT = AUS + B;
 									ATJ = AUT;
 									ATL = AUQ;
 									AUY = ATX;
@@ -2662,8 +2662,8 @@ impl Instance {
 									let AWD;
 									if AVF {
 										let AVG = AVD.exp();
-										let AVH = (-SS) * ((((AVE + AVD) - C) + (TE * (AVG - C))).sqrt());
-										let AVI = (EA / AVH) * (((-AVE) + C) + (TE * AVG));
+										let AVH = (-SS) * ((((AVE + AVD) - B) + (TE * (AVG - B))).sqrt());
+										let AVI = (EA / AVH) * (((-AVE) + B) + (TE * AVG));
 										AVO = AVH;
 										AWD = AVI;
 									} else {
@@ -2671,8 +2671,8 @@ impl Instance {
 										let AVP;
 										let AWE;
 										if AVJ {
-											let AVK = SS * (((AVE + AVD) - C).sqrt());
-											let AVL = (EA / AVK) * ((-AVE) + C);
+											let AVK = SS * (((AVE + AVD) - B).sqrt());
+											let AVL = (EA / AVK) * ((-AVE) + B);
 											AVP = AVK;
 											AWE = AVL;
 										} else {
@@ -2685,7 +2685,7 @@ impl Instance {
 										AWD = AWE;
 									}
 									let AVQ = ((AVO * AVO) + ((BF * SM) * SM)).sqrt();
-									let AVR = G * (C + (AVO / AVQ));
+									let AVR = G * (B + (AVO / AVQ));
 									let AVS = (G * (AVO + AVQ)) + (HW * SM);
 									let AVT = AVS < A;
 									let AVU;
@@ -2709,7 +2709,7 @@ impl Instance {
 									let AWA = ((AVV * AVV) + AVZ).sqrt();
 									let AWB = SL - (G * (AVV + AWA));
 									let AWF = ((((AWB * AWB) / AZ) / CB) / DX) / HH;
-									let AWG = (((((ASD - AVC) + (AVO / CI)) + (((AVO + (SK / AZ)) * F) / CB)) - SU) + AWF) / (((-1f64 + (AWD / CI)) + ((AWD * F) / CB)) + (((AZ * AWF) * (AWC * (AWD * (G * (C + (AVV / AWA)))))) / AWB));
+									let AWG = (((((ASD - AVC) + (AVO / CI)) + (((AVO + (SK / AZ)) * F) / CB)) - SU) + AWF) / (((-1f64 + (AWD / CI)) + ((AWD * F) / CB)) + (((AZ * AWF) * (AWC * (AWD * (G * (B + (AVV / AWA)))))) / AWB));
 									let AWH = AVC - AWG;
 									let AWI = ((AWH - AVC).abs()) < MV;
 									let AWJ = if AWI {
@@ -2717,7 +2717,7 @@ impl Instance {
 									} else {
 										AVA
 									};
-									let AWK = AWJ + C;
+									let AWK = AWJ + B;
 									AVA = AWK;
 									AVC = AWH;
 									AWM = AVO;
@@ -2759,7 +2759,7 @@ impl Instance {
 					} else {
 						AWR
 					};
-					let mut AXD = C;
+					let mut AXD = B;
 					let mut AXF = AXA;
 					let mut AXT = AWV;
 					let mut AXZ = AWZ;
@@ -2779,8 +2779,8 @@ impl Instance {
 						let BBT;
 						let BBZ;
 						if AXJ {
-							let AXK = SS * (((AXI + AXH) - C).sqrt());
-							let AXL = (EA * ((-AXI) + C)) / AXK;
+							let AXK = SS * (((AXI + AXH) - B).sqrt());
+							let AXL = (EA * ((-AXI) + B)) / AXK;
 							BBT = AXK;
 							BBZ = AXL;
 						} else {
@@ -2789,8 +2789,8 @@ impl Instance {
 							let BCA;
 							if AXM {
 								let AXN = AXH.exp();
-								let AXO = (-SS) * ((((AXI + AXH) - C) + (TE * ((AXN + AXH) - C))).sqrt());
-								let AXP = (EA * (((-AXI) + C) + (TE * (AXN + C)))) / AXO;
+								let AXO = (-SS) * ((((AXI + AXH) - B) + (TE * ((AXN + AXH) - B))).sqrt());
+								let AXP = (EA * (((-AXI) + B) + (TE * (AXN + B)))) / AXO;
 								BBU = AXO;
 								BCA = AXP;
 							} else {
@@ -2804,10 +2804,10 @@ impl Instance {
 							BBZ = BCA;
 						}
 						let AXU = (JC * (AXT - ARI)).exp();
-						let AXV = (((XJ * XJ) / (KI * KI)) + ((AZ * KP) * ((AXU + AXH) - C))).sqrt();
+						let AXV = (((XJ * XJ) / (KI * KI)) + ((AZ * KP) * ((AXU + AXH) - B))).sqrt();
 						let AXW = -KI;
 						let AXX = (AXW * AXV) - XJ;
-						let AXY = AXW * ((((AZ * JC) * KP) * (AXU + C)) / (AZ * AXV));
+						let AXY = AXW * ((((AZ * JC) * KP) * (AXU + B)) / (AZ * AXV));
 						let AYA = (AXZ - AXT) / SC;
 						let AYB = JC * AYA;
 						let AYC = -AYB;
@@ -2815,12 +2815,12 @@ impl Instance {
 						let AYL;
 						let AYP;
 						if AYD {
-							let AYE = AJJ * ((C + AYC) - 500f64);
+							let AYE = AJJ * ((B + AYC) - 500f64);
 							AYL = AYE;
 							AYP = AJJ;
 						} else {
 							let mut AYF = AYC;
-							let mut AYH = C;
+							let mut AYH = B;
 							loop {
 								let AYG = AYF >= 60f64;
 								if !AYG {
@@ -2835,14 +2835,14 @@ impl Instance {
 							AYL = AYK;
 							AYP = AYK;
 						}
-						let AYM = ((AYL + AYB) - C).sqrt();
+						let AYM = ((AYL + AYB) - B).sqrt();
 						let AYN = AYA < -1e-9f64;
 						let AYZ;
 						let BAC;
 						let BAG;
 						if AYN {
 							let AYO = KI * AYM;
-							let AYQ = (((KI * JC) * ((-AYP) + C)) / (AZ * AYM)) / SC;
+							let AYQ = (((KI * JC) * ((-AYP) + B)) / (AZ * AYM)) / SC;
 							let AYR = -AYQ;
 							AYZ = AYO;
 							BAC = AYQ;
@@ -2854,7 +2854,7 @@ impl Instance {
 							let BAH;
 							if AYS {
 								let AYT = AXW * AYM;
-								let AYU = (((AXW * JC) * ((-AYP) + C)) / (AZ * AYM)) / SC;
+								let AYU = (((AXW * JC) * ((-AYP) + B)) / (AZ * AYM)) / SC;
 								let AYV = -AYU;
 								AZA = AYT;
 								BAD = AYU;
@@ -2886,7 +2886,7 @@ impl Instance {
 							if AZJ {
 								let AZT;
 								if AZK {
-									AZT = C;
+									AZT = B;
 								} else {
 									let AZU;
 									if AZL {
@@ -2915,7 +2915,7 @@ impl Instance {
 										break;
 									}
 									let AZR = AZQ.sqrt();
-									let AZS = AZO + C;
+									let AZS = AZO + B;
 									AZO = AZS;
 									AZQ = AZR;
 								}
@@ -2924,13 +2924,13 @@ impl Instance {
 								let AZX = AZI.powf(0.25f64);
 								AZY = AZX;
 							}
-							let AZZ = C / AZY;
+							let AZZ = B / AZY;
 							let BAA = ((AZB * AZH) * AZZ) / AZI;
 							let BAB = AZC + ((AZE * AZB) * AZZ);
 							BAE = BAA;
 							BAJ = BAB;
 						} else {
-							BAE = C;
+							BAE = B;
 							BAJ = AYZ;
 						}
 						let BAF = BAC * BAE;
@@ -2951,7 +2951,7 @@ impl Instance {
 							if BAT {
 								let BBD;
 								if BAU {
-									BBD = C;
+									BBD = B;
 								} else {
 									let BBE;
 									if BAV {
@@ -2980,7 +2980,7 @@ impl Instance {
 										break;
 									}
 									let BBB = BBA.sqrt();
-									let BBC = BAY + C;
+									let BBC = BAY + B;
 									BAY = BBC;
 									BBA = BBB;
 								}
@@ -2989,19 +2989,19 @@ impl Instance {
 								let BBH = BAS.powf(0.25f64);
 								BBI = BBH;
 							}
-							let BBJ = C / BBI;
+							let BBJ = B / BBI;
 							let BBK = ((BAL * BAR) * BBJ) / BAS;
 							let BBL = BAM - ((BAO * BAL) * BBJ);
 							BBM = BBK;
 							BBP = BBL;
 						} else {
-							BBM = C;
+							BBM = B;
 							BBP = BAJ;
 						}
 						let BBN = BAI * BBM;
 						let BBO = BAF * BBM;
 						let BBQ = XJ + BBP;
-						let BBS = (BBR == C) && (AXD > BK);
+						let BBS = (BBR == B) && (AXD > BK);
 						let BDR;
 						let BDT;
 						let BDU;
@@ -3015,19 +3015,19 @@ impl Instance {
 							BDW = BBR;
 						} else {
 							let BBV = (AXT - RX) - (QC * ((((BBT + XJ) + AXX) + BBP) + APH));
-							let BBW = C - (QC * (AXY + BBN));
+							let BBW = B - (QC * (AXY + BBN));
 							let BBX = -QC;
 							let BBY = BBX * BBO;
 							let BCB = BBX * BBZ;
 							let BCC = AXZ - (AXT + (CD * ((G * SK) + BBT)));
 							let BCD = -(CD * BBZ);
 							let BCE = (AXF - AXZ) - (CJ * BBT);
-							let BCG = C - (CJ * BBZ);
+							let BCG = B - (CJ * BBZ);
 							let BCH = BBW * BCG;
 							let BCI = BBW * BCD;
 							let BCJ = BBY * -1f64;
 							let BCK = BCB * -1f64;
-							let BCL = -(C / ((((BCH - (BCI * BCF)) - (BCJ * BCG)) + (BCK * BCF)) + FT));
+							let BCL = -(B / ((((BCH - (BCI * BCF)) - (BCJ * BCG)) + (BCK * BCF)) + FT));
 							let BCM = BCL * ((((BCG - (BCD * BCF)) * BBV) + (((BCB * BCF) - (BBY * BCG)) * BCC)) + (((BBY * BCD) - BCB) * BCE));
 							let BCN = BCL * (((BCG * BBV) + (BCH * BCC)) + ((BCK - BCI) * BCE));
 							let BCO = BCL * ((BBV + (((-BBW) * BCF) * BCC)) + ((BBW - BCJ) * BCE));
@@ -3065,7 +3065,7 @@ impl Instance {
 										let BDD = if BCY {
 											IT
 										} else {
-											C
+											B
 										};
 										BDC = BDD;
 									}
@@ -3096,7 +3096,7 @@ impl Instance {
 							let BDP = AXF + BDO;
 							let BDQ = BCZ < (MV * BDA);
 							let BDX = if BDQ {
-								C
+								B
 							} else {
 								BBR
 							};
@@ -3106,7 +3106,7 @@ impl Instance {
 							BDV = BDN;
 							BDW = BDX;
 						}
-						let BDS = BDR + C;
+						let BDS = BDR + B;
 						AXD = BDS;
 						AXF = BDT;
 						AXT = BDU;
@@ -3124,7 +3124,7 @@ impl Instance {
 						BDZ = AXT;
 					}
 					let BVM = if AWQ {
-						C
+						B
 					} else {
 						A
 					};
@@ -3143,12 +3143,12 @@ impl Instance {
 					let BEN = BEA + MV;
 					let BES = SK * 1e-5f64;
 					let BET = BES >= A;
-					let BEU = ((-(((BEO * BEO) - (APW * APW)) / (CI / ((CI * BEF) + C)))) < BES) && BET;
+					let BEU = ((-(((BEO * BEO) - (APW * APW)) / (CI / ((CI * BEF) + B)))) < BES) && BET;
 					if BEU {
 						if BEV {
 							let BFD;
 							if BEW {
-								BFD = C;
+								BFD = B;
 							} else {
 								let BFE;
 								if BEX {
@@ -3175,7 +3175,7 @@ impl Instance {
 								if !BFB {
 									break;
 								}
-								let BFC = BFA + C;
+								let BFC = BFA + B;
 								BFA = BFC;
 							}
 						}
@@ -3192,7 +3192,7 @@ impl Instance {
 						if BFN {
 							let BFX;
 							if BFO {
-								BFX = C;
+								BFX = B;
 							} else {
 								let BFY;
 								if BFP {
@@ -3221,7 +3221,7 @@ impl Instance {
 									break;
 								}
 								let BFV = BFU.sqrt();
-								let BFW = BFS + C;
+								let BFW = BFS + B;
 								BFS = BFW;
 								BFU = BFV;
 							}
@@ -3230,12 +3230,12 @@ impl Instance {
 							let BGB = BFM.powf(0.25f64);
 							BGC = BGB;
 						}
-						let BGD = BES - ((BFJ * BES) * (C / BGC));
+						let BGD = BES - ((BFJ * BES) * (B / BGC));
 						BGE = BGD;
 					} else {
 						BGE = BFH;
 					}
-					let BGF = C - (((C + ((AZ * (-BGE)) / (((JC * QX) * BEN) * BEN))) * BEN) / APR);
+					let BGF = B - (((B + ((AZ * (-BGE)) / (((JC * QX) * BEN) * BEN))) * BEN) / APR);
 					let BGG = (BGF < 1e-5f64) && true;
 					let BHB;
 					if BGG {
@@ -3246,7 +3246,7 @@ impl Instance {
 						if BGK {
 							let BGU;
 							if BGL {
-								BGU = C;
+								BGU = B;
 							} else {
 								let BGV;
 								if BGM {
@@ -3275,7 +3275,7 @@ impl Instance {
 									break;
 								}
 								let BGS = BGR.sqrt();
-								let BGT = BGP + C;
+								let BGT = BGP + B;
 								BGP = BGT;
 								BGR = BGS;
 							}
@@ -3284,7 +3284,7 @@ impl Instance {
 							let BGY = BGJ.powf(0.25f64);
 							BGZ = BGY;
 						}
-						let BHA = 1e-5f64 - ((BGH * 1e-5f64) * (C / BGZ));
+						let BHA = 1e-5f64 - ((BGH * 1e-5f64) * (B / BGZ));
 						BHB = BHA;
 					} else {
 						BHB = BGF;
@@ -3324,7 +3324,7 @@ impl Instance {
 			} else {
 				let BHD = KT < F;
 				let BTT = if BHD {
-					C
+					B
 				} else {
 					AZ
 				};
@@ -3335,7 +3335,7 @@ impl Instance {
 				let CGI;
 				if BHE {
 					let BHG = (AZ * JE) * (((-FX) / SA).ln());
-					let BHH = (C / (JC * KI)) * QX;
+					let BHH = (B / (JC * KI)) * QX;
 					let BHI = AZ + (4.242640687119285f64 * BHH);
 					let BHJ = ((8f64 * BHI) * BHI) * BHI;
 					let BHK = (9f64 * BHH) * ((JC * (RX - MP)) - AZ);
@@ -3350,9 +3350,9 @@ impl Instance {
 						BHQ
 					};
 					let BHS = BHR.powf(XY);
-					let BHT = ((((((-5.65685424949238f64 - (12f64 * BHH)) + (AZ * BHS)) + ((KH * BHS) * BHS)) * (C / BHS)) * JE) + MP) - MP;
+					let BHT = ((((((-5.65685424949238f64 - (12f64 * BHH)) + (AZ * BHS)) + ((KH * BHS) * BHS)) * (B / BHS)) * JE) + MP) - MP;
 					let BHU = BHT / BHG;
-					let BHV = (BHT / ((C + (BHU * BHU)).sqrt())) + MP;
+					let BHV = (BHT / ((B + (BHU * BHU)).sqrt())) + MP;
 					BJF = BHV;
 					BNA = BHF;
 					BPD = A;
@@ -3365,19 +3365,19 @@ impl Instance {
 						BIY = A;
 					} else {
 						let BHX = JC * (RX - MP);
-						let BHY = C + ((BF * (BHX - C)) / (SB * JD));
+						let BHY = B + ((BF * (BHX - B)) / (SB * JD));
 						let BHZ = BHY >= 2.220446049250313e-15f64;
 						let BIB = if BHZ {
 							BHY
 						} else {
 							BIA
 						};
-						let BIC = RX + (((SB * JC) * G) * (C - (BIB.sqrt())));
+						let BIC = RX + (((SB * JC) * G) * (B - (BIB.sqrt())));
 						let BID = (JC * (BIC - MP)) < BK;
 						let BIT;
 						let BIZ;
 						if BID {
-							let BIE = C / ((0.013094570021973102f64 * JC) * SA);
+							let BIE = B / ((0.013094570021973102f64 * JC) * SA);
 							let BIF = XU + (BK * BIE);
 							let BIG = (27f64 * BIE) * BHX;
 							let BIH = (1458f64 - (XU * (54f64 + BIE))) + BIG;
@@ -3391,7 +3391,7 @@ impl Instance {
 							if BIK {
 								BIU = BIC;
 							} else {
-								let BIL = (((((C / KP) / SE) * RX) * RX).ln()) / (JC + (AZ / RX));
+								let BIL = (((((B / KP) / SE) * RX) * RX).ln()) / (JC + (AZ / RX));
 								let BIM = (BIL - BIC) - TH;
 								let BIN = (BF * BIL) * TH;
 								let BIO = BIN > A;
@@ -3422,7 +3422,7 @@ impl Instance {
 					BPD = BIY;
 					CGI = BIW;
 				}
-				let BJA = (ACY == C) && (AHV == AZ);
+				let BJA = (ACY == B) && (AHV == AZ);
 				let BJC = if BJA {
 					let BJB = 1e-5f64 * AIC;
 					BJB
@@ -3434,7 +3434,7 @@ impl Instance {
 				let BJG = (((HM * F) * F) / AZ) / CB;
 				let BJH = ((AZ * JC) * BJG).sqrt();
 				let BJI = ((((BJH.exp()) + ((-BJH).exp())) / AZ).ln()) / BJG;
-				let mut BJJ = C;
+				let mut BJJ = B;
 				let mut BJL = BJF;
 				let mut BKV = A;
 				let mut BLB = BNA;
@@ -3456,14 +3456,14 @@ impl Instance {
 					let BKA;
 					if BJQ {
 						let BJR = BJP.exp();
-						let BJS = C + (BJR - (((-BJI) * BJG).exp()));
+						let BJS = B + (BJR - (((-BJI) * BJG).exp()));
 						let BJT = (BJS.ln()) / BJI;
 						let BJU = BJR / BJS;
 						BJV = BJT;
 						BKA = BJU;
 					} else {
 						BJV = BJO;
-						BKA = C;
+						BKA = B;
 					}
 					let BJW = JC * BJV;
 					let BJX = BJN.abs();
@@ -3471,7 +3471,7 @@ impl Instance {
 					let BLD;
 					let BLL;
 					if BJZ {
-						let BKB = ((C - (BKA * BKA)) / AZ).sqrt();
+						let BKB = ((B - (BKA * BKA)) / AZ).sqrt();
 						let BKC = BJN * BKB;
 						let BKD = JC * BKB;
 						let BKE = BJN < A;
@@ -3497,9 +3497,9 @@ impl Instance {
 							let BKK = BJN / BF;
 							let BKL = BJW / BK;
 							let BKM = BJW / BF;
-							let BKN = (((BJN * BJN) / AZ) * (C - (BKJ * (C - (BKK * (C - (BJN / IT))))))) - (((BJW * BJW) / AZ) * (C - (BKL * (C - (BKM * (C - (BJW / IT)))))));
+							let BKN = (((BJN * BJN) / AZ) * (B - (BKJ * (B - (BKK * (B - (BJN / IT))))))) - (((BJW * BJW) / AZ) * (B - (BKL * (B - (BKM * (B - (BJW / IT)))))));
 							let BKO = BKN.sqrt();
-							let BKP = (BJN * (C - ((BJN / AZ) * (C - (BKJ * (C - BKK)))))) - (BKA * (BJW * (C - ((BJW / AZ) * (C - (BKL * (C - BKM)))))));
+							let BKP = (BJN * (B - ((BJN / AZ) * (B - (BKJ * (B - BKK)))))) - (BKA * (BJW * (B - ((BJW / AZ) * (B - (BKL * (B - BKM)))))));
 							let BKQ = ((JC * G) * BKP) / BKO;
 							BLF = BKO;
 							BLN = BKQ;
@@ -3507,14 +3507,14 @@ impl Instance {
 							let BKR = (-BJN).exp();
 							let BKS = (-BJW).exp();
 							let BKT = ((BJN - BJW) + (BKR - BKS)).sqrt();
-							let BKU = ((JC * G) * ((C - BKR) - (BKA * (C - BKS)))) / BKT;
+							let BKU = ((JC * G) * ((B - BKR) - (BKA * (B - BKS)))) / BKT;
 							BLF = BKT;
 							BLN = BKU;
 						}
 						BLD = BLF;
 						BLL = BLN;
 					}
-					let BKW = BKV == C;
+					let BKW = BKV == B;
 					let BKX = BJN < A;
 					let BKY = BKW && BKX;
 					let BLA = if BKY {
@@ -3531,7 +3531,7 @@ impl Instance {
 					};
 					let BLI = BLH < (F * 1.01f64);
 					let BTU = if BLI {
-						C
+						B
 					} else {
 						AZ
 					};
@@ -3560,13 +3560,13 @@ impl Instance {
 							let BLZ;
 							if BLQ {
 								let BLR = BJN.exp();
-								let BLS = BJE * (BLR - (BJN + C));
-								let BLT = (BJE * JC) * (BLR - C);
+								let BLS = BJE * (BLR - (BJN + B));
+								let BLT = (BJE * JC) * (BLR - B);
 								BLX = BLS;
 								BLZ = BLT;
 							} else {
 								let BLU = (JC * BJL).exp();
-								let BLV = KP * (BLU - (BJD * (BJN + C)));
+								let BLV = KP * (BLU - (BJD * (BJN + B)));
 								let BLW = (KP * JC) * (BLU - BJD);
 								BLX = BLV;
 								BLZ = BLW;
@@ -3582,7 +3582,7 @@ impl Instance {
 						BNH = BNI;
 					}
 					let BMD = (((-RX) + BJL) + (SA * BMB)) - (QC * BJC);
-					let BMG = C + (SA * BME);
+					let BMG = B + (SA * BME);
 					let BMV;
 					let BMX;
 					let BMY;
@@ -3593,19 +3593,19 @@ impl Instance {
 					} else {
 						let BMI = (-BMD) / BMG;
 						let BMJ = BJL.abs();
-						let BMK = C >= BMJ;
+						let BMK = B >= BMJ;
 						let BML = if BMK {
-							C
+							B
 						} else {
 							BMJ
 						};
-						let BMM = 0.05f64 * (C + BML);
+						let BMM = 0.05f64 * (B + BML);
 						let BMN = (BMI.abs()) > BMM;
 						let BMS;
 						if BMN {
 							let BMO = BMI >= A;
 							let BMQ = if BMO {
-								C
+								B
 							} else {
 								BMP
 							};
@@ -3617,7 +3617,7 @@ impl Instance {
 						let BMT = BJL + BMS;
 						let BMU = ((BMS.abs()) <= MV) && ((BMD.abs()) <= BHN);
 						let BMZ = if BMU {
-							C
+							B
 						} else {
 							BKV
 						};
@@ -3625,7 +3625,7 @@ impl Instance {
 						BMX = BMT;
 						BMY = BMZ;
 					}
-					let BMW = BMV + C;
+					let BMW = BMV + B;
 					BJJ = BMW;
 					BJL = BMX;
 					BKV = BMY;
@@ -3638,7 +3638,7 @@ impl Instance {
 				let BNC = BNB / KI;
 				let BND = (BNC * BNC) + 2.220446049250313e-15f64;
 				let BNE = BNC + 2.220446049250313e-15f64;
-				let BNJ = (KI * BNG) * (C / (BNF + BNE));
+				let BNJ = (KI * BNG) * (B / (BNF + BNE));
 				let BNK = -BNJ;
 				let BNL = BNJ * QC;
 				let BNM = (BLB == -1f64) || (BNL <= E);
@@ -3651,10 +3651,10 @@ impl Instance {
 				let DIY;
 				if BNM {
 					let BNN = QX * (RX - BJL);
-					BNO = C;
+					BNO = B;
 					BSY = BF;
 					BUG = A;
-					BVN = C;
+					BVN = B;
 					BVU = BJL;
 					BXH = BNN;
 					DIY = BJL;
@@ -3677,8 +3677,8 @@ impl Instance {
 				if BNP {
 					let BNQ = HN / (QX * QX);
 					let BNR = AZ / BNQ;
-					let BNS = C + (BNR * (RX - FT));
-					let BNT = C + BNR;
+					let BNS = B + (BNR * (RX - FT));
+					let BNT = B + BNR;
 					let BNU = (BNS < BNT) && (BNT >= A);
 					let BOQ;
 					if BNU {
@@ -3690,7 +3690,7 @@ impl Instance {
 						if BNZ {
 							let BOJ;
 							if BOA {
-								BOJ = C;
+								BOJ = B;
 							} else {
 								let BOK;
 								if BOB {
@@ -3719,7 +3719,7 @@ impl Instance {
 									break;
 								}
 								let BOH = BOG.sqrt();
-								let BOI = BOE + C;
+								let BOI = BOE + B;
 								BOE = BOI;
 								BOG = BOH;
 							}
@@ -3728,12 +3728,12 @@ impl Instance {
 							let BON = BNY.powf(0.125f64);
 							BOO = BON;
 						}
-						let BOP = BNT - ((BNV * BNT) * (C / BOO));
+						let BOP = BNT - ((BNV * BNT) * (B / BOO));
 						BOQ = BOP;
 					} else {
 						BOQ = BNS;
 					}
-					let BOR = RX + (BNQ * (C - (BOQ.sqrt())));
+					let BOR = RX + (BNQ * (B - (BOQ.sqrt())));
 					let BOS = (G * (BOR + (((BOR * BOR) + 4e-4f64).sqrt()))) + 1e-12f64;
 					let BOT = BOS < A;
 					let BOU = if BOT {
@@ -3742,8 +3742,8 @@ impl Instance {
 						BOS
 					};
 					let BOV = MF / BOU;
-					let BOW = C + ((BOV.powf((ARG - C))) * BOV);
-					let BOX = MF / ((BOW.powf(((C / ARG) - C))) * BOW);
+					let BOW = B + ((BOV.powf((ARG - B))) * BOV);
+					let BOX = MF / ((BOW.powf(((B / ARG) - B))) * BOW);
 					let BOY = (JC * (MP - BOX)).exp();
 					let BOZ = BOX <= A;
 					let BPW;
@@ -3801,7 +3801,7 @@ impl Instance {
 						let BPV = BJL + BPT;
 						BPW = BPV;
 					}
-					let mut BPX = C;
+					let mut BPX = B;
 					let mut BPZ = BPW;
 					let mut BSF = A;
 					let mut BTB = BNB;
@@ -3821,14 +3821,14 @@ impl Instance {
 						let BQN;
 						if BQE {
 							let BQF = BQD.exp();
-							let BQG = C + (BQF - (((-BJI) * BJG).exp()));
+							let BQG = B + (BQF - (((-BJI) * BJG).exp()));
 							let BQH = (BQG.ln()) / BJI;
 							let BQI = BQF / BQG;
 							BQJ = BQH;
 							BQN = BQI;
 						} else {
 							BQJ = BQC;
-							BQN = C;
+							BQN = B;
 						}
 						let BQK = JC * BQJ;
 						let BQL = BQB.abs();
@@ -3836,7 +3836,7 @@ impl Instance {
 						let BRI;
 						let BRQ;
 						if BQM {
-							let BQO = ((C - (BQN * BQN)) / AZ).sqrt();
+							let BQO = ((B - (BQN * BQN)) / AZ).sqrt();
 							let BQP = BQB * BQO;
 							let BQQ = JC * BQO;
 							let BQR = BQB < A;
@@ -3862,9 +3862,9 @@ impl Instance {
 								let BQW = BQB / BF;
 								let BQX = BQK / BK;
 								let BQY = BQK / BF;
-								let BQZ = (((BQB * BQB) / AZ) * (C - (BQV * (C - (BQW * (C - (BQB / IT))))))) - (((BQK * BQK) / AZ) * (C - (BQX * (C - (BQY * (C - (BQK / IT)))))));
+								let BQZ = (((BQB * BQB) / AZ) * (B - (BQV * (B - (BQW * (B - (BQB / IT))))))) - (((BQK * BQK) / AZ) * (B - (BQX * (B - (BQY * (B - (BQK / IT)))))));
 								let BRA = BQZ.sqrt();
-								let BRB = (BQB * (C - ((BQB / AZ) * (C - (BQV * (C - BQW)))))) - (BQN * (BQK * (C - ((BQK / AZ) * (C - (BQX * (C - BQY)))))));
+								let BRB = (BQB * (B - ((BQB / AZ) * (B - (BQV * (B - BQW)))))) - (BQN * (BQK * (B - ((BQK / AZ) * (B - (BQX * (B - BQY)))))));
 								let BRC = ((JC * G) * BRB) / BRA;
 								BRK = BRA;
 								BRS = BRC;
@@ -3872,7 +3872,7 @@ impl Instance {
 								let BRD = (-BQB).exp();
 								let BRE = (-BQK).exp();
 								let BRF = ((BQB - BQK) + (BRD - BRE)).sqrt();
-								let BRG = ((JC * G) * ((C - BRD) - (BQN * (C - BRE)))) / BRF;
+								let BRG = ((JC * G) * ((B - BRD) - (BQN * (B - BRE)))) / BRF;
 								BRK = BRF;
 								BRS = BRG;
 							}
@@ -3908,7 +3908,7 @@ impl Instance {
 								BTG = BTE;
 							} else {
 								let BRV = (JC * (BPZ - BOX)).exp();
-								let BRW = KP * (BRV - (BOY * (BQB + C)));
+								let BRW = KP * (BRV - (BOY * (BQB + B)));
 								let BRX = ((BRI * BRI) + BRW).sqrt();
 								let BRY = (G * (((AZ * BRQ) * BRI) + ((KP * JC) * (BRV - BOY)))) / BRX;
 								BSA = BRX;
@@ -3920,8 +3920,8 @@ impl Instance {
 							BTF = BTG;
 						}
 						let BSB = (((-RX) + BPZ) + (SA * BRZ)) - (QC * BJC);
-						let BSE = C + (SA * BSC);
-						let BSG = (BSF == C) && (BPX > BK);
+						let BSE = B + (SA * BSC);
+						let BSG = (BSF == B) && (BPX > BK);
 						let BSV;
 						let BSX;
 						let BSZ;
@@ -3932,19 +3932,19 @@ impl Instance {
 						} else {
 							let BSI = (-BSB) / BSE;
 							let BSJ = BPZ.abs();
-							let BSK = C >= BSJ;
+							let BSK = B >= BSJ;
 							let BSL = if BSK {
-								C
+								B
 							} else {
 								BSJ
 							};
-							let BSM = 0.05f64 * (C + BSL);
+							let BSM = 0.05f64 * (B + BSL);
 							let BSN = (BSI.abs()) > BSM;
 							let BSS;
 							if BSN {
 								let BSO = BSI >= A;
 								let BSQ = if BSO {
-									C
+									B
 								} else {
 									BSP
 								};
@@ -3956,7 +3956,7 @@ impl Instance {
 							let BST = BPZ + BSS;
 							let BSU = ((BSS.abs()) <= MV) && ((BSB.abs()) <= BHN);
 							let BTA = if BSU {
-								C
+								B
 							} else {
 								BSF
 							};
@@ -3964,7 +3964,7 @@ impl Instance {
 							BSX = BST;
 							BSZ = BTA;
 						}
-						let BSW = BSV + C;
+						let BSW = BSV + B;
 						BPX = BSW;
 						BPZ = BSX;
 						BSF = BSZ;
@@ -3973,10 +3973,10 @@ impl Instance {
 						BTE = BTF;
 					}
 					let BTC = BTB / KI;
-					let BTH = -((KI * BTE) * (C / (BTD + (BTC + 2.220446049250313e-15f64))));
+					let BTH = -((KI * BTE) * (B / (BTD + (BTC + 2.220446049250313e-15f64))));
 					let BTI = BPZ - BJL;
 					let BTJ = G * (BNC + BTC);
-					let BTK = ((JC * QX) * ((RX + JE) - (G * ((AZ * BJL) + BTI)))) + ((JC * KI) * ((-BTJ) + ((C / (((((JC / BND) * BTI) + C).sqrt()) + C)) / BNE)));
+					let BTK = ((JC * QX) * ((RX + JE) - (G * ((AZ * BJL) + BTI)))) + ((JC * KI) * ((-BTJ) + ((B / (((((JC / BND) * BTI) + B).sqrt()) + B)) / BNE)));
 					let BTL = BTB + BNB;
 					let BTM = BTL / AZ;
 					let BTN = BTH + BNK;
@@ -3984,7 +3984,7 @@ impl Instance {
 					let BTP = BTB - BNB;
 					let BTQ = -(BTH - BNK);
 					let BTR = KI * KI;
-					let BTV = BTS <= C;
+					let BTV = BTS <= B;
 					let BTY = if BTV {
 						let BTW = (((BTO * JC) * BTI) - BTQ) - ((((BTP * BTP) * BTP) / BTR) / IU);
 						BTW
@@ -3992,7 +3992,7 @@ impl Instance {
 						let BTX = BTI * BTK;
 						BTX
 					};
-					let BTZ = (parameters[46] >= C) && (BTY < A);
+					let BTZ = (parameters[46] >= B) && (BTY < A);
 					let BUD = if BTZ {
 						A
 					} else {
@@ -4003,7 +4003,7 @@ impl Instance {
 						let BUA = (BTI.abs()) > M;
 						let BXG = if BUA {
 							let BUB = AZ * BTM;
-							let BUC = ((((((BTO - BUB) + ((QX / JC) * ((C - ((BUB * BTM) / BTR)) + (((BTP * BTP) / BTR) / H)))) * BTP) * BTP) * BTP) / BTR) / IU;
+							let BUC = ((((((BTO - BUB) + ((QX / JC) * ((B - ((BUB * BTM) / BTR)) + (((BTP * BTP) / BTR) / H)))) * BTP) * BTP) * BTP) / BTR) / IU;
 							let BUE = ((BTM * (((BTO * JC) * BTI) - BTQ)) + BUC) / BUD;
 							BUE
 						} else {
@@ -4014,14 +4014,14 @@ impl Instance {
 						let BUF = G * BTL;
 						BXF = BUF;
 					}
-					let BUH = C - (C - ((BTI + ((AZ * SA) * (BTJ - BNE))) * (C / BUG)));
+					let BUH = B - (B - ((BTI + ((AZ * SA) * (BTJ - BNE))) * (B / BUG)));
 					let BUI = BUH * BUH;
 					let BUJ = (((BUI * BUI) * BUI) * BUI) + 1f64;
 					let BUZ;
 					if BUK {
 						let BUU;
 						if BUL {
-							BUU = C;
+							BUU = B;
 						} else {
 							let BUV;
 							if BUM {
@@ -4050,7 +4050,7 @@ impl Instance {
 								break;
 							}
 							let BUS = BUR.sqrt();
-							let BUT = BUP + C;
+							let BUT = BUP + B;
 							BUP = BUT;
 							BUR = BUS;
 						}
@@ -4059,7 +4059,7 @@ impl Instance {
 						let BUY = BUJ.powf(0.125f64);
 						BUZ = BUY;
 					}
-					let BVA = C - (BUH * (C / BUZ));
+					let BVA = B - (BUH * (B / BUZ));
 					let BXL;
 					if BTV {
 						let BVB = (BTI.abs()) > M;
@@ -4145,8 +4145,8 @@ impl Instance {
 						BWW = A;
 						DIU = DIV;
 					} else {
-						let BWB = CB * (C / ((BWA * HM) + (BVP * (BVZ * (C / F)))));
-						let BWD = (BWC * (MF + BVV)) + ((C - BWC) * BVR);
+						let BWB = CB * (B / ((BWA * HM) + (BVP * (BVZ * (B / F)))));
+						let BWD = (BWC * (MF + BVV)) + ((B - BWC) * BVR);
 						let BWE = BVV + MZ;
 						let BWF = BWD > (BWE - 2.220446049250313e-15f64);
 						let BWH = if BWF {
@@ -4163,7 +4163,7 @@ impl Instance {
 						} else {
 							BWJ
 						};
-						let BWP = BWL * (C / (JC * BVZ));
+						let BWP = BWL * (B / (JC * BVZ));
 						let BWQ = BWP < JE;
 						let BWR = if BWQ {
 							JE
@@ -4171,7 +4171,7 @@ impl Instance {
 							BWP
 						};
 						let BWT = (AZ * (HM / CB)) * BWS;
-						let BWU = ((((AZ * BWR) + (BWT * BWB)) + (1e9f64 * BWB)) * (C / CN)) * BWB;
+						let BWU = ((((AZ * BWR) + (BWT * BWB)) + (1e9f64 * BWB)) * (B / CN)) * BWB;
 						let BWV = NU * (G * ((-BWU) + (((BWU * BWU) + (((BF * (BWT + 1e9f64)) * BWB) * BWB)).sqrt())));
 						BWW = BWV;
 						DIU = BWH;
@@ -4194,7 +4194,7 @@ impl Instance {
 				let BXN = ((-DL) * CO) * BXI;
 				let BXR = MF - BXO;
 				let BXT = (AZ * (BXR / AZ)) / BXS;
-				let BXU = BXS / (C + (BXT * (0.5f64 + (BXT * (0.16666666666666666f64 + (BXT * (0.041666666666666664f64 + (BXT * (0.008333333333333333f64 + (BXT * (0.001388888888888889f64 + (BXT * 1.984126984126984e-4f64))))))))))));
+				let BXU = BXS / (B + (BXT * (0.5f64 + (BXT * (0.16666666666666666f64 + (BXT * (0.041666666666666664f64 + (BXT * (0.008333333333333333f64 + (BXT * (0.001388888888888889f64 + (BXT * 1.984126984126984e-4f64))))))))))));
 				let BXV = BXU < 2.220446049250313e-15f64;
 				let BXX = if BXV {
 					BXW
@@ -4203,7 +4203,7 @@ impl Instance {
 				};
 				let BXY = BVV + BXX;
 				let BYA = BXI / HZ;
-				let BYB = (((parameters[92] / BXZ) * (BXC / HZ)) + ((parameters[93] / BXZ) * BYA)) / (C + ((BVR - BVV) * parameters[94]));
+				let BYB = (((parameters[92] / BXZ) * (BXC / HZ)) + ((parameters[93] / BXZ) * BYA)) / (B + ((BVR - BVV) * parameters[94]));
 				let BYC = (G * (BYB + (((BYB * BYB) + 3.6e7f64).sqrt()))) + 3e-7f64;
 				let BYD = BYC < A;
 				let BYE = if BYD {
@@ -4211,7 +4211,7 @@ impl Instance {
 				} else {
 					BYC
 				};
-				let BYF = C / (((C / (parameters[95] + ((parameters[96] * (BYA / DX)) / 1e11f64))) + (JN * ((BYE.powf((parameters[97] - C))) * BYE))) + (((BYE.powf((DO - C))) * BYE) / parameters[106]));
+				let BYF = B / (((B / (parameters[95] + ((parameters[96] * (BYA / DX)) / 1e11f64))) + (JN * ((BYE.powf((parameters[97] - B))) * BYE))) + (((BYE.powf((DO - B))) * BYE) / parameters[106]));
 				let BYG = BYF * R;
 				let BYI = (JC * BVZ) * BYH;
 				let BYJ = (G * (BYI + (((BYI * BYI) + 4e-100f64).sqrt()))) + 1.0000000000000001e-60f64;
@@ -4221,37 +4221,37 @@ impl Instance {
 				} else {
 					BYJ
 				};
-				let BYM = BWL * (C / BYL);
+				let BYM = BWL * (B / BYL);
 				let BYN = (0.2f64 * JU) / BYG;
 				let BYO = ((BYM * BYM) + (BYN * BYN)).sqrt();
 				let BYP = (BYG * BYO) / JU;
 				let BYR = (0.9999999999999978f64 <= BYQ) && (BYQ <= 1.0000000000000022f64);
 				let BYU;
 				if BYR {
-					BYU = C;
+					BYU = B;
 				} else {
 					let BYS = (1.9999999999999978f64 <= BYQ) && (BYQ <= 2.000000000000002f64);
 					let BYV = if BYS {
 						BYP
 					} else {
-						let BYT = BYP.powf((BYQ - C));
+						let BYT = BYP.powf((BYQ - B));
 						BYT
 					};
 					BYU = BYV;
 				}
-				let BYW = C + (BYP * BYU);
+				let BYW = B + (BYP * BYU);
 				let BYX = (0.9999999999999978f64 <= BYQ) && (BYQ <= 1.0000000000000022f64);
 				let BZC;
 				if BYX {
-					let BYY = C / BYW;
+					let BYY = B / BYW;
 					BZC = BYY;
 				} else {
 					let BYZ = (1.9999999999999978f64 <= BYQ) && (BYQ <= 2.000000000000002f64);
 					let BZD = if BYZ {
-						let BZA = C / (BYW.sqrt());
+						let BZA = B / (BYW.sqrt());
 						BZA
 					} else {
-						let BZB = BYW * (BYW.powf(((-1f64 / BYQ) - C)));
+						let BZB = BYW * (BYW.powf(((-1f64 / BYQ) - B)));
 						BZB
 					};
 					BZC = BZD;
@@ -4263,7 +4263,7 @@ impl Instance {
 				let BZY;
 				if BZI {
 					let BZJ = (AZ * (G * BXR)) / K;
-					let BZK = BVV + (K / (C + (BZJ * (0.5f64 + (BZJ * (0.16666666666666666f64 + (BZJ * (0.041666666666666664f64 + (BZJ * (0.008333333333333333f64 + (BZJ * (0.001388888888888889f64 + (BZJ * 1.984126984126984e-4f64)))))))))))));
+					let BZK = BVV + (K / (B + (BZJ * (0.5f64 + (BZJ * (0.16666666666666666f64 + (BZJ * (0.041666666666666664f64 + (BZJ * (0.008333333333333333f64 + (BZJ * (0.001388888888888889f64 + (BZJ * 1.984126984126984e-4f64)))))))))))));
 					let BZL = 1.1f64 - BZK;
 					let BZM = (G * (BZL + (((BZL * BZL) + 0.010000000000000002f64).sqrt()))) + 5.0000000000000005e-12f64;
 					let BZN = BZM < A;
@@ -4273,7 +4273,7 @@ impl Instance {
 						BZM
 					};
 					let BZP = (QX * (JC * EC)) * (BZO.powf(parameters[245]));
-					let BZQ = C + (MZ * parameters[246]);
+					let BZQ = B + (MZ * parameters[246]);
 					let BZU = if PB {
 						let BZR = BZK - MY;
 						BZR
@@ -4306,7 +4306,7 @@ impl Instance {
 				let CDD;
 				if CAF {
 					let CAG = EL - QR;
-					let CAH = (((((AZ * QQ) * (CB * QC)) * HT) * (C / (CAG * CAG))) * QH) * (parameters[154] + (parameters[155] * MZ));
+					let CAH = (((((AZ * QQ) * (CB * QC)) * HT) * (B / (CAG * CAG))) * QH) * (parameters[154] + (parameters[155] * MZ));
 					let CAJ = ((NA - EK) + (CAI - (parameters[157] * MF))) + CAH;
 					let CAK = (KB * QC) * QC;
 					let CAL = (CAK * JC) * G;
@@ -4315,12 +4315,12 @@ impl Instance {
 					let CAO = (NA - CAN) - BKH;
 					let CAP = CAN >= A;
 					let CAR = if CAP {
-						C
+						B
 					} else {
 						CAQ
 					};
-					let CAS = ((JC * (((((CAN + (G * (CAO + (((CAO * CAO) + (((CAR * BF) * CAN) * BKH)).sqrt())))) - EK) + CAI) + CAH) - PC)) - C) * (BF / CAM);
-					let CAT = C + CAS;
+					let CAS = ((JC * (((((CAN + (G * (CAO + (((CAO * CAO) + (((CAR * BF) * CAN) * BKH)).sqrt())))) - EK) + CAI) + CAH) - PC)) - B) * (BF / CAM);
+					let CAT = B + CAS;
 					let CAU = (G * (CAT + (((CAT * CAT) + 4e-4f64).sqrt()))) + 1e-12f64;
 					let CAV = CAU < A;
 					let CAW = if CAV {
@@ -4328,11 +4328,11 @@ impl Instance {
 					} else {
 						CAU
 					};
-					let CAX = CAJ + (CAL * (C - ((CAW + FT).sqrt())));
-					let CBA = ((((C / CAY) / CAK) * (CAJ * CAJ)).ln()) * (C / (JC + (AZ / (CAJ + FT))));
+					let CAX = CAJ + (CAL * (B - ((CAW + FT).sqrt())));
+					let CBA = ((((B / CAY) / CAK) * (CAJ * CAJ)).ln()) * (B / (JC + (AZ / (CAJ + FT))));
 					let CBB = (CBA - CAX) - 2e-3f64;
 					let CBC = CBA - (G * (CBB + (((CBB * CBB) + (8e-3f64 * CBA)).sqrt())));
-					let CBD = (JC * (CBC - PC)) - C;
+					let CBD = (JC * (CBC - PC)) - B;
 					let CBE = CBD + (CAY * ((JC * CBC).exp()));
 					let CBF = (G * (CBE + (((CBE * CBE) + 4e-4f64).sqrt()))) + 1e-12f64;
 					let CBG = CBF < A;
@@ -4365,7 +4365,7 @@ impl Instance {
 					if CBW {
 						let CCG;
 						if CBX {
-							CCG = C;
+							CCG = B;
 						} else {
 							let CCH;
 							if CBY {
@@ -4394,7 +4394,7 @@ impl Instance {
 								break;
 							}
 							let CCE = CCD.sqrt();
-							let CCF = CCB + C;
+							let CCF = CCB + B;
 							CCB = CCF;
 							CCD = CCE;
 						}
@@ -4403,7 +4403,7 @@ impl Instance {
 						let CCK = CBV.powf(0.125f64);
 						CCL = CCK;
 					}
-					let CCM = CAE + (((((((AZ * EN) * CS) * JE) * BZE) * CBO) * (CBT * (C / CCL))) / BYH);
+					let CCM = CAE + (((((((AZ * EN) * CS) * JE) * BZE) * CBO) * (CBT * (B / CCL))) / BYH);
 					CDD = CCM;
 				} else {
 					CDD = CAE;
@@ -4435,7 +4435,7 @@ impl Instance {
 					let DJP = if CDB {
 						A
 					} else {
-						C
+						B
 					};
 					DJO = DJP;
 					DJS = CCZ;
@@ -4462,7 +4462,7 @@ impl Instance {
 				DJZ = DKA;
 			} else {
 				CDC = A;
-				CMJ = C;
+				CMJ = B;
 				CNC = CND;
 				CNK = A;
 				DHX = CN;
@@ -4489,20 +4489,20 @@ impl Instance {
 				let CDL = ((((((3.2043836e-19f64 * (CDJ - CDK)) / CB) * HL) * Z) / (HL + Z)).sqrt()) * CQ;
 				let CDM = ((-0.25f64 * CDL) * CDL) / (MF + CDL);
 				let CDN = JC * (CDH - CDM);
-				let CDO = C + ((BF * (CDN - C)) / (SB * JD));
+				let CDO = B + ((BF * (CDN - B)) / (SB * JD));
 				let CDP = CDO >= 2.220446049250313e-15f64;
 				let CDR = if CDP {
 					CDO
 				} else {
 					CDQ
 				};
-				let CDS = CDH + (((SB * JC) * G) * (C - (CDR.sqrt())));
+				let CDS = CDH + (((SB * JC) * G) * (B - (CDR.sqrt())));
 				let CFZ;
 				if CDT {
 					let CDU = (JC * (CDS - CDM)) < BK;
 					let CGE;
 					if CDU {
-						let CDV = C / ((0.013094570021973102f64 * JC) * SA);
+						let CDV = B / ((0.013094570021973102f64 * JC) * SA);
 						let CDW = XU + (BK * CDV);
 						let CDX = (27f64 * CDV) * CDN;
 						let CDY = (1458f64 - (XU * (54f64 + CDV))) + CDX;
@@ -4515,8 +4515,8 @@ impl Instance {
 						if CEC {
 							let CEI = if DA {
 								let CED = F / CB;
-								let CEE = C / CI;
-								let CEH = CDH - (((C / (((C / QX) + CED) + CEE)) * ((CDH - CEF) + ((CEE + (G * CED)) * (-CEG)))) / QX);
+								let CEE = B / CI;
+								let CEH = CDH - (((B / (((B / QX) + CED) + CEE)) * ((CDH - CEF) + ((CEE + (G * CED)) * (-CEG)))) / QX);
 								CEH
 							} else {
 								CDS
@@ -4524,7 +4524,7 @@ impl Instance {
 							CGF = CEI;
 						} else {
 							let CEJ = CDH - CEB;
-							let CEL = ((((((C / KP) / SE) * CEJ) * CEJ).ln()) / (JC + (AZ / CEJ))) + CEK;
+							let CEL = ((((((B / KP) / SE) * CEJ) * CEJ).ln()) / (JC + (AZ / CEJ))) + CEK;
 							let CEM = (CEL - CDS) - TH;
 							let CEN = (BF * CEL) * TH;
 							let CEO = CEN > A;
@@ -4545,18 +4545,18 @@ impl Instance {
 						let CGB;
 						if CES {
 							let CET = F / CB;
-							let CEU = C / CI;
-							let CEV = CDH - (((C / (((C / QX) + CET) + CEU)) * ((CDH - CEF) + ((CEU + (G * CET)) * (-CEG)))) / QX);
+							let CEU = B / CI;
+							let CEV = CDH - (((B / (((B / QX) + CET) + CEU)) * ((CDH - CEF) + ((CEU + (G * CET)) * (-CEG)))) / QX);
 							CGB = CEV;
 						} else {
 							let CEW = F / CB;
-							let CEX = C / CI;
-							let CEY = CDH - (((C / (((C / QX) + CEW) + CEX)) * ((CDH - CEF) + ((CEX + (G * CEW)) * (-CEG)))) / QX);
+							let CEX = B / CI;
+							let CEY = CDH - (((B / (((B / QX) + CEW) + CEX)) * ((CDH - CEF) + ((CEX + (G * CEW)) * (-CEG)))) / QX);
 							let CEZ = CDH - CEB;
 							let CFA = CEZ > A;
 							let CGC;
 							if CFA {
-								let CFB = (((((((C / KP) / SE) * CEZ) * CEZ).ln()) / (JC + (AZ / CEZ))) + CEK) * 0.98f64;
+								let CFB = (((((((B / KP) / SE) * CEZ) * CEZ).ln()) / (JC + (AZ / CEZ))) + CEK) * 0.98f64;
 								let CFC = CFB - JR;
 								let CFD = (CEY > CFC) && true;
 								let CGD;
@@ -4568,7 +4568,7 @@ impl Instance {
 									if CFH {
 										let CFR;
 										if CFI {
-											CFR = C;
+											CFR = B;
 										} else {
 											let CFS;
 											if CFJ {
@@ -4597,7 +4597,7 @@ impl Instance {
 												break;
 											}
 											let CFP = CFO.sqrt();
-											let CFQ = CFM + C;
+											let CFQ = CFM + B;
 											CFM = CFQ;
 											CFO = CFP;
 										}
@@ -4606,7 +4606,7 @@ impl Instance {
 										let CFV = CFG.powf(0.25f64);
 										CFW = CFV;
 									}
-									let CFX = CFC + ((CFE * JR) * (C / CFW));
+									let CFX = CFC + ((CFE * JR) * (B / CFW));
 									CGD = CFX;
 								} else {
 									CGD = CEY;
@@ -4632,14 +4632,14 @@ impl Instance {
 				} else {
 					CFZ
 				};
-				let CGL = parameters[282] == C;
+				let CGL = parameters[282] == B;
 				let CKE;
 				if CGL {
 					let CGM = ML < ((RZ + CDM) + CDG);
 					let CKF;
 					if CGM {
 						let CGN = (AZ * JE) * (((-FX) / SA).ln());
-						let CGO = (C / (JC * KI)) * QX;
+						let CGO = (B / (JC * KI)) * QX;
 						let CGP = AZ + (4.242640687119285f64 * CGO);
 						let CGQ = ((8f64 * CGP) * CGP) * CGP;
 						let CGR = (9f64 * CGO) * (CDN - AZ);
@@ -4654,16 +4654,16 @@ impl Instance {
 							CGW
 						};
 						let CGY = CGX.powf(XY);
-						let CGZ = ((((((-5.65685424949238f64 - (12f64 * CGO)) + (AZ * CGY)) + ((KH * CGY) * CGY)) * (C / CGY)) * JE) + CDM) - CDM;
+						let CGZ = ((((((-5.65685424949238f64 - (12f64 * CGO)) + (AZ * CGY)) + ((KH * CGY) * CGY)) * (B / CGY)) * JE) + CDM) - CDM;
 						let CHA = CGZ / CGN;
-						let CHB = (CGZ / ((C + (CHA * CHA)).sqrt())) + CDM;
+						let CHB = (CGZ / ((B + (CHA * CHA)).sqrt())) + CDM;
 						CKF = CHB;
 					} else {
 						let CHC = (JC * (CDM - CEK)).exp();
 						let CHD = (((HM * F) * F) / AZ) / CB;
 						let CHE = ((AZ * JC) * CHD).sqrt();
 						let CHF = ((((CHE.exp()) + ((-CHE).exp())) / AZ).ln()) / CHD;
-						let mut CHG = C;
+						let mut CHG = B;
 						let mut CHI = CGK;
 						let mut CIQ = A;
 						loop {
@@ -4680,14 +4680,14 @@ impl Instance {
 							let CHW;
 							if CHN {
 								let CHO = CHM.exp();
-								let CHP = C + (CHO - (((-CHF) * CHD).exp()));
+								let CHP = B + (CHO - (((-CHF) * CHD).exp()));
 								let CHQ = (CHP.ln()) / CHF;
 								let CHR = CHO / CHP;
 								CHS = CHQ;
 								CHW = CHR;
 							} else {
 								CHS = CHL;
-								CHW = C;
+								CHW = B;
 							}
 							let CHT = JC * CHS;
 							let CHU = CHK.abs();
@@ -4695,7 +4695,7 @@ impl Instance {
 							let CIT;
 							let CIX;
 							if CHV {
-								let CHX = ((C - (CHW * CHW)) / AZ).sqrt();
+								let CHX = ((B - (CHW * CHW)) / AZ).sqrt();
 								let CHY = CHK * CHX;
 								let CHZ = JC * CHX;
 								let CIA = CHK < A;
@@ -4721,9 +4721,9 @@ impl Instance {
 									let CIF = CHK / BF;
 									let CIG = CHT / BK;
 									let CIH = CHT / BF;
-									let CII = (((CHK * CHK) / AZ) * (C - (CIE * (C - (CIF * (C - (CHK / IT))))))) - (((CHT * CHT) / AZ) * (C - (CIG * (C - (CIH * (C - (CHT / IT)))))));
+									let CII = (((CHK * CHK) / AZ) * (B - (CIE * (B - (CIF * (B - (CHK / IT))))))) - (((CHT * CHT) / AZ) * (B - (CIG * (B - (CIH * (B - (CHT / IT)))))));
 									let CIJ = CII.sqrt();
-									let CIK = (CHK * (C - ((CHK / AZ) * (C - (CIE * (C - CIF)))))) - (CHW * (CHT * (C - ((CHT / AZ) * (C - (CIG * (C - CIH)))))));
+									let CIK = (CHK * (B - ((CHK / AZ) * (B - (CIE * (B - CIF)))))) - (CHW * (CHT * (B - ((CHT / AZ) * (B - (CIG * (B - CIH)))))));
 									let CIL = ((JC * G) * CIK) / CIJ;
 									CIV = CIJ;
 									CIZ = CIL;
@@ -4731,14 +4731,14 @@ impl Instance {
 									let CIM = (-CHK).exp();
 									let CIN = (-CHT).exp();
 									let CIO = ((CHK - CHT) + (CIM - CIN)).sqrt();
-									let CIP = ((JC * G) * ((C - CIM) - (CHW * (C - CIN)))) / CIO;
+									let CIP = ((JC * G) * ((B - CIM) - (CHW * (B - CIN)))) / CIO;
 									CIV = CIO;
 									CIZ = CIP;
 								}
 								CIT = CIV;
 								CIX = CIZ;
 							}
-							let CIR = CIQ == C;
+							let CIR = CIQ == B;
 							let CIS = CHK < A;
 							let CJF;
 							let CJI;
@@ -4756,7 +4756,7 @@ impl Instance {
 									CJJ = CIX;
 								} else {
 									let CJC = (JC * (CHI - CEK)).exp();
-									let CJD = ((CIT * CIT) + (KP * (CJC - (CHC * (CHK + C))))).sqrt();
+									let CJD = ((CIT * CIT) + (KP * (CJC - (CHC * (CHK + B))))).sqrt();
 									let CJE = (G * (((AZ * CIX) * CIT) + ((KP * JC) * (CJC - CHC)))) / CJD;
 									CJG = CJD;
 									CJJ = CJE;
@@ -4765,7 +4765,7 @@ impl Instance {
 								CJI = CJJ;
 							}
 							let CJH = ((-CDH) + CHI) + (SA * CJF);
-							let CJK = C + (SA * CJI);
+							let CJK = B + (SA * CJI);
 							let CJZ;
 							let CKB;
 							let CKC;
@@ -4776,19 +4776,19 @@ impl Instance {
 							} else {
 								let CJM = (-CJH) / CJK;
 								let CJN = CHI.abs();
-								let CJO = C >= CJN;
+								let CJO = B >= CJN;
 								let CJP = if CJO {
-									C
+									B
 								} else {
 									CJN
 								};
-								let CJQ = 0.05f64 * (C + CJP);
+								let CJQ = 0.05f64 * (B + CJP);
 								let CJR = (CJM.abs()) > CJQ;
 								let CJW;
 								if CJR {
 									let CJS = CJM >= A;
 									let CJU = if CJS {
-										C
+										B
 									} else {
 										CJT
 									};
@@ -4800,7 +4800,7 @@ impl Instance {
 								let CJX = CHI + CJW;
 								let CJY = ((CJW.abs()) <= MV) && ((CJH.abs()) <= BHN);
 								let CKD = if CJY {
-									C
+									B
 								} else {
 									CIQ
 								};
@@ -4808,7 +4808,7 @@ impl Instance {
 								CKB = CJX;
 								CKC = CKD;
 							}
-							let CKA = CJZ + C;
+							let CKA = CJZ + B;
 							CHG = CKA;
 							CHI = CKB;
 							CIQ = CKC;
@@ -4823,12 +4823,12 @@ impl Instance {
 				let CKH = (-JC) * CKG;
 				let CKI = CKH >= A;
 				let CKK = if CKI {
-					C
+					B
 				} else {
 					CKJ
 				};
 				let CKL = CKK * CKH;
-				let CKM = ((CKH.exp()) - C) - CKH;
+				let CKM = ((CKH.exp()) - B) - CKH;
 				let CKN = CKH > BY;
 				let CKS;
 				if CKN {
@@ -4840,7 +4840,7 @@ impl Instance {
 						let CKQ = KI * (CKM.sqrt());
 						CKQ
 					} else {
-						let CKR = (((-CKK) * CKL) * 0.7071067811865475f64) * ((C + ((CKL * XY) * (C + (0.25f64 * CKL)))).sqrt());
+						let CKR = (((-CKK) * CKL) * 0.7071067811865475f64) * ((B + ((CKL * XY) * (B + (0.25f64 * CKL)))).sqrt());
 						CKR
 					};
 					CKS = CKT;
@@ -4876,7 +4876,7 @@ impl Instance {
 					if CLL {
 						let CLV;
 						if CLM {
-							CLV = C;
+							CLV = B;
 						} else {
 							let CLW;
 							if CLN {
@@ -4905,7 +4905,7 @@ impl Instance {
 								break;
 							}
 							let CLT = CLS.sqrt();
-							let CLU = CLQ + C;
+							let CLU = CLQ + B;
 							CLQ = CLU;
 							CLS = CLT;
 						}
@@ -4914,7 +4914,7 @@ impl Instance {
 						let CLZ = CLK.sqrt();
 						CMA = CLZ;
 					}
-					let CMB = CLH - ((CLJ * CLH) * (C / CMA));
+					let CMB = CLH - ((CLJ * CLH) * (B / CMA));
 					CMC = CMB;
 				} else {
 					CMC = CLG;
@@ -4924,23 +4924,23 @@ impl Instance {
 			} else {
 				CNA = CDC;
 			}
-			let CME = D || (parameters[45] == C);
+			let CME = D || (parameters[45] == B);
 			if CME {
-				let CMF = (BVK == C) || (ACY == A);
+				let CMF = (BVK == B) || (ACY == A);
 				if !CMF {
 					let CMG = (EZ <= A) || (L <= A);
 					if !CMG {
 						let CMH = (((NA - FP) + RA) - RW) + parameters[48];
 						if !EP {
 							let CMK = (AZ / HN) * (QX * QX);
-							let CML = C + (CMK * ((((AGC * CMH) - JE) - (AFO * PC)) - (AFO * ((parameters[49] * CMI) / CC))));
-							let CMM = AZ * (C + CMK);
+							let CML = B + (CMK * ((((AGC * CMH) - JE) - (AFO * PC)) - (AFO * ((parameters[49] * CMI) / CC))));
+							let CMM = AZ * (B + CMK);
 							let CMN = (CML < (FT + CMM)) && (CMM >= A);
 							if CMN {
 								if CMO {
 									let CMW;
 									if CMP {
-										CMW = C;
+										CMW = B;
 									} else {
 										let CMX;
 										if CMQ {
@@ -4967,7 +4967,7 @@ impl Instance {
 										if !CMU {
 											break;
 										}
-										let CMV = CMT + C;
+										let CMV = CMT + B;
 										CMT = CMV;
 									}
 								}
@@ -4999,7 +4999,7 @@ impl Instance {
 			} else {
 				let DKJ;
 				if CNB {
-					let CNQ = ((((NA - EK) + ((parameters[216] * (RA - RW)) * CNI)) - (((CMJ + MZ) - 2.220446049250313e-15f64) * parameters[215])) * (C / CNG)) * (C + (CNL * (C / parameters[217])));
+					let CNQ = ((((NA - EK) + ((parameters[216] * (RA - RW)) * CNI)) - (((CMJ + MZ) - 2.220446049250313e-15f64) * parameters[215])) * (B / CNG)) * (B + (CNL * (B / parameters[217])));
 					let CNR = (G * (CNQ + (((CNQ * CNQ) + 4e-4f64).sqrt()))) + 1e-12f64;
 					let CNS = CNR < A;
 					let CNX = if CNS {
@@ -5015,16 +5015,16 @@ impl Instance {
 						CNT
 					};
 					let CNW = (CNV - MS) / BA;
-					let CNY = CNX * (C - (C / (C + (CNW * CNW))));
+					let CNY = CNX * (B - (B / (B + (CNW * CNW))));
 					let CNZ = CNI * CNJ;
 					let COB = COA / (COA + CNZ);
 					let COD = COC / (COC + MZ);
-					let COE = ((-parameters[214]) * JW) * (C / (CNY + FT));
+					let COE = ((-parameters[214]) * JW) * (B / (CNY + FT));
 					let COF = COE < -34f64;
 					let DKK = if COF {
 						A
 					} else {
-						let COG = (COB * COD) * (((((COE.exp()) * (((parameters[213] / JV) * DX) * CNZ)) * (((CNM + (CNH * E)) * (C / CNN)).sqrt())) * CNY) * CNY);
+						let COG = (COB * COD) * (((((COE.exp()) * (((parameters[213] / JV) * DX) * CNZ)) * (((CNM + (CNH * E)) * (B / CNN)).sqrt())) * CNY) * CNY);
 						COG
 					};
 					DKJ = DKK;
@@ -5074,7 +5074,7 @@ impl Instance {
 				DKO = DKP;
 			}
 			if D {
-				let COZ = C / CF;
+				let COZ = B / CF;
 				if IA != 0.0 {
 					let CPD;
 					let CQC;
@@ -5085,7 +5085,7 @@ impl Instance {
 						let CPE;
 						let CQD;
 						if CPC {
-							CPE = C;
+							CPE = B;
 							CQD = EK;
 						} else {
 							CPE = A;
@@ -5112,7 +5112,7 @@ impl Instance {
 							let CPU = KX - LB;
 							let CPV = (CPS - LB) / CPU;
 							let CPW = CPV * CPV;
-							let CPX = LB + (CPU * (C - (C / ((((C + CPV) + CPW) + (CPW * CPV)) + (CPW * CPW)))));
+							let CPX = LB + (CPU * (B - (B / ((((B + CPV) + CPW) + (CPW * CPV)) + (CPW * CPW)))));
 							CPX
 						} else {
 							CPS
@@ -5125,9 +5125,9 @@ impl Instance {
 						let CQG = CQE < CQF;
 						if !CQG {
 							let CQH = CQE + CPZ;
-							let CQI = (JC * CQH) - C;
+							let CQI = (JC * CQH) - B;
 							let CQJ = CQB * JD;
-							let CQK = C + ((BF * (CQI + 0.049787068367863944f64)) / CQJ);
+							let CQK = B + ((BF * (CQI + 0.049787068367863944f64)) / CQJ);
 							let CQL = CQK < 2.220446049250313e-15f64;
 							let CQO = if CQL {
 								CQM
@@ -5135,17 +5135,17 @@ impl Instance {
 								CQK
 							};
 							let CQN = (CQB * JC) / AZ;
-							let CQP = C + ((BF * (CQI + ((-(JC * ((CQE + (CQN * (C - (CQO.sqrt())))) + CPZ))).exp()))) / CQJ);
+							let CQP = B + ((BF * (CQI + ((-(JC * ((CQE + (CQN * (B - (CQO.sqrt())))) + CPZ))).exp()))) / CQJ);
 							let CQQ = CQP < 2.220446049250313e-15f64;
 							let CQS = if CQQ {
 								CQR
 							} else {
 								CQP
 							};
-							let CQT = JC * ((CQE + (CQN * (C - (CQS.sqrt())))) + CPZ);
+							let CQT = JC * ((CQE + (CQN * (B - (CQS.sqrt())))) + CPZ);
 							let CQU = CQT < BK;
 							let CRO = if CQU {
-								let CQV = 0.7071067811865476f64 + (C / (JC * CQA));
+								let CQV = 0.7071067811865476f64 + (B / (JC * CQA));
 								let CQW = (-51.51950988020902f64 - ((-0.1047839336957922f64 * CQV) / 5.286687693921294e-4f64)) + (((-CQH) / CQA) / 0.018773541122053122f64);
 								let CQX = ((0.028160311683079683f64 * CQV) - 0.010979672760764175f64) / 7.930031540881942e-4f64;
 								let CQY = ((CQW * CQW) + ((CQX * CQX) * CQX)).sqrt();
@@ -5161,7 +5161,7 @@ impl Instance {
 							let CRE = (CRC * (CRA + FT)) * CQJ;
 							let CRF = (CRC * CQJ).ln();
 							let CRG = JC * CPZ;
-							let CRH = (CRD - ((((CRE + (CRD * CRD)).ln()) - CRF) + CRG)) - C;
+							let CRH = (CRD - ((((CRE + (CRD * CRD)).ln()) - CRF) + CRG)) - B;
 							let CRI = BF * CRD;
 							let CRJ = CRI > A;
 							let CRL = if CRJ {
@@ -5183,10 +5183,10 @@ impl Instance {
 							};
 							let CRU = CRN - (G * (CRP + (((CRP * CRP) + CRT).sqrt())));
 							let CRV = (CRU / JC) - CPZ;
-							let CRX = CRW == C;
+							let CRX = CRW == B;
 							if CRX {
 								let CRY = CRC * CRA;
-								let mut CRZ = C;
+								let mut CRZ = B;
 								let mut CSB = CRV;
 								let mut CTG = A;
 								loop {
@@ -5215,7 +5215,7 @@ impl Instance {
 										let CTA;
 										if CSR {
 											let CSS = CSC.exp();
-											let CST = CRY * (CSS - C);
+											let CST = CRY * (CSS - B);
 											let CSU = (CRY * JC) * CSS;
 											CSY = CST;
 											CTA = CSU;
@@ -5226,14 +5226,14 @@ impl Instance {
 											CSY = CSW;
 											CTA = CSX;
 										}
-										let CSZ = ((CSC - C) + CSY).sqrt();
+										let CSZ = ((CSC - B) + CSY).sqrt();
 										let CTB = ((JC + CTA) / CSZ) * G;
 										CTC = CSZ;
 										CTE = CTB;
 									}
 									let CTD = (CQE - CSB) - (CQA * CTC);
 									let CTF = -1f64 - (CQA * CTE);
-									let CTH = CTG == C;
+									let CTH = CTG == B;
 									let CTW;
 									let CTY;
 									let CTZ;
@@ -5244,19 +5244,19 @@ impl Instance {
 									} else {
 										let CTJ = (-CTD) / CTF;
 										let CTK = CSB.abs();
-										let CTL = C >= CTK;
+										let CTL = B >= CTK;
 										let CTM = if CTL {
-											C
+											B
 										} else {
 											CTK
 										};
-										let CTN = 0.05f64 * (C + CTM);
+										let CTN = 0.05f64 * (B + CTM);
 										let CTO = (CTJ.abs()) > CTN;
 										let CTT;
 										if CTO {
 											let CTP = CTJ >= A;
 											let CTR = if CTP {
-												C
+												B
 											} else {
 												CTQ
 											};
@@ -5268,7 +5268,7 @@ impl Instance {
 										let CTU = CSB + CTT;
 										let CTV = ((CTT.abs()) <= MV) && ((CTD.abs()) <= BHN);
 										let CUA = if CTV {
-											C
+											B
 										} else {
 											CTG
 										};
@@ -5276,7 +5276,7 @@ impl Instance {
 										CTY = CTU;
 										CTZ = CUA;
 									}
-									let CTX = CTW + C;
+									let CTX = CTW + B;
 									CRZ = CTX;
 									CSB = CTY;
 									CTG = CTZ;
@@ -5292,7 +5292,7 @@ impl Instance {
 							let CUG = KX - LB;
 							let CUH = (CUE - LB) / CUG;
 							let CUI = CUH * CUH;
-							let CUJ = LB + (CUG * (C - (C / ((((C + CUH) + CUI) + (CUI * CUH)) + (CUI * CUI)))));
+							let CUJ = LB + (CUG * (B - (B / ((((B + CUH) + CUI) + (CUI * CUH)) + (CUI * CUI)))));
 							CUJ
 						} else {
 							CUE
@@ -5303,9 +5303,9 @@ impl Instance {
 						let CUO = CUM < CUN;
 						if !CUO {
 							let CUP = CUM + CUL;
-							let CUQ = (JC * CUP) - C;
+							let CUQ = (JC * CUP) - B;
 							let CUR = CQB * JD;
-							let CUS = C + ((BF * (CUQ + 0.049787068367863944f64)) / CUR);
+							let CUS = B + ((BF * (CUQ + 0.049787068367863944f64)) / CUR);
 							let CUT = CUS < 2.220446049250313e-15f64;
 							let CUW = if CUT {
 								CUU
@@ -5313,17 +5313,17 @@ impl Instance {
 								CUS
 							};
 							let CUV = (CQB * JC) / AZ;
-							let CUX = C + ((BF * (CUQ + ((-(JC * ((CUM + (CUV * (C - (CUW.sqrt())))) + CUL))).exp()))) / CUR);
+							let CUX = B + ((BF * (CUQ + ((-(JC * ((CUM + (CUV * (B - (CUW.sqrt())))) + CUL))).exp()))) / CUR);
 							let CUY = CUX < 2.220446049250313e-15f64;
 							let CVA = if CUY {
 								CUZ
 							} else {
 								CUX
 							};
-							let CVB = JC * ((CUM + (CUV * (C - (CVA.sqrt())))) + CUL);
+							let CVB = JC * ((CUM + (CUV * (B - (CVA.sqrt())))) + CUL);
 							let CVC = CVB < BK;
 							let CVW = if CVC {
-								let CVD = 0.7071067811865476f64 + (C / (JC * CQA));
+								let CVD = 0.7071067811865476f64 + (B / (JC * CQA));
 								let CVE = (-51.51950988020902f64 - ((-0.1047839336957922f64 * CVD) / 5.286687693921294e-4f64)) + (((-CUP) / CQA) / 0.018773541122053122f64);
 								let CVF = ((0.028160311683079683f64 * CVD) - 0.010979672760764175f64) / 7.930031540881942e-4f64;
 								let CVG = ((CVE * CVE) + ((CVF * CVF) * CVF)).sqrt();
@@ -5339,7 +5339,7 @@ impl Instance {
 							let CVM = (CVK * (CVI + FT)) * CUR;
 							let CVN = (CVK * CUR).ln();
 							let CVO = JC * CUL;
-							let CVP = (CVL - ((((CVM + (CVL * CVL)).ln()) - CVN) + CVO)) - C;
+							let CVP = (CVL - ((((CVM + (CVL * CVL)).ln()) - CVN) + CVO)) - B;
 							let CVQ = BF * CVL;
 							let CVR = CVQ > A;
 							let CVT = if CVR {
@@ -5361,10 +5361,10 @@ impl Instance {
 							};
 							let CWC = CVV - (G * (CVX + (((CVX * CVX) + CWB).sqrt())));
 							let CWD = (CWC / JC) - CUL;
-							let CWE = CRW == C;
+							let CWE = CRW == B;
 							if CWE {
 								let CWF = CVK * CVI;
-								let mut CWG = C;
+								let mut CWG = B;
 								let mut CWI = CWD;
 								let mut CXI = A;
 								loop {
@@ -5393,7 +5393,7 @@ impl Instance {
 										let CXC;
 										if CWT {
 											let CWU = CWJ.exp();
-											let CWV = CWF * (CWU - C);
+											let CWV = CWF * (CWU - B);
 											let CWW = (CWF * JC) * CWU;
 											CXA = CWV;
 											CXC = CWW;
@@ -5404,14 +5404,14 @@ impl Instance {
 											CXA = CWY;
 											CXC = CWZ;
 										}
-										let CXB = ((CWJ - C) + CXA).sqrt();
+										let CXB = ((CWJ - B) + CXA).sqrt();
 										let CXD = ((JC + CXC) / CXB) * G;
 										CXE = CXB;
 										CXG = CXD;
 									}
 									let CXF = (CUM - CWI) - (CQA * CXE);
 									let CXH = -1f64 - (CQA * CXG);
-									let CXJ = CXI == C;
+									let CXJ = CXI == B;
 									let CXY;
 									let CYA;
 									let CYB;
@@ -5422,19 +5422,19 @@ impl Instance {
 									} else {
 										let CXL = (-CXF) / CXH;
 										let CXM = CWI.abs();
-										let CXN = C >= CXM;
+										let CXN = B >= CXM;
 										let CXO = if CXN {
-											C
+											B
 										} else {
 											CXM
 										};
-										let CXP = 0.05f64 * (C + CXO);
+										let CXP = 0.05f64 * (B + CXO);
 										let CXQ = (CXL.abs()) > CXP;
 										let CXV;
 										if CXQ {
 											let CXR = CXL >= A;
 											let CXT = if CXR {
-												C
+												B
 											} else {
 												CXS
 											};
@@ -5446,7 +5446,7 @@ impl Instance {
 										let CXW = CWI + CXV;
 										let CXX = ((CXV.abs()) <= MV) && ((CXF.abs()) <= BHN);
 										let CYC = if CXX {
-											C
+											B
 										} else {
 											CXI
 										};
@@ -5454,7 +5454,7 @@ impl Instance {
 										CYA = CXW;
 										CYB = CYC;
 									}
-									let CXZ = CXY + C;
+									let CXZ = CXY + B;
 									CWG = CXZ;
 									CWI = CYA;
 									CXI = CYB;
@@ -5468,7 +5468,7 @@ impl Instance {
 			let DIQ;
 			if CYD {
 				let CYE = MF + BVV;
-				let CYF = (BWC * CYE) + ((C - BWC) * BVR);
+				let CYF = (BWC * CYE) + ((B - BWC) * BVR);
 				let CYG = CYF > (CYE - 2.220446049250313e-15f64);
 				let DIR = if CYG {
 					let CYH = CYE - 2.220446049250313e-15f64;
@@ -5480,10 +5480,10 @@ impl Instance {
 			} else {
 				DIQ = DIS;
 			}
-			let CYI = C / CF;
+			let CYI = B / CF;
 			if IA != 0.0 {
 				let CYJ = parameters[188] > A;
-				let CYK = (parameters[29] >= C) && CYJ;
+				let CYK = (parameters[29] >= B) && CYJ;
 				if CYK {
 					let CYL = (Y == A) && CYJ;
 					if !CYL {
@@ -5520,7 +5520,7 @@ impl Instance {
 							let CYZ = KX - LB;
 							let CZA = (CYX - LB) / CYZ;
 							let CZB = CZA * CZA;
-							let CZC = LB + (CYZ * (C - (C / ((((C + CZA) + CZB) + (CZB * CZA)) + (CZB * CZB)))));
+							let CZC = LB + (CYZ * (B - (B / ((((B + CZA) + CZB) + (CZB * CZA)) + (CZB * CZB)))));
 							CZC
 						} else {
 							CYX
@@ -5533,9 +5533,9 @@ impl Instance {
 						let CZM = CZK < CZL;
 						if !CZM {
 							let CZN = CZK + CZE;
-							let CZO = (JC * CZN) - C;
+							let CZO = (JC * CZN) - B;
 							let CZP = CZG * JD;
-							let CZQ = C + ((BF * (CZO + 0.049787068367863944f64)) / CZP);
+							let CZQ = B + ((BF * (CZO + 0.049787068367863944f64)) / CZP);
 							let CZR = CZQ < 2.220446049250313e-15f64;
 							let CZU = if CZR {
 								CZS
@@ -5543,17 +5543,17 @@ impl Instance {
 								CZQ
 							};
 							let CZT = (CZG * JC) / AZ;
-							let CZV = C + ((BF * (CZO + ((-(JC * ((CZK + (CZT * (C - (CZU.sqrt())))) + CZE))).exp()))) / CZP);
+							let CZV = B + ((BF * (CZO + ((-(JC * ((CZK + (CZT * (B - (CZU.sqrt())))) + CZE))).exp()))) / CZP);
 							let CZW = CZV < 2.220446049250313e-15f64;
 							let CZY = if CZW {
 								CZX
 							} else {
 								CZV
 							};
-							let CZZ = JC * ((CZK + (CZT * (C - (CZY.sqrt())))) + CZE);
+							let CZZ = JC * ((CZK + (CZT * (B - (CZY.sqrt())))) + CZE);
 							let DAA = CZZ < BK;
 							let DAV = if DAA {
-								let DAB = 0.7071067811865476f64 + (C / (JC * CZF));
+								let DAB = 0.7071067811865476f64 + (B / (JC * CZF));
 								let DAC = (-51.51950988020902f64 - ((-0.1047839336957922f64 * DAB) / 5.286687693921294e-4f64)) + (((-CZN) / CZF) / 0.018773541122053122f64);
 								let DAD = ((0.028160311683079683f64 * DAB) - 0.010979672760764175f64) / 7.930031540881942e-4f64;
 								let DAE = ((DAC * DAC) + ((DAD * DAD) * DAD)).sqrt();
@@ -5571,7 +5571,7 @@ impl Instance {
 								let DAL = (DAJ * (((JC * CZL).exp()) + FT)) * CZP;
 								let DAM = (DAJ * CZP).ln();
 								let DAN = JC * CZE;
-								let DAO = (DAK - ((((DAL + (DAK * DAK)).ln()) - DAM) + DAN)) - C;
+								let DAO = (DAK - ((((DAL + (DAK * DAK)).ln()) - DAM) + DAN)) - B;
 								let DAP = BF * DAK;
 								let DAQ = DAP > A;
 								let DAS = if DAQ {
@@ -5597,13 +5597,13 @@ impl Instance {
 								DBC = DAV;
 							}
 							let DBD = (DBC / JC) - CZE;
-							let DBE = DAG == C;
+							let DBE = DAG == B;
 							if DBE {
 								let DBF = (JC * CZL).exp();
 								let DBG = JY / Y;
 								let DBH = DBG * DBG;
 								let DBI = DBH * DBF;
-								let mut DBJ = C;
+								let mut DBJ = B;
 								let mut DBL = DBD;
 								let mut DCL = A;
 								loop {
@@ -5632,7 +5632,7 @@ impl Instance {
 										let DCF;
 										if DBW {
 											let DBX = DBM.exp();
-											let DBY = DBI * (DBX - C);
+											let DBY = DBI * (DBX - B);
 											let DBZ = (DBI * JC) * DBX;
 											DCD = DBY;
 											DCF = DBZ;
@@ -5643,14 +5643,14 @@ impl Instance {
 											DCD = DCB;
 											DCF = DCC;
 										}
-										let DCE = ((DBM - C) + DCD).sqrt();
+										let DCE = ((DBM - B) + DCD).sqrt();
 										let DCG = ((JC + DCF) / DCE) * G;
 										DCH = DCE;
 										DCJ = DCG;
 									}
 									let DCI = (CZK - DBL) - (CZF * DCH);
 									let DCK = -1f64 - (CZF * DCJ);
-									let DCM = DCL == C;
+									let DCM = DCL == B;
 									let DDB;
 									let DDD;
 									let DDE;
@@ -5661,19 +5661,19 @@ impl Instance {
 									} else {
 										let DCO = (-DCI) / DCK;
 										let DCP = DBL.abs();
-										let DCQ = C >= DCP;
+										let DCQ = B >= DCP;
 										let DCR = if DCQ {
-											C
+											B
 										} else {
 											DCP
 										};
-										let DCS = 0.05f64 * (C + DCR);
+										let DCS = 0.05f64 * (B + DCR);
 										let DCT = (DCO.abs()) > DCS;
 										let DCY;
 										if DCT {
 											let DCU = DCO >= A;
 											let DCW = if DCU {
-												C
+												B
 											} else {
 												DCV
 											};
@@ -5685,7 +5685,7 @@ impl Instance {
 										let DCZ = DBL + DCY;
 										let DDA = ((DCY.abs()) <= MV) && ((DCI.abs()) <= BHN);
 										let DDF = if DDA {
-											C
+											B
 										} else {
 											DCL
 										};
@@ -5693,7 +5693,7 @@ impl Instance {
 										DDD = DCZ;
 										DDE = DDF;
 									}
-									let DDC = DDB + C;
+									let DDC = DDB + B;
 									DBJ = DDC;
 									DBL = DDD;
 									DCL = DDE;
@@ -5732,7 +5732,7 @@ impl Instance {
 							let DDS = KX - LB;
 							let DDT = (DDQ - LB) / DDS;
 							let DDU = DDT * DDT;
-							let DDV = LB + (DDS * (C - (C / ((((C + DDT) + DDU) + (DDU * DDT)) + (DDU * DDU)))));
+							let DDV = LB + (DDS * (B - (B / ((((B + DDT) + DDU) + (DDU * DDT)) + (DDU * DDU)))));
 							DDV
 						} else {
 							DDQ
@@ -5743,9 +5743,9 @@ impl Instance {
 						let DED = DEB < DEC;
 						if !DED {
 							let DEE = DEB + DDX;
-							let DEF = (JC * DEE) - C;
+							let DEF = (JC * DEE) - B;
 							let DEG = CZG * JD;
-							let DEH = C + ((BF * (DEF + 0.049787068367863944f64)) / DEG);
+							let DEH = B + ((BF * (DEF + 0.049787068367863944f64)) / DEG);
 							let DEI = DEH < 2.220446049250313e-15f64;
 							let DEL = if DEI {
 								DEJ
@@ -5753,17 +5753,17 @@ impl Instance {
 								DEH
 							};
 							let DEK = (CZG * JC) / AZ;
-							let DEM = C + ((BF * (DEF + ((-(JC * ((DEB + (DEK * (C - (DEL.sqrt())))) + DDX))).exp()))) / DEG);
+							let DEM = B + ((BF * (DEF + ((-(JC * ((DEB + (DEK * (B - (DEL.sqrt())))) + DDX))).exp()))) / DEG);
 							let DEN = DEM < 2.220446049250313e-15f64;
 							let DEP = if DEN {
 								DEO
 							} else {
 								DEM
 							};
-							let DEQ = JC * ((DEB + (DEK * (C - (DEP.sqrt())))) + DDX);
+							let DEQ = JC * ((DEB + (DEK * (B - (DEP.sqrt())))) + DDX);
 							let DER = DEQ < BK;
 							let DFL = if DER {
-								let DES = 0.7071067811865476f64 + (C / (JC * CZF));
+								let DES = 0.7071067811865476f64 + (B / (JC * CZF));
 								let DET = (-51.51950988020902f64 - ((-0.1047839336957922f64 * DES) / 5.286687693921294e-4f64)) + (((-DEE) / CZF) / 0.018773541122053122f64);
 								let DEU = ((0.028160311683079683f64 * DES) - 0.010979672760764175f64) / 7.930031540881942e-4f64;
 								let DEV = ((DET * DET) + ((DEU * DEU) * DEU)).sqrt();
@@ -5781,7 +5781,7 @@ impl Instance {
 								let DFB = (DEZ * (((JC * DEC).exp()) + FT)) * DEG;
 								let DFC = (DEZ * DEG).ln();
 								let DFD = JC * DDX;
-								let DFE = (DFA - ((((DFB + (DFA * DFA)).ln()) - DFC) + DFD)) - C;
+								let DFE = (DFA - ((((DFB + (DFA * DFA)).ln()) - DFC) + DFD)) - B;
 								let DFF = BF * DFA;
 								let DFG = DFF > A;
 								let DFI = if DFG {
@@ -5807,13 +5807,13 @@ impl Instance {
 								DFS = DFL;
 							}
 							let DFT = (DFS / JC) - DDX;
-							let DFU = DAG == C;
+							let DFU = DAG == B;
 							if DFU {
 								let DFV = (JC * DEC).exp();
 								let DFW = JY / Y;
 								let DFX = DFW * DFW;
 								let DFY = DFX * DFV;
-								let mut DFZ = C;
+								let mut DFZ = B;
 								let mut DGB = DFT;
 								let mut DHB = A;
 								loop {
@@ -5842,7 +5842,7 @@ impl Instance {
 										let DGV;
 										if DGM {
 											let DGN = DGC.exp();
-											let DGO = DFY * (DGN - C);
+											let DGO = DFY * (DGN - B);
 											let DGP = (DFY * JC) * DGN;
 											DGT = DGO;
 											DGV = DGP;
@@ -5853,14 +5853,14 @@ impl Instance {
 											DGT = DGR;
 											DGV = DGS;
 										}
-										let DGU = ((DGC - C) + DGT).sqrt();
+										let DGU = ((DGC - B) + DGT).sqrt();
 										let DGW = ((JC + DGV) / DGU) * G;
 										DGX = DGU;
 										DGZ = DGW;
 									}
 									let DGY = (DEB - DGB) - (CZF * DGX);
 									let DHA = -1f64 - (CZF * DGZ);
-									let DHC = DHB == C;
+									let DHC = DHB == B;
 									let DHR;
 									let DHT;
 									let DHU;
@@ -5871,19 +5871,19 @@ impl Instance {
 									} else {
 										let DHE = (-DGY) / DHA;
 										let DHF = DGB.abs();
-										let DHG = C >= DHF;
+										let DHG = B >= DHF;
 										let DHH = if DHG {
-											C
+											B
 										} else {
 											DHF
 										};
-										let DHI = 0.05f64 * (C + DHH);
+										let DHI = 0.05f64 * (B + DHH);
 										let DHJ = (DHE.abs()) > DHI;
 										let DHO;
 										if DHJ {
 											let DHK = DHE >= A;
 											let DHM = if DHK {
-												C
+												B
 											} else {
 												DHL
 											};
@@ -5895,7 +5895,7 @@ impl Instance {
 										let DHP = DGB + DHO;
 										let DHQ = ((DHO.abs()) <= MV) && ((DGY.abs()) <= BHN);
 										let DHV = if DHQ {
-											C
+											B
 										} else {
 											DHB
 										};
@@ -5903,7 +5903,7 @@ impl Instance {
 										DHT = DHP;
 										DHU = DHV;
 									}
-									let DHS = DHR + C;
+									let DHS = DHR + B;
 									DFZ = DHS;
 									DGB = DHT;
 									DHB = DHU;
@@ -5925,11 +5925,11 @@ impl Instance {
 				let DIM = if DIG {
 					let DIH = DIA + DIB;
 					let DII = DIE + DIB;
-					let DIJ = (((C / DIH) / DII) + (((((AZ * Q) * CNK) * CNC) / DIF) * ((DII / DIH).ln()))) + (((((Q * CNK) * CNC) * Q) * CNK) * CNC);
+					let DIJ = (((B / DIH) / DII) + (((((AZ * Q) * CNK) * CNC) / DIF) * ((DII / DIH).ln()))) + (((((Q * CNK) * CNC) * Q) * CNK) * CNC);
 					DIJ
 				} else {
 					let DIK = DIA + DIB;
-					let DIL = (((C / DIK) / (DIE + DIB)) + ((((AZ * Q) * CNK) * CNC) / DIK)) + (((((Q * CNK) * CNC) * Q) * CNK) * CNC);
+					let DIL = (((B / DIK) / (DIE + DIB)) + ((((AZ * Q) * CNK) * CNC) / DIK)) + (((((Q * CNK) * CNC) * Q) * CNK) * CNC);
 					DIL
 				};
 				let DIN = (((CNA * CNA) * S) / ((DHX * JC) * DJ)) * DIM;
@@ -5945,29 +5945,29 @@ impl Instance {
 				let DJB = (0.9999999999999978f64 <= BYQ) && (BYQ <= 1.0000000000000022f64);
 				let DJE;
 				if DJB {
-					DJE = C;
+					DJE = B;
 				} else {
 					let DJC = (1.9999999999999978f64 <= BYQ) && (BYQ <= 2.000000000000002f64);
 					let DJF = if DJC {
 						DJA
 					} else {
-						let DJD = DJA.powf((BYQ - C));
+						let DJD = DJA.powf((BYQ - B));
 						DJD
 					};
 					DJE = DJF;
 				}
-				let DJG = C + (DJA * DJE);
-				let DJH = DIZ * (DJG * (DJG.powf(((-1f64 / BYQ) - C))));
+				let DJG = B + (DJA * DJE);
+				let DJH = DIZ * (DJG * (DJG.powf(((-1f64 / BYQ) - B))));
 				let DJI = (CNC + DJH) / AZ;
 				let DJJ = BVH * BVH;
 				let DJK = BK * BVH;
-				let DJL = (((((C + DJK) + (IU * DJJ)) * DJH) * DJH) + ((((BK + (BF * BVH)) + (BK * DJJ)) * DJH) * CNC)) + ((((IU + DJK) + DJJ) * CNC) * CNC);
-				let DJM = ((((DJ * QX) * CCQ) * CNC) * DJL) / ((((15f64 * DHX) * (C + BVH)) * DJI) * DJI);
+				let DJL = (((((B + DJK) + (IU * DJJ)) * DJH) * DJH) + ((((BK + (BF * BVH)) + (BK * DJJ)) * DJH) * CNC)) + ((((IU + DJK) + DJJ) * CNC) * CNC);
+				let DJM = ((((DJ * QX) * CCQ) * CNC) * DJL) / ((((15f64 * DHX) * (B + BVH)) * DJI) * DJI);
 				DJY = DJM;
 			} else {
 				DJY = A;
 			}
-			let DJQ = (((CCN != A) && DIO) && (DJN == C)) && DHY;
+			let DJQ = (((CCN != A) && DIO) && (DJN == B)) && DHY;
 			let DKZ;
 			if DJQ {
 				let DJT = DJR.sqrt();
@@ -5980,16 +5980,16 @@ impl Instance {
 				DKZ = A;
 			}
 			let DKF = -DKD;
-			let DKG = DHW == C;
+			let DKG = DHW == B;
 			let DPQ = if DKG {
 				let DKN = (DKH * DKI) - DKL;
 				DKN
 			} else {
-				let DKQ = ((C - DKH) * DKI) - DKO;
+				let DKQ = ((B - DKH) * DKI) - DKO;
 				DKQ
 			};
 			let DPR = if DKG {
-				let DKR = ((C - DKH) * DKI) - DKO;
+				let DKR = ((B - DKH) * DKI) - DKO;
 				DKR
 			} else {
 				let DKS = (DKH * DKI) - DKL;
@@ -6016,7 +6016,7 @@ impl Instance {
 			} else {
 				DPX = A;
 			}
-			let DLD = DLC == C;
+			let DLD = DLC == B;
 			let DPZ;
 			if DLD {
 				let DMC;
@@ -6062,8 +6062,8 @@ impl Instance {
 				}
 				let DMB = ((DMA * DMA) + (CM * CM)).sqrt();
 				let DMI = DMG + (DMH * JA);
-				let DMP = ((DMC / HZ) / (JM.powf(DME))) * (C + (DMJ / (CR.powf(DMK))));
-				let DMQ = ((((DMD / AT) / (JS - (DMF * JT))) * (C + (DMN / (DM.powf(DMO))))) * (C + (DML / (CR.powf(DMM))))) + FT;
+				let DMP = ((DMC / HZ) / (JM.powf(DME))) * (B + (DMJ / (CR.powf(DMK))));
+				let DMQ = ((((DMD / AT) / (JS - (DMF * JT))) * (B + (DMN / (DM.powf(DMO))))) * (B + (DML / (CR.powf(DMM))))) + FT;
 				let DMT = DMP * (DMR / DMS);
 				let DMU = DMR >= A;
 				let DMZ = if DMU {
@@ -6076,30 +6076,30 @@ impl Instance {
 				let DMX = (0.9999999999999978f64 <= DMI) && (DMI <= 1.0000000000000022f64);
 				let DNB;
 				if DMX {
-					DNB = C;
+					DNB = B;
 				} else {
 					let DMY = (1.9999999999999978f64 <= DMI) && (DMI <= 2.000000000000002f64);
 					let DNC = if DMY {
 						DMZ
 					} else {
-						let DNA = DMZ.powf((DMI - C));
+						let DNA = DMZ.powf((DMI - B));
 						DNA
 					};
 					DNB = DNC;
 				}
-				let DND = C + (DMZ * DNB);
+				let DND = B + (DMZ * DNB);
 				let DNE = (0.9999999999999978f64 <= DMI) && (DMI <= 1.0000000000000022f64);
 				let DNJ;
 				if DNE {
-					let DNF = C / DND;
+					let DNF = B / DND;
 					DNJ = DNF;
 				} else {
 					let DNG = (1.9999999999999978f64 <= DMI) && (DMI <= 2.000000000000002f64);
 					let DNK = if DNG {
-						let DNH = C / (DND.sqrt());
+						let DNH = B / (DND.sqrt());
 						DNH
 					} else {
-						let DNI = DND * (DND.powf(((-1f64 / DMI) - C)));
+						let DNI = DND * (DND.powf(((-1f64 / DMI) - B)));
 						DNI
 					};
 					DNJ = DNK;
@@ -6111,10 +6111,10 @@ impl Instance {
 				} else {
 					DNM
 				};
-				let DNQ = ((C / DNO) / DJ) + DNP;
+				let DNQ = ((B / DNO) / DJ) + DNP;
 				let DNR = (DNQ > R) && DIO;
 				let DNT = if DNR {
-					let DNS = C / DNQ;
+					let DNS = B / DNQ;
 					DNS
 				} else {
 					A
@@ -6123,7 +6123,7 @@ impl Instance {
 			} else {
 				DPZ = A;
 			}
-			let DNV = DNU == C;
+			let DNV = DNU == B;
 			let DQB;
 			if DNV {
 				let DOH;
@@ -6169,8 +6169,8 @@ impl Instance {
 				}
 				let DOG = ((DMA * DMA) + (CM * CM)).sqrt();
 				let DOK = DOJ + (DMH * JA);
-				let DOL = ((DOH / HZ) / (JM.powf(DME))) * (C + (DMJ / (CR.powf(DMK))));
-				let DOM = ((((DOI / AT) / (JS - (DMF * JT))) * (C + (DMN / (DM.powf(DMO))))) * (C + (DML / (CR.powf(DMM))))) + FT;
+				let DOL = ((DOH / HZ) / (JM.powf(DME))) * (B + (DMJ / (CR.powf(DMK))));
+				let DOM = ((((DOI / AT) / (JS - (DMF * JT))) * (B + (DMN / (DM.powf(DMO))))) * (B + (DML / (CR.powf(DMM))))) + FT;
 				let DOP = DOL * (DON / DOO);
 				let DOQ = DON >= A;
 				let DOV = if DOQ {
@@ -6183,30 +6183,30 @@ impl Instance {
 				let DOT = (0.9999999999999978f64 <= DOK) && (DOK <= 1.0000000000000022f64);
 				let DOX;
 				if DOT {
-					DOX = C;
+					DOX = B;
 				} else {
 					let DOU = (1.9999999999999978f64 <= DOK) && (DOK <= 2.000000000000002f64);
 					let DOY = if DOU {
 						DOV
 					} else {
-						let DOW = DOV.powf((DOK - C));
+						let DOW = DOV.powf((DOK - B));
 						DOW
 					};
 					DOX = DOY;
 				}
-				let DOZ = C + (DOV * DOX);
+				let DOZ = B + (DOV * DOX);
 				let DPA = (0.9999999999999978f64 <= DOK) && (DOK <= 1.0000000000000022f64);
 				let DPF;
 				if DPA {
-					let DPB = C / DOZ;
+					let DPB = B / DOZ;
 					DPF = DPB;
 				} else {
 					let DPC = (1.9999999999999978f64 <= DOK) && (DOK <= 2.000000000000002f64);
 					let DPG = if DPC {
-						let DPD = C / (DOZ.sqrt());
+						let DPD = B / (DOZ.sqrt());
 						DPD
 					} else {
-						let DPE = DOZ * (DOZ.powf(((-1f64 / DOK) - C)));
+						let DPE = DOZ * (DOZ.powf(((-1f64 / DOK) - B)));
 						DPE
 					};
 					DPF = DPG;
@@ -6218,10 +6218,10 @@ impl Instance {
 				} else {
 					DPI
 				};
-				let DPM = ((C / DPK) / DJ) + DPL;
+				let DPM = ((B / DPK) / DJ) + DPL;
 				let DPN = (DPM > R) && DIO;
 				let DPP = if DPN {
-					let DPO = C / DPM;
+					let DPO = B / DPM;
 					DPO
 				} else {
 					A
@@ -6231,15 +6231,15 @@ impl Instance {
 				DQB = A;
 			}
 			let DPS = 5.5224904e-23f64 * IZ;
-			let DPT = CNO == C;
+			let DPT = CNO == B;
 			let DPU = DHW * DKT;
 			let DPW = DPS * DJY;
-			let DPY = (C - (DPX * DPX)) * DPW;
+			let DPY = (B - (DPX * DPX)) * DPW;
 			let DQG;
 			let DQH;
 			if DLC != 0.0 {
 				let DQA = DPS * DPZ;
-				DQG = C;
+				DQG = B;
 				DQH = DQA;
 			} else {
 				DQG = A;
@@ -6249,7 +6249,7 @@ impl Instance {
 			let DQJ;
 			if DNU != 0.0 {
 				let DQC = DPS * DQB;
-				DQI = C;
+				DQI = B;
 				DQJ = DQC;
 			} else {
 				DQI = A;
@@ -6265,11 +6265,11 @@ impl Instance {
 				let DQD = 3.2043836e-19f64 * DPQ;
 				let DQE = 3.2043836e-19f64 * DPR;
 				let DQF = 3.2043836e-19f64 * DKF;
-				DQK = C;
+				DQK = B;
 				DQL = DQD;
-				DQM = C;
+				DQM = B;
 				DQN = DQE;
-				DQO = C;
+				DQO = B;
 				DQP = DQF;
 			} else {
 				DQK = A;

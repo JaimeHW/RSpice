@@ -5,8 +5,8 @@ use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
 use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 26] = [0, 1, 2, 3, 4, 16, 5, 17, 18, 19, 21, 6, 7, 23, 24, 25, 26, 27, 28, 9, 10, 11, 12, 13, 14, 15];
-pub(super) const CANONICAL_INSTANCE_STAGE_SLOTS: [u32; 7] = [8, 20, 22, 29, 30, 31, 32];
+pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 31] = [0, 1, 2, 3, 4, 16, 5, 17, 18, 19, 21, 6, 7, 23, 24, 25, 26, 27, 28, 33, 34, 35, 36, 37, 9, 10, 11, 12, 13, 14, 15];
+pub(super) const CANONICAL_INSTANCE_STAGE_SLOTS: [u32; 9] = [8, 20, 22, 29, 30, 31, 32, 38, 39];
 
 pub(super) fn canonical_model_preprocess(
     parameters: &[f64],
@@ -15,7 +15,7 @@ pub(super) fn canonical_model_preprocess(
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
-) -> [f64; 26] {
+) -> [f64; 31] {
 		let D = parameters[49];
 		let E = 1f64;
 		let G = parameters[51];
@@ -24,14 +24,14 @@ pub(super) fn canonical_model_preprocess(
 		let P = parameters[39];
 		let V = 0f64;
 		let W = 0f64;
-		let Y = parameters[30];
-		let AB = 0f64;
-		let AN = 0f64;
-		let AO = 0f64;
-		let AP = 0f64;
+		let Z = parameters[30];
+		let AC = 0f64;
+		let AV = 0f64;
+		let AW = 0f64;
+		let AX = 0f64;
 	    let mut oU = 0.0;
-	    let mut oAC = false;
-	    let mut oAJ = false;
+	    let mut oAD = false;
+	    let mut oAO = false;
 		let A = parameters[25] + 273.15f64;
 		let B = A / 300.15f64;
 		let C = 4e-4f64 * (A - 300.15f64);
@@ -46,62 +46,96 @@ pub(super) fn canonical_model_preprocess(
 		let R = I / P;
 		let S = R - E;
 		let T = parameters[32] == I;
-		let X = if T {
+		let X;
+		let Y;
+		if T {
 			let U = parameters[44] - E;
 			oU = U;
-			V
+			X = V;
+			Y = V;
 		} else {
-			W
-		};
-		let Z = parameters[33] > V;
-		let AA = (Y == I) && Z;
-		let AD;
+			X = W;
+			Y = I;
+		}
+		let AA = parameters[33] > V;
+		let AB = (Z == I) && AA;
 		let AE;
 		let AF;
 		let AG;
-		if AA {
-			AD = AB;
-			AE = V;
+		let AH;
+		let AI;
+		let AJ;
+		let AK;
+		let AL;
+		if AB {
+			AE = AC;
 			AF = V;
 			AG = V;
+			AH = V;
+			AI = I;
+			AJ = V;
+			AK = V;
+			AL = V;
 		} else {
-			let AC = ((Y == 2f64) && Z) && (parameters[35] > V);
-			oAC = AC;
-			let AK;
-			let AL;
-			let AM;
-			if AC {
-				AK = V;
-				AL = V;
-				AM = V;
+			let AD = ((Z == 2f64) && AA) && (parameters[35] > V);
+			oAD = AD;
+			let AP;
+			let AQ;
+			let AR;
+			let AS;
+			let AT;
+			let AU;
+			if AD {
+				AP = V;
+				AQ = V;
+				AR = V;
+				AS = V;
+				AT = V;
+				AU = V;
 			} else {
-				let AJ = Y == -1f64;
-				oAJ = AJ;
-				let AQ;
-				let AR;
-				let AS;
-				if AJ {
-					AQ = AN;
-					AR = V;
-					AS = V;
+				let AO = Z == -1f64;
+				oAO = AO;
+				let AY;
+				let AZ;
+				let BA;
+				let BB;
+				let BC;
+				let BD;
+				if AO {
+					AY = AV;
+					AZ = V;
+					BA = V;
+					BB = I;
+					BC = V;
+					BD = V;
 				} else {
-					AQ = V;
-					AR = AO;
-					AS = AP;
+					AY = V;
+					AZ = AW;
+					BA = AX;
+					BB = V;
+					BC = I;
+					BD = I;
 				}
-				AK = AQ;
-				AL = AR;
-				AM = AS;
+				AP = AY;
+				AQ = AZ;
+				AR = BA;
+				AS = BB;
+				AT = BC;
+				AU = BD;
 			}
-			AD = V;
-			AE = AK;
-			AF = AL;
-			AG = AM;
+			AE = V;
+			AF = AP;
+			AG = AQ;
+			AH = AR;
+			AI = V;
+			AJ = AS;
+			AK = AT;
+			AL = AU;
 		}
-		let AH = parameters[12] + (N * parameters[13]);
-		let AI = parameters[14] + (N * parameters[15]);
-		let AT = (((parameters[28] > V) && (parameters[27] > V)) as u8 as f64) > V;
-    [A, B, C, J, L, O as u8 as f64, R, T as u8 as f64, AA as u8 as f64, oAC as u8 as f64, oAJ as u8 as f64, AH, AI, AT as u8 as f64, X, AD, AE, AF, AG, F, H, K, M, Q, S, oU]
+		let AM = parameters[12] + (N * parameters[13]);
+		let AN = parameters[14] + (N * parameters[15]);
+		let BE = (((parameters[28] > V) && (parameters[27] > V)) as u8 as f64) > V;
+    [A, B, C, J, L, O as u8 as f64, R, T as u8 as f64, AB as u8 as f64, oAD as u8 as f64, oAO as u8 as f64, AM, AN, BE as u8 as f64, X, AE, AF, AG, AH, Y, AI, AJ, AK, AL, F, H, K, M, Q, S, oU]
 }
 
 pub(super) fn canonical_instance_preprocess(
@@ -111,37 +145,44 @@ pub(super) fn canonical_instance_preprocess(
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
-) -> [f64; 7] {
+) -> [f64; 9] {
 		let D = 0f64;
 		let E = parameters[46];
 		let G = 0f64;
-		let K = 0f64;
-		let L = 0f64;
-		let O = 0f64;
+		let H = 1f64;
+		let M = 0f64;
+		let N = 0f64;
+		let R = 0f64;
 		let A = parameters[43] * parameters[42];
 		let B = staged[6] / A;
 		let C = staged[7] / A;
 		let F = (B > D) && (B >= E);
-		let H;
 		let I;
+		let J;
+		let K;
 		if F {
-			H = K;
+			I = M;
+			J = D;
+			K = D;
+		} else {
 			I = D;
-		} else {
-			H = D;
-			I = G;
+			J = G;
+			K = H;
 		}
-		let J = (C > D) && (C >= E);
-		let M;
-		let N;
-		if J {
-			M = O;
-			N = D;
+		let L = (C > D) && (C >= E);
+		let O;
+		let P;
+		let Q;
+		if L {
+			O = R;
+			P = D;
+			Q = D;
 		} else {
-			M = D;
-			N = L;
+			O = D;
+			P = N;
+			Q = H;
 		}
-    [A, F as u8 as f64, J as u8 as f64, H, I, M, N]
+    [A, F as u8 as f64, L as u8 as f64, I, J, O, P, K, Q]
 }
 
 
@@ -268,13 +309,15 @@ impl Instance {
         let temperature = ctx.temperature();
         let staged = &*self.canonical_staged;
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6])];
-        let ddt_scale_value = self.ddt_coefficients.derivative_scale;
+        let ddt_scale_value = if ctx.dynamic_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
         let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
+        let dynamic_operators_enabled = ctx.dynamic_operators_enabled();
         let ddt_active = self.ddt_coefficients.active;
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
-            rspice_eval_ddt(
+            if dynamic_operators_enabled {
+                rspice_eval_ddt(
                 &mut ddt_state.ddt_current,
                 &mut ddt_state.ddt_previous,
                 &mut ddt_state.ddt_older,
@@ -288,7 +331,10 @@ impl Instance {
                 ddt_coefficients.previous_derivative_scale,
                 slot,
                 value,
-            )
+                )
+            } else {
+                0.0
+            }
         };
 			let A = node_potentials[2];
 			let D = 173.14999999999998f64;
@@ -1029,6 +1075,33 @@ impl Instance {
 			let RS = PB[2];
 			let RT = PB[3];
 			let RU = PB[4];
+        if (staged[33] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(6), None, 0, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(0);
+        }
+        if (staged[34] != 0.0) || (staged[35] != 0.0) || (staged[37] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(5), None, 1, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(1);
+        }
+        stamper.stamp_inactive_potential_branch_local(2);
+        stamper.stamp_inactive_potential_branch_local(4);
+        if (staged[36] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(2), None, 3, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(3);
+        }
+        if (staged[38] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(0), Some(3), 5, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(5);
+        }
+        if (staged[39] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(1), Some(4), 6, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(6);
+        }
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(6),
             None,
@@ -1059,7 +1132,7 @@ impl Instance {
             [],
             multiplicity,
         );
-        stamper.stamp_potential_branch_local(Some(6), None, 0, multiplicity);
+        if staged[33] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             0,
             staged[24],
@@ -1068,6 +1141,7 @@ impl Instance {
             [],
             [],
         );
+        }
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(2),
             None,
@@ -1098,7 +1172,7 @@ impl Instance {
             [],
             multiplicity,
         );
-        stamper.stamp_potential_branch_local(Some(5), None, 1, multiplicity);
+        if staged[34] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             1,
             staged[25],
@@ -1107,6 +1181,7 @@ impl Instance {
             [],
             [],
         );
+        }
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(2),
             None,
@@ -1167,16 +1242,17 @@ impl Instance {
             [],
             multiplicity,
         );
-        stamper.stamp_potential_branch_local(Some(5), None, 2, multiplicity);
+        if staged[35] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            2,
+            1,
             staged[26],
             [],
             [],
             [],
             [],
         );
-        stamper.stamp_potential_branch_local(Some(2), None, 3, multiplicity);
+        }
+        if staged[36] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             3,
             staged[27],
@@ -1185,15 +1261,17 @@ impl Instance {
             [],
             [],
         );
-        stamper.stamp_potential_branch_local(Some(5), None, 4, multiplicity);
+        }
+        if staged[37] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            4,
+            1,
             staged[28],
             [],
             [],
             [],
             [],
         );
+        }
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(3),
             Some(4),
@@ -1224,7 +1302,7 @@ impl Instance {
             [],
             multiplicity,
         );
-        stamper.stamp_potential_branch_local(Some(0), Some(3), 5, multiplicity);
+        if staged[38] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             5,
             staged[30],
@@ -1233,6 +1311,7 @@ impl Instance {
             [],
             [],
         );
+        }
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(1),
             Some(4),
@@ -1253,7 +1332,7 @@ impl Instance {
             [],
             multiplicity,
         );
-        stamper.stamp_potential_branch_local(Some(1), Some(4), 6, multiplicity);
+        if staged[39] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             6,
             staged[32],
@@ -1262,6 +1341,7 @@ impl Instance {
             [],
             [],
         );
+        }
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(3),
             Some(4),

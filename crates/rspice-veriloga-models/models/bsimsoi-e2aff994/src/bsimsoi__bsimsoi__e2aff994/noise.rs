@@ -36,7 +36,7 @@ impl Instance {
         if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
             return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });
         }
-        let mut prepared = [0.0; 1192];
+        let mut prepared = [0.0; 1205];
         let produced = canonical_model_preprocess(
             &self.params.values,
             &self.param_given[..],
@@ -254,7 +254,7 @@ impl Instance {
 			let CET = parameters[1264];
 			let CEW = parameters[1263];
 			let CEZ = parameters[1262];
-			let CFG = staged[1072] != 0.0;
+			let CFG = staged[1073] != 0.0;
 			let CFN = parameters[1151];
 			let CFO = staged[435];
 			let CSC = 1.4142135623730951f64;
@@ -265,44 +265,44 @@ impl Instance {
 			let CUD = staged[442];
 			let CUN = staged[443];
 			let CUY = staged[444];
-			let CYB = staged[1073] != 0.0;
+			let CYB = staged[1074] != 0.0;
 			let CYU = 1.804851387e-35f64;
-			let DAM = staged[1074] != 0.0;
-			let DAV = staged[1075] != 0.0;
-			let DBO = staged[1076] != 0.0;
-			let DBS = staged[1077] != 0.0;
-			let DCV = staged[1078] != 0.0;
+			let DAM = staged[1075] != 0.0;
+			let DAV = staged[1076] != 0.0;
+			let DBO = staged[1077] != 0.0;
+			let DBS = staged[1078] != 0.0;
+			let DCV = staged[1079] != 0.0;
 			let DDI = staged[449];
-			let DDL = staged[1079] != 0.0;
-			let DDN = staged[1082] != 0.0;
+			let DDL = staged[1080] != 0.0;
+			let DDN = staged[1083] != 0.0;
 			let DDO = staged[451];
-			let DDV = staged[1096] != 0.0;
-			let DDW = staged[1095] != 0.0;
-			let DEJ = staged[1099] != 0.0;
-			let DEX = staged[1100] != 0.0;
-			let DFR = staged[1101] != 0.0;
-			let DGT = staged[1110] != 0.0;
-			let DHI = staged[1111] != 0.0;
+			let DDV = staged[1097] != 0.0;
+			let DDW = staged[1096] != 0.0;
+			let DEJ = staged[1100] != 0.0;
+			let DEX = staged[1101] != 0.0;
+			let DFR = staged[1102] != 0.0;
+			let DGT = staged[1111] != 0.0;
+			let DHI = staged[1112] != 0.0;
 			let DIH = 1.804851387e-35f64;
 			let DJE = staged[514];
 			let DJG = staged[515];
-			let DJV = staged[1116] != 0.0;
-			let DKK = staged[1117] != 0.0;
+			let DJV = staged[1117] != 0.0;
+			let DKK = staged[1118] != 0.0;
 			let DLA = staged[530];
-			let DLE = staged[1114] != 0.0;
-			let DLK = staged[1118] != 0.0;
-			let DML = staged[1130] != 0.0;
+			let DLE = staged[1115] != 0.0;
+			let DLK = staged[1119] != 0.0;
+			let DML = staged[1131] != 0.0;
 			let DOJ = 1.804851387e-35f64;
 			let DPQ = 1.804851387e-35f64;
 			let DQT = staged[585];
 			let DQU = staged[584];
-			let DRI = staged[1142] != 0.0;
-			let DRJ = staged[1143] != 0.0;
-			let DRS = staged[1131];
-			let DRX = staged[1144] != 0.0;
-			let DSH = staged[1080];
-			let DSL = staged[1145] != 0.0;
-			let DSV = staged[1081];
+			let DRI = staged[1143] != 0.0;
+			let DRJ = staged[1144] != 0.0;
+			let DRS = staged[1132];
+			let DRX = staged[1145] != 0.0;
+			let DSH = staged[1081];
+			let DSL = staged[1146] != 0.0;
+			let DSV = staged[1082];
 			let CH;
 			if CC {
 				let CI;

@@ -37,8 +37,8 @@ use super::cfg::{
     SsaBuilder,
 };
 use super::hir::{
-    HirAnalogOperator, HirContribution, HirExprKind, HirExpression, HirLimiterArgument, HirModel,
-    HirRegion,
+    HirAnalogOperator, HirContribution, HirContributionKind, HirExprKind, HirExpression,
+    HirLimiterArgument, HirModel, HirRegion,
 };
 use super::mir::{MirEquationKind, MirModel};
 use super::noise::{contains_noise, is_noise_call, string_literal};
@@ -55,6 +55,17 @@ pub struct CfgModel {
     /// The accumulated residual of each contribution at the exit block, indexed
     /// by [`ContributionId`]. Parallel to `MirModel::equations`.
     pub residuals: Vec<ValueId>,
+    /// Topology activation after projecting each potential contribution's
+    /// leading instance-static guard prefix. Parallel to [`Self::residuals`]
+    /// and the HIR contribution list.
+    ///
+    /// This is deliberately independent of both the residual value and whether
+    /// runtime control reached the statement. In particular,
+    /// `if (mode) V(a, b) <+ 0` distinguishes an instance-static false/open
+    /// branch from an active ideal zero-volt source, while a contribution below
+    /// a bias-, time-, or state-dependent guard remains topology-active even on
+    /// an untaken path.
+    pub activations: Vec<Option<ValueId>>,
     /// Every noise source the body writes, in the order the body writes them.
     ///
     /// Kept apart from `residuals` because noise contributes nothing to the
@@ -103,7 +114,7 @@ impl CfgModel {
     /// in MIR. Nothing is recomputed here that MIR already decided.
     pub fn from_hir(hir: &HirModel, mir: &MirModel) -> Result<Self, Vec<IrDiagnostic>> {
         let mut lowerer = CfgLowerer::new(hir, mir);
-        let (function, residuals, noise) = lowerer.lower()?;
+        let (function, residuals, activations, noise) = lowerer.lower()?;
         // Errors only. A warning that failed the lowering would be an error
         // wearing a different word.
         if lowerer
@@ -117,6 +128,7 @@ impl CfgModel {
             module_name: hir.module_name.clone(),
             function,
             residuals,
+            activations,
             noise,
             warnings: lowerer.diagnostics,
         })
@@ -181,6 +193,10 @@ struct CfgLowerer<'a> {
     block: BlockId,
     variables_by_name: HashMap<SmolStr, VariableId>,
     parameters_by_name: HashMap<SmolStr, ParamId>,
+    /// Guard expressions whose reaching local definitions are instance-static
+    /// at that exact program point. These may participate in the leading guard
+    /// prefix that controls potential-branch topology.
+    static_guard_conditions: HashSet<ExprId>,
     nodes_by_name: HashMap<SmolStr, NodeId>,
     ground_names: HashSet<SmolStr>,
     leaves: HashMap<LeafKey, ValueId>,
@@ -226,10 +242,262 @@ struct Limiter {
     proposed: ValueId,
 }
 
+fn assignment_targets(hir: &HirModel, assignment: &super::hir::HirAssignment) -> Vec<VariableId> {
+    if assignment.index.is_some()
+        && let Some(array) = hir
+            .arrays
+            .iter()
+            .find(|array| array.name == assignment.target_name)
+    {
+        let base = usize::from(array.base);
+        return (0..array.len as usize)
+            .map(|offset| VariableId::from(base + offset))
+            .collect();
+    }
+    vec![assignment.target]
+}
+
+/// Canonical-HIR counterpart of the legacy backend's
+/// `is_instance_static_expr`: only values fixed for an instance/temperature/
+/// analysis configuration may gate solver topology.
+fn hir_expr_is_instance_static(
+    hir: &HirModel,
+    expression: ExprId,
+    static_variables: &HashSet<VariableId>,
+) -> bool {
+    let Some(expression) = hir.expressions.get(usize::from(expression)) else {
+        return false;
+    };
+    let recurse = |id| hir_expr_is_instance_static(hir, id, static_variables);
+    match &expression.kind {
+        HirExprKind::Number { .. } | HirExprKind::StringLiteral { .. } => true,
+        HirExprKind::Identifier { name } => {
+            hir.parameters
+                .iter()
+                .any(|parameter| parameter.name == *name)
+                || hir
+                    .variables
+                    .iter()
+                    .find(|variable| variable.name == *name)
+                    .is_some_and(|variable| static_variables.contains(&variable.id))
+        }
+        HirExprKind::SystemFunction { name, args } => {
+            match (name.to_ascii_lowercase().as_str(), args.len()) {
+                ("$temperature" | "$mfactor", 0) => true,
+                ("$param_given" | "$port_connected", 1) => true,
+                ("$vt" | "$thermal_vt", 0) => true,
+                ("$vt" | "$thermal_vt", 1) => args.iter().copied().all(recurse),
+                // `$abstime`, `$realtime`, `$simparam`, `$frequency`, noise,
+                // limiting, and every unknown system function fail closed.
+                _ => false,
+            }
+        }
+        HirExprKind::Call { name, args } => {
+            let name = name.to_ascii_lowercase();
+            match (name.as_str(), args.len()) {
+                // Legacy lowering represents a validated analysis query as
+                // `IrExpr::Analysis`, which is instance-static. Require the
+                // literal query here rather than blessing arbitrary call
+                // arguments as topology controls.
+                ("analysis", 1) => matches!(
+                    hir.expressions
+                        .get(usize::from(args[0]))
+                        .map(|argument| &argument.kind),
+                    Some(HirExprKind::StringLiteral { .. })
+                ),
+                // These are the calls legacy lowering converts to pure
+                // `IrExpr::Call` (or `Limexp`) values. Calls are not pure by
+                // default in Verilog-A: ddt/idt/ddx, delays, event operators,
+                // filters, noise sources, and unknown functions all remain
+                // runtime-dependent even when their operands are parameters.
+                (
+                    "abs"
+                    | "fabs"
+                    | "sqrt"
+                    | "exp"
+                    | "expm1"
+                    | "limexp"
+                    | "__rspice_limited_exp"
+                    | "ln"
+                    | "log"
+                    | "log10"
+                    | "log1p"
+                    | "sin"
+                    | "cos"
+                    | "tan"
+                    | "asin"
+                    | "acos"
+                    | "atan"
+                    | "sinh"
+                    | "cosh"
+                    | "tanh"
+                    | "asinh"
+                    | "acosh"
+                    | "atanh"
+                    | "floor"
+                    | "ceil",
+                    1,
+                ) => args.iter().copied().all(recurse),
+                ("min" | "max" | "pow" | "fpow" | "hypot" | "atan2", 2) => {
+                    args.iter().copied().all(recurse)
+                }
+                _ => false,
+            }
+        }
+        HirExprKind::Binary { left, right, .. } => recurse(*left) && recurse(*right),
+        HirExprKind::Unary { operand, .. } => recurse(*operand),
+        HirExprKind::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => recurse(*condition) && recurse(*then_expr) && recurse(*else_expr),
+        HirExprKind::ArrayAccess { array, index } => {
+            recurse(*index)
+                && hir
+                    .arrays
+                    .iter()
+                    .find(|candidate| candidate.name == *array)
+                    .is_some_and(|array| {
+                        let base = usize::from(array.base);
+                        (0..array.len as usize).all(|offset| {
+                            static_variables.contains(&VariableId::from(base + offset))
+                        })
+                    })
+        }
+        HirExprKind::ArrayLiteral { elements } => elements.iter().copied().all(recurse),
+        HirExprKind::BranchAccess { .. }
+        | HirExprKind::NamedBranchAccess { .. }
+        | HirExprKind::AnalogOperator { .. }
+        | HirExprKind::Laplace { .. }
+        | HirExprKind::Zi { .. }
+        | HirExprKind::NoiseSource { .. } => false,
+    }
+}
+
+fn compute_instance_static_guard_conditions(hir: &HirModel) -> HashSet<ExprId> {
+    fn analyze(
+        hir: &HirModel,
+        regions: &[HirRegion],
+        static_variables: &mut HashSet<VariableId>,
+        static_control: bool,
+        mut static_conditions: Option<&mut HashSet<ExprId>>,
+    ) {
+        for region in regions {
+            match region {
+                HirRegion::Assignment(assignment) => {
+                    let write_static = static_control
+                        && hir_expr_is_instance_static(hir, assignment.expr.id, static_variables)
+                        && assignment.index.as_ref().is_none_or(|index| {
+                            hir_expr_is_instance_static(hir, index.id, static_variables)
+                        });
+                    for target in assignment_targets(hir, assignment) {
+                        if write_static {
+                            static_variables.insert(target);
+                        } else {
+                            static_variables.remove(&target);
+                        }
+                    }
+                }
+                HirRegion::Conditional {
+                    condition,
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    let condition_static =
+                        hir_expr_is_instance_static(hir, condition.id, static_variables);
+                    if condition_static && let Some(conditions) = static_conditions.as_deref_mut() {
+                        conditions.insert(condition.id);
+                    }
+
+                    let incoming = static_variables.clone();
+                    let branch_control_static = static_control && condition_static;
+                    let mut then_variables = incoming.clone();
+                    analyze(
+                        hir,
+                        then_body,
+                        &mut then_variables,
+                        branch_control_static,
+                        static_conditions.as_deref_mut(),
+                    );
+                    let mut else_variables = incoming;
+                    analyze(
+                        hir,
+                        else_body,
+                        &mut else_variables,
+                        branch_control_static,
+                        static_conditions.as_deref_mut(),
+                    );
+                    then_variables.retain(|variable| else_variables.contains(variable));
+                    *static_variables = then_variables;
+                }
+                HirRegion::Loop {
+                    condition, body, ..
+                } => {
+                    // The loop header is reached both from the entry edge and
+                    // every back edge. Start from the entry state and descend
+                    // to the greatest fixed point so a value is considered
+                    // static only when it is static on every possible visit.
+                    let entry = static_variables.clone();
+                    let mut header = entry.clone();
+                    loop {
+                        let condition_static =
+                            hir_expr_is_instance_static(hir, condition.id, &header);
+                        let mut body_variables = header.clone();
+                        analyze(
+                            hir,
+                            body,
+                            &mut body_variables,
+                            static_control && condition_static,
+                            None,
+                        );
+                        body_variables.retain(|variable| entry.contains(variable));
+                        if body_variables == header {
+                            break;
+                        }
+                        header = body_variables;
+                    }
+
+                    let condition_static = hir_expr_is_instance_static(hir, condition.id, &header);
+                    if condition_static && let Some(conditions) = static_conditions.as_deref_mut() {
+                        conditions.insert(condition.id);
+                    }
+                    let mut body_variables = header;
+                    analyze(
+                        hir,
+                        body,
+                        &mut body_variables,
+                        static_control && condition_static,
+                        static_conditions.as_deref_mut(),
+                    );
+                    body_variables.retain(|variable| entry.contains(variable));
+                    *static_variables = body_variables;
+                }
+                HirRegion::Contribution(_) => {}
+            }
+        }
+    }
+
+    // Verilog-AMS initializes every analog local to zero. That reaching
+    // definition is instance-static until a runtime-dependent assignment
+    // replaces it.
+    let mut static_variables = hir.variables.iter().map(|variable| variable.id).collect();
+    let mut static_conditions = HashSet::new();
+    analyze(
+        hir,
+        &hir.body,
+        &mut static_variables,
+        true,
+        Some(&mut static_conditions),
+    );
+    static_conditions
+}
+
 impl<'a> CfgLowerer<'a> {
     fn new(hir: &'a HirModel, mir: &'a MirModel) -> Self {
         let mut ground_names: HashSet<SmolStr> = mir.ground_nodes.iter().cloned().collect();
         ground_names.insert(SmolStr::new("0"));
+        let static_guard_conditions = compute_instance_static_guard_conditions(hir);
 
         Self {
             hir,
@@ -246,6 +514,7 @@ impl<'a> CfgLowerer<'a> {
                 .iter()
                 .map(|parameter| (parameter.name.clone(), parameter.id))
                 .collect(),
+            static_guard_conditions,
             nodes_by_name: mir
                 .nodes
                 .iter()
@@ -263,7 +532,15 @@ impl<'a> CfgLowerer<'a> {
     #[allow(clippy::type_complexity)]
     fn lower(
         &mut self,
-    ) -> Result<(CfgFunction, Vec<ValueId>, Vec<CfgNoiseSource>), Vec<IrDiagnostic>> {
+    ) -> Result<
+        (
+            CfgFunction,
+            Vec<ValueId>,
+            Vec<Option<ValueId>>,
+            Vec<CfgNoiseSource>,
+        ),
+        Vec<IrDiagnostic>,
+    > {
         let entry = self.builder.create_block();
         self.builder.seal_block(entry);
         self.block = entry;
@@ -272,21 +549,32 @@ impl<'a> CfgLowerer<'a> {
         // case: the join simply merges the value that was never updated.
         let zero = self.real_constant(0.0);
         for index in 0..self.hir.contributions.len() {
-            self.builder.write_variable(
-                CfgVariable::Residual(ContributionId::from(index)),
-                entry,
-                zero,
-            );
+            let contribution = ContributionId::from(index);
+            self.builder
+                .write_variable(CfgVariable::Residual(contribution), entry, zero);
+            if self.hir.contributions[index].kind == HirContributionKind::Potential {
+                self.builder
+                    .write_variable(CfgVariable::Activation(contribution), entry, zero);
+            }
         }
 
         let body = self.hir.body.clone();
-        self.regions(&body);
+        self.regions(&body, false);
 
         let exit = self.block;
         let residuals: Vec<_> = (0..self.hir.contributions.len())
             .map(|index| {
                 let variable = CfgVariable::Residual(ContributionId::from(index));
                 self.builder.read_variable(variable, exit).unwrap_or(zero)
+            })
+            .collect();
+        let activations: Vec<Option<ValueId>> = (0..self.hir.contributions.len())
+            .map(|index| {
+                if self.hir.contributions[index].kind != HirContributionKind::Potential {
+                    return None;
+                }
+                let variable = CfgVariable::Activation(ContributionId::from(index));
+                Some(self.builder.read_variable(variable, exit).unwrap_or(zero))
             })
             .collect();
 
@@ -309,6 +597,7 @@ impl<'a> CfgLowerer<'a> {
             }
         }
         let mut outputs = residuals.clone();
+        outputs.extend(activations.iter().flatten().copied());
         for source in &pending {
             for variable in source.variables() {
                 outputs.push(self.builder.read_variable(variable, exit).unwrap_or(zero));
@@ -321,8 +610,24 @@ impl<'a> CfgLowerer<'a> {
         let builder = std::mem::take(&mut self.builder);
         match builder.finish_with_outputs(entry, &outputs) {
             Ok((function, outputs)) => {
-                let (residuals, noise) = outputs.split_at(self.hir.contributions.len());
-                Ok((function, residuals.to_vec(), resolve_noise(pending, noise)))
+                let contribution_count = self.hir.contributions.len();
+                let (residuals, remaining) = outputs.split_at(contribution_count);
+                let activation_count = activations.iter().flatten().count();
+                let (mapped_activations, noise) = remaining.split_at(activation_count);
+                let mut mapped_activations = mapped_activations.iter().copied();
+                let activations = activations
+                    .iter()
+                    .map(|activation| {
+                        activation.map(|_| mapped_activations.next().expect("activation output"))
+                    })
+                    .collect();
+                debug_assert!(mapped_activations.next().is_none());
+                Ok((
+                    function,
+                    residuals.to_vec(),
+                    activations,
+                    resolve_noise(pending, noise),
+                ))
             }
             Err(error) => Err(vec![IrDiagnostic::global_error(
                 CompilerPhase::CfgLowering,
@@ -331,13 +636,13 @@ impl<'a> CfgLowerer<'a> {
         }
     }
 
-    fn regions(&mut self, regions: &[HirRegion]) {
+    fn regions(&mut self, regions: &[HirRegion], dynamic_topology_ancestor: bool) {
         for region in regions {
-            self.region(region);
+            self.region(region, dynamic_topology_ancestor);
         }
     }
 
-    fn region(&mut self, region: &HirRegion) {
+    fn region(&mut self, region: &HirRegion, dynamic_topology_ancestor: bool) {
         match region {
             HirRegion::Assignment(assignment) => {
                 if assignment.index.is_some() {
@@ -357,20 +662,44 @@ impl<'a> CfgLowerer<'a> {
                     value,
                 );
             }
-            HirRegion::Contribution(contribution) => self.contribution(contribution),
+            HirRegion::Contribution(contribution) => {
+                self.contribution(contribution, dynamic_topology_ancestor)
+            }
             HirRegion::Conditional {
                 condition,
                 then_body,
                 else_body,
                 ..
-            } => self.conditional(condition.id, then_body, else_body),
+            } => {
+                let condition_static = self.condition_is_instance_static(condition.id);
+                if !condition_static && !dynamic_topology_ancestor {
+                    self.activate_potential_descendants(then_body);
+                    self.activate_potential_descendants(else_body);
+                }
+                self.conditional(
+                    condition.id,
+                    then_body,
+                    else_body,
+                    dynamic_topology_ancestor || !condition_static,
+                );
+            }
             HirRegion::Loop {
                 condition, body, ..
-            } => self.runtime_loop(condition.id, body),
+            } => {
+                let condition_static = self.condition_is_instance_static(condition.id);
+                if !condition_static && !dynamic_topology_ancestor {
+                    self.activate_potential_descendants(body);
+                }
+                self.runtime_loop(
+                    condition.id,
+                    body,
+                    dynamic_topology_ancestor || !condition_static,
+                );
+            }
         }
     }
 
-    fn contribution(&mut self, contribution: &HirContribution) {
+    fn contribution(&mut self, contribution: &HirContribution, dynamic_topology_ancestor: bool) {
         let value = self.expr(contribution.expression.id);
         let variable = CfgVariable::Residual(contribution.id);
         let accumulated = match self.builder.read_variable(variable, self.block) {
@@ -379,11 +708,61 @@ impl<'a> CfgLowerer<'a> {
         };
         let sum = self.binary(CfgBinaryOp::Add, accumulated, value);
         self.builder.write_variable(variable, self.block, sum);
+        if contribution.kind == HirContributionKind::Potential && !dynamic_topology_ancestor {
+            self.activate_contribution(contribution.id);
+        }
 
         // After the residual, not before: the two walks read the same variables
         // in the same block, so which runs first cannot change what either sees,
         // and this order keeps the contribution itself the first thing here.
         self.noise_sources(contribution.id, contribution.expression.id);
+    }
+
+    fn activate_contribution(&mut self, contribution: ContributionId) {
+        let active = self.real_constant(1.0);
+        self.builder
+            .write_variable(CfgVariable::Activation(contribution), self.block, active);
+    }
+
+    /// Once a dynamic guard is encountered, legacy topology semantics stop
+    /// peeling guards: every potential statement below it owns active topology,
+    /// while its residual remains governed by the full control flow. Mark those
+    /// statements before branching so an untaken runtime path still closes the
+    /// physical branch.
+    fn activate_potential_descendants(&mut self, regions: &[HirRegion]) {
+        fn collect(regions: &[HirRegion], out: &mut Vec<ContributionId>) {
+            for region in regions {
+                match region {
+                    HirRegion::Contribution(contribution)
+                        if contribution.kind == HirContributionKind::Potential =>
+                    {
+                        out.push(contribution.id);
+                    }
+                    HirRegion::Conditional {
+                        then_body,
+                        else_body,
+                        ..
+                    } => {
+                        collect(then_body, out);
+                        collect(else_body, out);
+                    }
+                    HirRegion::Loop { body, .. } => collect(body, out),
+                    HirRegion::Assignment(_) | HirRegion::Contribution(_) => {}
+                }
+            }
+        }
+
+        let mut contributions = Vec::new();
+        collect(regions, &mut contributions);
+        contributions.sort_unstable_by_key(|contribution| usize::from(*contribution));
+        contributions.dedup();
+        for contribution in contributions {
+            self.activate_contribution(contribution);
+        }
+    }
+
+    fn condition_is_instance_static(&self, expression: ExprId) -> bool {
+        self.static_guard_conditions.contains(&expression)
     }
 
     /// Lower whatever noise the contribution's expression carries.
@@ -696,7 +1075,13 @@ impl<'a> CfgLowerer<'a> {
         );
     }
 
-    fn conditional(&mut self, condition: ExprId, then_body: &[HirRegion], else_body: &[HirRegion]) {
+    fn conditional(
+        &mut self,
+        condition: ExprId,
+        then_body: &[HirRegion],
+        else_body: &[HirRegion],
+        dynamic_topology_ancestor: bool,
+    ) {
         let condition = self.expr(condition);
         let then_block = self.builder.create_block();
         let else_block = self.builder.create_block();
@@ -718,7 +1103,7 @@ impl<'a> CfgLowerer<'a> {
         self.builder.seal_block(else_block);
 
         self.block = then_block;
-        self.regions(then_body);
+        self.regions(then_body, dynamic_topology_ancestor);
         self.builder.set_terminator(
             self.block,
             CfgTerminator::Jump {
@@ -728,7 +1113,7 @@ impl<'a> CfgLowerer<'a> {
         );
 
         self.block = else_block;
-        self.regions(else_body);
+        self.regions(else_body, dynamic_topology_ancestor);
         self.builder.set_terminator(
             self.block,
             CfgTerminator::Jump {
@@ -747,7 +1132,12 @@ impl<'a> CfgLowerer<'a> {
     /// The header stays unsealed until the back edge exists. That is the one
     /// place incremental SSA construction needs the delay, and getting it wrong
     /// shows up as a loop-carried variable reading its initial value forever.
-    fn runtime_loop(&mut self, condition: ExprId, body: &[HirRegion]) {
+    fn runtime_loop(
+        &mut self,
+        condition: ExprId,
+        body: &[HirRegion],
+        dynamic_topology_ancestor: bool,
+    ) {
         let header = self.builder.create_block();
         self.builder.set_terminator(
             self.block,
@@ -776,7 +1166,7 @@ impl<'a> CfgLowerer<'a> {
         self.builder.seal_block(body_block);
 
         self.block = body_block;
-        self.regions(body);
+        self.regions(body, dynamic_topology_ancestor);
         self.builder.set_terminator(
             self.block,
             CfgTerminator::Jump {
@@ -1127,7 +1517,7 @@ impl<'a> CfgLowerer<'a> {
             terms.push((accumulated, reversed));
         }
 
-        let mut seen: HashSet<(Option<NodeId>, Option<NodeId>)> = HashSet::new();
+        let mut seen: HashSet<(usize, usize)> = HashSet::new();
         for unknown in &mir.branch_unknowns {
             let reversed = if unknown.pos_node == Some(node) {
                 false
@@ -1136,7 +1526,14 @@ impl<'a> CfgLowerer<'a> {
             } else {
                 continue;
             };
-            if !seen.insert((unknown.pos_node, unknown.neg_node)) {
+            let pos_key = unknown.pos_node.map(usize::from).unwrap_or(usize::MAX);
+            let neg_key = unknown.neg_node.map(usize::from).unwrap_or(usize::MAX);
+            let physical_key = if pos_key <= neg_key {
+                (pos_key, neg_key)
+            } else {
+                (neg_key, pos_key)
+            };
+            if !seen.insert(physical_key) {
                 continue;
             }
             let flow = self.leaf(
@@ -1259,21 +1656,20 @@ impl<'a> CfgLowerer<'a> {
         pos: Option<NodeId>,
         neg: Option<NodeId>,
     ) -> Option<(BranchUnknownId, bool)> {
-        if let Some(unknown) = self
-            .mir
-            .branch_unknowns
-            .iter()
-            .find(|unknown| unknown.pos_node == pos && unknown.neg_node == neg)
-        {
-            return Some((unknown.id, false));
-        }
-
-        let unknown = self
-            .mir
-            .branch_unknowns
-            .iter()
-            .find(|unknown| unknown.pos_node == neg && unknown.neg_node == pos)?;
-        Some((unknown.id, true))
+        // Preserve MIR/source order across both orientations. The canonical
+        // generated backend uses the first potential contribution on a physical
+        // branch as its leader unknown; preferring a later exact orientation
+        // over an earlier reversed one would make I(a,b) read an unused duplicate
+        // that the topology layer correctly pins to zero.
+        self.mir.branch_unknowns.iter().find_map(|unknown| {
+            if unknown.pos_node == pos && unknown.neg_node == neg {
+                Some((unknown.id, false))
+            } else if unknown.pos_node == neg && unknown.neg_node == pos {
+                Some((unknown.id, true))
+            } else {
+                None
+            }
+        })
     }
 
     fn system_function(&mut self, name: &SmolStr, args: &[ExprId], span: SourceSpanRef) -> ValueId {

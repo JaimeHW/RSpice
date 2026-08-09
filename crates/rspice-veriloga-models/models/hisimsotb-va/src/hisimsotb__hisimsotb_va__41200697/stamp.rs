@@ -5,7 +5,7 @@ use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
 use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L10, L2, L3, L4, L5, L6, L7, L8, L9, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 130] = [171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 31, 9, 32, 16, 6, 11, 3, 4, 131, 12, 129, 5, 8, 70, 0, 130, 25, 1, 2, 7, 10, 13, 181, 14, 15, 17, 18, 19, 20, 21, 22, 190, 192, 193, 194, 26, 24, 35, 38, 39, 197, 198, 40, 199, 41, 42, 53, 50, 81, 77, 98, 83, 78, 206, 48, 55, 207, 61, 63, 208, 210, 67, 68, 211, 212, 75, 82, 85, 86, 101, 105, 109, 113, 213, 214, 118, 215, 216, 119, 217, 218, 120, 219, 220, 121, 221, 222, 142, 223, 140, 135, 136, 224, 225, 149, 144, 145, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 155, 158, 159, 161, 163, 164, 165, 166, 167, 168, 169, 170];
+pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 137] = [171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 31, 9, 32, 16, 6, 11, 3, 4, 131, 12, 129, 5, 8, 70, 0, 130, 25, 1, 2, 7, 10, 13, 181, 14, 15, 17, 18, 19, 20, 21, 22, 190, 192, 193, 194, 26, 24, 35, 38, 39, 197, 198, 40, 199, 41, 42, 53, 50, 81, 77, 98, 83, 78, 206, 48, 55, 207, 61, 63, 208, 210, 67, 68, 211, 212, 75, 82, 85, 86, 101, 105, 109, 113, 213, 214, 118, 215, 216, 119, 217, 218, 120, 219, 220, 121, 221, 222, 142, 223, 140, 135, 136, 224, 225, 149, 144, 145, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 155, 158, 159, 161, 163, 164, 165, 166, 167, 168, 169, 170];
 pub(super) const CANONICAL_INSTANCE_STAGE_SLOTS: [u32; 106] = [195, 128, 125, 73, 127, 88, 90, 104, 112, 111, 117, 116, 110, 115, 182, 184, 183, 185, 187, 186, 43, 188, 132, 49, 92, 47, 79, 122, 123, 124, 189, 52, 74, 102, 191, 96, 93, 95, 91, 97, 134, 87, 94, 126, 27, 28, 29, 30, 196, 34, 33, 36, 37, 89, 200, 201, 51, 44, 45, 46, 80, 202, 203, 204, 205, 54, 56, 57, 58, 59, 60, 62, 209, 64, 65, 66, 69, 71, 72, 76, 84, 99, 100, 133, 103, 108, 107, 106, 114, 143, 137, 139, 138, 141, 151, 146, 148, 147, 150, 152, 153, 154, 156, 157, 160, 162];
 pub(super) const CANONICAL_TEMPERATURE_STAGE_SLOTS: [u32; 1] = [23];
 
@@ -16,7 +16,7 @@ pub(super) fn canonical_model_preprocess(
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
-) -> [f64; 130] {
+) -> [f64; 137] {
 		let A = 0f64;
 		let E = parameters[17];
 		let F = 1f64;
@@ -70,14 +70,14 @@ pub(super) fn canonical_model_preprocess(
 		let GO = parameters[322];
 		let GS = parameters[320];
 		let HA = 0f64;
-		let HC = 0f64;
-		let HE = 0f64;
+		let HD = 0f64;
 		let HG = 0f64;
 		let HI = 0f64;
 		let HK = 0f64;
 		let HN = 0f64;
-		let HP = 0f64;
-		let HQ = 0f64;
+		let HR = 0f64;
+		let HU = 0f64;
+		let HV = 0f64;
 	    let mut oC = false;
 	    let mut oH = false;
 	    let mut oL = false;
@@ -487,52 +487,78 @@ pub(super) fn canonical_model_preprocess(
 			oGY = GY;
 		}
 		let GZ = CX >= 8f64;
-		let HB = if GH != 0.0 {
-			A
+		let HB;
+		let HC;
+		if GH != 0.0 {
+			HB = A;
+			HC = A;
 		} else {
-			HA
-		};
-		let HD = if GM != 0.0 {
-			A
+			HB = HA;
+			HC = F;
+		}
+		let HE;
+		let HF;
+		if GM != 0.0 {
+			HE = A;
+			HF = A;
 		} else {
-			HC
-		};
-		let HF = if GH != 0.0 {
-			HE
-		} else {
-			A
-		};
-		let HH = if GM != 0.0 {
+			HE = HD;
+			HF = F;
+		}
+		let HH = if GH != 0.0 {
 			HG
 		} else {
 			A
 		};
-		let HJ = if CT != 0.0 {
-			A
-		} else {
+		let HJ = if GM != 0.0 {
 			HI
-		};
-		let HL = if CV {
+		} else {
 			A
-		} else {
-			HK
 		};
-		let HM = (parameters[27] != 0.0 && parameters[15] != 0.0) && parameters[16] != 0.0;
-		let HO = if HM {
-			A
+		let HL;
+		let HM;
+		if CT != 0.0 {
+			HL = A;
+			HM = A;
 		} else {
-			HN
-		};
-		let HR;
-		let HS;
-		if CW != 0.0 {
-			HR = A;
-			HS = A;
-		} else {
-			HR = HP;
-			HS = HQ;
+			HL = HK;
+			HM = F;
 		}
-    [B as u8 as f64, oC as u8 as f64, oH as u8 as f64, oL as u8 as f64, oO as u8 as f64, Q as u8 as f64, T as u8 as f64, U, AB as u8 as f64, oBU as u8 as f64, AI, AK, AL, AM, AN, AO, AQ, AR, AS, AT, AU, AV, AW, AX, AY, AZ, BA, BC, BD, BZ, CD, CE, CG as u8 as f64, CI, oCL, CN as u8 as f64, CO, CP, CQ, CR, CS as u8 as f64, CU as u8 as f64, CV as u8 as f64, CY as u8 as f64, CZ as u8 as f64, DA, DB, DF, DH, DI, DJ as u8 as f64, oDL as u8 as f64, oDQ, oDN as u8 as f64, oDS, DO, DV, DW, DY, DZ, EB, EC, ED, EG as u8 as f64, EH, EL, EM as u8 as f64, oEN, oEO, EP as u8 as f64, ER as u8 as f64, oES, oET, EU as u8 as f64, EW as u8 as f64, oFA, FB, oFD, oFE, AG, FG, oFI, oFK, FN as u8 as f64, oFO as u8 as f64, oFQ, FP as u8 as f64, oFS as u8 as f64, oFU, FT as u8 as f64, oFW as u8 as f64, oFY, FX as u8 as f64, oGA as u8 as f64, oGB, GD as u8 as f64, GI as u8 as f64, oGJ, oGL as u8 as f64, oGP, oGQ, oGR, GN as u8 as f64, oGU as u8 as f64, oGV, oGW, oGX, GZ as u8 as f64, HM as u8 as f64, HB, HD, HF, HH, HJ, HL, HO, HR, HS, DE, FH, FJ, FL, oFR, oFV, oFZ, oGC, oGF, oGG, oGT, oGY]
+		let HO;
+		let HP;
+		if CV {
+			HO = A;
+			HP = A;
+		} else {
+			HO = HN;
+			HP = F;
+		}
+		let HQ = (parameters[27] != 0.0 && parameters[15] != 0.0) && parameters[16] != 0.0;
+		let HS;
+		let HT;
+		if HQ {
+			HS = A;
+			HT = A;
+		} else {
+			HS = HR;
+			HT = F;
+		}
+		let HW;
+		let HX;
+		let HY;
+		let HZ;
+		if CW != 0.0 {
+			HW = A;
+			HX = A;
+			HY = A;
+			HZ = A;
+		} else {
+			HW = HU;
+			HX = HV;
+			HY = F;
+			HZ = F;
+		}
+    [B as u8 as f64, oC as u8 as f64, oH as u8 as f64, oL as u8 as f64, oO as u8 as f64, Q as u8 as f64, T as u8 as f64, U, AB as u8 as f64, oBU as u8 as f64, AI, AK, AL, AM, AN, AO, AQ, AR, AS, AT, AU, AV, AW, AX, AY, AZ, BA, BC, BD, BZ, CD, CE, CG as u8 as f64, CI, oCL, CN as u8 as f64, CO, CP, CQ, CR, CS as u8 as f64, CU as u8 as f64, CV as u8 as f64, CY as u8 as f64, CZ as u8 as f64, DA, DB, DF, DH, DI, DJ as u8 as f64, oDL as u8 as f64, oDQ, oDN as u8 as f64, oDS, DO, DV, DW, DY, DZ, EB, EC, ED, EG as u8 as f64, EH, EL, EM as u8 as f64, oEN, oEO, EP as u8 as f64, ER as u8 as f64, oES, oET, EU as u8 as f64, EW as u8 as f64, oFA, FB, oFD, oFE, AG, FG, oFI, oFK, FN as u8 as f64, oFO as u8 as f64, oFQ, FP as u8 as f64, oFS as u8 as f64, oFU, FT as u8 as f64, oFW as u8 as f64, oFY, FX as u8 as f64, oGA as u8 as f64, oGB, GD as u8 as f64, GI as u8 as f64, oGJ, oGL as u8 as f64, oGP, oGQ, oGR, GN as u8 as f64, oGU as u8 as f64, oGV, oGW, oGX, GZ as u8 as f64, HQ as u8 as f64, HB, HE, HH, HJ, HL, HO, HS, HW, HX, HC, HF, HM, HP, HT, HY, HZ, DE, FH, FJ, FL, oFR, oFV, oFZ, oGC, oGF, oGG, oGT, oGY]
 }
 
 pub(super) fn canonical_instance_preprocess(
@@ -1162,13 +1188,15 @@ impl Instance {
         let multiplicity = self.multiplicity;
         let staged = &*self.canonical_staged;
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12])];
-        let ddt_scale_value = self.ddt_coefficients.derivative_scale;
+        let ddt_scale_value = if ctx.dynamic_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
         let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
+        let dynamic_operators_enabled = ctx.dynamic_operators_enabled();
         let ddt_active = self.ddt_coefficients.active;
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
-            rspice_eval_ddt(
+            if dynamic_operators_enabled {
+                rspice_eval_ddt(
                 &mut ddt_state.ddt_current,
                 &mut ddt_state.ddt_previous,
                 &mut ddt_state.ddt_older,
@@ -1182,7 +1210,10 @@ impl Instance {
                 ddt_coefficients.previous_derivative_scale,
                 slot,
                 value,
-            )
+                )
+            } else {
+                0.0
+            }
         };
 			let A = staged[171] != 0.0;
 			let B = staged[179] != 0.0;
@@ -10345,6 +10376,46 @@ impl Instance {
 			let HHA = HAE;
 			let HHB = HAT;
 			let HHC = HAU;
+        if (staged[237] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(12), Some(2), 0, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(0);
+        }
+        if (staged[238] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(0), Some(11), 1, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(1);
+        }
+        if (staged[239] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(1), Some(5), 2, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(2);
+        }
+        if (BD != 0.0) {
+            stamper.stamp_potential_branch_local(Some(3), Some(6), 3, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(3);
+        }
+        if (staged[240] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(4), None, 4, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(4);
+        }
+        if (staged[241] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(10), None, 5, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(5);
+        }
+        if (staged[242] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(8), None, 6, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(6);
+        }
+        if (staged[243] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(9), None, 7, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(7);
+        }
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(11),
             Some(12),
@@ -10415,7 +10486,7 @@ impl Instance {
             [],
             multiplicity,
         );
-        stamper.stamp_potential_branch_local(Some(12), Some(2), 0, multiplicity);
+        if staged[237] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             0,
             staged[228],
@@ -10424,6 +10495,7 @@ impl Instance {
             [],
             [],
         );
+        }
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(0),
             Some(11),
@@ -10434,7 +10506,7 @@ impl Instance {
             [],
             multiplicity,
         );
-        stamper.stamp_potential_branch_local(Some(0), Some(11), 1, multiplicity);
+        if staged[238] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             1,
             staged[229],
@@ -10443,6 +10515,7 @@ impl Instance {
             [],
             [],
         );
+        }
         stamper.stamp_current_sparse_local::<10, 0>(
             Some(5),
             Some(12),
@@ -10603,7 +10676,7 @@ impl Instance {
             [],
             multiplicity,
         );
-        stamper.stamp_potential_branch_local(Some(1), Some(5), 2, multiplicity);
+        if staged[239] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             2,
             staged[232],
@@ -10612,7 +10685,8 @@ impl Instance {
             [],
             [],
         );
-        stamper.stamp_potential_branch_local(Some(3), Some(6), 3, multiplicity);
+        }
+        if BD != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             3,
             HHJ,
@@ -10621,6 +10695,7 @@ impl Instance {
             [],
             [],
         );
+        }
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(4),
             None,
@@ -10631,7 +10706,7 @@ impl Instance {
             [],
             multiplicity,
         );
-        stamper.stamp_potential_branch_local(Some(4), None, 4, multiplicity);
+        if staged[240] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             4,
             staged[233],
@@ -10640,6 +10715,7 @@ impl Instance {
             [],
             [],
         );
+        }
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(10),
             None,
@@ -10650,7 +10726,7 @@ impl Instance {
             [],
             multiplicity,
         );
-        stamper.stamp_potential_branch_local(Some(10), None, 5, multiplicity);
+        if staged[241] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             5,
             staged[234],
@@ -10659,6 +10735,7 @@ impl Instance {
             [],
             [],
         );
+        }
         stamper.stamp_current_sparse_local::<7, 0>(
             Some(8),
             None,
@@ -10679,7 +10756,7 @@ impl Instance {
             [],
             multiplicity,
         );
-        stamper.stamp_potential_branch_local(Some(8), None, 6, multiplicity);
+        if staged[242] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             6,
             staged[235],
@@ -10688,7 +10765,8 @@ impl Instance {
             [],
             [],
         );
-        stamper.stamp_potential_branch_local(Some(9), None, 7, multiplicity);
+        }
+        if staged[243] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             7,
             staged[236],
@@ -10697,6 +10775,7 @@ impl Instance {
             [],
             [],
         );
+        }
         self.canonical_reactive[0] = GWZ;
         self.canonical_reactive[1] = GXB;
         self.canonical_reactive[2] = GXD;

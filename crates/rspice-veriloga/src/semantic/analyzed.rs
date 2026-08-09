@@ -134,6 +134,9 @@ pub struct AnalyzedParameter {
     pub is_public: bool,
     /// Whether the source declares shared model-card or per-device storage.
     pub scope: ParameterScope,
+    /// Xyce/CMC dual-scope convention: an instance parameter may take a
+    /// model-card fallback while retaining independent instance-given state.
+    pub also_model: bool,
     pub param_type: ParamType,
     pub value_type: ValueType,
     /// Constant default value, when the default expression folds to a constant

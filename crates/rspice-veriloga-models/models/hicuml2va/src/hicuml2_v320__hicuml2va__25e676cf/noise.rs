@@ -34,7 +34,7 @@ impl Instance {
         if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
             return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });
         }
-        let mut prepared = [0.0; 229];
+        let mut prepared = [0.0; 235];
         let produced = canonical_model_preprocess(
             &self.params.values,
             &self.param_given[..],

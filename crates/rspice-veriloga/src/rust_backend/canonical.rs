@@ -71,7 +71,7 @@ use crate::canonical_ir::schedule::{
     worth_splitting,
 };
 use crate::canonical_ir::{
-    AdSeed, BlockId, CanonicalIrArtifact, ExprId, MirEquationKind, ValueId, optimize_cfg,
+    AdSeed, BlockId, CanonicalIrArtifact, ExprId, MirEquationKind, NodeId, ValueId, optimize_cfg,
 };
 use crate::metrics::{
     CfgStructureMetrics, KernelRegionMetric, MetricsRecorder, PipelineCancelled, PipelineControl,
@@ -123,6 +123,7 @@ pub(crate) fn generate_device_measured(
         &parameter_fields,
         plan.ddt_slots.len(),
         plan.idt_slots.len(),
+        plan.one_step_dae_split_safe,
         artifact.mir.branch_unknowns.len(),
         &plan.state_extensions(artifact),
     )?;
@@ -567,6 +568,28 @@ struct Stamps {
     corrections: Vec<Option<usize>>,
 }
 
+/// How one potential contribution maps onto the single solver branch used for
+/// its physical node pair.
+#[derive(Debug, Clone, Copy)]
+struct PotentialEquationPlan {
+    branch: usize,
+    /// `1` when the contribution uses the group's orientation, `-1` when its
+    /// source branch is reversed and its residual/Jacobian must be negated.
+    sign: i8,
+}
+
+/// A physical potential branch. Canonical MIR intentionally owns one branch
+/// unknown per contribution statement; generated devices instead assemble the
+/// Verilog-A branch semantics: one physical flow unknown, one structural KCL
+/// coupling, and the sum of every active potential contribution on that branch.
+struct PotentialBranchGroup {
+    pos: Option<NodeId>,
+    neg: Option<NodeId>,
+    branch: usize,
+    equations: Vec<usize>,
+    duplicate_branches: Vec<usize>,
+}
+
 struct ModelPlan {
     /// One body computing both matrices' worth of values.
     ///
@@ -587,8 +610,12 @@ struct ModelPlan {
     stages: Vec<Stage>,
     slots: usize,
     node_count: usize,
-    /// Branch-unknown ordinal per equation, for the potential stamps.
-    branch_of_equation: Vec<Option<usize>>,
+    /// Physical-branch target and orientation per potential equation.
+    potential_equations: Vec<Option<PotentialEquationPlan>>,
+    /// Stable source-order groups of potential equations sharing a node pair.
+    potential_groups: Vec<PotentialBranchGroup>,
+    /// Output position of each equation's control-flow activation value.
+    activation_positions: Vec<Option<usize>>,
     /// The noise magnitudes, as their own body.
     ///
     /// `None` where the canonical level cannot express them and the generator
@@ -613,6 +640,11 @@ struct ModelPlan {
     /// Newton iteration. `Limit` and its `LimitPrevious` readers carry the same
     /// operator id, so they resolve to the same slot by construction.
     limit_slots: HashMap<ExprId, usize>,
+    /// Whether Xyce OneStep may split this generated model into a full-weight
+    /// dynamic residual and a half-weight static history contribution.
+    /// Models with `idt`, nonlinear use of `ddt`, or `ddt`-dependent control
+    /// flow remain on OneStep order one rather than changing their equations.
+    one_step_dae_split_safe: bool,
 }
 
 impl ModelPlan {
@@ -696,11 +728,34 @@ impl ModelPlan {
             .iter()
             .map(|equation| cfg.residuals[usize::from(equation.contribution)])
             .collect();
+        let activations: Vec<Option<ValueId>> = artifact
+            .mir
+            .equations
+            .iter()
+            .map(|equation| {
+                (equation.kind == MirEquationKind::Potential)
+                    .then(|| cfg.activations[usize::from(equation.contribution)])
+                    .flatten()
+            })
+            .collect();
         // Before differentiation, because a guarded charge is recovered by
         // *adding* a merge to the graph and a value added afterwards would have
         // no derivative. Differentiating a block parameter is the ordinary case,
         // so nothing else has to know this happened.
+        let values_reaching_ddt = values_reaching_a_ddt(&cfg.function);
+        let ddt_controls_flow = cfg.function.blocks.iter().any(|block| {
+            matches!(
+                &block.terminator,
+                CfgTerminator::Branch { condition, .. }
+                    if values_reaching_ddt[usize::from(*condition)]
+            )
+        });
         let charges = stored_charges(&mut cfg.function, &residuals);
+        let one_step_dae_split_safe = idt_slots.is_empty()
+            && !ddt_controls_flow
+            && residuals.iter().zip(&charges).all(|(residual, charge)| {
+                !values_reaching_ddt[usize::from(*residual)] || charge.is_some()
+            });
         cfg.function
             .validate()
             .map_err(|error| unsupported(artifact, format!("charge recovery: {error}")))?;
@@ -836,6 +891,8 @@ impl ModelPlan {
         let mut wanted = conduction.wanted();
         let reactive_wanted = reactive.wanted();
         wanted.extend_from_slice(&reactive_wanted);
+        let stamp_wanted = wanted.len();
+        wanted.extend(activations.iter().flatten().copied());
         let tracked_primal = (0..cfg.function.values.len())
             .map(ValueId::from)
             .collect::<Vec<_>>();
@@ -852,8 +909,17 @@ impl ModelPlan {
                 error,
             )
         })?;
-        conduction.remap(&mapped[..wanted.len() - reactive_wanted.len()]);
-        reactive.remap(&mapped[wanted.len() - reactive_wanted.len()..]);
+        let conduction_wanted = stamp_wanted - reactive_wanted.len();
+        conduction.remap(&mapped[..conduction_wanted]);
+        reactive.remap(&mapped[conduction_wanted..stamp_wanted]);
+        let mut mapped_activations = mapped[stamp_wanted..].iter().copied();
+        let activations = activations
+            .iter()
+            .map(|activation| {
+                activation.map(|_| mapped_activations.next().expect("mapped activation"))
+            })
+            .collect::<Vec<_>>();
+        debug_assert!(mapped_activations.next().is_none());
         conduction.drop_zeros(&function);
         reactive.drop_zeros(&function);
         let mut scalar_derivatives = 0usize;
@@ -892,6 +958,15 @@ impl ModelPlan {
         let mut outputs = Vec::new();
         let conduction = Stamps::place(conduction, &mut outputs);
         let reactive = Stamps::place(reactive, &mut outputs);
+        let activation_positions = activations
+            .iter()
+            .map(|activation| {
+                activation.map(|activation| {
+                    outputs.push(activation);
+                    outputs.len() - 1
+                })
+            })
+            .collect();
 
         let parameter_scopes: Vec<_> = artifact
             .mir
@@ -954,7 +1029,7 @@ impl ModelPlan {
             );
         }
 
-        let branch_of_equation = artifact
+        let branch_of_equation: Vec<Option<usize>> = artifact
             .mir
             .equations
             .iter()
@@ -967,6 +1042,8 @@ impl ModelPlan {
                     .map(|unknown| usize::from(unknown.id))
             })
             .collect();
+        let (potential_equations, potential_groups) =
+            plan_potential_branches(artifact, &branch_of_equation)?;
         record_phase(
             artifact,
             measurements,
@@ -982,11 +1059,14 @@ impl ModelPlan {
             stages,
             slots,
             node_count: artifact.mir.nodes.len(),
-            branch_of_equation,
+            potential_equations,
+            potential_groups,
+            activation_positions,
             noise,
             ddt_slots,
             idt_slots,
             limit_slots,
+            one_step_dae_split_safe,
         })
     }
 }
@@ -1327,6 +1407,73 @@ fn plan_stamps(
         ));
     }
     plan
+}
+
+fn plan_potential_branches(
+    artifact: &CanonicalIrArtifact,
+    branch_of_equation: &[Option<usize>],
+) -> Result<
+    (
+        Vec<Option<PotentialEquationPlan>>,
+        Vec<PotentialBranchGroup>,
+    ),
+    RustBackendError,
+> {
+    let mut equations = vec![None; artifact.mir.equations.len()];
+    let mut groups: Vec<PotentialBranchGroup> = Vec::new();
+
+    for (equation_index, equation) in artifact.mir.equations.iter().enumerate() {
+        if equation.kind != MirEquationKind::Potential {
+            continue;
+        }
+        let branch = branch_of_equation
+            .get(equation_index)
+            .copied()
+            .flatten()
+            .ok_or_else(|| {
+                RustBackendError::internal(
+                    artifact.metadata.source_package.as_str(),
+                    artifact.mir.module_name.as_str(),
+                    format!("potential equation {equation_index} has no branch unknown"),
+                )
+            })?;
+        let pos = equation.branch.pos_node;
+        let neg = equation.branch.neg_node;
+
+        let existing = groups.iter().position(|group| {
+            (group.pos == pos && group.neg == neg) || (group.pos == neg && group.neg == pos)
+        });
+        let (group_index, sign) = match existing {
+            Some(group_index) => {
+                let group = &mut groups[group_index];
+                let sign = if group.pos == pos && group.neg == neg {
+                    1
+                } else {
+                    -1
+                };
+                group.equations.push(equation_index);
+                group.duplicate_branches.push(branch);
+                (group_index, sign)
+            }
+            None => {
+                let group_index = groups.len();
+                groups.push(PotentialBranchGroup {
+                    pos,
+                    neg,
+                    branch,
+                    equations: vec![equation_index],
+                    duplicate_branches: Vec::new(),
+                });
+                (group_index, 1)
+            }
+        };
+        equations[equation_index] = Some(PotentialEquationPlan {
+            branch: groups[group_index].branch,
+            sign,
+        });
+    }
+
+    Ok((equations, groups))
 }
 
 impl Stamps {
@@ -1765,9 +1912,13 @@ impl ModelPlan {
         self.emit_prologue(artifact, function, 2, out)?;
         out.push_str(&indent(&body, 2));
 
+        self.emit_potential_structure(&values, out);
+
         for (index, row) in self.conduction.rows.iter().enumerate() {
             let (residual, derivatives) = &self.conduction.positions[index];
             let residual = self.corrected_residual(index, &values, *residual);
+            let activation = (row.kind == MirEquationKind::Potential)
+                .then(|| self.activation_expression(index, &values));
             self.emit_row(
                 row,
                 &residual,
@@ -1777,6 +1928,7 @@ impl ModelPlan {
                     .collect::<Vec<_>>(),
                 index,
                 Reactive::No,
+                activation.as_deref(),
                 out,
             )?;
         }
@@ -1842,6 +1994,7 @@ impl ModelPlan {
                 &derivatives,
                 index,
                 Reactive::Yes,
+                None,
                 out,
             )?;
         }
@@ -2239,6 +2392,44 @@ impl ModelPlan {
         Ok((body, values))
     }
 
+    fn activation_expression(&self, equation: usize, values: &[String]) -> String {
+        let position = self.activation_positions[equation]
+            .expect("only potential equations request topology activation");
+        truth_output(&self.function, self.outputs[position], &values[position])
+    }
+
+    fn emit_potential_structure(&self, values: &[String], out: &mut String) {
+        for group in &self.potential_groups {
+            let active = group
+                .equations
+                .iter()
+                .map(|equation| format!("({})", self.activation_expression(*equation, values)))
+                .collect::<Vec<_>>()
+                .join(" || ");
+            let pos = optional_node(group.pos);
+            let neg = optional_node(group.neg);
+            let _ = writeln!(
+                out,
+                "        if {active} {{\n\
+                 \x20           stamper.stamp_potential_branch_local({pos}, {neg}, {}, multiplicity);\n\
+                 \x20       }} else {{\n\
+                 \x20           stamper.stamp_inactive_potential_branch_local({});\n\
+                 \x20       }}",
+                group.branch, group.branch,
+            );
+            // MIR keeps one branch-current unknown per contribution statement.
+            // Only the source-first unknown represents the physical branch;
+            // every duplicate remains in the generated ABI and is pinned to
+            // zero current so it cannot make the solver matrix singular.
+            for duplicate in &group.duplicate_branches {
+                let _ = writeln!(
+                    out,
+                    "        stamper.stamp_inactive_potential_branch_local({duplicate});"
+                );
+            }
+        }
+    }
+
     /// One equation's stamper calls.
     /// The residual as the matrix wants it, with the limiter's displacement
     /// taken back out.
@@ -2272,6 +2463,7 @@ impl ModelPlan {
         derivatives: &[String],
         equation: usize,
         reactive: Reactive,
+        activation: Option<&str>,
         out: &mut String,
     ) -> Result<(), RustBackendError> {
         let mut nodes = Vec::new();
@@ -2319,43 +2511,81 @@ impl ModelPlan {
                 );
             }
             (MirEquationKind::Potential, Reactive::No) => {
-                let branch = self.branch_of_equation[equation].ok_or_else(|| {
+                let plan = self.potential_equations[equation].ok_or_else(|| {
                     RustBackendError::internal(
                         "",
                         "",
-                        format!("potential equation {equation} has no branch unknown"),
+                        format!("potential equation {equation} has no physical branch plan"),
                     )
                 })?;
-                let _ = writeln!(
-                    out,
-                    "        stamper.stamp_potential_branch_local({pos}, {neg}, {branch}, multiplicity);"
-                );
+                let signed = |value: &str| {
+                    if plan.sign < 0 {
+                        format!("-({value})")
+                    } else {
+                        value.to_string()
+                    }
+                };
+                let residual = signed(residual);
+                let node_values = node_values
+                    .iter()
+                    .map(|value| signed(value))
+                    .collect::<Vec<_>>();
+                let branch_values = branch_values
+                    .iter()
+                    .map(|value| signed(value))
+                    .collect::<Vec<_>>();
+                let active = activation.ok_or_else(|| {
+                    RustBackendError::internal(
+                        "",
+                        "",
+                        format!("potential equation {equation} has no activation expression"),
+                    )
+                })?;
+                let _ = writeln!(out, "        if {active} {{");
                 let _ = writeln!(
                     out,
                     "        stamper.stamp_potential_sparse_local::<{}, {}>(\n\
-                     \x20           {branch},\n            {residual},\n\
+                     \x20           {},\n            {residual},\n\
                      \x20           [{}],\n            [{}],\n            [{}],\n            [{}],\n        );",
                     nodes.len(),
                     branches.len(),
+                    plan.branch,
                     nodes.join(", "),
                     node_values.join(", "),
                     branches.join(", "),
                     branch_values.join(", "),
                 );
+                out.push_str("        }\n");
             }
             (MirEquationKind::Potential, Reactive::Yes) => {
-                let branch = self.branch_of_equation[equation].ok_or_else(|| {
+                let plan = self.potential_equations[equation].ok_or_else(|| {
                     RustBackendError::internal(
                         "",
                         "",
-                        format!("potential equation {equation} has no branch unknown"),
+                        format!("potential equation {equation} has no physical branch plan"),
                     )
                 })?;
+                let signed = |value: &str| {
+                    if plan.sign < 0 {
+                        format!("-({value})")
+                    } else {
+                        value.to_string()
+                    }
+                };
+                let node_values = node_values
+                    .iter()
+                    .map(|value| signed(value))
+                    .collect::<Vec<_>>();
+                let branch_values = branch_values
+                    .iter()
+                    .map(|value| signed(value))
+                    .collect::<Vec<_>>();
                 let _ = writeln!(
                     out,
                     "        stamper.stamp_potential_reactive_indexed_dense_local(\n\
-                     \x20           {branch},\n            &[{}],\n            &[{}],\n\
+                     \x20           {},\n            &[{}],\n            &[{}],\n\
                      \x20           &[{}],\n            &[{}],\n        );",
+                    plan.branch,
                     nodes.join(", "),
                     node_values.join(", "),
                     branches.join(", "),
@@ -2437,7 +2667,7 @@ impl ModelPlan {
         if wants.ddt_scale {
             let _ = writeln!(
                 out,
-                "{pad}let ddt_scale_value = self.ddt_coefficients.derivative_scale;"
+                "{pad}let ddt_scale_value = if ctx.dynamic_operators_enabled() {{ self.ddt_coefficients.derivative_scale }} else {{ 0.0 }};"
             );
             let _ = writeln!(out, "{pad}let ddt_scale = move || ddt_scale_value;");
         }
@@ -2447,7 +2677,7 @@ impl ModelPlan {
             // than an arbitrary multiple of the last timestep.
             let _ = writeln!(
                 out,
-                "{pad}let idt_scale_value = if self.ddt_coefficients.active {{ self.timestep }} else {{ 0.0 }};\n\
+                "{pad}let idt_scale_value = if self.ddt_coefficients.active && ctx.dynamic_operators_enabled() {{ self.timestep }} else {{ 0.0 }};\n\
                  {pad}let idt_scale = move || idt_scale_value;"
             );
         }
@@ -2472,10 +2702,12 @@ impl ModelPlan {
             }
             let _ = writeln!(
                 out,
-                "{pad}let idt_active = self.ddt_coefficients.active;\n\
+                "{pad}let dynamic_operators_enabled = ctx.dynamic_operators_enabled();\n\
+                 {pad}let idt_active = self.ddt_coefficients.active;\n\
                  {pad}let idt_step = self.timestep;\n\
                  {pad}let mut idt = |slot: usize, value: f64, ic: f64| -> f64 {{\n\
-                 {pad}    rspice_eval_idt(\n\
+                 {pad}    if dynamic_operators_enabled {{\n\
+                 {pad}        rspice_eval_idt(\n\
                  {pad}        &mut ddt_state.idt_current,\n\
                  {pad}        &mut ddt_state.idt_previous,\n\
                  {pad}        &mut ddt_state.idt_initialized,\n\
@@ -2484,7 +2716,12 @@ impl ModelPlan {
                  {pad}        slot,\n\
                  {pad}        value,\n\
                  {pad}        ic,\n\
-                 {pad}    )\n\
+                 {pad}        )\n\
+                 {pad}    }} else if ddt_state.idt_initialized[slot] {{\n\
+                 {pad}        ddt_state.idt_current[slot]\n\
+                 {pad}    }} else {{\n\
+                 {pad}        ic\n\
+                 {pad}    }}\n\
                  {pad}}};"
             );
         }
@@ -2504,10 +2741,12 @@ impl ModelPlan {
             }
             let _ = writeln!(
                 out,
-                "{pad}let ddt_active = self.ddt_coefficients.active;\n\
+                "{pad}let dynamic_operators_enabled = ctx.dynamic_operators_enabled();\n\
+                 {pad}let ddt_active = self.ddt_coefficients.active;\n\
                  {pad}let ddt_coefficients = self.ddt_coefficients;\n\
                  {pad}let mut ddt = |slot: usize, value: f64| -> f64 {{\n\
-                 {pad}    rspice_eval_ddt(\n\
+                 {pad}    if dynamic_operators_enabled {{\n\
+                 {pad}        rspice_eval_ddt(\n\
                  {pad}        &mut ddt_state.ddt_current,\n\
                  {pad}        &mut ddt_state.ddt_previous,\n\
                  {pad}        &mut ddt_state.ddt_older,\n\
@@ -2521,7 +2760,10 @@ impl ModelPlan {
                  {pad}        ddt_coefficients.previous_derivative_scale,\n\
                  {pad}        slot,\n\
                  {pad}        value,\n\
-                 {pad}    )\n\
+                 {pad}        )\n\
+                 {pad}    }} else {{\n\
+                 {pad}        0.0\n\
+                 {pad}    }}\n\
                  {pad}}};"
             );
         }

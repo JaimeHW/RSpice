@@ -254,6 +254,174 @@ fn parameter_default_out_of_range_is_an_error() {
 }
 
 #[test]
+fn parameter_default_composites_may_reference_only_earlier_parameters() {
+    analyze(&module_src(
+        r#"
+            parameter real first = 2.0;
+            parameter real second = (first + 1.0) * (first > 0.0 ? first : 1.0);
+            analog I(p, n) <+ second * V(p, n);
+            "#,
+    ))
+    .expect("composite default may reference an earlier parameter");
+
+    let error = analyze(&module_src(
+        r#"
+            parameter real first = (later + 1.0) * 2.0;
+            parameter real later = 3.0;
+            analog I(p, n) <+ first * V(p, n);
+            "#,
+    ))
+    .expect_err("composite forward reference must be rejected")
+    .to_string();
+    assert!(
+        error.contains("references later parameter 'later'"),
+        "{error}"
+    );
+
+    let error = analyze(&module_src(
+        r#"
+            parameter real recursive = recursive + 1.0;
+            analog I(p, n) <+ recursive * V(p, n);
+            "#,
+    ))
+    .expect_err("self reference must be rejected")
+    .to_string();
+    assert!(error.contains("references itself"), "{error}");
+}
+
+#[test]
+fn parameter_default_forward_reference_through_param_given_alias_is_rejected() {
+    let error = analyze(&module_src(
+        r#"
+            parameter real first = $param_given(LATE_ALIAS) ? 1.0 : 0.0;
+            parameter real later = 3.0;
+            aliasparam late_alias = later;
+            analog I(p, n) <+ first * V(p, n);
+            "#,
+    ))
+    .expect_err("$param_given alias must not hide a forward dependency")
+    .to_string();
+    assert!(
+        error.contains("references later parameter 'later'"),
+        "{error}"
+    );
+}
+
+#[test]
+fn case_insensitive_external_parameter_names_must_be_unambiguous() {
+    let canonical_collision = analyze(&module_src(
+        r#"
+            parameter real Gain = 1.0;
+            parameter real gain = 2.0;
+            analog I(p, n) <+ Gain * V(p, n);
+            "#,
+    ))
+    .expect_err("SPICE-facing canonical names must be unambiguous")
+    .to_string();
+    assert!(canonical_collision.contains("conflicts case-insensitively"));
+
+    let alias_collision = analyze(&module_src(
+        r#"
+            parameter real gain = 1.0;
+            parameter real width = 2.0;
+            aliasparam GAIN = width;
+            analog I(p, n) <+ gain * V(p, n);
+            "#,
+    ))
+    .expect_err("SPICE-facing aliases must not collide with canonical names")
+    .to_string();
+    assert!(alias_collision.contains("conflicts case-insensitively"));
+}
+
+#[test]
+fn model_defaults_may_read_dual_scope_parameter_model_storage() {
+    analyze(&module_src(
+        r#"
+            (* type = "instance", xyceAlsoModel = "yes" *) parameter real dual = 2.0;
+            parameter real model_value = dual + ($param_given(DUAL) ? 1.0 : 0.0);
+            analog I(p, n) <+ model_value * V(p, n);
+            "#,
+    ))
+    .expect("dual-scope parameters have model storage available to model defaults");
+}
+
+#[test]
+fn model_defaults_reject_nondual_instance_param_given_aliases() {
+    let error = analyze(&module_src(
+        r#"
+            (* type = "instance" *) parameter real geometry = 2.0;
+            parameter real model_value = $param_given(GEOMETRY_ALIAS) ? 1.0 : 0.0;
+            aliasparam geometry_alias = geometry;
+            analog I(p, n) <+ model_value * V(p, n);
+            "#,
+    ))
+    .expect_err("an alias must not hide an instance-only parameter from scope validation")
+    .to_string();
+    assert!(
+        error.contains(
+            "model parameter 'model_value' cannot depend on an instance parameter that lacks model storage"
+        ),
+        "{error}"
+    );
+}
+
+#[test]
+fn dual_scope_model_fallback_rejects_nondual_instance_dependencies() {
+    let error = analyze(&module_src(
+        r#"
+            (* type = "instance" *) parameter real geometry = 2.0;
+            (* type = "instance", xyceAlsoModel = "yes" *) parameter real dual = geometry * 2.0;
+            analog I(p, n) <+ dual * V(p, n);
+            "#,
+    ))
+    .expect_err("dual model fallback cannot read instance-only storage")
+    .to_string();
+    assert!(
+        error.contains(
+            "dual-scope parameter model fallback 'dual' cannot depend on an instance parameter that lacks model storage"
+        ),
+        "{error}"
+    );
+}
+
+#[test]
+fn xyce_also_model_is_presence_gated_and_ignores_its_value() {
+    let analyzed = analyze_one(&module_src(
+        r#"
+            (* type = "instance", xyceAlsoModel *) parameter real bare = 1.0;
+            (* type = "instance", xyceAlsoModel = "no" *) parameter real value_ignored = 2.0;
+            analog I(p, n) <+ (bare + value_ignored) * V(p, n);
+            "#,
+    ));
+    assert!(
+        analyzed
+            .parameters
+            .iter()
+            .find(|parameter| parameter.name == "bare")
+            .expect("bare parameter")
+            .also_model
+    );
+    assert!(
+        analyzed
+            .parameters
+            .iter()
+            .find(|parameter| parameter.name == "value_ignored")
+            .expect("value-ignored parameter")
+            .also_model
+    );
+
+    let error = analyze(&module_src(
+        r#"
+            (* xyceAlsoModel = "no" *) parameter real model_value = 1.0;
+            analog I(p, n) <+ model_value * V(p, n);
+            "#,
+    ))
+    .expect_err("attribute presence is invalid on an already model-scope parameter")
+    .to_string();
+    assert!(error.contains("only with type=\"instance\""), "{error}");
+}
+
+#[test]
 fn assignment_to_parameter_is_an_error() {
     let result = analyze(&module_src(
         r#"
@@ -299,6 +467,44 @@ fn block_local_variable_shadowing_is_hoisted() {
     );
     // The block assignment targets the hoisted name, not the outer tmp
     assert_ne!(flat_assignments(&m)[0].target.as_str(), "tmp");
+}
+
+#[test]
+fn block_local_parameter_shadowing_gets_a_distinct_canonical_name() {
+    let m = analyze_one(&module_src(
+        r#"
+            parameter real grade = 0.5;
+            real captured;
+            analog begin
+                captured = grade;
+                begin : load
+                    real grade;
+                    grade = V(p, n);
+                    I(p, n) <+ captured + grade;
+                end
+            end
+            "#,
+    ));
+
+    let parameter = m
+        .parameters
+        .iter()
+        .find(|parameter| parameter.name == "grade")
+        .expect("module parameter");
+    assert_eq!(parameter.default, Some(0.5));
+    let hoisted = m
+        .variables
+        .iter()
+        .find(|variable| variable.name.starts_with("grade__blk"))
+        .expect("renamed block local");
+    assert_ne!(hoisted.name, parameter.name);
+
+    let assignments = flat_assignments(&m);
+    assert!(matches!(
+        &assignments[0].expression,
+        Expression::Identifier(identifier) if identifier.name == parameter.name
+    ));
+    assert_eq!(assignments[1].target, hoisted.name);
 }
 
 #[test]

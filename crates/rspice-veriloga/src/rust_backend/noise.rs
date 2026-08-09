@@ -358,6 +358,7 @@ pub(super) fn generate_noise_file(
 /// from is exactly what the two disagree about.
 pub(super) fn descriptor_table(artifact: &CanonicalIrArtifact) -> String {
     let mut out = String::new();
+    let potential_leaders = potential_branch_leaders(artifact);
     writeln!(
         out,
         "pub static NOISE_SOURCES: [GeneratedNoiseDescriptor; {}] = [",
@@ -366,6 +367,15 @@ pub(super) fn descriptor_table(artifact: &CanonicalIrArtifact) -> String {
     .expect("write noise descriptor header");
     for source in &artifact.noise_sources.sources {
         let table = source.table.as_ref();
+        let branch_ordinal = if source.is_current {
+            source.branch_ordinal.map(|ordinal| ordinal.index())
+        } else {
+            potential_leaders
+                .get(source.equation.index() as usize)
+                .copied()
+                .flatten()
+                .or_else(|| source.branch_ordinal.map(|ordinal| ordinal.index()))
+        };
         writeln!(
             out,
             "    GeneratedNoiseDescriptor {{ mechanism: {:?}, label: {}, kind: GeneratedNoiseKind::{}, equation: {}, is_current: {}, branch_ordinal: {}, pos: {}, neg: {}, table_len: {}, table_log_interp: {} }},",
@@ -374,7 +384,7 @@ pub(super) fn descriptor_table(artifact: &CanonicalIrArtifact) -> String {
             noise_kind(source.kind),
             source.equation.index(),
             source.is_current,
-            option_usize(source.branch_ordinal.map(|ordinal| ordinal.index())),
+            option_usize(branch_ordinal),
             endpoint_literal(source.pos.node, &source.pos.name, source.pos.is_internal),
             endpoint_literal(source.neg.node, &source.neg.name, source.neg.is_internal),
             table.map_or(0, |table| table.operands.len()),
@@ -1055,14 +1065,52 @@ fn noise_branch_unknowns(artifact: &CanonicalIrArtifact) -> HashMap<String, Bran
     for unknown in &artifact.mir.branch_unknowns {
         let slot = unknown.id.index() as usize;
         if let Some(name) = &unknown.declared_name {
-            slots.insert(name.to_string(), BranchCurrentSlot::forward(slot));
+            slots
+                .entry(name.to_string())
+                .or_insert_with(|| BranchCurrentSlot::forward(slot));
         }
         let pos = unknown.pos_node.map(|node| node.index() as usize);
         let neg = unknown.neg_node.map(|node| node.index() as usize);
-        slots.insert(branch_pair_key(pos, neg), BranchCurrentSlot::forward(slot));
-        slots.insert(branch_pair_key(neg, pos), BranchCurrentSlot::reverse(slot));
+        slots
+            .entry(branch_pair_key(pos, neg))
+            .or_insert_with(|| BranchCurrentSlot::forward(slot));
+        slots
+            .entry(branch_pair_key(neg, pos))
+            .or_insert_with(|| BranchCurrentSlot::reverse(slot));
     }
     slots
+}
+
+fn potential_branch_leaders(artifact: &CanonicalIrArtifact) -> Vec<Option<u32>> {
+    let mut leaders = vec![None; artifact.mir.equations.len()];
+    let mut physical: Vec<(Option<NodeId>, Option<NodeId>, u32)> = Vec::new();
+    for (equation_index, equation) in artifact.mir.equations.iter().enumerate() {
+        if equation.kind != crate::canonical_ir::MirEquationKind::Potential {
+            continue;
+        }
+        let Some(branch) = artifact
+            .mir
+            .branch_unknowns
+            .iter()
+            .find(|unknown| unknown.equation == equation.id)
+            .map(|unknown| unknown.id.index())
+        else {
+            continue;
+        };
+        let leader = physical
+            .iter()
+            .find(|(pos, neg, _)| {
+                (*pos == equation.branch.pos_node && *neg == equation.branch.neg_node)
+                    || (*pos == equation.branch.neg_node && *neg == equation.branch.pos_node)
+            })
+            .map(|(_, _, leader)| *leader)
+            .unwrap_or_else(|| {
+                physical.push((equation.branch.pos_node, equation.branch.neg_node, branch));
+                branch
+            });
+        leaders[equation_index] = Some(leader);
+    }
+    leaders
 }
 
 fn emit_lines(out: &mut String, lines: &[String], indentation: usize) {

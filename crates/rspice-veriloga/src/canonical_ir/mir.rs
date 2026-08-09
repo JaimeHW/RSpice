@@ -53,6 +53,8 @@ pub struct MirParameterSlot {
     #[serde(default = "default_true")]
     pub is_public: bool,
     pub scope: ParameterScope,
+    #[serde(default)]
+    pub also_model: bool,
     pub value_type: CanonicalValueType,
     pub default: Option<f64>,
     pub default_expr: Option<HirExprRef>,
@@ -153,6 +155,7 @@ impl MirModel {
                 name: parameter.name.clone(),
                 is_public: parameter.is_public,
                 scope: parameter.scope,
+                also_model: parameter.also_model,
                 value_type: parameter.value_type,
                 default: parameter.default,
                 default_expr: parameter.default_expr.clone(),

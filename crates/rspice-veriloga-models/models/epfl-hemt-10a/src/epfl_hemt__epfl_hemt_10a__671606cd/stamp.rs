@@ -9,13 +9,15 @@ impl Instance {
         let multiplicity = self.multiplicity;
         let temperature = ctx.temperature();
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11])];
-        let ddt_scale_value = self.ddt_coefficients.derivative_scale;
+        let ddt_scale_value = if ctx.dynamic_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
         let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
+        let dynamic_operators_enabled = ctx.dynamic_operators_enabled();
         let ddt_active = self.ddt_coefficients.active;
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
-            rspice_eval_ddt(
+            if dynamic_operators_enabled {
+                rspice_eval_ddt(
                 &mut ddt_state.ddt_current,
                 &mut ddt_state.ddt_previous,
                 &mut ddt_state.ddt_older,
@@ -29,7 +31,10 @@ impl Instance {
                 ddt_coefficients.previous_derivative_scale,
                 slot,
                 value,
-            )
+                )
+            } else {
+                0.0
+            }
         };
 			let A = 0f64;
 			let B = 1.602e-19f64;
@@ -888,7 +893,22 @@ impl Instance {
 			let ACR = UG;
 			let ACS = UH;
 			let ACT = UI;
-        stamper.stamp_potential_branch_local(Some(6), Some(2), 0, multiplicity);
+        if (C != 0.0) {
+            stamper.stamp_potential_branch_local(Some(6), Some(2), 0, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(0);
+        }
+        if (C != 0.0) {
+            stamper.stamp_potential_branch_local(Some(0), Some(5), 1, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(1);
+        }
+        if (C != 0.0) {
+            stamper.stamp_potential_branch_local(Some(3), Some(9), 2, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(2);
+        }
+        if C != 0.0 {
         stamper.stamp_potential_sparse_local::<4, 0>(
             0,
             TE,
@@ -897,6 +917,7 @@ impl Instance {
             [],
             [],
         );
+        }
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(5),
             Some(6),
@@ -907,7 +928,7 @@ impl Instance {
             [],
             multiplicity,
         );
-        stamper.stamp_potential_branch_local(Some(0), Some(5), 1, multiplicity);
+        if C != 0.0 {
         stamper.stamp_potential_sparse_local::<4, 0>(
             1,
             TD,
@@ -916,7 +937,8 @@ impl Instance {
             [],
             [],
         );
-        stamper.stamp_potential_branch_local(Some(3), Some(9), 2, multiplicity);
+        }
+        if C != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             2,
             TF,
@@ -925,6 +947,7 @@ impl Instance {
             [],
             [],
         );
+        }
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(4),
             None,

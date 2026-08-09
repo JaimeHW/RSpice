@@ -5,7 +5,7 @@ use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
 use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 53] = [0, 2, 8, 16, 3, 9, 17, 11, 12, 23, 1, 4, 5, 6, 7, 10, 26, 27, 13, 28, 14, 15, 29, 30, 70, 71, 19, 72, 73, 74, 75, 20, 21, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 22, 93, 89, 90, 91, 92, 94];
+pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 57] = [0, 2, 8, 16, 3, 9, 17, 11, 12, 23, 1, 4, 5, 6, 7, 10, 26, 27, 13, 28, 14, 15, 29, 30, 70, 71, 19, 72, 73, 74, 75, 20, 21, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 22, 93, 89, 90, 91, 92, 94, 95, 96, 97, 98];
 pub(super) const CANONICAL_TEMPERATURE_STAGE_SLOTS: [u32; 42] = [18, 24, 25, 35, 34, 42, 41, 43, 45, 44, 46, 56, 57, 33, 32, 58, 51, 50, 39, 40, 49, 54, 61, 36, 31, 66, 65, 64, 63, 47, 48, 53, 52, 68, 62, 67, 69, 37, 38, 55, 59, 60];
 
 pub(super) fn canonical_model_preprocess(
@@ -15,7 +15,7 @@ pub(super) fn canonical_model_preprocess(
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
-) -> [f64; 53] {
+) -> [f64; 57] {
 		let B = 1.3806226e-23f64;
 		let C = 1.602176462e-19f64;
 		let F = parameters[76];
@@ -31,12 +31,12 @@ pub(super) fn canonical_model_preprocess(
 		let AV = parameters[36];
 		let AY = parameters[39];
 		let BO = 0f64;
-		let BR = 0f64;
-		let BU = 0f64;
-		let BZ = 0f64;
-		let CB = 0f64;
-		let CD = 0f64;
+		let BS = 0f64;
+		let BW = 0f64;
+		let CC = 0f64;
 		let CF = 0f64;
+		let CH = 0f64;
+		let CJ = 0f64;
 	    let mut oBC = false;
 		let A = parameters[108] + 273.15f64;
 		let D = (B * A) / C;
@@ -101,47 +101,63 @@ pub(super) fn canonical_model_preprocess(
 		let BL = (AP == N) && AS;
 		let BM = (parameters[73] != T) && (parameters[54] != T);
 		let BN = parameters[28] >= AR;
-		let BP = if BN {
-			T
+		let BP;
+		let BQ;
+		if BN {
+			BP = T;
+			BQ = T;
 		} else {
-			BO
-		};
-		let BQ = parameters[29] >= AR;
-		let BS = if BQ {
-			T
+			BP = BO;
+			BQ = N;
+		}
+		let BR = parameters[29] >= AR;
+		let BT;
+		let BU;
+		if BR {
+			BT = T;
+			BU = T;
 		} else {
-			BR
-		};
-		let BT = (parameters[23] >= AR) || (parameters[26] >= AR);
-		let BV = if BT {
-			T
+			BT = BS;
+			BU = N;
+		}
+		let BV = (parameters[23] >= AR) || (parameters[26] >= AR);
+		let BX;
+		let BY;
+		if BV {
+			BX = T;
+			BY = T;
 		} else {
-			BU
-		};
-		let BW = AP == T;
-		let BX = BW || (parameters[107] == T);
-		let BY = BW || (AQ < AR);
-		let CA = if BY {
-			BZ
+			BX = BW;
+			BY = N;
+		}
+		let BZ = AP == T;
+		let CA = BZ || (parameters[107] == T);
+		let CB = BZ || (AQ < AR);
+		let CD;
+		let CE;
+		if CB {
+			CD = CC;
+			CE = N;
 		} else {
-			T
-		};
-		let CC = if BT {
-			CB
-		} else {
-			T
-		};
-		let CE = if BQ {
-			CD
-		} else {
-			T
-		};
-		let CG = if BN {
+			CD = T;
+			CE = T;
+		}
+		let CG = if BV {
 			CF
 		} else {
 			T
 		};
-    [A, I, K, L, M, P, Q, R, S, U as u8 as f64, Y, AA, AB, AC, AE, AF, AG as u8 as f64, AH as u8 as f64, AI, AJ as u8 as f64, AL, AN, AO as u8 as f64, AT as u8 as f64, AU as u8 as f64, AX as u8 as f64, AW, AZ as u8 as f64, BA as u8 as f64, BB as u8 as f64, oBC as u8 as f64, BD, BE, BF as u8 as f64, BG as u8 as f64, BH as u8 as f64, BI as u8 as f64, BJ as u8 as f64, BK as u8 as f64, BL as u8 as f64, BM as u8 as f64, BN as u8 as f64, BQ as u8 as f64, BT as u8 as f64, BX as u8 as f64, BY as u8 as f64, CC, CE, BP, BS, BV, CA, CG]
+		let CI = if BR {
+			CH
+		} else {
+			T
+		};
+		let CK = if BN {
+			CJ
+		} else {
+			T
+		};
+    [A, I, K, L, M, P, Q, R, S, U as u8 as f64, Y, AA, AB, AC, AE, AF, AG as u8 as f64, AH as u8 as f64, AI, AJ as u8 as f64, AL, AN, AO as u8 as f64, AT as u8 as f64, AU as u8 as f64, AX as u8 as f64, AW, AZ as u8 as f64, BA as u8 as f64, BB as u8 as f64, oBC as u8 as f64, BD, BE, BF as u8 as f64, BG as u8 as f64, BH as u8 as f64, BI as u8 as f64, BJ as u8 as f64, BK as u8 as f64, BL as u8 as f64, BM as u8 as f64, BN as u8 as f64, BR as u8 as f64, BV as u8 as f64, CA as u8 as f64, CB as u8 as f64, CG, CI, BP, BT, BX, CD, CK, BQ, BU, BY, CE]
 }
 
 pub(super) fn canonical_temperature_preprocess(
@@ -399,13 +415,15 @@ impl Instance {
         let staged = &*self.canonical_staged;
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9])];
         let branch_unknown_flows = [ctx.branch_current(self.branches[0]), ctx.branch_current(self.branches[1]), ctx.branch_current(self.branches[2]), ctx.branch_current(self.branches[3])];
-        let ddt_scale_value = self.ddt_coefficients.derivative_scale;
+        let ddt_scale_value = if ctx.dynamic_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
         let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
+        let dynamic_operators_enabled = ctx.dynamic_operators_enabled();
         let ddt_active = self.ddt_coefficients.active;
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
-            rspice_eval_ddt(
+            if dynamic_operators_enabled {
+                rspice_eval_ddt(
                 &mut ddt_state.ddt_current,
                 &mut ddt_state.ddt_previous,
                 &mut ddt_state.ddt_older,
@@ -419,7 +437,10 @@ impl Instance {
                 ddt_coefficients.previous_derivative_scale,
                 slot,
                 value,
-            )
+                )
+            } else {
+                0.0
+            }
         };
 			let A = node_potentials[1];
 			let B = node_potentials[5];
@@ -3068,6 +3089,26 @@ impl Instance {
 			let BQW = BNG;
 			let BQX = BKA;
 			let BQY = BKC;
+        if (staged[95] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(7), Some(2), 0, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(0);
+        }
+        if (staged[96] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(5), Some(0), 1, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(1);
+        }
+        if (staged[97] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(1), Some(6), 2, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(2);
+        }
+        if (staged[98] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(4), None, 3, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(3);
+        }
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(6),
             Some(7),
@@ -3158,7 +3199,7 @@ impl Instance {
             [],
             multiplicity,
         );
-        stamper.stamp_potential_branch_local(Some(7), Some(2), 0, multiplicity);
+        if staged[95] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             0,
             staged[89],
@@ -3167,6 +3208,7 @@ impl Instance {
             [],
             [],
         );
+        }
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(5),
             Some(0),
@@ -3177,7 +3219,7 @@ impl Instance {
             [],
             multiplicity,
         );
-        stamper.stamp_potential_branch_local(Some(5), Some(0), 1, multiplicity);
+        if staged[96] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             1,
             staged[90],
@@ -3186,6 +3228,7 @@ impl Instance {
             [],
             [],
         );
+        }
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(1),
             Some(6),
@@ -3196,7 +3239,7 @@ impl Instance {
             [],
             multiplicity,
         );
-        stamper.stamp_potential_branch_local(Some(1), Some(6), 2, multiplicity);
+        if staged[97] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             2,
             staged[91],
@@ -3205,6 +3248,7 @@ impl Instance {
             [],
             [],
         );
+        }
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(6),
             Some(5),
@@ -3255,7 +3299,7 @@ impl Instance {
             [],
             multiplicity,
         );
-        stamper.stamp_potential_branch_local(Some(4), None, 3, multiplicity);
+        if staged[98] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             3,
             staged[92],
@@ -3264,6 +3308,7 @@ impl Instance {
             [],
             [],
         );
+        }
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(4),
             None,

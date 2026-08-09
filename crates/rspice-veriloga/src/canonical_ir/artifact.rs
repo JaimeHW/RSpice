@@ -301,6 +301,7 @@ fn validate_hir_mir_parameters(
             || hir_parameter.name != mir_parameter.name
             || hir_parameter.is_public != mir_parameter.is_public
             || hir_parameter.scope != mir_parameter.scope
+            || hir_parameter.also_model != mir_parameter.also_model
             || hir_parameter.value_type != mir_parameter.value_type
             || hir_parameter.default != mir_parameter.default
             || hir_parameter.default_expr != mir_parameter.default_expr
@@ -622,11 +623,12 @@ fn write_hir_port(out: &mut String, port: &HirPort) {
 fn write_hir_parameter(out: &mut String, parameter: &HirParameter) {
     writeln!(
         out,
-        "parameter id={} name={} public={} scope={} type={} default={} default_expr={} range={} aliases={}",
+        "parameter id={} name={} public={} scope={} also_model={} type={} default={} default_expr={} range={} aliases={}",
         parameter.id.index(),
         enc_str(&parameter.name),
         parameter.is_public,
         parameter.scope.name(),
+        parameter.also_model,
         value_type_label(parameter.value_type),
         option_f64(parameter.default),
         expr_ref_label(parameter.default_expr.as_ref()),
@@ -776,11 +778,12 @@ fn write_mir_node(out: &mut String, node: &MirNode) {
 fn write_mir_parameter(out: &mut String, parameter: &MirParameterSlot) {
     writeln!(
         out,
-        "parameter id={} name={} public={} scope={} type={} default={} default_expr={} range={} aliases={}",
+        "parameter id={} name={} public={} scope={} also_model={} type={} default={} default_expr={} range={} aliases={}",
         parameter.id.index(),
         enc_str(&parameter.name),
         parameter.is_public,
         parameter.scope.name(),
+        parameter.also_model,
         value_type_label(parameter.value_type),
         option_f64(parameter.default),
         expr_ref_label(parameter.default_expr.as_ref()),

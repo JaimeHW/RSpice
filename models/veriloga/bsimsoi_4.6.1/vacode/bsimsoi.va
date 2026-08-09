@@ -216,6 +216,18 @@
 
 `define BPIcc(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",  desc=des*) parameter integer nam=def from[lwr:upr] ;
 
+// BSIM-SOI 4.6.1 declares these parameters as instance parameters while the
+// model manual also permits them on model cards.  Xyce 7.10 carries the same
+// dual-scope metadata on its canonical 4.6.1 Verilog-A source.
+`define IPRcc_BOTH(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",  desc=des xyceAlsoModel="yes"*) parameter real    nam=def from[lwr:upr] ;
+`define IPRco_BOTH(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",  desc=des xyceAlsoModel="yes"*) parameter real    nam=def from[lwr:upr) ;
+`define IPRcz_BOTH(nam,def,uni,        des) (*units=uni, type="instance",  desc=des xyceAlsoModel="yes"*) parameter real    nam=def from[  0:inf);
+`define IPRoz_BOTH(nam,def,uni,        des) (*units=uni, type="instance",  desc=des xyceAlsoModel="yes"*) parameter real    nam=def from(  0:inf);
+`define IPIco_BOTH(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",  desc=des xyceAlsoModel="yes"*) parameter integer nam=def from[lwr:upr) ;
+`define IPIcc_BOTH(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",  desc=des xyceAlsoModel="yes"*) parameter integer nam=def from[lwr:upr] ;
+`define IPRnb_BOTH(nam,def,uni,        des) (*units=uni, type="instance",  desc=des xyceAlsoModel="yes"*) parameter real    nam=def ;
+`define BPIcc_BOTH(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",  desc=des xyceAlsoModel="yes"*) parameter integer nam=def from[lwr:upr] ;
+
 //`define PORT_CONNECTED
 `ifdef PORT_CONNECTED
 
@@ -261,39 +273,39 @@ endfunction
 /*  Instance Parameters    */
 /***************************/
 `IPRnb( DTEMP          ,0.0            ,""                                 ,"device temperature offset from ambient" ) /* Changed to instance parameter in v4.6 */
-`IPRoz( L              ,5e-6           ,"m"                                ,"Length" )
-`IPRoz( W              ,5e-6           ,"m"                                ,"Width" )
-`IPIco( NF             ,1            ,""          ,1          ,inf       ,"Number of fingers" )
-`IPRcz( SA             ,0.0            ,"m"                                ,"distance between  OD edge to poly of one side" )
-`IPRcz( SB             ,0.0            ,"m"                                ,"distance between  OD edge to poly of the other side" )
-`IPRcz( SD             ,0.0            ,"m"                                ,"distance between neighbor fingers" )
-`IPRcz( AD             ,0.0            ,"m^2"                              ,"Drain area" )
-`IPRcz( AS             ,0.0            ,"m^2"                              ,"Source area" )
-`IPRcz( PD             ,0.0            ,"m"                                ,"Drain perimeter" )
-`IPRcz( PS             ,0.0            ,"m"                                ,"Source perimeter" )
-`IPRcz( NRD            ,1.0            ,""                                 ,"Number of squares in drain" )
-`IPRcz( NRS            ,1.0            ,""                                 ,"Number of squares in source" )
-`IPIcc( OFF            ,0              ,""          ,0          ,1         ,"Device is initially off" )
-`IPIcc( BJTOFF         ,0              ,""          ,0          ,1         ,"BJT on/off flag" )
+`IPRoz_BOTH( L              ,5e-6           ,"m"                                ,"Length" )
+`IPRoz_BOTH( W              ,5e-6           ,"m"                                ,"Width" )
+`IPIco_BOTH( NF             ,1            ,""          ,1          ,inf       ,"Number of fingers" )
+`IPRcz_BOTH( SA             ,0.0            ,"m"                                ,"distance between  OD edge to poly of one side" )
+`IPRcz_BOTH( SB             ,0.0            ,"m"                                ,"distance between  OD edge to poly of the other side" )
+`IPRcz_BOTH( SD             ,0.0            ,"m"                                ,"distance between neighbor fingers" )
+`IPRcz_BOTH( AD             ,0.0            ,"m^2"                              ,"Drain area" )
+`IPRcz_BOTH( AS             ,0.0            ,"m^2"                              ,"Source area" )
+`IPRcz_BOTH( PD             ,0.0            ,"m"                                ,"Drain perimeter" )
+`IPRcz_BOTH( PS             ,0.0            ,"m"                                ,"Source perimeter" )
+`IPRcz_BOTH( NRD            ,1.0            ,""                                 ,"Number of squares in drain" )
+`IPRcz_BOTH( NRS            ,1.0            ,""                                 ,"Number of squares in source" )
+`IPIcc_BOTH( OFF            ,0              ,""          ,0          ,1         ,"Device is initially off" )
+`IPIcc_BOTH( BJTOFF         ,0              ,""          ,0          ,1         ,"BJT on/off flag" )
 `IPIcc( DEBUG          ,0              ,""          ,0          ,1         ,"DEBUG on/off flag" )
-`IPRcz( RTH0           ,0.0            ,"ohm"                              ,"Instance Thermal Resistance" )
-`IPRcz( CTH0           ,1e-5           ,"Ws/mK"                                                    ,"Instance Thermal Capacitance" )
-`IPRcz( NRB            ,1.0            ,""                                 ,"Number of squares in body" )
-`IPRnb( FRBODY         ,1.0            ,""                                 ,"layout dependent body-resistance coefficient" )
-`IPRcz( RBDB           ,50.0           ,"ohm"                              ,"Body resistance" )
-`IPRcz( RBSB           ,50.0           ,"ohm"                              ,"Body resistance" )
-`IPRnb( DELVTO         ,0.0            ,"V"                                ,"Zero bias threshold voltage variation" )
-`IPIcc( SOIMOD         ,0              ,""          ,0          ,3         ,"Instance model selector for PD/FD operation /* v3.2 " )
-`IPRcz( NBC            ,0.0            ,""                                 ,"Number of body contact isolation edge" )
-`IPRco( NSEG           ,1              ,""          ,1          ,inf       ,"Number segments for width partitioning" )
-`IPRcz( PDBCP          ,0.0            ,"m"                                ,"Perimeter length for bc parasitics at drain side" )
-`IPRcz( PSBCP          ,0.0            ,"m"                                ,"Perimeter length for bc parasitics at source side" )
-`IPRcz( AGBCP          ,0.0            ,"m^2"                              ,"Gate to body overlap area for bc parasitics" )
-`IPRcz( AGBCP2         ,0.0            ,"m^2"                              ,"Parasitic Gate to body overlap area for bc parasitics /* v4.1 improvement on BC " )
-`IPRcz( AGBCPD         ,AGBCP          ,"m^2"                              ,"Gate to body overlap area for bc parasitics in DC" )
-`IPRcz( AEBCP          ,0.0            ,"m^2"                              ,"Substrate to body overlap area for bc parasitics" )
+`IPRcz_BOTH( RTH0           ,0.0            ,"ohm"                              ,"Instance Thermal Resistance" )
+`IPRcz_BOTH( CTH0           ,1e-5           ,"Ws/mK"                                                    ,"Instance Thermal Capacitance" )
+`IPRcz_BOTH( NRB            ,1.0            ,""                                 ,"Number of squares in body" )
+`IPRnb_BOTH( FRBODY         ,1.0            ,""                                 ,"layout dependent body-resistance coefficient" )
+`IPRcz_BOTH( RBDB           ,50.0           ,"ohm"                              ,"Body resistance" )
+`IPRcz_BOTH( RBSB           ,50.0           ,"ohm"                              ,"Body resistance" )
+`IPRnb_BOTH( DELVTO         ,0.0            ,"V"                                ,"Zero bias threshold voltage variation" )
+`IPIcc_BOTH( SOIMOD         ,0              ,""          ,0          ,3         ,"Instance model selector for PD/FD operation /* v3.2 " )
+`IPRcz_BOTH( NBC            ,0.0            ,""                                 ,"Number of body contact isolation edge" )
+`IPRco_BOTH( NSEG           ,1              ,""          ,1          ,inf       ,"Number segments for width partitioning" )
+`IPRcz_BOTH( PDBCP          ,0.0            ,"m"                                ,"Perimeter length for bc parasitics at drain side" )
+`IPRcz_BOTH( PSBCP          ,0.0            ,"m"                                ,"Perimeter length for bc parasitics at source side" )
+`IPRcz_BOTH( AGBCP          ,0.0            ,"m^2"                              ,"Gate to body overlap area for bc parasitics" )
+`IPRcz_BOTH( AGBCP2         ,0.0            ,"m^2"                              ,"Parasitic Gate to body overlap area for bc parasitics /* v4.1 improvement on BC " )
+`IPRcz_BOTH( AGBCPD         ,AGBCP          ,"m^2"                              ,"Gate to body overlap area for bc parasitics in DC" )
+`IPRcz_BOTH( AEBCP          ,0.0            ,"m^2"                              ,"Substrate to body overlap area for bc parasitics" )
 `IPIcc( TNODEOUT       ,0              ,""          ,0          ,1         ,"Flag indicating external temp node" ) /* Changed to instance parameter in v4.6 */
-`BPIcc( SHMOD          ,0              ,""          ,0          ,1         ,"Self heating mode selector" )
+`BPIcc_BOTH( SHMOD          ,0              ,""          ,0          ,1         ,"Self heating mode selector" )
 /************************/
 /*  Model Parameters    */
 /************************/
@@ -7752,12 +7764,6 @@ analog begin : the_module
             qgso = qgso * B4SOInf;
         end
 
-        // [Nov 2016] : adding overlap charges (qgso + qgdo) to qgate
-        // [Qov depends on V(gm,si) for RGATEMOD=3, else on V(gi,si)]
-        qgi   = qgate;
-        qov   = qgso + qgdo;
-        qgate = qgi + qov;
-
         begin : noise // {
             real cd, cdmin, logcdmin, wefftot, leffBcox;
             real thermalNoiseContrib, flickerNoiseContrib;
@@ -8126,6 +8132,15 @@ analog begin : the_module
             end else
                 Temp(t) <+ 0;
 `endif
+        // [Nov 2016] : adding overlap charges (qgso + qgdo) to qgate
+        // [Qov depends on V(gm,si) for RGATEMOD=3, else on V(gi,si)]
+        // Xyce 7.10 carries the BSIM-SOI 4.7 capacitance correction back to
+        // 4.6.1: keep qgate intrinsic through the electrical DDT stamps, then
+        // add the overlap charge for operating-point reporting below.
+        qgi   = qgate;
+        qov   = qgso + qgdo;
+        qgate = qgi + qov;
+
         // operating-point information
         IDS   = B4SOItype * Ids;
         GM    = B4SOIgm;

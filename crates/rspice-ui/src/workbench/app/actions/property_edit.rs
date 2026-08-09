@@ -171,14 +171,7 @@ fn generated_veriloga_property_sheet(
     let descriptor = crate::state::validate_generated_veriloga_binding(binding)?;
     let mut sheet = cell_instance_identity_sheet();
     for (index, parameter) in descriptor.parameters.iter().enumerate() {
-        let scope = match parameter.scope {
-            rspice_core::device::veriloga_builtins::GeneratedVerilogAParameterScope::Model => {
-                "model"
-            }
-            rspice_core::device::veriloga_builtins::GeneratedVerilogAParameterScope::Instance => {
-                "instance"
-            }
-        };
+        let scope = generated_veriloga_parameter_scope_label(parameter.scope);
         let default = parameter
             .default
             .map(|value| {
@@ -226,6 +219,20 @@ fn generated_veriloga_property_sheet(
         sheet.add(definition);
     }
     Ok(sheet)
+}
+
+const fn generated_veriloga_parameter_scope_label(
+    scope: rspice_core::device::veriloga_builtins::GeneratedVerilogAParameterScope,
+) -> &'static str {
+    match scope {
+        rspice_core::device::veriloga_builtins::GeneratedVerilogAParameterScope::Model => "model",
+        rspice_core::device::veriloga_builtins::GeneratedVerilogAParameterScope::Instance => {
+            "instance"
+        }
+        rspice_core::device::veriloga_builtins::GeneratedVerilogAParameterScope::Dual => {
+            "model/instance"
+        }
+    }
 }
 
 fn xspice_parameter_property(parameter: &ParamSpec) -> (PropertyType, PropertyValue) {
@@ -599,6 +606,24 @@ mod tests {
         SymbolParameterDefault, SymbolParameterField, SymbolParameterForm, SymbolParameterSection,
         SymbolParameterVisibility, SymbolPinDefinition, SymbolPinSide, SymbolSourceContract, Wire,
     };
+
+    #[test]
+    fn generated_veriloga_scope_labels_cover_dual_storage() {
+        use rspice_core::device::veriloga_builtins::GeneratedVerilogAParameterScope;
+
+        assert_eq!(
+            generated_veriloga_parameter_scope_label(GeneratedVerilogAParameterScope::Model),
+            "model"
+        );
+        assert_eq!(
+            generated_veriloga_parameter_scope_label(GeneratedVerilogAParameterScope::Instance),
+            "instance"
+        );
+        assert_eq!(
+            generated_veriloga_parameter_scope_label(GeneratedVerilogAParameterScope::Dual),
+            "model/instance"
+        );
+    }
 
     fn model_bound_definition() -> ModelBoundSymbolDefinition {
         let model = SymbolModelReference::new("vendor_cmos", "nmos_core").with_source_path(

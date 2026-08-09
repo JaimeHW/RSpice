@@ -110,10 +110,13 @@ pub fn validate_generated_veriloga_descriptor(
         ));
     }
     let mut node_names = HashSet::new();
+    let mut terminal_current_parameters = HashSet::new();
     for terminal in descriptor.terminals {
         if terminal.name.trim().is_empty()
             || terminal.discipline.trim().is_empty()
             || !node_names.insert(terminal.name.to_ascii_lowercase())
+            || terminal.current_parameter.trim().is_empty()
+            || !terminal_current_parameters.insert(terminal.current_parameter.to_ascii_lowercase())
         {
             return Err(format!(
                 "generated Verilog-A model '{}' has invalid or duplicate terminal metadata",
@@ -248,7 +251,7 @@ fn generated_veriloga_descriptor_signature(
     descriptor: &GeneratedVerilogAModelDescriptor,
 ) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"rspice-generated-veriloga-descriptor-signature-v1\0");
+    hasher.update(b"rspice-generated-veriloga-descriptor-signature-v2\0");
     hash_u64(&mut hasher, u64::from(descriptor.abi_version));
     hash_text(&mut hasher, descriptor.model_name);
     hash_text(&mut hasher, descriptor.module_name);
@@ -265,6 +268,7 @@ fn generated_veriloga_descriptor_signature(
             GeneratedVerilogATerminalDirection::InOut => 2,
         }]);
         hash_text(&mut hasher, terminal.discipline);
+        hash_text(&mut hasher, terminal.current_parameter);
     }
     hash_u64(&mut hasher, descriptor.internal_node_names.len() as u64);
     for internal_node in descriptor.internal_node_names {
@@ -276,6 +280,7 @@ fn generated_veriloga_descriptor_signature(
         hasher.update([match parameter.scope {
             rspice_core::device::veriloga_builtins::GeneratedVerilogAParameterScope::Model => 0,
             rspice_core::device::veriloga_builtins::GeneratedVerilogAParameterScope::Instance => 1,
+            rspice_core::device::veriloga_builtins::GeneratedVerilogAParameterScope::Dual => 2,
         }]);
         hasher.update([u8::from(parameter.is_integer)]);
         hash_optional_number(&mut hasher, parameter.default);
@@ -336,6 +341,49 @@ const fn terminal_direction(direction: GeneratedVerilogATerminalDirection) -> Po
         GeneratedVerilogATerminalDirection::Input => PortDirection::In,
         GeneratedVerilogATerminalDirection::Output => PortDirection::Out,
         GeneratedVerilogATerminalDirection::InOut => PortDirection::InOut,
+    }
+}
+
+#[cfg(test)]
+mod descriptor_v2_tests {
+    use super::*;
+    use rspice_core::device::veriloga_builtins::GeneratedVerilogATerminalDescriptor;
+
+    #[test]
+    fn descriptor_signature_covers_terminal_current_identity() {
+        const TERMINALS_A: [GeneratedVerilogATerminalDescriptor; 1] =
+            [GeneratedVerilogATerminalDescriptor {
+                name: "p",
+                direction: GeneratedVerilogATerminalDirection::InOut,
+                discipline: "electrical",
+                current_parameter: "ip",
+            }];
+        const TERMINALS_B: [GeneratedVerilogATerminalDescriptor; 1] =
+            [GeneratedVerilogATerminalDescriptor {
+                current_parameter: "ilead",
+                ..TERMINALS_A[0]
+            }];
+        const BASE: GeneratedVerilogAModelDescriptor = GeneratedVerilogAModelDescriptor {
+            abi_version: GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION,
+            model_name: "signature_probe",
+            module_name: "signature_probe",
+            source_digest: "0123456789abcdef",
+            checkpoint_identity: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            terminals: &TERMINALS_A,
+            parameters: &[],
+            total_node_count: 1,
+            internal_node_names: &[],
+            branch_count: 0,
+        };
+        const CHANGED: GeneratedVerilogAModelDescriptor = GeneratedVerilogAModelDescriptor {
+            terminals: &TERMINALS_B,
+            ..BASE
+        };
+
+        assert_ne!(
+            generated_veriloga_descriptor_signature(&BASE),
+            generated_veriloga_descriptor_signature(&CHANGED)
+        );
     }
 }
 

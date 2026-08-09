@@ -25,12 +25,15 @@ pub type Value = f64;
 /// This is intentionally independent of checkpoint and stamp-workspace
 /// versions: consumers use it to decide whether a persisted schematic binding
 /// can be reconstructed from the compiled model catalog.
-pub const GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION: u32 = 1;
+pub const GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedVerilogAParameterScope {
     Model,
     Instance,
+    /// Model-card storage supplies the default and an instance assignment may
+    /// override it for one concrete device.
+    Dual,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +48,8 @@ pub struct GeneratedVerilogATerminalDescriptor {
     pub name: &'static str,
     pub direction: GeneratedVerilogATerminalDirection,
     pub discipline: &'static str,
+    /// Canonical operating-point parameter for current entering this terminal.
+    pub current_parameter: &'static str,
 }
 
 /// A static numeric range endpoint from a Verilog-A parameter declaration.
@@ -92,6 +97,48 @@ pub struct GeneratedVerilogAModelDescriptor {
     pub total_node_count: usize,
     pub internal_node_names: &'static [&'static str],
     pub branch_count: usize,
+}
+
+/// Provenance of a parameter assignment applied to a generated Verilog-A model.
+///
+/// CMC Verilog-A distinguishes model-card parameters from per-instance
+/// parameters. Keeping that provenance through the engine boundary is also
+/// required for `$param_given`: a value written through the wrong storage
+/// class must be rejected rather than silently changing the corresponding
+/// given flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneratedParameterOrigin {
+    /// A model-authoring or standalone caller intentionally targets whatever
+    /// storage class the Verilog-A declaration assigns to the parameter.
+    DeclaredScope,
+    /// The assignment came from a SPICE `.model` card.
+    ModelCard,
+    /// The assignment came from a concrete device instance.
+    Instance,
+}
+
+/// One numeric parameter assignment supplied to a generated model instance.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeneratedParameterAssignment<'a> {
+    pub name: &'a str,
+    pub value: Value,
+    pub origin: GeneratedParameterOrigin,
+}
+
+impl<'a> GeneratedParameterAssignment<'a> {
+    #[inline]
+    pub const fn new(name: &'a str, value: Value, origin: GeneratedParameterOrigin) -> Self {
+        Self {
+            name,
+            value,
+            origin,
+        }
+    }
+
+    #[inline]
+    pub const fn for_declared_scope(name: &'a str, value: Value) -> Self {
+        Self::new(name, value, GeneratedParameterOrigin::DeclaredScope)
+    }
 }
 
 /// Packed partial derivatives used by precompiled Verilog-A model bodies.
@@ -783,7 +830,7 @@ const DEFAULT_GMIN: Value = 1.0e-12;
 const K_BOLTZMANN: Value = 1.380649e-23;
 const Q_ELECTRON: Value = 1.602176634e-19;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GeneratedDdtCoefficients {
     pub active: bool,
     pub derivative_scale: Value,
@@ -829,6 +876,25 @@ impl GeneratedDdtCoefficients {
                 0.0
             },
             previous_derivative_scale: if needs_current_history { 1.0 } else { 0.0 },
+        }
+    }
+
+    /// Scale the complete dynamic residual without changing its history
+    /// representation. Xyce OneStep order two halves the enclosing static
+    /// device residual, so generated `ddt` terms are doubled before that
+    /// common scaling to retain `(Q_n - Q_previous) / h` at unit weight.
+    #[inline]
+    pub fn scaled(self, factor: Value) -> Self {
+        debug_assert!(factor.is_finite() && factor >= 0.0);
+        if !self.active || !factor.is_finite() || factor < 0.0 {
+            return Self::inactive();
+        }
+        Self {
+            active: true,
+            derivative_scale: self.derivative_scale * factor,
+            previous_value_scale: self.previous_value_scale * factor,
+            older_value_scale: self.older_value_scale * factor,
+            previous_derivative_scale: self.previous_derivative_scale * factor,
         }
     }
 }
@@ -1230,6 +1296,10 @@ pub enum GeneratedAnalysisKind {
 pub enum GeneratedEvaluationMode {
     NewtonLimited,
     StaticProbe,
+    /// Evaluate the transient model's physical static `F-B` contribution
+    /// without advancing or contributing `ddt`/`idt` operators. This is used
+    /// only to capture Xyce OneStep's accepted static-history vector.
+    StaticDaeProbe,
     SmallSignal,
 }
 
@@ -1408,6 +1478,16 @@ impl<'a> GeneratedEvalContext<'a> {
     #[inline]
     pub fn limiting_enabled(&self) -> bool {
         matches!(self.evaluation_mode, GeneratedEvaluationMode::NewtonLimited)
+    }
+
+    /// Whether transient dynamic operators may contribute and update their
+    /// trial state during this evaluation.
+    #[inline]
+    pub fn dynamic_operators_enabled(&self) -> bool {
+        !matches!(
+            self.evaluation_mode,
+            GeneratedEvaluationMode::StaticDaeProbe
+        )
     }
 
     #[inline]
@@ -1829,6 +1909,11 @@ pub struct GeneratedStamper<'a> {
     matrix: GeneratedMatrixTarget<'a>,
     cache: Option<&'a GeneratedStaticStampCache>,
     rhs: Option<&'a mut [Value]>,
+    /// Device-local terminal currents accumulated from the exact flow
+    /// contributions emitted by generated code. The slice may cover only the
+    /// external-node prefix; contributions involving later internal nodes are
+    /// deliberately ignored while their external endpoint is still recorded.
+    terminal_currents: Option<&'a mut [Value]>,
     voltages: &'a [Value],
     num_nodes: usize,
 }
@@ -1845,6 +1930,7 @@ impl<'a> GeneratedStamper<'a> {
             matrix: GeneratedMatrixTarget::Static { matrix },
             cache: None,
             rhs: Some(rhs),
+            terminal_currents: None,
             voltages,
             num_nodes,
         }
@@ -1862,6 +1948,34 @@ impl<'a> GeneratedStamper<'a> {
             matrix: GeneratedMatrixTarget::Static { matrix },
             cache: Some(cache),
             rhs: Some(rhs),
+            terminal_currents: None,
+            voltages,
+            num_nodes,
+        }
+    }
+
+    /// Construct a static stamper that also observes exact device-local
+    /// terminal currents.
+    ///
+    /// Generated contributions use local node ordinals, which preserves the
+    /// identity of shorted terminals and avoids trying to infer per-terminal
+    /// current from an assembled nodal row. `terminal_currents` is reset by
+    /// the caller and accumulated in the same sign convention as Verilog-A
+    /// flow: positive current enters the contribution's positive endpoint.
+    #[inline]
+    pub fn new_with_static_cache_and_terminal_currents(
+        matrix: &'a mut StaticMatrix,
+        rhs: &'a mut [Value],
+        voltages: &'a [Value],
+        num_nodes: usize,
+        cache: &'a GeneratedStaticStampCache,
+        terminal_currents: &'a mut [Value],
+    ) -> Self {
+        Self {
+            matrix: GeneratedMatrixTarget::Static { matrix },
+            cache: Some(cache),
+            rhs: Some(rhs),
+            terminal_currents: Some(terminal_currents),
             voltages,
             num_nodes,
         }
@@ -1877,6 +1991,7 @@ impl<'a> GeneratedStamper<'a> {
             matrix: GeneratedMatrixTarget::AcReal { matrix },
             cache: None,
             rhs: None,
+            terminal_currents: None,
             voltages,
             num_nodes,
         }
@@ -1893,6 +2008,7 @@ impl<'a> GeneratedStamper<'a> {
             matrix: GeneratedMatrixTarget::AcReal { matrix },
             cache: Some(cache),
             rhs: None,
+            terminal_currents: None,
             voltages,
             num_nodes,
         }
@@ -2241,6 +2357,7 @@ impl<'a> GeneratedStamper<'a> {
         if self.rhs.is_none() {
             return;
         }
+        self.observe_terminal_current_pair(pos, neg, value);
         let pos_axis = pos.and_then(|node| self.node_axis_local(node));
         let neg_axis = neg.and_then(|node| self.node_axis_local(node));
         self.add_current_rhs_axis_pair(pos_axis, neg_axis, value);
@@ -2255,6 +2372,7 @@ impl<'a> GeneratedStamper<'a> {
         node0: usize,
         derivative0: Value,
     ) {
+        self.observe_terminal_current_pair(pos, neg, value);
         let pos_axis = pos.and_then(|node| self.node_axis_local(node));
         let neg_axis = neg.and_then(|node| self.node_axis_local(node));
         if pos_axis.is_none() && neg_axis.is_none() {
@@ -2285,6 +2403,7 @@ impl<'a> GeneratedStamper<'a> {
         node1: usize,
         derivative1: Value,
     ) {
+        self.observe_terminal_current_pair(pos, neg, value);
         let pos_axis = pos.and_then(|node| self.node_axis_local(node));
         let neg_axis = neg.and_then(|node| self.node_axis_local(node));
         if pos_axis.is_none() && neg_axis.is_none() {
@@ -2322,6 +2441,7 @@ impl<'a> GeneratedStamper<'a> {
         node2: usize,
         derivative2: Value,
     ) {
+        self.observe_terminal_current_pair(pos, neg, value);
         let pos_axis = pos.and_then(|node| self.node_axis_local(node));
         let neg_axis = neg.and_then(|node| self.node_axis_local(node));
         if pos_axis.is_none() && neg_axis.is_none() {
@@ -2359,6 +2479,7 @@ impl<'a> GeneratedStamper<'a> {
         branch0: usize,
         derivative0: Value,
     ) {
+        self.observe_terminal_current_pair(pos, neg, value);
         let pos_axis = pos.and_then(|node| self.node_axis_local(node));
         let neg_axis = neg.and_then(|node| self.node_axis_local(node));
         if pos_axis.is_none() && neg_axis.is_none() {
@@ -2389,6 +2510,7 @@ impl<'a> GeneratedStamper<'a> {
         branch1: usize,
         derivative1: Value,
     ) {
+        self.observe_terminal_current_pair(pos, neg, value);
         let pos_axis = pos.and_then(|node| self.node_axis_local(node));
         let neg_axis = neg.and_then(|node| self.node_axis_local(node));
         if pos_axis.is_none() && neg_axis.is_none() {
@@ -2424,6 +2546,7 @@ impl<'a> GeneratedStamper<'a> {
         branch0: usize,
         derivative1: Value,
     ) {
+        self.observe_terminal_current_pair(pos, neg, value);
         let pos_axis = pos.and_then(|node| self.node_axis_local(node));
         let neg_axis = neg.and_then(|node| self.node_axis_local(node));
         if pos_axis.is_none() && neg_axis.is_none() {
@@ -2461,6 +2584,7 @@ impl<'a> GeneratedStamper<'a> {
         branch0: usize,
         derivative2: Value,
     ) {
+        self.observe_terminal_current_pair(pos, neg, value);
         let pos_axis = pos.and_then(|node| self.node_axis_local(node));
         let neg_axis = neg.and_then(|node| self.node_axis_local(node));
         if pos_axis.is_none() && neg_axis.is_none() {
@@ -2508,6 +2632,7 @@ impl<'a> GeneratedStamper<'a> {
         lanes: &[GeneratedStampLane; LANES],
         derivatives: &[Value; LANES],
     ) {
+        self.observe_terminal_current_pair(pos, neg, value);
         let pos_axis = pos.and_then(|node| self.node_axis_local(node));
         let neg_axis = neg.and_then(|node| self.node_axis_local(node));
         if pos_axis.is_none() && neg_axis.is_none() {
@@ -2555,6 +2680,7 @@ impl<'a> GeneratedStamper<'a> {
         value: Value,
         derivatives: &[GeneratedDerivative],
     ) {
+        self.observe_terminal_current_pair(pos, neg, value);
         if let Some(cache) = self.cache {
             let pos_axis = pos.and_then(|node| cache.node_axis(node));
             let neg_axis = neg.and_then(|node| cache.node_axis(node));
@@ -2627,6 +2753,7 @@ impl<'a> GeneratedStamper<'a> {
         branch_derivatives: &[Value],
         derivative_scale: Value,
     ) {
+        self.observe_terminal_current_pair(pos, neg, value);
         if let Some(cache) = self.cache {
             let pos_axis = pos.and_then(|node| cache.node_axis(node));
             let neg_axis = neg.and_then(|node| cache.node_axis(node));
@@ -2737,6 +2864,7 @@ impl<'a> GeneratedStamper<'a> {
         branch_derivatives: &[Value],
         derivative_scale: Value,
     ) {
+        self.observe_terminal_current_pair(pos, neg, value);
         debug_assert_eq!(node_derivative_indices.len(), node_derivatives.len());
         debug_assert_eq!(branch_derivative_indices.len(), branch_derivatives.len());
 
@@ -2821,6 +2949,7 @@ impl<'a> GeneratedStamper<'a> {
         branch_derivatives: [Value; BRANCH_COUNT],
         derivative_scale: Value,
     ) {
+        self.observe_terminal_current_pair(pos, neg, value);
         if let Some(cache) = self.cache {
             let pos_axis = pos.and_then(|node| cache.node_axis(node));
             let neg_axis = neg.and_then(|node| cache.node_axis(node));
@@ -2947,6 +3076,7 @@ impl<'a> GeneratedStamper<'a> {
         branch_derivatives: &[Value],
         derivative_scale: Value,
     ) {
+        self.observe_terminal_current_pair(pos, neg, value);
         debug_assert!(
             node_derivative_indices
                 .iter()
@@ -3306,6 +3436,8 @@ impl<'a> GeneratedStamper<'a> {
         let Some(branch_axis) = self.branch_axis_local(branch_index) else {
             return;
         };
+        let branch_current = multiplicity * self.branch_value_local(branch_index);
+        self.observe_terminal_current_pair(pos, neg, branch_current);
         if let Some(pos_axis) = pos.and_then(|node| self.node_axis_local(node)) {
             self.add_real_axis(pos_axis, branch_axis, multiplicity);
             self.add_real_axis(branch_axis, pos_axis, 1.0);
@@ -3313,6 +3445,26 @@ impl<'a> GeneratedStamper<'a> {
         if let Some(neg_axis) = neg.and_then(|node| self.node_axis_local(node)) {
             self.add_real_axis(neg_axis, branch_axis, -multiplicity);
             self.add_real_axis(branch_axis, neg_axis, -1.0);
+        }
+    }
+
+    /// Keep an allocated but inactive potential-source unknown nonsingular
+    /// without coupling it to either endpoint. The unit diagonal constrains the
+    /// unused branch current to zero. It is intentionally not scaled by device
+    /// multiplicity: this is a solver identity row, not a physical contribution.
+    #[inline]
+    pub fn stamp_inactive_potential_branch(&mut self, branch_ordinal: usize) {
+        if let Some(branch) = self.branch_matrix_index(branch_ordinal) {
+            self.add_real(branch, branch, 1.0);
+        }
+    }
+
+    /// Local-index counterpart of [`Self::stamp_inactive_potential_branch`]
+    /// for generated devices linked through a static stamp cache.
+    #[inline]
+    pub fn stamp_inactive_potential_branch_local(&mut self, branch_index: usize) {
+        if let Some(branch_axis) = self.branch_axis_local(branch_index) {
+            self.add_real_axis(branch_axis, branch_axis, 1.0);
         }
     }
 
@@ -3820,6 +3972,24 @@ impl<'a> GeneratedStamper<'a> {
             0.0
         } else {
             self.voltages.get(node - 1).copied().unwrap_or(0.0)
+        }
+    }
+
+    #[inline]
+    fn observe_terminal_current_pair(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        value: Value,
+    ) {
+        let Some(currents) = &mut self.terminal_currents else {
+            return;
+        };
+        if let Some(slot) = pos.and_then(|node| currents.get_mut(node)) {
+            *slot += value;
+        }
+        if let Some(slot) = neg.and_then(|node| currents.get_mut(node)) {
+            *slot -= value;
         }
     }
 
@@ -6151,6 +6321,180 @@ impl<'a> GeneratedReactiveStamper<'a> {
 #[cfg(test)]
 mod fixed_lane_tests {
     use super::*;
+
+    #[test]
+    fn descriptor_v2_unifies_terminal_current_and_dual_scope_metadata() {
+        const TERMINALS: [GeneratedVerilogATerminalDescriptor; 1] =
+            [GeneratedVerilogATerminalDescriptor {
+                name: "FG",
+                direction: GeneratedVerilogATerminalDirection::InOut,
+                discipline: "electrical",
+                current_parameter: "ifg",
+            }];
+        const PARAMETERS: [GeneratedVerilogAParameterDescriptor; 1] =
+            [GeneratedVerilogAParameterDescriptor {
+                name: "rth0",
+                aliases: &["rth"],
+                scope: GeneratedVerilogAParameterScope::Dual,
+                is_integer: false,
+                default: Some(0.0),
+                minimum: Some(GeneratedVerilogAParameterBound {
+                    value: 0.0,
+                    exclusive: false,
+                }),
+                maximum: None,
+                excluded_values: &[],
+                has_dynamic_constraints: false,
+            }];
+
+        assert_eq!(GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, 2);
+        assert_eq!(TERMINALS[0].name, "FG");
+        assert_eq!(TERMINALS[0].current_parameter, "ifg");
+        assert_eq!(PARAMETERS[0].scope, GeneratedVerilogAParameterScope::Dual);
+        assert_eq!(
+            GeneratedParameterAssignment::new("rth", 1.0, GeneratedParameterOrigin::ModelCard)
+                .origin,
+            GeneratedParameterOrigin::ModelCard
+        );
+    }
+
+    #[test]
+    fn generated_ddt_coefficients_scale_the_complete_dynamic_residual() {
+        let coefficients = GeneratedDdtCoefficients {
+            active: true,
+            derivative_scale: 2.0,
+            previous_value_scale: -3.0,
+            older_value_scale: 5.0,
+            previous_derivative_scale: -7.0,
+        };
+
+        assert_eq!(
+            coefficients.scaled(0.5),
+            GeneratedDdtCoefficients {
+                active: true,
+                derivative_scale: 1.0,
+                previous_value_scale: -1.5,
+                older_value_scale: 2.5,
+                previous_derivative_scale: -3.5,
+            }
+        );
+        assert_eq!(
+            GeneratedDdtCoefficients::inactive().scaled(2.0),
+            GeneratedDdtCoefficients::inactive()
+        );
+    }
+
+    #[test]
+    fn static_dae_probe_is_the_only_mode_that_disables_dynamic_operators() {
+        let voltages = [0.0];
+        let dynamic = GeneratedEvalContext::with_analysis_step_simparams_and_mode(
+            &voltages,
+            300.15,
+            1,
+            GeneratedAnalysisKind::Tran,
+            false,
+            false,
+            GeneratedSimulationParameters::default(),
+            GeneratedEvaluationMode::NewtonLimited,
+        );
+        let static_probe = GeneratedEvalContext::with_analysis_step_simparams_and_mode(
+            &voltages,
+            300.15,
+            1,
+            GeneratedAnalysisKind::Tran,
+            false,
+            false,
+            GeneratedSimulationParameters::default(),
+            GeneratedEvaluationMode::StaticProbe,
+        );
+        let static_dae_probe = GeneratedEvalContext::with_analysis_step_simparams_and_mode(
+            &voltages,
+            300.15,
+            1,
+            GeneratedAnalysisKind::Tran,
+            false,
+            false,
+            GeneratedSimulationParameters::default(),
+            GeneratedEvaluationMode::StaticDaeProbe,
+        );
+
+        assert!(dynamic.dynamic_operators_enabled());
+        assert!(static_probe.dynamic_operators_enabled());
+        assert!(!static_dae_probe.dynamic_operators_enabled());
+    }
+
+    #[test]
+    fn inactive_potential_branch_pins_exact_unit_diagonal() {
+        for cached in [false, true] {
+            let mut matrix =
+                StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).expect("one-entry branch matrix");
+            let mut stamp_rhs = [0.0];
+            let voltages = [17.0];
+            let mut cache = GeneratedStaticStampCache::default();
+            cache.link(&matrix, &[], &[1], 0);
+            if cached {
+                let mut stamper = GeneratedStamper::new_with_static_cache(
+                    &mut matrix,
+                    &mut stamp_rhs,
+                    &voltages,
+                    0,
+                    &cache,
+                );
+                stamper.stamp_inactive_potential_branch_local(0);
+            } else {
+                let mut stamper = GeneratedStamper::new(&mut matrix, &mut stamp_rhs, &voltages, 0);
+                stamper.stamp_inactive_potential_branch(1);
+            }
+            let solution = matrix.solve(&[2.5]).expect("unit diagonal solves");
+            assert_eq!(solution, vec![2.5], "cached={cached}");
+            assert_eq!(stamp_rhs, [0.0], "cached={cached}");
+        }
+    }
+
+    #[test]
+    fn terminal_current_observer_preserves_local_lead_identity_and_sign() {
+        let mut matrix = StaticMatrix::from_triplets(
+            3,
+            3,
+            &[
+                (0, 2, 0.0),
+                (1, 2, 0.0),
+                (2, 0, 0.0),
+                (2, 1, 0.0),
+                (2, 2, 0.0),
+            ],
+        )
+        .expect("potential-source topology");
+        let nodes = [1, 1, 2];
+        let branches = [1];
+        let voltages = [0.0, 0.0, -0.25];
+        let mut rhs = [0.0; 3];
+        let mut currents = [0.0; 3];
+        let mut cache = GeneratedStaticStampCache::default();
+        cache.link(&matrix, &nodes, &branches, 2);
+
+        {
+            let mut stamper = GeneratedStamper::new_with_static_cache_and_terminal_currents(
+                &mut matrix,
+                &mut rhs,
+                &voltages,
+                2,
+                &cache,
+                &mut currents,
+            );
+            stamper.stamp_current_const_local(Some(0), Some(2), 2.0);
+            stamper.stamp_current_const_local(Some(1), Some(2), 3.0);
+            stamper.stamp_potential_branch_local(Some(0), Some(2), 0, 4.0);
+        }
+
+        assert_eq!(
+            currents,
+            [1.0, 3.0, -4.0],
+            "shorted external terminals retain distinct local lead currents"
+        );
+        assert_eq!(rhs, [-5.0, 5.0, 0.0]);
+        assert_eq!(currents.iter().sum::<Value>(), 0.0);
+    }
 
     fn left<const N: usize>() -> [f64; N] {
         let values = [

@@ -60,6 +60,14 @@ use super::{
 pub enum CfgVariable {
     Local(VariableId),
     Residual(ContributionId),
+    /// Whether a potential contribution's leading instance-static guard prefix
+    /// enables its topology. This is not ordinary statement reachability: once
+    /// a bias-, time-, or state-dependent guard is encountered, topology stays
+    /// active even when runtime control does not take the contribution's path.
+    /// It must remain separate from the residual because an inactive/open
+    /// contribution and an active ideal zero-volt source both have a numeric
+    /// residual of zero, but only the latter closes the branch topology.
+    Activation(ContributionId),
 }
 
 /// Arithmetic on one operand.

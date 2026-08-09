@@ -5,7 +5,7 @@ use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
 use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 47] = [74, 16, 1, 2, 75, 76, 77, 78, 79, 80, 0, 91, 7, 8, 101, 102, 38, 17, 103, 22, 31, 32, 33, 36, 104, 105, 106, 41, 48, 49, 52, 55, 56, 59, 63, 65, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128];
+pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 51] = [74, 16, 1, 2, 75, 76, 77, 78, 79, 80, 0, 91, 7, 8, 101, 102, 38, 17, 103, 22, 31, 32, 33, 36, 104, 105, 106, 41, 48, 49, 52, 55, 56, 59, 63, 65, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132];
 pub(super) const CANONICAL_INSTANCE_STAGE_SLOTS: [u32; 17] = [83, 84, 85, 86, 67, 68, 87, 88, 69, 3, 4, 5, 6, 9, 10, 11, 12];
 pub(super) const CANONICAL_TEMPERATURE_STAGE_SLOTS: [u32; 65] = [81, 82, 34, 21, 37, 19, 20, 15, 13, 14, 18, 26, 27, 28, 29, 24, 23, 30, 46, 45, 43, 42, 89, 90, 92, 93, 94, 95, 96, 97, 98, 99, 100, 70, 71, 73, 72, 39, 44, 25, 35, 40, 60, 111, 53, 108, 107, 109, 47, 112, 57, 50, 58, 51, 54, 113, 66, 115, 64, 110, 114, 116, 61, 62, 117];
 
@@ -16,7 +16,7 @@ pub(super) fn canonical_model_preprocess(
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
-) -> [f64; 47] {
+) -> [f64; 51] {
 		let B = parameters[19];
 		let D = parameters[29];
 		let G = parameters[30];
@@ -29,32 +29,33 @@ pub(super) fn canonical_model_preprocess(
 		let AD = parameters[66];
 		let AF = parameters[49];
 		let AG = parameters[53];
-		let AJ = parameters[50];
-		let AL = parameters[51];
-		let AN = 1.05457168e-34f64;
-		let AQ = parameters[59];
-		let AS = 0.1f64;
-		let BD = parameters[64];
-		let BJ = parameters[18];
-		let BS = 0f64;
+		let AJ = 1f64;
+		let AK = parameters[50];
+		let AM = parameters[51];
+		let AO = 1.05457168e-34f64;
+		let AR = parameters[59];
+		let AT = 0.1f64;
+		let BE = parameters[64];
+		let BK = parameters[18];
 		let BT = 0f64;
 		let BU = 0f64;
 		let BV = 0f64;
-		let CA = 0f64;
-		let CB = 0f64;
-		let CE = 0f64;
+		let BW = 0f64;
 		let CF = 0f64;
 		let CG = 0f64;
-		let CH = 0f64;
-		let CI = 0f64;
+		let CJ = 0f64;
+		let CK = 0f64;
+		let CL = 0f64;
+		let CM = 0f64;
+		let CN = 0f64;
 	    let mut oL = false;
 	    let mut oAH = 0.0;
 	    let mut oAI = 0.0;
-	    let mut oAR = false;
-	    let mut oBE = false;
-	    let mut oBH = 0.0;
-	    let mut oBK = 0.0;
-	    let mut oBM = 0.0;
+	    let mut oAS = false;
+	    let mut oBF = false;
+	    let mut oBI = 0.0;
+	    let mut oBL = 0.0;
+	    let mut oBN = 0.0;
 		let A = parameters[7] != 1e3f64;
 		let C = (3.453e-11f64 * (parameters[20] / 3.9f64)) / B;
 		let E = ((3.348580862e-29f64 * D).sqrt()) / C;
@@ -94,7 +95,6 @@ pub(super) fn canonical_model_preprocess(
 		let AA = Y > parameters[9];
 		let AB = 273.15f64 + Y;
 		let AE = AD == H;
-		let AT;
 		let AU;
 		let AV;
 		let AW;
@@ -102,111 +102,124 @@ pub(super) fn canonical_model_preprocess(
 		let AY;
 		let AZ;
 		let BA;
+		let BB;
 		if AF != 0.0 {
 			let AH = (2f64 * parameters[56]) * AG;
 			oAH = AH;
 			let AI = (2f64 * parameters[61]) * AG;
 			oAI = AI;
-			let AK = 1f64 / AJ;
-			let AM = 1f64 / AL;
-			let AO = ((1.3333333333333333f64 * ((2.918995620956536e-49f64 * AJ).sqrt())) / AN) * B;
-			let AP = ((1.3333333333333333f64 * ((2.918995620956536e-49f64 * AL).sqrt())) / AN) * B;
-			let AR = AQ < H;
-			oAR = AR;
-			let BC = if AR {
-				let BB = (-0.495f64 * parameters[58]) / AQ;
-				BB
+			let AL = AJ / AK;
+			let AN = AJ / AM;
+			let AP = ((1.3333333333333333f64 * ((2.918995620956536e-49f64 * AK).sqrt())) / AO) * B;
+			let AQ = ((1.3333333333333333f64 * ((2.918995620956536e-49f64 * AM).sqrt())) / AO) * B;
+			let AS = AR < H;
+			oAS = AS;
+			let BD = if AS {
+				let BC = (-0.495f64 * parameters[58]) / AR;
+				BC
 			} else {
 				H
 			};
-			let BE = BD < H;
-			oBE = BE;
-			let BG = if BE {
-				let BF = (-0.495f64 * parameters[63]) / BD;
-				BF
+			let BF = BE < H;
+			oBF = BF;
+			let BH = if BF {
+				let BG = (-0.495f64 * parameters[63]) / BE;
+				BG
 			} else {
 				H
 			};
-			AT = AM;
-			AU = BG;
-			AV = AP;
-			AW = AK;
-			AX = BC;
-			AY = AO;
+			AU = AN;
+			AV = BH;
+			AW = AQ;
+			AX = AL;
+			AY = BD;
 			AZ = AP;
-			BA = AO;
+			BA = AQ;
+			BB = AP;
 		} else {
-			AT = AS;
-			AU = H;
+			AU = AT;
 			AV = H;
-			AW = AS;
-			AX = H;
+			AW = H;
+			AX = AT;
 			AY = H;
 			AZ = H;
 			BA = H;
+			BB = H;
 		}
 		if I {
-			let BH = 0.75f64 * M;
-			oBH = BH;
+			let BI = 0.75f64 * M;
+			oBI = BI;
 		}
-		let BI = D < 1e27f64;
-		if BI {
-			let BK = (-K) * BJ;
-			oBK = BK;
+		let BJ = D < 1e27f64;
+		if BJ {
+			let BL = (-K) * BK;
+			oBL = BL;
 		}
-		let BL = parameters[21] < 1f64;
-		if BI {
-			let BM = (-K) * BJ;
-			oBM = BM;
+		let BM = parameters[21] < AJ;
+		if BJ {
+			let BN = (-K) * BK;
+			oBN = BN;
 		}
-		let BN = 1f64 + (0.37f64 * U);
-		let BO = M > H;
-		let BP = AD == 2f64;
-		let BQ = (BJ * K) == -1f64;
-		let BR = AF != H;
-		let BW;
+		let BO = AJ + (0.37f64 * U);
+		let BP = M > H;
+		let BQ = AD == 2f64;
+		let BR = (BK * K) == -1f64;
+		let BS = AF != H;
 		let BX;
 		let BY;
 		let BZ;
+		let CA;
+		let CB;
+		let CC;
+		let CD;
+		let CE;
 		if AC != 0.0 {
-			BW = H;
 			BX = H;
 			BY = H;
 			BZ = H;
+			CA = H;
+			CB = H;
+			CC = H;
+			CD = H;
+			CE = H;
 		} else {
-			BW = BS;
 			BX = BT;
 			BY = BU;
 			BZ = BV;
+			CA = BW;
+			CB = AJ;
+			CC = AJ;
+			CD = AJ;
+			CE = AJ;
 		}
-		let CC;
-		let CD;
+		let CH;
+		let CI;
 		if AF != 0.0 {
-			CC = CA;
-			CD = CB;
+			CH = CF;
+			CI = CG;
 		} else {
-			CC = H;
-			CD = H;
+			CH = H;
+			CI = H;
 		}
-		let CJ;
-		let CK;
-		let CL;
-		let CM;
-		let CN;
+		let CO;
+		let CP;
+		let CQ;
+		let CR;
+		let CS;
 		if AC != 0.0 {
-			CJ = CE;
-			CK = CF;
-			CL = CG;
-			CM = CH;
-			CN = CI;
+			CO = CJ;
+			CP = CK;
+			CQ = CL;
+			CR = CM;
+			CS = CN;
 		} else {
-			CJ = H;
-			CK = H;
-			CL = H;
-			CM = H;
-			CN = H;
+			CO = H;
+			CP = H;
+			CQ = H;
+			CR = H;
+			CS = H;
 		}
-    [A as u8 as f64, C, E, F, I as u8 as f64, oL as u8 as f64, N as u8 as f64, W as u8 as f64, Z as u8 as f64, AA as u8 as f64, AB, AE as u8 as f64, oAH, oAI, oAR as u8 as f64, oBE as u8 as f64, M, oBH, BI as u8 as f64, oBK, BL as u8 as f64, oBM, BN, T, BO as u8 as f64, BP as u8 as f64, BQ as u8 as f64, BR as u8 as f64, AT, AU, AV, AW, AX, AY, AZ, BA, BW, BX, BY, BZ, CC, CD, CJ, CK, CL, CM, CN]
+    [A as u8 as f64, C, E, F, I as u8 as f64, oL as u8 as f64, N as u8 as f64, W as u8 as f64, Z as u8 as f64, AA as u8 as f64, AB, AE as u8 as f64, oAH, oAI, oAS as u8 as f64, oBF as u8 as f64, M, oBI, BJ as u8 as f64, oBL, BM as u8 as f64, oBN, BO, T, BP as u8 as f64, BQ as u8 as f64, BR as u8 as f64, BS as u8 as f64, AU, AV, AW, AX, AY, AZ, BA, BB, BX, BY, BZ, CA, CH, CI, CO, CP, CQ, CR, CS, CB, CC, CD, CE]
 }
 
 pub(super) fn canonical_instance_preprocess(
@@ -681,13 +694,15 @@ impl Instance {
         let multiplicity = self.multiplicity;
         let staged = &*self.canonical_staged;
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6])];
-        let ddt_scale_value = self.ddt_coefficients.derivative_scale;
+        let ddt_scale_value = if ctx.dynamic_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
         let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
+        let dynamic_operators_enabled = ctx.dynamic_operators_enabled();
         let ddt_active = self.ddt_coefficients.active;
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
-            rspice_eval_ddt(
+            if dynamic_operators_enabled {
+                rspice_eval_ddt(
                 &mut ddt_state.ddt_current,
                 &mut ddt_state.ddt_previous,
                 &mut ddt_state.ddt_older,
@@ -701,7 +716,10 @@ impl Instance {
                 ddt_coefficients.previous_derivative_scale,
                 slot,
                 value,
-            )
+                )
+            } else {
+                0.0
+            }
         };
 			let A = staged[75] != 0.0;
 			let B = parameters[16];
@@ -3984,6 +4002,26 @@ impl Instance {
 			let CJY = BPX;
 			let CJZ = BQB[0];
 			let CKA = BQB[1];
+        if (staged[129] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(0), Some(3), 0, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(0);
+        }
+        if (staged[130] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(3), Some(4), 1, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(1);
+        }
+        if (staged[131] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(5), Some(1), 2, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(2);
+        }
+        if (staged[132] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(1), Some(2), 3, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(3);
+        }
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(6),
             None,
@@ -4034,7 +4072,7 @@ impl Instance {
             [],
             multiplicity,
         );
-        stamper.stamp_potential_branch_local(Some(0), Some(3), 0, multiplicity);
+        if staged[129] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             0,
             staged[118],
@@ -4043,7 +4081,8 @@ impl Instance {
             [],
             [],
         );
-        stamper.stamp_potential_branch_local(Some(3), Some(4), 1, multiplicity);
+        }
+        if staged[130] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             1,
             staged[119],
@@ -4052,7 +4091,8 @@ impl Instance {
             [],
             [],
         );
-        stamper.stamp_potential_branch_local(Some(5), Some(1), 2, multiplicity);
+        }
+        if staged[131] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             2,
             staged[120],
@@ -4061,7 +4101,8 @@ impl Instance {
             [],
             [],
         );
-        stamper.stamp_potential_branch_local(Some(1), Some(2), 3, multiplicity);
+        }
+        if staged[132] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             3,
             staged[121],
@@ -4070,6 +4111,7 @@ impl Instance {
             [],
             [],
         );
+        }
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(4),
             Some(5),

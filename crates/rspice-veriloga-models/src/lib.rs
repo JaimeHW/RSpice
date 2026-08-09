@@ -37,7 +37,7 @@ pub use rspice_veriloga_model_bsimsoi_18c250bc::bsimsoi__bsimsoi__18c250bc;
 #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
 pub use rspice_veriloga_model_bsimsoi_e2aff994::bsimsoi__bsimsoi__e2aff994;
 #[cfg(feature = "veriloga-model-bsimsoi-va")]
-pub use rspice_veriloga_model_bsimsoi_va::bsimsoi__bsimsoi_va__8ee5e64d;
+pub use rspice_veriloga_model_bsimsoi_va::bsimsoi__bsimsoi_va__3b1f6b5e;
 #[cfg(feature = "veriloga-model-diode-cmc")]
 pub use rspice_veriloga_model_diode_cmc::diode_cmc__diode_cmc__cdfab304;
 #[cfg(feature = "veriloga-model-ekv-va")]

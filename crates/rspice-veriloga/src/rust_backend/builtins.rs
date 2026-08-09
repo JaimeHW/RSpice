@@ -1836,9 +1836,34 @@ mod tests {
             "{registry}"
         );
         assert!(
-            registry.contains("instance.set_multiplicity(*value)?;"),
+            registry.contains("instance.set_multiplicity(multiplicity)?;"),
             "{registry}"
         );
+        assert!(
+            registry.contains("instance.apply_parameters(&device_params)?;"),
+            "{registry}"
+        );
+        assert!(
+            registry.contains("pub fn instantiate(model_name: &str")
+                && registry.contains("GeneratedParameterAssignment::for_declared_scope"),
+            "{registry}"
+        );
+        assert!(
+            registry.contains("pub fn instantiate_scoped(model_name: &str"),
+            "{registry}"
+        );
+        assert!(
+            registry.contains("pub fn terminal_descriptors(model_name: &str")
+                && registry
+                    .contains("descriptor(model_name).map(|descriptor| descriptor.terminals)"),
+            "{registry}"
+        );
+        assert!(
+            registry.contains("pub fn parameter_scope(model_name: &str, parameter_name: &str")
+                && registry.contains("parameter.aliases.iter().any"),
+            "{registry}"
+        );
+        assert!(!registry.contains("TERMINAL_NAMES"), "{registry}");
         assert!(
             registry.contains("pub const BUILTIN_DESCRIPTORS:"),
             "{registry}"
@@ -2140,6 +2165,25 @@ fn write_registry(
     out.push_str("}\n\n");
 
     out.push_str("impl GeneratedBuiltinKind {\n");
+    out.push_str("    pub fn one_step_dae_split_safe(&self) -> bool {\n");
+    if devices.is_empty() {
+        out.push_str("        let _ = self;\n");
+        out.push_str(
+            "        unreachable!(\"empty generated Verilog-A registry has no DAE capability\")\n",
+        );
+    } else {
+        out.push_str("        match self {\n");
+        for (index, feature) in feature_names.iter().enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(_) => {}::Instance::ONE_STEP_DAE_SPLIT_SAFE,",
+                devices[index].folder_name,
+            )?;
+        }
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n\n");
     out.push_str(
         "    pub fn capture_rollback_state(&self) -> super::GeneratedVerilogARollbackState {\n",
     );
@@ -2296,8 +2340,12 @@ fn write_registry(
     out.push_str(
         "    pub fn evaluate_noise_sources(&self, ctx: &super::GeneratedEvalContext<'_>, visitor: &mut dyn super::GeneratedNoiseVisitor) -> Result<(), super::GeneratedNoiseEvaluationError> {\n",
     );
+    // Some legal feature shards enable the noise ABI without selecting an
+    // individual model. Keep those builds warning-free while preserving the
+    // ordinary generated dispatch when model arms are present.
+    out.push_str("        let _ = (&ctx, &visitor);\n");
     if devices.is_empty() {
-        out.push_str("        let _ = (self, ctx, visitor);\n");
+        out.push_str("        let _ = self;\n");
         out.push_str("        Ok(())\n");
     } else {
         out.push_str("        match self {\n");
@@ -2445,77 +2493,40 @@ fn write_registry(
     );
     out.push_str("}\n\n");
     out.push_str("pub fn node_count(model_name: &str) -> Option<usize> {\n");
-    out.push_str("    match model_name.to_ascii_uppercase().as_str() {\n");
-    for ((device, registry_name), feature) in devices
-        .iter()
-        .zip(&registry_model_names)
-        .zip(&feature_names)
-    {
-        writeln!(
-            out,
-            "        #[cfg(feature = {feature:?})]\n        {:?} => Some({}::Instance::TERMINAL_COUNT),",
-            registry_name.to_ascii_uppercase(),
-            device.folder_name,
-        )?;
-    }
-    out.push_str("        _ => None,\n");
-    out.push_str("    }\n");
+    out.push_str("    descriptor(model_name).map(|descriptor| descriptor.terminals.len())\n");
     out.push_str("}\n\n");
     out.push_str("pub fn total_node_count(model_name: &str) -> Option<usize> {\n");
-    out.push_str("    match model_name.to_ascii_uppercase().as_str() {\n");
-    for ((device, registry_name), feature) in devices
-        .iter()
-        .zip(&registry_model_names)
-        .zip(&feature_names)
-    {
-        writeln!(
-            out,
-            "        #[cfg(feature = {feature:?})]\n        {:?} => Some({}::Instance::NODE_COUNT),",
-            registry_name.to_ascii_uppercase(),
-            device.folder_name,
-        )?;
-    }
-    out.push_str("        _ => None,\n");
-    out.push_str("    }\n");
+    out.push_str("    descriptor(model_name).map(|descriptor| descriptor.total_node_count)\n");
+    out.push_str("}\n\n");
+    out.push_str(
+        "pub fn terminal_descriptors(model_name: &str) -> Option<&'static [crate::GeneratedVerilogATerminalDescriptor]> {\n",
+    );
+    out.push_str("    descriptor(model_name).map(|descriptor| descriptor.terminals)\n");
     out.push_str("}\n\n");
     out.push_str(
         "pub fn internal_node_names(model_name: &str) -> Option<&'static [&'static str]> {\n",
     );
-    out.push_str("    match model_name.to_ascii_uppercase().as_str() {\n");
-    for ((device, registry_name), feature) in devices
-        .iter()
-        .zip(&registry_model_names)
-        .zip(&feature_names)
-    {
-        writeln!(
-            out,
-            "        #[cfg(feature = {feature:?})]\n        {:?} => Some(&{}::Instance::INTERNAL_NODE_NAMES),",
-            registry_name.to_ascii_uppercase(),
-            device.folder_name,
-        )?;
-    }
-    out.push_str("        _ => None,\n");
-    out.push_str("    }\n");
+    out.push_str("    descriptor(model_name).map(|descriptor| descriptor.internal_node_names)\n");
+    out.push_str("}\n\n");
+    out.push_str(
+        "pub fn parameter_scope(model_name: &str, parameter_name: &str) -> Option<crate::GeneratedVerilogAParameterScope> {\n",
+    );
+    out.push_str("    descriptor(model_name)?.parameters.iter().find(|parameter| {\n");
+    out.push_str("        parameter.name.eq_ignore_ascii_case(parameter_name)\n");
+    out.push_str("            || parameter.aliases.iter().any(|alias| alias.eq_ignore_ascii_case(parameter_name))\n");
+    out.push_str("    }).map(|parameter| parameter.scope)\n");
     out.push_str("}\n\n");
     out.push_str("pub fn branch_count(model_name: &str) -> Option<usize> {\n");
-    out.push_str("    match model_name.to_ascii_uppercase().as_str() {\n");
-    for ((device, registry_name), feature) in devices
-        .iter()
-        .zip(&registry_model_names)
-        .zip(&feature_names)
-    {
-        writeln!(
-            out,
-            "        #[cfg(feature = {feature:?})]\n        {:?} => Some({}::Instance::BRANCH_COUNT),",
-            registry_name.to_ascii_uppercase(),
-            device.folder_name,
-        )?;
-    }
-    out.push_str("        _ => None,\n");
-    out.push_str("    }\n");
+    out.push_str("    descriptor(model_name).map(|descriptor| descriptor.branch_count)\n");
     out.push_str("}\n\n");
     out.push_str(
         "pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params: &[(String, crate::Value)]) -> Result<Option<GeneratedBuiltinKind>, String> {\n",
+    );
+    out.push_str("    let assignments = params.iter().map(|(name, value)| crate::GeneratedParameterAssignment::for_declared_scope(name, *value)).collect::<Vec<_>>();\n");
+    out.push_str("    instantiate_scoped(model_name, nodes, branches, &assignments)\n");
+    out.push_str("}\n\n");
+    out.push_str(
+        "pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize], params: &[crate::GeneratedParameterAssignment<'_>]) -> Result<Option<GeneratedBuiltinKind>, String> {\n",
     );
     out.push_str("    let _ = (nodes, branches, params);\n");
     if devices.is_empty() {
@@ -2540,18 +2551,27 @@ fn write_registry(
                 device.folder_name
             )?;
             out.push_str("            instance.set_branch_indices(branches);\n");
-            out.push_str("            for (name, value) in params {\n");
-            out.push_str(
-                "                if let Err(error) = instance.set_parameter(name, *value) {\n",
-            );
-            out.push_str("                    if name.eq_ignore_ascii_case(\"m\") {\n");
-            out.push_str("                        instance.set_multiplicity(*value)?;\n");
-            out.push_str("                    } else {\n");
-            out.push_str("                        return Err(error);\n");
+            out.push_str("            let mut device_params = Vec::with_capacity(params.len());\n");
+            out.push_str("            let mut multiplicity = None;\n");
+            out.push_str("            for assignment in params {\n");
+            out.push_str("                if assignment.name.eq_ignore_ascii_case(\"m\") && !");
+            out.push_str(&device.folder_name);
+            out.push_str("::Instance::has_parameter(assignment.name) {\n");
+            out.push_str("                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {\n");
+            out.push_str("                        return Err(\"instance multiplicity 'm' cannot be assigned from model-card scope\".to_string());\n");
             out.push_str("                    }\n");
+            out.push_str("                    if !assignment.value.is_finite() || assignment.value <= 0.0 {\n");
+            out.push_str("                        return Err(format!(\"instance multiplicity 'm' must be finite and > 0.0, got {}\", assignment.value));\n");
+            out.push_str("                    }\n");
+            out.push_str("                    multiplicity = Some(assignment.value);\n");
+            out.push_str("                } else {\n");
+            out.push_str("                    device_params.push(*assignment);\n");
             out.push_str("                }\n");
             out.push_str("            }\n");
-            out.push_str("            instance.validate_parameters()?;\n");
+            out.push_str("            instance.apply_parameters(&device_params)?;\n");
+            out.push_str("            if let Some(multiplicity) = multiplicity {\n");
+            out.push_str("                instance.set_multiplicity(multiplicity)?;\n");
+            out.push_str("            }\n");
             writeln!(
                 out,
                 "            Ok(Some(GeneratedBuiltinKind::Device{index}(instance)))"

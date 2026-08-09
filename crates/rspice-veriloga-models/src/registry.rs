@@ -41,7 +41,7 @@ pub use crate::bsimsoi__bsimsoi__18c250bc;
 #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
 pub use crate::bsimsoi__bsimsoi__e2aff994;
 #[cfg(feature = "veriloga-model-bsimsoi-va")]
-pub use crate::bsimsoi__bsimsoi_va__8ee5e64d;
+pub use crate::bsimsoi__bsimsoi_va__3b1f6b5e;
 #[cfg(feature = "veriloga-model-ekv-va")]
 pub use crate::ekv26_sdext_verilog_a__ekv_va__0adf5df4;
 #[cfg(feature = "veriloga-model-hicuml0va")]
@@ -128,7 +128,7 @@ pub enum GeneratedBuiltinKind {
     #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
     Device19(Box<bsimsoi__bsimsoi__e2aff994::Instance>),
     #[cfg(feature = "veriloga-model-bsimsoi-va")]
-    Device20(Box<bsimsoi__bsimsoi_va__8ee5e64d::Instance>),
+    Device20(Box<bsimsoi__bsimsoi_va__3b1f6b5e::Instance>),
     #[cfg(feature = "veriloga-model-ekv-va")]
     Device21(Box<ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance>),
     #[cfg(feature = "veriloga-model-hicuml0va")]
@@ -176,6 +176,96 @@ pub enum GeneratedBuiltinKind {
 }
 
 impl GeneratedBuiltinKind {
+    pub fn one_step_dae_split_safe(&self) -> bool {
+        match self {
+            #[cfg(feature = "veriloga-model-diode-cmc")]
+            Self::Device0(_) => diode_cmc__diode_cmc__cdfab304::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-epfl-hemt-10a")]
+            Self::Device1(_) => epfl_hemt__epfl_hemt_10a__671606cd::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-juncap200")]
+            Self::Device2(_) => juncap200__juncap200__94ba75b4::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-psp104tva")]
+            Self::Device3(_) => psp104t__psp104tva__0878692d::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-psp104va")]
+            Self::Device4(_) => psp104__psp104va__75652357::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-pspnqs104va")]
+            Self::Device5(_) => psp104_nqs__pspnqs104va__1d25ee14::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-angelov")]
+            Self::Device6(_) => angelov__angelov__98b92059::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-angelov-gan")]
+            Self::Device7(_) => angelov_gan__angelov_gan__98687686::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-asmesd")]
+            Self::Device8(_) => asmesd__asmesd__fbe2f3a4::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-asmesd-dio")]
+            Self::Device9(_) => asmesd_dio__asmesd_dio__b913dc15::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-asmhemt")]
+            Self::Device10(_) => asmhemt__asmhemt__9d86ed5b::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-bjt505-va")]
+            Self::Device11(_) => bjt505__bjt505_va__6ac090e2::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-bjt505t-va")]
+            Self::Device12(_) => bjt505t__bjt505t_va__48d754e7::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-bjtd505-va")]
+            Self::Device13(_) => bjtd505__bjtd505_va__3cb9ae22::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-bjtd505t-va")]
+            Self::Device14(_) => bjtd505t__bjtd505t_va__06e24760::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-bsimbulk")]
+            Self::Device15(_) => bsimbulk__bsimbulk__0f953aae::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-bsimcmg-va")]
+            Self::Device16(_) => bsimcmg__bsimcmg_va__f3a4082f::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-bsimimg")]
+            Self::Device17(_) => bsimimg__bsimimg__25eb6a31::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
+            Self::Device18(_) => bsimsoi__bsimsoi__18c250bc::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
+            Self::Device19(_) => bsimsoi__bsimsoi__e2aff994::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-bsimsoi-va")]
+            Self::Device20(_) => bsimsoi__bsimsoi_va__3b1f6b5e::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-ekv-va")]
+            Self::Device21(_) => ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-hicuml0va")]
+            Self::Device22(_) => hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-hicuml2va")]
+            Self::Device23(_) => hicuml2_v320__hicuml2va__25e676cf::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
+            Self::Device24(_) => hisimhv_n4__hisimhv_n4_va__69344dcf::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
+            Self::Device25(_) => hisimhv_n5__hisimhv_n5_va__89bf8539::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-hisimhv-va")]
+            Self::Device26(_) => hisimhv__hisimhv_va__57d0ff0e::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
+            Self::Device27(_) => hisimsoi__hisimsoi_va__5be18005::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
+            Self::Device28(_) => hisimsoi_n4__hisimsoi_va__242bc21d::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
+            Self::Device29(_) => hisimsoi_n5__hisimsoi_va__38074d06::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-hisimsotb-va")]
+            Self::Device30(_) => hisimsotb__hisimsotb_va__41200697::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
+            Self::Device31(_) => l_utsoi_102__l_utsoi__832ce87d::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
+            Self::Device32(_) => l_utsoi_102_nqs__l_utsoi__485e0ac9::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-mosvar")]
+            Self::Device33(_) => mosvar__mosvar__0a88ed4a::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-mvsg-cmc")]
+            Self::Device34(_) => mvsg_cmc_4__mvsg_cmc__7d7f784b::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-r2-cmc")]
+            Self::Device35(_) => r2_cmc__r2_cmc__bc71a915::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-r2-et-cmc")]
+            Self::Device36(_) => r2_et_cmc__r2_et_cmc__a8425039::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-r3-cmc")]
+            Self::Device37(_) => r3_cmc__r3_cmc__2e3554ae::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-vbic13")]
+            Self::Device38(_) => vbic_3t__vbic13__aa00e2e7::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
+            Self::Device39(_) => vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-vbic13-4t")]
+            Self::Device40(_) => vbic_1p3__vbic13_4t__132cb4e0::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            Self::Device41(_) => vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::__NonExhaustive(value) => match *value {},
+        }
+    }
+
     pub fn capture_rollback_state(&self) -> super::GeneratedVerilogARollbackState {
         match self {
             #[cfg(feature = "veriloga-model-diode-cmc")]
@@ -400,7 +490,7 @@ impl GeneratedBuiltinKind {
             #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
             Self::Device19(_) => bsimsoi__bsimsoi__e2aff994::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-bsimsoi-va")]
-            Self::Device20(_) => bsimsoi__bsimsoi_va__8ee5e64d::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device20(_) => bsimsoi__bsimsoi_va__3b1f6b5e::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-ekv-va")]
             Self::Device21(_) => ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-hicuml0va")]
@@ -852,7 +942,7 @@ impl GeneratedBuiltinKind {
             #[cfg(all(feature = "veriloga-model-bsimsoi-e2aff994", feature = "veriloga-builtins-noise"))]
             Self::Device19(_) => &bsimsoi__bsimsoi__e2aff994::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-bsimsoi-va", feature = "veriloga-builtins-noise"))]
-            Self::Device20(_) => &bsimsoi__bsimsoi_va__8ee5e64d::NOISE_SOURCES,
+            Self::Device20(_) => &bsimsoi__bsimsoi_va__3b1f6b5e::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-ekv-va", feature = "veriloga-builtins-noise"))]
             Self::Device21(_) => &ekv26_sdext_verilog_a__ekv_va__0adf5df4::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-hicuml0va", feature = "veriloga-builtins-noise"))]
@@ -903,6 +993,7 @@ impl GeneratedBuiltinKind {
     }
 
     pub fn evaluate_noise_sources(&self, ctx: &super::GeneratedEvalContext<'_>, visitor: &mut dyn super::GeneratedNoiseVisitor) -> Result<(), super::GeneratedNoiseEvaluationError> {
+        let _ = (&ctx, &visitor);
         match self {
             #[cfg(all(feature = "veriloga-model-diode-cmc", feature = "veriloga-builtins-noise"))]
             Self::Device0(device) => device.evaluate_noise_sources(ctx, visitor),
@@ -1591,7 +1682,7 @@ pub fn node_count(model_name: &str) -> Option<usize> {
         #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
         "BSIMSOI__E2AFF994" => Some(bsimsoi__bsimsoi__e2aff994::Instance::TERMINAL_COUNT),
         #[cfg(feature = "veriloga-model-bsimsoi-va")]
-        "BSIMSOI_VA" => Some(bsimsoi__bsimsoi_va__8ee5e64d::Instance::TERMINAL_COUNT),
+        "BSIMSOI_VA" => Some(bsimsoi__bsimsoi_va__3b1f6b5e::Instance::TERMINAL_COUNT),
         #[cfg(feature = "veriloga-model-ekv-va")]
         "EKV_VA" => Some(ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::TERMINAL_COUNT),
         #[cfg(feature = "veriloga-model-hicuml0va")]
@@ -1681,7 +1772,7 @@ pub fn total_node_count(model_name: &str) -> Option<usize> {
         #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
         "BSIMSOI__E2AFF994" => Some(bsimsoi__bsimsoi__e2aff994::Instance::NODE_COUNT),
         #[cfg(feature = "veriloga-model-bsimsoi-va")]
-        "BSIMSOI_VA" => Some(bsimsoi__bsimsoi_va__8ee5e64d::Instance::NODE_COUNT),
+        "BSIMSOI_VA" => Some(bsimsoi__bsimsoi_va__3b1f6b5e::Instance::NODE_COUNT),
         #[cfg(feature = "veriloga-model-ekv-va")]
         "EKV_VA" => Some(ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::NODE_COUNT),
         #[cfg(feature = "veriloga-model-hicuml0va")]
@@ -1724,6 +1815,186 @@ pub fn total_node_count(model_name: &str) -> Option<usize> {
         "VBIC13_4T" => Some(vbic_1p3__vbic13_4t__132cb4e0::Instance::NODE_COUNT),
         #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
         "VBIC_4T_ET_CF" => Some(vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::NODE_COUNT),
+        _ => None,
+    }
+}
+
+pub fn terminal_names(model_name: &str) -> Option<&'static [&'static str]> {
+    match model_name.to_ascii_uppercase().as_str() {
+        #[cfg(feature = "veriloga-model-diode-cmc")]
+        "DIODE_CMC" => Some(&diode_cmc__diode_cmc__cdfab304::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-epfl-hemt-10a")]
+        "EPFL_HEMT_10A" => Some(&epfl_hemt__epfl_hemt_10a__671606cd::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-juncap200")]
+        "JUNCAP200" => Some(&juncap200__juncap200__94ba75b4::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-psp104tva")]
+        "PSP104TVA" => Some(&psp104t__psp104tva__0878692d::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-psp104va")]
+        "PSP104VA" => Some(&psp104__psp104va__75652357::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-pspnqs104va")]
+        "PSPNQS104VA" => Some(&psp104_nqs__pspnqs104va__1d25ee14::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-angelov")]
+        "ANGELOV" => Some(&angelov__angelov__98b92059::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-angelov-gan")]
+        "ANGELOV_GAN" => Some(&angelov_gan__angelov_gan__98687686::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-asmesd")]
+        "ASMESD" => Some(&asmesd__asmesd__fbe2f3a4::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-asmesd-dio")]
+        "ASMESD_DIO" => Some(&asmesd_dio__asmesd_dio__b913dc15::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-asmhemt")]
+        "ASMHEMT" => Some(&asmhemt__asmhemt__9d86ed5b::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-bjt505-va")]
+        "BJT505_VA" => Some(&bjt505__bjt505_va__6ac090e2::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-bjt505t-va")]
+        "BJT505T_VA" => Some(&bjt505t__bjt505t_va__48d754e7::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-bjtd505-va")]
+        "BJTD505_VA" => Some(&bjtd505__bjtd505_va__3cb9ae22::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-bjtd505t-va")]
+        "BJTD505T_VA" => Some(&bjtd505t__bjtd505t_va__06e24760::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-bsimbulk")]
+        "BSIMBULK" => Some(&bsimbulk__bsimbulk__0f953aae::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-bsimcmg-va")]
+        "BSIMCMG_VA" => Some(&bsimcmg__bsimcmg_va__f3a4082f::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-bsimimg")]
+        "BSIMIMG" => Some(&bsimimg__bsimimg__25eb6a31::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
+        "BSIMSOI__18C250BC" => Some(&bsimsoi__bsimsoi__18c250bc::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
+        "BSIMSOI__E2AFF994" => Some(&bsimsoi__bsimsoi__e2aff994::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-bsimsoi-va")]
+        "BSIMSOI_VA" => Some(&bsimsoi__bsimsoi_va__3b1f6b5e::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-ekv-va")]
+        "EKV_VA" => Some(&ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-hicuml0va")]
+        "HICUML0VA" => Some(&hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-hicuml2va")]
+        "HICUML2VA" => Some(&hicuml2_v320__hicuml2va__25e676cf::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
+        "HISIMHV_N4_VA" => Some(&hisimhv_n4__hisimhv_n4_va__69344dcf::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
+        "HISIMHV_N5_VA" => Some(&hisimhv_n5__hisimhv_n5_va__89bf8539::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-hisimhv-va")]
+        "HISIMHV_VA" => Some(&hisimhv__hisimhv_va__57d0ff0e::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
+        "HISIMSOI_VA__5BE18005" => Some(&hisimsoi__hisimsoi_va__5be18005::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
+        "HISIMSOI_VA__242BC21D" => Some(&hisimsoi_n4__hisimsoi_va__242bc21d::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
+        "HISIMSOI_VA__38074D06" => Some(&hisimsoi_n5__hisimsoi_va__38074d06::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-hisimsotb-va")]
+        "HISIMSOTB_VA" => Some(&hisimsotb__hisimsotb_va__41200697::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
+        "L_UTSOI__832CE87D" => Some(&l_utsoi_102__l_utsoi__832ce87d::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
+        "L_UTSOI__485E0AC9" => Some(&l_utsoi_102_nqs__l_utsoi__485e0ac9::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-mosvar")]
+        "MOSVAR" => Some(&mosvar__mosvar__0a88ed4a::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-mvsg-cmc")]
+        "MVSG_CMC" => Some(&mvsg_cmc_4__mvsg_cmc__7d7f784b::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-r2-cmc")]
+        "R2_CMC" => Some(&r2_cmc__r2_cmc__bc71a915::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-r2-et-cmc")]
+        "R2_ET_CMC" => Some(&r2_et_cmc__r2_et_cmc__a8425039::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-r3-cmc")]
+        "R3_CMC" => Some(&r3_cmc__r3_cmc__2e3554ae::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-vbic13")]
+        "VBIC13" => Some(&vbic_3t__vbic13__aa00e2e7::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-vbic13-3t-et")]
+        "VBIC13_3T_ET" => Some(&vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-vbic13-4t")]
+        "VBIC13_4T" => Some(&vbic_1p3__vbic13_4t__132cb4e0::Instance::TERMINAL_NAMES),
+        #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+        "VBIC_4T_ET_CF" => Some(&vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::TERMINAL_NAMES),
+        _ => None,
+    }
+}
+
+pub fn terminal_descriptors(model_name: &str) -> Option<&'static [crate::GeneratedExternalTerminalDescriptor]> {
+    match model_name.to_ascii_uppercase().as_str() {
+        #[cfg(feature = "veriloga-model-diode-cmc")]
+        "DIODE_CMC" => Some(&diode_cmc__diode_cmc__cdfab304::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-epfl-hemt-10a")]
+        "EPFL_HEMT_10A" => Some(&epfl_hemt__epfl_hemt_10a__671606cd::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-juncap200")]
+        "JUNCAP200" => Some(&juncap200__juncap200__94ba75b4::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-psp104tva")]
+        "PSP104TVA" => Some(&psp104t__psp104tva__0878692d::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-psp104va")]
+        "PSP104VA" => Some(&psp104__psp104va__75652357::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-pspnqs104va")]
+        "PSPNQS104VA" => Some(&psp104_nqs__pspnqs104va__1d25ee14::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-angelov")]
+        "ANGELOV" => Some(&angelov__angelov__98b92059::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-angelov-gan")]
+        "ANGELOV_GAN" => Some(&angelov_gan__angelov_gan__98687686::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-asmesd")]
+        "ASMESD" => Some(&asmesd__asmesd__fbe2f3a4::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-asmesd-dio")]
+        "ASMESD_DIO" => Some(&asmesd_dio__asmesd_dio__b913dc15::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-asmhemt")]
+        "ASMHEMT" => Some(&asmhemt__asmhemt__9d86ed5b::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-bjt505-va")]
+        "BJT505_VA" => Some(&bjt505__bjt505_va__6ac090e2::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-bjt505t-va")]
+        "BJT505T_VA" => Some(&bjt505t__bjt505t_va__48d754e7::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-bjtd505-va")]
+        "BJTD505_VA" => Some(&bjtd505__bjtd505_va__3cb9ae22::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-bjtd505t-va")]
+        "BJTD505T_VA" => Some(&bjtd505t__bjtd505t_va__06e24760::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-bsimbulk")]
+        "BSIMBULK" => Some(&bsimbulk__bsimbulk__0f953aae::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-bsimcmg-va")]
+        "BSIMCMG_VA" => Some(&bsimcmg__bsimcmg_va__f3a4082f::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-bsimimg")]
+        "BSIMIMG" => Some(&bsimimg__bsimimg__25eb6a31::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
+        "BSIMSOI__18C250BC" => Some(&bsimsoi__bsimsoi__18c250bc::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
+        "BSIMSOI__E2AFF994" => Some(&bsimsoi__bsimsoi__e2aff994::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-bsimsoi-va")]
+        "BSIMSOI_VA" => Some(&bsimsoi__bsimsoi_va__3b1f6b5e::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-ekv-va")]
+        "EKV_VA" => Some(&ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-hicuml0va")]
+        "HICUML0VA" => Some(&hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-hicuml2va")]
+        "HICUML2VA" => Some(&hicuml2_v320__hicuml2va__25e676cf::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
+        "HISIMHV_N4_VA" => Some(&hisimhv_n4__hisimhv_n4_va__69344dcf::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
+        "HISIMHV_N5_VA" => Some(&hisimhv_n5__hisimhv_n5_va__89bf8539::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-hisimhv-va")]
+        "HISIMHV_VA" => Some(&hisimhv__hisimhv_va__57d0ff0e::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
+        "HISIMSOI_VA__5BE18005" => Some(&hisimsoi__hisimsoi_va__5be18005::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
+        "HISIMSOI_VA__242BC21D" => Some(&hisimsoi_n4__hisimsoi_va__242bc21d::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
+        "HISIMSOI_VA__38074D06" => Some(&hisimsoi_n5__hisimsoi_va__38074d06::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-hisimsotb-va")]
+        "HISIMSOTB_VA" => Some(&hisimsotb__hisimsotb_va__41200697::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
+        "L_UTSOI__832CE87D" => Some(&l_utsoi_102__l_utsoi__832ce87d::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
+        "L_UTSOI__485E0AC9" => Some(&l_utsoi_102_nqs__l_utsoi__485e0ac9::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-mosvar")]
+        "MOSVAR" => Some(&mosvar__mosvar__0a88ed4a::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-mvsg-cmc")]
+        "MVSG_CMC" => Some(&mvsg_cmc_4__mvsg_cmc__7d7f784b::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-r2-cmc")]
+        "R2_CMC" => Some(&r2_cmc__r2_cmc__bc71a915::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-r2-et-cmc")]
+        "R2_ET_CMC" => Some(&r2_et_cmc__r2_et_cmc__a8425039::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-r3-cmc")]
+        "R3_CMC" => Some(&r3_cmc__r3_cmc__2e3554ae::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-vbic13")]
+        "VBIC13" => Some(&vbic_3t__vbic13__aa00e2e7::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-vbic13-3t-et")]
+        "VBIC13_3T_ET" => Some(&vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-vbic13-4t")]
+        "VBIC13_4T" => Some(&vbic_1p3__vbic13_4t__132cb4e0::Instance::TERMINALS),
+        #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+        "VBIC_4T_ET_CF" => Some(&vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::TERMINALS),
         _ => None,
     }
 }
@@ -1771,7 +2042,7 @@ pub fn internal_node_names(model_name: &str) -> Option<&'static [&'static str]> 
         #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
         "BSIMSOI__E2AFF994" => Some(&bsimsoi__bsimsoi__e2aff994::Instance::INTERNAL_NODE_NAMES),
         #[cfg(feature = "veriloga-model-bsimsoi-va")]
-        "BSIMSOI_VA" => Some(&bsimsoi__bsimsoi_va__8ee5e64d::Instance::INTERNAL_NODE_NAMES),
+        "BSIMSOI_VA" => Some(&bsimsoi__bsimsoi_va__3b1f6b5e::Instance::INTERNAL_NODE_NAMES),
         #[cfg(feature = "veriloga-model-ekv-va")]
         "EKV_VA" => Some(&ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::INTERNAL_NODE_NAMES),
         #[cfg(feature = "veriloga-model-hicuml0va")]
@@ -1814,6 +2085,97 @@ pub fn internal_node_names(model_name: &str) -> Option<&'static [&'static str]> 
         "VBIC13_4T" => Some(&vbic_1p3__vbic13_4t__132cb4e0::Instance::INTERNAL_NODE_NAMES),
         #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
         "VBIC_4T_ET_CF" => Some(&vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::INTERNAL_NODE_NAMES),
+        _ => None,
+    }
+}
+
+pub fn parameter_scope(model_name: &str, parameter_name: &str) -> Option<crate::GeneratedParameterScope> {
+    let _ = parameter_name;
+    match model_name.to_ascii_uppercase().as_str() {
+        #[cfg(feature = "veriloga-model-diode-cmc")]
+        "DIODE_CMC" => diode_cmc__diode_cmc__cdfab304::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-epfl-hemt-10a")]
+        "EPFL_HEMT_10A" => epfl_hemt__epfl_hemt_10a__671606cd::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-juncap200")]
+        "JUNCAP200" => juncap200__juncap200__94ba75b4::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-psp104tva")]
+        "PSP104TVA" => psp104t__psp104tva__0878692d::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-psp104va")]
+        "PSP104VA" => psp104__psp104va__75652357::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-pspnqs104va")]
+        "PSPNQS104VA" => psp104_nqs__pspnqs104va__1d25ee14::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-angelov")]
+        "ANGELOV" => angelov__angelov__98b92059::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-angelov-gan")]
+        "ANGELOV_GAN" => angelov_gan__angelov_gan__98687686::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-asmesd")]
+        "ASMESD" => asmesd__asmesd__fbe2f3a4::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-asmesd-dio")]
+        "ASMESD_DIO" => asmesd_dio__asmesd_dio__b913dc15::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-asmhemt")]
+        "ASMHEMT" => asmhemt__asmhemt__9d86ed5b::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-bjt505-va")]
+        "BJT505_VA" => bjt505__bjt505_va__6ac090e2::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-bjt505t-va")]
+        "BJT505T_VA" => bjt505t__bjt505t_va__48d754e7::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-bjtd505-va")]
+        "BJTD505_VA" => bjtd505__bjtd505_va__3cb9ae22::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-bjtd505t-va")]
+        "BJTD505T_VA" => bjtd505t__bjtd505t_va__06e24760::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-bsimbulk")]
+        "BSIMBULK" => bsimbulk__bsimbulk__0f953aae::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-bsimcmg-va")]
+        "BSIMCMG_VA" => bsimcmg__bsimcmg_va__f3a4082f::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-bsimimg")]
+        "BSIMIMG" => bsimimg__bsimimg__25eb6a31::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
+        "BSIMSOI__18C250BC" => bsimsoi__bsimsoi__18c250bc::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
+        "BSIMSOI__E2AFF994" => bsimsoi__bsimsoi__e2aff994::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-bsimsoi-va")]
+        "BSIMSOI_VA" => bsimsoi__bsimsoi_va__3b1f6b5e::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-ekv-va")]
+        "EKV_VA" => ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-hicuml0va")]
+        "HICUML0VA" => hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-hicuml2va")]
+        "HICUML2VA" => hicuml2_v320__hicuml2va__25e676cf::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
+        "HISIMHV_N4_VA" => hisimhv_n4__hisimhv_n4_va__69344dcf::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
+        "HISIMHV_N5_VA" => hisimhv_n5__hisimhv_n5_va__89bf8539::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-hisimhv-va")]
+        "HISIMHV_VA" => hisimhv__hisimhv_va__57d0ff0e::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
+        "HISIMSOI_VA__5BE18005" => hisimsoi__hisimsoi_va__5be18005::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
+        "HISIMSOI_VA__242BC21D" => hisimsoi_n4__hisimsoi_va__242bc21d::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
+        "HISIMSOI_VA__38074D06" => hisimsoi_n5__hisimsoi_va__38074d06::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-hisimsotb-va")]
+        "HISIMSOTB_VA" => hisimsotb__hisimsotb_va__41200697::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
+        "L_UTSOI__832CE87D" => l_utsoi_102__l_utsoi__832ce87d::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
+        "L_UTSOI__485E0AC9" => l_utsoi_102_nqs__l_utsoi__485e0ac9::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-mosvar")]
+        "MOSVAR" => mosvar__mosvar__0a88ed4a::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-mvsg-cmc")]
+        "MVSG_CMC" => mvsg_cmc_4__mvsg_cmc__7d7f784b::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-r2-cmc")]
+        "R2_CMC" => r2_cmc__r2_cmc__bc71a915::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-r2-et-cmc")]
+        "R2_ET_CMC" => r2_et_cmc__r2_et_cmc__a8425039::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-r3-cmc")]
+        "R3_CMC" => r3_cmc__r3_cmc__2e3554ae::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-vbic13")]
+        "VBIC13" => vbic_3t__vbic13__aa00e2e7::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-vbic13-3t-et")]
+        "VBIC13_3T_ET" => vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-vbic13-4t")]
+        "VBIC13_4T" => vbic_1p3__vbic13_4t__132cb4e0::Instance::parameter_scope(parameter_name),
+        #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+        "VBIC_4T_ET_CF" => vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::parameter_scope(parameter_name),
         _ => None,
     }
 }
@@ -1861,7 +2223,7 @@ pub fn branch_count(model_name: &str) -> Option<usize> {
         #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
         "BSIMSOI__E2AFF994" => Some(bsimsoi__bsimsoi__e2aff994::Instance::BRANCH_COUNT),
         #[cfg(feature = "veriloga-model-bsimsoi-va")]
-        "BSIMSOI_VA" => Some(bsimsoi__bsimsoi_va__8ee5e64d::Instance::BRANCH_COUNT),
+        "BSIMSOI_VA" => Some(bsimsoi__bsimsoi_va__3b1f6b5e::Instance::BRANCH_COUNT),
         #[cfg(feature = "veriloga-model-ekv-va")]
         "EKV_VA" => Some(ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::BRANCH_COUNT),
         #[cfg(feature = "veriloga-model-hicuml0va")]
@@ -1909,678 +2271,1061 @@ pub fn branch_count(model_name: &str) -> Option<usize> {
 }
 
 pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params: &[(String, crate::Value)]) -> Result<Option<GeneratedBuiltinKind>, String> {
+    let assignments = params.iter().map(|(name, value)| crate::GeneratedParameterAssignment::for_declared_scope(name, *value)).collect::<Vec<_>>();
+    instantiate_scoped(model_name, nodes, branches, &assignments)
+}
+
+pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize], params: &[crate::GeneratedParameterAssignment<'_>]) -> Result<Option<GeneratedBuiltinKind>, String> {
     let _ = (nodes, branches, params);
     match model_name.to_ascii_uppercase().as_str() {
         #[cfg(feature = "veriloga-model-diode-cmc")]
         "DIODE_CMC" => {
             let mut instance = Box::new(diode_cmc__diode_cmc__cdfab304::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !diode_cmc__diode_cmc__cdfab304::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device0(instance)))
         }
         #[cfg(feature = "veriloga-model-epfl-hemt-10a")]
         "EPFL_HEMT_10A" => {
             let mut instance = Box::new(epfl_hemt__epfl_hemt_10a__671606cd::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !epfl_hemt__epfl_hemt_10a__671606cd::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device1(instance)))
         }
         #[cfg(feature = "veriloga-model-juncap200")]
         "JUNCAP200" => {
             let mut instance = Box::new(juncap200__juncap200__94ba75b4::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !juncap200__juncap200__94ba75b4::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device2(instance)))
         }
         #[cfg(feature = "veriloga-model-psp104tva")]
         "PSP104TVA" => {
             let mut instance = Box::new(psp104t__psp104tva__0878692d::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !psp104t__psp104tva__0878692d::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device3(instance)))
         }
         #[cfg(feature = "veriloga-model-psp104va")]
         "PSP104VA" => {
             let mut instance = Box::new(psp104__psp104va__75652357::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !psp104__psp104va__75652357::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device4(instance)))
         }
         #[cfg(feature = "veriloga-model-pspnqs104va")]
         "PSPNQS104VA" => {
             let mut instance = Box::new(psp104_nqs__pspnqs104va__1d25ee14::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !psp104_nqs__pspnqs104va__1d25ee14::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device5(instance)))
         }
         #[cfg(feature = "veriloga-model-angelov")]
         "ANGELOV" => {
             let mut instance = Box::new(angelov__angelov__98b92059::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !angelov__angelov__98b92059::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device6(instance)))
         }
         #[cfg(feature = "veriloga-model-angelov-gan")]
         "ANGELOV_GAN" => {
             let mut instance = Box::new(angelov_gan__angelov_gan__98687686::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !angelov_gan__angelov_gan__98687686::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device7(instance)))
         }
         #[cfg(feature = "veriloga-model-asmesd")]
         "ASMESD" => {
             let mut instance = Box::new(asmesd__asmesd__fbe2f3a4::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !asmesd__asmesd__fbe2f3a4::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device8(instance)))
         }
         #[cfg(feature = "veriloga-model-asmesd-dio")]
         "ASMESD_DIO" => {
             let mut instance = Box::new(asmesd_dio__asmesd_dio__b913dc15::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !asmesd_dio__asmesd_dio__b913dc15::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device9(instance)))
         }
         #[cfg(feature = "veriloga-model-asmhemt")]
         "ASMHEMT" => {
             let mut instance = Box::new(asmhemt__asmhemt__9d86ed5b::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !asmhemt__asmhemt__9d86ed5b::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device10(instance)))
         }
         #[cfg(feature = "veriloga-model-bjt505-va")]
         "BJT505_VA" => {
             let mut instance = Box::new(bjt505__bjt505_va__6ac090e2::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !bjt505__bjt505_va__6ac090e2::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device11(instance)))
         }
         #[cfg(feature = "veriloga-model-bjt505t-va")]
         "BJT505T_VA" => {
             let mut instance = Box::new(bjt505t__bjt505t_va__48d754e7::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !bjt505t__bjt505t_va__48d754e7::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device12(instance)))
         }
         #[cfg(feature = "veriloga-model-bjtd505-va")]
         "BJTD505_VA" => {
             let mut instance = Box::new(bjtd505__bjtd505_va__3cb9ae22::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !bjtd505__bjtd505_va__3cb9ae22::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device13(instance)))
         }
         #[cfg(feature = "veriloga-model-bjtd505t-va")]
         "BJTD505T_VA" => {
             let mut instance = Box::new(bjtd505t__bjtd505t_va__06e24760::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !bjtd505t__bjtd505t_va__06e24760::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device14(instance)))
         }
         #[cfg(feature = "veriloga-model-bsimbulk")]
         "BSIMBULK" => {
             let mut instance = Box::new(bsimbulk__bsimbulk__0f953aae::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !bsimbulk__bsimbulk__0f953aae::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device15(instance)))
         }
         #[cfg(feature = "veriloga-model-bsimcmg-va")]
         "BSIMCMG_VA" => {
             let mut instance = Box::new(bsimcmg__bsimcmg_va__f3a4082f::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !bsimcmg__bsimcmg_va__f3a4082f::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device16(instance)))
         }
         #[cfg(feature = "veriloga-model-bsimimg")]
         "BSIMIMG" => {
             let mut instance = Box::new(bsimimg__bsimimg__25eb6a31::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !bsimimg__bsimimg__25eb6a31::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device17(instance)))
         }
         #[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
         "BSIMSOI__18C250BC" => {
             let mut instance = Box::new(bsimsoi__bsimsoi__18c250bc::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !bsimsoi__bsimsoi__18c250bc::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device18(instance)))
         }
         #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
         "BSIMSOI__E2AFF994" => {
             let mut instance = Box::new(bsimsoi__bsimsoi__e2aff994::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !bsimsoi__bsimsoi__e2aff994::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device19(instance)))
         }
         #[cfg(feature = "veriloga-model-bsimsoi-va")]
         "BSIMSOI_VA" => {
-            let mut instance = Box::new(bsimsoi__bsimsoi_va__8ee5e64d::Instance::new(nodes));
+            let mut instance = Box::new(bsimsoi__bsimsoi_va__3b1f6b5e::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !bsimsoi__bsimsoi_va__3b1f6b5e::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device20(instance)))
         }
         #[cfg(feature = "veriloga-model-ekv-va")]
         "EKV_VA" => {
             let mut instance = Box::new(ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device21(instance)))
         }
         #[cfg(feature = "veriloga-model-hicuml0va")]
         "HICUML0VA" => {
             let mut instance = Box::new(hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device22(instance)))
         }
         #[cfg(feature = "veriloga-model-hicuml2va")]
         "HICUML2VA" => {
             let mut instance = Box::new(hicuml2_v320__hicuml2va__25e676cf::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !hicuml2_v320__hicuml2va__25e676cf::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device23(instance)))
         }
         #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
         "HISIMHV_N4_VA" => {
             let mut instance = Box::new(hisimhv_n4__hisimhv_n4_va__69344dcf::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !hisimhv_n4__hisimhv_n4_va__69344dcf::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device24(instance)))
         }
         #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
         "HISIMHV_N5_VA" => {
             let mut instance = Box::new(hisimhv_n5__hisimhv_n5_va__89bf8539::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !hisimhv_n5__hisimhv_n5_va__89bf8539::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device25(instance)))
         }
         #[cfg(feature = "veriloga-model-hisimhv-va")]
         "HISIMHV_VA" => {
             let mut instance = Box::new(hisimhv__hisimhv_va__57d0ff0e::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !hisimhv__hisimhv_va__57d0ff0e::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device26(instance)))
         }
         #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
         "HISIMSOI_VA__5BE18005" => {
             let mut instance = Box::new(hisimsoi__hisimsoi_va__5be18005::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !hisimsoi__hisimsoi_va__5be18005::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device27(instance)))
         }
         #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
         "HISIMSOI_VA__242BC21D" => {
             let mut instance = Box::new(hisimsoi_n4__hisimsoi_va__242bc21d::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !hisimsoi_n4__hisimsoi_va__242bc21d::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device28(instance)))
         }
         #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
         "HISIMSOI_VA__38074D06" => {
             let mut instance = Box::new(hisimsoi_n5__hisimsoi_va__38074d06::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !hisimsoi_n5__hisimsoi_va__38074d06::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device29(instance)))
         }
         #[cfg(feature = "veriloga-model-hisimsotb-va")]
         "HISIMSOTB_VA" => {
             let mut instance = Box::new(hisimsotb__hisimsotb_va__41200697::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !hisimsotb__hisimsotb_va__41200697::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device30(instance)))
         }
         #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
         "L_UTSOI__832CE87D" => {
             let mut instance = Box::new(l_utsoi_102__l_utsoi__832ce87d::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !l_utsoi_102__l_utsoi__832ce87d::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device31(instance)))
         }
         #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
         "L_UTSOI__485E0AC9" => {
             let mut instance = Box::new(l_utsoi_102_nqs__l_utsoi__485e0ac9::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !l_utsoi_102_nqs__l_utsoi__485e0ac9::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device32(instance)))
         }
         #[cfg(feature = "veriloga-model-mosvar")]
         "MOSVAR" => {
             let mut instance = Box::new(mosvar__mosvar__0a88ed4a::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !mosvar__mosvar__0a88ed4a::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device33(instance)))
         }
         #[cfg(feature = "veriloga-model-mvsg-cmc")]
         "MVSG_CMC" => {
             let mut instance = Box::new(mvsg_cmc_4__mvsg_cmc__7d7f784b::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !mvsg_cmc_4__mvsg_cmc__7d7f784b::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device34(instance)))
         }
         #[cfg(feature = "veriloga-model-r2-cmc")]
         "R2_CMC" => {
             let mut instance = Box::new(r2_cmc__r2_cmc__bc71a915::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !r2_cmc__r2_cmc__bc71a915::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device35(instance)))
         }
         #[cfg(feature = "veriloga-model-r2-et-cmc")]
         "R2_ET_CMC" => {
             let mut instance = Box::new(r2_et_cmc__r2_et_cmc__a8425039::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !r2_et_cmc__r2_et_cmc__a8425039::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device36(instance)))
         }
         #[cfg(feature = "veriloga-model-r3-cmc")]
         "R3_CMC" => {
             let mut instance = Box::new(r3_cmc__r3_cmc__2e3554ae::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !r3_cmc__r3_cmc__2e3554ae::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device37(instance)))
         }
         #[cfg(feature = "veriloga-model-vbic13")]
         "VBIC13" => {
             let mut instance = Box::new(vbic_3t__vbic13__aa00e2e7::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !vbic_3t__vbic13__aa00e2e7::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device38(instance)))
         }
         #[cfg(feature = "veriloga-model-vbic13-3t-et")]
         "VBIC13_3T_ET" => {
             let mut instance = Box::new(vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device39(instance)))
         }
         #[cfg(feature = "veriloga-model-vbic13-4t")]
         "VBIC13_4T" => {
             let mut instance = Box::new(vbic_1p3__vbic13_4t__132cb4e0::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !vbic_1p3__vbic13_4t__132cb4e0::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device40(instance)))
         }
         #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
         "VBIC_4T_ET_CF" => {
             let mut instance = Box::new(vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::new(nodes));
             instance.set_branch_indices(branches);
-            for (name, value) in params {
-                if let Err(error) = instance.set_parameter(name, *value) {
-                    if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value)?;
-                    } else {
-                        return Err(error);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
                     }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
                 }
             }
-            instance.validate_parameters()?;
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
             Ok(Some(GeneratedBuiltinKind::Device41(instance)))
         }
         _ => Ok(None),

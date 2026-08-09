@@ -458,17 +458,47 @@ impl SemanticAnalyzer {
             .iter()
             .map(|parameter| self.parameter_scope(parameter))
             .collect();
-        let instance_parameter_names: std::collections::HashSet<SmolStr> = module
+        let parameter_also_model: Vec<_> = module
             .parameters
             .iter()
             .zip(&parameter_scopes)
-            .filter(|(_, scope)| **scope == ParameterScope::Instance)
-            .map(|(parameter, _)| parameter.name.clone())
+            .map(|(parameter, scope)| self.parameter_also_model(parameter, *scope))
             .collect();
-        for (param, scope) in module.parameters.iter().zip(parameter_scopes) {
-            if scope == ParameterScope::Model {
+        let canonical_model_storage = module
+            .parameters
+            .iter()
+            .zip(&parameter_scopes)
+            .zip(&parameter_also_model)
+            .map(|((parameter, scope), also_model)| {
+                (
+                    parameter.name.clone(),
+                    *scope == ParameterScope::Model || *also_model,
+                )
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+        let mut external_model_storage = canonical_model_storage
+            .iter()
+            .map(|(name, has_model_storage)| (name.to_ascii_lowercase(), *has_model_storage))
+            .collect::<std::collections::HashMap<_, _>>();
+        for alias in &module.aliasparams {
+            if let Some(has_model_storage) = canonical_model_storage.get(&alias.target) {
+                external_model_storage.insert(alias.alias.to_ascii_lowercase(), *has_model_storage);
+            }
+        }
+        self.validate_parameter_default_dependencies(&module.parameters, &module.aliasparams);
+        for ((param, scope), also_model) in module
+            .parameters
+            .iter()
+            .zip(parameter_scopes)
+            .zip(parameter_also_model)
+        {
+            if scope == ParameterScope::Model || also_model {
                 let default_reads_instance = param.default.as_ref().is_some_and(|expression| {
-                    Self::references_identifiers(expression, &instance_parameter_names)
+                    Self::references_parameter_without_model_storage(
+                        expression,
+                        &canonical_model_storage,
+                        &external_model_storage,
+                    )
                 });
                 // Range bounds are validation expressions, not part of the
                 // model-card value. CMC models legitimately constrain a model
@@ -476,10 +506,15 @@ impl SemanticAnalyzer {
                 // Those bounds are evaluated after instance overrides and do
                 // not make the model parameter itself instance-owned.
                 if default_reads_instance {
+                    let storage = if scope == ParameterScope::Model {
+                        "model parameter"
+                    } else {
+                        "dual-scope parameter model fallback"
+                    };
                     self.record_error_at(
                         SemanticErrorKind::UnsupportedFeature(format!(
-                            "model parameter '{}' cannot depend on an instance parameter",
-                            param.name
+                            "{storage} '{}' cannot depend on an instance parameter that lacks model storage",
+                            param.name,
                         )),
                         param.span,
                     );
@@ -596,6 +631,7 @@ impl SemanticAnalyzer {
                 name: param.name.clone(),
                 is_public: true,
                 scope,
+                also_model,
                 param_type: param.param_type,
                 value_type,
                 default,
@@ -926,6 +962,29 @@ impl SemanticAnalyzer {
             declared = true;
         }
         scope
+    }
+
+    /// Interpret Xyce's CMC dual-scope extension. Xyce's ADMS templates gate
+    /// this extension on attribute presence and intentionally ignore its value,
+    /// so even a bare attribute or `xyceAlsoModel="no"` enables model storage.
+    /// An explicit instance value remains independently given and takes
+    /// precedence over the model-card fallback.
+    fn parameter_also_model(&mut self, parameter: &ParameterDecl, scope: ParameterScope) -> bool {
+        let present = parameter
+            .attributes
+            .iter()
+            .any(|attribute| attribute.name.eq_ignore_ascii_case("xyceAlsoModel"));
+        if present && scope != ParameterScope::Instance {
+            self.record_error_at(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "parameter '{}' may use 'xyceAlsoModel' only with type=\"instance\"",
+                    parameter.name
+                )),
+                parameter.span,
+            );
+            return false;
+        }
+        present
     }
 
     fn define_symbol(&mut self, symbol: Symbol) -> CompileResult<()> {
@@ -1418,6 +1477,27 @@ impl SemanticAnalyzer {
     /// expressions (`guard ? value : previous`), so the recorded flat lists
     /// preserve branch semantics exactly. Loops whose bounds do not fold to
     /// compile-time constants lower to runtime loop statements.
+    fn block_local_canonical_name_is_taken(&self, module: &AnalyzedModule, name: &SmolStr) -> bool {
+        module
+            .variables
+            .iter()
+            .any(|variable| variable.name == *name)
+            || module
+                .parameters
+                .iter()
+                .any(|parameter| parameter.name == *name)
+            || module
+                .param_aliases
+                .iter()
+                .any(|alias| alias.alias == *name)
+            || module.ports.iter().any(|port| port.name == *name)
+            || module.internal_nodes.iter().any(|node| node.name == *name)
+            || module.branches.iter().any(|branch| branch.name == *name)
+            || module.arrays.contains_key(name)
+            || self.arrays.contains_key(name)
+            || self.symbols.lookup(name).is_some()
+    }
+
     fn analyze_statement(
         &mut self,
         stmt: &AnalogStatement,
@@ -1445,14 +1525,20 @@ impl SemanticAnalyzer {
                     };
                     for item in &var_decl.items {
                         self.local_counter += 1;
-                        let hoisted: SmolStr =
-                            if module.variables.iter().any(|v| v.name == item.name)
-                                || self.arrays.contains_key(&item.name)
-                            {
-                                format!("{}__blk{}", item.name, self.local_counter).into()
-                            } else {
-                                item.name.clone()
-                            };
+                        let hoisted = if self
+                            .block_local_canonical_name_is_taken(module, &item.name)
+                        {
+                            loop {
+                                let candidate: SmolStr =
+                                    format!("{}__blk{}", item.name, self.local_counter).into();
+                                if !self.block_local_canonical_name_is_taken(module, &candidate) {
+                                    break candidate;
+                                }
+                                self.local_counter += 1;
+                            }
+                        } else {
+                            item.name.clone()
+                        };
 
                         if !item.dimensions.is_empty() {
                             if let Some(layout) = self.register_array_variable(
@@ -5012,6 +5098,219 @@ impl SemanticAnalyzer {
         self.errors.push(SemanticError::new(kind, span));
     }
 
+    /// Verilog-AMS 2.3.1 section 3.4 permits a parameter initializer to read
+    /// only parameters declared before it. Enforce that language rule here,
+    /// before symbolic defaults reach any backend, so composite forward and
+    /// cyclic references cannot acquire order-dependent values.
+    fn validate_parameter_default_dependencies(
+        &mut self,
+        parameters: &[ParameterDecl],
+        aliases: &[AliasParamDecl],
+    ) {
+        // Verilog-A identifiers are case-sensitive. Preserve the first
+        // declaration here so a duplicate declaration cannot silently change
+        // dependency order before the symbol-table diagnostic is emitted.
+        let mut indices = std::collections::HashMap::new();
+        for (index, parameter) in parameters.iter().enumerate() {
+            indices.entry(parameter.name.clone()).or_insert(index);
+        }
+
+        // External SPICE parameter names and the generated `$param_given`
+        // resolver are intentionally case-insensitive. Reject collisions up
+        // front: otherwise the backend's sorted lookup table would pick one
+        // declaration nondeterministically. Aliases resolve to their exact,
+        // case-sensitive Verilog-A target.
+        let mut param_given_indices: std::collections::HashMap<String, (usize, SmolStr)> =
+            std::collections::HashMap::new();
+        for (index, parameter) in parameters.iter().enumerate() {
+            Self::insert_external_parameter_name(
+                &mut param_given_indices,
+                parameter.name.as_str(),
+                parameter.name.as_str(),
+                index,
+                parameter.span,
+                &mut self.errors,
+            );
+        }
+        for alias in aliases {
+            let Some(&target) = indices.get(&alias.target) else {
+                continue;
+            };
+            Self::insert_external_parameter_name(
+                &mut param_given_indices,
+                alias.alias.as_str(),
+                parameters[target].name.as_str(),
+                target,
+                alias.span,
+                &mut self.errors,
+            );
+        }
+
+        for (index, parameter) in parameters.iter().enumerate() {
+            let Some(default) = &parameter.default else {
+                continue;
+            };
+            let mut references = Vec::new();
+            Self::collect_parameter_identifier_references(
+                default,
+                &indices,
+                &param_given_indices,
+                &mut references,
+            );
+            let mut reported = std::collections::HashSet::new();
+            for (referenced_index, referenced, span) in references {
+                if !reported.insert(referenced_index) {
+                    continue;
+                }
+                if referenced_index == index {
+                    self.record_error_at(
+                        SemanticErrorKind::CircularDependency(format!(
+                            "default of parameter '{}' references itself",
+                            parameter.name
+                        )),
+                        span,
+                    );
+                } else if referenced_index > index {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "default of parameter '{}' references later parameter '{}'; Verilog-AMS parameter defaults may reference only previously declared parameters",
+                            parameter.name, referenced
+                        )),
+                        span,
+                    );
+                }
+            }
+        }
+    }
+
+    fn insert_external_parameter_name(
+        names: &mut std::collections::HashMap<String, (usize, SmolStr)>,
+        name: &str,
+        canonical_name: &str,
+        index: usize,
+        span: Span,
+        errors: &mut Vec<SemanticError>,
+    ) {
+        let folded = name.to_ascii_lowercase();
+        if let Some((_, first_name)) = names.get(&folded) {
+            errors.push(SemanticError::new(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "parameter lookup name '{name}' conflicts case-insensitively with '{first_name}'; generated SPICE parameter names and aliases must be unique ignoring ASCII case"
+                )),
+                span,
+            ));
+            return;
+        }
+        names.insert(folded, (index, canonical_name.into()));
+    }
+
+    fn collect_parameter_identifier_references<'a>(
+        expression: &'a Expression,
+        parameter_indices: &std::collections::HashMap<SmolStr, usize>,
+        param_given_indices: &std::collections::HashMap<String, (usize, SmolStr)>,
+        references: &mut Vec<(usize, SmolStr, Span)>,
+    ) {
+        match expression {
+            Expression::Identifier(identifier) => {
+                if let Some(&index) = parameter_indices.get(&identifier.name) {
+                    references.push((index, identifier.name.clone(), identifier.span));
+                }
+            }
+            Expression::Binary(binary) => {
+                Self::collect_parameter_identifier_references(
+                    &binary.left,
+                    parameter_indices,
+                    param_given_indices,
+                    references,
+                );
+                Self::collect_parameter_identifier_references(
+                    &binary.right,
+                    parameter_indices,
+                    param_given_indices,
+                    references,
+                );
+            }
+            Expression::Unary(unary) => Self::collect_parameter_identifier_references(
+                &unary.operand,
+                parameter_indices,
+                param_given_indices,
+                references,
+            ),
+            Expression::Conditional(conditional) => {
+                Self::collect_parameter_identifier_references(
+                    &conditional.condition,
+                    parameter_indices,
+                    param_given_indices,
+                    references,
+                );
+                Self::collect_parameter_identifier_references(
+                    &conditional.then_expr,
+                    parameter_indices,
+                    param_given_indices,
+                    references,
+                );
+                Self::collect_parameter_identifier_references(
+                    &conditional.else_expr,
+                    parameter_indices,
+                    param_given_indices,
+                    references,
+                );
+            }
+            Expression::Call(call) => {
+                for argument in &call.args {
+                    Self::collect_parameter_identifier_references(
+                        argument,
+                        parameter_indices,
+                        param_given_indices,
+                        references,
+                    );
+                }
+            }
+            Expression::SystemFunction(function) => {
+                if function.name.eq_ignore_ascii_case("$param_given")
+                    || function.name.eq_ignore_ascii_case("param_given")
+                {
+                    if let [Expression::Identifier(identifier)] = function.args.as_slice()
+                        && let Some((index, canonical)) =
+                            param_given_indices.get(&identifier.name.to_ascii_lowercase())
+                    {
+                        references.push((*index, canonical.clone(), identifier.span));
+                    }
+                    return;
+                }
+                for argument in &function.args {
+                    Self::collect_parameter_identifier_references(
+                        argument,
+                        parameter_indices,
+                        param_given_indices,
+                        references,
+                    );
+                }
+            }
+            Expression::ArrayAccess(access) => Self::collect_parameter_identifier_references(
+                &access.index,
+                parameter_indices,
+                param_given_indices,
+                references,
+            ),
+            Expression::ArrayLiteral(array) => {
+                for element in &array.elements {
+                    Self::collect_parameter_identifier_references(
+                        element,
+                        parameter_indices,
+                        param_given_indices,
+                        references,
+                    );
+                }
+            }
+            Expression::Number(_)
+            | Expression::StringLit(_)
+            | Expression::BranchAccess(_)
+            | Expression::AnalogOperator(_)
+            | Expression::NoiseSource(_) => {}
+        }
+    }
+
     /// Whether an expression references any identifier from the given set
     fn references_identifiers(
         expr: &Expression,
@@ -5044,6 +5343,95 @@ impl SemanticAnalyzer {
                 .iter()
                 .any(|e| Self::references_identifiers(e, names)),
             Expression::BranchAccess(_)
+            | Expression::AnalogOperator(_)
+            | Expression::NoiseSource(_) => false,
+        }
+    }
+
+    /// Whether a model-parameter default reads a parameter that has no
+    /// model-card storage. Ordinary Verilog-A identifiers resolve with exact
+    /// case; `$param_given` follows the generated external lookup and accepts
+    /// canonical names and aliases case-insensitively.
+    fn references_parameter_without_model_storage(
+        expr: &Expression,
+        canonical_storage: &std::collections::HashMap<SmolStr, bool>,
+        external_storage: &std::collections::HashMap<String, bool>,
+    ) -> bool {
+        match expr {
+            Expression::Identifier(identifier) => canonical_storage
+                .get(&identifier.name)
+                .is_some_and(|has_model_storage| !has_model_storage),
+            Expression::SystemFunction(function)
+                if function.name.eq_ignore_ascii_case("$param_given")
+                    || function.name.eq_ignore_ascii_case("param_given") =>
+            {
+                let [Expression::Identifier(identifier)] = function.args.as_slice() else {
+                    return false;
+                };
+                external_storage
+                    .get(&identifier.name.to_ascii_lowercase())
+                    .is_some_and(|has_model_storage| !has_model_storage)
+            }
+            Expression::Binary(binary) => {
+                Self::references_parameter_without_model_storage(
+                    &binary.left,
+                    canonical_storage,
+                    external_storage,
+                ) || Self::references_parameter_without_model_storage(
+                    &binary.right,
+                    canonical_storage,
+                    external_storage,
+                )
+            }
+            Expression::Unary(unary) => Self::references_parameter_without_model_storage(
+                &unary.operand,
+                canonical_storage,
+                external_storage,
+            ),
+            Expression::Conditional(conditional) => {
+                Self::references_parameter_without_model_storage(
+                    &conditional.condition,
+                    canonical_storage,
+                    external_storage,
+                ) || Self::references_parameter_without_model_storage(
+                    &conditional.then_expr,
+                    canonical_storage,
+                    external_storage,
+                ) || Self::references_parameter_without_model_storage(
+                    &conditional.else_expr,
+                    canonical_storage,
+                    external_storage,
+                )
+            }
+            Expression::Call(call) => call.args.iter().any(|argument| {
+                Self::references_parameter_without_model_storage(
+                    argument,
+                    canonical_storage,
+                    external_storage,
+                )
+            }),
+            Expression::SystemFunction(function) => function.args.iter().any(|argument| {
+                Self::references_parameter_without_model_storage(
+                    argument,
+                    canonical_storage,
+                    external_storage,
+                )
+            }),
+            Expression::ArrayAccess(access) => Self::references_parameter_without_model_storage(
+                &access.index,
+                canonical_storage,
+                external_storage,
+            ),
+            Expression::ArrayLiteral(array) => array.elements.iter().any(|element| {
+                Self::references_parameter_without_model_storage(
+                    element,
+                    canonical_storage,
+                    external_storage,
+                )
+            }),
+            Expression::Number(_)
+            | Expression::StringLit(_)
+            | Expression::BranchAccess(_)
             | Expression::AnalogOperator(_)
             | Expression::NoiseSource(_) => false,
         }

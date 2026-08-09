@@ -334,6 +334,44 @@ fn canonical_artifacts_exclude_removed_scalar_graph() {
 }
 
 #[test]
+fn canonical_artifacts_default_missing_dual_scope_metadata_to_false() {
+    let canonical = compiler()
+        .compile_canonical_ir(SENSOR_BRIDGE_SOURCE)
+        .expect("compile canonical artifact");
+    let mut encoded = serde_json::to_value(&canonical).expect("serialize canonical artifact");
+    for section in ["hir", "mir"] {
+        let parameters = encoded
+            .get_mut(section)
+            .and_then(|section| section.get_mut("parameters"))
+            .and_then(serde_json::Value::as_array_mut)
+            .expect("canonical parameter array");
+        for parameter in parameters {
+            parameter
+                .as_object_mut()
+                .expect("canonical parameter object")
+                .remove("also_model");
+        }
+    }
+
+    let decoded: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
+        serde_json::from_value(encoded).expect("deserialize pre-dual-scope canonical artifact");
+    assert!(
+        decoded
+            .hir
+            .parameters
+            .iter()
+            .all(|parameter| !parameter.also_model)
+    );
+    assert!(
+        decoded
+            .mir
+            .parameters
+            .iter()
+            .all(|parameter| !parameter.also_model)
+    );
+}
+
+#[test]
 fn integrity_validation_rejects_cross_artifact_digest_drift() {
     let mut report = compiler()
         .compile_runtime(SENSOR_BRIDGE_SOURCE, None)
