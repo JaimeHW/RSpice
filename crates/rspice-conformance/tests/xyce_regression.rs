@@ -6662,6 +6662,7 @@ fn test_xyce_scalar_transient_measurement_artifact_oracles() {
         "Netlists/MEASURE/ErrorTest.cir",
         "Netlists/MEASURE/FindWhenVariableTest.cir",
         "Netlists/MEASURE/TrigTargTest.cir",
+        "Netlists/Certification_Tests/BUG_1962/measure.cir",
     ] {
         let result = runner.run_test(root.join(relative));
         assert!(
