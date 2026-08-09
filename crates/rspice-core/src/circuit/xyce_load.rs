@@ -65,6 +65,10 @@ impl XyceTopologyDevice {
         }
     }
 
+    /// The two-terminal shorthand the traversal tests build graphs with;
+    /// production loaders come through [`new`](Self::new) with the terminal
+    /// list the device already owns.
+    #[cfg(test)]
     pub(crate) fn two_terminal(device: XyceDeviceRef, node_pos: NodeId, node_neg: NodeId) -> Self {
         Self {
             device,
@@ -332,10 +336,18 @@ impl XyceLoadPlan {
         &self.ordered_devices
     }
 
+    /// The traversal's device-family order. Recorded because it is part of
+    /// the Xyce load contract this plan reproduces; the DAE loaders reach the
+    /// devices through the more specific accessors below, so today only the
+    /// tests that pin the traversal read it.
+    #[cfg(test)]
     pub(crate) fn master_order(&self) -> &[XyceDeviceFamily] {
         &self.master_order
     }
 
+    /// Independent sources in traversal order, likewise pinned by the
+    /// traversal tests rather than read by a loader.
+    #[cfg(test)]
     pub(crate) fn independent_sources(&self) -> &[XyceIndependentSourceRef] {
         &self.independent_sources
     }
@@ -464,6 +476,9 @@ impl CircuitData {
         Ok(())
     }
 
+    /// The frozen plan, for the tests that assert what the traversal
+    /// produced. Loaders in this crate read the field directly.
+    #[cfg(test)]
     pub(crate) fn xyce_load_plan(&self) -> &XyceLoadPlan {
         &self.xyce_load_plan
     }

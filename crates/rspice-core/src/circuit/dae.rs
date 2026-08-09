@@ -10,9 +10,10 @@ use crate::Value;
 
 /// Reusable global `Q`, `F`, and `B` vectors for DAE assembly.
 ///
-/// [`clear`](Self::clear) starts a new load without releasing allocation.
-/// [`resize_and_clear`](Self::resize_and_clear) likewise retains existing
-/// capacity whenever it can satisfy the requested dimension.
+/// [`resize_and_clear`](Self::resize_and_clear) starts a new load without
+/// releasing allocation, retaining existing capacity whenever it can satisfy
+/// the requested dimension. Loaders always know the dimension, so that is the
+/// only entry point production code needs.
 #[derive(Clone, Debug)]
 pub(crate) struct XyceDaeVectors {
     q: Vec<Value>,
@@ -39,6 +40,11 @@ impl XyceDaeVectors {
     }
 
     /// Zeros all current contributions while retaining their allocations.
+    ///
+    /// Loaders reach for [`resize_and_clear`](Self::resize_and_clear), which
+    /// zeros as it sizes; this is the dimension-preserving half, exercised on
+    /// its own by the tests below.
+    #[cfg(test)]
     pub(crate) fn clear(&mut self) {
         self.q.fill(0.0);
         self.f.fill(0.0);
