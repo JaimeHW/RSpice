@@ -1,4 +1,4 @@
-#![allow(dead_code, non_snake_case, unused_parens, unused_variables)]
+#![allow(dead_code, non_snake_case, unused_imports, unused_parens, unused_variables)]
 
 use rspice_veriloga_runtime::{GeneratedDdtCoefficients, GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState, boxed_zero_bool_array, boxed_zero_f64_array};
 use rspice_veriloga_runtime::{GeneratedParameterBound as ParameterBound, GENERATED_PARAMETER_MAX_EXCLUSIVE_FLAG as PARAMETER_MAX_EXCLUSIVE_FLAG, GENERATED_PARAMETER_MIN_EXCLUSIVE_FLAG as PARAMETER_MIN_EXCLUSIVE_FLAG, validate_generated_finite_parameter as validate_finite_parameter, validate_generated_parameter as validate_parameter, validate_generated_parameter_bounds as validate_parameter_bounds};
@@ -785,7 +785,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 1901;
     pub const DDT_STATE_COUNT: usize = 19;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "4fe056b27e04fe583867675466d5f8e6f16a4f90f0fd7e4e223073e1f1258e67";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "18d8d4c71e0f9068485900043b57eff9f7707a36d07323424194d8c595611b15";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 

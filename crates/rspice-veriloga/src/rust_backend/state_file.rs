@@ -107,7 +107,14 @@ pub(super) fn generate_state_file_with_extensions(
 ) -> Result<String, RustBackendError> {
     let checkpoint_model_identity = CHECKPOINT_IDENTITY_PLACEHOLDER;
     let mut out = String::new();
-    out.push_str("#![allow(dead_code, non_snake_case, unused_parens, unused_variables)]\n\n");
+    // The parameter-validation prelude below is emitted whole whenever a
+    // model has parameters, but which of its three validators the body calls
+    // depends on that model's own bounds — so an unused import here is the
+    // generator being uniform, not the model being wrong. Same reason the
+    // other four lints are allowed.
+    out.push_str(
+        "#![allow(dead_code, non_snake_case, unused_imports, unused_parens, unused_variables)]\n\n",
+    );
     out.push_str(&format!(
         "use {}::{{GeneratedDdtCoefficients, GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState, boxed_zero_bool_array, boxed_zero_f64_array}};\n",
         options.runtime_path
