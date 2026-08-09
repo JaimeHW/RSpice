@@ -58,8 +58,8 @@ pub use initcond::{
 };
 pub use mutual_inductor::validate_mutual_inductor_references;
 pub(crate) use output_symbols::{
-    InterfaceNodeAliases, canonical_symbol, collect_requested_interface_node_aliases,
-    collect_output_node_namespace_from_elements_with_abort,
+    InterfaceNodeAliases, canonical_symbol, collect_output_node_namespace_from_elements_with_abort,
+    collect_requested_interface_node_aliases,
 };
 pub use output_symbols::{
     OutputAnalysisKind, OutputDirectiveKind, OutputRequest, OutputSymbolDependency,

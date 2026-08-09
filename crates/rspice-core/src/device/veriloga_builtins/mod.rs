@@ -211,6 +211,25 @@ impl BuiltinVerilogADevices {
         }
     }
 
+    /// Refresh an existing rollback image while retaining its outer storage.
+    ///
+    /// Transient trial probes capture this state repeatedly after circuit
+    /// topology has become immutable. Reusing the per-instance vector avoids
+    /// one topology-sized allocation on every rejected Newton point or
+    /// timestep while preserving the generated model's exact state packing.
+    #[inline]
+    pub(crate) fn capture_rollback_state_into(
+        &self,
+        rollback: &mut BuiltinVerilogADevicesRollback,
+    ) {
+        rollback.states.clear();
+        rollback.states.extend(
+            self.devices
+                .iter()
+                .map(|device| device.kind.capture_rollback_state()),
+        );
+    }
+
     #[inline]
     pub(crate) fn restore_rollback_state(&mut self, rollback: BuiltinVerilogADevicesRollback) {
         debug_assert_eq!(self.devices.len(), rollback.states.len());
@@ -1069,6 +1088,22 @@ mod tests {
                 "failed restore must not partially mutate live generated devices"
             );
         }
+    }
+
+    #[cfg(feature = "veriloga-builtins-base")]
+    #[test]
+    fn generated_rollback_refresh_reuses_the_instance_vector() {
+        let devices = checkpoint_test_devices();
+        let expected = devices.capture_rollback_state();
+        let mut reusable = expected.clone();
+        let original_capacity = reusable.states.capacity();
+        let original_storage = reusable.states.as_ptr();
+
+        devices.capture_rollback_state_into(&mut reusable);
+
+        assert_eq!(reusable, expected);
+        assert_eq!(reusable.states.capacity(), original_capacity);
+        assert_eq!(reusable.states.as_ptr(), original_storage);
     }
 
     fn noise_descriptor(

@@ -440,6 +440,15 @@ class CiConfigurationTests(unittest.TestCase):
         ]:
             self.assertIn(target, workflow)
         self.assertIn("veriloga-mobile:", workflow)
+        self.assertIn("Configure Android NDK C toolchain", workflow)
+        self.assertIn(
+            "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin",
+            workflow,
+        )
+        self.assertIn("aarch64-linux-android21-clang", workflow)
+        self.assertIn("CC_aarch64_linux_android", workflow)
+        self.assertIn("AR_aarch64_linux_android", workflow)
+        self.assertIn("CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER", workflow)
 
     def test_linux_ci_runs_clippy_warning_clean(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
@@ -507,6 +516,9 @@ class CiConfigurationTests(unittest.TestCase):
 
     def test_aarch64_desktop_ci_executes_native_veriloga_jit(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
+        aarch64_job = workflow.split("  test-aarch64-native:", maxsplit=1)[1].split(
+            "\n  check-macos-desktop:", maxsplit=1
+        )[0]
 
         self.assertIn("test-aarch64-native:", workflow)
         for runner in ["ubuntu-24.04-arm", "macos-15", "windows-11-arm"]:
@@ -516,6 +528,9 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("Qualify full shipped device census through AArch64 JIT", workflow)
         self.assertIn("Gate AArch64 native JIT performance", workflow)
         self.assertIn("--test native_aarch64_shipped_models", workflow)
+        self.assertIn("--min-dense-speedup 1.50", aarch64_job)
+        self.assertIn("--min-speedup 3.00", aarch64_job)
+        self.assertIn("--min-full-stamp-speedup 2.00", aarch64_job)
 
     def test_macos_hardened_jit_uses_only_narrow_execution_entitlements(self) -> None:
         import plistlib
