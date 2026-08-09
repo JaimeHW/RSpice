@@ -45,6 +45,33 @@ fn circuit_probe_arguments_preserve_digit_leading_node_names() {
 }
 
 #[test]
+fn derived_probe_accessors_preserve_hierarchical_raw_arguments() {
+    for accessor in [
+        "V", "VM", "VR", "VI", "VP", "VDB", "I", "IM", "IR", "II", "IP", "IDB",
+    ] {
+        let expression = parse_expression(&format!("{accessor}( X1 : A )"))
+            .unwrap_or_else(|error| panic!("{accessor} hierarchical probe failed: {error}"));
+        assert!(matches!(
+            expression,
+            Expr::FnCall { ref name, ref args }
+                if name == accessor
+                    && matches!(args.as_slice(), [Expr::Param(symbol)] if symbol == "X1 : A")
+        ));
+    }
+
+    for accessor in ["DNO", "DNI"] {
+        let expression = parse_expression(&format!("{accessor}(X2:R1, thermal)"))
+            .unwrap_or_else(|error| panic!("{accessor} hierarchical probe failed: {error}"));
+        assert!(matches!(
+            expression,
+            Expr::FnCall { ref name, ref args }
+                if name == accessor
+                    && matches!(args.as_slice(), [Expr::Param(device), Expr::Param(mechanism)] if device == "X2:R1" && mechanism == "THERMAL")
+        ));
+    }
+}
+
+#[test]
 fn modulo_operator_matches_xyce_precedence() {
     let ctx = ParamContext::new();
     assert_eq!(eval_with(&ctx, "2 + 6*5/2%4 - 1"), 4.0);

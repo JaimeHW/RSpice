@@ -158,6 +158,85 @@ pub struct XspiceAutoBridgeNodeHint {
 // Flattener
 //=============================================================================
 
+/// Validate one subcircuit invocation after its actual nodes have been mapped
+/// through the parent scope. Both hierarchy flattening and selective interface
+/// alias projection use this routine so duplicate/global/arity diagnostics
+/// retain identical ordering and typed error payloads.
+pub(super) fn validate_subcircuit_port_bindings(
+    subcircuit: &SubcircuitDef,
+    invoked_subcircuit_name: &str,
+    instance_name: &str,
+    qualified_instance_name: &str,
+    actual_count: usize,
+    mapped_ports: &[(&String, String)],
+    global_nodes: &HashSet<String>,
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    let mut first_bindings = HashMap::<String, (usize, &str)>::new();
+    for (index, (formal, actual)) in mapped_ports.iter().enumerate() {
+        poll_parse_abort(abort, index)?;
+        let canonical_formal = formal.to_ascii_uppercase();
+        if let Some((first_index, first_actual)) = first_bindings.get(&canonical_formal) {
+            if !first_actual.eq_ignore_ascii_case(actual) {
+                return Err(ParseError::DuplicateSubcircuitPortBinding(Box::new(
+                    DuplicateSubcircuitPortBindingError {
+                        subcircuit_name: subcircuit.name.clone(),
+                        canonical_subcircuit_name: subcircuit.name.to_ascii_uppercase(),
+                        instance_name: instance_name.to_string(),
+                        canonical_instance_name: instance_name.to_ascii_uppercase(),
+                        qualified_instance_name: qualified_instance_name.to_string(),
+                        formal_port: formal.to_string(),
+                        first_position: first_index + 1,
+                        conflicting_position: index + 1,
+                        first_actual_node: (*first_actual).to_string(),
+                        conflicting_actual_node: actual.clone(),
+                    },
+                ))
+                .into());
+            }
+        } else {
+            let formal_is_global = global_nodes.contains(&canonical_formal)
+                || formal
+                    .get(..2)
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("$G"));
+            if formal_is_global && !formal.eq_ignore_ascii_case(actual) {
+                return Err(ParseError::GlobalSubcircuitPortBinding(Box::new(
+                    GlobalSubcircuitPortBindingError {
+                        subcircuit_name: subcircuit.name.clone(),
+                        canonical_subcircuit_name: subcircuit.name.to_ascii_uppercase(),
+                        instance_name: instance_name.to_string(),
+                        canonical_instance_name: instance_name.to_ascii_uppercase(),
+                        qualified_instance_name: qualified_instance_name.to_string(),
+                        formal_port: formal.to_string(),
+                        position: index + 1,
+                        actual_node: actual.clone(),
+                    },
+                ))
+                .into());
+            }
+            first_bindings.insert(canonical_formal, (index, actual.as_str()));
+        }
+    }
+
+    // Xyce validates every available duplicate/global binding before
+    // connection count and recursion.
+    if actual_count != subcircuit.ports.len() {
+        return Err(ParseError::Syntax {
+            line: 0,
+            message: format!(
+                "Subcircuit instance '{}' connects {} node(s) but '{}' declares {} port(s): {}",
+                qualified_instance_name,
+                actual_count,
+                invoked_subcircuit_name,
+                subcircuit.ports.len(),
+                subcircuit.ports.join(" ")
+            ),
+        }
+        .into());
+    }
+    Ok(())
+}
+
 /// Flattens a hierarchical netlist into a flat element list
 ///
 /// This is the core hierarchy processor that converts subcircuit instances
@@ -282,7 +361,11 @@ impl<'a> Flattener<'a> {
         validate_mutual_inductor_references(netlist)?;
         let mut flat_elements = Vec::new();
         self.external_subckts = Self::collect_external_subckts(netlist);
-        self.global_nodes = netlist.global_nodes.clone();
+        self.global_nodes = netlist
+            .global_nodes
+            .iter()
+            .map(|node| node.to_ascii_uppercase())
+            .collect();
         self.ground_policy = netlist.ground_policy();
         self.expansion_stack.clear();
         self.scoped_models.clear();
@@ -464,7 +547,7 @@ impl<'a> Flattener<'a> {
         }
     }
 
-    fn collect_external_subckts(netlist: &Netlist) -> HashSet<String> {
+    pub(super) fn collect_external_subckts(netlist: &Netlist) -> HashSet<String> {
         let mut names = HashSet::new();
         for include in &netlist.veriloga_includes {
             if let Some(model_name) = &include.model_name {
@@ -525,68 +608,16 @@ impl<'a> Flattener<'a> {
             .zip(&instance.nodes)
             .map(|(port, actual)| (port, self.remap_node(actual, prefix, parent_node_map)))
             .collect::<Vec<_>>();
-        let mut first_bindings = HashMap::<String, (usize, &str)>::new();
-        for (index, (formal, actual)) in mapped_ports.iter().enumerate() {
-            poll_parse_abort(abort, index)?;
-            let canonical_formal = formal.to_ascii_uppercase();
-            if let Some((first_index, first_actual)) = first_bindings.get(&canonical_formal) {
-                if !first_actual.eq_ignore_ascii_case(actual) {
-                    return Err(ParseError::DuplicateSubcircuitPortBinding(Box::new(
-                        DuplicateSubcircuitPortBindingError {
-                            subcircuit_name: subckt.name.clone(),
-                            canonical_subcircuit_name: subckt.name.to_ascii_uppercase(),
-                            instance_name: instance.name.clone(),
-                            canonical_instance_name: instance.name.to_ascii_uppercase(),
-                            qualified_instance_name: new_prefix.clone(),
-                            formal_port: formal.to_string(),
-                            first_position: first_index + 1,
-                            conflicting_position: index + 1,
-                            first_actual_node: (*first_actual).to_string(),
-                            conflicting_actual_node: actual.clone(),
-                        },
-                    ))
-                    .into());
-                }
-            } else {
-                let formal_is_global = self.global_nodes.contains(&canonical_formal)
-                    || formal
-                        .get(..2)
-                        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("$G"));
-                if formal_is_global && !formal.eq_ignore_ascii_case(actual) {
-                    return Err(ParseError::GlobalSubcircuitPortBinding(Box::new(
-                        GlobalSubcircuitPortBindingError {
-                            subcircuit_name: subckt.name.clone(),
-                            canonical_subcircuit_name: subckt.name.to_ascii_uppercase(),
-                            instance_name: instance.name.clone(),
-                            canonical_instance_name: instance.name.to_ascii_uppercase(),
-                            qualified_instance_name: new_prefix.clone(),
-                            formal_port: formal.to_string(),
-                            position: index + 1,
-                            actual_node: actual.clone(),
-                        },
-                    ))
-                    .into());
-                }
-                first_bindings.insert(canonical_formal, (index, actual.as_str()));
-            }
-        }
-
-        // Xyce validates every available duplicate/global binding before
-        // connection count and recursion.
-        if instance.nodes.len() != subckt.ports.len() {
-            return Err(ParseError::Syntax {
-                line: 0,
-                message: format!(
-                    "Subcircuit instance '{}' connects {} node(s) but '{}' declares {} port(s): {}",
-                    new_prefix,
-                    instance.nodes.len(),
-                    subckt_name,
-                    subckt.ports.len(),
-                    subckt.ports.join(" ")
-                ),
-            }
-            .into());
-        }
+        validate_subcircuit_port_bindings(
+            subckt,
+            subckt_name,
+            &instance.name,
+            &new_prefix,
+            instance.nodes.len(),
+            &mapped_ports,
+            &self.global_nodes,
+            abort,
+        )?;
 
         if self
             .expansion_stack

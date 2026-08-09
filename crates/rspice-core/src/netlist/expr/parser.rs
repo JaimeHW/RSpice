@@ -589,7 +589,7 @@ impl<'a> ExprParser<'a> {
 
         // Check for function call
         if self.consume('(') {
-            if matches!(name.as_str(), "V" | "I") {
+            if is_raw_probe_accessor(&name) {
                 let mut args = Vec::new();
                 loop {
                     self.skip_ws();
@@ -660,4 +660,23 @@ fn is_expr_ident_start(c: char) -> bool {
 
 fn is_expr_ident_continue(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '_' | '`' | '@' | '#' | '.' | '$')
+}
+
+fn is_raw_probe_accessor(name: &str) -> bool {
+    matches!(
+        name,
+        "V" | "VM"
+            | "VR"
+            | "VI"
+            | "VP"
+            | "VDB"
+            | "I"
+            | "IM"
+            | "IR"
+            | "II"
+            | "IP"
+            | "IDB"
+            | "DNO"
+            | "DNI"
+    )
 }

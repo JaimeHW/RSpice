@@ -75,10 +75,10 @@ pub enum OutputAnalysisKind {
 impl OutputAnalysisKind {
     pub(crate) fn from_keyword(keyword: &str) -> Option<Self> {
         match keyword.trim().to_ascii_uppercase().as_str() {
-            "TRAN" => Some(Self::Tran),
-            "AC" => Some(Self::Ac),
-            "DC" => Some(Self::Dc),
-            "NOISE" => Some(Self::Noise),
+            "TRAN" | "TRAN_CONT" => Some(Self::Tran),
+            "AC" | "AC_CONT" => Some(Self::Ac),
+            "DC" | "DC_CONT" => Some(Self::Dc),
+            "NOISE" | "NOISE_CONT" => Some(Self::Noise),
             "DISTO" => Some(Self::Disto),
             "OP" => Some(Self::Op),
             "TF" => Some(Self::Tf),
@@ -133,6 +133,16 @@ pub struct OutputRequest {
 }
 
 impl OutputRequest {
+    /// Whether this request needs any transient device-current operand.
+    pub(crate) fn requires_transient_device_current_operand(&self) -> bool {
+        self.analysis
+            .is_none_or(|analysis| analysis == OutputAnalysisKind::Tran)
+            && self.dependencies.iter().any(|dependency| {
+                dependency.kind == OutputSymbolKind::Device
+                    && is_transient_device_current_operator(&dependency.operator)
+            })
+    }
+
     /// Whether this request needs a derived transient current for `device`.
     ///
     /// Direct `I(device)` probes already appear in [`SaveSet`](super::SaveSet),
@@ -140,16 +150,13 @@ impl OutputRequest {
     /// represented only by this typed dependency sidecar. Result retention
     /// must honor both representations before integration starts.
     pub(crate) fn selects_transient_device_current(&self, device: &str) -> bool {
-        if self
-            .analysis
-            .is_some_and(|analysis| analysis != OutputAnalysisKind::Tran)
-        {
+        if !self.requires_transient_device_current_operand() {
             return false;
         }
         let device = canonical_symbol(device);
         self.dependencies.iter().any(|dependency| {
             dependency.kind == OutputSymbolKind::Device
-                && matches!(dependency.operator.as_str(), "I" | "P" | "W")
+                && is_transient_device_current_operator(&dependency.operator)
                 && hierarchy_pattern_matches(&canonical_symbol(&dependency.symbol), &device)
         })
     }
@@ -269,6 +276,13 @@ impl OutputRequest {
             dependencies,
         }
     }
+}
+
+fn is_transient_device_current_operator(operator: &str) -> bool {
+    matches!(
+        operator,
+        "I" | "IR" | "II" | "IM" | "IP" | "IDB" | "P" | "W"
+    )
 }
 
 fn retain_authored_dependency_spelling(
@@ -394,7 +408,7 @@ pub fn validate_output_symbols_with_abort(
         }
         collect_embedded_element_nodes(&element.kind, &mut nodes);
     }
-    let node_aliases = collect_interface_aliases(netlist, abort)?;
+    let node_aliases = collect_interface_node_aliases_with_abort(netlist, abort)?;
     ensure_parse_not_aborted(abort)?;
 
     let mut unresolved = Vec::new();
@@ -494,7 +508,7 @@ fn analysis_owned_output_vector_exists(
 
 /// Build the complete flattened node namespace used by semantic validators.
 ///
-/// This includes element terminals, control/embedded nodes, and transitive
+/// This includes element terminals, control/embedded nodes, and one-hop
 /// hierarchy-interface aliases. `None` preserves ordinary elaboration-error
 /// precedence when a deck cannot yet be flattened.
 pub(crate) fn collect_output_node_namespace_from_elements_with_abort(
@@ -512,16 +526,10 @@ pub(crate) fn collect_output_node_namespace_from_elements_with_abort(
         }
         collect_embedded_element_nodes(&element.kind, &mut nodes);
     }
-    let aliases = collect_interface_aliases(netlist, abort)?;
-    loop {
-        let before = nodes.len();
-        for alias in aliases.keys() {
-            if resolved_alias_exists(&nodes, &aliases, alias) {
-                nodes.insert(alias.clone());
-            }
-        }
-        if nodes.len() == before {
-            break;
+    let aliases = collect_interface_node_aliases_with_abort(netlist, abort)?;
+    for (alias, target) in aliases.iter() {
+        if nodes.contains(target) {
+            nodes.insert(alias.to_string());
         }
     }
     ensure_parse_not_aborted(abort)?;
@@ -652,7 +660,7 @@ fn canonical_dependency_symbol(
     }
 }
 
-fn canonical_symbol(symbol: &str) -> String {
+pub(crate) fn canonical_symbol(symbol: &str) -> String {
     symbol
         .trim()
         .chars()
@@ -666,19 +674,151 @@ fn canonical_symbol(symbol: &str) -> String {
         .collect()
 }
 
-fn collect_interface_aliases(
+/// Canonical map from subcircuit interface names to flattened solution nodes.
+///
+/// The representation stays opaque so validation and runtime consumers share
+/// the same case and hierarchy-separator rules. Targets remain one-hop: a
+/// target can itself be a physical node whose spelling also happens to be an
+/// interface alias, and that physical node must win.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct InterfaceNodeAliases {
+    targets: HashMap<String, String>,
+}
+
+impl InterfaceNodeAliases {
+    /// Resolve an authored alias spelling to its direct flattened target.
+    pub(crate) fn resolve(&self, authored: &str) -> Option<&str> {
+        let canonical = canonical_symbol(authored);
+        self.targets.get(&canonical).map(String::as_str)
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.targets
+            .iter()
+            .map(|(alias, target)| (alias.as_str(), target.as_str()))
+    }
+
+    fn keys(&self) -> impl Iterator<Item = &String> {
+        self.targets.keys()
+    }
+}
+
+/// Collect interface aliases for non-abortable analysis post-processing.
+#[cfg(test)]
+pub(crate) fn collect_interface_node_aliases(
+    netlist: &Netlist,
+) -> Result<InterfaceNodeAliases, ParseError> {
+    super::finish_non_aborting_parse(collect_interface_node_aliases_with_abort(
+        netlist,
+        &crate::abort_signal::NoAbort,
+    ))
+}
+
+/// Collect only interface aliases referenced by one analysis adapter.
+///
+/// Only hierarchy paths that can own a requested alias are traversed, and only
+/// requested formal ports are retained. Exhaustive output-symbol validation
+/// remains owned by the full collector. This projection matches Xyce's
+/// requested-alias materialization policy without scaling measurement setup
+/// with unrelated hierarchy.
+pub(crate) fn collect_requested_interface_node_aliases(
+    netlist: &Netlist,
+    requested: &HashSet<String>,
+) -> Result<InterfaceNodeAliases, ParseError> {
+    let requested = requested
+        .iter()
+        .map(|alias| canonical_symbol(alias))
+        .collect::<HashSet<_>>();
+    if requested.is_empty() {
+        return Ok(InterfaceNodeAliases::default());
+    }
+    super::finish_non_aborting_parse(collect_interface_node_aliases_impl(
+        netlist,
+        Some(&requested),
+        &crate::abort_signal::NoAbort,
+    ))
+}
+
+fn collect_interface_node_aliases_with_abort(
     netlist: &Netlist,
     abort: &dyn AbortSignal,
-) -> Result<HashMap<String, String>, ParseWithAbortError> {
+) -> Result<InterfaceNodeAliases, ParseWithAbortError> {
+    collect_interface_node_aliases_impl(netlist, None, abort)
+}
+
+fn collect_interface_node_aliases_impl(
+    netlist: &Netlist,
+    requested_aliases: Option<&HashSet<String>>,
+    abort: &dyn AbortSignal,
+) -> Result<InterfaceNodeAliases, ParseWithAbortError> {
+    let config = FlattenerConfig::default();
+    collect_interface_node_aliases_impl_with_limits(
+        netlist,
+        requested_aliases,
+        abort,
+        config.max_depth,
+        config.max_elements,
+    )
+}
+
+fn collect_interface_node_aliases_impl_with_limits(
+    netlist: &Netlist,
+    requested_aliases: Option<&HashSet<String>>,
+    abort: &dyn AbortSignal,
+    max_depth: usize,
+    max_elements: usize,
+) -> Result<InterfaceNodeAliases, ParseWithAbortError> {
+    fn requested_instance_paths(
+        requested_aliases: Option<&HashSet<String>>,
+    ) -> (Option<HashSet<String>>, Option<HashSet<String>>) {
+        let Some(requested_aliases) = requested_aliases else {
+            return (None, None);
+        };
+        let mut visit = HashSet::new();
+        let mut descend = HashSet::new();
+        for alias in requested_aliases {
+            let Some((deepest_instance, _)) = alias.rsplit_once('.') else {
+                continue;
+            };
+            visit.insert(deepest_instance.to_string());
+            let mut child = deepest_instance;
+            while let Some((parent, _)) = child.rsplit_once('.') {
+                visit.insert(parent.to_string());
+                descend.insert(parent.to_string());
+                child = parent;
+            }
+        }
+        (Some(visit), Some(descend))
+    }
+
     struct AliasCollector<'a> {
         definitions: HashMap<String, &'a super::SubcircuitDef>,
+        external_subcircuits: HashSet<String>,
         globals: &'a HashSet<String>,
         ground_policy: super::GroundPolicy,
         aliases: HashMap<String, String>,
-        visits: usize,
+        requested_aliases: Option<&'a HashSet<String>>,
+        instances_to_visit: Option<HashSet<String>>,
+        instances_to_descend: Option<HashSet<String>>,
+        max_depth: usize,
+        max_elements: usize,
+        emitted_elements: usize,
+        traversal_steps: usize,
     }
 
-    impl AliasCollector<'_> {
+    impl<'a> AliasCollector<'a> {
+        fn charge_emitted_element(&mut self) -> Result<(), ParseWithAbortError> {
+            let requested = self.emitted_elements.saturating_add(1);
+            crate::resource::ResourceLimitError::ensure(
+                crate::resource::ResourceKind::FlattenedElements,
+                requested,
+                self.max_elements,
+            )
+            .map_err(ParseError::from)?;
+            self.emitted_elements = requested;
+            Ok(())
+        }
+
         fn remap_node(&self, node: &str, prefix: &str, ports: &HashMap<String, String>) -> String {
             let canonical =
                 canonical_dependency_symbol(node, OutputSymbolKind::Node, self.ground_policy);
@@ -696,40 +836,154 @@ fn collect_interface_aliases(
             }
         }
 
-        fn walk(
+        fn collect(
             &mut self,
-            elements: &[super::Element],
-            prefix: &str,
-            parent_ports: &HashMap<String, String>,
+            root_elements: &'a [super::Element],
             abort: &dyn AbortSignal,
         ) -> Result<(), ParseWithAbortError> {
-            for element in elements {
-                poll_parse_abort(abort, self.visits)?;
-                self.visits += 1;
+            struct Frame<'a> {
+                elements: &'a [super::Element],
+                next_index: usize,
+                prefix: String,
+                parent_ports: HashMap<String, String>,
+                active_definitions: Vec<String>,
+                depth: usize,
+            }
+
+            let mut frames = vec![Frame {
+                elements: root_elements,
+                next_index: 0,
+                prefix: String::new(),
+                parent_ports: HashMap::new(),
+                active_definitions: Vec::new(),
+                depth: 0,
+            }];
+            while !frames.is_empty() {
+                let frame_index = frames.len() - 1;
+                if frames[frame_index].next_index >= frames[frame_index].elements.len() {
+                    frames.pop();
+                    continue;
+                }
+                let element_index = frames[frame_index].next_index;
+                frames[frame_index].next_index += 1;
+                poll_parse_abort(abort, self.traversal_steps)?;
+                self.traversal_steps = self.traversal_steps.saturating_add(1);
+                let frame = &frames[frame_index];
+                let element = &frame.elements[element_index];
+                crate::resource::ResourceLimitError::ensure(
+                    crate::resource::ResourceKind::HierarchyDepth,
+                    frame.depth,
+                    self.max_depth,
+                )
+                .map_err(ParseError::from)?;
                 let ElementKind::Subcircuit { subckt_name, .. } = &element.kind else {
+                    if self.requested_aliases.is_none() {
+                        self.charge_emitted_element()?;
+                    }
                     continue;
                 };
-                let Some(definition) = self
-                    .definitions
-                    .get(&subckt_name.to_ascii_uppercase())
-                    .copied()
-                else {
-                    continue;
-                };
-                let instance = if prefix.is_empty() {
+                let instance = if frame.prefix.is_empty() {
                     canonical_symbol(&element.name)
                 } else {
-                    format!("{prefix}.{}", canonical_symbol(&element.name))
+                    format!("{}.{}", frame.prefix, canonical_symbol(&element.name))
                 };
+                if self
+                    .instances_to_visit
+                    .as_ref()
+                    .is_some_and(|instances| !instances.contains(&instance))
+                {
+                    continue;
+                }
+                let canonical_subcircuit = subckt_name.to_ascii_uppercase();
+                let Some(definition) = self.definitions.get(&canonical_subcircuit).copied() else {
+                    if self.external_subcircuits.contains(&canonical_subcircuit) {
+                        self.charge_emitted_element()?;
+                        continue;
+                    }
+                    return Err(ParseError::Syntax {
+                        line: 0,
+                        message: format!("Undefined subcircuit: {subckt_name}"),
+                    }
+                    .into());
+                };
+                let mapped_ports = definition
+                    .ports
+                    .iter()
+                    .zip(&element.nodes)
+                    .map(|(formal, actual)| {
+                        (
+                            formal,
+                            self.remap_node(actual, &frame.prefix, &frame.parent_ports),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                super::flattener::validate_subcircuit_port_bindings(
+                    definition,
+                    subckt_name,
+                    &element.name,
+                    &instance,
+                    element.nodes.len(),
+                    &mapped_ports,
+                    self.globals,
+                    abort,
+                )?;
+                if let Some(start) = frame
+                    .active_definitions
+                    .iter()
+                    .position(|name| name == &canonical_subcircuit)
+                {
+                    let mut chain = frame.active_definitions[start..].to_vec();
+                    chain.push(canonical_subcircuit);
+                    return Err(ParseError::Syntax {
+                        line: 0,
+                        message: format!(
+                            "Recursive subcircuit instantiation at '{instance}': {}",
+                            chain.join(" -> ")
+                        ),
+                    }
+                    .into());
+                }
                 let mut child_ports = HashMap::new();
-                for (formal, actual) in definition.ports.iter().zip(&element.nodes) {
+                for (formal, target) in mapped_ports {
                     let formal = canonical_symbol(formal);
-                    let target = self.remap_node(actual, prefix, parent_ports);
                     let alias = format!("{instance}.{formal}");
-                    self.aliases.insert(alias, target.clone());
+                    if self
+                        .requested_aliases
+                        .is_none_or(|requested| requested.contains(&alias))
+                    {
+                        if let Some(existing) = self.aliases.get(&alias) {
+                            if existing != &target {
+                                return Err(ParseError::Syntax {
+                                    line: 0,
+                                    message: format!(
+                                        "Interface alias '{alias}' resolves ambiguously to '{existing}' and '{target}'"
+                                    ),
+                                }
+                                .into());
+                            }
+                        } else {
+                            self.aliases.insert(alias, target.clone());
+                        }
+                    }
                     child_ports.entry(formal).or_insert(target);
                 }
-                self.walk(&definition.elements, &instance, &child_ports, abort)?;
+                if self
+                    .instances_to_descend
+                    .as_ref()
+                    .is_some_and(|instances| !instances.contains(&instance))
+                {
+                    continue;
+                }
+                let mut active_definitions = frame.active_definitions.clone();
+                active_definitions.push(canonical_subcircuit);
+                frames.push(Frame {
+                    elements: &definition.elements,
+                    next_index: 0,
+                    prefix: instance,
+                    parent_ports: child_ports,
+                    active_definitions,
+                    depth: frame.depth.saturating_add(1),
+                });
             }
             Ok(())
         }
@@ -745,15 +999,25 @@ fn collect_interface_aliases(
         .iter()
         .map(|node| canonical_symbol(node))
         .collect::<HashSet<_>>();
+    let (instances_to_visit, instances_to_descend) = requested_instance_paths(requested_aliases);
     let mut collector = AliasCollector {
         definitions,
+        external_subcircuits: Flattener::collect_external_subckts(netlist),
         globals: &globals,
         ground_policy: netlist.ground_policy(),
         aliases: HashMap::new(),
-        visits: 0,
+        requested_aliases,
+        instances_to_visit,
+        instances_to_descend,
+        max_depth,
+        max_elements,
+        emitted_elements: 0,
+        traversal_steps: 0,
     };
-    collector.walk(&netlist.elements, "", &HashMap::new(), abort)?;
-    Ok(collector.aliases)
+    collector.collect(&netlist.elements, abort)?;
+    Ok(InterfaceNodeAliases {
+        targets: collector.aliases,
+    })
 }
 
 fn namespace_matches(namespace: &HashSet<String>, pattern: &str) -> bool {
@@ -770,7 +1034,7 @@ fn namespace_matches(namespace: &HashSet<String>, pattern: &str) -> bool {
 
 fn namespace_matches_with_aliases(
     namespace: &HashSet<String>,
-    aliases: &HashMap<String, String>,
+    aliases: &InterfaceNodeAliases,
     pattern: &str,
 ) -> bool {
     if pattern == "*" {
@@ -780,7 +1044,7 @@ fn namespace_matches_with_aliases(
         return namespace
             .iter()
             .any(|candidate| hierarchy_pattern_matches(pattern, candidate))
-            || aliases.iter().any(|(alias, _)| {
+            || aliases.keys().any(|alias| {
                 hierarchy_pattern_matches(pattern, alias)
                     && resolved_alias_exists(namespace, aliases, alias)
             });
@@ -790,21 +1054,12 @@ fn namespace_matches_with_aliases(
 
 fn resolved_alias_exists(
     namespace: &HashSet<String>,
-    aliases: &HashMap<String, String>,
+    aliases: &InterfaceNodeAliases,
     alias: &str,
 ) -> bool {
-    let mut current = alias;
-    let mut visited = HashSet::new();
-    while let Some(target) = aliases.get(current) {
-        if !visited.insert(current.to_string()) {
-            return false;
-        }
-        if namespace.contains(target) {
-            return true;
-        }
-        current = target;
-    }
-    false
+    aliases
+        .resolve(alias)
+        .is_some_and(|target| namespace.contains(target))
 }
 
 fn hierarchy_pattern_matches(pattern: &str, candidate: &str) -> bool {
@@ -892,7 +1147,7 @@ pub(crate) fn extract_output_dependencies(source: &str) -> Vec<OutputSymbolDepen
                     push_dependency(&mut dependencies, &operator, arg, OutputSymbolKind::Node);
                 }
             }
-            "I" | "P" | "W" => {
+            "I" | "IR" | "II" | "IM" | "IP" | "IDB" | "DNO" | "DNI" | "P" | "W" => {
                 if let Some(arg) = args.first() {
                     push_dependency(&mut dependencies, &operator, arg, OutputSymbolKind::Device);
                 }
@@ -907,7 +1162,22 @@ pub(crate) fn extract_output_dependencies(source: &str) -> Vec<OutputSymbolDepen
         // ordinary arithmetic functions retain their circuit dependencies.
         if !matches!(
             operator.as_str(),
-            "V" | "VR" | "VI" | "VM" | "VP" | "VDB" | "N" | "I" | "P" | "W"
+            "V" | "VR"
+                | "VI"
+                | "VM"
+                | "VP"
+                | "VDB"
+                | "N"
+                | "I"
+                | "IR"
+                | "II"
+                | "IM"
+                | "IP"
+                | "IDB"
+                | "DNO"
+                | "DNI"
+                | "P"
+                | "W"
         ) {
             dependencies.extend(extract_output_dependencies(&source[open + 1..close]));
         }
@@ -1143,6 +1413,77 @@ mod tests {
     }
 
     #[test]
+    fn continuous_measurements_retain_their_base_analysis_domain() {
+        for (keyword, expected) in [
+            ("TRAN_CONT", OutputAnalysisKind::Tran),
+            ("DC_CONT", OutputAnalysisKind::Dc),
+            ("AC_CONT", OutputAnalysisKind::Ac),
+            ("NOISE_CONT", OutputAnalysisKind::Noise),
+        ] {
+            assert_eq!(OutputAnalysisKind::from_keyword(keyword), Some(expected));
+        }
+    }
+
+    #[test]
+    fn derived_current_and_noise_probes_retain_device_dependencies() {
+        let dependencies = extract_output_dependencies(
+            "IM(X1:R1) IR(X2:R2) II(X3:R3) IP(X4:R4) IDB(X5:R5) \
+             DNO(X6:R6,thermal) DNI(X7:R7)",
+        );
+        assert_eq!(
+            dependencies
+                .iter()
+                .map(|dependency| (
+                    dependency.operator.as_str(),
+                    dependency.symbol.as_str(),
+                    dependency.kind,
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("IM", "X1:R1", OutputSymbolKind::Device),
+                ("IR", "X2:R2", OutputSymbolKind::Device),
+                ("II", "X3:R3", OutputSymbolKind::Device),
+                ("IP", "X4:R4", OutputSymbolKind::Device),
+                ("IDB", "X5:R5", OutputSymbolKind::Device),
+                ("DNO", "X6:R6", OutputSymbolKind::Device),
+                ("DNI", "X7:R7", OutputSymbolKind::Device),
+            ]
+        );
+    }
+
+    #[test]
+    fn transient_capture_predicate_covers_current_projections_only() {
+        for operator in ["I", "IR", "II", "IM", "IP", "IDB", "P", "W"] {
+            let source = format!(
+                "transient current selection\nR1 1 0 1\n.TRAN 1 1\n.PRINT TRAN {operator}(R1)\n.END\n"
+            );
+            let netlist = Netlist::parse(&source).expect("transient current request parses");
+            let request = netlist
+                .output_requests
+                .last()
+                .expect("PRINT request retained");
+            assert!(
+                request.requires_transient_device_current_operand(),
+                "{operator}"
+            );
+            assert!(request.selects_transient_device_current("r1"), "{operator}");
+        }
+
+        for source in [
+            "AC current is not transient\nR1 1 0 1\n.AC LIN 1 1 1\n.PRINT AC IR(R1)\n.END\n",
+            "noise contribution is not a branch current\nR1 1 0 1\n.NOISE V(1) V1 LIN 1 1 1\n.PRINT NOISE DNO(R1,thermal)\n.END\n",
+        ] {
+            let netlist = Netlist::parse(source).expect("non-transient request parses");
+            let request = netlist
+                .output_requests
+                .last()
+                .expect("output request retained");
+            assert!(!request.requires_transient_device_current_operand());
+            assert!(!request.selects_transient_device_current("R1"));
+        }
+    }
+
+    #[test]
     fn dependency_extraction_scales_to_certification_sized_probe_lists() {
         let source = (0..20_000)
             .map(|index| {
@@ -1324,6 +1665,247 @@ mod tests {
              .END\n",
         )
         .expect("formal aliases, wildcard nodes, and wildcard devices resolve");
+    }
+
+    #[test]
+    fn interface_aliases_resolve_nested_ports_case_separators_and_ground() {
+        let netlist = Netlist::parse(
+            "nested interface aliases\n\
+             V1 1 0 1\n\
+             XTOP 1 0 OUTER\n\
+             .SUBCKT INNER P N\n\
+             R1 P N 1\n\
+             .ENDS\n\
+             .SUBCKT OUTER A G\n\
+             XINNER A G INNER\n\
+             .ENDS\n\
+             .END\n",
+        )
+        .expect("nested alias deck parses");
+
+        let aliases = collect_interface_node_aliases(&netlist).expect("aliases collect");
+        assert_eq!(aliases.resolve("xtop:a"), Some("1"));
+        assert_eq!(aliases.resolve("XTOP.A"), Some("1"));
+        assert_eq!(aliases.resolve("XTOP:XINNER:P"), Some("1"));
+        assert_eq!(aliases.resolve("xtop.xinner.n"), Some("0"));
+        assert_eq!(aliases.resolve("XTOP:UNKNOWN"), None);
+    }
+
+    #[test]
+    fn interface_alias_resolution_is_one_hop() {
+        let aliases = InterfaceNodeAliases {
+            targets: HashMap::from([
+                ("A".to_string(), "B".to_string()),
+                ("B".to_string(), "C".to_string()),
+            ]),
+        };
+        assert_eq!(aliases.resolve("a"), Some("B"));
+        assert_eq!(aliases.resolve("b"), Some("C"));
+
+        let physical_name_collision = InterfaceNodeAliases {
+            targets: HashMap::from([("A".to_string(), "A".to_string())]),
+        };
+        assert_eq!(physical_name_collision.resolve("A"), Some("A"));
+    }
+
+    #[test]
+    fn interface_alias_collection_rejects_recursive_hierarchy() {
+        let netlist = Netlist::parse(
+            "recursive aliases\n\
+             X1 1 0 LOOP\n\
+             .SUBCKT LOOP A B\n\
+             XSELF A B LOOP\n\
+             .ENDS\n\
+             .END\n",
+        )
+        .expect("syntactic parser retains recursive hierarchy");
+
+        let error = collect_interface_node_aliases(&netlist)
+            .expect_err("runtime alias collection must reject recursion");
+        assert!(
+            matches!(&error, ParseError::Syntax { message, .. } if message.contains("Recursive subcircuit instantiation")),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn requested_interface_alias_collection_omits_unreferenced_ports_and_instances() {
+        let netlist = Netlist::parse(
+            "selected aliases\n\
+             X1 1 0 CELL\n\
+             X2 2 0 CELL\n\
+             .SUBCKT CELL A B\n\
+             R1 A B 1\n\
+             .ENDS\n\
+             .END\n",
+        )
+        .expect("selection deck parses");
+        let requested = HashSet::from(["X1:A".to_string()]);
+
+        let aliases = collect_requested_interface_node_aliases(&netlist, &requested)
+            .expect("selected aliases collect");
+
+        assert_eq!(aliases.iter().count(), 1);
+        assert_eq!(aliases.resolve("X1.A"), Some("1"));
+        assert_eq!(aliases.resolve("X1.B"), None);
+        assert_eq!(aliases.resolve("X2.A"), None);
+    }
+
+    #[test]
+    fn requested_interface_alias_collection_prunes_empty_and_unrelated_paths() {
+        let recursive = Netlist::parse(
+            "unrequested recursive hierarchy\n\
+             X1 1 LOOP\n\
+             .SUBCKT LOOP A\n\
+             XSELF A LOOP\n\
+             .ENDS\n\
+             .END\n",
+        )
+        .expect("recursive hierarchy parses syntactically");
+        let empty = collect_requested_interface_node_aliases(&recursive, &HashSet::new())
+            .expect("empty projection does not elaborate hierarchy");
+        assert_eq!(empty.iter().count(), 0);
+
+        let netlist = Netlist::parse(
+            "prefix-exact selected aliases\n\
+             X1 1 MISSING\n\
+             X10 10 CELL\n\
+             .SUBCKT CELL A\n\
+             R1 A 0 1\n\
+             .ENDS\n\
+             .END\n",
+        )
+        .expect("selected hierarchy parses syntactically");
+        let selected = HashSet::from(["X10:A".to_string()]);
+        let aliases = collect_requested_interface_node_aliases(&netlist, &selected)
+            .expect("X10 selection must not traverse X1");
+        assert_eq!(aliases.resolve("X10.A"), Some("10"));
+
+        let invalid = HashSet::from(["X1:A".to_string()]);
+        assert!(matches!(
+            collect_requested_interface_node_aliases(&netlist, &invalid),
+            Err(ParseError::Syntax { message, .. }) if message.contains("Undefined subcircuit")
+        ));
+    }
+
+    #[test]
+    fn requested_interface_aliases_share_typed_port_binding_validation() {
+        let netlist = Netlist::parse(
+            "duplicate formal binding\n\
+             X1 1 2 CELL\n\
+             .SUBCKT CELL A A\n\
+             R1 A 0 1\n\
+             .ENDS\n\
+             .END\n",
+        )
+        .expect("duplicate formal hierarchy parses syntactically");
+        let requested = HashSet::from(["X1:A".to_string()]);
+        assert!(matches!(
+            collect_requested_interface_node_aliases(&netlist, &requested),
+            Err(ParseError::DuplicateSubcircuitPortBinding(_))
+        ));
+    }
+
+    #[test]
+    fn exhaustive_alias_resource_accounting_matches_flattened_leaf_count() {
+        let one_leaf = Netlist::parse(
+            "one flattened leaf\n\
+             X1 1 OUTER\n\
+             .SUBCKT INNER A\n\
+             R1 A 0 1\n\
+             .ENDS\n\
+             .SUBCKT OUTER A\n\
+             X2 A INNER\n\
+             .ENDS\n\
+             .END\n",
+        )
+        .expect("one-leaf hierarchy parses");
+        crate::netlist::finish_non_aborting_parse(collect_interface_node_aliases_impl_with_limits(
+            &one_leaf,
+            None,
+            &crate::abort_signal::NoAbort,
+            100,
+            1,
+        ))
+        .expect("two X containers plus one resistor emit one leaf");
+
+        let two_leaves = Netlist::parse(
+            "two flattened leaves\n\
+             X1 1 CELL\n\
+             .SUBCKT CELL A\n\
+             R1 A 0 1\n\
+             R2 A 0 2\n\
+             .ENDS\n\
+             .END\n",
+        )
+        .expect("two-leaf hierarchy parses");
+        let error = crate::netlist::finish_non_aborting_parse(
+            collect_interface_node_aliases_impl_with_limits(
+                &two_leaves,
+                None,
+                &crate::abort_signal::NoAbort,
+                100,
+                1,
+            ),
+        )
+        .expect_err("second emitted resistor exceeds the one-leaf limit");
+        assert!(matches!(
+            error,
+            ParseError::ResourceLimit(crate::resource::ResourceLimitError {
+                resource: crate::resource::ResourceKind::FlattenedElements,
+                requested: 2,
+                limit: 1,
+            })
+        ));
+    }
+
+    #[test]
+    fn interface_alias_collection_accepts_the_exact_hierarchy_depth_limit() {
+        let mut source = String::from("allowed alias depth\nXROOT 1 0 S0\n");
+        for depth in 0..=99 {
+            source.push_str(&format!(".SUBCKT S{depth} A B\n"));
+            if depth < 99 {
+                source.push_str(&format!("XNEXT A B S{}\n", depth + 1));
+            } else {
+                source.push_str("R1 A B 1\n");
+            }
+            source.push_str(".ENDS\n");
+        }
+        source.push_str(".END\n");
+        let netlist = Netlist::parse(&source).expect("boundary hierarchy parses");
+
+        collect_interface_node_aliases(&netlist)
+            .expect("an element at hierarchy depth 100 is permitted");
+    }
+
+    #[test]
+    fn interface_alias_collection_enforces_hierarchy_depth_limit() {
+        let mut source = String::from("deep aliases\nXROOT 1 0 S0\n");
+        for depth in 0..=100 {
+            source.push_str(&format!(".SUBCKT S{depth} A B\n"));
+            if depth < 100 {
+                source.push_str(&format!("XNEXT A B S{}\n", depth + 1));
+            } else {
+                source.push_str("R1 A B 1\n");
+            }
+            source.push_str(".ENDS\n");
+        }
+        source.push_str(".END\n");
+        let netlist = Netlist::parse(&source).expect("deep hierarchy parses syntactically");
+
+        let error = collect_interface_node_aliases(&netlist)
+            .expect_err("runtime alias collection must enforce depth limits");
+        assert!(
+            matches!(
+                &error,
+                ParseError::ResourceLimit(crate::resource::ResourceLimitError {
+                    resource: crate::resource::ResourceKind::HierarchyDepth,
+                    requested: 101,
+                    limit: 100,
+                })
+            ),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

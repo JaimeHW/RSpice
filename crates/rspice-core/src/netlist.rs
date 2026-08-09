@@ -57,7 +57,10 @@ pub use initcond::{
     MAX_DEVICE_INITIAL_CONDITION_SOURCE_BYTES,
 };
 pub use mutual_inductor::validate_mutual_inductor_references;
-pub(crate) use output_symbols::collect_output_node_namespace_from_elements_with_abort;
+pub(crate) use output_symbols::{
+    InterfaceNodeAliases, canonical_symbol, collect_requested_interface_node_aliases,
+    collect_output_node_namespace_from_elements_with_abort,
+};
 pub use output_symbols::{
     OutputAnalysisKind, OutputDirectiveKind, OutputRequest, OutputSymbolDependency,
     OutputSymbolKind, OutputSymbolValidationError, UnresolvedOutputSymbol, validate_output_symbols,
