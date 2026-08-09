@@ -11,7 +11,8 @@ multi-corpus validation work.
 - Vendored into RSpice on: 2026-06-26
 - Scope: runtime test materials only. RSpice keeps `Netlists/`, `OutputData/`,
   upstream `README.md`, `COPYING`, this note, and
-  `RSPICE-HARNESS-MANIFEST.tsv`.
+  `RSPICE-HARNESS-MANIFEST.tsv` plus
+  `RSPICE-UPSTREAM-EXCLUSIONS.tsv`.
 - Trimmed upstream harness material: `TestScripts/`, `.cir.sh` shell wrappers,
   Perl/Python helper scripts, tag/exclude selection files, and upstream
   per-directory `Manifest.txt` runner lists. RSpice discovers retained `.cir`
@@ -33,9 +34,9 @@ redistributing this corpus.
 
 ## Harness Status
 
-This corpus is not executed by `crates/rspice-core/tests/ngspice_regression.rs`.
+This corpus is not executed by the ngspice regression adapter.
 That harness is scoped to `tests/ngspice/`. Xyce uses its own Rust-native
-adapter in `crates/rspice-core/tests/xyce_regression.rs` because its
+adapter in `crates/rspice-conformance/tests/xyce_regression.rs` because its
 `Netlists/` and `OutputData/` layout and `.prn`-style references differ from
 ngspice's checked-in `.out` convention.
 
@@ -44,3 +45,29 @@ had a `.cir.sh` wrapper sidecar. The wrapper scripts themselves are not
 vendored; the manifest is the cross-platform contract the Rust adapter uses to
 report those decks as expected-unsupported until wrapper semantics are
 implemented natively.
+
+`RSPICE-UPSTREAM-EXCLUSIONS.tsv` is the complete, versioned provenance
+manifest for all 1,143 retained decks named by the upstream exclusion files.
+Its source is commit `80115a9277c0ddb3409acceb3d4e745fd11cddd4`, Netlists
+tree `3e34bfaafa890cb2e4457137b6a0e325c8c1e87d`, immediately before RSpice
+trimmed those platform-harness files. Each row records the original `exclude`
+file even though the files themselves remain trimmed.
+
+Upstream exclusion is the default disposition: the adapter still discovers
+and counts the deck, but does not claim execution coverage from an oracle the
+upstream harness excludes. This is distinct from an RSpice feature gap and is
+reported separately from `expected_unsupported`.
+
+Some upstream exclusions are helper, baseline, or control decks tested by an
+upstream wrapper owner. RSpice has independently reconstructed and qualified
+native relational contracts for 123 such decks. Those rows use
+`rspice_independently_qualified` and name the exact expected native contract.
+The adapter executes them, preserves their upstream provenance on the result,
+and fails closed if execution becomes unsupported, fails, or selects a
+different contract. A removed-wrapper marker by itself is not a promotion.
+
+The complete inventory and promotions are reproduced by
+`tools/xyce/sync_upstream_exclusions.py`. The checked-in manifest pins the
+source tree, the clean RSpice qualification commit, and the qualification
+report digest; the Rust loader also pins its exact path, promotion, record,
+and file identities.

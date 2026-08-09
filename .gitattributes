@@ -24,6 +24,10 @@ models/spice/**/LICENSE -text
 # artifacts. Materialize detected text files identically on every runner while
 # leaving binary fixtures untouched.
 tests/xyce/** text=auto eol=crlf
+# This generated provenance manifest is parsed and fingerprinted as canonical
+# LF text on every platform; a more-specific rule must follow the corpus-wide
+# CRLF materialization rule above.
+tests/xyce/RSPICE-UPSTREAM-EXCLUSIONS.tsv text eol=lf
 
 # Publication-contract golden fixtures are compared byte-for-byte against the
 # canonical serializer's LF output and include_str!'d into the test binary, so

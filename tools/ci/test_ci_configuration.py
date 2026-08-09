@@ -1,11 +1,14 @@
+import importlib.util
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+_XYCE_EXCLUSION_FIXTURE = None
 
 
 def read_text(relative_path: str) -> str:
@@ -37,7 +40,59 @@ def cargo_tree_for_target(package: str, target: str) -> str:
     return result.stdout
 
 
+def xyce_exclusion_fixture():
+    global _XYCE_EXCLUSION_FIXTURE
+    if _XYCE_EXCLUSION_FIXTURE is not None:
+        return _XYCE_EXCLUSION_FIXTURE
+    tool_path = ROOT / "tools/xyce/sync_upstream_exclusions.py"
+    sys.dont_write_bytecode = True
+    spec = importlib.util.spec_from_file_location("sync_upstream_exclusions", tool_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError(f"cannot load {tool_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    exclusions = module.recover_exclusions(ROOT)
+    manifest = ROOT / module.MANIFEST_RELATIVE_PATH
+    promotions = module.parse_existing_promotions(manifest)
+    expected = module.render_manifest(exclusions, promotions)
+    _XYCE_EXCLUSION_FIXTURE = (module, exclusions, manifest, expected)
+    return _XYCE_EXCLUSION_FIXTURE
+
+
 class CiConfigurationTests(unittest.TestCase):
+    def test_xyce_upstream_exclusion_manifest_is_byte_exact_and_reproducible(self) -> None:
+        module, _, manifest, expected = xyce_exclusion_fixture()
+        module.verify_manifest_bytes(manifest, expected)
+
+    def test_xyce_upstream_exclusion_check_rejects_noncanonical_bytes(self) -> None:
+        module, _, _, expected = xyce_exclusion_fixture()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.tsv"
+            for label, mutation in [
+                ("crlf", expected.replace("\n", "\r\n")),
+                (
+                    "source-case substitution",
+                    expected.replace(
+                        "Netlists/ABM_FREQ/RC_data.cir",
+                        "Netlists/ABM_FREQ/RC_Data.cir",
+                        1,
+                    ),
+                ),
+            ]:
+                with self.subTest(mutation=label):
+                    path.write_bytes(mutation.encode("utf-8"))
+                    with self.assertRaisesRegex(RuntimeError, "byte-for-byte"):
+                        module.verify_manifest_bytes(path, expected)
+
+    def test_xyce_upstream_exclusion_report_digest_mismatch_fails_closed(self) -> None:
+        module, exclusions, _, _ = xyce_exclusion_fixture()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "census.tsv"
+            path.write_text("relative_path\tpassed\n", encoding="utf-8", newline="\n")
+            with self.assertRaisesRegex(RuntimeError, "SHA-256"):
+                module.parse_classification_report(path, exclusions)
+
     def test_rust_workflows_install_pinned_toolchain_without_toolchain_action(self) -> None:
         workflows = [
             ".github/workflows/ci.yml",
