@@ -544,6 +544,9 @@ pub struct ResultsState {
     /// Most-recent-first waveform names the user selected or revealed,
     /// deduplicated and bounded: the browser's Recent scope is this order.
     pub(crate) recent_signals: Vec<String>,
+    /// Quantities check-marked in the browser for a batch action. Session
+    /// state like the marks above it; the immutable dataset never sees it.
+    pub(crate) checked_signals: std::collections::BTreeSet<String>,
     /// Id allocator for `markers`. Monotonic within a session so a marker
     /// label never silently changes meaning after a deletion.
     next_marker_id: u32,
@@ -991,6 +994,20 @@ impl ResultsState {
     /// Position in the Recent shortlist; `None` when never noted.
     pub(crate) fn recent_signal_rank(&self, name: &str) -> Option<usize> {
         self.recent_signals.iter().position(|recent| recent == name)
+    }
+
+    pub(crate) fn toggle_checked_signal(&mut self, name: &str) {
+        if !self.checked_signals.remove(name) {
+            self.checked_signals.insert(name.to_owned());
+        }
+    }
+
+    pub(crate) fn is_checked_signal(&self, name: &str) -> bool {
+        self.checked_signals.contains(name)
+    }
+
+    pub(crate) fn clear_checked_signals(&mut self) {
+        self.checked_signals.clear();
     }
 
     /// The zoom/pan override for a single-pane plot.

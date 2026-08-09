@@ -1145,6 +1145,50 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             },
         );
     }
+    // The mockup's `.result-browser-selection`: what a batch action would
+    // act on, with only the actions RSpice actually performs on a set of
+    // quantities — plot membership, and letting the set go.
+    if tab == ResultsBrowserTab::Signals && !app.state.ui.results.checked_signals.is_empty() {
+        let t = Tokens::get(ui.ctx());
+        let checked = app.state.ui.results.checked_signals.clone();
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), 29.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.painter().rect_filled(
+                    ui.available_rect_before_wrap(),
+                    0.0,
+                    t.color.accent_dim,
+                );
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new(format!("{} selected", checked.len()))
+                        .font(theme::sans(tokens::FS_0, FontWeight::Medium))
+                        .color(t.color.text),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_space(6.0);
+                    if ui.small_button("Clear").clicked() {
+                        app.state.ui.results.clear_checked_signals();
+                    }
+                    if ui
+                        .small_button("Hide")
+                        .on_hover_text("Remove every selected quantity from its pane")
+                        .clicked()
+                    {
+                        set_checked_signal_visibility(app, &checked, false);
+                    }
+                    if ui
+                        .small_button("Show")
+                        .on_hover_text("Add every selected quantity to its pane")
+                        .clicked()
+                    {
+                        set_checked_signal_visibility(app, &checked, true);
+                    }
+                });
+            },
+        );
+    }
     ScrollArea::vertical()
         .id_salt("workbench.results.navigator")
         .show(ui, |ui| {
@@ -1236,7 +1280,14 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                     signal_selected,
                                     signal.visible,
                                     app.state.ui.results.is_favorite_signal(&signal.name),
+                                    app.state.ui.results.is_checked_signal(&signal.name),
                                 );
+                                if responses.check.clicked() {
+                                    app.state
+                                        .ui
+                                        .results
+                                        .toggle_checked_signal(&signal.name);
+                                }
                                 if responses.visibility.clicked() {
                                     crate::workbench::documents::result_document::toggle_visibility(
                                         &mut app.state,
@@ -2219,7 +2270,11 @@ fn expression_header(ui: &mut Ui, app: &mut RSpiceApp) {
 
 struct SignalRowResponses {
     selection: egui::Response,
+    /// Plot membership. On a quantity row this is the hover-revealed ±
+    /// action; expression rows keep it on their swatch.
     visibility: egui::Response,
+    /// The batch-selection checkbox, on quantity rows only.
+    check: egui::Response,
     /// Hover-revealed star toggle; present only while the row shows it.
     favorite: Option<egui::Response>,
 }
@@ -2242,6 +2297,7 @@ fn result_quantity_row(
     selected: bool,
     visible: bool,
     favorite: bool,
+    checked: bool,
 ) -> SignalRowResponses {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -2257,13 +2313,15 @@ fn result_quantity_row(
     );
     let selection_rect =
         egui::Rect::from_min_max(egui::pos2(visibility_rect.right(), rect.top()), rect.right_bottom());
-    let visibility = ui.interact(visibility_rect, id.with("visibility"), egui::Sense::click());
-    visibility.widget_info(|| {
+    // The checkbox marks the row for a batch action; plotting is the row's
+    // own affordance in the action cluster, as the mockup separates them.
+    let check = ui.interact(visibility_rect, id.with("check"), egui::Sense::click());
+    check.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::Checkbox,
             ui.is_enabled(),
-            visible,
-            format!("{name} plotted"),
+            checked,
+            format!("Select {name}"),
         )
     });
     let selection = ui.interact(selection_rect, id.with("selection"), egui::Sense::click());
@@ -2278,7 +2336,8 @@ fn result_quantity_row(
     if !ui.is_rect_visible(rect) {
         return SignalRowResponses {
             selection,
-            visibility,
+            visibility: check.clone(),
+            check,
             favorite: None,
         };
     }
@@ -2297,7 +2356,15 @@ fn result_quantity_row(
     // Plot membership reads as a checkbox, filled in the trace's own colour
     // so the row still answers "which curve is this" without a swatch column.
     let box_rect = egui::Rect::from_center_size(visibility_rect.center(), egui::vec2(13.0, 13.0));
-    if visible {
+    if checked {
+        ui.painter().rect_stroke(
+            box_rect,
+            3.0,
+            egui::Stroke::new(1.0, c.accent),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter().rect_filled(box_rect.shrink(3.0), 1.0, c.accent);
+    } else if visible {
         ui.painter()
             .rect_stroke(box_rect, 3.0, egui::Stroke::new(1.0, color), egui::StrokeKind::Inside);
         ui.painter()
@@ -2338,6 +2405,38 @@ fn result_quantity_row(
 
     // The action cluster and the preview value share the right column: on an
     // idle row the value owns it, on intent the actions take it.
+    // The action cluster: plot membership, then the favorite mark.
+    let plot_response = hovered.then(|| {
+        let plot_rect = egui::Rect::from_center_size(
+            egui::pos2(rect.right() - 3.0 - 22.0 - 11.0, rect.center().y),
+            egui::vec2(22.0, 24.0),
+        );
+        let response = ui.interact(plot_rect, id.with("plot"), egui::Sense::click());
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::Button,
+                ui.is_enabled(),
+                visible,
+                format!("{name} plotted"),
+            )
+        });
+        if response.hovered() {
+            ui.painter().rect_filled(plot_rect, 3.0, c.bg_active);
+        }
+        ui.painter().text(
+            plot_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            if visible { "−" } else { "+" },
+            theme::mono(tokens::FS_1, FontWeight::Medium),
+            if visible { color } else { c.text_faint },
+        );
+        theme::paint_focus_ring(ui, &response, plot_rect);
+        response.on_hover_text(if visible {
+            format!("Remove {name} from its pane")
+        } else {
+            format!("Add {name} to its pane")
+        })
+    });
     let favorite_response = if hovered {
         let star_rect = egui::Rect::from_center_size(
             egui::pos2(rect.right() - 3.0 - 11.0, rect.center().y),
@@ -2375,7 +2474,7 @@ fn result_quantity_row(
                 egui::Align2::RIGHT_CENTER,
                 value,
                 theme::mono(tokens::FS_0, FontWeight::Regular),
-                c.text_dim,
+                if visible { c.text_dim } else { c.text_faint },
             );
         }
         None
@@ -2389,17 +2488,18 @@ fn result_quantity_row(
         c.text_faint,
     );
 
-    theme::paint_focus_ring(ui, &visibility, visibility_rect);
+    theme::paint_focus_ring(ui, &check, visibility_rect);
     theme::paint_focus_ring(ui, &selection, selection_rect);
-    let visibility = visibility.on_hover_text(if visible {
-        format!("Hide {name}")
+    let check = check.on_hover_text(if checked {
+        format!("Deselect {name}")
     } else {
-        format!("Show {name}")
+        format!("Select {name} for a batch action")
     });
-    let selection = selection.on_hover_text(format!("Select {name}"));
+    let selection = selection.on_hover_text(format!("Inspect {name}"));
     SignalRowResponses {
         selection,
-        visibility,
+        visibility: plot_response.unwrap_or_else(|| check.clone()),
+        check,
         favorite: favorite_response,
     }
 }
@@ -2505,9 +2605,51 @@ fn signal_row(
     });
     let selection = selection.on_hover_text(format!("Select {name}"));
     SignalRowResponses {
+        // Expression rows carry no batch selection: the swatch is their only
+        // control, so the check response mirrors it rather than inventing one.
+        check: visibility.clone(),
         selection,
         visibility,
         favorite: None,
+    }
+}
+
+/// Put every checked quantity of the active dataset into the requested plot
+/// state. Toggling one at a time is the same act repeated, so the batch runs
+/// through the same visibility path rather than writing the flag itself.
+fn set_checked_signal_visibility(
+    app: &mut RSpiceApp,
+    checked: &std::collections::BTreeSet<String>,
+    visible: bool,
+) {
+    let Some(run_index) = app.state.simulation.active_run_idx else {
+        return;
+    };
+    let Some(run) = app.state.simulation.runs.get(run_index) else {
+        return;
+    };
+    let targets: Vec<(usize, usize)> = run
+        .analyses
+        .iter()
+        .enumerate()
+        .flat_map(|(analysis_index, analysis)| {
+            analysis
+                .waveforms
+                .iter()
+                .enumerate()
+                .filter(|(_, waveform)| {
+                    checked.contains(&waveform.name) && waveform.visible != visible
+                })
+                .map(move |(waveform_index, _)| (analysis_index, waveform_index))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    for (analysis_index, waveform_index) in targets {
+        crate::workbench::documents::result_document::toggle_visibility(
+            &mut app.state,
+            analysis_index,
+            waveform_index,
+        );
     }
 }
 
@@ -3954,6 +4096,37 @@ mod tests {
             !super::result_browser_group_expanded(&ctx, 0, true),
             "closing the active analysis must outrank the default"
         );
+    }
+
+    /// A batch plot action is the single-row act repeated: it must reach the
+    /// same visibility path, skip rows already in the requested state, and
+    /// leave the checked set intact so a second action can follow.
+    #[test]
+    fn batch_plot_action_moves_only_the_checked_quantities() {
+        let mut app = result_navigator_app();
+        assert!(select_result_dataset(&mut app, 0));
+        let checked: std::collections::BTreeSet<String> =
+            ["V(out)".to_owned()].into_iter().collect();
+        let untouched = app.state.simulation.runs[0].analyses[1].waveforms[0].visible;
+
+        super::set_checked_signal_visibility(&mut app, &checked, false);
+        assert!(
+            !app.state.simulation.runs[0].analyses[0].waveforms[0].visible,
+            "the checked quantity leaves its pane"
+        );
+        assert_eq!(
+            app.state.simulation.runs[0].analyses[1].waveforms[0].visible, untouched,
+            "an unchecked quantity in another analysis is not disturbed"
+        );
+
+        super::set_checked_signal_visibility(&mut app, &checked, true);
+        assert!(
+            app.state.simulation.runs[0].analyses[0].waveforms[0].visible,
+            "the same act returns it"
+        );
+        // Idempotent: repeating the request cannot toggle it back off.
+        super::set_checked_signal_visibility(&mut app, &checked, true);
+        assert!(app.state.simulation.runs[0].analyses[0].waveforms[0].visible);
     }
 
     #[test]
