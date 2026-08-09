@@ -223,7 +223,7 @@ jobs:
           cargo test --locked -p rspice-veriloga --features native native:: -- --test-threads=1
           cargo test --locked -p rspice-veriloga --release --features native native:: -- --test-threads=1
       - name: Test Verilog-A native core builder route (Linux x64)
-        run: cargo test --locked -p rspice-core --features veriloga-native --test veriloga_transient veriloga_native_builder_uses_canonical_ir_without_bytecode_fallback -- --test-threads=1
+        run: cargo test --locked -p rspice-core --features veriloga-native --test veriloga_transient veriloga_native_builder_ -- --test-threads=1
       - name: Test Verilog-A native JIT contracts (Linux x64)
         run: cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1
       - name: Test Verilog-A native multiplicity contracts (Linux x64)
@@ -314,11 +314,101 @@ jobs:
         run: |
           cargo test --locked -p rspice-veriloga --features native native:: -- --test-threads=1
           cargo test --locked -p rspice-veriloga --release --features native native:: -- --test-threads=1
+      - name: Test Intel macOS hardened-runtime JIT entitlements
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_binary=$(find target/debug/deps -maxdepth 1 -type f -perm -111 -name 'rspice_veriloga-*' -print -quit)
+          test -n "$source_binary"
+          signed_binary="$RUNNER_TEMP/rspice-veriloga-x64-hardened-jit"
+          cp "$source_binary" "$signed_binary"
+          codesign --force --sign - --options runtime \
+            --entitlements crates/rspice-ui/macos/RSpice.entitlements \
+            "$signed_binary"
+          codesign --verify --strict --verbose=2 "$signed_binary"
+          codesign --display --entitlements - "$signed_binary" > "$RUNNER_TEMP/x64-jit-entitlements.txt"
+          grep -Fqx $'\t[Key] com.apple.security.cs.allow-jit' "$RUNNER_TEMP/x64-jit-entitlements.txt"
+          grep -Fqx $'\t[Key] com.apple.security.cs.jit-write-allowlist' "$RUNNER_TEMP/x64-jit-entitlements.txt"
+          test "$(grep -Fxc $'\t\t[Bool] true' "$RUNNER_TEMP/x64-jit-entitlements.txt")" -eq 2
+          "$signed_binary" native::x64::tests::compile_model_with_canonical_ir_executes_mir_stamp_value --exact --test-threads=1
       - name: Test Verilog-A native core builder route
-        run: cargo test --locked -p rspice-core --features veriloga-native --test veriloga_transient veriloga_native_builder_uses_canonical_ir_without_bytecode_fallback -- --test-threads=1
+        run: cargo test --locked -p rspice-core --features veriloga-native --test veriloga_transient veriloga_native_builder_ -- --test-threads=1
       - name: Test Verilog-A native JIT contracts
         run: cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1
       - name: Gate Verilog-A native JIT performance
+        run: >-
+          cargo run --locked -p rspice-bench --release -- native-jit
+          --iterations 100000
+          --samples 9
+          --min-dense-speedup 2.00
+          --min-speedup 3.00
+          --min-full-stamp-speedup 2.00
+          --max-native-setup-ms 10
+          --max-native-p95-ns-per-sweep 5000
+          --max-relative-stddev 0.25
+          --max-native-code-bytes 16384
+
+  test-aarch64-native:
+    name: Test Verilog-A native JIT (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Linux ARM64
+            os: ubuntu-24.04-arm
+          - label: macOS ARM64
+            os: macos-15
+          - label: Windows ARM64
+            os: windows-11-arm
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: veriloga-native-aarch64-${{ matrix.os }}
+      - name: Verify native ARM64 toolchain
+        run: rustc -vV
+      - name: Test AArch64 encoder, runtime, unwind, and model JIT
+        env:
+          RUSTFLAGS: -D warnings
+        run: |
+          cargo test --locked -p rspice-veriloga --features native --lib native:: -- --test-threads=1
+          cargo test --locked -p rspice-veriloga --release --features native --lib native:: -- --test-threads=1
+      - name: Test macOS hardened-runtime JIT entitlements
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_binary=$(find target/debug/deps -maxdepth 1 -type f -perm -111 -name 'rspice_veriloga-*' -print -quit)
+          test -n "$source_binary"
+          signed_binary="$RUNNER_TEMP/rspice-veriloga-hardened-jit"
+          cp "$source_binary" "$signed_binary"
+          codesign --force --sign - --options runtime \
+            --entitlements crates/rspice-ui/macos/RSpice.entitlements \
+            "$signed_binary"
+          codesign --verify --strict --verbose=2 "$signed_binary"
+          codesign --display --entitlements - "$signed_binary" > "$RUNNER_TEMP/jit-entitlements.txt"
+          grep -Fqx $'\t[Key] com.apple.security.cs.allow-jit' "$RUNNER_TEMP/jit-entitlements.txt"
+          grep -Fqx $'\t[Key] com.apple.security.cs.jit-write-allowlist' "$RUNNER_TEMP/jit-entitlements.txt"
+          test "$(grep -Fxc $'\t\t[Bool] true' "$RUNNER_TEMP/jit-entitlements.txt")" -eq 2
+          "$signed_binary" native::runtime::aarch64_tests::registered_dwarf_cfi_unwinds_through_generated_helper_frame --exact --test-threads=1
+      - name: Test public host-native qualification report
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo test --locked -p rspice-veriloga --features native --test runtime_compile_report -- --test-threads=1
+      - name: Test native core builder route
+        run: cargo test --locked -p rspice-core --features veriloga-native --test veriloga_transient veriloga_native_builder_ -- --test-threads=1
+      - name: Qualify full shipped device census through AArch64 JIT
+        env:
+          RUSTFLAGS: -D warnings
+          RUST_MIN_STACK: "67108864"
+        run: >-
+          cargo test --locked --release -p rspice-veriloga --features native
+          --test native_aarch64_shipped_models -- --ignored --nocapture --test-threads=1
+      - name: Gate AArch64 native JIT performance
         run: >-
           cargo run --locked -p rspice-bench --release -- native-jit
           --iterations 100000

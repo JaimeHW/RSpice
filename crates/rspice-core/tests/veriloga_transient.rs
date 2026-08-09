@@ -31,7 +31,10 @@ fn deck_path(path: &std::path::Path) -> String {
     path.display().to_string().replace('\\', "/")
 }
 
-#[cfg(all(feature = "veriloga-native", target_arch = "x86_64"))]
+#[cfg(all(
+    feature = "veriloga-native",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
 fn canonical_artifact_with_unsupported_root(
     compiler: &VerilogACompiler,
     source: &str,
@@ -314,7 +317,10 @@ endmodule
 }
 
 #[test]
-#[cfg(all(feature = "veriloga-native", target_arch = "x86_64"))]
+#[cfg(all(
+    feature = "veriloga-native",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
 fn veriloga_native_builder_uses_canonical_ir_without_bytecode_fallback() {
     let source = r#"
 `include "disciplines.vams"
@@ -362,7 +368,10 @@ endmodule
 }
 
 #[test]
-#[cfg(all(feature = "veriloga-native", target_arch = "x86_64"))]
+#[cfg(all(
+    feature = "veriloga-native",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
 fn veriloga_native_builder_runs_assignment_fed_canonical_ir_without_bytecode_fallback() {
     let model = write_model(
         "canonical_assignment_fed",

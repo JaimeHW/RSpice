@@ -14,9 +14,13 @@ mod calling_convention;
 pub(crate) mod codegen;
 mod driver;
 pub mod encoder;
-mod ir;
 mod verifier;
 
+pub(super) use super::ssa as ir;
+
+#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+use super::assignment::MAX_ASSIGNMENT_CHUNK_OPERATIONS;
+use super::assignment::{NativeAssignment, chunk_ranges as assignment_chunk_ranges};
 use super::expr::{
     BranchUnknownRuntimeMapping, CanonicalDerivativeAxis, CanonicalStateOperator, EntryKind,
     NativeIdentifierIndex, NativeLoweringLimits, NativeOp, NativeProgram, PriorCurrentProbe,
@@ -27,9 +31,11 @@ use super::model::{
     CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeEntryStarts, NativeModel,
     NativeRequiredStorage,
 };
+use super::model_plan::NativeModelPlan;
 use super::runtime::ExecutableMemory;
-#[cfg(windows)]
+#[cfg(all(windows, target_arch = "x86_64"))]
 use super::runtime::WindowsX64RuntimeFunction;
+use super::value_cache::ValueEntryCache;
 use super::{JitError, JitResult};
 use crate::canonical_ir::{
     CanonicalIrArtifact, EquationId, ExprId, HirAnalogOperator, HirAssignment, HirExprKind,
@@ -40,14 +46,12 @@ use crate::codegen::{
     AssignmentStep, BytecodeProgram, ColumnAxis, CompiledModel, CompiledNoiseSource, Instruction,
     JacobianEntry, StampIndex, StampProgram,
 };
-use crate::native::x64::codegen::NativeAssignment;
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
 use smol_str::SmolStr;
 use std::collections::HashMap;
 
 const ENTRY_ALIGNMENT: usize = 16;
 const X64_NOP: u8 = 0x90;
-const MAX_ASSIGNMENT_CHUNK_OPERATIONS: usize = 8 * 1024;
 
 #[derive(Debug)]
 struct CompiledX64Function {
@@ -154,7 +158,7 @@ enum WindowsX64UnwindOperation {
 }
 
 #[derive(Debug)]
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(not(all(windows, target_arch = "x86_64")), allow(dead_code))]
 struct PendingWindowsX64UnwindFunction {
     begin: CodeOffset,
     end: CodeOffset,
@@ -170,14 +174,26 @@ pub(crate) fn compile_model_with_canonical_ir(
     model: &CompiledModel,
     artifact: &CanonicalIrArtifact,
 ) -> JitResult<NativeModel> {
-    validate_canonical_artifact_for_model(model, artifact)?;
-    compile_model_inner(model, Some(artifact))
+    let plan = build_model_plan_with_canonical_ir(model, artifact)?;
+    compile_model_plan(model, &plan)
 }
 
-fn compile_model_inner(
+/// Build the architecture-neutral native plan consumed by every machine
+/// backend. The lowering implementation is still colocated here while the
+/// original x64 model compiler is split into planning and image-emission
+/// phases; no A64-specific decision enters this plan.
+pub(super) fn build_model_plan_with_canonical_ir(
+    model: &CompiledModel,
+    artifact: &CanonicalIrArtifact,
+) -> JitResult<NativeModelPlan> {
+    validate_canonical_artifact_for_model(model, artifact)?;
+    build_model_plan_inner(model, Some(artifact))
+}
+
+fn build_model_plan_inner(
     model: &CompiledModel,
     canonical_artifact: Option<&CanonicalIrArtifact>,
-) -> JitResult<NativeModel> {
+) -> JitResult<NativeModelPlan> {
     super::validate_native_coverage(model)?;
     let canonical_mir = canonical_artifact.map(|artifact| &artifact.mir);
     let canonical_branch_unknown_map = match canonical_mir {
@@ -217,53 +233,43 @@ fn compile_model_inner(
             }
         }
     }
-
-    let mut image = Vec::new();
-    let mut entry_starts = Vec::new();
-    let mut windows_unwind_functions = Vec::new();
-    let (assignment, post_assignment, assignment_dependencies, post_assignment_dependencies) =
-        append_assignment_entries(
+    let (assignments, post_assignments, assignment_dependencies, post_assignment_dependencies) =
+        lower_assignment_phases(
             model,
             canonical_artifact,
             base_limits.with_prior_current_probes(&assignment_prior_current_probes),
-            &mut image,
-            &mut entry_starts,
-            &mut windows_unwind_functions,
         )?;
 
-    let mut parameter_defaults = Vec::with_capacity(model.parameters.len());
-    for (parameter_index, parameter) in model.parameters.iter().enumerate() {
-        let default_entry = if let Some(program) = &parameter.default_program {
-            let program = lower_parameter_default_program(
-                model,
-                canonical_mir,
-                parameter_index,
-                program,
-                base_limits,
-            )?;
-            Some(append_value_entry(
-                &mut image,
-                &mut entry_starts,
-                &mut windows_unwind_functions,
-                &program,
-            )?)
-        } else {
-            None
-        };
-        parameter_defaults.push(default_entry);
-    }
+    let parameter_defaults = model
+        .parameters
+        .iter()
+        .enumerate()
+        .map(|(parameter_index, parameter)| {
+            parameter
+                .default_program
+                .as_ref()
+                .map(|program| {
+                    lower_parameter_default_program(
+                        model,
+                        canonical_mir,
+                        parameter_index,
+                        program,
+                        base_limits,
+                    )
+                })
+                .transpose()
+        })
+        .collect::<JitResult<Vec<_>>>()?;
 
     let mut static_conditions = Vec::with_capacity(model.stamp_programs.len());
     let mut static_condition_branch_unknown_dependencies =
         Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_values = Vec::with_capacity(model.stamp_programs.len());
-    let mut stamp_value_programs = Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_value_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_value_prior_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_value_branch_unknown_dependencies =
         Vec::with_capacity(model.stamp_programs.len());
     let mut jacobians = Vec::with_capacity(model.stamp_programs.len());
-    let mut jacobian_programs = Vec::with_capacity(model.stamp_programs.len());
     let mut jacobian_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut jacobian_prior_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut jacobian_branch_unknown_dependencies = Vec::with_capacity(model.stamp_programs.len());
@@ -273,63 +279,44 @@ fn compile_model_inner(
         Vec::with_capacity(model.stamp_programs.len());
     let mut reactive_jacobian_branch_unknown_dependencies =
         Vec::with_capacity(model.stamp_programs.len());
-    let mut noise_psd = Vec::with_capacity(model.noise_sources.len());
-    let mut noise_psd_current_dependencies = Vec::with_capacity(model.noise_sources.len());
-    let mut noise_psd_prior_current_dependencies = Vec::with_capacity(model.noise_sources.len());
-    let mut noise_psd_branch_unknown_dependencies = Vec::with_capacity(model.noise_sources.len());
-    let mut noise_exponents = Vec::with_capacity(model.noise_sources.len());
-    let mut noise_exponent_current_dependencies = Vec::with_capacity(model.noise_sources.len());
-    let mut noise_exponent_prior_current_dependencies =
-        Vec::with_capacity(model.noise_sources.len());
-    let mut noise_exponent_branch_unknown_dependencies =
-        Vec::with_capacity(model.noise_sources.len());
     let mut available_current_pairs = Vec::new();
     let mut prior_current_probes = Vec::new();
 
     for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
-        let static_condition = if let Some(condition) = &stamp.static_condition {
-            let program = lower_static_condition_program(
-                model,
-                canonical_mir,
-                stamp_index,
-                condition,
-                base_limits,
-            )?;
-            static_condition_branch_unknown_dependencies
-                .push(program.branch_unknown_dependencies().to_vec());
-            Some(append_value_entry(
-                &mut image,
-                &mut entry_starts,
-                &mut windows_unwind_functions,
-                &program,
-            )?)
-        } else {
-            static_condition_branch_unknown_dependencies.push(Vec::new());
-            None
-        };
+        let static_condition = stamp
+            .static_condition
+            .as_ref()
+            .map(|condition| {
+                lower_static_condition_program(
+                    model,
+                    canonical_mir,
+                    stamp_index,
+                    condition,
+                    base_limits,
+                )
+            })
+            .transpose()?;
+        static_condition_branch_unknown_dependencies.push(
+            static_condition.as_ref().map_or_else(Vec::new, |program| {
+                program.branch_unknown_dependencies().to_vec()
+            }),
+        );
         static_conditions.push(static_condition);
 
         let value_limits = base_limits
             .with_available_current_pairs(&available_current_pairs)
             .with_prior_current_probes(&prior_current_probes);
-        let program = lower_stamp_value_program(
+        let value = lower_stamp_value_program(
             model,
             canonical_mir,
             stamp_index,
             &stamp.value_program,
             value_limits,
         )?;
-        stamp_value_current_dependencies.push(program.current_pair_dependencies().to_vec());
-        stamp_value_prior_current_dependencies.push(program.prior_current_dependencies().to_vec());
-        stamp_value_branch_unknown_dependencies
-            .push(program.branch_unknown_dependencies().to_vec());
-        stamp_values.push(append_value_entry(
-            &mut image,
-            &mut entry_starts,
-            &mut windows_unwind_functions,
-            &program,
-        )?);
-        stamp_value_programs.push(program);
+        stamp_value_current_dependencies.push(value.current_pair_dependencies().to_vec());
+        stamp_value_prior_current_dependencies.push(value.prior_current_dependencies().to_vec());
+        stamp_value_branch_unknown_dependencies.push(value.branch_unknown_dependencies().to_vec());
+        stamp_values.push(value);
 
         let mut jacobian_current_pairs = available_current_pairs.clone();
         if let Some((pos, neg)) = infer_current_terminal_pair(stamp) {
@@ -364,9 +351,7 @@ fn compile_model_inner(
             )?,
             None => Vec::new(),
         };
-
         let mut stamp_jacobians = Vec::with_capacity(stamp.jacobian_programs.len());
-        let mut stamp_jacobian_programs = Vec::with_capacity(stamp.jacobian_programs.len());
         let mut stamp_jacobian_current_dependencies =
             Vec::with_capacity(stamp.jacobian_programs.len());
         let mut stamp_jacobian_prior_current_dependencies =
@@ -387,27 +372,13 @@ fn compile_model_inner(
                 .push(program.prior_current_dependencies().to_vec());
             stamp_jacobian_branch_unknown_dependencies
                 .push(program.branch_unknown_dependencies().to_vec());
-            stamp_jacobians.push(append_value_entry(
-                &mut image,
-                &mut entry_starts,
-                &mut windows_unwind_functions,
-                &program,
-            )?);
-            stamp_jacobian_programs.push(program);
+            stamp_jacobians.push(program);
         }
         jacobians.push(stamp_jacobians);
-        jacobian_programs.push(stamp_jacobian_programs);
         jacobian_current_dependencies.push(stamp_jacobian_current_dependencies);
         jacobian_prior_current_dependencies.push(stamp_jacobian_prior_current_dependencies);
         jacobian_branch_unknown_dependencies.push(stamp_jacobian_branch_unknown_dependencies);
 
-        let mut stamp_reactive_jacobians = Vec::with_capacity(stamp.reactive_jacobians.len());
-        let mut stamp_reactive_jacobian_current_dependencies =
-            Vec::with_capacity(stamp.reactive_jacobians.len());
-        let mut stamp_reactive_jacobian_prior_current_dependencies =
-            Vec::with_capacity(stamp.reactive_jacobians.len());
-        let mut stamp_reactive_jacobian_branch_unknown_dependencies =
-            Vec::with_capacity(stamp.reactive_jacobians.len());
         let canonical_reactive_mir = match canonical_mir {
             Some(mir) if !stamp.reactive_jacobians.is_empty() => Some(canonical_reactive_mir(
                 model,
@@ -416,6 +387,13 @@ fn compile_model_inner(
             )?),
             _ => None,
         };
+        let mut stamp_reactive_jacobians = Vec::with_capacity(stamp.reactive_jacobians.len());
+        let mut stamp_reactive_jacobian_current_dependencies =
+            Vec::with_capacity(stamp.reactive_jacobians.len());
+        let mut stamp_reactive_jacobian_prior_current_dependencies =
+            Vec::with_capacity(stamp.reactive_jacobians.len());
+        let mut stamp_reactive_jacobian_branch_unknown_dependencies =
+            Vec::with_capacity(stamp.reactive_jacobians.len());
         for reactive_jacobian in &stamp.reactive_jacobians {
             let program = lower_reactive_jacobian_program(
                 model,
@@ -430,12 +408,7 @@ fn compile_model_inner(
                 .push(program.prior_current_dependencies().to_vec());
             stamp_reactive_jacobian_branch_unknown_dependencies
                 .push(program.branch_unknown_dependencies().to_vec());
-            stamp_reactive_jacobians.push(append_value_entry(
-                &mut image,
-                &mut entry_starts,
-                &mut windows_unwind_functions,
-                &program,
-            )?);
+            stamp_reactive_jacobians.push(program);
         }
         reactive_jacobians.push(stamp_reactive_jacobians);
         reactive_jacobian_current_dependencies.push(stamp_reactive_jacobian_current_dependencies);
@@ -463,8 +436,18 @@ fn compile_model_inner(
     let noise_limits = base_limits
         .with_available_current_pairs(&available_current_pairs)
         .with_prior_current_probes(&prior_current_probes);
+    let mut noise_psd = Vec::with_capacity(model.noise_sources.len());
+    let mut noise_psd_current_dependencies = Vec::with_capacity(model.noise_sources.len());
+    let mut noise_psd_prior_current_dependencies = Vec::with_capacity(model.noise_sources.len());
+    let mut noise_psd_branch_unknown_dependencies = Vec::with_capacity(model.noise_sources.len());
+    let mut noise_exponents = Vec::with_capacity(model.noise_sources.len());
+    let mut noise_exponent_current_dependencies = Vec::with_capacity(model.noise_sources.len());
+    let mut noise_exponent_prior_current_dependencies =
+        Vec::with_capacity(model.noise_sources.len());
+    let mut noise_exponent_branch_unknown_dependencies =
+        Vec::with_capacity(model.noise_sources.len());
     for (source_index, source) in model.noise_sources.iter().enumerate() {
-        let psd_program = lower_noise_psd_program(
+        let psd = lower_noise_psd_program(
             model,
             canonical_noise_plan.as_ref(),
             source_index,
@@ -472,46 +455,41 @@ fn compile_model_inner(
             &source.psd_program,
             noise_limits,
         )?;
-        noise_psd_current_dependencies.push(psd_program.current_pair_dependencies().to_vec());
-        noise_psd_prior_current_dependencies
-            .push(psd_program.prior_current_dependencies().to_vec());
-        noise_psd_branch_unknown_dependencies
-            .push(psd_program.branch_unknown_dependencies().to_vec());
-        noise_psd.push(append_value_entry(
-            &mut image,
-            &mut entry_starts,
-            &mut windows_unwind_functions,
-            &psd_program,
-        )?);
+        noise_psd_current_dependencies.push(psd.current_pair_dependencies().to_vec());
+        noise_psd_prior_current_dependencies.push(psd.prior_current_dependencies().to_vec());
+        noise_psd_branch_unknown_dependencies.push(psd.branch_unknown_dependencies().to_vec());
+        noise_psd.push(psd);
 
-        let exponent_entry = if let Some(program) = &source.exponent_program {
-            let exponent_program = lower_noise_exponent_program(
-                model,
-                canonical_noise_plan.as_ref(),
-                source_index,
-                source,
-                program,
-                noise_limits,
-            )?;
-            noise_exponent_current_dependencies
-                .push(exponent_program.current_pair_dependencies().to_vec());
-            noise_exponent_prior_current_dependencies
-                .push(exponent_program.prior_current_dependencies().to_vec());
-            noise_exponent_branch_unknown_dependencies
-                .push(exponent_program.branch_unknown_dependencies().to_vec());
-            Some(append_value_entry(
-                &mut image,
-                &mut entry_starts,
-                &mut windows_unwind_functions,
-                &exponent_program,
-            )?)
-        } else {
-            noise_exponent_current_dependencies.push(Vec::new());
-            noise_exponent_prior_current_dependencies.push(Vec::new());
-            noise_exponent_branch_unknown_dependencies.push(Vec::new());
-            None
-        };
-        noise_exponents.push(exponent_entry);
+        let exponent = source
+            .exponent_program
+            .as_ref()
+            .map(|program| {
+                lower_noise_exponent_program(
+                    model,
+                    canonical_noise_plan.as_ref(),
+                    source_index,
+                    source,
+                    program,
+                    noise_limits,
+                )
+            })
+            .transpose()?;
+        noise_exponent_current_dependencies.push(
+            exponent.as_ref().map_or_else(Vec::new, |program| {
+                program.current_pair_dependencies().to_vec()
+            }),
+        );
+        noise_exponent_prior_current_dependencies.push(
+            exponent.as_ref().map_or_else(Vec::new, |program| {
+                program.prior_current_dependencies().to_vec()
+            }),
+        );
+        noise_exponent_branch_unknown_dependencies.push(
+            exponent.as_ref().map_or_else(Vec::new, |program| {
+                program.branch_unknown_dependencies().to_vec()
+            }),
+        );
+        noise_exponents.push(exponent);
     }
 
     let published_current_pairs = model
@@ -531,49 +509,6 @@ fn compile_model_inner(
             Ok(Some((forward, reverse)))
         })
         .collect::<JitResult<Vec<_>>>()?;
-
-    let evaluation_kernel = align_image_for_entry(&mut image, &mut entry_starts);
-    let evaluation_kernel_artifact = codegen::compile_fused_evaluation_kernel_artifact(
-        evaluation_kernel.as_usize(),
-        assignment,
-        &stamp_value_programs,
-        &published_current_pairs,
-    )?;
-    append_compiled_function_at_offset(
-        &mut image,
-        evaluation_kernel,
-        &mut windows_unwind_functions,
-        evaluation_kernel_artifact,
-    )?;
-
-    let stamp_kernel = align_image_for_entry(&mut image, &mut entry_starts);
-    let stamp_kernel_artifact = codegen::compile_fused_stamp_kernel_artifact(
-        stamp_kernel.as_usize(),
-        assignment,
-        &stamp_value_programs,
-        &jacobian_programs,
-        &published_current_pairs,
-    )?;
-    append_compiled_function_at_offset(
-        &mut image,
-        stamp_kernel,
-        &mut windows_unwind_functions,
-        stamp_kernel_artifact,
-    )?;
-
-    let entries = NativeEntryOffsets {
-        assignment,
-        post_assignment,
-        evaluation_kernel: Some(evaluation_kernel),
-        stamp_kernel: Some(stamp_kernel),
-        parameter_defaults,
-        static_conditions,
-        stamp_values,
-        jacobians,
-        reactive_jacobians,
-        noise_psd,
-        noise_exponents,
-    };
     let current_dependencies = NativeCurrentDependencies {
         assignment_current_pairs: assignment_dependencies.current_pairs,
         assignment_prior_currents: assignment_dependencies.prior_currents,
@@ -598,17 +533,236 @@ fn compile_model_inner(
         noise_exponent_prior_currents: noise_exponent_prior_current_dependencies,
         noise_exponent_branch_unknowns: noise_exponent_branch_unknown_dependencies,
     };
-    validate_compiled_entry_shape(model, &entries, &current_dependencies)?;
+    let plan = NativeModelPlan {
+        assignments,
+        post_assignments,
+        parameter_defaults,
+        static_conditions,
+        stamp_values,
+        jacobians,
+        reactive_jacobians,
+        noise_psd,
+        noise_exponents,
+        published_current_pairs,
+        current_dependencies,
+    };
+    plan.validate_shape(model)?;
+    Ok(plan)
+}
+
+#[cfg(feature = "native-bytecode-contract-tests")]
+fn compile_model_inner(
+    model: &CompiledModel,
+    canonical_artifact: Option<&CanonicalIrArtifact>,
+) -> JitResult<NativeModel> {
+    let plan = build_model_plan_inner(model, canonical_artifact)?;
+    compile_model_plan(model, &plan)
+}
+
+fn compile_model_plan(model: &CompiledModel, plan: &NativeModelPlan) -> JitResult<NativeModel> {
+    plan.validate_shape(model)?;
+
+    let mut image = Vec::new();
+    let mut entry_starts = Vec::new();
+    let mut windows_unwind_functions = Vec::new();
+    let mut value_entries = ValueEntryCache::default();
+
+    let (assignment, _) = append_assignment_pass(
+        &plan.assignments,
+        &mut image,
+        &mut entry_starts,
+        &mut windows_unwind_functions,
+    )?;
+    let assignment_image_end = image.len();
+    let post_assignment = if plan.post_assignments.is_empty() {
+        None
+    } else {
+        Some(
+            append_assignment_pass(
+                &plan.post_assignments,
+                &mut image,
+                &mut entry_starts,
+                &mut windows_unwind_functions,
+            )?
+            .0,
+        )
+    };
+    let post_assignment_image_end = image.len();
+
+    let mut parameter_defaults = Vec::with_capacity(plan.parameter_defaults.len());
+    for program in &plan.parameter_defaults {
+        parameter_defaults.push(
+            program
+                .as_ref()
+                .map(|program| {
+                    append_value_entry(
+                        &mut image,
+                        &mut entry_starts,
+                        &mut windows_unwind_functions,
+                        &mut value_entries,
+                        program,
+                    )
+                })
+                .transpose()?,
+        );
+    }
+
+    let mut static_conditions = Vec::with_capacity(plan.static_conditions.len());
+    for program in &plan.static_conditions {
+        static_conditions.push(
+            program
+                .as_ref()
+                .map(|program| {
+                    append_value_entry(
+                        &mut image,
+                        &mut entry_starts,
+                        &mut windows_unwind_functions,
+                        &mut value_entries,
+                        program,
+                    )
+                })
+                .transpose()?,
+        );
+    }
+
+    let mut stamp_values = Vec::with_capacity(plan.stamp_values.len());
+    for program in &plan.stamp_values {
+        stamp_values.push(append_value_entry(
+            &mut image,
+            &mut entry_starts,
+            &mut windows_unwind_functions,
+            &mut value_entries,
+            program,
+        )?);
+    }
+
+    let mut jacobians = Vec::with_capacity(plan.jacobians.len());
+    for row in &plan.jacobians {
+        let mut entries = Vec::with_capacity(row.len());
+        for program in row {
+            entries.push(append_value_entry(
+                &mut image,
+                &mut entry_starts,
+                &mut windows_unwind_functions,
+                &mut value_entries,
+                program,
+            )?);
+        }
+        jacobians.push(entries);
+    }
+
+    let mut reactive_jacobians = Vec::with_capacity(plan.reactive_jacobians.len());
+    for row in &plan.reactive_jacobians {
+        let mut entries = Vec::with_capacity(row.len());
+        for program in row {
+            entries.push(append_value_entry(
+                &mut image,
+                &mut entry_starts,
+                &mut windows_unwind_functions,
+                &mut value_entries,
+                program,
+            )?);
+        }
+        reactive_jacobians.push(entries);
+    }
+
+    let mut noise_psd = Vec::with_capacity(plan.noise_psd.len());
+    for program in &plan.noise_psd {
+        noise_psd.push(append_value_entry(
+            &mut image,
+            &mut entry_starts,
+            &mut windows_unwind_functions,
+            &mut value_entries,
+            program,
+        )?);
+    }
+
+    let mut noise_exponents = Vec::with_capacity(plan.noise_exponents.len());
+    for program in &plan.noise_exponents {
+        noise_exponents.push(
+            program
+                .as_ref()
+                .map(|program| {
+                    append_value_entry(
+                        &mut image,
+                        &mut entry_starts,
+                        &mut windows_unwind_functions,
+                        &mut value_entries,
+                        program,
+                    )
+                })
+                .transpose()?,
+        );
+    }
+    let value_entries_image_end = image.len();
+
+    let evaluation_kernel = align_image_for_entry(&mut image, &mut entry_starts);
+    let evaluation_kernel_artifact = codegen::compile_fused_evaluation_kernel_artifact(
+        evaluation_kernel.as_usize(),
+        assignment,
+        &plan.stamp_values,
+        &plan.published_current_pairs,
+    )?;
+    append_compiled_function_at_offset(
+        &mut image,
+        evaluation_kernel,
+        &mut windows_unwind_functions,
+        evaluation_kernel_artifact,
+    )?;
+    let evaluation_kernel_image_end = image.len();
+
+    let stamp_kernel = align_image_for_entry(&mut image, &mut entry_starts);
+    let stamp_kernel_artifact = codegen::compile_fused_stamp_kernel_artifact(
+        stamp_kernel.as_usize(),
+        assignment,
+        &plan.stamp_values,
+        &plan.jacobians,
+        &plan.published_current_pairs,
+    )?;
+    append_compiled_function_at_offset(
+        &mut image,
+        stamp_kernel,
+        &mut windows_unwind_functions,
+        stamp_kernel_artifact,
+    )?;
+
+    if std::env::var_os("RSPICE_NATIVE_X64_IMAGE_TRACE").is_some() {
+        eprintln!(
+            "native-x64-image assignment={} post_assignment={} value_entries={} evaluation_kernel={} stamp_kernel={} total={}",
+            assignment_image_end,
+            post_assignment_image_end - assignment_image_end,
+            value_entries_image_end - post_assignment_image_end,
+            evaluation_kernel_image_end - value_entries_image_end,
+            image.len() - evaluation_kernel_image_end,
+            image.len(),
+        );
+    }
+
+    let entries = NativeEntryOffsets {
+        assignment,
+        post_assignment,
+        evaluation_kernel: Some(evaluation_kernel),
+        stamp_kernel: Some(stamp_kernel),
+        parameter_defaults,
+        static_conditions,
+        stamp_values,
+        jacobians,
+        reactive_jacobians,
+        noise_psd,
+        noise_exponents,
+    };
+    validate_compiled_entry_shape(model, &entries, &plan.current_dependencies)?;
     verify_x64_image_layout(model, &image, &entry_starts)?;
 
-    #[cfg(windows)]
+    #[cfg(all(windows, target_arch = "x86_64"))]
     let executable = {
         let runtime_functions =
             append_windows_x64_unwind_metadata(&mut image, &windows_unwind_functions)?;
         ExecutableMemory::allocate_with_windows_unwind(&image, &runtime_functions)?
     };
-    #[cfg(not(windows))]
+    #[cfg(not(all(windows, target_arch = "x86_64")))]
     let executable = ExecutableMemory::allocate(&image)?;
+
     NativeModel::from_executable_image_with_dependencies(
         model.num_terminals,
         model.internal_nodes,
@@ -618,7 +772,7 @@ fn compile_model_inner(
         executable,
         entries,
         NativeEntryStarts::new(entry_starts),
-        current_dependencies,
+        plan.current_dependencies.clone(),
         NativeRequiredStorage::for_model(model),
     )
 }
@@ -831,7 +985,7 @@ fn verify_x64_image_layout(
     Ok(())
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, target_arch = "x86_64"))]
 fn append_windows_x64_unwind_metadata(
     image: &mut Vec<u8>,
     functions: &[PendingWindowsX64UnwindFunction],
@@ -893,7 +1047,7 @@ fn append_windows_x64_unwind_metadata(
     Ok(runtime_functions)
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, target_arch = "x86_64"))]
 fn encode_windows_x64_unwind_info(info: &WindowsX64UnwindInfo) -> JitResult<Vec<u8>> {
     const UWOP_PUSH_NONVOL: u8 = 0;
     const UWOP_ALLOC_LARGE: u8 = 1;
@@ -3571,16 +3725,13 @@ struct AssignmentDependencies {
     branch_unknowns: Vec<usize>,
 }
 
-fn append_assignment_entries(
+fn lower_assignment_phases(
     model: &CompiledModel,
     canonical_artifact: Option<&CanonicalIrArtifact>,
     limits: NativeLoweringLimits<'_>,
-    image: &mut Vec<u8>,
-    entry_starts: &mut Vec<CodeOffset>,
-    windows_unwind_functions: &mut Vec<PendingWindowsX64UnwindFunction>,
 ) -> JitResult<(
-    CodeOffset,
-    Option<CodeOffset>,
+    Vec<NativeAssignment>,
+    Vec<NativeAssignment>,
     AssignmentDependencies,
     AssignmentDependencies,
 )> {
@@ -3603,22 +3754,13 @@ fn append_assignment_entries(
             (assignments, Vec::new())
         }
     };
-    let (assignment, assignment_dependencies) =
-        append_assignment_pass(&assignments, image, entry_starts, windows_unwind_functions)?;
-    let (post_assignment, post_assignment_dependencies) = if post_assignments.is_empty() {
-        (None, AssignmentDependencies::default())
-    } else {
-        let (entry, dependencies) = append_assignment_pass(
-            &post_assignments,
-            image,
-            entry_starts,
-            windows_unwind_functions,
-        )?;
-        (Some(entry), dependencies)
-    };
+    let mut assignment_dependencies = AssignmentDependencies::default();
+    collect_assignment_dependencies(&assignments, &mut assignment_dependencies);
+    let mut post_assignment_dependencies = AssignmentDependencies::default();
+    collect_assignment_dependencies(&post_assignments, &mut post_assignment_dependencies);
     Ok((
-        assignment,
-        post_assignment,
+        assignments,
+        post_assignments,
         assignment_dependencies,
         post_assignment_dependencies,
     ))
@@ -3660,39 +3802,6 @@ fn append_assignment_pass(
         offset
     };
     Ok((assignment, dependencies))
-}
-
-fn assignment_operation_count(assignment: &NativeAssignment) -> usize {
-    match assignment {
-        NativeAssignment::Direct { program, .. } => program.ops().len(),
-        NativeAssignment::Indexed { index, value, .. } => {
-            index.ops().len().saturating_add(value.ops().len())
-        }
-        NativeAssignment::Loop { condition, body } => condition.ops().len().saturating_add(
-            body.iter()
-                .map(assignment_operation_count)
-                .fold(0_usize, usize::saturating_add),
-        ),
-    }
-}
-
-fn assignment_chunk_ranges(assignments: &[NativeAssignment]) -> Vec<std::ops::Range<usize>> {
-    let mut ranges = Vec::new();
-    let mut start = 0_usize;
-    let mut operations = 0_usize;
-    for (index, assignment) in assignments.iter().enumerate() {
-        let cost = assignment_operation_count(assignment);
-        if index > start && operations.saturating_add(cost) > MAX_ASSIGNMENT_CHUNK_OPERATIONS {
-            ranges.push(start..index);
-            start = index;
-            operations = 0;
-        }
-        operations = operations.saturating_add(cost);
-    }
-    if start < assignments.len() {
-        ranges.push(start..assignments.len());
-    }
-    ranges
 }
 
 fn split_canonical_assignment_phases(
@@ -5145,7 +5254,7 @@ fn mark_variable_live(index: usize, live: &mut [bool], changed: &mut bool) {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_arch = "x86_64"))]
 fn lower_assignment_step(
     model: &CompiledModel,
     step: &AssignmentStep,
@@ -5255,11 +5364,16 @@ fn append_value_entry(
     image: &mut Vec<u8>,
     entry_starts: &mut Vec<CodeOffset>,
     windows_unwind_functions: &mut Vec<PendingWindowsX64UnwindFunction>,
+    value_entries: &mut ValueEntryCache,
     program: &NativeProgram,
 ) -> JitResult<CodeOffset> {
+    if let Some(offset) = value_entries.lookup(program) {
+        return Ok(offset);
+    }
     let artifact = codegen::compile_value_function_artifact(program)?;
     let offset = align_image_for_entry(image, entry_starts);
     append_compiled_function_at_offset(image, offset, windows_unwind_functions, artifact)?;
+    value_entries.insert(program, offset);
     Ok(offset)
 }
 
@@ -5586,11 +5700,13 @@ mod tests {
         let mut image = vec![0xC3];
         let mut entry_starts = Vec::new();
         let mut windows_unwind_functions = Vec::new();
+        let mut value_entries = super::ValueEntryCache::default();
 
         let offset = super::append_value_entry(
             &mut image,
             &mut entry_starts,
             &mut windows_unwind_functions,
+            &mut value_entries,
             &program,
         )
         .expect("append aligned value entry");
@@ -8621,6 +8737,13 @@ endmodule
             device.is_using_native(),
             "{name}: shipped device must use native code"
         );
+        assert!(
+            device.native_code_size_bytes()
+                <= crate::native::SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES,
+            "{name}: x64 native image is {} bytes, exceeding the shipped-model budget of {} bytes",
+            device.native_code_size_bytes(),
+            crate::native::SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES,
+        );
         if matches!(name, "hicuml0" | "hicuml2") {
             device
                 .try_set_analysis_type(2)
@@ -8751,9 +8874,10 @@ endmodule
         );
 
         eprintln!(
-            "native-x64-shipped-device model={name} frontend_ms={:.3} native_ms={:.3} native_chunks={} finite_currents={} matrix_entries={} rhs_entries={} reactive_entries={} matrix_l1={matrix_l1:.17e} rhs_l1={rhs_l1:.17e} reactive_l1={reactive_l1:.17e}",
+            "native-x64-shipped-device model={name} frontend_ms={:.3} native_ms={:.3} code_bytes={} native_chunks={} finite_currents={} matrix_entries={} rhs_entries={} reactive_entries={} matrix_l1={matrix_l1:.17e} rhs_l1={rhs_l1:.17e} reactive_l1={reactive_l1:.17e}",
             frontend_elapsed.as_secs_f64() * 1000.0,
             native_elapsed.as_secs_f64() * 1000.0,
+            device.native_code_size_bytes(),
             device.native_chunk_count(),
             finite_currents,
             matrix_entries,

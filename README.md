@@ -268,7 +268,7 @@ under configurable resource limits.
 
 `rspice-veriloga` compiles behavioral modules through parser, semantic analysis,
 canonical IR, and either a bytecode VM or the RSpice-owned native JIT (x86-64
-hosts). When native mode is requested, construction is full JIT or a typed
+hosts plus AArch64 on macOS, Linux, and Windows). When native mode is requested, construction is full JIT or a typed
 error — never a silent fall back to the interpreter. The same crate owns the
 Rust backend that produces the generated built-in devices above. External models
 compile standalone with `rspice compile-va`; examples live in

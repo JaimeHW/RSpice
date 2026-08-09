@@ -59,7 +59,7 @@ impl NativeEntryStarts {
         Self { starts }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_arch = "x86_64"))]
     pub(crate) fn from_entries(entries: &NativeEntryOffsets) -> Self {
         let mut starts = vec![entries.assignment];
         starts.extend(entries.post_assignment);
@@ -311,7 +311,7 @@ unsafe impl Send for NativeModel {}
 unsafe impl Sync for NativeModel {}
 
 impl NativeModel {
-    #[cfg(test)]
+    #[cfg(all(test, target_arch = "x86_64"))]
     pub(crate) fn from_executable_image(
         num_variables: usize,
         num_parameters: usize,
@@ -627,7 +627,7 @@ impl NativeModel {
         Ok(())
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_arch = "x86_64"))]
     fn empty_current_dependencies(entries: &NativeEntryOffsets) -> NativeCurrentDependencies {
         NativeCurrentDependencies {
             assignment_current_pairs: Vec::new(),
@@ -1015,7 +1015,7 @@ impl NativeModel {
             .expect("validated native entry offset")
     }
 
-    #[cfg(all(test, windows))]
+    #[cfg(all(test, windows, target_arch = "x86_64"))]
     pub(crate) fn stamp_kernel_address_for_test(&self) -> *const u8 {
         self.entry_ptr(
             self.entries
@@ -1024,7 +1024,7 @@ impl NativeModel {
         )
     }
 
-    #[cfg(all(test, windows))]
+    #[cfg(all(test, windows, target_arch = "x86_64"))]
     pub(crate) fn stamp_value_address_for_test(&self, index: usize) -> *const u8 {
         self.entry_ptr(self.entries.stamp_values[index])
     }

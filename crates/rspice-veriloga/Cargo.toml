@@ -38,6 +38,7 @@ libc = { version = "0.2", optional = true }
 
 [build-dependencies]
 blake3 = "1.5"
+cc = "1.2"
 
 [features]
 default = []

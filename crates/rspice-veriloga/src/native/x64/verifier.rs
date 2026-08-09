@@ -415,8 +415,8 @@ fn decode_instruction(bytes: &[u8], start: usize) -> Result<DecodedInstruction, 
                     }
                     rip_displacement_offset = decode_modrm(bytes, &mut cursor)?;
                 }
-                0x10 | 0x11 | 0x2A | 0x2C | 0x2E | 0x45 | 0x51 | 0x54 | 0x57 | 0x58 | 0x59
-                | 0x5C | 0x5D | 0x5E | 0x5F | 0x6E | 0x6F | 0x7E | 0x7F | 0xB6 => {
+                0x10 | 0x11 | 0x2A | 0x2C | 0x2E | 0x45 | 0x4A | 0x51 | 0x54 | 0x57 | 0x58
+                | 0x59 | 0x5C | 0x5D | 0x5E | 0x5F | 0x6E | 0x6F | 0x7E | 0x7F | 0xB6 => {
                     validate_two_byte_prefix(legacy_prefix, secondary)?;
                     rip_displacement_offset = decode_modrm(bytes, &mut cursor)?;
                 }
@@ -493,7 +493,7 @@ fn decode_modrm(bytes: &[u8], cursor: &mut usize) -> Result<Option<usize>, Strin
 
 fn validate_two_byte_prefix(prefix: Option<u8>, opcode: u8) -> Result<(), String> {
     let valid = match opcode {
-        0x45 | 0xB6 => prefix.is_none(),
+        0x45 | 0x4A | 0xB6 => prefix.is_none(),
         0x6F | 0x7F => prefix == Some(0xF3),
         0x10 | 0x11 | 0x2A | 0x2C | 0x51 | 0x58 | 0x59 | 0x5C | 0x5D | 0x5E | 0x5F => {
             prefix == Some(0xF2)

@@ -143,14 +143,13 @@ rspice-cloud-client = { workspace = true }
 time = { workspace = true }
 url = { workspace = true }
 
-[target.'cfg(all(not(target_arch = "wasm32"), target_arch = "x86_64"))'.dependencies]
+[target.'cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))'.dependencies]
 # Default features keep the desktop solver's parallel/SIMD paths. The native
-# Verilog-A JIT is selected only on the architecture its encoder targets.
+# Verilog-A JIT is selected on each qualified desktop architecture.
 rspice-core = { path = "../rspice-core", version = "0.1.0", features = ["veriloga-native"] }
 
-[target.'cfg(all(not(target_arch = "wasm32"), not(target_arch = "x86_64")))'.dependencies]
-# Apple Silicon and ARM mobile/tablet builds keep Verilog-A functional through
-# the bytecode engine until an AArch64 native backend is qualified.
+[target.'cfg(all(not(target_arch = "wasm32"), not(all(any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))))'.dependencies]
+# Mobile/tablet and other unqualified architectures retain portable bytecode.
 rspice-core = { path = "../rspice-core", version = "0.1.0", features = ["veriloga"] }
 
 [target.'cfg(unix)'.dependencies]

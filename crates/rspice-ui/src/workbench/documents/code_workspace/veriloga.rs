@@ -726,7 +726,7 @@ fn receipt_from_report(
         noise_sources: report.abi.noise_source_count,
         state_variables: report.abi.state_variable_count,
         bytecode_available: report.targets.is_available(RuntimeTarget::BytecodeVm),
-        native_jit: target_qualification(report.targets.get(RuntimeTarget::NativeX64Jit)),
+        native_jit: target_qualification(report.targets.get(RuntimeTarget::NativeJit)),
         wasm_interpreter: target_qualification(report.targets.get(RuntimeTarget::WasmInterpreter)),
         generated_rust: target_qualification(report.targets.get(RuntimeTarget::GeneratedRust)),
         diagnostics: Vec::new(),

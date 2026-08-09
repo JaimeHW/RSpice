@@ -93,7 +93,7 @@ fn target_matrix_is_exhaustive_and_truthful() {
     assert!(rust.detail.contains("not requested"));
     assert!(report.generated_rust.is_none());
 
-    let native = report.targets.get(RuntimeTarget::NativeX64Jit);
+    let native = report.targets.get(RuntimeTarget::NativeJit);
     assert_eq!(native.maturity, RuntimeTargetMaturity::Preview);
     assert_eq!(native.readiness, RuntimeTargetReadiness::Unavailable);
     assert!(native.detail.contains("not requested"));
@@ -121,12 +121,27 @@ fn optional_backend_qualification_is_explicit() {
     );
     assert!(!generated.files.is_empty());
 
-    let native = report.targets.get(RuntimeTarget::NativeX64Jit);
+    let native = report.targets.get(RuntimeTarget::NativeJit);
     #[cfg(not(feature = "native"))]
     assert_eq!(native.readiness, RuntimeTargetReadiness::Unavailable);
     #[cfg(all(feature = "native", target_arch = "x86_64"))]
     assert_eq!(native.readiness, RuntimeTargetReadiness::Available);
-    #[cfg(all(feature = "native", not(target_arch = "x86_64")))]
+    #[cfg(all(
+        feature = "native",
+        target_arch = "aarch64",
+        any(target_os = "macos", target_os = "linux", windows)
+    ))]
+    assert_eq!(native.readiness, RuntimeTargetReadiness::Available);
+    #[cfg(all(
+        feature = "native",
+        not(any(
+            target_arch = "x86_64",
+            all(
+                target_arch = "aarch64",
+                any(target_os = "macos", target_os = "linux", windows)
+            )
+        ))
+    ))]
     assert_eq!(native.readiness, RuntimeTargetReadiness::Unavailable);
 
     report
@@ -153,25 +168,43 @@ fn required_native_backend_is_a_typed_fail_closed_contract() {
     let result = compiler().compile_runtime_with_qualifications(
         SENSOR_BRIDGE_SOURCE,
         None,
-        RuntimeQualificationOptions::NATIVE_X64_REQUIRED,
+        RuntimeQualificationOptions::NATIVE_REQUIRED,
     );
 
-    #[cfg(all(feature = "native", target_arch = "x86_64"))]
+    #[cfg(all(
+        feature = "native",
+        any(
+            target_arch = "x86_64",
+            all(
+                target_arch = "aarch64",
+                any(target_os = "macos", target_os = "linux", windows)
+            )
+        )
+    ))]
     assert!(
         result
             .expect("supported native host must qualify the sample")
             .targets
-            .is_available(RuntimeTarget::NativeX64Jit)
+            .is_available(RuntimeTarget::NativeJit)
     );
 
-    #[cfg(not(all(feature = "native", target_arch = "x86_64")))]
+    #[cfg(not(all(
+        feature = "native",
+        any(
+            target_arch = "x86_64",
+            all(
+                target_arch = "aarch64",
+                any(target_os = "macos", target_os = "linux", windows)
+            )
+        )
+    )))]
     {
         let error = result.expect_err("required native backend must fail closed");
         assert!(
             matches!(
                 &error,
                 CompileError::BackendQualification(qualification)
-                    if qualification.target == RuntimeTarget::NativeX64Jit
+                    if qualification.target == RuntimeTarget::NativeJit
                         && qualification.readiness == RuntimeTargetReadiness::Unavailable
             ),
             "{error}"
