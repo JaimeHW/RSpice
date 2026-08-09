@@ -733,6 +733,7 @@ pub(super) fn slope_values(
                 TraceKind::MagnitudeDb => "dB",
                 TraceKind::PhaseDeg => "deg",
                 TraceKind::PhaseRad => "rad",
+                TraceKind::NoiseDensity => "nV/√Hz",
                 TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => model.y_unit,
             };
             let x_unit = match model.x_scale {
@@ -825,6 +826,9 @@ pub(super) fn measurement_rows(
                     quantity_policy.format_angle(v.to_radians(), significant_digits)
                 }
                 TraceKind::PhaseRad => quantity_policy.format_angle(v, significant_digits),
+                TraceKind::NoiseDensity => {
+                    fmt_si_significant(v, "nV/√Hz", significant_digits)
+                }
             }
         };
         rows.push((format!("{} min", trace.name), fmt(min)));

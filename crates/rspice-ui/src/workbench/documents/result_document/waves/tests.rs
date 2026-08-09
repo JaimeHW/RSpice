@@ -642,7 +642,6 @@ fn one_unit_stays_one_pane() {
     let panes = models[0].unit_panes();
     assert_eq!(panes.len(), 1, "a strip does not split without a reason to");
     assert_eq!(panes[0].unit, "V");
-    assert!(panes[0].right.is_empty());
 }
 
 #[test]
@@ -682,7 +681,7 @@ fn a_hidden_trace_keeps_its_unit_pane_available_for_reactivation() {
 }
 
 #[test]
-fn phase_rides_the_magnitude_pane_rather_than_taking_its_own() {
+fn a_bode_pair_stacks_magnitude_over_phase() {
     let mut simulation = SimulationState::default();
     simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
@@ -704,11 +703,70 @@ fn phase_rides_the_magnitude_pane_rather_than_taking_its_own() {
     let panes = models[0].unit_panes();
     assert_eq!(
         panes.len(),
-        1,
-        "a Bode pair is one reading — splitting it across stacked panes breaks it"
+        2,
+        "the mockup Bode instrument is two stacked panes over one X domain"
     );
-    assert_eq!(panes[0].unit, "dB");
-    assert_eq!(panes[0].right.len(), 1, "phase goes to the right axis");
+    assert_eq!(panes[0].unit, "dB", "magnitude keeps the primary slot");
+    assert_eq!(panes[1].unit, "°");
+    assert_eq!(panes[1].traces.len(), 1);
+}
+
+#[test]
+fn noise_analyses_project_psd_into_an_nv_sqrt_hz_pane() {
+    let mut simulation = SimulationState::default();
+    simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Noise, "NOISE").with_waveforms(vec![
+            WaveformData::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#fff"),
+        ]),
+    );
+    let mut derived = DerivedSeries::default();
+    let models = build_models(
+        &simulation,
+        &mut derived,
+        &Tokens::default(),
+        false,
+        ComplexNumberDisplay::MagnitudePhaseDegrees,
+        None,
+        &HashSet::new(),
+    );
+
+    let panes = models[0].unit_panes();
+    assert_eq!(panes.len(), 1);
+    assert_eq!(panes[0].unit, "nV/√Hz");
+    // 1e-18 V²/Hz → 1 nV/√Hz; 4e-18 → 2 nV/√Hz. The projection is the
+    // exact amplitude-density conversion, not a relabeled PSD.
+    let trace = &models[0].traces[0];
+    assert!((trace.y[0] - 1.0).abs() < 1e-9);
+    assert!((trace.y[1] - 2.0).abs() < 1e-9);
+}
+
+#[test]
+fn phase_panes_order_after_quantity_panes_regardless_of_waveform_order() {
+    let mut simulation = SimulationState::default();
+    simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
+            WaveformData::new("phase(V(out))", vec![1.0, 10.0], vec![0.0, -45.0], "#fff"),
+            WaveformData::new("|V(out)|", vec![1.0, 10.0], vec![1.0, 0.5], "#fff"),
+        ]),
+    );
+    let mut derived = DerivedSeries::default();
+    let models = build_models(
+        &simulation,
+        &mut derived,
+        &Tokens::default(),
+        false,
+        ComplexNumberDisplay::MagnitudePhaseDegrees,
+        None,
+        &HashSet::new(),
+    );
+
+    let panes = models[0].unit_panes();
+    assert_eq!(panes.len(), 2);
+    assert_eq!(
+        panes[0].unit, "dB",
+        "magnitude is the primary pane even when the dataset lists phase first"
+    );
+    assert_eq!(panes[1].unit, "°");
 }
 
 #[test]
@@ -756,7 +814,7 @@ fn noise_strip_uses_spectral_density_unit_without_db_conversion() {
     let mut simulation = SimulationState::default();
     simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Noise, "Noise").with_waveforms(vec![
-            WaveformData::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 2.0e-18], "#fff"),
+            WaveformData::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#fff"),
         ]),
     );
     let mut derived = DerivedSeries::default();
@@ -771,10 +829,11 @@ fn noise_strip_uses_spectral_density_unit_without_db_conversion() {
         &HashSet::new(),
     );
 
+    // Retained PSDs project to amplitude density (nV/√Hz), never a dB
+    // relabeling of V²/Hz.
     assert_eq!(models.len(), 1);
-    assert_eq!(models[0].y_unit, "V^2/Hz");
-    assert!(matches!(models[0].traces[0].kind, TraceKind::Value));
-    assert_eq!(models[0].traces[0].y.as_slice(), &[1.0e-18, 2.0e-18]);
+    assert!(matches!(models[0].traces[0].kind, TraceKind::NoiseDensity));
+    assert_eq!(models[0].traces[0].y.as_slice(), &[1.0, 2.0]);
 }
 
 #[test]
@@ -1229,6 +1288,8 @@ fn cursor_copy_uses_explicit_scientific_si_policy() {
     let copied = copy_cursor_text(&mut state).expect("active cursor has copy data");
 
     assert!(copied.contains("A f = 1.00000000000000000e1 Hz"));
-    assert!(copied.contains("onoise = 4."));
-    assert!(copied.contains("e-18 V^2/Hz"));
+    // 4e-18 V²/Hz at the cursor → 2 nV/√Hz through the amplitude-density
+    // projection the pane displays.
+    assert!(copied.contains("onoise = 2."));
+    assert!(copied.contains("e0 nV/√Hz"));
 }

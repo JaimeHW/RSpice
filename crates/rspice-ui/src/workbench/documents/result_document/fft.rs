@@ -274,7 +274,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         spec.markers.push(plot::Marker {
             x: f0,
             y: db0,
-            side: plot::YSide::Left,
             color: c.accent,
             label: format!("f₀ {:.1} {level_unit}", db0),
             drop_line: false,
@@ -287,7 +286,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         spec.markers.push(plot::Marker {
             x: f,
             y: level,
-            side: plot::YSide::Left,
             color: c.traces[2],
             label: format!("HD{order} {dbc:.1} dBc"),
             drop_line: false,

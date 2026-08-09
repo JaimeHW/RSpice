@@ -165,7 +165,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     spec.markers.push(plot::Marker {
         x: -1.0,
         y: 0.0,
-        side: plot::YSide::Left,
         color: c.err,
         label: "−1 + j0".to_owned(),
         drop_line: false,

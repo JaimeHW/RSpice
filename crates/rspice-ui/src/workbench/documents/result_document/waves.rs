@@ -47,8 +47,20 @@ use super::{
 };
 
 const WAVE_SHARED_X_HEIGHT: f32 = 50.0;
-const WAVE_SHARED_LEFT_MARGIN: f32 = 56.0;
-const WAVE_SHARED_RIGHT_MARGIN: f32 = 54.0;
+// Mockup gutter geometry: a 64 px left gutter carries the Y ticks and the
+// X-strip's band labels; the right edge keeps only a 14 px breathing strip
+// now that no pane owns a secondary axis.
+const WAVE_SHARED_LEFT_MARGIN: f32 = 64.0;
+const WAVE_SHARED_RIGHT_MARGIN: f32 = 14.0;
+
+/// The mockup's per-sheet left gutter: the noise sheet's nV/√Hz tick
+/// labels need 88 px where the shared 64 px gutter suffices elsewhere.
+fn wave_left_margin(results: &ResultsState) -> f32 {
+    match results.viewer {
+        super::ResultViewer::NoiseContrib => 88.0,
+        _ => WAVE_SHARED_LEFT_MARGIN,
+    }
+}
 const WAVE_PANE_HEADER_HEIGHT: f32 = 25.0;
 const WAVE_MIN_PLOT_HEIGHT: f32 = 24.0;
 
@@ -59,14 +71,16 @@ enum TraceKind {
     Value,
     /// dB-converted AC magnitude.
     MagnitudeDb,
-    /// Phase in degrees (right axis, dashed).
+    /// Phase in degrees (dashed, own stacked pane).
     PhaseDeg,
-    /// Phase in radians (right axis, dashed).
+    /// Phase in radians (dashed, own stacked pane).
     PhaseRad,
     /// Original real component of a complex source quantity.
     Real,
     /// Original imaginary component of a complex source quantity.
     Imaginary,
+    /// nV/√Hz projection of a retained V²/Hz noise PSD.
+    NoiseDensity,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -260,6 +274,8 @@ pub(super) fn cached_models(
     built.retain(|model| match results.viewer {
         super::ResultViewer::DcSweep => model.analysis_type == AnalysisType::DcSweep,
         super::ResultViewer::Waves => model.analysis_type == AnalysisType::Transient,
+        super::ResultViewer::Bode => model.analysis_type == AnalysisType::Ac,
+        super::ResultViewer::NoiseContrib => model.analysis_type == AnalysisType::Noise,
         _ => true,
     });
     let models = Arc::new(built);
@@ -366,6 +382,9 @@ impl StripModel {
                 quantity_policy.format_angle(value.to_radians(), significant_digits)
             }
             TraceKind::PhaseRad => quantity_policy.format_angle(value, significant_digits),
+            TraceKind::NoiseDensity => {
+                fmt_si_significant(value, "nV/√Hz", significant_digits)
+            }
             TraceKind::Real | TraceKind::Imaginary => {
                 fmt_si_significant(value, self.y_unit, significant_digits)
             }
@@ -412,17 +431,13 @@ impl StripModel {
     /// visibility changes. A pane with no visible trace remains as the exact
     /// owner of its hidden signals so its Add signal control can restore one.
     ///
-    /// Phase does not take a pane of its own while a magnitude pane exists
-    /// to read it against — splitting a Bode pair across two stacked panes
-    /// would break the one reading they are drawn together for.
+    /// Phase owns a stacked pane of its own — the mockup's Bode instrument
+    /// reads magnitude over phase as two weighted panes sharing one X
+    /// domain, not a second axis on the magnitude pane. Phase panes order
+    /// after the quantity panes so magnitude keeps the primary slot.
     pub(super) fn unit_panes(&self) -> Vec<UnitPane> {
         let mut panes: Vec<UnitPane> = Vec::new();
-        let mut phase: Vec<usize> = Vec::new();
         for (index, trace) in self.traces.iter().enumerate() {
-            if trace.kind.is_phase() {
-                phase.push(index);
-                continue;
-            }
             let unit = self.trace_unit(trace);
             match panes.iter_mut().find(|pane| pane.unit == unit) {
                 Some(pane) => {
@@ -433,39 +448,13 @@ impl StripModel {
                 None => panes.push(UnitPane {
                     unit,
                     traces: trace.visible.then_some(index).into_iter().collect(),
-                    right: Vec::new(),
                 }),
             }
         }
-        if phase.is_empty() {
-            return panes;
-        }
-        // Attach phase to the magnitude pane it belongs to; with no
-        // magnitude on screen it becomes a pane in its own right.
-        let host = panes
-            .iter()
-            .position(|pane| pane.unit == "dB")
-            .or_else(|| (!panes.is_empty()).then_some(0));
-        let visible_phase = phase
-            .iter()
-            .copied()
-            .filter(|index| self.traces.get(*index).is_some_and(|trace| trace.visible))
-            .collect::<Vec<_>>();
-        match host.and_then(|index| panes.get_mut(index)) {
-            Some(pane) => pane.right = visible_phase,
-            None => {
-                let unit = self
-                    .traces
-                    .get(phase[0])
-                    .map_or("°", |trace| self.trace_unit(trace));
-                panes.push(UnitPane {
-                    unit,
-                    traces: visible_phase,
-                    right: Vec::new(),
-                });
-            }
-        }
-        panes
+        let (quantity, phase): (Vec<_>, Vec<_>) = panes
+            .into_iter()
+            .partition(|pane| !matches!(pane.unit, "°" | "rad"));
+        quantity.into_iter().chain(phase).collect()
     }
 
     /// Indices of the visible active-run signal traces, in legend order.
@@ -744,6 +733,7 @@ fn append_projected_traces(
             ^ presentation_key.rotate_left(23);
         let y = match kind {
             TraceKind::MagnitudeDb => derived.db(derived_key, &projection.y),
+            TraceKind::NoiseDensity => derived.noise_density_nv(derived_key, &projection.y),
             TraceKind::PhaseDeg | TraceKind::PhaseRad => displayed_phase_series(
                 derived,
                 derived_key,
@@ -907,6 +897,10 @@ pub(super) fn build_models(
                 }
             } else if analysis.analysis_type == AnalysisType::Ac && is_mag {
                 TraceKind::MagnitudeDb
+            } else if analysis.analysis_type == AnalysisType::Noise {
+                // Retained noise PSDs are V²/Hz; the pane reads nV/√Hz like
+                // the mockup's noise instrument.
+                TraceKind::NoiseDensity
             } else {
                 TraceKind::Value
             };
@@ -1000,6 +994,9 @@ pub(super) fn build_models(
                 let derived_key = run_mixed_key(base_key, overlay_run.id, true);
                 let source_y = match *signal_kind {
                     TraceKind::MagnitudeDb => derived.db(derived_key, &overlay_waveform.y),
+                    TraceKind::NoiseDensity => {
+                        derived.noise_density_nv(derived_key, &overlay_waveform.y)
+                    }
                     TraceKind::PhaseDeg | TraceKind::PhaseRad => displayed_phase_series(
                         derived,
                         derived_key,
@@ -1201,6 +1198,7 @@ fn signal_unit(name: &str, kind: TraceKind, analysis_unit: &'static str) -> &'st
         TraceKind::MagnitudeDb => "dB",
         TraceKind::PhaseDeg => "°",
         TraceKind::PhaseRad => "rad",
+        TraceKind::NoiseDensity => "nV/√Hz",
         TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
             let name = unwrap_projection(name);
             if starts_with_accessor(name, "i(") {
@@ -1222,17 +1220,12 @@ fn signal_unit(name: &str, kind: TraceKind, analysis_unit: &'static str) -> &'st
 /// measurement read against several scales, not several plots.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct UnitPane {
-    /// The unit every trace on this pane's left axis is measured in.
+    /// The unit every trace on this pane's axis is measured in.
     pub unit: &'static str,
-    /// Trace indices on the left axis.
+    /// Trace indices on this pane's axis.
     pub traces: Vec<usize>,
-    /// Trace indices on this pane's right axis — phase read against the
-    /// magnitude it belongs to, which is what keeps a Bode pair together.
-    pub right: Vec<usize>,
 }
 
-/// Y range of the visible traces on one axis side, padded 8 %. Per-trace
-/// extremes are cached on the data version — never rescanned per frame.
 /// Y range of one pane's traces, padded 8 %. Per-trace extremes are cached
 /// on the data version — never rescanned per frame.
 ///
@@ -1452,33 +1445,24 @@ struct FamilyEnvelopeSeries {
     color: egui::Color32,
     minimum_cache_key: u64,
     maximum_cache_key: u64,
-    right_axis: bool,
 }
 
 fn family_envelope_series(model: &StripModel, pane: &UnitPane) -> Vec<FamilyEnvelopeSeries> {
-    let mut groups = HashMap::<(String, u8, bool), Vec<&StripTrace>>::new();
-    for (trace, right_axis) in pane
+    let mut groups = HashMap::<(String, u8), Vec<&StripTrace>>::new();
+    for trace in pane
         .traces
         .iter()
-        .map(|index| (*index, false))
-        .chain(pane.right.iter().map(|index| (*index, true)))
-        .filter_map(|(index, right)| model.traces.get(index).map(|trace| (trace, right)))
-        .filter(|(trace, _)| {
-            trace.visible && !trace.overlay && trace.family_group_ordinal.is_some()
-        })
+        .filter_map(|index| model.traces.get(*index))
+        .filter(|trace| trace.visible && !trace.overlay && trace.family_group_ordinal.is_some())
     {
         groups
-            .entry((
-                trace.source_waveform_name.clone(),
-                trace.kind as u8,
-                right_axis,
-            ))
+            .entry((trace.source_waveform_name.clone(), trace.kind as u8))
             .or_default()
             .push(trace);
     }
 
     let mut envelopes = Vec::new();
-    for ((source_name, kind, right_axis), traces) in groups {
+    for ((source_name, kind), traces) in groups {
         let family_groups = traces
             .iter()
             .map(|trace| trace.presentation_key)
@@ -1516,13 +1500,7 @@ fn family_envelope_series(model: &StripModel, pane: &UnitPane) -> Vec<FamilyEnve
             .iter()
             .map(|trace| trace.presentation_key)
             .collect::<Vec<_>>();
-        let identity = stable_hash(&(
-            model.analysis_key,
-            source_name,
-            kind,
-            right_axis,
-            presentation_keys,
-        ));
+        let identity = stable_hash(&(model.analysis_key, source_name, kind, presentation_keys));
         envelopes.push(FamilyEnvelopeSeries {
             x: points.iter().map(|point| point.0).collect(),
             minimum: points.iter().map(|point| point.1).collect(),
@@ -1530,7 +1508,6 @@ fn family_envelope_series(model: &StripModel, pane: &UnitPane) -> Vec<FamilyEnve
             color: traces[0].signal_color.gamma_multiply(0.78),
             minimum_cache_key: identity ^ 0x1357_9BDF_2468_ACE0,
             maximum_cache_key: identity ^ 0x0246_8ACE_1357_9BDF,
-            right_axis,
         });
     }
     envelopes
@@ -1567,7 +1544,6 @@ fn cursor_marker_target(
     let pane_traces = pane
         .traces
         .iter()
-        .chain(pane.right.iter())
         .filter_map(|index| model.traces.get(*index))
         .filter(|trace| trace.visible && !trace.overlay)
         .collect::<Vec<_>>();
@@ -1695,10 +1671,6 @@ pub(super) fn zoom_active_pane(state: &mut AppState, t: &Tokens, factor: f64) {
         .y
         .or_else(|| pane_y_range(&mut state.ui.results.derived, model, &pane.traces))
         .and_then(|range| scaled_range(range, factor, false));
-    let y_right = current
-        .y_right
-        .or_else(|| pane_y_range(&mut state.ui.results.derived, model, &pane.right))
-        .and_then(|range| scaled_range(range, factor, false));
     let view = state.ui.results.analysis_plot_view_pane_mut(
         super::ResultViewer::Waves,
         model.analysis_key,
@@ -1709,9 +1681,6 @@ pub(super) fn zoom_active_pane(state: &mut AppState, t: &Tokens, factor: f64) {
     }
     if let Some(y) = y {
         view.y = Some(y);
-    }
-    if let Some(y_right) = y_right {
-        view.y_right = Some(y_right);
     }
 }
 
@@ -1763,6 +1732,22 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 /// the pane-only maximize/close/fit and expression controls are omitted.
 pub fn show_compact(ui: &mut Ui, state: &mut AppState) {
     show_with_pane_chrome(ui, state, false);
+}
+
+/// The Bode sheet: the run's AC response through the same pane-stack
+/// instrument, which [`StripModel::unit_panes`] reads as the mockup's two
+/// weighted panes — magnitude over phase on one shared X domain. The AC
+/// scope rides the viewer-aware model cache; stability margins stay in the
+/// right panel's inspector card.
+pub fn show_bode(ui: &mut Ui, state: &mut AppState) {
+    show_with_pane_chrome(ui, state, true);
+}
+
+/// The Noise sheet: retained noise PSDs as an nV/√Hz pane through the same
+/// instrument, scoped to Noise analyses by the viewer-aware model cache.
+/// The spectrum summary card stays in the right panel.
+pub fn show_noise(ui: &mut Ui, state: &mut AppState) {
+    show_with_pane_chrome(ui, state, true);
 }
 
 fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
@@ -2013,6 +1998,7 @@ fn append_copied_cursor(
             TraceKind::PhaseDeg => policy.copy_angle(value.to_radians()),
             TraceKind::PhaseRad => policy.copy_angle(value),
             TraceKind::MagnitudeDb => policy.copy_si_value(value, "dB"),
+            TraceKind::NoiseDensity => policy.copy_si_value(value, "nV/√Hz"),
             TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
                 policy.copy_si_value(value, model.y_unit)
             }
@@ -2516,7 +2502,7 @@ fn show_shared_x_axis(
     painter.rect_filled(rect, 0.0, c.canvas_bg);
     painter.hline(rect.x_range(), rect.top(), egui::Stroke::new(1.0, c.border));
 
-    let plot_left = (rect.left() + WAVE_SHARED_LEFT_MARGIN).min(rect.right());
+    let plot_left = (rect.left() + wave_left_margin(&state.ui.results)).min(rect.right());
     let plot_right = (rect.right() - WAVE_SHARED_RIGHT_MARGIN).max(plot_left);
     let track = egui::Rect::from_min_max(
         egui::pos2(plot_left, rect.top() + 5.0),
@@ -2989,7 +2975,6 @@ fn show_unit_pane(
             ordinal,
         );
         view.y = None;
-        view.y_right = None;
     }
     if header.toggle_log_y {
         log_y = !log_y;
@@ -3012,7 +2997,7 @@ fn show_unit_pane(
     );
     let (x0, x1) =
         shared_x_view(&state.ui.results, model.analysis_key, pane_count).unwrap_or((x0, x1));
-    let (y0, y1) = pane_view
+    let (mut y0, mut y1) = pane_view
         .y
         .filter(|(minimum, maximum)| !log_y || (*minimum > 0.0 && *maximum > 0.0))
         .unwrap_or((auto_y0, auto_y1));
@@ -3025,13 +3010,37 @@ fn show_unit_pane(
     };
     let y_axis = if log_y {
         Axis::log_decades(y0, y1, pane.unit)
+    } else if pane.unit == "°" && pane_view.y.is_none() {
+        // An unzoomed degree pane keeps the 45° lattice a Bode phase
+        // reading expects; arbitrary zoom depths fall back to plain linear
+        // ticks, which stay legible where the lattice would crowd.
+        y0 = (y0 / 45.0).floor() * 45.0;
+        y1 = (y1 / 45.0).ceil() * 45.0;
+        let ticks: Vec<f64> = (0..=((y1 - y0) / 45.0) as i64)
+            .map(|i| y0 + i as f64 * 45.0)
+            .collect();
+        Axis::with_ticks(y0, y1, "°", &ticks)
     } else {
         Axis::linear(y0, y1, pane.unit)
+    };
+    let y_axis = if pane.unit == "rad" {
+        match quantity_policy.angle_display {
+            crate::quantity::AngleDisplay::Degrees => {
+                y_axis.with_display_transform(180.0 / std::f64::consts::PI, 0.0, "°")
+            }
+            crate::quantity::AngleDisplay::Radians => y_axis,
+        }
+    } else if pane.unit == "°" {
+        let (scale, offset, unit) = quantity_policy.degree_axis_transform();
+        y_axis.with_display_transform(scale, offset, unit)
+    } else {
+        y_axis
     };
     let mut spec = PlotSpec::new(x_axis, model.x_scale, y_axis)
         .accessible_name("Waveform plot")
         .without_x_axis_chrome()
         .with_right_margin(WAVE_SHARED_RIGHT_MARGIN);
+    spec.left_margin = wave_left_margin(&state.ui.results);
     if log_y {
         spec = spec.with_log_y();
     }
@@ -3051,44 +3060,6 @@ fn show_unit_pane(
         .map(|cursor| cursor.y);
     spec.horizontal_cursor_interactive = state.ui.results.horizontal_cursor_placement_enabled();
 
-    // Right (phase) axis when this pane hosts phase traces.
-    let has_phase = !pane.right.is_empty();
-    if has_phase
-        && let Some((p0, p1)) = pane_y_range(&mut state.ui.results.derived, model, &pane.right)
-    {
-        let displays_radians = pane
-            .right
-            .iter()
-            .filter_map(|index| model.traces.get(*index))
-            .any(|trace| trace.kind == TraceKind::PhaseRad);
-        let axis = match (pane_view.y_right, displays_radians) {
-            (Some((z0, z1)), true) => Axis::linear_with(z0, z1, "rad", 5),
-            (None, true) => Axis::linear_with(p0, p1, "rad", 5),
-            // Zoomed degree axes use plain linear ticks; the 45° lattice
-            // would be too dense at arbitrary zoom depths.
-            (Some((z0, z1)), false) => Axis::linear_with(z0, z1, "°", 5),
-            (None, false) => {
-                let p0 = (p0 / 45.0).floor() * 45.0;
-                let p1 = (p1 / 45.0).ceil() * 45.0;
-                let ticks: Vec<f64> = (0..=((p1 - p0) / 45.0) as i64)
-                    .map(|i| p0 + i as f64 * 45.0)
-                    .collect();
-                Axis::with_ticks(p0, p1, "°", &ticks)
-            }
-        };
-        let axis = if displays_radians {
-            match quantity_policy.angle_display {
-                crate::quantity::AngleDisplay::Degrees => {
-                    axis.with_display_transform(180.0 / std::f64::consts::PI, 0.0, "°")
-                }
-                crate::quantity::AngleDisplay::Radians => axis,
-            }
-        } else {
-            let (scale, offset, unit) = quantity_policy.degree_axis_transform();
-            axis.with_display_transform(scale, offset, unit)
-        };
-        spec.y_right = Some((axis, t.color.traces[2]));
-    }
     // 0 dB reference on a log-magnitude pane.
     if pane.unit == "dB" && y0 < 0.0 && y1 > 0.0 {
         spec.ref_lines.push(plot::RefLine { y: 0.0 });
@@ -3106,10 +3077,6 @@ fn show_unit_pane(
             .thin()
             .dashed()
             .cache_key(envelope.maximum_cache_key);
-        if envelope.right_axis {
-            minimum = minimum.right();
-            maximum = maximum.right();
-        }
         if envelope.x.len() == 1 {
             minimum = minimum.show_single_point();
             maximum = maximum.show_single_point();
@@ -3121,15 +3088,17 @@ fn show_unit_pane(
     // Run owns weight: overlay traces keep the signal hue at reduced alpha
     // and stroke, painted first so the active run draws at full strength
     // on top.
-    let pane_indices = pane.traces.iter().chain(pane.right.iter()).copied();
-    let pane_traces: Vec<(usize, &StripTrace)> = pane_indices
+    let pane_traces: Vec<(usize, &StripTrace)> = pane
+        .traces
+        .iter()
+        .copied()
         .filter_map(|index| model.traces.get(index).map(|trace| (index, trace)))
         .collect();
     let draw_order = pane_traces
         .iter()
         .filter(|(_, trace)| trace.overlay)
         .chain(pane_traces.iter().filter(|(_, trace)| !trace.overlay));
-    for (index, trace) in draw_order {
+    for (_, trace) in draw_order {
         let color = if trace.overlay {
             trace.color.gamma_multiply(0.40)
         } else {
@@ -3141,9 +3110,6 @@ fn show_unit_pane(
         );
         if trace.overlay {
             plot_trace = plot_trace.thin();
-        }
-        if pane.right.contains(index) {
-            plot_trace = plot_trace.right().dashed();
         }
         spec.traces.push(plot_trace);
     }
@@ -3173,18 +3139,15 @@ fn show_unit_pane(
         let anchored = pane_traces
             .iter()
             .find(|(_, trace)| !trace.overlay && anchor_key(model, trace) == marker.anchor);
-        let Some((index, trace)) = anchored else {
+        let Some((_, trace)) = anchored else {
             continue;
         };
         let y = sample_at_with(&trace.x, &trace.y, marker.x, interpolation);
         if !y.is_finite() {
             continue;
         }
-        let mut plot_marker = plot::Marker::point(marker.x, y, color, label);
-        if pane.right.contains(index) {
-            plot_marker.side = plot::YSide::Right;
-        }
-        spec.markers.push(plot_marker);
+        spec.markers
+            .push(plot::Marker::point(marker.x, y, color, label));
     }
 
     let model_cursor_domain = model.cursor_domain();
@@ -3238,23 +3201,21 @@ fn show_unit_pane(
     if let Some(clicked_x) = response.clicked_x
         && state.ui.results.marker_tool.is_armed()
     {
-        let right_range = spec.y_right.as_ref().map(|(axis, _)| (axis.min, axis.max));
         let pointer_y = response.response.interact_pointer_pos().map(|pos| pos.y);
         let plot_rect = response.plot_rect;
-        // "Nearest" has to mean what the eye sees, so each trace is measured
-        // in screen space against the axis it actually draws on.
-        let screen_y = |value: f64, right: bool| -> Option<f32> {
-            let (lo, hi) = if right { right_range? } else { (y0, y1) };
-            (value.is_finite() && hi > lo).then(|| {
-                plot_rect.bottom() - ((value - lo) / (hi - lo)) as f32 * plot_rect.height()
+        // "Nearest" has to mean what the eye sees, so traces are measured
+        // in screen space against the pane's drawn range.
+        let screen_y = |value: f64| -> Option<f32> {
+            (value.is_finite() && y1 > y0).then(|| {
+                plot_rect.bottom() - ((value - y0) / (y1 - y0)) as f32 * plot_rect.height()
             })
         };
         let nearest = pane_traces
             .iter()
             .filter(|(_, trace)| !trace.overlay)
-            .filter_map(|(index, trace)| {
+            .filter_map(|(_, trace)| {
                 let value = sample_at_with(&trace.x, &trace.y, clicked_x, interpolation);
-                let y = screen_y(value, pane.right.contains(index))?;
+                let y = screen_y(value)?;
                 Some((trace, pointer_y.map_or(0.0, |pointer| (pointer - y).abs())))
             })
             .min_by(|(_, a), (_, b)| a.total_cmp(b));
@@ -3277,24 +3238,17 @@ fn show_unit_pane(
             .response
             .interact_pointer_pos()
             .map(|position| position.y);
-        let right_range = spec.y_right.as_ref().map(|(axis, _)| (axis.min, axis.max));
         let nearest_anchor = placing_cursor_a.then(|| {
             pane_traces
                 .iter()
                 .filter(|(_, trace)| !trace.overlay)
-                .filter_map(|(index, trace)| {
+                .filter_map(|(_, trace)| {
                     let value = sample_at_with(&trace.x, &trace.y, clicked_x, interpolation);
-                    let (minimum, maximum) = if pane.right.contains(index) {
-                        right_range?
-                    } else {
-                        (y0, y1)
-                    };
-                    if !value.is_finite() || maximum <= minimum {
+                    if !value.is_finite() || y1 <= y0 {
                         return None;
                     }
                     let screen_y = response.plot_rect.bottom()
-                        - ((value - minimum) / (maximum - minimum)) as f32
-                            * response.plot_rect.height();
+                        - ((value - y0) / (y1 - y0)) as f32 * response.plot_rect.height();
                     Some((
                         anchor_key(model, trace),
                         pointer_y.map_or(0.0, |pointer| (pointer - screen_y).abs()),
@@ -3324,7 +3278,6 @@ fn show_unit_pane(
             ordinal,
         );
         view.y = None;
-        view.y_right = None;
     } else if response.view.any() {
         if let Some(x) = response.view.x {
             set_shared_x_view(
@@ -3341,9 +3294,6 @@ fn show_unit_pane(
         );
         if let Some(y) = response.view.y {
             view.y = Some(y);
-        }
-        if let Some(y_right) = response.view.y_right {
-            view.y_right = Some(y_right);
         }
     }
 }

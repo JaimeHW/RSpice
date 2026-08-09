@@ -1,9 +1,8 @@
-//! BODE — the active run's AC response promoted to a full-bleed stability
-//! view: gain and phase with unity-gain, phase-margin and gain-margin
-//! markers, and the stability table in the right panel.
-//!
-//! All margins are computed from the simulated curves — markers and tables
-//! read the same numbers by construction.
+//! BODE derivations — the active run's AC stability numbers (unity-gain,
+//! phase and gain margins) for the right panel's inspector card, plus the
+//! ordinary-noise spectrum instrument. The Bode sheet itself renders through
+//! the waves pane-stack; margins and curves read the same data by
+//! construction.
 
 use std::sync::Arc;
 
@@ -12,71 +11,29 @@ use egui::Ui;
 use crate::state::{
     AnalysisResult, AnalysisType, SharedWaveformValues, ac_bode_summary_for_selection,
 };
-use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale, sample_at};
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{chip, section_header};
+use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
 
-use super::strip::{self, LegendChip};
-use super::{BodeDerived, well_hint};
+use super::BodeDerived;
 
-/// The AC signal pair and its computed stability numbers.
+/// The AC signal pair's computed stability numbers.
 struct BodeModel {
-    signal: String,
-    frequency: SharedWaveformValues,
-    gain_db: SharedWaveformValues,
     /// The phase trace as displayed: raw ±180°-wrapped samples, or the
     /// unwrapped series when the continuous toggle is on. The margins are
     /// always computed from the raw arrays.
     phase_deg: Option<SharedWaveformValues>,
-    /// Finite (min, max) of the displayed phase curve.
-    phase_extremes: Option<(f64, f64)>,
     margins: BodeDerived,
 }
 
-/// Exact retained ordinary-noise spectrum. The Noise result viewer owns this
-/// model; it lives beside the Bode renderer only because both instruments use
-/// the same frequency-domain plot machinery.
+/// Summary facts of the selected retained ordinary-noise spectrum for the
+/// right panel's card. The spectrum itself renders through the waves
+/// pane-stack's nV/√Hz projection.
 struct NoiseSpectrumModel {
-    analysis_index: usize,
-    label: String,
     frequency: SharedWaveformValues,
-    traces: Vec<NoiseSpectrumTrace>,
-    reference: NoiseReference,
+    trace_count: usize,
     total_rms: Option<f64>,
     input_rms: Option<f64>,
     band: Option<(f64, f64)>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum NoiseReference {
-    Input,
-    Output,
-}
-
-impl NoiseReference {
-    const fn title(self) -> &'static str {
-        match self {
-            Self::Input => "Input-referred noise",
-            Self::Output => "Output-referred noise",
-        }
-    }
-
-    const fn accessible_plot_name(self) -> &'static str {
-        match self {
-            Self::Input => "Input-referred noise spectrum plot",
-            Self::Output => "Output-referred noise spectrum plot",
-        }
-    }
-}
-
-struct NoiseSpectrumTrace {
-    waveform_index: usize,
-    name: String,
-    density_v2_per_hz: SharedWaveformValues,
-    density_v_per_sqrt_hz: SharedWaveformValues,
-    density_nv_per_sqrt_hz: SharedWaveformValues,
 }
 
 fn noise_waveform_is_renderable(waveform: &crate::state::WaveformData) -> bool {
@@ -117,18 +74,10 @@ fn build_model(state: &mut AppState) -> Option<BodeModel> {
     let simulation = &state.simulation;
     let run = simulation.active_run()?;
     let summary = ac_bode_summary_for_selection(run, simulation.active_analysis_idx)?;
-    let analysis = &run.analyses[summary.analysis_index];
-    let mag = &analysis.waveforms[summary.mag_index];
     let phase = summary
         .phase_index
         .zip(summary.phase_deg.as_ref())
         .map(|(phase_index, phase)| (phase_index, Arc::clone(phase)));
-
-    let gain_db = state.ui.results.derived.db(
-        (summary.analysis_index as u64) << 32 | summary.mag_index as u64,
-        &mag.y,
-    );
-    let frequency = Arc::clone(&summary.frequency);
 
     // Margins + extremes from the curves, cached on (data version, resolved
     // magnitude waveform) — the crossings and folds are O(points) and both
@@ -154,8 +103,6 @@ fn build_model(state: &mut AppState) -> Option<BodeModel> {
                 f180: metrics.f180,
                 gm_db: metrics.gm_db,
                 f3db: metrics.f3db,
-                gain_extremes: metrics.gain_extremes,
-                phase_extremes: metrics.phase_extremes,
             };
             state.ui.results.bode = Some(d);
             d
@@ -164,27 +111,17 @@ fn build_model(state: &mut AppState) -> Option<BodeModel> {
 
     // Displayed phase: optionally unwrapped into a continuous curve. The
     // margin computation above reads the raw wrapped arrays on purpose —
-    // only the displayed trace (and its axis range) changes.
-    let (phase_deg, phase_extremes) = match &phase {
+    // only the displayed trace changes.
+    let phase_deg = match &phase {
         Some((phase_index, raw)) if state.ui.results.phase_continuous => {
             let key = (summary.analysis_index as u64) << 32 | *phase_index as u64;
-            let derived = &mut state.ui.results.derived;
-            let series = derived.unwrapped(key, raw);
-            let extremes = derived.unwrapped_range(key, raw);
-            (Some(series), extremes)
+            Some(state.ui.results.derived.unwrapped(key, raw))
         }
-        Some((_, raw)) => (Some(Arc::clone(raw)), margins.phase_extremes),
-        None => (None, None),
+        Some((_, raw)) => Some(Arc::clone(raw)),
+        None => None,
     };
 
-    Some(BodeModel {
-        signal: summary.signal,
-        frequency,
-        gain_db,
-        phase_deg,
-        phase_extremes,
-        margins,
-    })
+    Some(BodeModel { phase_deg, margins })
 }
 
 fn normalized_noise_name(name: &str) -> String {
@@ -242,56 +179,33 @@ fn selected_noise_analysis(state: &AppState) -> Option<(usize, &AnalysisResult)>
 }
 
 fn build_noise_model(state: &AppState) -> Option<NoiseSpectrumModel> {
-    let (analysis_index, analysis) = selected_noise_analysis(state)?;
-    let input = analysis.waveforms.iter().enumerate().find(|(_, waveform)| {
+    let (_, analysis) = selected_noise_analysis(state)?;
+    let input_referred = analysis.waveforms.iter().find(|waveform| {
         is_input_noise_name(&waveform.name) && noise_waveform_is_renderable(waveform)
     });
-    let (reference, anchor_index, anchor) = if let Some((index, waveform)) = input {
-        (NoiseReference::Input, index, waveform)
-    } else {
-        let (index, waveform) = analysis
-            .waveforms
-            .iter()
-            .enumerate()
-            .find(|(_, waveform)| {
-                is_output_noise_name(&waveform.name) && noise_waveform_is_renderable(waveform)
-            })?;
-        (NoiseReference::Output, index, waveform)
+    let anchor = match input_referred {
+        Some(waveform) => waveform,
+        None => analysis.waveforms.iter().find(|waveform| {
+            is_output_noise_name(&waveform.name) && noise_waveform_is_renderable(waveform)
+        })?,
     };
 
     let frequency = Arc::clone(&anchor.x);
-    let source_traces = if reference == NoiseReference::Input {
-        vec![(anchor_index, anchor)]
+    let trace_count = if input_referred.is_some() {
+        1
     } else {
         analysis
             .waveforms
             .iter()
-            .enumerate()
-            .filter(|(_, waveform)| {
+            .filter(|waveform| {
                 !is_input_noise_name(&waveform.name)
                     && (is_output_noise_name(&waveform.name)
                         || is_noise_contributor_name(&waveform.name))
                     && noise_waveform_is_renderable(waveform)
                     && waveform.x.as_slice() == frequency.as_slice()
             })
-            .collect()
+            .count()
     };
-    let traces = source_traces
-        .into_iter()
-        .map(|(waveform_index, waveform)| NoiseSpectrumTrace {
-            waveform_index,
-            name: waveform.name.clone(),
-            density_v2_per_hz: Arc::clone(&waveform.y),
-            density_v_per_sqrt_hz: Arc::new(waveform.y.iter().map(|value| value.sqrt()).collect()),
-            density_nv_per_sqrt_hz: Arc::new(
-                waveform
-                    .y
-                    .iter()
-                    .map(|value| value.sqrt() * 1.0e9)
-                    .collect(),
-            ),
-        })
-        .collect::<Vec<_>>();
     let (total_rms, input_rms, band) = analysis
         .noise_summary
         .as_ref()
@@ -300,361 +214,14 @@ fn build_noise_model(state: &AppState) -> Option<NoiseSpectrumModel> {
         });
 
     Some(NoiseSpectrumModel {
-        analysis_index,
-        label: analysis.label.clone(),
         frequency,
-        traces,
-        reference,
+        trace_count,
         total_rms,
         input_rms,
         band,
     })
 }
 
-// ---------------------------------------------------------------------------
-// center view
-// ---------------------------------------------------------------------------
-
-/// Render the stability view.
-pub fn show(ui: &mut Ui, state: &mut AppState) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
-    let Some(model) = build_model(state) else {
-        well_hint(ui, "No usable AC response in the active dataset");
-        return;
-    };
-
-    let legend = [
-        LegendChip {
-            name: "gain dB20",
-            color: c.traces[0],
-            on: true,
-        },
-        LegendChip {
-            name: match quantity_policy.angle_display {
-                crate::quantity::AngleDisplay::Degrees => "phase°",
-                crate::quantity::AngleDisplay::Radians => "phase rad",
-            },
-            color: c.traces[2],
-            on: model.phase_deg.is_some(),
-        },
-    ];
-    let view = state.ui.results.plot_view(super::ResultViewer::Bode, 0);
-    let header = strip::StripHeader::new(
-        "STB",
-        &format!("{} · margins from the simulated curves", model.signal),
-        &legend,
-    )
-    .zoomed(view.is_zoomed())
-    .show(ui);
-    if header.fit_clicked {
-        state
-            .ui
-            .results
-            .reset_plot_view(super::ResultViewer::Bode, 0);
-    }
-
-    // Phase-wrap selector, mirroring the FFT window-selector row: display
-    // only — the margins always read the raw wrapped arrays. The choice
-    // also drives the waves strips' phase traces. `continuous` is captured
-    // before the chips so this frame's trace keys match the model that was
-    // just built; a click re-renders next frame.
-    let continuous = state.ui.results.phase_continuous;
-    if model.phase_deg.is_some() {
-        ui.horizontal(|ui| {
-            ui.add_space(10.0);
-            ui.label(
-                egui::RichText::new("phase")
-                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                    .color(c.text_dim),
-            );
-            let wrapped_label = match quantity_policy.angle_display {
-                crate::quantity::AngleDisplay::Degrees => "wrapped ±180°",
-                crate::quantity::AngleDisplay::Radians => "wrapped ±π rad",
-            };
-            if chip(ui, wrapped_label, !continuous)
-                .on_hover_text("Phase as simulated, wrapped to one full-turn interval")
-                .clicked()
-            {
-                state.ui.results.phase_continuous = false;
-            }
-            if chip(ui, "continuous", continuous)
-                .on_hover_text("Unwrap the displayed phase into a continuous curve")
-                .clicked()
-            {
-                state.ui.results.phase_continuous = true;
-            }
-        });
-        ui.add_space(2.0);
-    }
-
-    let x0 = model
-        .frequency
-        .iter()
-        .copied()
-        .find(|&f| f > 0.0)
-        .unwrap_or(1.0);
-    let x1 = *model.frequency.last().unwrap_or(&1.0);
-    if !matches!(x1.partial_cmp(&x0), Some(std::cmp::Ordering::Greater)) {
-        well_hint(ui, "Degenerate frequency axis");
-        return;
-    }
-    let (x0, x1) = view.x.unwrap_or((x0, x1));
-
-    let (g_min, g_max) = model.margins.gain_extremes;
-    let pad = ((g_max - g_min) * 0.1).max(3.0);
-    let (y0, y1) = view
-        .y
-        .unwrap_or(((g_min - pad).min(-10.0), (g_max + pad).max(10.0)));
-    let y = Axis::linear(y0, y1, "dB");
-
-    let (frequency_scale, frequency_offset, frequency_unit) =
-        quantity_policy.frequency_axis_transform();
-    let x_axis = Axis::log_decades(x0, x1, "Hz").with_display_transform(
-        frequency_scale,
-        frequency_offset,
-        frequency_unit,
-    );
-    let mut spec = PlotSpec::new(x_axis, XScale::Log10, y).accessible_name("Bode plot");
-    spec.ref_lines.push(plot::RefLine { y: 0.0 });
-
-    if let Some(phase) = &model.phase_deg {
-        // Displayed extremes — the unwrapped curve can leave ±180°, and the
-        // 45° lattice below handles the wider range.
-        let (p_min, p_max) = model.phase_extremes.unwrap_or((-180.0, 0.0));
-        let axis = match view.y_right {
-            // Zoomed: plain linear ticks instead of the 45° lattice.
-            Some((z0, z1)) => Axis::linear_with(z0, z1, "°", 5),
-            None => {
-                let p0 = ((p_min.min(-180.0)) / 45.0).floor() * 45.0;
-                let p1 = (p_max.max(0.0) / 45.0).ceil() * 45.0;
-                let ticks: Vec<f64> = (0..=((p1 - p0) / 45.0) as i64)
-                    .map(|i| p0 + i as f64 * 45.0)
-                    .collect();
-                Axis::with_ticks(p0, p1, "°", &ticks)
-            }
-        };
-        let (angle_scale, angle_offset, angle_unit) = quantity_policy.degree_axis_transform();
-        let axis = axis.with_display_transform(angle_scale, angle_offset, angle_unit);
-        spec.y_right = Some((axis, c.traces[2]));
-        spec.traces.push(
-            Trace::new(&model.frequency, phase, c.traces[2])
-                .right()
-                .dashed()
-                // Wrapped and continuous series decimate differently.
-                .cache_key(if continuous { 0xB0DE_0003 } else { 0xB0DE_0002 }),
-        );
-    }
-    spec.traces
-        .push(Trace::new(&model.frequency, &model.gain_db, c.traces[0]).cache_key(0xB0DE_0001));
-
-    // Margin markers — first-class objects per the design.
-    let m = model.margins;
-    if let Some(ugf) = m.ugf {
-        spec.markers.push(plot::Marker {
-            x: ugf,
-            y: 0.0,
-            side: plot::YSide::Left,
-            color: c.accent,
-            label: format!("UGF {}", quantity_policy.format_frequency(ugf, 1)),
-            drop_line: true,
-            label_dy: 0.0,
-            shape: plot::MarkerShape::Point,
-        });
-        if let (Some(pm), Some(phase)) = (m.pm_deg, &model.phase_deg) {
-            spec.markers.push(plot::Marker {
-                x: ugf,
-                y: sample_at(&model.frequency, phase, ugf),
-                side: plot::YSide::Right,
-                color: c.traces[2],
-                label: format!("PM {}", quantity_policy.format_angle(pm.to_radians(), 1)),
-                drop_line: false,
-                label_dy: 30.0,
-                shape: plot::MarkerShape::Point,
-            });
-        }
-    }
-    if let (Some(f180), Some(gm)) = (m.f180, m.gm_db) {
-        spec.markers.push(plot::Marker {
-            x: f180,
-            y: -gm,
-            side: plot::YSide::Left,
-            color: c.traces[0],
-            label: format!("GM {gm:.1} dB"),
-            drop_line: true,
-            label_dy: 0.0,
-            shape: plot::MarkerShape::Point,
-        });
-    }
-
-    let readout = |x: f64| -> Vec<(String, String)> {
-        let mut rows = vec![
-            ("f".to_owned(), quantity_policy.format_frequency(x, 2)),
-            (
-                "gain".to_owned(),
-                format!("{:.1} dB", sample_at(&model.frequency, &model.gain_db, x)),
-            ),
-        ];
-        if let Some(phase) = &model.phase_deg {
-            rows.push((
-                "phase".to_owned(),
-                quantity_policy.format_angle(sample_at(&model.frequency, phase, x).to_radians(), 1),
-            ));
-        }
-        rows
-    };
-
-    let response = plot::show(ui, &spec, &mut state.ui.results.cache, None, Some(&readout));
-    if response.view.any() {
-        state
-            .ui
-            .results
-            .plot_view_mut(super::ResultViewer::Bode, 0)
-            .apply(&response.view);
-    }
-}
-
-pub(super) fn show_noise_spectrum(ui: &mut Ui, state: &mut AppState) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
-    let Some(model) = build_noise_model(state) else {
-        well_hint(ui, "No valid ordinary noise spectrum in the active dataset");
-        return;
-    };
-
-    let legend = model
-        .traces
-        .iter()
-        .enumerate()
-        .map(|(index, trace)| LegendChip {
-            name: &trace.name,
-            color: c.traces[index % c.traces.len()],
-            on: true,
-        })
-        .collect::<Vec<_>>();
-    let view = state
-        .ui
-        .results
-        .plot_view(super::ResultViewer::NoiseContrib, 0);
-    let header = strip::StripHeader::new(
-        "NOISE",
-        &format!(
-            "{} · {} · amplitude density from retained PSD",
-            model.label,
-            model.reference.title()
-        ),
-        &legend,
-    )
-    .zoomed(view.is_zoomed())
-    .show(ui);
-    if header.fit_clicked {
-        state
-            .ui
-            .results
-            .reset_plot_view(super::ResultViewer::NoiseContrib, 0);
-    }
-
-    let x0 = model
-        .frequency
-        .iter()
-        .copied()
-        .find(|frequency| frequency.is_finite() && *frequency > 0.0)
-        .unwrap_or(1.0);
-    let x1 = model
-        .frequency
-        .iter()
-        .copied()
-        .rev()
-        .find(|frequency| frequency.is_finite() && *frequency > x0)
-        .unwrap_or(x0);
-    if x1 <= x0 {
-        well_hint(ui, "Degenerate noise-frequency axis");
-        return;
-    }
-    let (x0, x1) = view.x.unwrap_or((x0, x1));
-
-    let Some((density_min, density_max)) = model
-        .traces
-        .iter()
-        .filter_map(|trace| super::finite_extremes(&trace.density_nv_per_sqrt_hz))
-        .reduce(|(lo, hi), (trace_lo, trace_hi)| (lo.min(trace_lo), hi.max(trace_hi)))
-    else {
-        well_hint(
-            ui,
-            "The retained noise spectrum contains no positive samples",
-        );
-        return;
-    };
-    let automatic_y = (
-        (density_min / 1.2).max(f64::MIN_POSITIVE),
-        (density_max * 1.2).max(density_min * 1.01),
-    );
-    let (y0, y1) = view
-        .y
-        .filter(|(lo, hi)| lo.is_finite() && hi.is_finite() && *lo > 0.0 && *hi > *lo)
-        .unwrap_or(automatic_y);
-    let (frequency_scale, frequency_offset, frequency_unit) =
-        quantity_policy.frequency_axis_transform();
-    let x_axis = Axis::log_decades(x0, x1, "Hz").with_display_transform(
-        frequency_scale,
-        frequency_offset,
-        frequency_unit,
-    );
-    let y_axis = Axis::log_decades(y0, y1, "nV/√Hz").with_label(model.reference.title());
-    let mut spec = PlotSpec::new(x_axis, XScale::Log10, y_axis)
-        .with_log_y()
-        .accessible_name(model.reference.accessible_plot_name());
-    for (index, trace) in model.traces.iter().enumerate() {
-        spec.traces.push(
-            Trace::new(
-                &model.frequency,
-                &trace.density_nv_per_sqrt_hz,
-                c.traces[index % c.traces.len()],
-            )
-            .cache_key(
-                0xA015_E000_u64.saturating_add(
-                    (model.analysis_index as u64) << 16 | trace.waveform_index as u64,
-                ),
-            ),
-        );
-    }
-
-    let readout = |x: f64| -> Vec<(String, String)> {
-        let mut rows = vec![("f".to_owned(), quantity_policy.format_frequency(x, 2))];
-        for trace in &model.traces {
-            let density_psd = sample_at(&model.frequency, &trace.density_v2_per_hz, x);
-            let density_v = sample_at(&model.frequency, &trace.density_v_per_sqrt_hz, x);
-            let density_nv = sample_at(&model.frequency, &trace.density_nv_per_sqrt_hz, x);
-            rows.push((
-                trace.name.clone(),
-                if density_nv.is_finite() {
-                    format!(
-                        "{density_nv:.6} nV/√Hz ({density_v:.9e} V/√Hz; {density_psd:.9e} V²/Hz retained)"
-                    )
-                } else {
-                    "unavailable".to_owned()
-                },
-            ));
-        }
-        rows
-    };
-    let response = plot::show(ui, &spec, &mut state.ui.results.cache, None, Some(&readout));
-    if response.view.any() {
-        state
-            .ui
-            .results
-            .plot_view_mut(super::ResultViewer::NoiseContrib, 0)
-            .apply(&response.view);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// right panel
-// ---------------------------------------------------------------------------
-
-/// The stability readout.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     section_header(ui, "Stability", None);
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
@@ -734,7 +301,7 @@ pub(super) fn noise_spectrum_right_panel(ui: &mut Ui, state: &mut AppState) {
             ),
             false,
         ),
-        ("Traces", model.traces.len().to_string(), false),
+        ("Traces", model.trace_count.to_string(), false),
         (
             "Output integrated",
             model
@@ -801,15 +368,14 @@ mod tests {
         assert!(state.simulation.select_run(0));
 
         assert!(state.simulation.select_analysis(0));
-        assert_eq!(
-            build_model(&mut state).expect("first model").signal,
-            "V(first)"
-        );
+        let first = build_model(&mut state).expect("first model");
+        assert_eq!(first.margins.analysis_index, 0);
+        assert_eq!(first.margins.adc_db, Some(20.0));
 
         assert!(state.simulation.select_analysis(1));
         let second = build_model(&mut state).expect("second model");
-        assert_eq!(second.signal, "V(second)");
-        assert_eq!(second.gain_db.as_slice(), &[40.0, 20.0]);
+        assert_eq!(second.margins.analysis_index, 1);
+        assert_eq!(second.margins.adc_db, Some(40.0));
     }
 
     #[test]
@@ -831,27 +397,13 @@ mod tests {
         assert!(state.simulation.select_run(0));
 
         assert!(state.simulation.select_analysis(0));
+        // The selected Pnoise analysis has no ordinary spectrum; the card
+        // falls back to the Noise analysis rather than relabeling
+        // phase-noise data. The nV/√Hz conversion itself is pinned by the
+        // waves pane-stack projection tests.
         let fallback = build_noise_model(&mut state).expect("ordinary noise fallback");
-        assert_eq!(fallback.analysis_index, 1);
-        assert_eq!(fallback.reference, NoiseReference::Output);
-        assert_eq!(
-            fallback.traces[0].density_v2_per_hz.as_slice(),
-            &[1.0e-18, 1.0e-16]
-        );
-        assert!(
-            fallback.traces[0]
-                .density_v_per_sqrt_hz
-                .iter()
-                .zip([1.0e-9, 1.0e-8])
-                .all(|(actual, expected)| (actual - expected).abs() <= expected * 1.0e-12)
-        );
-        assert!(
-            fallback.traces[0]
-                .density_nv_per_sqrt_hz
-                .iter()
-                .zip([1.0, 10.0])
-                .all(|(actual, expected)| (actual - expected).abs() <= expected * 1.0e-12)
-        );
+        assert_eq!(fallback.frequency.as_slice(), &[1.0, 10.0]);
+        assert_eq!(fallback.trace_count, 1);
     }
 
     #[test]
@@ -879,16 +431,9 @@ mod tests {
         state.simulation.runs = vec![run];
         assert!(state.simulation.select_run(0));
         let model = build_noise_model(&state).expect("input-referred noise model");
-        assert_eq!(model.reference, NoiseReference::Input);
-        assert_eq!(model.traces.len(), 1);
-        assert_eq!(model.traces[0].name, "inoise_spectrum");
-        assert!(
-            model.traces[0]
-                .density_nv_per_sqrt_hz
-                .iter()
-                .zip([4.0, 5.0])
-                .all(|(actual, expected)| (actual - expected).abs() <= expected * 1.0e-12)
-        );
+        // Input-referred evidence takes the card without mixing in output
+        // or contributor traces.
+        assert_eq!(model.trace_count, 1);
     }
 
     #[test]

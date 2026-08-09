@@ -137,16 +137,6 @@ impl Axis {
     }
 }
 
-/// Which Y axis a trace or marker is mapped to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum YSide {
-    /// Primary (left) axis.
-    #[default]
-    Left,
-    /// Secondary (right) axis — gain/phase plots.
-    Right,
-}
-
 /// One trace. Data is borrowed; the engine never copies it except into the
 /// cached decimation envelope.
 pub struct Trace<'a> {
@@ -156,9 +146,7 @@ pub struct Trace<'a> {
     pub y: &'a [f64],
     /// Stroke color.
     pub color: Color32,
-    /// Axis mapping.
-    pub side: YSide,
-    /// Dashed stroke (secondary quantities — phase, fit overlays).
+    /// Dashed stroke (secondary quantities — fit overlays).
     pub dashed: bool,
     /// Explicit categorical dash cue. Unlike the global color-safe display
     /// preference, this is part of a persisted family presentation policy.
@@ -178,13 +166,12 @@ pub struct Trace<'a> {
 }
 
 impl<'a> Trace<'a> {
-    /// A solid 1.8 pt trace on the left axis.
+    /// A solid 1.8 pt trace.
     pub fn new(x: &'a [f64], y: &'a [f64], color: Color32) -> Self {
         Self {
             x,
             y,
             color,
-            side: YSide::Left,
             dashed: false,
             dash_style: None,
             marker_style: None,
@@ -192,12 +179,6 @@ impl<'a> Trace<'a> {
             width: 1.8,
             cache_key: None,
         }
-    }
-
-    /// Map to the right axis.
-    pub fn right(mut self) -> Self {
-        self.side = YSide::Right;
-        self
     }
 
     /// Dashed stroke.
@@ -260,10 +241,8 @@ pub enum MarkerShape {
 pub struct Marker {
     /// Position (data space).
     pub x: f64,
-    /// Position (data space, on `side`'s axis).
+    /// Position (data space).
     pub y: f64,
-    /// Axis mapping for `y`.
-    pub side: YSide,
     /// Dot ring and tag text color.
     pub color: Color32,
     /// Tag text ("UGF 10.4 MHz").
@@ -277,12 +256,11 @@ pub struct Marker {
 }
 
 impl Marker {
-    /// A dot-and-tag marker on the left axis.
+    /// A dot-and-tag marker.
     pub fn point(x: f64, y: f64, color: Color32, label: impl Into<String>) -> Self {
         Self {
             x,
             y,
-            side: YSide::Left,
             color,
             label: label.into(),
             drop_line: false,
@@ -363,13 +341,11 @@ pub struct PlotSpec<'a> {
     pub x: Axis,
     /// X scale (linear or log decades).
     pub x_scale: XScale,
-    /// Left Y axis.
+    /// Y axis.
     pub y: Axis,
-    /// Left Y scale. Linear by default; unit-pane controls may opt into
+    /// Y scale. Linear by default; unit-pane controls may opt into
     /// logarithmic decades only for strictly positive source data.
     pub y_scale: XScale,
-    /// Optional right Y axis with its tick/unit tint.
-    pub y_right: Option<(Axis, Color32)>,
     /// Traces, drawn in order (first = bottom).
     pub traces: Vec<Trace<'a>>,
     /// Viewer-only trace sampling policy.
@@ -393,8 +369,7 @@ pub struct PlotSpec<'a> {
     /// Left margin in points (56 default; widen for long tick labels).
     pub left_margin: f32,
     /// Right margin in points. `None` selects the renderer default. A stack
-    /// uses one explicit margin so every pane's X grid stays aligned even
-    /// when only one pane owns a secondary Y axis.
+    /// uses one explicit margin so every pane's X grid stays aligned.
     pub right_margin: Option<f32>,
     /// Whether this plot owns labeled X-axis chrome. Unit-scoped waveform
     /// panes disable it and render one shared X strip beneath the stack.
@@ -411,7 +386,6 @@ impl<'a> PlotSpec<'a> {
             x_scale,
             y,
             y_scale: XScale::Linear,
-            y_right: None,
             traces: Vec::new(),
             display_decimation: DisplayDecimation::default(),
             markers: Vec::new(),

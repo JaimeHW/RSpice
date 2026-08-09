@@ -317,7 +317,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         spec.markers.push(plot::Marker {
             x: moments.mean,
             y: y1 * 0.86,
-            side: plot::YSide::Left,
             color: c.accent,
             label: format!("µ {}", fmt_si(moments.mean, "", 2)),
             drop_line: true,
@@ -335,7 +334,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             spec.markers.push(plot::Marker {
                 x: lsl,
                 y: y1 * 0.72,
-                side: plot::YSide::Left,
                 color: c.err,
                 label: format!("LSL {}", fmt_si(lsl, "", 2)),
                 drop_line: true,
@@ -350,7 +348,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             spec.markers.push(plot::Marker {
                 x: usl,
                 y: y1 * 0.72,
-                side: plot::YSide::Left,
                 color: c.err,
                 label: format!("USL {}", fmt_si(usl, "", 2)),
                 drop_line: true,

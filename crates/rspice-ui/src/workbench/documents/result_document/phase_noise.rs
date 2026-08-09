@@ -270,7 +270,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         spec.markers.push(plot::Marker {
             x: 1.0e6,
             y: level,
-            side: plot::YSide::Left,
             color: colors.accent,
             label: format!("1 MHz {level:.1} dBc/Hz"),
             drop_line: true,

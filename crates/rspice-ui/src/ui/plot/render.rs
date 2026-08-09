@@ -10,7 +10,7 @@ use crate::ui::tokens::Tokens;
 
 use super::cursor::CursorPair;
 use super::decimate::{DecimationCache, DisplayDecimation};
-use super::spec::{MarkerShape, PlotSpec, YSide};
+use super::spec::{MarkerShape, PlotSpec};
 
 /// Interaction contract selected by the owning result surface.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -47,10 +47,8 @@ fn interaction_mode(ctx: &egui::Context) -> InteractionMode {
 pub struct ViewChange {
     /// New X range.
     pub x: Option<(f64, f64)>,
-    /// New left-Y range.
+    /// New Y range.
     pub y: Option<(f64, f64)>,
-    /// New right-Y range (only emitted when the spec had a right axis).
-    pub y_right: Option<(f64, f64)>,
     /// Double-click: restore the automatic (fit-to-data) view.
     pub reset: bool,
 }
@@ -58,7 +56,7 @@ pub struct ViewChange {
 impl ViewChange {
     /// Whether the gesture produced any change this frame.
     pub fn any(&self) -> bool {
-        self.reset || self.x.is_some() || self.y.is_some() || self.y_right.is_some()
+        self.reset || self.x.is_some() || self.y.is_some()
     }
 }
 
@@ -94,7 +92,6 @@ pub fn plot_rect(ui: &Ui, spec: &PlotSpec<'_>) -> Rect {
 const MARGIN_TOP: f32 = 12.0;
 const MARGIN_BOTTOM: f32 = 26.0;
 const MARGIN_RIGHT_PLAIN: f32 = 16.0;
-const MARGIN_RIGHT_AXIS: f32 = 54.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum TraceMarkerShape {
@@ -262,13 +259,7 @@ fn paint_trace_markers(
 }
 
 fn right_margin(spec: &PlotSpec<'_>) -> f32 {
-    if let Some(margin) = spec.right_margin {
-        margin
-    } else if spec.y_right.is_some() {
-        MARGIN_RIGHT_AXIS
-    } else {
-        MARGIN_RIGHT_PLAIN
-    }
+    spec.right_margin.unwrap_or(MARGIN_RIGHT_PLAIN)
 }
 
 fn bottom_margin(spec: &PlotSpec<'_>) -> f32 {
@@ -319,9 +310,6 @@ fn plot_accessibility_label(spec: &PlotSpec<'_>, cursors: Option<&CursorPair>) -
     } else {
         counted(trace_count, "visible trace", "visible traces")
     };
-    let right_axis = spec.y_right.as_ref().map_or_else(String::new, |(axis, _)| {
-        format!(" Right Y axis {}.", axis_accessibility_range(axis))
-    });
     let cursor_summary = cursors.map_or_else(String::new, |pair| match (pair.a, pair.b) {
         (Some(a), Some(b)) => format!(
             " Cursor A {}, cursor B {}, delta {}.",
@@ -339,13 +327,12 @@ fn plot_accessibility_label(spec: &PlotSpec<'_>, cursors: Option<&CursorPair>) -
         .accessible_detail
         .map_or_else(String::new, |detail| format!(" {detail}."));
     format!(
-        "{}.{} {}. X axis {}. Left Y axis {}.{} {}. {}.{}{} Drag to pan, use the mouse wheel to zoom, Shift-drag or right-drag to zoom a region, and double-click to fit the data.",
+        "{}.{} {}. X axis {}. Y axis {}. {}. {}.{}{} Drag to pan, use the mouse wheel to zoom, Shift-drag or right-drag to zoom a region, and double-click to fit the data.",
         spec.accessible_name,
         custom_detail,
         trace_summary,
         axis_accessibility_range(&spec.x),
         axis_accessibility_range(&spec.y),
-        right_axis,
         counted(spec.markers.len(), "marker", "markers"),
         counted(spec.limit_lines.len(), "project limit", "project limits"),
         cursor_summary,
@@ -427,24 +414,6 @@ pub fn show(
         plot_rect.bottom()
             - (spec.y_scale.normalize(y, spec.y.min, spec.y.max) as f32) * plot_rect.height()
     };
-    let my_r = |y: f64| -> f32 {
-        // A right-side trace with no right axis is an inconsistent spec;
-        // map it against the left axis rather than panicking mid-frame.
-        match spec.y_right.as_ref() {
-            Some((axis, _)) => {
-                plot_rect.bottom()
-                    - (((y - axis.min) / (axis.max - axis.min)) as f32) * plot_rect.height()
-            }
-            None => my(y),
-        }
-    };
-    let map_y = |y: f64, side: YSide| -> f32 {
-        match side {
-            YSide::Left => my(y),
-            YSide::Right => my_r(y),
-        }
-    };
-
     let painter = ui.painter_at(rect);
     let tick_font = theme::mono(10.0, FontWeight::Regular);
     let grid = Stroke::new(1.0, c.canvas_grid);
@@ -527,18 +496,6 @@ pub fn show(
             c.text_dim,
         );
     }
-    if let Some((axis, tint)) = &spec.y_right {
-        for (yv, label) in &axis.ticks {
-            painter.text(
-                pos2(plot_rect.right() + 8.0, my_r(*yv)),
-                Align2::LEFT_CENTER,
-                label,
-                tick_font.clone(),
-                *tint,
-            );
-        }
-    }
-
     // ---- reference lines
     let ref_stroke = Stroke::new(1.0, c.text_faint);
     for line in &spec.ref_lines {
@@ -609,13 +566,13 @@ pub fn show(
                         columns,
                     )
                     .iter()
-                    .map(|p| pos2(mx(p[0]), map_y(p[1], trace.side)))
+                    .map(|p| pos2(mx(p[0]), my(p[1])))
                     .collect(),
                 _ => trace
                     .x
                     .iter()
                     .zip(trace.y.iter())
-                    .map(|(&x, &y)| pos2(mx(x), map_y(y, trace.side)))
+                    .map(|(&x, &y)| pos2(mx(x), my(y)))
                     .collect(),
             };
             let redundancy = t
@@ -677,9 +634,6 @@ pub fn show(
     // ---- frame + axis units
     painter.vline(plot_rect.left(), plot_rect.y_range(), frame);
     painter.hline(plot_rect.x_range(), plot_rect.bottom(), frame);
-    if spec.y_right.is_some() {
-        painter.vline(plot_rect.right(), plot_rect.y_range(), frame);
-    }
     if !spec.y.unit.is_empty() {
         painter.text(
             pos2(plot_rect.left() - 7.0, rect.top() + 8.0),
@@ -687,17 +641,6 @@ pub fn show(
             spec.y.unit.as_str(),
             tick_font.clone(),
             c.text_dim,
-        );
-    }
-    if let Some((axis, tint)) = &spec.y_right
-        && !axis.unit.is_empty()
-    {
-        painter.text(
-            pos2(plot_rect.right() + 8.0, rect.top() + 8.0),
-            Align2::LEFT_CENTER,
-            axis.unit.as_str(),
-            tick_font.clone(),
-            *tint,
         );
     }
     if !x_end_label.is_empty() {
@@ -720,7 +663,7 @@ pub fn show(
         let py = if limit_line {
             plot_rect.top()
         } else {
-            map_y(marker.y, marker.side)
+            my(marker.y)
         };
         if limit_line {
             painter.extend(Shape::dashed_line(
@@ -881,11 +824,6 @@ fn handle_navigation(
     let fy_of = |py: f32| ((plot_rect.bottom() - py) / plot_rect.height()) as f64;
     let denorm_x = |frac: f64| spec.x_scale.denormalize(frac, spec.x.min, spec.x.max);
     let denorm_y = |frac: f64| spec.y_scale.denormalize(frac, spec.y.min, spec.y.max);
-    let denorm_yr = |frac: f64| {
-        spec.y_right
-            .as_ref()
-            .map(|(axis, _)| axis.min + frac * (axis.max - axis.min))
-    };
 
     // Double-click restores the automatic fit.
     if interaction != InteractionMode::Select && out.response.double_clicked() {
@@ -939,9 +877,6 @@ fn handle_navigation(
                         .map(|(a, b)| (denorm_x(a), denorm_x(b)));
                     let (fy0, fy1) = (fy_of(band.bottom()).max(0.0), fy_of(band.top()).min(1.0));
                     out.view.y = Some((denorm_y(fy0), denorm_y(fy1)));
-                    if let (Some(a), Some(b)) = (denorm_yr(fy0), denorm_yr(fy1)) {
-                        out.view.y_right = Some((a, b));
-                    }
                 }
             }
         }
@@ -962,10 +897,6 @@ fn handle_navigation(
             let dy = f64::from(delta.y) / f64::from(plot_rect.height());
             if dy != 0.0 {
                 out.view.y = Some((denorm_y(dy), denorm_y(1.0 + dy)));
-                if let Some((axis, _)) = &spec.y_right {
-                    let span_r = axis.max - axis.min;
-                    out.view.y_right = Some((axis.min + dy * span_r, axis.max + dy * span_r));
-                }
             }
         }
         return;
@@ -988,9 +919,6 @@ fn handle_navigation(
                 let fy = fy_of(pointer.y);
                 let (f0, f1) = (fy * (1.0 - factor), fy + (1.0 - fy) * factor);
                 out.view.y = Some((denorm_y(f0), denorm_y(f1)));
-                if let (Some(a), Some(b)) = (denorm_yr(f0), denorm_yr(f1)) {
-                    out.view.y_right = Some((a, b));
-                }
             } else {
                 let fx = fx_of(pointer.x);
                 let (f0, f1) = (fx * (1.0 - factor), fx + (1.0 - fx) * factor);
@@ -1110,7 +1038,6 @@ mod tests {
         spec.markers.push(Marker {
             x: 10.0,
             y: 4.0,
-            side: YSide::Left,
             color: egui::Color32::WHITE,
             label: "UGF".to_owned(),
             drop_line: true,
@@ -1128,7 +1055,7 @@ mod tests {
 
         assert!(label.starts_with("Bode plot. 1 visible trace."));
         assert!(label.contains("X axis 1 to 10 Hz."));
-        assert!(label.contains(&format!("Left Y axis {} to 5 dB.", tick_label(-5.0))));
+        assert!(label.contains(&format!("Y axis {} to 5 dB.", tick_label(-5.0))));
         assert!(label.contains("1 marker."));
         assert!(label.contains("Cursor A 2, cursor B 5, delta 3."));
     }

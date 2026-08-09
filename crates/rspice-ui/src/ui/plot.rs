@@ -35,4 +35,4 @@ pub use render::{
     InteractionMode, ViewChange, plot_rect, set_interaction_mode, show, square_outer_rect,
 };
 pub use scale::XScale;
-pub use spec::{Axis, Band, LimitLine, Marker, MarkerShape, PlotSpec, RefLine, Trace, YSide};
+pub use spec::{Axis, Band, LimitLine, Marker, MarkerShape, PlotSpec, RefLine, Trace};

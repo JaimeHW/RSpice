@@ -366,16 +366,14 @@ impl ViewerAvailability {
 pub struct PlotView {
     /// X range override (data space).
     pub x: Option<(f64, f64)>,
-    /// Left-Y range override.
+    /// Y range override.
     pub y: Option<(f64, f64)>,
-    /// Right-Y range override (dual-axis strips).
-    pub y_right: Option<(f64, f64)>,
 }
 
 impl PlotView {
     /// Whether any axis is zoomed away from the automatic view.
     pub fn is_zoomed(&self) -> bool {
-        self.x.is_some() || self.y.is_some() || self.y_right.is_some()
+        self.x.is_some() || self.y.is_some()
     }
 
     /// Fold one frame's gesture result into the override.
@@ -389,9 +387,6 @@ impl PlotView {
         }
         if let Some(y) = change.y {
             self.y = Some(y);
-        }
-        if let Some(y_right) = change.y_right {
-            self.y_right = Some(y_right);
         }
     }
 }
@@ -1158,10 +1153,6 @@ pub struct BodeDerived {
     pub(crate) gm_db: Option<f64>,
     /// −3 dB bandwidth (Hz).
     pub(crate) f3db: Option<f64>,
-    /// Finite (min, max) of the gain curve.
-    pub(crate) gain_extremes: (f64, f64),
-    /// Finite (min, max) of the phase curve, when phase data exists.
-    pub(crate) phase_extremes: Option<(f64, f64)>,
 }
 
 /// Finite (min, max) of a slice, if any finite values exist.
@@ -1249,6 +1240,24 @@ impl DerivedSeries {
     /// which share the `(analysis << 32 | waveform)` key convention.
     const UNWRAP_KEY_BIT: u64 = 1 << 62;
 
+    /// Key-space bit for nV/√Hz noise-density projections of retained
+    /// V²/Hz PSD series, sharing the same key convention.
+    const NOISE_DENSITY_KEY_BIT: u64 = 1 << 61;
+
+    /// nV/√Hz spectral density of a retained V²/Hz PSD series, cached
+    /// under `key` like `db`. Negative retained samples clamp to zero
+    /// rather than inventing NaNs the plot would silently drop.
+    pub fn noise_density_nv(&mut self, key: u64, psd_v2_per_hz: &[f64]) -> SharedWaveformValues {
+        self.get_or(Self::NOISE_DENSITY_KEY_BIT | key, || {
+            std::sync::Arc::new(
+                psd_v2_per_hz
+                    .iter()
+                    .map(|&value| 1.0e9 * value.max(0.0).sqrt())
+                    .collect::<Vec<_>>(),
+            )
+        })
+    }
+
     /// Continuous (unwrapped) copy of a ±180°-wrapped phase-degree series,
     /// cached under `key` like `db`.
     pub fn unwrapped(&mut self, key: u64, phase_deg: &[f64]) -> SharedWaveformValues {
@@ -1259,12 +1268,6 @@ impl DerivedSeries {
         })
     }
 
-    /// Finite (min, max) of the unwrapped series for `key`, cached alongside
-    /// the per-trace ranges.
-    pub fn unwrapped_range(&mut self, key: u64, phase_deg: &[f64]) -> Option<(f64, f64)> {
-        let series = self.unwrapped(key, phase_deg);
-        self.range_or(Self::UNWRAP_KEY_BIT | key, || finite_extremes(&series))
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1315,7 +1318,6 @@ pub(super) fn square_xy_view_change(
     crate::ui::plot::ViewChange {
         x: Some((x_center - span * 0.5, x_center + span * 0.5)),
         y: Some((y_center - span * 0.5, y_center + span * 0.5)),
-        y_right: None,
         reset: false,
     }
 }
@@ -1656,7 +1658,10 @@ fn result_stage_bar_visible(state: &AppState) -> bool {
 /// documents (OP, specs, tables) have no cursor to report.
 fn readout_strip_height(state: &AppState) -> f32 {
     match state.ui.results.viewer {
-        ResultViewer::Waves | ResultViewer::DcSweep => waves::readout_strip_height(state),
+        ResultViewer::Waves
+        | ResultViewer::DcSweep
+        | ResultViewer::Bode
+        | ResultViewer::NoiseContrib => waves::readout_strip_height(state),
         _ => 0.0,
     }
 }
@@ -1757,7 +1762,7 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
             ResultChrome::Full => waves::show(ui, &mut app.state),
             ResultChrome::CompactSplit => waves::show_compact(ui, &mut app.state),
         },
-        ResultViewer::Bode => bode::show(ui, &mut app.state),
+        ResultViewer::Bode => waves::show_bode(ui, &mut app.state),
         ResultViewer::Fft => {
             if ensure_derived(ui, app, ActiveViewer::Fft) {
                 fft::show(ui, &mut app.state);
@@ -1772,7 +1777,7 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         }
         ResultViewer::Hist => hist::show(ui, &mut app.state),
         ResultViewer::Op => op_inspector::show(ui, &mut app.state),
-        ResultViewer::NoiseContrib => noise_contrib::show(ui, &mut app.state),
+        ResultViewer::NoiseContrib => waves::show_noise(ui, &mut app.state),
         ResultViewer::Contribution => sensitivity::show(ui, &mut app.state),
         ResultViewer::TransferFunction => transfer_function::show(ui, &mut app.state),
         ResultViewer::Specs => specs::show(ui, &mut app.state),
@@ -1789,16 +1794,9 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
 /// Results workspace; every compatible existing viewer stays reachable here.
 fn show_compact_docbar(ui: &mut Ui, state: &mut AppState) {
     docbar_at_height(ui, RESULT_VIEWER_TABS_HEIGHT, |ui| {
-        let tabs = egui::ScrollArea::horizontal()
-            .id_salt("rspice.results.split.viewer-tabs")
-            .auto_shrink([false, true])
-            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-            .show(ui, |ui| ui.horizontal(|ui| viewer_tabs(ui, state)));
-        ui.ctx()
-            .accesskit_node_builder(tabs.inner.response.id, |node| {
-                node.set_role(egui::accesskit::Role::TabList);
-                node.set_label("Compatible result viewers");
-            });
+        viewer_tab_scroller(ui, "rspice.results.split.viewer-tabs", |ui| {
+            viewer_tabs(ui, state);
+        });
     });
 }
 
@@ -1831,22 +1829,11 @@ fn show_docbar_for_family(ui: &mut Ui, app: &mut RSpiceApp, family_label: Option
                 tabs_size,
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
-                    egui::ScrollArea::horizontal()
-                        .id_salt("rspice.results.viewer-tabs")
-                        .auto_shrink([false, true])
-                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                        .show(ui, |ui| {
-                            let tabs = ui.horizontal(|ui| {
-                                viewer_tabs_filtered(ui, &mut app.state, |viewer| {
-                                    family_label
-                                        .is_none_or(|family| family_allows_viewer(family, viewer))
-                                })
-                            });
-                            ui.ctx().accesskit_node_builder(tabs.response.id, |node| {
-                                node.set_role(egui::accesskit::Role::TabList);
-                                node.set_label("Compatible result viewers");
-                            });
+                    viewer_tab_scroller(ui, "rspice.results.viewer-tabs", |ui| {
+                        viewer_tabs_filtered(ui, &mut app.state, |viewer| {
+                            family_label.is_none_or(|family| family_allows_viewer(family, viewer))
                         });
+                    });
                 },
             );
         });
@@ -1863,6 +1850,125 @@ fn show_docbar_for_family(ui: &mut Ui, app: &mut RSpiceApp, family_label: Option
 const RESULT_VIEWER_TABS_HEIGHT: f32 = 41.0;
 const RESULT_VIEWER_TAB_HEIGHT: f32 = 30.0;
 const RESULT_SHEET_BAR_HEIGHT: f32 = 31.0;
+
+/// Horizontal viewer-tab list with the mockup's overflow chevrons: 20×30
+/// paddles flanking the list, present only while it genuinely overflows,
+/// stepping the scroll position by the mockup's 220 px increment and
+/// disabling at either extreme.
+fn viewer_tab_scroller(ui: &mut Ui, salt: &'static str, add_tabs: impl FnOnce(&mut Ui)) {
+    const SCROLL_STEP: f32 = 220.0;
+    const CHEVRON_WIDTH: f32 = 20.0;
+    let overflow_id = egui::Id::new(("results.viewer-tabs.overflow", salt));
+    // Measured on the previous frame — the leading chevron must reserve its
+    // width before the list lays out.
+    let (overflowing, at_start, at_end) = ui
+        .ctx()
+        .data(|data| data.get_temp::<(bool, bool, bool)>(overflow_id))
+        .unwrap_or((false, true, true));
+    let mut step = 0.0_f32;
+    if overflowing && viewer_tab_overflow_chevron(ui, -1.0, !at_start) {
+        step -= SCROLL_STEP;
+    }
+    let trailing = if overflowing { CHEVRON_WIDTH } else { 0.0 };
+    let width = (ui.available_width() - trailing).max(1.0);
+    let output = egui::ScrollArea::horizontal()
+        .id_salt(salt)
+        .max_width(width)
+        .auto_shrink([false, true])
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+        .show(ui, |ui| {
+            let row = ui.horizontal(|ui| add_tabs(ui));
+            ui.ctx().accesskit_node_builder(row.response.id, |node| {
+                node.set_role(egui::accesskit::Role::TabList);
+                node.set_label("Compatible result viewers");
+            });
+        });
+    if overflowing && viewer_tab_overflow_chevron(ui, 1.0, !at_end) {
+        step += SCROLL_STEP;
+    }
+    let visible = output.inner_rect.width();
+    let content = output.content_size.x;
+    let max_offset = (content - visible).max(0.0);
+    let mut state = output.state;
+    if step != 0.0 {
+        state.offset.x = (state.offset.x + step).clamp(0.0, max_offset);
+        state.store(ui.ctx(), output.id);
+        ui.ctx().request_repaint();
+    }
+    ui.ctx().data_mut(|data| {
+        data.insert_temp(
+            overflow_id,
+            (
+                content > visible + 0.5,
+                state.offset.x <= 0.5,
+                state.offset.x >= max_offset - 0.5,
+            ),
+        );
+    });
+}
+
+/// One 20×30 overflow paddle. `direction` is −1 for the leading (scroll
+/// left) chevron and +1 for the trailing one; the hairline sits on the side
+/// facing the tab list. Returns true when an enabled paddle was clicked.
+fn viewer_tab_overflow_chevron(ui: &mut Ui, direction: f32, enabled: bool) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(20.0, RESULT_VIEWER_TAB_HEIGHT),
+        if enabled {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
+    );
+    response.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::Button,
+            enabled,
+            if direction < 0.0 {
+                "Scroll viewer tabs backward"
+            } else {
+                "Scroll viewer tabs forward"
+            },
+        )
+    });
+    if ui.is_rect_visible(rect) {
+        let hovered = enabled && response.hovered();
+        if hovered {
+            ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+        }
+        let mut color = if hovered {
+            t.color.text
+        } else {
+            t.color.text_dim
+        };
+        if !enabled {
+            color = color.gamma_multiply(0.3);
+        }
+        let center = rect.center();
+        let arm_x = center.x - 2.0 * direction;
+        let apex_x = center.x + 2.0 * direction;
+        ui.painter().add(egui::Shape::line(
+            vec![
+                egui::pos2(arm_x, center.y - 3.5),
+                egui::pos2(apex_x, center.y),
+                egui::pos2(arm_x, center.y + 3.5),
+            ],
+            egui::Stroke::new(1.2, color),
+        ));
+        let border_x = if direction < 0.0 {
+            rect.right() - 0.5
+        } else {
+            rect.left() + 0.5
+        };
+        ui.painter().vline(
+            border_x,
+            rect.y_range(),
+            egui::Stroke::new(1.0, t.color.border),
+        );
+        theme::paint_focus_ring(ui, &response, rect);
+    }
+    enabled && response.clicked()
+}
 const RESULT_STRUCTURED_STRIP_HEIGHT: f32 = 40.0;
 const RESULT_INSTRUMENT_CONTROL_HEIGHT: f32 = 23.0;
 
@@ -1943,7 +2049,13 @@ fn show_sheet_bar(ui: &mut Ui, state: &mut AppState) {
     );
     let accessible_label = if structured {
         "Structured result controls"
-    } else if matches!(viewer, ResultViewer::Waves | ResultViewer::DcSweep) {
+    } else if matches!(
+        viewer,
+        ResultViewer::Waves
+            | ResultViewer::DcSweep
+            | ResultViewer::Bode
+            | ResultViewer::NoiseContrib
+    ) {
         "Plot instrument controls"
     } else {
         "Result sheet controls"
@@ -1964,7 +2076,13 @@ fn show_sheet_bar(ui: &mut Ui, state: &mut AppState) {
     child.spacing_mut().item_spacing.x = 4.0;
     if structured {
         show_structured_result_strip(&mut child, state);
-    } else if matches!(viewer, ResultViewer::Waves | ResultViewer::DcSweep) {
+    } else if matches!(
+        viewer,
+        ResultViewer::Waves
+            | ResultViewer::DcSweep
+            | ResultViewer::Bode
+            | ResultViewer::NoiseContrib
+    ) {
         show_wave_instrument(&mut child, state);
     } else {
         child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
