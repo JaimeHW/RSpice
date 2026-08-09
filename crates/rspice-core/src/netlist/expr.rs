@@ -59,5 +59,9 @@ pub use context::{
     StatisticalParamMode,
 };
 pub use error::ExprError;
+pub(crate) use eval::{
+    PreparedExpression, evaluate_complex_raw, normalize_xyce_expression_component,
+    normalize_xyce_expression_result,
+};
 pub use eval::{evaluate, evaluate_complex};
 pub use types::{BinOpKind, ComplexValue, Expr, UnaryOpKind};

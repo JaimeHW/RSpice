@@ -215,6 +215,111 @@ fn xyce_user_functions_rebind_arguments_as_expressions() {
 }
 
 #[test]
+fn prepared_expressions_match_repeated_standard_evaluation() {
+    let mut ctx = ParamContext::new();
+    ctx.set_expression_dialect(ExpressionDialect::Xyce);
+    ctx.set("X", 2.0);
+    ctx.set("Y", 5.0);
+    ctx.set("SELECT", 1.0);
+    ctx.define_function("SCALE", vec!["A".to_string()], "A*3+Y");
+    let expression = parse_expression("SCALE(IF(SELECT,X,Y))+SIN(X)").unwrap();
+    let mut prepared = PreparedExpression::compile(&expression, &ctx).unwrap();
+
+    for select in [1.0, 0.0, 1.0, 0.0] {
+        ctx.set("SELECT", select);
+        let expected = evaluate_complex_raw(&expression, &ctx).unwrap();
+        let actual = prepared.evaluate_with(&ctx, &mut |_| Ok(None)).unwrap();
+        assert_eq!(actual, expected);
+    }
+}
+
+#[test]
+fn prepared_if_and_ternary_read_only_the_selected_arm() {
+    let ctx = ParamContext::new();
+    for source in [
+        "IF(CONDITION,THEN_VALUE,ELSE_VALUE)",
+        "CONDITION ? THEN_VALUE : ELSE_VALUE",
+    ] {
+        let expression = parse_expression(source).unwrap();
+        let mut prepared = PreparedExpression::compile(&expression, &ctx).unwrap();
+
+        for (condition, expected_name, expected_value) in
+            [(1.0, "THEN_VALUE", 11.0), (0.0, "ELSE_VALUE", 29.0)]
+        {
+            let mut reads = Vec::new();
+            let value = prepared
+                .evaluate_with(&ctx, &mut |name| {
+                    reads.push(name.to_string());
+                    Ok(Some(ComplexValue::real(match name {
+                        "CONDITION" => condition,
+                        "THEN_VALUE" => 11.0,
+                        "ELSE_VALUE" => 29.0,
+                        _ => unreachable!("unexpected prepared parameter {name}"),
+                    })))
+                })
+                .unwrap();
+            assert_eq!(value, ComplexValue::real(expected_value));
+            assert_eq!(reads, ["CONDITION", expected_name]);
+        }
+    }
+}
+
+#[test]
+fn prepared_external_nodes_are_disjoint_from_authored_parameters() {
+    let mut ctx = ParamContext::new();
+    let authored = "__RSPICE_LIVE_PROBE_0";
+    let internal = "\0RSPICE_LIVE_PROBE_0";
+    ctx.set(authored, 7.0);
+    let expression = Expr::BinOp {
+        op: BinOpKind::Add,
+        left: Box::new(Expr::Param(authored.to_string())),
+        right: Box::new(Expr::Param(internal.to_string())),
+    };
+    let externals = std::collections::HashSet::from([internal.to_string()]);
+    let mut prepared =
+        PreparedExpression::compile_with_external_parameters(&expression, &ctx, &externals)
+            .unwrap();
+    let mut runtime_parameters = Vec::new();
+    prepared.visit_runtime_parameters(|name| runtime_parameters.push(name.to_string()));
+    assert_eq!(runtime_parameters, [authored]);
+
+    let mut external_reads = Vec::new();
+    let value = prepared
+        .evaluate_with(&ctx, &mut |name| {
+            external_reads.push(name.to_string());
+            Ok((name == internal).then_some(ComplexValue::real(3.0)))
+        })
+        .unwrap();
+    assert_eq!(value, ComplexValue::real(10.0));
+    assert_eq!(external_reads, [authored, internal]);
+}
+
+#[test]
+fn prepared_nested_user_function_scopes_are_reusable() {
+    let mut ctx = ParamContext::new();
+    ctx.set("BASE", 4.0);
+    ctx.define_function(
+        "INNER",
+        vec!["TAKE".to_string(), "VALUE".to_string()],
+        "IF(TAKE,VALUE+BASE,0)",
+    );
+    ctx.define_function(
+        "OUTER",
+        vec!["ARG".to_string()],
+        "INNER(ARG>0,ARG*2)+INNER(ARG<0,-ARG)",
+    );
+    let expression = parse_expression("OUTER(INPUT)").unwrap();
+    let mut prepared = PreparedExpression::compile(&expression, &ctx).unwrap();
+
+    for input in [3.0, -5.0, 0.0, 8.0, -2.0] {
+        ctx.set("INPUT", input);
+        let expected = evaluate_complex_raw(&expression, &ctx).unwrap();
+        let actual = prepared.evaluate_with(&ctx, &mut |_| Ok(None)).unwrap();
+        assert_eq!(actual, expected);
+    }
+}
+
+#[test]
 fn xyce_special_character_function_names_evaluate() {
     let mut ctx = ParamContext::new();
     for name in ["#func", "@func", "`func", "$func"] {
@@ -236,6 +341,53 @@ fn parameter_expression_pow_pwr_and_pwrs_keep_distinct_spice_sign_semantics() {
     assert_eq!(eval_with(&ctx, "pow(-2,3)"), -8.0);
     assert_eq!(eval_with(&ctx, "pwr(-2,3)"), 8.0);
     assert_eq!(eval_with(&ctx, "pwrs(-2,3)"), -8.0);
+
+    let mut xyce = ParamContext::new();
+    xyce.set_expression_dialect(ExpressionDialect::Xyce);
+    xyce.set("BASE", -2.0);
+    xyce.set("EXPONENT", 3.0);
+    for expression in ["pwr(-2,3)", "pwr(BASE,EXPONENT)", "pow(BASE,EXPONENT)"] {
+        assert!((eval_with(&xyce, expression) + 8.0).abs() < 1.0e-12);
+    }
+
+    let base = num_complex::Complex64::new(-2.0, 0.5);
+    let exponent = num_complex::Complex64::new(1.5, -0.25);
+    xyce.set_complex("COMPLEX_BASE", ComplexValue::new(base.re, base.im));
+    xyce.set_complex(
+        "COMPLEX_EXPONENT",
+        ComplexValue::new(exponent.re, exponent.im),
+    );
+    let actual = eval_expression_complex("pwrs(COMPLEX_BASE,COMPLEX_EXPONENT)", &xyce)
+        .expect("Xyce runtime complex PWRS evaluates");
+    let expected = -(-base).powc(exponent);
+    assert!((actual.re - expected.re).abs() < 1.0e-12);
+    assert!((actual.im - expected.im).abs() < 1.0e-12);
+}
+
+#[test]
+fn xyce_literal_aliases_and_sign_functions_follow_parser_semantics() {
+    let mut ctx = ParamContext::new();
+    ctx.set_expression_dialect(ExpressionDialect::Xyce);
+    assert_eq!(eval_with(&ctx, "arctan(1)"), eval_with(&ctx, "atan(1)"));
+    assert_eq!(eval_with(&ctx, "sgn(0)"), 0.0);
+    assert_eq!(eval_with(&ctx, "sgn(-0.0)"), 0.0);
+    assert_eq!(eval_with(&ctx, "sign(3,-2)"), -3.0);
+    assert_eq!(eval_with(&ctx, "sign(3,0)"), 0.0);
+
+    ctx.set("ARG", 1.0);
+    ctx.set("MAGNITUDE", 3.0);
+    ctx.set("POLARITY", -2.0);
+    assert_eq!(eval_with(&ctx, "arctan(ARG)"), eval_with(&ctx, "atan(ARG)"));
+    assert_eq!(eval_with(&ctx, "sign(MAGNITUDE,POLARITY)"), -3.0);
+
+    for (name, value, expected) in [
+        ("POSITIVE_COMPLEX", ComplexValue::new(1.0, 4.0), 1.0),
+        ("NEGATIVE_COMPLEX", ComplexValue::new(-1.0, 4.0), -1.0),
+        ("ZERO_REAL_COMPLEX", ComplexValue::new(0.0, 4.0), 0.0),
+    ] {
+        ctx.set_complex(name, value);
+        assert_eq!(eval_with(&ctx, &format!("sgn({name})")), expected);
+    }
 }
 
 #[test]
@@ -965,7 +1117,25 @@ fn xyce_expression_boundary_normalizes_non_finite_results() {
     assert_eq!(eval_with(&ctx, "log(0)"), -1.0e50);
     assert_eq!(eval_with(&ctx, "-log(0)"), 1.0e50);
     assert_eq!(eval_with(&ctx, "exp(1000)"), 1.0e50);
-    assert_eq!(eval_with(&ctx, "log(0)-log(0)").abs(), 1.0e50);
+    assert_eq!(eval_with(&ctx, "log(0)-log(0)"), 0.0);
+    assert_eq!(eval_with(&ctx, "re(1/0)"), 1.0e50);
+    assert_eq!(eval_with(&ctx, "img(1/0)"), -1.0e50);
+    assert_eq!(eval_with(&ctx, "re(0/0)"), -1.0e50);
+    assert_eq!(eval_with(&ctx, "img(0/0)"), -1.0e50);
+    assert_eq!(eval_with(&ctx, "(1/0)-(1/0)"), 0.0);
+    assert_eq!(eval_with(&ctx, "(1%0)-(1%0)"), 1.0e50);
+    assert_eq!(eval_with(&ctx, "fmod(1,0)-fmod(1,0)"), 1.0e50);
+
+    ctx.set("zero", 0.0);
+    ctx.set("tiny", 1.0e-200);
+    assert_eq!(eval_with(&ctx, "1/zero"), 1.0e50);
+    assert_eq!(eval_with(&ctx, "(1/zero)-(1/zero)"), -1.0e50);
+    assert_eq!(eval_with(&ctx, "1/tiny"), 1.0e200);
+    assert_eq!(eval_with(&ctx, "fmod(1,zero)"), 1.0e50);
+    assert_eq!(eval_with(&ctx, "mod(1,zero)"), 1.0e50);
+    ctx.set_complex("complex_left", ComplexValue::new(5.5, 7.0));
+    ctx.set_complex("complex_right", ComplexValue::new(2.0, -3.0));
+    assert_eq!(eval_with(&ctx, "fmod(complex_left,complex_right)"), 1.5);
 
     ctx.set("not_a_number", Value::NAN);
     assert_eq!(eval_with(&ctx, "not_a_number"), 1.0e50);
@@ -989,18 +1159,112 @@ fn xyce_hyperbolic_functions_follow_expression_dialect() {
 
     ctx.set_expression_dialect(crate::config::ExpressionDialect::Xyce);
 
+    assert_eq!(eval_with(&ctx, "atanh(1)"), 1.0e50);
+    let constant_complex =
+        eval_expression_complex("atanh(2)", &ctx).expect("constant complex ATANH evaluates");
+    assert!((constant_complex.re - 0.5 * 3.0_f64.ln()).abs() < 1.0e-14);
+    assert!((constant_complex.im - std::f64::consts::FRAC_PI_2).abs() < 1.0e-14);
+
     let upper_saturated_atanh = (1.0 - 1.0e-12_f64).atanh();
     let lower_saturated_atanh = (1.0e-12_f64 - 1.0).atanh();
-    assert!((eval_with(&ctx, "atanh(1)") - upper_saturated_atanh).abs() < 1.0e-14);
-    assert!((eval_with(&ctx, "atanh(2)") - upper_saturated_atanh).abs() < 1.0e-14);
-    assert!((eval_with(&ctx, "atanh(-2)") - lower_saturated_atanh).abs() < 1.0e-14);
+    ctx.set("upper", 2.0);
+    ctx.set("lower", -2.0);
+    assert!((eval_with(&ctx, "atanh(upper)") - upper_saturated_atanh).abs() < 1.0e-14);
+    assert!((eval_with(&ctx, "atanh(lower)") - lower_saturated_atanh).abs() < 1.0e-14);
     assert_eq!(eval_with(&ctx, "tanh(21)"), 1.0);
     assert_eq!(eval_with(&ctx, "tanh(-21)"), -1.0);
+
+    let runtime_input = num_complex::Complex64::new(0.5, 0.25);
+    ctx.set_complex(
+        "RUNTIME_COMPLEX",
+        ComplexValue::new(runtime_input.re, runtime_input.im),
+    );
+    for (name, expected) in [
+        ("sinh", runtime_input.sinh()),
+        ("cosh", runtime_input.cosh()),
+        ("tanh", runtime_input.tanh()),
+        ("asinh", runtime_input.asinh()),
+        ("acosh", runtime_input.acosh()),
+        ("atanh", runtime_input.atanh()),
+    ] {
+        let actual = eval_expression_complex(&format!("{name}(RUNTIME_COMPLEX)"), &ctx)
+            .unwrap_or_else(|error| panic!("runtime {name}: {error}"));
+        assert!(
+            (actual.re - expected.re).abs() < 1.0e-14,
+            "{name}: {actual:?}"
+        );
+        assert!(
+            (actual.im - expected.im).abs() < 1.0e-14,
+            "{name}: {actual:?}"
+        );
+    }
+    ctx.set_complex("SATURATED", ComplexValue::new(21.0, 3.0));
+    assert_eq!(
+        eval_expression_complex("tanh(SATURATED)", &ctx).expect("saturated TANH"),
+        ComplexValue::real(1.0)
+    );
+    let clamped = eval_expression_complex("atanh(SATURATED)", &ctx).expect("clamped ATANH");
+    assert_eq!(clamped.im.to_bits(), 0.0_f64.to_bits());
+    assert!((clamped.re - upper_saturated_atanh).abs() < 1.0e-14);
+}
+
+#[test]
+fn xyce_literal_inverse_functions_match_std_complex_branch_cuts() {
+    let mut ctx = ParamContext::new();
+    ctx.set_expression_dialect(crate::config::ExpressionDialect::Xyce);
+    let imaginary = |expression: &str| {
+        eval_expression_complex(expression, &ctx)
+            .unwrap_or_else(|error| panic!("{expression}: {error}"))
+            .im
+    };
+    let acosh_two = 2.0_f64.acosh();
+    for (expression, expected) in [
+        ("asin(2)", acosh_two),
+        ("asin(-2)", -acosh_two),
+        ("acos(2)", -acosh_two),
+        ("acos(-2)", acosh_two),
+        ("acosh(2)", 0.0),
+        ("acosh(-2)", -std::f64::consts::PI),
+        ("acosh(-1)", -std::f64::consts::PI),
+        ("acosh(-0.5)", -2.0 * std::f64::consts::PI / 3.0),
+        ("acosh(0)", std::f64::consts::FRAC_PI_2),
+        ("acosh(0.5)", std::f64::consts::PI / 3.0),
+        ("acosh(1)", 0.0),
+        ("atan(2)", 0.0),
+        ("atan(-2)", -0.0),
+        ("atanh(2)", std::f64::consts::FRAC_PI_2),
+        ("atanh(-2)", -std::f64::consts::FRAC_PI_2),
+    ] {
+        let actual = imaginary(expression);
+        assert!(
+            (actual - expected).abs() < 1.0e-12,
+            "{expression}: expected imaginary {expected}, got {actual}"
+        );
+        if expected == 0.0 {
+            assert_eq!(
+                actual.to_bits(),
+                expected.to_bits(),
+                "{expression}: signed zero mismatch"
+            );
+        }
+    }
+    assert_eq!(imaginary("asinh(2)").to_bits(), 0.0_f64.to_bits());
+    assert_eq!(imaginary("asinh(-2)").to_bits(), (-0.0_f64).to_bits());
+
+    ctx.set("NEGATIVE_HALF", -0.5);
+    ctx.set("NEGATIVE_TWO", -2.0);
+    let runtime_acosh =
+        eval_expression_complex("acosh(NEGATIVE_HALF)", &ctx).expect("runtime ACOSH evaluates");
+    assert!((runtime_acosh.im - 2.0 * std::f64::consts::PI / 3.0).abs() < 1.0e-12);
+    let runtime_atanh =
+        eval_expression_complex("atanh(NEGATIVE_TWO)", &ctx).expect("runtime ATANH evaluates");
+    assert_eq!(runtime_atanh.im.to_bits(), 0.0_f64.to_bits());
 }
 
 #[test]
 fn xyce_complex_literals_and_projection_functions() {
-    let ctx = ParamContext::new();
+    let mut ctx = ParamContext::new();
+    ctx.set_expression_dialect(crate::config::ExpressionDialect::Xyce);
     let literal = eval_expression_complex("3.0+2.0J", &ctx)
         .unwrap_or_else(|e| panic!("complex literal failed: {e}"));
     assert!((literal.re - 3.0).abs() < 1.0e-14);
@@ -1012,6 +1276,16 @@ fn xyce_complex_literals_and_projection_functions() {
     assert!(sqrt_negative.re.abs() < 1.0e-14);
     assert!((sqrt_negative.im + 1.0).abs() < 1.0e-14);
     assert!((eval_with(&ctx, "img(sqrt(-1.0))") + 1.0).abs() < 1.0e-14);
+
+    ctx.set("NEGATIVE_ONE", -1.0);
+    let sqrt_bound = eval_expression_complex("sqrt(NEGATIVE_ONE)", &ctx)
+        .unwrap_or_else(|e| panic!("bound complex sqrt failed: {e}"));
+    assert_eq!(sqrt_bound.re.to_bits(), 0.0_f64.to_bits());
+    assert_eq!(sqrt_bound.im, 1.0);
+
+    let sqrt_positive_below = super::eval::complex_sqrt(ComplexValue::new(4.0, -0.0));
+    assert_eq!(sqrt_positive_below.re, 2.0);
+    assert_eq!(sqrt_positive_below.im.to_bits(), (-0.0_f64).to_bits());
 }
 
 #[test]

@@ -8,7 +8,7 @@
 use crate::config::ExpressionDialect;
 
 use super::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 const MAX_EVAL_FUNCTION_CALL_DEPTH: usize = 4096;
 const XYCE_ATANH_EPSILON: Value = 1.0e-12;
@@ -22,7 +22,7 @@ pub fn evaluate(expr: &Expr, ctx: &ParamContext) -> Result<Value, ExprError> {
 
 /// Evaluate an expression with the given context, preserving complex values.
 pub fn evaluate_complex(expr: &Expr, ctx: &ParamContext) -> Result<ComplexValue, ExprError> {
-    let value = ExpressionEvaluator::new(ctx).evaluate(expr)?;
+    let value = evaluate_complex_raw(expr, ctx)?;
     Ok(if ctx.expression_dialect() == ExpressionDialect::Xyce {
         normalize_xyce_expression_result(value)
     } else {
@@ -30,19 +30,573 @@ pub fn evaluate_complex(expr: &Expr, ctx: &ParamContext) -> Result<ComplexValue,
     })
 }
 
-/// Match Xyce's public expression-evaluation boundary, which replaces each
-/// non-finite result component with a signed finite sentinel before consumers
-/// compare, print, or reuse the value.
-fn normalize_xyce_expression_result(value: ComplexValue) -> ComplexValue {
-    fn normalize_component(component: Value) -> Value {
-        if component.is_finite() {
-            component
+/// Evaluate without applying the dialect's public root normalization.
+///
+/// Most expression consumers must use [`evaluate_complex`]. Measurement
+/// execution is the exception: Xyce distinguishes a raw `MeasureOp` getter
+/// from an authored `ExpressionOp` root, so that layer applies normalization
+/// only when the parsed measure operand carries expression provenance.
+pub(crate) fn evaluate_complex_raw(
+    expr: &Expr,
+    ctx: &ParamContext,
+) -> Result<ComplexValue, ExprError> {
+    ExpressionEvaluator::new(ctx).evaluate(expr)
+}
+
+/// Compile an expression into an index-based program that can be evaluated
+/// repeatedly without cloning its AST or allocating evaluator stacks. Runtime
+/// parameter reads are exposed through a resolver so live measurements can
+/// implement Xyce's first-read semantics at the exact lazy evaluation point.
+#[derive(Debug)]
+pub(crate) struct PreparedExpression {
+    programs: Vec<PreparedProgram>,
+    root: PreparedNodeRef,
+    frames: Vec<PreparedEvalFrame>,
+    values: Vec<EvaluatedValue>,
+    numeric_args: Vec<ComplexValue>,
+    call_scopes: Vec<PreparedCallScope>,
+    arg_bindings: Vec<PreparedArgBinding>,
+}
+
+#[derive(Debug)]
+struct PreparedProgram {
+    nodes: Vec<PreparedNode>,
+    root: usize,
+    formal_args: Vec<String>,
+}
+
+#[derive(Debug)]
+enum PreparedNode {
+    Number(Value),
+    ComplexNumber(ComplexValue),
+    StringLiteral(String),
+    Param {
+        name: String,
+        formal_index: Option<usize>,
+    },
+    External(String),
+    Unary {
+        op: UnaryOpKind,
+        operand: usize,
+    },
+    Binary {
+        op: BinOpKind,
+        left: usize,
+        right: usize,
+    },
+    Function {
+        name: String,
+        args: Vec<usize>,
+        user_program: Option<usize>,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PreparedNodeRef {
+    program: usize,
+    node: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PreparedArgBinding {
+    expression: PreparedNodeRef,
+    caller_scope: Option<usize>,
+}
+
+#[derive(Debug)]
+struct PreparedCallScope {
+    function_program: usize,
+    bindings_start: usize,
+    bindings_len: usize,
+}
+
+#[derive(Debug)]
+enum PreparedEvalFrame {
+    Eval {
+        expression: PreparedNodeRef,
+        scope: Option<usize>,
+    },
+    ApplyUnary(UnaryOpKind),
+    ApplyBinary(BinOpKind),
+    ApplyIf {
+        then_expression: PreparedNodeRef,
+        else_expression: PreparedNodeRef,
+        scope: Option<usize>,
+    },
+    ApplyBuiltin {
+        function: PreparedNodeRef,
+        argc: usize,
+    },
+    ReturnUserFunction {
+        scope: usize,
+        bindings_start: usize,
+    },
+    MarkRuntime,
+}
+
+struct PreparedExpressionBuilder<'a> {
+    ctx: &'a ParamContext,
+    external_parameters: &'a HashSet<String>,
+    programs: Vec<PreparedProgram>,
+    function_programs: HashMap<String, usize>,
+    maximum_builtin_args: usize,
+    maximum_user_args: usize,
+}
+
+impl PreparedExpression {
+    pub(crate) fn compile(expr: &Expr, ctx: &ParamContext) -> Result<Self, ExprError> {
+        Self::compile_with_external_parameters(expr, ctx, &HashSet::new())
+    }
+
+    pub(crate) fn compile_with_external_parameters(
+        expr: &Expr,
+        ctx: &ParamContext,
+        external_parameters: &HashSet<String>,
+    ) -> Result<Self, ExprError> {
+        let mut builder = PreparedExpressionBuilder {
+            ctx,
+            external_parameters,
+            programs: Vec::new(),
+            function_programs: HashMap::new(),
+            maximum_builtin_args: 0,
+            maximum_user_args: 0,
+        };
+        let root_program = builder.add_program(expr, Vec::new())?;
+        let root = PreparedNodeRef {
+            program: root_program,
+            node: builder.programs[root_program].root,
+        };
+        let node_count = builder
+            .programs
+            .iter()
+            .map(|program| program.nodes.len())
+            .sum::<usize>();
+        // The depth limit is a runtime safety guard, not a useful eager
+        // allocation size. Most live expressions never call a user function;
+        // size scratch storage from the compiled program and let genuinely
+        // deep calls grow these reusable vectors on demand.
+        let frame_capacity = node_count.max(1);
+        let call_scope_capacity = builder.function_programs.len();
+        let binding_capacity = builder.maximum_user_args;
+        Ok(Self {
+            programs: builder.programs,
+            root,
+            frames: Vec::with_capacity(frame_capacity),
+            values: Vec::with_capacity(node_count.max(1)),
+            numeric_args: Vec::with_capacity(builder.maximum_builtin_args),
+            call_scopes: Vec::with_capacity(call_scope_capacity),
+            arg_bindings: Vec::with_capacity(binding_capacity),
+        })
+    }
+
+    pub(crate) fn evaluate_with(
+        &mut self,
+        ctx: &ParamContext,
+        resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
+    ) -> Result<ComplexValue, ExprError> {
+        self.frames.clear();
+        self.values.clear();
+        self.numeric_args.clear();
+        self.call_scopes.clear();
+        self.arg_bindings.clear();
+        self.frames.push(PreparedEvalFrame::Eval {
+            expression: self.root,
+            scope: None,
+        });
+
+        while let Some(frame) = self.frames.pop() {
+            match frame {
+                PreparedEvalFrame::Eval { expression, scope } => {
+                    match &self.programs[expression.program].nodes[expression.node] {
+                        PreparedNode::Number(value) => self
+                            .values
+                            .push(EvaluatedValue::literal(ComplexValue::real(*value))),
+                        PreparedNode::ComplexNumber(value) => {
+                            self.values.push(EvaluatedValue::literal(*value))
+                        }
+                        PreparedNode::StringLiteral(value) => {
+                            return Err(ExprError::InvalidArgument(format!(
+                                "string literal \"{value}\" is only valid as a file-backed expression argument"
+                            )));
+                        }
+                        PreparedNode::Param { name, formal_index } => {
+                            if let Some(formal_index) = formal_index {
+                                let scope_index = scope.ok_or_else(|| {
+                                    ExprError::InvalidArgument(format!(
+                                        "function argument '{name}' evaluated without a call scope"
+                                    ))
+                                })?;
+                                let call_scope = &self.call_scopes[scope_index];
+                                if call_scope.function_program != expression.program
+                                    || *formal_index >= call_scope.bindings_len
+                                {
+                                    return Err(ExprError::InvalidArgument(format!(
+                                        "function argument '{name}' has an invalid prepared binding"
+                                    )));
+                                }
+                                let binding =
+                                    self.arg_bindings[call_scope.bindings_start + *formal_index];
+                                self.frames.push(PreparedEvalFrame::MarkRuntime);
+                                self.frames.push(PreparedEvalFrame::Eval {
+                                    expression: binding.expression,
+                                    scope: binding.caller_scope,
+                                });
+                            } else {
+                                let value = if let Some(value) = resolver(name)? {
+                                    value
+                                } else {
+                                    ctx.get_complex(name).ok_or_else(|| {
+                                        ExprError::UndefinedParam(name.to_string())
+                                    })?
+                                };
+                                self.values.push(EvaluatedValue::runtime(value));
+                            }
+                        }
+                        PreparedNode::External(name) => {
+                            let value = resolver(name)?
+                                .ok_or_else(|| ExprError::UndefinedParam(name.to_string()))?;
+                            self.values.push(EvaluatedValue::runtime(value));
+                        }
+                        PreparedNode::Unary { op, operand } => {
+                            self.frames.push(PreparedEvalFrame::ApplyUnary(*op));
+                            self.frames.push(PreparedEvalFrame::Eval {
+                                expression: PreparedNodeRef {
+                                    program: expression.program,
+                                    node: *operand,
+                                },
+                                scope,
+                            });
+                        }
+                        PreparedNode::Binary { op, left, right } => {
+                            self.frames.push(PreparedEvalFrame::ApplyBinary(*op));
+                            self.frames.push(PreparedEvalFrame::Eval {
+                                expression: PreparedNodeRef {
+                                    program: expression.program,
+                                    node: *right,
+                                },
+                                scope,
+                            });
+                            self.frames.push(PreparedEvalFrame::Eval {
+                                expression: PreparedNodeRef {
+                                    program: expression.program,
+                                    node: *left,
+                                },
+                                scope,
+                            });
+                        }
+                        PreparedNode::Function {
+                            name,
+                            args,
+                            user_program,
+                        } => {
+                            if let Some(function_program) = user_program {
+                                if self.call_scopes.len() >= MAX_EVAL_FUNCTION_CALL_DEPTH {
+                                    return Err(ExprError::InvalidArgument(format!(
+                                        "function nesting exceeds maximum depth of {} while calling {}",
+                                        MAX_EVAL_FUNCTION_CALL_DEPTH, name
+                                    )));
+                                }
+                                let formal_count =
+                                    self.programs[*function_program].formal_args.len();
+                                if args.len() != formal_count {
+                                    return Err(ExprError::WrongArgCount(name.clone()));
+                                }
+                                let bindings_start = self.arg_bindings.len();
+                                self.arg_bindings.extend(args.iter().map(|node| {
+                                    PreparedArgBinding {
+                                        expression: PreparedNodeRef {
+                                            program: expression.program,
+                                            node: *node,
+                                        },
+                                        caller_scope: scope,
+                                    }
+                                }));
+                                let scope_index = self.call_scopes.len();
+                                self.call_scopes.push(PreparedCallScope {
+                                    function_program: *function_program,
+                                    bindings_start,
+                                    bindings_len: args.len(),
+                                });
+                                self.frames.push(PreparedEvalFrame::ReturnUserFunction {
+                                    scope: scope_index,
+                                    bindings_start,
+                                });
+                                self.frames.push(PreparedEvalFrame::Eval {
+                                    expression: PreparedNodeRef {
+                                        program: *function_program,
+                                        node: self.programs[*function_program].root,
+                                    },
+                                    scope: Some(scope_index),
+                                });
+                            } else if name == "IF" {
+                                if args.len() != 3 {
+                                    return Err(ExprError::WrongArgCount(name.clone()));
+                                }
+                                self.frames.push(PreparedEvalFrame::ApplyIf {
+                                    then_expression: PreparedNodeRef {
+                                        program: expression.program,
+                                        node: args[1],
+                                    },
+                                    else_expression: PreparedNodeRef {
+                                        program: expression.program,
+                                        node: args[2],
+                                    },
+                                    scope,
+                                });
+                                self.frames.push(PreparedEvalFrame::Eval {
+                                    expression: PreparedNodeRef {
+                                        program: expression.program,
+                                        node: args[0],
+                                    },
+                                    scope,
+                                });
+                            } else {
+                                self.frames.push(PreparedEvalFrame::ApplyBuiltin {
+                                    function: expression,
+                                    argc: args.len(),
+                                });
+                                for &node in args.iter().rev() {
+                                    self.frames.push(PreparedEvalFrame::Eval {
+                                        expression: PreparedNodeRef {
+                                            program: expression.program,
+                                            node,
+                                        },
+                                        scope,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                PreparedEvalFrame::ApplyUnary(op) => {
+                    let value = pop_value(&mut self.values)?;
+                    self.values.push(EvaluatedValue {
+                        numeric: apply_unary(op, value.numeric),
+                        numval: value.numval && matches!(op, UnaryOpKind::Neg | UnaryOpKind::Pos),
+                    });
+                }
+                PreparedEvalFrame::ApplyBinary(op) => {
+                    let right = pop_value(&mut self.values)?;
+                    let left = pop_value(&mut self.values)?;
+                    let numval = ctx.expression_dialect() == ExpressionDialect::Xyce
+                        && left.numval
+                        && right.numval
+                        && xyce_binary_is_constant_foldable(op);
+                    let value =
+                        apply_binary(op, left.numeric, right.numeric, ctx.expression_dialect())?;
+                    self.values.push(EvaluatedValue {
+                        numeric: if numval {
+                            normalize_xyce_expression_result(value)
+                        } else {
+                            value
+                        },
+                        numval,
+                    });
+                }
+                PreparedEvalFrame::ApplyIf {
+                    then_expression,
+                    else_expression,
+                    scope,
+                } => {
+                    let condition = pop_value(&mut self.values)?;
+                    self.frames.push(PreparedEvalFrame::MarkRuntime);
+                    self.frames.push(PreparedEvalFrame::Eval {
+                        expression: if complex_truth(condition.numeric) {
+                            then_expression
+                        } else {
+                            else_expression
+                        },
+                        scope,
+                    });
+                }
+                PreparedEvalFrame::ApplyBuiltin { function, argc } => {
+                    let Some(start) = self.values.len().checked_sub(argc) else {
+                        return Err(ExprError::InvalidArgument(
+                            "expression function argument stack underflow".to_string(),
+                        ));
+                    };
+                    let PreparedNode::Function { name, .. } =
+                        &self.programs[function.program].nodes[function.node]
+                    else {
+                        unreachable!("prepared builtin frame references a non-function node")
+                    };
+                    let args = &self.values[start..];
+                    let numval = ctx.expression_dialect() == ExpressionDialect::Xyce
+                        && args.iter().all(|arg| arg.numval)
+                        && xyce_numeric_function_is_constant_foldable(name);
+                    self.numeric_args.clear();
+                    self.numeric_args.extend(args.iter().map(|arg| arg.numeric));
+                    let value = if numval {
+                        xyce_constant_fold_builtin(name, &self.numeric_args)?
+                    } else {
+                        eval_builtin_function_values(name, &self.numeric_args, ctx)?
+                    };
+                    self.values.truncate(start);
+                    self.values.push(EvaluatedValue {
+                        numeric: if numval {
+                            normalize_xyce_expression_result(value)
+                        } else {
+                            value
+                        },
+                        numval,
+                    });
+                }
+                PreparedEvalFrame::ReturnUserFunction {
+                    scope,
+                    bindings_start,
+                } => {
+                    if self.call_scopes.len() != scope + 1 {
+                        return Err(ExprError::InvalidArgument(
+                            "prepared expression call-scope stack is inconsistent".to_string(),
+                        ));
+                    }
+                    self.call_scopes.pop();
+                    self.arg_bindings.truncate(bindings_start);
+                    if let Some(value) = self.values.last_mut() {
+                        value.numval = false;
+                    }
+                }
+                PreparedEvalFrame::MarkRuntime => {
+                    if let Some(value) = self.values.last_mut() {
+                        value.numval = false;
+                    }
+                }
+            }
+        }
+
+        if self.values.len() == 1 {
+            Ok(self.values.pop().expect("length checked").numeric)
         } else {
-            XYCE_NONFINITE_REPLACEMENT.copysign(component)
+            Err(ExprError::InvalidArgument(format!(
+                "prepared expression evaluation produced {} values",
+                self.values.len()
+            )))
         }
     }
 
-    ComplexValue::new(normalize_component(value.re), normalize_component(value.im))
+    pub(crate) fn visit_runtime_parameters(&self, mut visit: impl FnMut(&str)) {
+        for program in &self.programs {
+            for node in &program.nodes {
+                if let PreparedNode::Param {
+                    name,
+                    formal_index: None,
+                } = node
+                {
+                    visit(name);
+                }
+            }
+        }
+    }
+}
+
+impl<'a> PreparedExpressionBuilder<'a> {
+    fn add_program(
+        &mut self,
+        expression: &Expr,
+        formal_args: Vec<String>,
+    ) -> Result<usize, ExprError> {
+        let program = self.programs.len();
+        self.programs.push(PreparedProgram {
+            nodes: Vec::new(),
+            root: 0,
+            formal_args,
+        });
+        let root = self.compile_node(program, expression)?;
+        self.programs[program].root = root;
+        Ok(program)
+    }
+
+    fn ensure_function_program(&mut self, name: &str) -> Result<usize, ExprError> {
+        if let Some(&program) = self.function_programs.get(name) {
+            return Ok(program);
+        }
+        let function = self
+            .ctx
+            .get_function(name)
+            .cloned()
+            .ok_or_else(|| ExprError::UnknownFunction(name.to_string()))?;
+        let program = self.programs.len();
+        self.function_programs
+            .insert(function.name.clone(), program);
+        self.maximum_user_args = self.maximum_user_args.max(function.args.len());
+        self.programs.push(PreparedProgram {
+            nodes: Vec::new(),
+            root: 0,
+            formal_args: function.args.clone(),
+        });
+        let body = parse_expression(&function.body)?;
+        let root = self.compile_node(program, &body)?;
+        self.programs[program].root = root;
+        Ok(program)
+    }
+
+    fn compile_node(&mut self, program: usize, expression: &Expr) -> Result<usize, ExprError> {
+        let node = match expression {
+            Expr::Number(value) => PreparedNode::Number(*value),
+            Expr::ComplexNumber(value) => PreparedNode::ComplexNumber(*value),
+            Expr::StringLiteral(value) => PreparedNode::StringLiteral(value.clone()),
+            Expr::Param(name) if self.external_parameters.contains(name) => {
+                PreparedNode::External(name.clone())
+            }
+            Expr::Param(name) => PreparedNode::Param {
+                formal_index: self.programs[program]
+                    .formal_args
+                    .iter()
+                    .position(|formal| formal == name),
+                name: name.clone(),
+            },
+            Expr::UnaryOp { op, operand } => PreparedNode::Unary {
+                op: *op,
+                operand: self.compile_node(program, operand)?,
+            },
+            Expr::BinOp { op, left, right } => PreparedNode::Binary {
+                op: *op,
+                left: self.compile_node(program, left)?,
+                right: self.compile_node(program, right)?,
+            },
+            Expr::FnCall { name, args } => {
+                let upper = name.to_ascii_uppercase();
+                let user_program = if self.ctx.has_function(&upper) {
+                    Some(self.ensure_function_program(&upper)?)
+                } else {
+                    None
+                };
+                if user_program.is_none() && upper != "IF" {
+                    self.maximum_builtin_args = self.maximum_builtin_args.max(args.len());
+                }
+                let args = args
+                    .iter()
+                    .map(|argument| self.compile_node(program, argument))
+                    .collect::<Result<Vec<_>, _>>()?;
+                PreparedNode::Function {
+                    name: upper,
+                    args,
+                    user_program,
+                }
+            }
+        };
+        let index = self.programs[program].nodes.len();
+        self.programs[program].nodes.push(node);
+        Ok(index)
+    }
+}
+
+/// Match Xyce's public expression-evaluation boundary, which replaces each
+/// non-finite result component with a signed finite sentinel before consumers
+/// compare, print, or reuse the value.
+pub(crate) fn normalize_xyce_expression_result(value: ComplexValue) -> ComplexValue {
+    ComplexValue::new(
+        normalize_xyce_expression_component(value.re),
+        normalize_xyce_expression_component(value.im),
+    )
+}
+
+pub(crate) fn normalize_xyce_expression_component(component: Value) -> Value {
+    if component.is_finite() {
+        component
+    } else {
+        XYCE_NONFINITE_REPLACEMENT.copysign(component)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +642,31 @@ struct ExpressionEvaluator<'a> {
     body_cache: HashMap<String, Expr>,
     call_depth: usize,
     next_binding_id: u64,
+    numeric_args: Vec<ComplexValue>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EvaluatedValue {
+    numeric: ComplexValue,
+    /// Xyce parser `numvalType` provenance. Only these literal subtrees are
+    /// folded with fixNan/fixInf before their parent expression is evaluated.
+    numval: bool,
+}
+
+impl EvaluatedValue {
+    fn literal(numeric: ComplexValue) -> Self {
+        Self {
+            numeric,
+            numval: true,
+        }
+    }
+
+    fn runtime(numeric: ComplexValue) -> Self {
+        Self {
+            numeric,
+            numval: false,
+        }
+    }
 }
 
 enum EvalFrame {
@@ -114,6 +693,7 @@ enum EvalFrame {
         function_name: String,
         arg_names: Vec<String>,
     },
+    MarkRuntime,
 }
 
 impl<'a> ExpressionEvaluator<'a> {
@@ -124,18 +704,21 @@ impl<'a> ExpressionEvaluator<'a> {
             body_cache: HashMap::new(),
             call_depth: 0,
             next_binding_id: 1,
+            numeric_args: Vec::new(),
         }
     }
 
     fn evaluate(&mut self, expr: &Expr) -> Result<ComplexValue, ExprError> {
         let mut frames = vec![EvalFrame::Eval(expr.clone(), EvalScope::global())];
-        let mut values = Vec::<ComplexValue>::new();
+        let mut values = Vec::<EvaluatedValue>::new();
 
         while let Some(frame) = frames.pop() {
             match frame {
                 EvalFrame::Eval(expr, scope) => match expr {
-                    Expr::Number(value) => values.push(ComplexValue::real(value)),
-                    Expr::ComplexNumber(value) => values.push(value),
+                    Expr::Number(value) => {
+                        values.push(EvaluatedValue::literal(ComplexValue::real(value)))
+                    }
+                    Expr::ComplexNumber(value) => values.push(EvaluatedValue::literal(value)),
                     Expr::StringLiteral(value) => {
                         return Err(ExprError::InvalidArgument(format!(
                             "string literal \"{value}\" is only valid as a file-backed expression argument"
@@ -159,12 +742,32 @@ impl<'a> ExpressionEvaluator<'a> {
                 },
                 EvalFrame::ApplyUnary(op) => {
                     let value = pop_value(&mut values)?;
-                    values.push(apply_unary(op, value));
+                    values.push(EvaluatedValue {
+                        numeric: apply_unary(op, value.numeric),
+                        numval: value.numval && matches!(op, UnaryOpKind::Neg | UnaryOpKind::Pos),
+                    });
                 }
                 EvalFrame::ApplyBinary(op) => {
                     let right = pop_value(&mut values)?;
                     let left = pop_value(&mut values)?;
-                    values.push(apply_binary(op, left, right)?);
+                    let numval = self.ctx.expression_dialect() == ExpressionDialect::Xyce
+                        && left.numval
+                        && right.numval
+                        && xyce_binary_is_constant_foldable(op);
+                    let value = apply_binary(
+                        op,
+                        left.numeric,
+                        right.numeric,
+                        self.ctx.expression_dialect(),
+                    )?;
+                    values.push(EvaluatedValue {
+                        numeric: if numval {
+                            normalize_xyce_expression_result(value)
+                        } else {
+                            value
+                        },
+                        numval,
+                    });
                 }
                 EvalFrame::ApplyIf {
                     then_expr,
@@ -172,8 +775,9 @@ impl<'a> ExpressionEvaluator<'a> {
                     scope,
                 } => {
                     let cond = pop_value(&mut values)?;
+                    frames.push(EvalFrame::MarkRuntime);
                     frames.push(EvalFrame::Eval(
-                        if complex_truth(cond) {
+                        if complex_truth(cond.numeric) {
                             then_expr
                         } else {
                             else_expr
@@ -182,8 +786,31 @@ impl<'a> ExpressionEvaluator<'a> {
                     ));
                 }
                 EvalFrame::ApplyBuiltin { name, argc } => {
-                    let args = pop_args(&mut values, argc)?;
-                    values.push(eval_builtin_function_values(&name, &args, self.ctx)?);
+                    let Some(start) = values.len().checked_sub(argc) else {
+                        return Err(ExprError::InvalidArgument(
+                            "expression function argument stack underflow".to_string(),
+                        ));
+                    };
+                    let args = &values[start..];
+                    let numval = self.ctx.expression_dialect() == ExpressionDialect::Xyce
+                        && args.iter().all(|arg| arg.numval)
+                        && xyce_numeric_function_is_constant_foldable(&name);
+                    self.numeric_args.clear();
+                    self.numeric_args.extend(args.iter().map(|arg| arg.numeric));
+                    let value = if numval {
+                        xyce_constant_fold_builtin(&name, &self.numeric_args)?
+                    } else {
+                        eval_builtin_function_values(&name, &self.numeric_args, self.ctx)?
+                    };
+                    values.truncate(start);
+                    values.push(EvaluatedValue {
+                        numeric: if numval {
+                            normalize_xyce_expression_result(value)
+                        } else {
+                            value
+                        },
+                        numval,
+                    });
                 }
                 EvalFrame::ApplyFunctionArg {
                     function_name,
@@ -197,7 +824,7 @@ impl<'a> ExpressionEvaluator<'a> {
                         .current_function_arg_binding_id(&function_name, &arg_name)
                         .is_some_and(|current_id| current_id == binding_id)
                     {
-                        values.push(value);
+                        values.push(EvaluatedValue::runtime(value.numeric));
                     } else {
                         frames.push(EvalFrame::Eval(Expr::Param(param_name), scope));
                     }
@@ -208,12 +835,20 @@ impl<'a> ExpressionEvaluator<'a> {
                 } => {
                     self.call_depth = self.call_depth.saturating_sub(1);
                     self.unset_function_args(&function_name, &arg_names);
+                    if let Some(value) = values.last_mut() {
+                        value.numval = false;
+                    }
+                }
+                EvalFrame::MarkRuntime => {
+                    if let Some(value) = values.last_mut() {
+                        value.numval = false;
+                    }
                 }
             }
         }
 
         if values.len() == 1 {
-            Ok(values.pop().expect("length checked"))
+            Ok(values.pop().expect("length checked").numeric)
         } else {
             Err(ExprError::InvalidArgument(format!(
                 "expression evaluation produced {} values",
@@ -225,7 +860,7 @@ impl<'a> ExpressionEvaluator<'a> {
     fn push_param_eval(
         &mut self,
         frames: &mut Vec<EvalFrame>,
-        values: &mut Vec<ComplexValue>,
+        values: &mut Vec<EvaluatedValue>,
         name: String,
         scope: EvalScope,
     ) -> Result<(), ExprError> {
@@ -241,16 +876,18 @@ impl<'a> ExpressionEvaluator<'a> {
                     });
                     frames.push(EvalFrame::Eval(arg.expr, arg.scope));
                 }
-                FunctionArgBinding::Unset(_) => values.push(ComplexValue::zero()),
+                FunctionArgBinding::Unset(_) => {
+                    values.push(EvaluatedValue::runtime(ComplexValue::zero()))
+                }
             }
             return Ok(());
         }
 
-        values.push(
+        values.push(EvaluatedValue::runtime(
             self.ctx
                 .get_complex(&name)
                 .ok_or_else(|| ExprError::UndefinedParam(name.to_string()))?,
-        );
+        ));
         Ok(())
     }
 
@@ -400,19 +1037,10 @@ impl<'a> ExpressionEvaluator<'a> {
     }
 }
 
-fn pop_value(values: &mut Vec<ComplexValue>) -> Result<ComplexValue, ExprError> {
+fn pop_value(values: &mut Vec<EvaluatedValue>) -> Result<EvaluatedValue, ExprError> {
     values.pop().ok_or_else(|| {
         ExprError::InvalidArgument("expression evaluation stack underflow".to_string())
     })
-}
-
-fn pop_args(values: &mut Vec<ComplexValue>, argc: usize) -> Result<Vec<ComplexValue>, ExprError> {
-    if values.len() < argc {
-        return Err(ExprError::InvalidArgument(
-            "expression function argument stack underflow".to_string(),
-        ));
-    }
-    Ok(values.split_off(values.len() - argc))
 }
 
 fn apply_unary(op: UnaryOpKind, value: ComplexValue) -> ComplexValue {
@@ -427,12 +1055,15 @@ fn apply_binary(
     op: BinOpKind,
     left: ComplexValue,
     right: ComplexValue,
+    dialect: ExpressionDialect,
 ) -> Result<ComplexValue, ExprError> {
     Ok(match op {
         BinOpKind::Add => complex_add(left, right),
         BinOpKind::Sub => complex_sub(left, right),
         BinOpKind::Mul => complex_mul(left, right),
+        BinOpKind::Div if dialect == ExpressionDialect::Xyce => complex_div_xyce(left, right),
         BinOpKind::Div => complex_div(left, right)?,
+        BinOpKind::Mod if dialect == ExpressionDialect::Xyce => complex_mod_xyce(left, right),
         BinOpKind::Mod => complex_mod(left, right)?,
         BinOpKind::Pow => complex_pow(left, right),
         BinOpKind::Gt => bool_value(left.re > right.re),
@@ -490,6 +1121,273 @@ fn complex_div(left: ComplexValue, right: ComplexValue) -> Result<ComplexValue, 
     ))
 }
 
+fn xyce_numeric_function_is_constant_foldable(name: &str) -> bool {
+    matches!(
+        name,
+        "SQRT"
+            | "SIN"
+            | "COS"
+            | "TAN"
+            | "EXP"
+            | "LOG"
+            | "LN"
+            | "LOG10"
+            | "ABS"
+            | "M"
+            | "ASIN"
+            | "ACOS"
+            | "ATAN"
+            | "ARCTAN"
+            | "POW"
+            | "PWR"
+            | "PWRS"
+            | "SGN"
+            | "SIGN"
+            | "SINH"
+            | "COSH"
+            | "TANH"
+            | "ASINH"
+            | "ACOSH"
+            | "ATANH"
+    )
+}
+
+fn xyce_binary_is_constant_foldable(op: BinOpKind) -> bool {
+    matches!(
+        op,
+        BinOpKind::Add | BinOpKind::Sub | BinOpKind::Mul | BinOpKind::Div | BinOpKind::Pow
+    )
+}
+
+fn xyce_constant_fold_builtin(
+    name: &str,
+    args: &[ComplexValue],
+) -> Result<ComplexValue, ExprError> {
+    let unary = |operation: fn(num_complex::Complex64) -> num_complex::Complex64| {
+        require_arg_count(name, args, 1)?;
+        Ok(from_num_complex(operation(to_num_complex(args[0]))))
+    };
+    match name {
+        "POW" | "PWR" => {
+            require_arg_count(name, args, 2)?;
+            Ok(from_num_complex(
+                to_num_complex(args[0]).powc(to_num_complex(args[1])),
+            ))
+        }
+        "PWRS" => {
+            require_arg_count(name, args, 2)?;
+            Ok(from_num_complex(xyce_complex_pwrs(
+                to_num_complex(args[0]),
+                to_num_complex(args[1]),
+            )))
+        }
+        "SGN" => {
+            require_arg_count(name, args, 1)?;
+            Ok(ComplexValue::real(if args[0].re > 0.0 {
+                1.0
+            } else if args[0].re < 0.0 {
+                -1.0
+            } else {
+                0.0
+            }))
+        }
+        "SIGN" => {
+            require_arg_count(name, args, 2)?;
+            let sign = if args[1].re > 0.0 {
+                1.0
+            } else if args[1].re < 0.0 {
+                -1.0
+            } else {
+                0.0
+            };
+            Ok(ComplexValue::real(args[0].magnitude() * sign))
+        }
+        "SQRT" => unary(num_complex::Complex64::sqrt),
+        "EXP" => unary(num_complex::Complex64::exp),
+        "SIN" => unary(num_complex::Complex64::sin),
+        "COS" => unary(num_complex::Complex64::cos),
+        "TAN" => unary(num_complex::Complex64::tan),
+        "M" | "ABS" => {
+            require_arg_count(name, args, 1)?;
+            Ok(ComplexValue::real(args[0].magnitude()))
+        }
+        "ACOS" => unary(xyce_complex_acos),
+        "ACOSH" => unary(xyce_complex_acosh),
+        "ASIN" => unary(xyce_complex_asin),
+        "ASINH" => unary(xyce_complex_asinh),
+        "ATAN" | "ARCTAN" => unary(num_complex::Complex64::atan),
+        "ATANH" => unary(xyce_complex_atanh),
+        "COSH" => unary(num_complex::Complex64::cosh),
+        "LN" => unary(num_complex::Complex64::ln),
+        "LOG" | "LOG10" => unary(num_complex::Complex64::log10),
+        "SINH" => unary(num_complex::Complex64::sinh),
+        "TANH" => unary(num_complex::Complex64::tanh),
+        _ => Err(ExprError::UnknownFunction(name.to_string())),
+    }
+}
+
+fn to_num_complex(value: ComplexValue) -> num_complex::Complex64 {
+    num_complex::Complex64::new(value.re, value.im)
+}
+
+fn from_num_complex(value: num_complex::Complex64) -> ComplexValue {
+    ComplexValue::new(value.re, value.im)
+}
+
+fn xyce_complex_pwrs(
+    base: num_complex::Complex64,
+    exponent: num_complex::Complex64,
+) -> num_complex::Complex64 {
+    if base.re < 0.0 {
+        -(-base).powc(exponent)
+    } else {
+        base.powc(exponent)
+    }
+}
+
+fn xyce_complex_atanh(value: num_complex::Complex64) -> num_complex::Complex64 {
+    if value.im == 0.0 && value.re.abs() > 1.0 {
+        // libstdc++'s std::atanh follows the signed-zero side of the real
+        // branch cut. num_complex selects the opposite side for +0, so match
+        // the C++/Xyce convention explicitly.
+        let real = 0.5 * ((1.0 + value.re).abs() / (1.0 - value.re).abs()).ln();
+        return num_complex::Complex64::new(real, std::f64::consts::FRAC_PI_2.copysign(value.im));
+    }
+    value.atanh()
+}
+
+fn xyce_complex_asin(value: num_complex::Complex64) -> num_complex::Complex64 {
+    if value.im == 0.0 && value.re.abs() > 1.0 {
+        return num_complex::Complex64::new(
+            std::f64::consts::FRAC_PI_2.copysign(value.re),
+            value.re.abs().acosh().copysign(value.im),
+        );
+    }
+    value.asin()
+}
+
+fn xyce_complex_acos(value: num_complex::Complex64) -> num_complex::Complex64 {
+    if value.im == 0.0 && value.re > 1.0 {
+        return num_complex::Complex64::new(0.0, -value.re.acosh().copysign(value.im));
+    }
+    if value.im == 0.0 && value.re < -1.0 {
+        return num_complex::Complex64::new(
+            std::f64::consts::PI,
+            -(-value.re).acosh().copysign(value.im),
+        );
+    }
+    value.acos()
+}
+
+fn xyce_complex_acosh(value: num_complex::Complex64) -> num_complex::Complex64 {
+    if value.im == 0.0 && value.re < 1.0 {
+        let real = if value.re < -1.0 {
+            (-value.re).acosh()
+        } else {
+            0.0
+        };
+        let angle = if value.re <= -1.0 {
+            std::f64::consts::PI
+        } else {
+            value.re.acos()
+        };
+        return num_complex::Complex64::new(real, angle.copysign(value.im));
+    }
+    value.acosh()
+}
+
+fn xyce_complex_asinh(value: num_complex::Complex64) -> num_complex::Complex64 {
+    let mut result = value.asinh();
+    if value.im == 0.0 && result.im == 0.0 {
+        result.im = value.im;
+    }
+    result
+}
+
+#[inline]
+fn complex_div_xyce(left: ComplexValue, right: ComplexValue) -> ComplexValue {
+    // Xyce's expression scalar is std::complex<double>.  libstdc++ lowers its
+    // quotient to GCC's scaled complex-division runtime, including recovery
+    // for zero and non-finite operands.  Reproduce that behavior explicitly:
+    // num_complex uses the unscaled textbook formula and neither recovers the
+    // real infinity in (1+0i)/(0+0i) nor preserves the NaN signs consumed by
+    // Xyce's per-component fixNan.
+    let (mut a, mut b) = (left.re, left.im);
+    let (mut c, mut d) = (right.re, right.im);
+    let denominator_scale = c.abs().max(d.abs());
+    let mut denominator_exponent = 0;
+    if denominator_scale.is_finite() && denominator_scale != 0.0 {
+        denominator_exponent = libm::ilogb(denominator_scale);
+        c = libm::scalbn(c, -denominator_exponent);
+        d = libm::scalbn(d, -denominator_exponent);
+    }
+
+    let denominator = c * c + d * d;
+    let mut real = libm::scalbn((a * c + b * d) / denominator, -denominator_exponent);
+    let mut imaginary = libm::scalbn((b * c - a * d) / denominator, -denominator_exponent);
+
+    if real.is_nan() && imaginary.is_nan() {
+        if denominator == 0.0 && (!a.is_nan() || !b.is_nan()) {
+            let infinity = Value::INFINITY.copysign(c);
+            real = gcc_infinity_product(infinity, a);
+            imaginary = gcc_infinity_product(infinity, b);
+        } else if (a.is_infinite() || b.is_infinite()) && c.is_finite() && d.is_finite() {
+            a = if a.is_infinite() {
+                1.0_f64.copysign(a)
+            } else {
+                0.0_f64.copysign(a)
+            };
+            b = if b.is_infinite() {
+                1.0_f64.copysign(b)
+            } else {
+                0.0_f64.copysign(b)
+            };
+            real = gcc_infinity_product(Value::INFINITY, a * c + b * d);
+            imaginary = gcc_infinity_product(Value::INFINITY, b * c - a * d);
+        } else if denominator_scale.is_infinite() && a.is_finite() && b.is_finite() {
+            c = if c.is_infinite() {
+                1.0_f64.copysign(c)
+            } else {
+                0.0_f64.copysign(c)
+            };
+            d = if d.is_infinite() {
+                1.0_f64.copysign(d)
+            } else {
+                0.0_f64.copysign(d)
+            };
+            real = gcc_zero_product(a * c + b * d);
+            imaginary = gcc_zero_product(b * c - a * d);
+        }
+    }
+
+    ComplexValue::new(real, imaginary)
+}
+
+#[inline]
+fn gcc_negative_nan() -> Value {
+    Value::NAN.copysign(-1.0)
+}
+
+#[inline]
+fn gcc_infinity_product(infinity: Value, factor: Value) -> Value {
+    if factor == 0.0 {
+        // GCC's complex runtime produces a negative quiet NaN for Inf * +/-0
+        // on the libstdc++ runtime used by the Xyce oracle.
+        gcc_negative_nan()
+    } else {
+        infinity * factor
+    }
+}
+
+#[inline]
+fn gcc_zero_product(factor: Value) -> Value {
+    if factor.is_infinite() {
+        gcc_negative_nan()
+    } else {
+        0.0 * factor
+    }
+}
+
 #[inline]
 fn complex_mod(left: ComplexValue, right: ComplexValue) -> Result<ComplexValue, ExprError> {
     if !left.is_real() || !right.is_real() {
@@ -501,6 +1399,13 @@ fn complex_mod(left: ComplexValue, right: ComplexValue) -> Result<ComplexValue, 
         return Err(ExprError::DivisionByZero);
     }
     Ok(ComplexValue::real(left.re % right.re))
+}
+
+#[inline]
+fn complex_mod_xyce(left: ComplexValue, right: ComplexValue) -> ComplexValue {
+    // Xyce's fmodOp explicitly projects std::real from both operands and lets
+    // std::fmod produce IEEE NaN for invalid or zero-divisor cases.
+    ComplexValue::real(left.re % right.re)
 }
 
 #[inline]
@@ -535,12 +1440,12 @@ fn complex_pow(base: ComplexValue, exponent: ComplexValue) -> ComplexValue {
 }
 
 #[inline]
-fn complex_sqrt(value: ComplexValue) -> ComplexValue {
+pub(super) fn complex_sqrt(value: ComplexValue) -> ComplexValue {
     if value.im == 0.0 {
         return if value.re >= 0.0 {
-            ComplexValue::real(value.re.sqrt())
+            ComplexValue::new(value.re.sqrt(), value.im)
         } else {
-            ComplexValue::new(0.0, -(-value.re).sqrt())
+            ComplexValue::new(0.0, (-value.re).sqrt().copysign(value.im))
         };
     }
     complex_pow(value, ComplexValue::real(0.5))
@@ -645,16 +1550,34 @@ fn eval_complex_builtin_function(
             require_arg_count(name, args, 1)?;
             Ok(ComplexValue::real(20.0 * args[0].magnitude().log10()))
         }
+        "ASIN" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
+            require_arg_count(name, args, 1)?;
+            Ok(from_num_complex(to_num_complex(args[0]).asin()))
+        }
         "ASIN" => real_unary(name, args, |x| x.asin()),
+        "ACOS" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
+            require_arg_count(name, args, 1)?;
+            Ok(from_num_complex(to_num_complex(args[0]).acos()))
+        }
         "ACOS" => real_unary(name, args, |x| x.acos()),
-        "ATAN" => real_unary(name, args, |x| x.atan()),
+        "ATAN" | "ARCTAN" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
+            require_arg_count(name, args, 1)?;
+            Ok(from_num_complex(to_num_complex(args[0]).atan()))
+        }
+        "ATAN" | "ARCTAN" => real_unary(name, args, |x| x.atan()),
         "ATAN2" => real_binary(name, args, |left, right| left.atan2(right)),
-        "FMOD" | "MOD" => eval_real_fmod_function(name, args),
+        "FMOD" | "MOD" => eval_real_fmod_function(name, args, ctx.expression_dialect()),
         "FLOOR" => real_unary(name, args, |x| x.floor()),
         "CEIL" => real_unary(name, args, |x| x.ceil()),
         "ROUND" => real_unary(name, args, |x| x.round()),
         "MIN" => real_binary(name, args, |left, right| left.min(right)),
         "MAX" => real_binary(name, args, |left, right| left.max(right)),
+        "POW" | "PWR" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
+            require_arg_count(name, args, 2)?;
+            Ok(from_num_complex(
+                to_num_complex(args[0]).powc(to_num_complex(args[1])),
+            ))
+        }
         "POW" => {
             require_arg_count(name, args, 2)?;
             Ok(complex_pow(args[0], args[1]))
@@ -664,6 +1587,13 @@ fn eval_complex_builtin_function(
                 .abs()
                 .powf(checked_real_arg(name, args, 1)?),
         )),
+        "PWRS" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
+            require_arg_count(name, args, 2)?;
+            Ok(from_num_complex(xyce_complex_pwrs(
+                to_num_complex(args[0]),
+                to_num_complex(args[1]),
+            )))
+        }
         "PWRS" => {
             let base = checked_real_arg(name, args, 0)?;
             Ok(ComplexValue::real(
@@ -740,7 +1670,18 @@ fn eval_complex_builtin_function(
             let x = checked_real_arg(name, args, 0)?;
             Ok(ComplexValue::real(if x > 0.0 { x } else { 0.0 }))
         }
-        "SGN" | "SIGN" => {
+        "SGN" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
+            require_arg_count(name, args, 1)?;
+            let x = args[0].re;
+            Ok(ComplexValue::real(if x > 0.0 {
+                1.0
+            } else if x < 0.0 {
+                -1.0
+            } else {
+                0.0
+            }))
+        }
+        "SGN" => {
             let x = checked_real_arg(name, args, 0)?;
             Ok(ComplexValue::real(if x > 0.0 {
                 1.0
@@ -750,26 +1691,54 @@ fn eval_complex_builtin_function(
                 0.0
             }))
         }
-        "TABLE" | "PWL" => eval_real_table_function(name, args),
-        "SINH" => real_unary(name, args, |x| x.sinh()),
-        "COSH" => real_unary(name, args, |x| x.cosh()),
-        "TANH" => {
-            if ctx.expression_dialect() == ExpressionDialect::Xyce {
-                real_unary(name, args, xyce_tanh)
+        "SIGN" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
+            require_arg_count(name, args, 2)?;
+            let sign = if args[1].re > 0.0 {
+                1.0
+            } else if args[1].re < 0.0 {
+                -1.0
             } else {
-                real_unary(name, args, |x| x.tanh())
-            }
+                0.0
+            };
+            Ok(ComplexValue::real(args[0].magnitude() * sign))
+        }
+        "SIGN" => {
+            let x = checked_real_arg(name, args, 0)?;
+            Ok(ComplexValue::real(x.signum()))
+        }
+        "TABLE" | "PWL" => eval_real_table_function(name, args),
+        "SINH" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
+            require_arg_count(name, args, 1)?;
+            Ok(from_num_complex(to_num_complex(args[0]).sinh()))
+        }
+        "SINH" => real_unary(name, args, |x| x.sinh()),
+        "COSH" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
+            require_arg_count(name, args, 1)?;
+            Ok(from_num_complex(to_num_complex(args[0]).cosh()))
+        }
+        "COSH" => real_unary(name, args, |x| x.cosh()),
+        "TANH" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
+            require_arg_count(name, args, 1)?;
+            Ok(from_num_complex(xyce_runtime_tanh(to_num_complex(args[0]))))
+        }
+        "TANH" => real_unary(name, args, |x| x.tanh()),
+        "ASINH" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
+            require_arg_count(name, args, 1)?;
+            Ok(from_num_complex(to_num_complex(args[0]).asinh()))
         }
         "ASINH" => real_unary(name, args, |x| x.asinh()),
-        "ACOSH" => real_unary(name, args, |x| x.acosh()),
-        "ATANH" => {
-            if ctx.expression_dialect() == ExpressionDialect::Xyce {
-                real_unary(name, args, xyce_atanh)
-            } else {
-                real_unary(name, args, |x| x.atanh())
-            }
+        "ACOSH" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
+            require_arg_count(name, args, 1)?;
+            Ok(from_num_complex(to_num_complex(args[0]).acosh()))
         }
-        "ARCTAN" => real_unary(name, args, |x| x.atan()),
+        "ACOSH" => real_unary(name, args, |x| x.acosh()),
+        "ATANH" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
+            require_arg_count(name, args, 1)?;
+            Ok(from_num_complex(xyce_runtime_atanh(to_num_complex(
+                args[0],
+            ))))
+        }
+        "ATANH" => real_unary(name, args, |x| x.atanh()),
         "INT" | "TRUNC" => real_unary(name, args, |x| x.trunc()),
         "NINT" => {
             let x = checked_real_arg(name, args, 0)?;
@@ -873,10 +1842,19 @@ fn real_binary(
 ///
 /// Rust's floating-point remainder operator has the same sign convention as
 /// `fmod`: the quotient is truncated toward zero, so a non-zero remainder has
-/// the sign of the dividend. Rejecting non-finite operands keeps invalid
-/// intermediate expression results from silently becoming printable values.
-fn eval_real_fmod_function(name: &str, args: &[ComplexValue]) -> Result<ComplexValue, ExprError> {
+/// the sign of the dividend.
+fn eval_real_fmod_function(
+    name: &str,
+    args: &[ComplexValue],
+    dialect: ExpressionDialect,
+) -> Result<ComplexValue, ExprError> {
     require_arg_count(name, args, 2)?;
+    if dialect == ExpressionDialect::Xyce {
+        // Xyce's fmodOp projects std::real from both operands and invokes
+        // std::fmod directly. Invalid/zero-divisor inputs yield IEEE NaN for
+        // the expression-root normalization boundary to handle.
+        return Ok(ComplexValue::real(args[0].re % args[1].re));
+    }
     let dividend = checked_real_arg(name, args, 0)?;
     let divisor = checked_real_arg(name, args, 1)?;
 
@@ -898,19 +1876,33 @@ fn eval_real_fmod_function(name: &str, args: &[ComplexValue]) -> Result<ComplexV
     Ok(ComplexValue::real(remainder))
 }
 
-fn xyce_tanh(x: Value) -> Value {
-    if x > XYCE_TANH_SATURATION_THRESHOLD {
-        1.0
-    } else if x < -XYCE_TANH_SATURATION_THRESHOLD {
-        -1.0
+fn xyce_runtime_tanh(value: num_complex::Complex64) -> num_complex::Complex64 {
+    if value.re > XYCE_TANH_SATURATION_THRESHOLD {
+        num_complex::Complex64::new(1.0, 0.0)
+    } else if value.re < -XYCE_TANH_SATURATION_THRESHOLD {
+        num_complex::Complex64::new(-1.0, 0.0)
     } else {
-        x.tanh()
+        value.tanh()
     }
 }
 
-fn xyce_atanh(x: Value) -> Value {
-    x.clamp(XYCE_ATANH_EPSILON - 1.0, 1.0 - XYCE_ATANH_EPSILON)
-        .atanh()
+fn xyce_runtime_atanh(mut value: num_complex::Complex64) -> num_complex::Complex64 {
+    let lower = XYCE_ATANH_EPSILON - 1.0;
+    let upper = 1.0 - XYCE_ATANH_EPSILON;
+    if value.re < lower {
+        value = num_complex::Complex64::new(lower, 0.0);
+    } else if value.re > upper {
+        value = num_complex::Complex64::new(upper, 0.0);
+    }
+    if value.im == 0.0 && value.re.abs() <= 1.0 {
+        // libstdc++ evaluates std::atanh(complex<double>) on the real interval
+        // with the same stable real branch used by std::atanh(double).  The
+        // logarithmic identity in num_complex loses a few ulps near Xyce's
+        // +/- (1 - epsilon) clamps.
+        num_complex::Complex64::new(value.re.atanh(), value.im)
+    } else {
+        value.atanh()
+    }
 }
 
 fn eval_real_table_function(name: &str, args: &[ComplexValue]) -> Result<ComplexValue, ExprError> {
