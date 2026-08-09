@@ -10,9 +10,12 @@
 //! `compile_model`, which works from the bytecode model alone, exists only
 //! for the `native-bytecode-contract-tests` feature.
 
+mod calling_convention;
 pub(crate) mod codegen;
 mod driver;
 pub mod encoder;
+mod ir;
+mod verifier;
 
 use super::expr::{
     BranchUnknownRuntimeMapping, CanonicalDerivativeAxis, CanonicalStateOperator, EntryKind,
@@ -44,11 +47,81 @@ use std::collections::HashMap;
 
 const ENTRY_ALIGNMENT: usize = 16;
 const X64_NOP: u8 = 0x90;
+const MAX_ASSIGNMENT_CHUNK_OPERATIONS: usize = 8 * 1024;
 
 #[derive(Debug)]
 struct CompiledX64Function {
     bytes: Vec<u8>,
+    code_len: usize,
+    data_ranges: Vec<X64DataRange>,
+    rip_relative_relocations: Vec<X64RipRelativeRelocation>,
     windows_unwind: Option<WindowsX64UnwindInfo>,
+}
+
+#[derive(Debug)]
+struct X64FunctionBody {
+    bytes: Vec<u8>,
+    code_len: usize,
+    data_ranges: Vec<X64DataRange>,
+    rip_relative_relocations: Vec<X64RipRelativeRelocation>,
+}
+
+impl X64FunctionBody {
+    fn code_only(bytes: Vec<u8>) -> Self {
+        let code_len = bytes.len();
+        Self {
+            bytes,
+            code_len,
+            data_ranges: Vec::new(),
+            rip_relative_relocations: Vec::new(),
+        }
+    }
+}
+
+impl CompiledX64Function {
+    fn new(body: X64FunctionBody, windows_unwind: Option<WindowsX64UnwindInfo>) -> Self {
+        Self {
+            bytes: body.bytes,
+            code_len: body.code_len,
+            data_ranges: body.data_ranges,
+            rip_relative_relocations: body.rip_relative_relocations,
+            windows_unwind,
+        }
+    }
+
+    fn code_only(bytes: Vec<u8>, windows_unwind: Option<WindowsX64UnwindInfo>) -> Self {
+        Self::new(X64FunctionBody::code_only(bytes), windows_unwind)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum X64DataKind {
+    ScalarF64,
+    Vector128,
+}
+
+impl X64DataKind {
+    fn width(self) -> usize {
+        match self {
+            Self::ScalarF64 => std::mem::size_of::<f64>(),
+            Self::Vector128 => 16,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct X64DataRange {
+    start: usize,
+    end: usize,
+    alignment: usize,
+    kind: X64DataKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct X64RipRelativeRelocation {
+    displacement_offset: usize,
+    target_offset: usize,
+    kind: X64DataKind,
 }
 
 #[derive(Debug, Clone)]
@@ -184,11 +257,13 @@ fn compile_model_inner(
     let mut static_condition_branch_unknown_dependencies =
         Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_values = Vec::with_capacity(model.stamp_programs.len());
+    let mut stamp_value_programs = Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_value_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_value_prior_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_value_branch_unknown_dependencies =
         Vec::with_capacity(model.stamp_programs.len());
     let mut jacobians = Vec::with_capacity(model.stamp_programs.len());
+    let mut jacobian_programs = Vec::with_capacity(model.stamp_programs.len());
     let mut jacobian_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut jacobian_prior_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut jacobian_branch_unknown_dependencies = Vec::with_capacity(model.stamp_programs.len());
@@ -254,6 +329,7 @@ fn compile_model_inner(
             &mut windows_unwind_functions,
             &program,
         )?);
+        stamp_value_programs.push(program);
 
         let mut jacobian_current_pairs = available_current_pairs.clone();
         if let Some((pos, neg)) = infer_current_terminal_pair(stamp) {
@@ -290,6 +366,7 @@ fn compile_model_inner(
         };
 
         let mut stamp_jacobians = Vec::with_capacity(stamp.jacobian_programs.len());
+        let mut stamp_jacobian_programs = Vec::with_capacity(stamp.jacobian_programs.len());
         let mut stamp_jacobian_current_dependencies =
             Vec::with_capacity(stamp.jacobian_programs.len());
         let mut stamp_jacobian_prior_current_dependencies =
@@ -316,8 +393,10 @@ fn compile_model_inner(
                 &mut windows_unwind_functions,
                 &program,
             )?);
+            stamp_jacobian_programs.push(program);
         }
         jacobians.push(stamp_jacobians);
+        jacobian_programs.push(stamp_jacobian_programs);
         jacobian_current_dependencies.push(stamp_jacobian_current_dependencies);
         jacobian_prior_current_dependencies.push(stamp_jacobian_prior_current_dependencies);
         jacobian_branch_unknown_dependencies.push(stamp_jacobian_branch_unknown_dependencies);
@@ -454,10 +533,10 @@ fn compile_model_inner(
         .collect::<JitResult<Vec<_>>>()?;
 
     let evaluation_kernel = align_image_for_entry(&mut image, &mut entry_starts);
-    let evaluation_kernel_artifact = driver::compile_evaluation_kernel_artifact(
+    let evaluation_kernel_artifact = codegen::compile_fused_evaluation_kernel_artifact(
         evaluation_kernel.as_usize(),
         assignment,
-        &stamp_values,
+        &stamp_value_programs,
         &published_current_pairs,
     )?;
     append_compiled_function_at_offset(
@@ -468,11 +547,11 @@ fn compile_model_inner(
     )?;
 
     let stamp_kernel = align_image_for_entry(&mut image, &mut entry_starts);
-    let stamp_kernel_artifact = driver::compile_stamp_kernel_artifact(
+    let stamp_kernel_artifact = codegen::compile_fused_stamp_kernel_artifact(
         stamp_kernel.as_usize(),
         assignment,
-        &stamp_values,
-        &jacobians,
+        &stamp_value_programs,
+        &jacobian_programs,
         &published_current_pairs,
     )?;
     append_compiled_function_at_offset(
@@ -545,14 +624,139 @@ fn compile_model_inner(
 }
 
 fn verify_x64_function_code(bytes: &[u8], entry_kind: &str) -> JitResult<()> {
-    if bytes.last() != Some(&0xC3) {
+    verifier::verify_exact_function(bytes, entry_kind).map(|_| ())
+}
+
+fn verify_x64_function_artifact(artifact: &CompiledX64Function, entry_kind: &str) -> JitResult<()> {
+    if artifact.code_len == 0 || artifact.code_len > artifact.bytes.len() {
         return Err(JitError::Verifier {
             model: "native-x64".into(),
             detail: format!(
-                "compiled {entry_kind} does not end in RET at its compiler-known code boundary"
+                "compiled {entry_kind} has invalid code range 0..{} for artifact length {}",
+                artifact.code_len,
+                artifact.bytes.len()
             )
             .into(),
         });
+    }
+    let verified =
+        verifier::verify_exact_function(&artifact.bytes[..artifact.code_len], entry_kind)?;
+    #[cfg(windows)]
+    if let Some(unwind) = &artifact.windows_unwind {
+        verifier::verify_windows_unwind_prologue(
+            &artifact.bytes[..artifact.code_len],
+            unwind,
+            entry_kind,
+        )?;
+    }
+
+    let mut prior_end = artifact.code_len;
+    for (index, range) in artifact.data_ranges.iter().enumerate() {
+        if range.alignment == 0
+            || !range.alignment.is_power_of_two()
+            || range.start % range.alignment != 0
+            || range.start < prior_end
+            || range.end <= range.start
+            || range.end > artifact.bytes.len()
+            || (range.end - range.start) % range.kind.width() != 0
+        {
+            return Err(JitError::Verifier {
+                model: "native-x64".into(),
+                detail: format!(
+                    "compiled {entry_kind} has invalid {:?} data range {index}: {}..{} (alignment {})",
+                    range.kind, range.start, range.end, range.alignment
+                )
+                .into(),
+            });
+        }
+        if artifact.bytes[prior_end..range.start]
+            .iter()
+            .any(|byte| *byte != X64_NOP)
+        {
+            return Err(JitError::Verifier {
+                model: "native-x64".into(),
+                detail: format!(
+                    "compiled {entry_kind} has non-padding bytes between typed code/data ranges at {prior_end}..{}",
+                    range.start
+                )
+                .into(),
+            });
+        }
+        prior_end = range.end;
+    }
+    if prior_end != artifact.bytes.len() {
+        return Err(JitError::Verifier {
+            model: "native-x64".into(),
+            detail: format!(
+                "compiled {entry_kind} has {} untyped trailing byte(s)",
+                artifact.bytes.len() - prior_end
+            )
+            .into(),
+        });
+    }
+
+    if verified.rip_relative_references.len() != artifact.rip_relative_relocations.len() {
+        return Err(JitError::Verifier {
+            model: "native-x64".into(),
+            detail: format!(
+                "compiled {entry_kind} decoded {} RIP-relative references but declares {} relocations",
+                verified.rip_relative_references.len(),
+                artifact.rip_relative_relocations.len()
+            )
+            .into(),
+        });
+    }
+    for reference in &verified.rip_relative_references {
+        let relocation = artifact
+            .rip_relative_relocations
+            .iter()
+            .find(|relocation| relocation.displacement_offset == reference.displacement_offset)
+            .ok_or_else(|| JitError::Verifier {
+                model: "native-x64".into(),
+                detail: format!(
+                    "compiled {entry_kind} has undeclared RIP-relative displacement at byte {}",
+                    reference.displacement_offset
+                )
+                .into(),
+            })?;
+        let decoded_target = usize::try_from(reference.target_offset).map_err(|_| {
+            JitError::Verifier {
+                model: "native-x64".into(),
+                detail: format!(
+                    "compiled {entry_kind} RIP-relative reference at byte {} targets negative offset {}",
+                    reference.displacement_offset, reference.target_offset
+                )
+                .into(),
+            }
+        })?;
+        if decoded_target != relocation.target_offset {
+            return Err(JitError::Verifier {
+                model: "native-x64".into(),
+                detail: format!(
+                    "compiled {entry_kind} RIP-relative reference at byte {} resolves to {decoded_target}, declared target is {}",
+                    reference.displacement_offset, relocation.target_offset
+                )
+                .into(),
+            });
+        }
+        let target_range = artifact.data_ranges.iter().find(|range| {
+            range.kind == relocation.kind
+                && relocation.target_offset >= range.start
+                && relocation
+                    .target_offset
+                    .checked_add(relocation.kind.width())
+                    .is_some_and(|end| end <= range.end)
+        });
+        if target_range.is_none() {
+            return Err(JitError::Verifier {
+                model: "native-x64".into(),
+                detail: format!(
+                    "compiled {entry_kind} {:?} relocation at byte {} targets untyped/out-of-range data byte {}",
+                    relocation.kind, relocation.displacement_offset, relocation.target_offset
+                )
+                .into(),
+            });
+        }
     }
     Ok(())
 }
@@ -601,6 +805,27 @@ fn verify_x64_image_layout(
                 )
                 .into(),
             });
+        }
+        let verified =
+            verifier::verify_function_prefix(&image[start..end], &format!("image entry {index}"))?;
+        for relative_target in verified.direct_call_targets {
+            let absolute_target = i64::try_from(start)
+                .ok()
+                .and_then(|start| start.checked_add(relative_target))
+                .and_then(|target| usize::try_from(target).ok());
+            if absolute_target.is_none_or(|target| {
+                entry_starts
+                    .binary_search_by_key(&target, |offset| offset.as_usize())
+                    .is_err()
+            }) {
+                return Err(JitError::Verifier {
+                    model: model.name.clone(),
+                    detail: format!(
+                        "x64 entry {index} has a direct call to non-entry byte {absolute_target:?}"
+                    )
+                    .into(),
+                });
+            }
         }
     }
     Ok(())
@@ -3407,17 +3632,67 @@ fn append_assignment_pass(
 ) -> JitResult<(CodeOffset, AssignmentDependencies)> {
     let mut dependencies = AssignmentDependencies::default();
     collect_assignment_dependencies(assignments, &mut dependencies);
-    let artifact = if assignments.is_empty() {
-        CompiledX64Function {
-            bytes: vec![0xC3],
-            windows_unwind: None,
-        }
+    if assignments.is_empty() {
+        let artifact = CompiledX64Function::code_only(vec![0xC3], None);
+        let offset = align_image_for_entry(image, entry_starts);
+        append_compiled_function_at_offset(image, offset, windows_unwind_functions, artifact)?;
+        return Ok((offset, dependencies));
+    }
+
+    let chunk_ranges = assignment_chunk_ranges(assignments);
+    let mut chunk_offsets = Vec::with_capacity(chunk_ranges.len());
+    for range in chunk_ranges {
+        let artifact = codegen::compile_assignment_pass_function_artifact(&assignments[range])?;
+        let offset = align_image_for_entry(image, entry_starts);
+        append_compiled_function_at_offset(image, offset, windows_unwind_functions, artifact)?;
+        chunk_offsets.push(offset);
+    }
+
+    let assignment = if let [only] = chunk_offsets.as_slice() {
+        *only
     } else {
-        codegen::compile_assignment_pass_function_artifact(assignments)?
+        let offset = align_image_for_entry(image, entry_starts);
+        let artifact = codegen::compile_assignment_dispatch_function_artifact(
+            offset.as_usize(),
+            &chunk_offsets,
+        )?;
+        append_compiled_function_at_offset(image, offset, windows_unwind_functions, artifact)?;
+        offset
     };
-    let offset = align_image_for_entry(image, entry_starts);
-    append_compiled_function_at_offset(image, offset, windows_unwind_functions, artifact)?;
-    Ok((offset, dependencies))
+    Ok((assignment, dependencies))
+}
+
+fn assignment_operation_count(assignment: &NativeAssignment) -> usize {
+    match assignment {
+        NativeAssignment::Direct { program, .. } => program.ops().len(),
+        NativeAssignment::Indexed { index, value, .. } => {
+            index.ops().len().saturating_add(value.ops().len())
+        }
+        NativeAssignment::Loop { condition, body } => condition.ops().len().saturating_add(
+            body.iter()
+                .map(assignment_operation_count)
+                .fold(0_usize, usize::saturating_add),
+        ),
+    }
+}
+
+fn assignment_chunk_ranges(assignments: &[NativeAssignment]) -> Vec<std::ops::Range<usize>> {
+    let mut ranges = Vec::new();
+    let mut start = 0_usize;
+    let mut operations = 0_usize;
+    for (index, assignment) in assignments.iter().enumerate() {
+        let cost = assignment_operation_count(assignment);
+        if index > start && operations.saturating_add(cost) > MAX_ASSIGNMENT_CHUNK_OPERATIONS {
+            ranges.push(start..index);
+            start = index;
+            operations = 0;
+        }
+        operations = operations.saturating_add(cost);
+    }
+    if start < assignments.len() {
+        ranges.push(start..assignments.len());
+    }
+    ranges
 }
 
 fn split_canonical_assignment_phases(
@@ -5005,17 +5280,18 @@ fn append_compiled_function_at_offset(
             .into(),
         });
     }
-    let end = offset
+    verify_x64_function_artifact(&artifact, "image entry")?;
+    let code_end = offset
         .as_usize()
-        .checked_add(artifact.bytes.len())
+        .checked_add(artifact.code_len)
         .ok_or_else(|| JitError::Encoding {
             model: "native-x64".into(),
-            detail: "compiled function image range overflow".into(),
+            detail: "compiled function code range overflow".into(),
         })?;
     if let Some(info) = artifact.windows_unwind {
         windows_unwind_functions.push(PendingWindowsX64UnwindFunction {
             begin: offset,
-            end: CodeOffset::new(end),
+            end: CodeOffset::new(code_end),
             info,
         });
     }
@@ -5229,9 +5505,10 @@ fn format_current_endpoint(endpoint: usize) -> String {
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        NativeModel, canonical_branch_unknown_runtime_map, compile_model_with_canonical_ir,
-        derivative_shadow_axes_from_suffix, live_canonical_assignment_slots,
-        live_native_assignment_steps, lower_assignment_step, lower_static_condition_program,
+        MAX_ASSIGNMENT_CHUNK_OPERATIONS, NativeModel, append_assignment_pass,
+        assignment_chunk_ranges, canonical_branch_unknown_runtime_map,
+        compile_model_with_canonical_ir, derivative_shadow_axes_from_suffix,
+        live_canonical_assignment_slots, lower_assignment_step, lower_static_condition_program,
         native_assignment_roots, validate_compiled_entry_shape, verify_x64_function_code,
         verify_x64_image_layout,
     };
@@ -5344,11 +5621,7 @@ mod tests {
     fn x64_structural_verifiers_reject_missing_ret_and_unaligned_entries() {
         let missing_ret = verify_x64_function_code(&[0x31, 0xC0], "test entry")
             .expect_err("function without RET must fail verification");
-        assert!(
-            missing_ret
-                .to_string()
-                .contains("does not end in RET at its compiler-known code boundary")
-        );
+        assert!(missing_ret.to_string().contains("without RET"));
 
         let model = compiled_model_with_variables(0);
         let unaligned = verify_x64_image_layout(
@@ -5358,6 +5631,69 @@ mod tests {
         )
         .expect_err("unaligned entry must fail verification");
         assert!(unaligned.to_string().contains("unaligned byte 2"));
+    }
+
+    #[test]
+    fn x64_artifact_verifier_authenticates_typed_literal_relocations() {
+        // movsd xmm0, qword ptr [rip + 8]; ret; <alignment>; 1.0_f64
+        let mut bytes = vec![0xF2, 0x0F, 0x10, 0x05, 8, 0, 0, 0, 0xC3];
+        bytes.resize(16, super::X64_NOP);
+        bytes.extend_from_slice(&1.0_f64.to_le_bytes());
+        let mut artifact = super::CompiledX64Function {
+            bytes,
+            code_len: 9,
+            data_ranges: vec![super::X64DataRange {
+                start: 16,
+                end: 24,
+                alignment: 8,
+                kind: super::X64DataKind::ScalarF64,
+            }],
+            rip_relative_relocations: vec![super::X64RipRelativeRelocation {
+                displacement_offset: 4,
+                target_offset: 16,
+                kind: super::X64DataKind::ScalarF64,
+            }],
+            windows_unwind: None,
+        };
+        super::verify_x64_function_artifact(&artifact, "typed literal")
+            .expect("well-formed typed artifact");
+
+        artifact.rip_relative_relocations[0].target_offset = 15;
+        let error = super::verify_x64_function_artifact(&artifact, "typed literal")
+            .expect_err("mismatched relocation metadata must fail");
+        assert!(error.to_string().contains("declared target is 15"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn x64_artifact_verifier_rejects_unwind_metadata_that_drifted_from_the_prologue() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadVariable(0),
+                NativeOp::UnaryMath(crate::native::expr::UnaryMathOp::Exp),
+            ],
+            1,
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut artifact = super::codegen::compile_value_function_artifact(&program)
+            .expect("compile helper-backed artifact");
+        let unwind = artifact
+            .windows_unwind
+            .as_mut()
+            .expect("helper-backed Win64 artifact has unwind metadata");
+        match &mut unwind.operations[0] {
+            super::WindowsX64UnwindOperation::PushNonvolatile { code_offset, .. }
+            | super::WindowsX64UnwindOperation::AllocateStack { code_offset, .. }
+            | super::WindowsX64UnwindOperation::SaveXmm128 { code_offset, .. }
+            | super::WindowsX64UnwindOperation::SetFramePointer { code_offset } => {
+                *code_offset += 1;
+            }
+        }
+
+        let error = super::verify_x64_function_artifact(&artifact, "corrupt unwind")
+            .expect_err("unwind/prologue drift must fail independent verification");
+        assert!(error.to_string().contains("unwind operation"));
     }
 
     #[cfg(windows)]
@@ -5403,7 +5739,7 @@ endmodule
             );
         };
 
-        assert_registered(native.stamp_kernel_address_for_test(), 0);
+        assert_registered(native.stamp_kernel_address_for_test(), 5);
         assert_registered(native.stamp_value_address_for_test(0), 5);
     }
 
@@ -7754,6 +8090,114 @@ endmodule
     }
 
     #[test]
+    fn assignment_chunks_bound_code_size_and_dispatch_in_source_order() {
+        let mut first_ops = Vec::with_capacity(MAX_ASSIGNMENT_CHUNK_OPERATIONS - 1);
+        first_ops.push(NativeOp::Const(1.0));
+        for _ in 0..((MAX_ASSIGNMENT_CHUNK_OPERATIONS - 2) / 2) {
+            first_ops.extend([NativeOp::Const(1.0), NativeOp::Add]);
+        }
+        let first = NativeProgram::from_ops_for_test(first_ops, 2, Vec::new(), Vec::new());
+        let second = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadVariable(0),
+                NativeOp::Const(2.0),
+                NativeOp::Add,
+            ],
+            2,
+            Vec::new(),
+            Vec::new(),
+        );
+        let assignments = [
+            NativeAssignment::Direct {
+                var_index: 0,
+                program: first,
+            },
+            NativeAssignment::Direct {
+                var_index: 1,
+                program: second,
+            },
+        ];
+
+        assert_eq!(assignment_chunk_ranges(&assignments), vec![0..1, 1..2]);
+
+        let mut image = Vec::new();
+        let mut entry_starts = Vec::new();
+        let mut unwind = Vec::new();
+        let (dispatcher, _) =
+            append_assignment_pass(&assignments, &mut image, &mut entry_starts, &mut unwind)
+                .expect("compile chunked assignment dispatcher");
+        assert_eq!(entry_starts.len(), 3, "two chunks plus one dispatcher");
+        assert_eq!(dispatcher, entry_starts[2]);
+
+        let memory = ExecutableMemory::allocate(&image).expect("allocate chunked assignments");
+        let entry = memory
+            .ptr_at(dispatcher.as_usize())
+            .expect("chunked assignment dispatcher entry");
+        let function: extern "C" fn(*const EvalContext, *mut f64) =
+            unsafe { std::mem::transmute(entry) };
+        let context = eval_context(&[], &[]);
+        let mut variables = [0.0_f64; 2];
+        function(&context, variables.as_mut_ptr());
+
+        let expected_first = (MAX_ASSIGNMENT_CHUNK_OPERATIONS / 2) as f64;
+        assert_eq!(variables[0], expected_first);
+        assert_eq!(variables[1], expected_first + 2.0);
+    }
+
+    #[test]
+    fn assignment_dispatcher_aborts_before_later_chunks_on_runtime_error() {
+        let mut failing_ops = Vec::with_capacity(MAX_ASSIGNMENT_CHUNK_OPERATIONS);
+        failing_ops.push(NativeOp::Const(1.0));
+        for _ in 0..((MAX_ASSIGNMENT_CHUNK_OPERATIONS - 2) / 2 + 1) {
+            failing_ops.extend([NativeOp::Const(1.0), NativeOp::Add]);
+        }
+        failing_ops.push(NativeOp::LoadVariableDyn {
+            base: 0,
+            len: 1,
+            lower: 0,
+        });
+        let assignments = [
+            NativeAssignment::Direct {
+                var_index: 0,
+                program: NativeProgram::from_ops_for_test(failing_ops, 2, Vec::new(), Vec::new()),
+            },
+            NativeAssignment::Direct {
+                var_index: 1,
+                program: NativeProgram::from_ops_for_test(
+                    vec![NativeOp::Const(5.0)],
+                    1,
+                    Vec::new(),
+                    Vec::new(),
+                ),
+            },
+        ];
+        assert_eq!(assignment_chunk_ranges(&assignments), vec![0..1, 1..2]);
+
+        let mut image = Vec::new();
+        let mut entry_starts = Vec::new();
+        let mut unwind = Vec::new();
+        let (dispatcher, _) =
+            append_assignment_pass(&assignments, &mut image, &mut entry_starts, &mut unwind)
+                .expect("compile failing chunk dispatcher");
+        let memory = ExecutableMemory::allocate(&image).expect("allocate failing dispatcher");
+        let entry = memory
+            .ptr_at(dispatcher.as_usize())
+            .expect("failing assignment dispatcher entry");
+        let function: extern "C" fn(*const EvalContext, *mut f64) =
+            unsafe { std::mem::transmute(entry) };
+        let context = eval_context(&[], &[]);
+        let mut variables = [0.0_f64, -7.0_f64];
+
+        function(&context, variables.as_mut_ptr());
+
+        assert!(context.take_runtime_error().is_some());
+        assert_eq!(
+            variables[1], -7.0,
+            "dispatcher must not execute chunks after the first runtime error"
+        );
+    }
+
+    #[test]
     fn native_assignment_roots_keeps_internal_shadow_reads_from_jacobians() {
         let mut model = compiled_model_with_variables(3);
         model.variable_names = vec![
@@ -8986,8 +9430,12 @@ endmodule
         context.clear_currents();
         context.currents.resize(model.stamp_programs.len(), 0.0);
         let mut vm = Vm::new(&mut context);
-        let live_assignment_steps = live_native_assignment_steps(model);
-        execute_bytecode_assignment_steps(&mut vm, &live_assignment_steps)
+        let (pre_current_assignment_steps, _) =
+            split_bytecode_assignment_steps_at_completed_current(
+                &model.assignment_steps,
+                model.num_variables,
+            );
+        execute_bytecode_assignment_steps(&mut vm, &pre_current_assignment_steps)
             .map_err(|error| error.to_string())?;
 
         let mut prior_current_probes = Vec::new();

@@ -144,6 +144,28 @@ pub struct X64Encoder {
     bytes: Vec<u8>,
 }
 
+/// A typed four-byte PC-relative displacement field.
+///
+/// Keeping the instruction end with the patch prevents callers from repeating
+/// (and occasionally getting wrong) the x86 rule that displacements are
+/// relative to the byte after the field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Rel32Patch {
+    displacement_offset: usize,
+    next_instruction_offset: usize,
+}
+
+impl Rel32Patch {
+    #[cfg(test)]
+    pub(crate) fn displacement_offset(self) -> usize {
+        self.displacement_offset
+    }
+
+    pub(crate) fn next_instruction_offset(self) -> usize {
+        self.next_instruction_offset
+    }
+}
+
 #[allow(dead_code)]
 impl X64Encoder {
     pub fn new() -> Self {
@@ -166,8 +188,13 @@ impl X64Encoder {
         self.bytes.len()
     }
 
-    pub(crate) fn patch_i32(&mut self, offset: usize, value: i32) {
-        self.bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    pub(crate) fn patch_rel32(&mut self, patch: Rel32Patch, value: i32) {
+        let start = patch.displacement_offset;
+        debug_assert_eq!(
+            patch.next_instruction_offset,
+            start + std::mem::size_of::<i32>()
+        );
+        self.bytes[start..patch.next_instruction_offset].copy_from_slice(&value.to_le_bytes());
     }
 
     pub fn mov_eax_imm32(&mut self, value: u32) {
@@ -222,11 +249,14 @@ impl X64Encoder {
     /// instruction immediately following it. Native image drivers use this
     /// form to call sibling entry points without materializing absolute
     /// addresses or consuming a scratch register.
-    pub(crate) fn call_rel32_placeholder(&mut self) -> usize {
+    pub(crate) fn call_rel32_placeholder(&mut self) -> Rel32Patch {
         self.emit_u8(0xE8);
         let offset = self.position();
         self.emit_i32(0);
-        offset
+        Rel32Patch {
+            displacement_offset: offset,
+            next_instruction_offset: self.position(),
+        }
     }
 
     pub(crate) fn sub_rsp_imm32(&mut self, value: i32) {
@@ -528,18 +558,24 @@ impl X64Encoder {
         self.emit_modrm(0b11, dst.code(), src.code());
     }
 
-    pub(crate) fn jcc_rel32_placeholder(&mut self, condition: ConditionCode) -> usize {
+    pub(crate) fn jcc_rel32_placeholder(&mut self, condition: ConditionCode) -> Rel32Patch {
         self.emit_all(&[0x0F, condition.jump_opcode()]);
         let offset = self.position();
         self.emit_i32(0);
-        offset
+        Rel32Patch {
+            displacement_offset: offset,
+            next_instruction_offset: self.position(),
+        }
     }
 
-    pub(crate) fn jmp_rel32_placeholder(&mut self) -> usize {
+    pub(crate) fn jmp_rel32_placeholder(&mut self) -> Rel32Patch {
         self.emit_u8(0xE9);
         let offset = self.position();
         self.emit_i32(0);
-        offset
+        Rel32Patch {
+            displacement_offset: offset,
+            next_instruction_offset: self.position(),
+        }
     }
 
     pub(crate) fn addsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
@@ -1152,9 +1188,9 @@ mod tests {
         let mut encoder = X64Encoder::new();
 
         let displacement = encoder.call_rel32_placeholder();
-        encoder.patch_i32(displacement, -0x1020_3040);
+        encoder.patch_rel32(displacement, -0x1020_3040);
 
-        assert_eq!(displacement, 1);
+        assert_eq!(displacement.displacement_offset(), 1);
         assert_eq!(encoder.into_bytes(), [0xE8, 0xC0, 0xCF, 0xDF, 0xEF]);
     }
 
@@ -1229,7 +1265,7 @@ mod tests {
         encoder.btc_r64_imm8(Gpr::R11, 63);
         encoder.cmp_r64_imm32(Gpr::R11, 1);
         let branch = encoder.jcc_rel32_placeholder(ConditionCode::BelowOrEqual);
-        encoder.patch_i32(branch, 0);
+        encoder.patch_rel32(branch, 0);
         encoder.subsd_xmm_m64_base_disp32(Xmm::Xmm1, Gpr::Rax, 24);
         encoder.minsd_xmm_m64_base_disp32(Xmm::Xmm1, Gpr::Rsp, 0);
         encoder.maxsd_xmm_m64_base_disp32(Xmm::Xmm2, Gpr::Rsp, 8);

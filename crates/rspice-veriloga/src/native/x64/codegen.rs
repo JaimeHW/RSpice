@@ -12,8 +12,18 @@
 //! convention exactly — the compiled code is entered by ordinary Rust
 //! `extern "C"` pointers, with no shim to absorb a mistake.
 
-use super::encoder::{ConditionCode, Gpr, X64Encoder, Xmm};
-use super::{CompiledX64Function, WindowsX64UnwindInfo, WindowsX64UnwindOperation};
+use super::calling_convention::HOST_ABI;
+use super::encoder::{ConditionCode, Gpr, Rel32Patch, X64Encoder, Xmm};
+use super::ir::{
+    ALLOCATABLE_XMM_REGISTERS, AllocatedInstruction, Effects as X64Effects,
+    Program as X64SsaProgram, RegisterAllocation, ValueLocation as X64ValueLocation,
+    ValueType as X64ValueType, dynamic_variable_inline_supported, plan_shared_outputs,
+};
+use super::{
+    CompiledX64Function, WindowsX64UnwindInfo, WindowsX64UnwindOperation, X64DataKind,
+    X64DataRange, X64FunctionBody, X64RipRelativeRelocation,
+};
+use crate::native::abi::NativeRuntimeStatus;
 use crate::native::abi::{
     rspice_above_state_native, rspice_absdelay_state_native, rspice_acos, rspice_acosh,
     rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh, rspice_ceil, rspice_cos,
@@ -26,15 +36,16 @@ use crate::native::abi::{
     rspice_native_dynamic_variable_error, rspice_native_integer_shift_count_error,
     rspice_native_limit_state_bounds_error, rspice_native_limit_state_initialized_error,
     rspice_native_limit_state_values_bounds_error, rspice_native_limit_state_values_error,
-    rspice_native_loop_limit_error, rspice_native_param_given_error,
-    rspice_native_port_connected_error, rspice_native_prior_current_error, rspice_pow, rspice_sin,
-    rspice_sinh, rspice_slew_state_native, rspice_table_derivative_native,
-    rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
-    rspice_transition_state_native, rspice_zi_step_native,
+    rspice_native_loop_limit_error, rspice_native_non_finite_contribution_error,
+    rspice_native_param_given_error, rspice_native_port_connected_error,
+    rspice_native_prior_current_error, rspice_pow, rspice_sin, rspice_sinh,
+    rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup_native,
+    rspice_tan, rspice_tanh, rspice_timer_state_native, rspice_transition_state_native,
+    rspice_zi_step_native,
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
-use crate::native::{EvalContext, JitError, JitResult};
+use crate::native::{EvalContext, JitError, JitResult, NativeStampKernelIo};
 
 const MODEL: &str = "native-x64";
 const VOLTAGES_OFFSET: i32 = std::mem::offset_of!(EvalContext, voltages) as i32;
@@ -58,6 +69,8 @@ const PARAM_GIVEN_LEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, param_give
 const BRANCH_UNKNOWNS_OFFSET: i32 = std::mem::offset_of!(EvalContext, branch_unknowns) as i32;
 const ANALYSIS_TYPE_OFFSET: i32 = std::mem::offset_of!(EvalContext, analysis_type) as i32;
 const MFACTOR_OFFSET: i32 = std::mem::offset_of!(EvalContext, multiplicity) as i32;
+const KERNEL_ACTIVE_OFFSET: i32 = std::mem::offset_of!(NativeStampKernelIo, program_active) as i32;
+const KERNEL_JACOBIANS_OFFSET: i32 = std::mem::offset_of!(NativeStampKernelIo, jacobians) as i32;
 const STATE_VALUES_LEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, state_values_len) as i32;
 const ANALYSIS_INITIAL_STEP_OFFSET: i32 =
     std::mem::offset_of!(EvalContext, analysis_initial_step) as i32;
@@ -75,25 +88,27 @@ const THERMAL_VOLTAGE_PER_K: f64 = K_BOLTZMANN / Q_ELECTRON;
 const F64_EXACT_INTEGER_LIMIT_ABS_BITS: u64 = 0x4330_0000_0000_0000;
 const I64_MAX_EXCLUSIVE_AS_F64: f64 = 9_223_372_036_854_775_808.0;
 const I64_MIN_AS_F64: f64 = -9_223_372_036_854_775_808.0;
-const INLINE_DYNAMIC_LOWER_ABS_LIMIT: i64 = 1_i64 << 51;
+#[cfg(test)]
+const INLINE_DYNAMIC_LOWER_ABS_LIMIT: i64 = super::ir::INLINE_DYNAMIC_LOWER_ABS_LIMIT;
 const DYNAMIC_READ_FRAME_BYTES: i32 = 16;
 const ROUND_TEMP_FRAME_BYTES: i32 = 16;
 const CALLEE_SAVED_XMM_BYTES: i32 = 16;
 #[cfg(test)]
 const CALL_RESULT_SLOT: usize = 6;
-#[cfg(windows)]
-const CALL_SHADOW_BYTES: i32 = 32;
-#[cfg(not(windows))]
-const CALL_SHADOW_BYTES: i32 = 0;
+const CALL_SHADOW_BYTES: i32 = HOST_ABI.call_shadow_bytes;
 const LOCAL_SLOT_BYTES: i32 = 8;
 const LOCAL_FRAME_ALIGN_BYTES: i32 = 16;
+/// Maximum distance between stack touches while reserving a generated frame.
+///
+/// Windows grows stacks through guard pages and requires large frames to probe
+/// every intervening page before moving RSP.  Applying the same discipline on
+/// every x64 host also prevents generated functions from creating a stack-clash
+/// gap on System V targets.
+const STACK_PROBE_INTERVAL_BYTES: i32 = 4096;
 const INDEXED_ASSIGNMENT_SLOT_PTR_DISP: i32 = 0;
 const MAX_RUNTIME_LOOP_ITERATIONS: i32 = 100_000;
 const MAX_EXPRESSION_STACK_DEPTH: usize = 4096;
-#[cfg(windows)]
-const CALLER_SAVED_XMM_COUNT: usize = 6;
-#[cfg(not(windows))]
-const CALLER_SAVED_XMM_COUNT: usize = XMM_STACK.len();
+const CALLER_SAVED_XMM_COUNT: usize = HOST_ABI.caller_saved_xmm_count;
 const XMM_STACK: [Xmm; 16] = [
     Xmm::Xmm0,
     Xmm::Xmm1,
@@ -121,27 +136,30 @@ pub(super) fn compile_value_function_artifact(
     program: &NativeProgram,
 ) -> JitResult<CompiledX64Function> {
     validate_expression_stack_depth(program.max_stack_depth())?;
-    let callee_saved_xmm_count = callee_saved_xmm_count_for_depth(program.max_stack_depth());
-    let expression_spill_bytes = expression_spill_frame_bytes(program.max_stack_depth())?;
-    let local_frame_bytes = align_local_frame(
-        expression_spill_bytes + callee_saved_xmm_frame_bytes(callee_saved_xmm_count),
-    );
+    let ssa = X64SsaProgram::lower(program)?;
+    validate_expression_stack_depth(ssa.maximum_stack_depth())?;
+    let allocation = RegisterAllocation::build(&ssa)?;
+    let callee_saved_xmm_count = callee_saved_xmm_count_for_allocation(&allocation);
+    let expression_spill_bytes = allocation_spill_frame_bytes(&allocation)?;
+    let local_frame_bytes = checked_local_frame_bytes(&[
+        expression_spill_bytes,
+        callee_saved_xmm_frame_bytes(callee_saved_xmm_count),
+    ])?;
     let mut compiler = FunctionCompiler::new(
-        program_uses_helper_calls(program),
-        value_program_needs_saved_entry_args(program),
-        program_uses_helper_calls(program) || program.max_stack_depth() >= XMM_STACK.len(),
+        ssa.uses_helper_calls(),
+        ssa.needs_saved_entry_args(),
+        ssa.uses_helper_calls() || expression_spill_bytes > 0,
         local_frame_bytes,
         None,
         (expression_spill_bytes > 0).then_some(0),
         callee_saved_xmm_count,
-    );
-    compiler.emit_program(program)?;
+    )?;
+    compiler.emit_allocated_program(&ssa, &allocation)?;
     let windows_unwind = compiler.windows_unwind_info();
-    let bytes = compiler.finish_value_function()?;
-    Ok(CompiledX64Function {
-        bytes,
-        windows_unwind,
-    })
+    let body = compiler.finish_value_function()?;
+    let artifact = CompiledX64Function::new(body, windows_unwind);
+    super::verify_x64_function_artifact(&artifact, "generated value function")?;
+    Ok(artifact)
 }
 
 #[allow(dead_code)]
@@ -157,27 +175,222 @@ fn compile_assignment_function_artifact(
     program: &NativeProgram,
 ) -> JitResult<CompiledX64Function> {
     validate_expression_stack_depth(program.max_stack_depth())?;
-    let callee_saved_xmm_count = callee_saved_xmm_count_for_depth(program.max_stack_depth());
-    let expression_spill_bytes = expression_spill_frame_bytes(program.max_stack_depth())?;
-    let local_frame_bytes = align_local_frame(
-        expression_spill_bytes + callee_saved_xmm_frame_bytes(callee_saved_xmm_count),
-    );
+    let ssa = X64SsaProgram::lower(program)?;
+    validate_expression_stack_depth(ssa.maximum_stack_depth())?;
+    let allocation = RegisterAllocation::build(&ssa)?;
+    let callee_saved_xmm_count = callee_saved_xmm_count_for_allocation(&allocation);
+    let expression_spill_bytes = allocation_spill_frame_bytes(&allocation)?;
+    let local_frame_bytes = checked_local_frame_bytes(&[
+        expression_spill_bytes,
+        callee_saved_xmm_frame_bytes(callee_saved_xmm_count),
+    ])?;
     let mut compiler = FunctionCompiler::new(
-        program_uses_helper_calls(program),
-        program_uses_helper_calls(program),
-        program_uses_helper_calls(program) || program.max_stack_depth() >= XMM_STACK.len(),
+        ssa.uses_helper_calls(),
+        ssa.uses_helper_calls(),
+        ssa.uses_helper_calls() || expression_spill_bytes > 0,
         local_frame_bytes,
         None,
         (expression_spill_bytes > 0).then_some(0),
         callee_saved_xmm_count,
-    );
-    compiler.emit_program(program)?;
+    )?;
+    compiler.emit_allocated_program(&ssa, &allocation)?;
     let windows_unwind = compiler.windows_unwind_info();
-    let bytes = compiler.finish_assignment_function(var_index)?;
-    Ok(CompiledX64Function {
-        bytes,
-        windows_unwind,
-    })
+    let body = compiler.finish_assignment_function(var_index)?;
+    let artifact = CompiledX64Function::new(body, windows_unwind);
+    super::verify_x64_function_artifact(&artifact, "generated assignment function")?;
+    Ok(artifact)
+}
+
+pub(super) fn compile_fused_evaluation_kernel_artifact(
+    kernel_image_offset: usize,
+    assignment: crate::native::model::CodeOffset,
+    stamp_values: &[NativeProgram],
+    published_current_pairs: &[Option<(usize, usize)>],
+) -> JitResult<CompiledX64Function> {
+    compile_fused_kernel_artifact(
+        kernel_image_offset,
+        assignment,
+        stamp_values,
+        None,
+        published_current_pairs,
+        "fused evaluation",
+    )
+}
+
+pub(super) fn compile_fused_stamp_kernel_artifact(
+    kernel_image_offset: usize,
+    assignment: crate::native::model::CodeOffset,
+    stamp_values: &[NativeProgram],
+    jacobians: &[Vec<NativeProgram>],
+    published_current_pairs: &[Option<(usize, usize)>],
+) -> JitResult<CompiledX64Function> {
+    compile_fused_kernel_artifact(
+        kernel_image_offset,
+        assignment,
+        stamp_values,
+        Some(jacobians),
+        published_current_pairs,
+        "fused stamp",
+    )
+}
+
+fn compile_fused_kernel_artifact(
+    kernel_image_offset: usize,
+    assignment: crate::native::model::CodeOffset,
+    stamp_values: &[NativeProgram],
+    jacobians: Option<&[Vec<NativeProgram>]>,
+    published_current_pairs: &[Option<(usize, usize)>],
+    kernel_name: &str,
+) -> JitResult<CompiledX64Function> {
+    if stamp_values.len() != published_current_pairs.len()
+        || jacobians.is_some_and(|entries| entries.len() != stamp_values.len())
+    {
+        return Err(JitError::InternalCompilerError {
+            model: MODEL.into(),
+            detail: "fused kernel value, Jacobian, and publication shapes differ".into(),
+        });
+    }
+
+    let value_ssa = stamp_values
+        .iter()
+        .map(X64SsaProgram::lower)
+        .collect::<JitResult<Vec<_>>>()?;
+    let jacobian_ssa = jacobians
+        .map(|entries| {
+            entries
+                .iter()
+                .map(|stamp| {
+                    stamp
+                        .iter()
+                        .map(X64SsaProgram::lower)
+                        .collect::<JitResult<Vec<_>>>()
+                })
+                .collect::<JitResult<Vec<_>>>()
+        })
+        .transpose()?;
+    let value_allocations = value_ssa
+        .iter()
+        .map(RegisterAllocation::build)
+        .collect::<JitResult<Vec<_>>>()?;
+    let jacobian_allocations = jacobian_ssa
+        .as_ref()
+        .map(|entries| {
+            entries
+                .iter()
+                .map(|stamp| {
+                    stamp
+                        .iter()
+                        .map(RegisterAllocation::build)
+                        .collect::<JitResult<Vec<_>>>()
+                })
+                .collect::<JitResult<Vec<_>>>()
+        })
+        .transpose()?;
+    let maximum_stack_depth = value_ssa
+        .iter()
+        .chain(
+            jacobian_ssa
+                .iter()
+                .flat_map(|entries| entries.iter().flatten()),
+        )
+        .map(X64SsaProgram::maximum_stack_depth)
+        .max()
+        .unwrap_or(0);
+    validate_expression_stack_depth(maximum_stack_depth)?;
+    let maximum_spill_slots = value_allocations
+        .iter()
+        .chain(
+            jacobian_allocations
+                .iter()
+                .flat_map(|entries| entries.iter().flatten()),
+        )
+        .map(RegisterAllocation::spill_slot_count)
+        .max()
+        .unwrap_or(0);
+    let maximum_required_registers = value_allocations
+        .iter()
+        .chain(
+            jacobian_allocations
+                .iter()
+                .flat_map(|entries| entries.iter().flatten()),
+        )
+        .map(RegisterAllocation::required_register_count)
+        .max()
+        .unwrap_or(0);
+    let expression_spill_bytes = maximum_spill_slots
+        .checked_mul(WORD_BYTES)
+        .and_then(|bytes| i32::try_from(bytes).ok())
+        .ok_or_else(|| {
+            register_allocation_error(
+                "fused-kernel liveness spill frame exceeds the x64 displacement range".into(),
+            )
+        })?;
+    let callee_saved_xmm_count = maximum_required_registers
+        .min(XMM_STACK.len())
+        .saturating_sub(CALLER_SAVED_XMM_COUNT);
+    let local_frame_bytes = checked_local_frame_bytes(&[
+        expression_spill_bytes,
+        callee_saved_xmm_frame_bytes(callee_saved_xmm_count),
+    ])?;
+    let mut compiler = FunctionCompiler::new_kernel(
+        local_frame_bytes,
+        (expression_spill_bytes > 0).then_some(0),
+        callee_saved_xmm_count,
+    )?;
+
+    compiler.emit_image_entry_call(kernel_image_offset, assignment)?;
+    compiler.emit_kernel_abort_if_failed()?;
+
+    let mut jacobian_index = 0_usize;
+    for (stamp_index, ((program, allocation), current_pair)) in value_ssa
+        .iter()
+        .zip(&value_allocations)
+        .zip(published_current_pairs)
+        .enumerate()
+    {
+        let skip_stamp = compiler.emit_kernel_skip_if_inactive(stamp_index)?;
+        compiler.emit_allocated_program(program, allocation)?;
+        compiler.emit_kernel_non_finite_guard(stamp_index)?;
+        compiler.emit_kernel_stamp_value_store(stamp_index, *current_pair)?;
+        compiler.reset_expression_state();
+
+        if let Some(stamp_jacobians) = jacobian_ssa.as_ref().map(|entries| &entries[stamp_index]) {
+            let stamp_allocations = &jacobian_allocations
+                .as_ref()
+                .expect("Jacobian SSA and allocations are built together")[stamp_index];
+            for group in plan_shared_outputs(stamp_jacobians) {
+                let representative = group.representative();
+                compiler.emit_allocated_program(
+                    &stamp_jacobians[representative],
+                    &stamp_allocations[representative],
+                )?;
+                for output in group.outputs() {
+                    let output_index =
+                        jacobian_index
+                            .checked_add(*output)
+                            .ok_or_else(|| JitError::Encoding {
+                                model: MODEL.into(),
+                                detail: "fused kernel Jacobian output index overflow".into(),
+                            })?;
+                    compiler.emit_kernel_jacobian_store(output_index)?;
+                }
+                compiler.reset_expression_state();
+            }
+            jacobian_index = jacobian_index
+                .checked_add(stamp_jacobians.len())
+                .ok_or_else(|| JitError::Encoding {
+                    model: MODEL.into(),
+                    detail: "fused kernel Jacobian index overflow".into(),
+                })?;
+        }
+        compiler.patch_rel32_to_current(skip_stamp)?;
+    }
+
+    let windows_unwind = compiler.windows_unwind_info();
+    let body = compiler.finish_assignment_pass_function()?;
+    let artifact = CompiledX64Function::new(body, windows_unwind);
+    super::verify_x64_function_artifact(&artifact, kernel_name)?;
+    Ok(artifact)
 }
 
 #[derive(Debug)]
@@ -210,49 +423,99 @@ pub(super) fn compile_assignment_pass_function_artifact(
     assignments: &[NativeAssignment],
 ) -> JitResult<CompiledX64Function> {
     let has_indexed_assignment = assignments.iter().any(assignment_has_indexed);
-    let loop_depth = assignment_loop_depth(assignments);
+    let loop_depth = assignment_loop_depth(assignments)?;
     let uses_helper_calls = assignments.iter().any(assignment_uses_helper_calls);
     let max_stack_depth = assignment_max_stack_depth(assignments);
     validate_expression_stack_depth(max_stack_depth)?;
-    let callee_saved_xmm_count = callee_saved_xmm_count_for_depth(max_stack_depth);
+    let (maximum_spill_slots, maximum_required_registers) =
+        assignment_allocation_requirements(assignments)?;
+    let callee_saved_xmm_count = maximum_required_registers
+        .min(XMM_STACK.len())
+        .saturating_sub(CALLER_SAVED_XMM_COUNT);
     let indexed_slot_bytes = if has_indexed_assignment {
         LOCAL_SLOT_BYTES
     } else {
         0
     };
     let loop_counter_base_disp = (loop_depth > 0).then_some(indexed_slot_bytes);
-    let expression_spill_base_disp = indexed_slot_bytes + loop_depth * LOCAL_SLOT_BYTES;
-    let expression_spill_bytes = expression_spill_frame_bytes(max_stack_depth)?;
-    let local_frame_bytes = align_local_frame(
-        expression_spill_base_disp
-            + expression_spill_bytes
-            + callee_saved_xmm_frame_bytes(callee_saved_xmm_count),
-    );
+    let loop_slot_bytes = loop_depth.checked_mul(LOCAL_SLOT_BYTES).ok_or_else(|| {
+        register_allocation_error("assignment-loop frame exceeds the x64 displacement range".into())
+    })?;
+    let expression_spill_base_disp =
+        indexed_slot_bytes
+            .checked_add(loop_slot_bytes)
+            .ok_or_else(|| {
+                register_allocation_error(
+                    "indexed-assignment frame exceeds the x64 displacement range".into(),
+                )
+            })?;
+    let expression_spill_bytes = maximum_spill_slots
+        .checked_mul(WORD_BYTES)
+        .and_then(|bytes| i32::try_from(bytes).ok())
+        .ok_or_else(|| {
+            register_allocation_error(
+                "assignment liveness spill frame exceeds the x64 displacement range".into(),
+            )
+        })?;
+    let local_frame_bytes = checked_local_frame_bytes(&[
+        expression_spill_base_disp,
+        expression_spill_bytes,
+        callee_saved_xmm_frame_bytes(callee_saved_xmm_count),
+    ])?;
 
     let mut compiler = FunctionCompiler::new(
         uses_helper_calls,
         uses_helper_calls,
-        uses_helper_calls || max_stack_depth >= XMM_STACK.len(),
+        uses_helper_calls || expression_spill_bytes > 0,
         local_frame_bytes,
         loop_counter_base_disp,
         (expression_spill_bytes > 0).then_some(expression_spill_base_disp),
         callee_saved_xmm_count,
-    );
+    )?;
     for assignment in assignments {
         compiler.emit_assignment_step(assignment, 0)?;
     }
     let windows_unwind = compiler.windows_unwind_info();
-    let bytes = compiler.finish_assignment_pass_function()?;
-    Ok(CompiledX64Function {
-        bytes,
-        windows_unwind,
-    })
+    let body = compiler.finish_assignment_pass_function()?;
+    let artifact = CompiledX64Function::new(body, windows_unwind);
+    super::verify_x64_function_artifact(&artifact, "generated assignment-pass function")?;
+    Ok(artifact)
+}
+
+pub(super) fn compile_assignment_dispatch_function_artifact(
+    function_image_offset: usize,
+    chunks: &[crate::native::model::CodeOffset],
+) -> JitResult<CompiledX64Function> {
+    if chunks.is_empty() {
+        return Err(JitError::Encoding {
+            model: MODEL.into(),
+            detail: "assignment dispatcher requires at least one chunk".into(),
+        });
+    }
+
+    // The dispatcher is itself an assignment entry: it preserves the context
+    // and variable pointers, calls chunks in source order, and stops at the
+    // first helper-reported runtime error.
+    let mut compiler = FunctionCompiler::new(true, true, true, 0, None, None, 0)?;
+    for chunk in chunks {
+        compiler.emit_image_entry_call(function_image_offset, *chunk)?;
+        compiler.emit_kernel_abort_if_failed()?;
+    }
+    let windows_unwind = compiler.windows_unwind_info();
+    let body = compiler.finish_assignment_pass_function()?;
+    let artifact = CompiledX64Function::new(body, windows_unwind);
+    super::verify_x64_function_artifact(&artifact, "generated assignment dispatcher")?;
+    Ok(artifact)
 }
 
 #[derive(Debug)]
 struct FunctionCompiler {
     encoder: X64Encoder,
-    /// Number of live expression values currently resident in `XMM_STACK`.
+    /// Physical registers presented to the instruction emitters as their
+    /// logical operand stack.  Liveness allocation can permute this window
+    /// without making individual instruction encoders allocation-aware.
+    register_stack: [Xmm; XMM_STACK.len()],
+    /// Number of live expression values currently resident in `register_stack`.
     depth: usize,
     /// Number of older live expression values in the fixed local spill area.
     spilled_depth: usize,
@@ -261,11 +524,12 @@ struct FunctionCompiler {
     uses_helper_calls: bool,
     saves_entry_args: bool,
     uses_frame_pointer: bool,
+    saves_kernel_io: bool,
     local_frame_bytes: i32,
     loop_counter_base_disp: Option<i32>,
     expression_spill_base_disp: Option<i32>,
     callee_saved_xmm_count: usize,
-    early_return_jumps: Vec<usize>,
+    early_return_jumps: Vec<Rel32Patch>,
     #[cfg_attr(not(windows), allow(dead_code))]
     windows_unwind_operations: Vec<WindowsX64UnwindOperation>,
     windows_unwind_prologue_size: u8,
@@ -283,6 +547,102 @@ struct VectorLiteralPatch {
     lanes: [u64; 2],
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FunctionLiteralLayout {
+    scalar_start: usize,
+    scalar_bits: Vec<u64>,
+    vector_start: usize,
+    vector_bits: Vec<[u64; 2]>,
+    final_len: usize,
+}
+
+impl FunctionLiteralLayout {
+    fn build(
+        code_len: usize,
+        scalars: &[LiteralPatch],
+        vectors: &[VectorLiteralPatch],
+    ) -> JitResult<Self> {
+        let mut scalar_bits = Vec::new();
+        for literal in scalars {
+            let bits = literal.value.to_bits();
+            if !scalar_bits.contains(&bits) {
+                scalar_bits.push(bits);
+            }
+        }
+        let scalar_start = if scalar_bits.is_empty() {
+            code_len
+        } else {
+            checked_align_up(code_len, LITERAL_POOL_ALIGNMENT)?
+        };
+        let scalar_end = scalar_bits
+            .len()
+            .checked_mul(WORD_BYTES)
+            .and_then(|bytes| scalar_start.checked_add(bytes))
+            .ok_or_else(|| JitError::Relocation {
+                model: MODEL.into(),
+                detail: "scalar literal layout overflow".into(),
+            })?;
+
+        let mut vector_bits = Vec::new();
+        for literal in vectors {
+            if !vector_bits.contains(&literal.lanes) {
+                vector_bits.push(literal.lanes);
+            }
+        }
+        let vector_start = if vector_bits.is_empty() {
+            scalar_end
+        } else {
+            checked_align_up(scalar_end, VECTOR_LITERAL_ALIGNMENT)?
+        };
+        let final_len = vector_bits
+            .len()
+            .checked_mul(VECTOR_LITERAL_ALIGNMENT)
+            .and_then(|bytes| vector_start.checked_add(bytes))
+            .ok_or_else(|| JitError::Relocation {
+                model: MODEL.into(),
+                detail: "vector literal layout overflow".into(),
+            })?;
+        Ok(Self {
+            scalar_start,
+            scalar_bits,
+            vector_start,
+            vector_bits,
+            final_len,
+        })
+    }
+
+    fn scalar_offset(&self, bits: u64) -> usize {
+        self.scalar_start
+            + self
+                .scalar_bits
+                .iter()
+                .position(|candidate| *candidate == bits)
+                .expect("layout contains every scalar relocation")
+                * WORD_BYTES
+    }
+
+    fn vector_offset(&self, bits: [u64; 2]) -> usize {
+        self.vector_start
+            + self
+                .vector_bits
+                .iter()
+                .position(|candidate| *candidate == bits)
+                .expect("layout contains every vector relocation")
+                * VECTOR_LITERAL_ALIGNMENT
+    }
+}
+
+fn checked_align_up(value: usize, alignment: usize) -> JitResult<usize> {
+    debug_assert!(alignment.is_power_of_two());
+    value
+        .checked_add(alignment - 1)
+        .map(|rounded| rounded & !(alignment - 1))
+        .ok_or_else(|| JitError::Relocation {
+            model: MODEL.into(),
+            detail: "x64 function layout alignment overflow".into(),
+        })
+}
+
 impl FunctionCompiler {
     fn new(
         uses_helper_calls: bool,
@@ -292,11 +652,103 @@ impl FunctionCompiler {
         loop_counter_base_disp: Option<i32>,
         expression_spill_base_disp: Option<i32>,
         callee_saved_xmm_count: usize,
-    ) -> Self {
-        debug_assert_eq!(local_frame_bytes % 16, 0);
-        debug_assert!(callee_saved_xmm_frame_bytes(callee_saved_xmm_count) <= local_frame_bytes);
+    ) -> JitResult<Self> {
+        Self::new_with_kernel_io(
+            uses_helper_calls,
+            saves_entry_args,
+            uses_frame_pointer,
+            false,
+            local_frame_bytes,
+            loop_counter_base_disp,
+            expression_spill_base_disp,
+            callee_saved_xmm_count,
+        )
+    }
+
+    fn new_kernel(
+        local_frame_bytes: i32,
+        expression_spill_base_disp: Option<i32>,
+        callee_saved_xmm_count: usize,
+    ) -> JitResult<Self> {
+        Self::new_with_kernel_io(
+            true,
+            true,
+            true,
+            true,
+            local_frame_bytes,
+            None,
+            expression_spill_base_disp,
+            callee_saved_xmm_count,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn new_with_kernel_io(
+        uses_helper_calls: bool,
+        saves_entry_args: bool,
+        uses_frame_pointer: bool,
+        saves_kernel_io: bool,
+        local_frame_bytes: i32,
+        loop_counter_base_disp: Option<i32>,
+        expression_spill_base_disp: Option<i32>,
+        callee_saved_xmm_count: usize,
+    ) -> JitResult<Self> {
+        if saves_kernel_io && !uses_frame_pointer {
+            return Err(JitError::RegisterAllocation {
+                model: MODEL.into(),
+                detail: "kernel I/O requires a preserved R14 frame anchor".into(),
+            });
+        }
+        if local_frame_bytes < 0 || local_frame_bytes % LOCAL_FRAME_ALIGN_BYTES != 0 {
+            return Err(JitError::RegisterAllocation {
+                model: MODEL.into(),
+                detail: format!(
+                    "generated local frame size {local_frame_bytes} is negative or not {LOCAL_FRAME_ALIGN_BYTES}-byte aligned"
+                )
+                .into(),
+            });
+        }
+        let maximum_callee_saved_xmm_count = XMM_STACK.len() - CALLER_SAVED_XMM_COUNT;
+        if callee_saved_xmm_count > maximum_callee_saved_xmm_count {
+            return Err(JitError::RegisterAllocation {
+                model: MODEL.into(),
+                detail: format!(
+                    "generated frame requests {callee_saved_xmm_count} callee-saved XMM slots, but this ABI exposes only {maximum_callee_saved_xmm_count}"
+                )
+                .into(),
+            });
+        }
+        let callee_saved_xmm_bytes = callee_saved_xmm_frame_bytes(callee_saved_xmm_count);
+        if callee_saved_xmm_bytes > local_frame_bytes {
+            return Err(JitError::RegisterAllocation {
+                model: MODEL.into(),
+                detail: format!(
+                    "generated {local_frame_bytes}-byte frame cannot hold {callee_saved_xmm_bytes} bytes of callee-saved XMM state"
+                )
+                .into(),
+            });
+        }
+        for (name, displacement) in [
+            ("loop counter", loop_counter_base_disp),
+            ("expression spill", expression_spill_base_disp),
+        ] {
+            let Some(displacement) = displacement else {
+                continue;
+            };
+            let slot_end = displacement.checked_add(LOCAL_SLOT_BYTES);
+            if displacement < 0 || slot_end.is_none_or(|end| end > local_frame_bytes) {
+                return Err(JitError::RegisterAllocation {
+                    model: MODEL.into(),
+                    detail: format!(
+                        "generated {name} slot at byte {displacement} falls outside the {local_frame_bytes}-byte local frame"
+                    )
+                    .into(),
+                });
+            }
+        }
         let mut compiler = Self {
             encoder: X64Encoder::new(),
+            register_stack: XMM_STACK,
             depth: 0,
             spilled_depth: 0,
             literals: Vec::new(),
@@ -304,6 +756,7 @@ impl FunctionCompiler {
             uses_helper_calls,
             saves_entry_args,
             uses_frame_pointer,
+            saves_kernel_io,
             local_frame_bytes,
             loop_counter_base_disp,
             expression_spill_base_disp,
@@ -313,9 +766,9 @@ impl FunctionCompiler {
             windows_unwind_prologue_size: 0,
         };
         if compiler.has_stack_setup() {
-            compiler.emit_prologue();
+            compiler.emit_prologue()?;
         }
-        compiler
+        Ok(compiler)
     }
 
     fn has_stack_setup(&self) -> bool {
@@ -326,15 +779,47 @@ impl FunctionCompiler {
         self.saves_entry_args
     }
 
-    fn emit_program(&mut self, program: &NativeProgram) -> JitResult<()> {
-        program.validate_dependency_metadata()?;
-        validate_expression_stack_depth(program.max_stack_depth())?;
+    fn emit_native_program(&mut self, program: &NativeProgram) -> JitResult<()> {
+        let ssa = X64SsaProgram::lower(program)?;
+        self.emit_program(&ssa)
+    }
+
+    fn emit_program(&mut self, ssa: &X64SsaProgram) -> JitResult<()> {
+        validate_expression_stack_depth(ssa.maximum_stack_depth())?;
+        let allocation = RegisterAllocation::build(ssa)?;
+        self.emit_allocated_program(ssa, &allocation)
+    }
+
+    fn emit_allocated_program(
+        &mut self,
+        ssa: &X64SsaProgram,
+        allocation: &RegisterAllocation,
+    ) -> JitResult<()> {
+        if ssa.instructions().len() != allocation.instructions().len() {
+            return Err(JitError::Verifier {
+                model: MODEL.into(),
+                detail: "x64 SSA and register-allocation instruction counts differ".into(),
+            });
+        }
 
         self.depth = 0;
         self.spilled_depth = 0;
         let mut context_pointer_cache = None;
-        for op in program.ops() {
-            match *op {
+        for (instruction, allocated) in ssa.instructions().iter().zip(allocation.instructions()) {
+            if instruction.value_type() != X64ValueType::F64 {
+                return Err(JitError::Verifier {
+                    model: MODEL.into(),
+                    detail: format!(
+                        "x64 codegen cannot legalize SSA value type {:?}",
+                        instruction.value_type()
+                    )
+                    .into(),
+                });
+            }
+            let result_register = self.prepare_allocated_instruction(allocated)?;
+
+            let op = instruction.op();
+            match op {
                 NativeOp::Const(value) => {
                     let dst = self.push_register()?;
                     self.emit_constant_load(dst, value);
@@ -481,45 +966,274 @@ impl FunctionCompiler {
                 NativeOp::IdtJacobian => self.emit_idt_jacobian()?,
                 NativeOp::IdtModState(index) => self.emit_idtmod_state(index)?,
             }
-            if !native_op_preserves_context_pointer_cache(*op) {
+            if self.logical_depth() != 1 {
+                return Err(JitError::Verifier {
+                    model: MODEL.into(),
+                    detail: format!(
+                        "x64 emitter depth {} is not one result after allocated {op:?}",
+                        self.logical_depth(),
+                    )
+                    .into(),
+                });
+            }
+            if let X64ValueLocation::Spill(slot) = allocated.result() {
+                let displacement = self.expression_spill_disp(slot)?;
+                self.encoder
+                    .movsd_m64_base_disp32_xmm(Gpr::Rsp, displacement, result_register);
+            }
+            self.reset_expression_state();
+            if instruction.effects().clobbers_context_pointer_cache() {
                 context_pointer_cache = None;
             }
         }
 
-        if self.logical_depth() != 1 {
-            return Err(JitError::Encoding {
-                model: MODEL.into(),
-                detail: format!(
-                    "final expression stack depth {}, expected 1",
-                    self.logical_depth()
-                )
-                .into(),
-            });
+        self.materialize_allocated_result(allocation.result())
+    }
+
+    fn prepare_allocated_instruction(
+        &mut self,
+        allocated: &AllocatedInstruction,
+    ) -> JitResult<Xmm> {
+        if allocated.operands().len() > XMM_STACK.len() {
+            return Err(register_allocation_error(format!(
+                "allocated instruction requires {} simultaneous operands, but x64 exposes {} XMM registers",
+                allocated.operands().len(),
+                XMM_STACK.len()
+            )));
         }
 
+        self.reset_expression_state();
+        let mut used_register_mask = allocated.live_register_mask();
+        let mut operands = Vec::with_capacity(allocated.operands().len());
+        for location in allocated.operands() {
+            let register = match *location {
+                X64ValueLocation::Register(register) => allocated_xmm(register)?,
+                X64ValueLocation::Spill(slot) => {
+                    let register = take_temporary_xmm(&mut used_register_mask)?;
+                    self.encoder.movsd_xmm_m64_base_disp32(
+                        register,
+                        Gpr::Rsp,
+                        self.expression_spill_disp(slot)?,
+                    );
+                    register
+                }
+            };
+            used_register_mask |= xmm_mask(register);
+            operands.push(register);
+        }
+
+        let result_register = match allocated.result() {
+            X64ValueLocation::Register(register) => allocated_xmm(register)?,
+            X64ValueLocation::Spill(_) => match (allocated.operands().first(), operands.first()) {
+                (Some(X64ValueLocation::Spill(_)), Some(register)) => *register,
+                _ => take_temporary_xmm(&mut used_register_mask)?,
+            },
+        };
+        used_register_mask |= xmm_mask(result_register);
+
+        if let Some(first_operand) = operands.first()
+            && *first_operand != result_register
+        {
+            self.encoder.movsd_xmm_xmm(result_register, *first_operand);
+        }
+
+        self.register_stack = XMM_STACK;
+        self.register_stack[0] = result_register;
+        for (position, register) in operands.iter().copied().enumerate().skip(1) {
+            self.register_stack[position] = register;
+        }
+
+        let operand_count = operands.len();
+        let mut scratch_position = operand_count.max(1);
+        for register in XMM_STACK {
+            if scratch_position == XMM_STACK.len() {
+                break;
+            }
+            if used_register_mask & xmm_mask(register) == 0 {
+                self.register_stack[scratch_position] = register;
+                scratch_position += 1;
+            }
+        }
+        self.depth = operand_count;
+        Ok(result_register)
+    }
+
+    fn materialize_allocated_result(&mut self, result: X64ValueLocation) -> JitResult<()> {
+        match result {
+            X64ValueLocation::Register(register) => {
+                let source = allocated_xmm(register)?;
+                if source != Xmm::Xmm0 {
+                    self.encoder.movsd_xmm_xmm(Xmm::Xmm0, source);
+                }
+            }
+            X64ValueLocation::Spill(slot) => {
+                self.encoder.movsd_xmm_m64_base_disp32(
+                    Xmm::Xmm0,
+                    Gpr::Rsp,
+                    self.expression_spill_disp(slot)?,
+                );
+            }
+        }
+        self.register_stack = XMM_STACK;
+        self.depth = 1;
+        self.spilled_depth = 0;
         Ok(())
     }
 
-    fn finish_value_function(mut self) -> JitResult<Vec<u8>> {
+    fn reset_expression_state(&mut self) {
+        self.depth = 0;
+        self.spilled_depth = 0;
+    }
+
+    fn register_stack_slot(&self, register: Xmm) -> usize {
+        self.register_stack[..self.depth]
+            .iter()
+            .position(|candidate| *candidate == register)
+            .expect("active register belongs to the allocated operand stack")
+    }
+
+    fn emit_image_entry_call(
+        &mut self,
+        function_image_offset: usize,
+        target: crate::native::model::CodeOffset,
+    ) -> JitResult<()> {
+        let frame_bytes = call_frame_bytes_for_slots(0);
+        self.encoder.sub_rsp_imm32(frame_bytes);
+        self.encoder
+            .mov_r64_r64(entry_ctx_arg_reg(), saved_ctx_arg_reg());
+        self.encoder
+            .mov_r64_r64(entry_vars_arg_reg(), saved_vars_arg_reg());
+        let call_patch = self.encoder.call_rel32_placeholder();
+        let next_instruction = function_image_offset
+            .checked_add(call_patch.next_instruction_offset())
+            .ok_or_else(|| JitError::Relocation {
+                model: MODEL.into(),
+                detail: "fused kernel call address overflow".into(),
+            })?;
+        let displacement = i64::try_from(target.as_usize())
+            .ok()
+            .and_then(|target| {
+                i64::try_from(next_instruction)
+                    .ok()
+                    .and_then(|next| target.checked_sub(next))
+            })
+            .and_then(|displacement| i32::try_from(displacement).ok())
+            .ok_or_else(|| JitError::Relocation {
+                model: MODEL.into(),
+                detail: "fused kernel call target is outside the x64 rel32 range".into(),
+            })?;
+        self.encoder.patch_rel32(call_patch, displacement);
+        self.encoder.add_rsp_imm32(frame_bytes);
+        Ok(())
+    }
+
+    fn emit_kernel_abort_if_failed(&mut self) -> JitResult<()> {
+        let failed_offset = std::mem::offset_of!(EvalContext, runtime_status)
+            .checked_add(NativeRuntimeStatus::failed_offset())
+            .and_then(|offset| i32::try_from(offset).ok())
+            .ok_or_else(|| JitError::Encoding {
+                model: MODEL.into(),
+                detail: "native runtime status offset exceeds x64 disp32 range".into(),
+            })?;
+        self.encoder
+            .movzx_r32_m8_base_disp32(Gpr::Rax, saved_ctx_arg_reg(), failed_offset);
+        self.encoder.test_r8_r8(Gpr::Rax, Gpr::Rax);
+        let abort = self.encoder.jcc_rel32_placeholder(ConditionCode::NotEqual);
+        self.early_return_jumps.push(abort);
+        Ok(())
+    }
+
+    fn emit_kernel_skip_if_inactive(&mut self, stamp_index: usize) -> JitResult<Rel32Patch> {
+        self.encoder
+            .mov_r64_m64_base_disp32(Gpr::R10, Gpr::R14, KERNEL_ACTIVE_OFFSET);
+        self.encoder
+            .movzx_r32_m8_base_disp32(Gpr::Rax, Gpr::R10, byte_disp_u8(stamp_index)?);
+        self.encoder.test_r8_r8(Gpr::Rax, Gpr::Rax);
+        Ok(self.encoder.jcc_rel32_placeholder(ConditionCode::Equal))
+    }
+
+    fn emit_kernel_non_finite_guard(&mut self, stamp_index: usize) -> JitResult<()> {
+        const EXPONENT_MASK: u64 = 0x7ff0_0000_0000_0000;
+
+        self.encoder.movq_r64_xmm(Gpr::R10, Xmm::Xmm0);
+        self.encoder.movabs_r64_imm64(Gpr::R11, EXPONENT_MASK);
+        self.encoder.and_r64_r64(Gpr::R10, Gpr::R11);
+        self.encoder.cmp_r64_r64(Gpr::R10, Gpr::R11);
+        let finite = self.encoder.jcc_rel32_placeholder(ConditionCode::NotEqual);
+
+        let frame_bytes = call_frame_bytes_for_slots(0);
+        self.encoder.sub_rsp_imm32(frame_bytes);
+        self.encoder
+            .mov_r64_r64(entry_ctx_arg_reg(), saved_ctx_arg_reg());
+        self.emit_usize_arg(entry_vars_arg_reg(), stamp_index);
+        self.encoder.movabs_r64_imm64(
+            Gpr::R11,
+            rspice_native_non_finite_contribution_error as *const () as usize as u64,
+        );
+        self.encoder.call_r64(Gpr::R11);
+        self.encoder.add_rsp_imm32(frame_bytes);
+        let abort = self.encoder.jmp_rel32_placeholder();
+        self.early_return_jumps.push(abort);
+        self.patch_rel32_to_current(finite)
+    }
+
+    fn emit_kernel_stamp_value_store(
+        &mut self,
+        stamp_index: usize,
+        current_pair: Option<(usize, usize)>,
+    ) -> JitResult<()> {
+        self.encoder
+            .mov_r64_m64_base_disp32(Gpr::R11, saved_ctx_arg_reg(), CURRENTS_OFFSET);
+        self.encoder
+            .movsd_m64_base_disp32_xmm(Gpr::R11, byte_disp(stamp_index)?, Xmm::Xmm0);
+
+        if let Some((forward, reverse)) = current_pair {
+            self.encoder.mov_r64_m64_base_disp32(
+                Gpr::R11,
+                saved_ctx_arg_reg(),
+                BRANCH_CURRENTS_OFFSET,
+            );
+            self.encoder
+                .movsd_m64_base_disp32_xmm(Gpr::R11, byte_disp(forward)?, Xmm::Xmm0);
+            if forward != reverse {
+                self.encoder.movq_r64_xmm(Gpr::R10, Xmm::Xmm0);
+                self.encoder.btc_r64_imm8(Gpr::R10, 63);
+                self.encoder.movq_xmm_r64(Xmm::Xmm1, Gpr::R10);
+                self.encoder
+                    .movsd_m64_base_disp32_xmm(Gpr::R11, byte_disp(reverse)?, Xmm::Xmm1);
+            }
+        }
+        Ok(())
+    }
+
+    fn emit_kernel_jacobian_store(&mut self, jacobian_index: usize) -> JitResult<()> {
+        self.encoder
+            .mov_r64_m64_base_disp32(Gpr::R11, Gpr::R14, KERNEL_JACOBIANS_OFFSET);
+        self.encoder
+            .movsd_m64_base_disp32_xmm(Gpr::R11, byte_disp(jacobian_index)?, Xmm::Xmm0);
+        Ok(())
+    }
+
+    fn finish_value_function(mut self) -> JitResult<X64FunctionBody> {
         self.patch_early_returns_to_current()?;
         self.emit_return();
         self.finish_with_literals()
     }
 
-    fn finish_assignment_function(mut self, var_index: usize) -> JitResult<Vec<u8>> {
+    fn finish_assignment_function(mut self, var_index: usize) -> JitResult<X64FunctionBody> {
         self.emit_assignment_store(var_index)?;
         self.patch_early_returns_to_current()?;
         self.emit_return();
         self.finish_with_literals()
     }
 
-    fn finish_assignment_pass_function(mut self) -> JitResult<Vec<u8>> {
+    fn finish_assignment_pass_function(mut self) -> JitResult<X64FunctionBody> {
         self.patch_early_returns_to_current()?;
         self.emit_return();
         self.finish_with_literals()
     }
 
-    fn emit_prologue(&mut self) {
+    fn emit_prologue(&mut self) -> JitResult<()> {
         if self.uses_frame_pointer {
             self.encoder.push_r64(Gpr::Rbp);
             self.record_windows_unwind_push(5);
@@ -539,9 +1253,12 @@ impl FunctionCompiler {
             self.encoder
                 .mov_r64_r64(saved_vars_arg_reg(), entry_vars_arg_reg());
         }
+        if self.saves_kernel_io {
+            self.encoder
+                .mov_r64_r64(Gpr::R14, entry_kernel_io_arg_reg());
+        }
         if self.local_frame_bytes > 0 {
-            self.encoder.sub_rsp_imm32(self.local_frame_bytes);
-            self.record_windows_unwind_stack_allocation(self.local_frame_bytes as u32);
+            self.emit_stack_allocation()?;
         }
         self.emit_callee_saved_xmm_stores();
         if self.uses_frame_pointer {
@@ -549,6 +1266,52 @@ impl FunctionCompiler {
             self.record_windows_unwind_set_frame_pointer();
         }
         self.windows_unwind_prologue_size = self.current_windows_unwind_code_offset();
+        Ok(())
+    }
+
+    /// Probe every page crossed by a generated frame before committing RSP to
+    /// the allocation.  RAX, R10, and R11 are volatile under both supported
+    /// x64 ABIs, so this sequence cannot disturb entry arguments or nonvolatile
+    /// caller state.
+    fn emit_stack_allocation(&mut self) -> JitResult<()> {
+        let frame_bytes = self.local_frame_bytes;
+        debug_assert!(frame_bytes > 0);
+
+        if frame_bytes >= STACK_PROBE_INTERVAL_BYTES {
+            self.encoder.mov_r64_r64(Gpr::R10, Gpr::Rsp);
+            self.encoder
+                .mov_r32_imm32(Gpr::R11, u32::try_from(frame_bytes).map_err(|_| {
+                    JitError::RegisterAllocation {
+                        model: MODEL.into(),
+                        detail: format!(
+                            "generated local frame size {frame_bytes} cannot be represented by the x64 stack prober"
+                        )
+                        .into(),
+                    }
+                })?);
+
+            let probe_loop = self.encoder.position();
+            self.encoder
+                .cmp_r64_imm32(Gpr::R11, STACK_PROBE_INTERVAL_BYTES);
+            let final_probe = self
+                .encoder
+                .jcc_rel32_placeholder(ConditionCode::BelowOrEqual);
+
+            self.encoder
+                .sub_r64_imm32(Gpr::R10, STACK_PROBE_INTERVAL_BYTES);
+            self.encoder.mov_r64_m64_base_disp32(Gpr::Rax, Gpr::R10, 0);
+            self.encoder
+                .sub_r64_imm32(Gpr::R11, STACK_PROBE_INTERVAL_BYTES);
+            self.emit_jmp_to_offset(probe_loop)?;
+
+            self.patch_rel32_to_current(final_probe)?;
+            self.encoder.sub_r64_r64(Gpr::R10, Gpr::R11);
+            self.encoder.mov_r64_m64_base_disp32(Gpr::Rax, Gpr::R10, 0);
+        }
+
+        self.encoder.sub_rsp_imm32(frame_bytes);
+        self.record_windows_unwind_stack_allocation(frame_bytes as u32);
+        Ok(())
     }
 
     fn emit_return(&mut self) {
@@ -702,7 +1465,7 @@ impl FunctionCompiler {
     ) -> JitResult<()> {
         match assignment {
             NativeAssignment::Direct { var_index, program } => {
-                self.emit_program(program)?;
+                self.emit_native_program(program)?;
                 self.emit_assignment_store(*var_index)
             }
             NativeAssignment::Indexed {
@@ -730,7 +1493,7 @@ impl FunctionCompiler {
             .mov_m64_base_disp32_r64(Gpr::Rsp, counter_disp, Gpr::R10);
 
         let loop_start = self.encoder.position();
-        self.emit_program(condition)?;
+        self.emit_native_program(condition)?;
         let loop_exit = self.emit_loop_exit_if_zero()?;
 
         for assignment in body {
@@ -766,7 +1529,7 @@ impl FunctionCompiler {
         Ok(base_disp + loop_depth * LOCAL_SLOT_BYTES)
     }
 
-    fn emit_loop_exit_if_zero(&mut self) -> JitResult<usize> {
+    fn emit_loop_exit_if_zero(&mut self) -> JitResult<Rel32Patch> {
         if self.logical_depth() != 1 {
             return Err(JitError::Encoding {
                 model: MODEL.into(),
@@ -797,7 +1560,7 @@ impl FunctionCompiler {
     ) -> JitResult<()> {
         debug_assert!(self.local_frame_bytes >= LOCAL_SLOT_BYTES);
 
-        self.emit_program(index)?;
+        self.emit_native_program(index)?;
         if dynamic_variable_inline_supported(len, lower) {
             self.emit_dynamic_variable_slot_inline(base, len, lower)?;
         } else {
@@ -809,7 +1572,7 @@ impl FunctionCompiler {
             );
         }
 
-        self.emit_program(value)?;
+        self.emit_native_program(value)?;
         if self.logical_depth() != 1 {
             return Err(JitError::Encoding {
                 model: MODEL.into(),
@@ -833,16 +1596,16 @@ impl FunctionCompiler {
         if self.depth >= XMM_STACK.len() {
             let spill_disp = self.expression_spill_disp(self.spilled_depth)?;
             self.encoder
-                .movsd_m64_base_disp32_xmm(Gpr::Rsp, spill_disp, XMM_STACK[0]);
+                .movsd_m64_base_disp32_xmm(Gpr::Rsp, spill_disp, self.register_stack[0]);
             for index in 0..XMM_STACK.len() - 1 {
                 self.encoder
-                    .movsd_xmm_xmm(XMM_STACK[index], XMM_STACK[index + 1]);
+                    .movsd_xmm_xmm(self.register_stack[index], self.register_stack[index + 1]);
             }
             self.depth -= 1;
             self.spilled_depth += 1;
         }
 
-        let register = XMM_STACK[self.depth];
+        let register = self.register_stack[self.depth];
         self.depth += 1;
         Ok(register)
     }
@@ -886,12 +1649,12 @@ impl FunctionCompiler {
         while self.spilled_depth > 0 && self.depth < XMM_STACK.len() {
             for index in (0..self.depth).rev() {
                 self.encoder
-                    .movsd_xmm_xmm(XMM_STACK[index + 1], XMM_STACK[index]);
+                    .movsd_xmm_xmm(self.register_stack[index + 1], self.register_stack[index]);
             }
             let spill_index = self.spilled_depth - 1;
             let spill_disp = self.expression_spill_disp(spill_index)?;
             self.encoder
-                .movsd_xmm_m64_base_disp32(XMM_STACK[0], Gpr::Rsp, spill_disp);
+                .movsd_xmm_m64_base_disp32(self.register_stack[0], Gpr::Rsp, spill_disp);
             self.spilled_depth -= 1;
             self.depth += 1;
         }
@@ -905,7 +1668,7 @@ impl FunctionCompiler {
             ));
         }
 
-        Ok(XMM_STACK[self.depth])
+        Ok(self.register_stack[self.depth])
     }
 
     fn emit_binary_op(&mut self, op: BinaryOp) -> JitResult<()> {
@@ -916,8 +1679,8 @@ impl FunctionCompiler {
             });
         }
 
-        let left = XMM_STACK[self.depth - 2];
-        let right = XMM_STACK[self.depth - 1];
+        let left = self.register_stack[self.depth - 2];
+        let right = self.register_stack[self.depth - 1];
         match op {
             BinaryOp::Add => self.encoder.addsd_xmm_xmm(left, right),
             BinaryOp::Sub => self.encoder.subsd_xmm_xmm(left, right),
@@ -936,7 +1699,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         self.emit_literal_binary_op(target, value, op);
         Ok(())
     }
@@ -949,7 +1712,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         match op {
             BinaryOp::Sub | BinaryOp::Div => {
                 if self.depth < XMM_STACK.len() {
@@ -1006,7 +1769,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         self.encoder.movq_r64_xmm(Gpr::R11, target);
         self.encoder.btc_r64_imm8(Gpr::R11, 63);
         self.encoder.movq_xmm_r64(target, Gpr::R11);
@@ -1021,7 +1784,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         self.emit_abs_register(target);
         Ok(())
     }
@@ -1034,7 +1797,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         self.encoder.mulsd_xmm_xmm(target, target);
         Ok(())
     }
@@ -1055,7 +1818,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         self.encoder.sqrtsd_xmm_xmm(target, target);
         Ok(())
     }
@@ -1068,7 +1831,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         match op {
             UnaryMathOp::Floor => self.emit_floor_or_ceil(target, RoundDirection::Floor),
             UnaryMathOp::Ceil => self.emit_floor_or_ceil(target, RoundDirection::Ceil),
@@ -1196,10 +1959,10 @@ impl FunctionCompiler {
 
     fn emit_unary_helper_call(&mut self, target: Xmm, helper: UnaryHelper) {
         debug_assert!(self.uses_helper_calls);
-        let frame_bytes =
-            call_frame_bytes_for_slots(call_frame_spill_slot_count(self.depth, |_, register| {
-                register != target
-            }));
+        let frame_bytes = call_frame_bytes_for_slots(call_frame_spill_slot_count(
+            &self.register_stack[..self.depth],
+            |_, register| register != target,
+        ));
         self.encoder.sub_rsp_imm32(frame_bytes);
         self.emit_call_frame_spills(self.depth, |_, register| register != target);
 
@@ -1223,7 +1986,13 @@ impl FunctionCompiler {
         if target != Xmm::Xmm0 {
             self.encoder.movsd_xmm_xmm(target, Xmm::Xmm0);
         }
-        for (index, register) in XMM_STACK.iter().copied().take(restore_depth).enumerate() {
+        for (index, register) in self
+            .register_stack
+            .iter()
+            .copied()
+            .take(restore_depth)
+            .enumerate()
+        {
             if register != target && should_restore(index, register) {
                 self.encoder
                     .movsd_xmm_m64_base_disp32(register, Gpr::Rsp, call_spill_disp(index));
@@ -1236,7 +2005,13 @@ impl FunctionCompiler {
         spill_depth: usize,
         mut should_spill: impl FnMut(usize, Xmm) -> bool,
     ) {
-        for (index, register) in XMM_STACK.iter().copied().take(spill_depth).enumerate() {
+        for (index, register) in self
+            .register_stack
+            .iter()
+            .copied()
+            .take(spill_depth)
+            .enumerate()
+        {
             if should_spill(index, register) {
                 self.encoder
                     .movsd_m64_base_disp32_xmm(Gpr::Rsp, call_spill_disp(index), register);
@@ -1253,11 +2028,11 @@ impl FunctionCompiler {
         }
 
         if !dynamic_variable_inline_supported(len, lower) {
-            let target = XMM_STACK[self.depth - 1];
+            let target = self.register_stack[self.depth - 1];
             return self.emit_dynamic_variable_helper_call(target, base, len, lower);
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         let base_disp = byte_disp(base)?;
 
         if self.depth < XMM_STACK.len() {
@@ -1347,7 +2122,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         let base_disp = byte_disp(base)?;
         self.encoder
             .movsd_m64_base_disp32_xmm(Gpr::Rsp, INDEXED_ASSIGNMENT_SLOT_PTR_DISP, target);
@@ -1385,7 +2160,7 @@ impl FunctionCompiler {
         base_disp: i32,
         len: usize,
         lower: i64,
-    ) -> JitResult<Vec<usize>> {
+    ) -> JitResult<Vec<Rel32Patch>> {
         let mut slow_jumps = Vec::new();
 
         self.encoder.movq_r64_xmm(Gpr::R8, index);
@@ -1436,7 +2211,7 @@ impl FunctionCompiler {
         lower: i64,
     ) -> JitResult<()> {
         debug_assert!(self.uses_helper_calls);
-        debug_assert!(xmm_stack_slot(target) < self.depth);
+        debug_assert!(self.register_stack_slot(target) < self.depth);
         let base_disp = byte_disp(base)?;
         let context_slot = self.depth;
 
@@ -1469,7 +2244,13 @@ impl FunctionCompiler {
         let invalid_slot = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
 
         self.encoder.movsd_xmm_m64_base_disp32(target, Gpr::Rax, 0);
-        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
+        for (index, register) in self
+            .register_stack
+            .iter()
+            .copied()
+            .take(self.depth)
+            .enumerate()
+        {
             if register != target {
                 self.encoder
                     .movsd_xmm_m64_base_disp32(register, Gpr::Rsp, call_spill_disp(index));
@@ -1482,7 +2263,7 @@ impl FunctionCompiler {
         self.encoder.movsd_xmm_m64_base_disp32(
             Xmm::Xmm0,
             Gpr::Rsp,
-            call_spill_disp(xmm_stack_slot(target)),
+            call_spill_disp(self.register_stack_slot(target)),
         );
         self.encoder.mov_r64_m64_base_disp32(
             dynamic_variable_ptr_arg_reg(),
@@ -1523,7 +2304,7 @@ impl FunctionCompiler {
 
         debug_assert!(self.uses_helper_calls);
         let base_disp = byte_disp(base)?;
-        let target = XMM_STACK[0];
+        let target = self.register_stack[0];
 
         let frame_bytes = call_frame_bytes_for_slots(1);
         self.encoder.sub_rsp_imm32(frame_bytes);
@@ -1588,8 +2369,8 @@ impl FunctionCompiler {
             });
         }
 
-        let left = XMM_STACK[self.depth - 2];
-        let right = XMM_STACK[self.depth - 1];
+        let left = self.register_stack[self.depth - 2];
+        let right = self.register_stack[self.depth - 1];
         self.emit_binary_helper_call(left, right, binary_math_helper(op));
         self.drop_stack_values(1)?;
         Ok(())
@@ -1607,8 +2388,8 @@ impl FunctionCompiler {
             });
         }
 
-        let left = XMM_STACK[self.depth - 2];
-        let right = XMM_STACK[self.depth - 1];
+        let left = self.register_stack[self.depth - 2];
+        let right = self.register_stack[self.depth - 1];
         match op {
             IntegerBinaryOp::Shl | IntegerBinaryOp::Shr => {
                 self.emit_integer_shift_op(left, right, op)?
@@ -1629,7 +2410,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         self.emit_rust_f64_to_i64(target, Gpr::R10)?;
         self.encoder.cvtsi2sd_xmm_r64(target, Gpr::R10);
         Ok(())
@@ -1689,7 +2470,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         self.emit_rust_f64_to_i64(target, Gpr::R11)?;
         if count != 0 {
             match op {
@@ -1736,7 +2517,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         self.emit_rust_f64_to_i64(target, Gpr::R10)?;
         if let Ok(value) = i32::try_from(value) {
             match op {
@@ -1864,11 +2645,11 @@ impl FunctionCompiler {
         }
 
         debug_assert!(self.uses_helper_calls);
-        let target = XMM_STACK[self.depth - 1];
-        let frame_bytes =
-            call_frame_bytes_for_slots(call_frame_spill_slot_count(self.depth, |_, register| {
-                register != target
-            }));
+        let target = self.register_stack[self.depth - 1];
+        let frame_bytes = call_frame_bytes_for_slots(call_frame_spill_slot_count(
+            &self.register_stack[..self.depth],
+            |_, register| register != target,
+        ));
         self.encoder.sub_rsp_imm32(frame_bytes);
         self.emit_call_frame_spills(self.depth, |_, register| register != target);
 
@@ -1894,11 +2675,11 @@ impl FunctionCompiler {
         helper: ContextFilterHelper,
     ) -> JitResult<()> {
         debug_assert!(self.uses_helper_calls);
-        debug_assert!(xmm_stack_slot(target) < self.depth);
-        let frame_bytes =
-            call_frame_bytes_for_slots(call_frame_spill_slot_count(self.depth, |_, register| {
-                register != target
-            }));
+        debug_assert!(self.register_stack_slot(target) < self.depth);
+        let frame_bytes = call_frame_bytes_for_slots(call_frame_spill_slot_count(
+            &self.register_stack[..self.depth],
+            |_, register| register != target,
+        ));
         self.encoder.sub_rsp_imm32(frame_bytes);
         self.emit_call_frame_spills(self.depth, |_, register| register != target);
 
@@ -1925,8 +2706,8 @@ impl FunctionCompiler {
             });
         }
 
-        let value = XMM_STACK[self.depth - 2];
-        let step = XMM_STACK[self.depth - 1];
+        let value = self.register_stack[self.depth - 2];
+        let step = self.register_stack[self.depth - 1];
         let state_disp = byte_disp(state_index)?;
         let initialized_disp = byte_disp_u8(state_index)?;
         let state_index_i32 = i32::try_from(state_index).map_err(|_| JitError::Encoding {
@@ -2020,7 +2801,11 @@ impl FunctionCompiler {
                 detail: "named limiter state helper requires stack depth 1, found 0".into(),
             });
         }
-        self.emit_context_filter_helper_call(XMM_STACK[self.depth - 1], state_index, helper)
+        self.emit_context_filter_helper_call(
+            self.register_stack[self.depth - 1],
+            state_index,
+            helper,
+        )
     }
 
     fn emit_limiter_store(&mut self, state_index: usize) -> JitResult<()> {
@@ -2035,7 +2820,7 @@ impl FunctionCompiler {
             });
         }
 
-        let proposed = XMM_STACK[self.depth - 2];
+        let proposed = self.register_stack[self.depth - 2];
         self.emit_operand_context_filter_helper_call(
             proposed,
             2,
@@ -2080,7 +2865,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         self.encoder.xorpd_xmm_xmm(target, target);
         Ok(())
     }
@@ -2094,7 +2879,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 2];
+        let target = self.register_stack[self.depth - 2];
         self.encoder.xorpd_xmm_xmm(target, target);
         self.drop_stack_values(1)?;
         Ok(())
@@ -2108,7 +2893,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         self.emit_context_filter_helper_call(target, filter_id, rspice_laplace_step_native)
     }
 
@@ -2120,7 +2905,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         self.emit_context_filter_helper_call(target, filter_id, rspice_zi_step_native)
     }
 
@@ -2132,7 +2917,7 @@ impl FunctionCompiler {
             });
         }
 
-        let start = XMM_STACK[self.depth - 4];
+        let start = self.register_stack[self.depth - 4];
         self.emit_operand_context_filter_helper_call(start, 4, timer_id, rspice_timer_state_native);
         self.drop_stack_values(3)?;
         Ok(())
@@ -2150,7 +2935,7 @@ impl FunctionCompiler {
             });
         }
 
-        let input = XMM_STACK[self.depth - 4];
+        let input = self.register_stack[self.depth - 4];
         self.emit_operand_context_filter_helper_call(
             input,
             4,
@@ -2169,7 +2954,7 @@ impl FunctionCompiler {
             });
         }
 
-        let input = XMM_STACK[self.depth - 3];
+        let input = self.register_stack[self.depth - 3];
         self.emit_operand_context_filter_helper_call(input, 3, filter_id, rspice_slew_state_native);
         self.drop_stack_values(2)?;
         Ok(())
@@ -2187,7 +2972,7 @@ impl FunctionCompiler {
             });
         }
 
-        let input = XMM_STACK[self.depth - 2];
+        let input = self.register_stack[self.depth - 2];
         self.emit_operand_context_filter_helper_call(
             input,
             2,
@@ -2206,7 +2991,7 @@ impl FunctionCompiler {
             });
         }
 
-        let input = XMM_STACK[self.depth - 5];
+        let input = self.register_stack[self.depth - 5];
         self.emit_operand_context_filter_helper_call(
             input,
             5,
@@ -2225,7 +3010,7 @@ impl FunctionCompiler {
             });
         }
 
-        let input = XMM_STACK[self.depth - 4];
+        let input = self.register_stack[self.depth - 4];
         self.emit_operand_context_filter_helper_call(
             input,
             4,
@@ -2248,7 +3033,7 @@ impl FunctionCompiler {
             });
         }
 
-        let input = XMM_STACK[self.depth - 2];
+        let input = self.register_stack[self.depth - 2];
         self.emit_operand_context_filter_helper_call(
             input,
             2,
@@ -2266,7 +3051,7 @@ impl FunctionCompiler {
                 detail: "ddt state requires stack depth 1, found 0".into(),
             });
         }
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         self.emit_operand_context_filter_helper_call(
             target,
             1,
@@ -2284,7 +3069,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         self.emit_operand_context_filter_helper_call(target, 1, 0, rspice_ddt_jacobian_native);
         Ok(())
     }
@@ -2297,7 +3082,7 @@ impl FunctionCompiler {
             });
         }
 
-        let value = XMM_STACK[self.depth - 2];
+        let value = self.register_stack[self.depth - 2];
         self.emit_operand_context_filter_helper_call(
             value,
             2,
@@ -2316,7 +3101,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         self.emit_operand_context_filter_helper_call(target, 1, 0, rspice_idt_jacobian_native);
         Ok(())
     }
@@ -2329,7 +3114,7 @@ impl FunctionCompiler {
             });
         }
 
-        let value = XMM_STACK[self.depth - 4];
+        let value = self.register_stack[self.depth - 4];
         self.emit_operand_context_filter_helper_call(
             value,
             4,
@@ -2356,20 +3141,43 @@ impl FunctionCompiler {
 
     fn emit_binary_helper_call(&mut self, left: Xmm, right: Xmm, helper: BinaryHelper) {
         debug_assert!(self.uses_helper_calls);
-        let frame_bytes =
-            call_frame_bytes_for_slots(call_frame_spill_slot_count(self.depth, |_, register| {
+        let argument_swap = left == Xmm::Xmm1 && right == Xmm::Xmm0;
+        let mut spill_slots =
+            call_frame_spill_slot_count(&self.register_stack[..self.depth], |_, register| {
                 register != left && register != right
-            }));
+            });
+        if argument_swap {
+            // XMM1 -> XMM0 and XMM0 -> XMM1 is a parallel move. Reserve a
+            // non-overlapping call-frame slot so neither source is destroyed.
+            spill_slots = spill_slots.max(self.depth + 1);
+        }
+        let frame_bytes = call_frame_bytes_for_slots(spill_slots);
         self.encoder.sub_rsp_imm32(frame_bytes);
         self.emit_call_frame_spills(self.depth, |_, register| {
             register != left && register != right
         });
 
-        if left != Xmm::Xmm0 {
-            self.encoder.movsd_xmm_xmm(Xmm::Xmm0, left);
-        }
-        if right != Xmm::Xmm1 {
+        if argument_swap {
+            let swap_disp = call_spill_disp(self.depth);
+            self.encoder
+                .movsd_m64_base_disp32_xmm(Gpr::Rsp, swap_disp, left);
             self.encoder.movsd_xmm_xmm(Xmm::Xmm1, right);
+            self.encoder
+                .movsd_xmm_m64_base_disp32(Xmm::Xmm0, Gpr::Rsp, swap_disp);
+        } else if left == Xmm::Xmm1 {
+            // Preserve the first argument before assigning the second one.
+            self.encoder.movsd_xmm_xmm(Xmm::Xmm0, left);
+            if right != Xmm::Xmm1 {
+                self.encoder.movsd_xmm_xmm(Xmm::Xmm1, right);
+            }
+        } else {
+            // Preserve an XMM0 second argument before assigning XMM0.
+            if right != Xmm::Xmm1 {
+                self.encoder.movsd_xmm_xmm(Xmm::Xmm1, right);
+            }
+            if left != Xmm::Xmm0 {
+                self.encoder.movsd_xmm_xmm(Xmm::Xmm0, left);
+            }
         }
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
@@ -2389,14 +3197,20 @@ impl FunctionCompiler {
         helper: OperandContextFilterHelper,
     ) {
         debug_assert!(self.uses_helper_calls);
-        let input_slot = xmm_stack_slot(input);
+        let input_slot = self.register_stack_slot(input);
         debug_assert!(operand_count > 0);
         debug_assert!(input_slot + operand_count <= self.depth);
 
         let frame_bytes = call_frame_bytes_for_slots(self.depth);
         self.encoder.sub_rsp_imm32(frame_bytes);
         self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
-        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
+        for (index, register) in self
+            .register_stack
+            .iter()
+            .copied()
+            .take(self.depth)
+            .enumerate()
+        {
             self.encoder
                 .movsd_m64_base_disp32_xmm(Gpr::R11, call_spill_disp(index), register);
         }
@@ -2427,8 +3241,8 @@ impl FunctionCompiler {
             });
         }
 
-        let left = XMM_STACK[self.depth - 2];
-        let right = XMM_STACK[self.depth - 1];
+        let left = self.register_stack[self.depth - 2];
+        let right = self.register_stack[self.depth - 1];
         match op {
             CompareOp::Gt => {
                 self.encoder.ucomisd_xmm_xmm(left, right);
@@ -2467,7 +3281,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         match op {
             CompareOp::Gt => {
                 self.emit_literal_compare(target, value);
@@ -2534,8 +3348,8 @@ impl FunctionCompiler {
             });
         }
 
-        let left = XMM_STACK[self.depth - 2];
-        let right = XMM_STACK[self.depth - 1];
+        let left = self.register_stack[self.depth - 2];
+        let right = self.register_stack[self.depth - 1];
         self.emit_truthy_to_gpr(right, Gpr::R11);
         self.emit_truthy_to_gpr(left, Gpr::R10);
         match op {
@@ -2557,7 +3371,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         match (op, rhs_truthy) {
             (LogicalOp::And, true) | (LogicalOp::Or, false) => {
                 self.emit_truthy_to_gpr(target, Gpr::R10);
@@ -2578,7 +3392,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         self.emit_falsy_to_gpr(target, Gpr::R10, Gpr::R11);
         self.emit_gpr_bool_result(target, Gpr::R10);
         Ok(())
@@ -2620,9 +3434,9 @@ impl FunctionCompiler {
             });
         }
 
-        let cond = XMM_STACK[self.depth - 3];
-        let then_value = XMM_STACK[self.depth - 2];
-        let else_value = XMM_STACK[self.depth - 1];
+        let cond = self.register_stack[self.depth - 3];
+        let then_value = self.register_stack[self.depth - 2];
+        let else_value = self.register_stack[self.depth - 1];
         self.emit_truthy_to_gpr(cond, Gpr::R10);
         self.encoder.movq_r64_xmm(Gpr::R8, else_value);
         self.encoder.movq_r64_xmm(Gpr::R11, then_value);
@@ -2641,8 +3455,8 @@ impl FunctionCompiler {
             });
         }
 
-        let left = XMM_STACK[self.depth - 2];
-        let right = XMM_STACK[self.depth - 1];
+        let left = self.register_stack[self.depth - 2];
+        let right = self.register_stack[self.depth - 1];
         self.emit_extremum_left_prelude(left);
         self.emit_extremum_register_op(left, right, op);
         self.emit_extremum_select_left_fixup(left, right);
@@ -2658,7 +3472,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         self.emit_extremum_left_prelude(target);
         self.emit_literal_extremum_op(target, value, op);
         self.emit_extremum_select_left_fixup_from_result(target);
@@ -2673,7 +3487,7 @@ impl FunctionCompiler {
             });
         }
 
-        let target = XMM_STACK[self.depth - 1];
+        let target = self.register_stack[self.depth - 1];
         if self.depth < XMM_STACK.len() {
             let left = self.scratch_register()?;
             self.emit_literal_load(left, value);
@@ -3126,26 +3940,29 @@ impl FunctionCompiler {
         }
     }
 
-    fn finish_with_literals(self) -> JitResult<Vec<u8>> {
+    fn finish_with_literals(self) -> JitResult<X64FunctionBody> {
         let mut bytes = self.encoder.into_bytes();
+        let code_len = bytes.len();
         super::verify_x64_function_code(&bytes, "generated function")?;
-        let mut literal_offsets: Vec<(u64, usize)> = Vec::new();
-        if !self.literals.is_empty() {
-            let padding = (LITERAL_POOL_ALIGNMENT - (bytes.len() % LITERAL_POOL_ALIGNMENT))
-                % LITERAL_POOL_ALIGNMENT;
-            bytes.resize(bytes.len() + padding, LITERAL_POOL_PADDING_BYTE);
+        let layout = FunctionLiteralLayout::build(code_len, &self.literals, &self.vector_literals)?;
+        bytes.resize(layout.final_len, LITERAL_POOL_PADDING_BYTE);
+        let mut data_ranges = Vec::new();
+        let mut rip_relative_relocations = Vec::with_capacity(
+            self.literals
+                .len()
+                .checked_add(self.vector_literals.len())
+                .ok_or_else(|| JitError::Relocation {
+                    model: MODEL.into(),
+                    detail: "literal relocation count overflow".into(),
+                })?,
+        );
+        for (index, bits) in layout.scalar_bits.iter().copied().enumerate() {
+            let offset = layout.scalar_start + index * WORD_BYTES;
+            bytes[offset..offset + WORD_BYTES].copy_from_slice(&bits.to_le_bytes());
         }
         for literal in &self.literals {
             let bits = literal.value.to_bits();
-            let literal_offset = literal_offsets
-                .iter()
-                .find_map(|(candidate, offset)| (*candidate == bits).then_some(*offset))
-                .unwrap_or_else(|| {
-                    let offset = bytes.len();
-                    bytes.extend_from_slice(&bits.to_le_bytes());
-                    literal_offsets.push((bits, offset));
-                    offset
-                });
+            let literal_offset = layout.scalar_offset(bits);
             let next_instruction_offset = literal.displacement_offset + std::mem::size_of::<i32>();
             let displacement = i32::try_from(
                 literal_offset as isize - next_instruction_offset as isize,
@@ -3157,25 +3974,29 @@ impl FunctionCompiler {
 
             bytes[literal.displacement_offset..literal.displacement_offset + 4]
                 .copy_from_slice(&displacement.to_le_bytes());
+            rip_relative_relocations.push(X64RipRelativeRelocation {
+                displacement_offset: literal.displacement_offset,
+                target_offset: literal_offset,
+                kind: X64DataKind::ScalarF64,
+            });
+        }
+        if !layout.scalar_bits.is_empty() {
+            data_ranges.push(X64DataRange {
+                start: layout.scalar_start,
+                end: layout.scalar_start + layout.scalar_bits.len() * WORD_BYTES,
+                alignment: LITERAL_POOL_ALIGNMENT,
+                kind: X64DataKind::ScalarF64,
+            });
         }
 
-        let mut vector_literal_offsets: Vec<([u64; 2], usize)> = Vec::new();
-        if !self.vector_literals.is_empty() {
-            let padding = (VECTOR_LITERAL_ALIGNMENT - (bytes.len() % VECTOR_LITERAL_ALIGNMENT))
-                % VECTOR_LITERAL_ALIGNMENT;
-            bytes.resize(bytes.len() + padding, LITERAL_POOL_PADDING_BYTE);
+        for (index, lanes) in layout.vector_bits.iter().copied().enumerate() {
+            let offset = layout.vector_start + index * VECTOR_LITERAL_ALIGNMENT;
+            bytes[offset..offset + WORD_BYTES].copy_from_slice(&lanes[0].to_le_bytes());
+            bytes[offset + WORD_BYTES..offset + VECTOR_LITERAL_ALIGNMENT]
+                .copy_from_slice(&lanes[1].to_le_bytes());
         }
         for literal in &self.vector_literals {
-            let literal_offset = vector_literal_offsets
-                .iter()
-                .find_map(|(candidate, offset)| (*candidate == literal.lanes).then_some(*offset))
-                .unwrap_or_else(|| {
-                    let offset = bytes.len();
-                    bytes.extend_from_slice(&literal.lanes[0].to_le_bytes());
-                    bytes.extend_from_slice(&literal.lanes[1].to_le_bytes());
-                    vector_literal_offsets.push((literal.lanes, offset));
-                    offset
-                });
+            let literal_offset = layout.vector_offset(literal.lanes);
             let next_instruction_offset = literal.displacement_offset + std::mem::size_of::<i32>();
             let displacement = i32::try_from(
                 literal_offset as isize - next_instruction_offset as isize,
@@ -3187,9 +4008,27 @@ impl FunctionCompiler {
 
             bytes[literal.displacement_offset..literal.displacement_offset + 4]
                 .copy_from_slice(&displacement.to_le_bytes());
+            rip_relative_relocations.push(X64RipRelativeRelocation {
+                displacement_offset: literal.displacement_offset,
+                target_offset: literal_offset,
+                kind: X64DataKind::Vector128,
+            });
+        }
+        if !layout.vector_bits.is_empty() {
+            data_ranges.push(X64DataRange {
+                start: layout.vector_start,
+                end: layout.vector_start + layout.vector_bits.len() * VECTOR_LITERAL_ALIGNMENT,
+                alignment: VECTOR_LITERAL_ALIGNMENT,
+                kind: X64DataKind::Vector128,
+            });
         }
 
-        Ok(bytes)
+        Ok(X64FunctionBody {
+            bytes,
+            code_len,
+            data_ranges,
+            rip_relative_relocations,
+        })
     }
 
     fn emit_jmp_to_offset(&mut self, target_offset: usize) -> JitResult<()> {
@@ -3197,29 +4036,32 @@ impl FunctionCompiler {
         self.patch_rel32_to_offset(displacement_offset, target_offset)
     }
 
-    fn patch_rel32_to_current(&mut self, displacement_offset: usize) -> JitResult<()> {
-        self.patch_rel32_to_offset(displacement_offset, self.encoder.position())
+    fn patch_rel32_to_current(&mut self, patch: Rel32Patch) -> JitResult<()> {
+        self.patch_rel32_to_offset(patch, self.encoder.position())
     }
 
-    fn patch_rel32_to_offset(
-        &mut self,
-        displacement_offset: usize,
-        target_offset: usize,
-    ) -> JitResult<()> {
-        let next_instruction_offset = displacement_offset + std::mem::size_of::<i32>();
-        let displacement = i32::try_from(target_offset as isize - next_instruction_offset as isize)
-            .map_err(|_| JitError::Relocation {
+    fn patch_rel32_to_offset(&mut self, patch: Rel32Patch, target_offset: usize) -> JitResult<()> {
+        let next_instruction_offset = patch.next_instruction_offset();
+        let displacement = i64::try_from(target_offset)
+            .ok()
+            .and_then(|target| {
+                i64::try_from(next_instruction_offset)
+                    .ok()
+                    .and_then(|next| target.checked_sub(next))
+            })
+            .and_then(|displacement| i32::try_from(displacement).ok())
+            .ok_or_else(|| JitError::Relocation {
                 model: MODEL.into(),
                 detail: "branch displacement does not fit in i32".into(),
             })?;
-        self.encoder.patch_i32(displacement_offset, displacement);
+        self.encoder.patch_rel32(patch, displacement);
         Ok(())
     }
 
     fn patch_early_returns_to_current(&mut self) -> JitResult<()> {
         let jumps = std::mem::take(&mut self.early_return_jumps);
-        for displacement_offset in jumps {
-            self.patch_rel32_to_current(displacement_offset)?;
+        for patch in jumps {
+            self.patch_rel32_to_current(patch)?;
         }
         Ok(())
     }
@@ -3287,6 +4129,33 @@ fn assignment_max_stack_depth(assignments: &[NativeAssignment]) -> usize {
         .unwrap_or(0)
 }
 
+fn assignment_allocation_requirements(
+    assignments: &[NativeAssignment],
+) -> JitResult<(usize, usize)> {
+    let mut maximum_spill_slots = 0;
+    let mut maximum_required_registers = 0;
+    for assignment in assignments {
+        let programs: Vec<&NativeProgram> = match assignment {
+            NativeAssignment::Direct { program, .. } => vec![program],
+            NativeAssignment::Indexed { index, value, .. } => vec![index, value],
+            NativeAssignment::Loop { condition, body } => {
+                let (body_spills, body_registers) = assignment_allocation_requirements(body)?;
+                maximum_spill_slots = maximum_spill_slots.max(body_spills);
+                maximum_required_registers = maximum_required_registers.max(body_registers);
+                vec![condition]
+            }
+        };
+        for program in programs {
+            let ssa = X64SsaProgram::lower(program)?;
+            let allocation = RegisterAllocation::build(&ssa)?;
+            maximum_spill_slots = maximum_spill_slots.max(allocation.spill_slot_count());
+            maximum_required_registers =
+                maximum_required_registers.max(allocation.required_register_count());
+        }
+    }
+    Ok((maximum_spill_slots, maximum_required_registers))
+}
+
 fn assignment_has_indexed(assignment: &NativeAssignment) -> bool {
     match assignment {
         NativeAssignment::Direct { .. } => false,
@@ -3295,23 +4164,46 @@ fn assignment_has_indexed(assignment: &NativeAssignment) -> bool {
     }
 }
 
-fn assignment_loop_depth(assignments: &[NativeAssignment]) -> i32 {
-    assignments
-        .iter()
-        .map(|assignment| match assignment {
+fn assignment_loop_depth(assignments: &[NativeAssignment]) -> JitResult<i32> {
+    let mut maximum_depth = 0_i32;
+    for assignment in assignments {
+        let depth = match assignment {
             NativeAssignment::Direct { .. } | NativeAssignment::Indexed { .. } => 0,
-            NativeAssignment::Loop { body, .. } => 1 + assignment_loop_depth(body),
-        })
-        .max()
-        .unwrap_or(0)
+            NativeAssignment::Loop { body, .. } => {
+                assignment_loop_depth(body)?.checked_add(1).ok_or_else(|| {
+                    register_allocation_error(
+                        "assignment-loop nesting exceeds the x64 frame displacement range".into(),
+                    )
+                })?
+            }
+        };
+        maximum_depth = maximum_depth.max(depth);
+    }
+    Ok(maximum_depth)
 }
 
-fn align_local_frame(bytes: i32) -> i32 {
-    if bytes == 0 {
-        0
-    } else {
-        ((bytes + LOCAL_FRAME_ALIGN_BYTES - 1) / LOCAL_FRAME_ALIGN_BYTES) * LOCAL_FRAME_ALIGN_BYTES
+fn checked_local_frame_bytes(components: &[i32]) -> JitResult<i32> {
+    let unaligned_bytes = components.iter().try_fold(0_i32, |total, component| {
+        if *component < 0 {
+            return Err(register_allocation_error(format!(
+                "generated frame component has negative size {component}"
+            )));
+        }
+        total.checked_add(*component).ok_or_else(|| {
+            register_allocation_error("generated frame exceeds the x64 displacement range".into())
+        })
+    })?;
+    if unaligned_bytes == 0 {
+        return Ok(0);
     }
+    let rounded_bytes = unaligned_bytes
+        .checked_add(LOCAL_FRAME_ALIGN_BYTES - 1)
+        .ok_or_else(|| {
+            register_allocation_error(
+                "aligned generated frame exceeds the x64 displacement range".into(),
+            )
+        })?;
+    Ok((rounded_bytes / LOCAL_FRAME_ALIGN_BYTES) * LOCAL_FRAME_ALIGN_BYTES)
 }
 
 fn validate_expression_stack_depth(max_stack_depth: usize) -> JitResult<()> {
@@ -3323,26 +4215,54 @@ fn validate_expression_stack_depth(max_stack_depth: usize) -> JitResult<()> {
     Ok(())
 }
 
-fn expression_spill_frame_bytes(max_stack_depth: usize) -> JitResult<i32> {
-    max_stack_depth
-        .saturating_sub(XMM_STACK.len())
+fn allocation_spill_frame_bytes(allocation: &RegisterAllocation) -> JitResult<i32> {
+    allocation
+        .spill_slot_count()
         .checked_mul(WORD_BYTES)
         .and_then(|bytes| i32::try_from(bytes).ok())
         .ok_or_else(|| {
             register_allocation_error(
-                "expression spill frame exceeds the x64 frame displacement range".to_string(),
+                "liveness spill frame exceeds the x64 frame displacement range".to_string(),
             )
         })
 }
 
-fn callee_saved_xmm_count_for_depth(max_stack_depth: usize) -> usize {
-    max_stack_depth
+fn callee_saved_xmm_count_for_allocation(allocation: &RegisterAllocation) -> usize {
+    allocation
+        .required_register_count()
         .min(XMM_STACK.len())
         .saturating_sub(CALLER_SAVED_XMM_COUNT)
 }
 
 fn callee_saved_xmm_frame_bytes(count: usize) -> i32 {
     count as i32 * CALLEE_SAVED_XMM_BYTES
+}
+
+fn allocated_xmm(index: usize) -> JitResult<Xmm> {
+    if index >= ALLOCATABLE_XMM_REGISTERS {
+        return Err(register_allocation_error(format!(
+            "allocated XMM register {index} exceeds the {ALLOCATABLE_XMM_REGISTERS}-register value set"
+        )));
+    }
+    Ok(XMM_STACK[index])
+}
+
+fn xmm_mask(register: Xmm) -> u16 {
+    1_u16 << xmm_unwind_register(register)
+}
+
+fn take_temporary_xmm(used_register_mask: &mut u16) -> JitResult<Xmm> {
+    let register = XMM_STACK
+        .into_iter()
+        .find(|register| *used_register_mask & xmm_mask(*register) == 0)
+        .ok_or_else(|| {
+            register_allocation_error(
+                "allocated instruction has no XMM register available for a spilled operand"
+                    .to_string(),
+            )
+        })?;
+    *used_register_mask |= xmm_mask(register);
+    Ok(register)
 }
 
 fn callee_saved_xmm_register(index: usize) -> Xmm {
@@ -3417,13 +4337,12 @@ fn call_frame_bytes_for_slots(slot_count: usize) -> i32 {
 }
 
 fn call_frame_spill_slot_count(
-    spill_depth: usize,
+    registers: &[Xmm],
     mut should_spill: impl FnMut(usize, Xmm) -> bool,
 ) -> usize {
-    XMM_STACK
+    registers
         .iter()
         .copied()
-        .take(spill_depth)
         .enumerate()
         .filter_map(|(index, register)| should_spill(index, register).then_some(index + 1))
         .max()
@@ -3439,6 +4358,7 @@ fn program_uses_helper_calls(program: &NativeProgram) -> bool {
     program.ops().iter().any(native_op_uses_helper_call)
 }
 
+#[cfg(test)]
 fn value_program_needs_saved_entry_args(program: &NativeProgram) -> bool {
     let mut helper_seen = false;
     for op in program.ops() {
@@ -3453,155 +4373,18 @@ fn value_program_needs_saved_entry_args(program: &NativeProgram) -> bool {
     false
 }
 
+#[cfg(test)]
 fn native_op_needs_saved_entry_args_for_internal_helper_continuation(op: NativeOp) -> bool {
-    matches!(op, NativeOp::IdtModState(_))
+    X64Effects::for_op(op).needs_saved_entry_args_for_internal_continuation()
 }
 
 fn native_op_uses_helper_call(op: &NativeOp) -> bool {
-    matches!(
-        op,
-        NativeOp::BinaryMath(_)
-            | NativeOp::TableLookup(_)
-            | NativeOp::TableDerivative(_)
-            | NativeOp::LimiterPrevious(_)
-            | NativeOp::LimiterStore(_)
-            | NativeOp::LaplaceState(_)
-            | NativeOp::ZiState(_)
-            | NativeOp::TimerState(_)
-            | NativeOp::TransitionState(_)
-            | NativeOp::SlewState(_)
-            | NativeOp::AbsDelayState(_)
-            | NativeOp::CrossState(_)
-            | NativeOp::AboveState(_)
-            | NativeOp::LastCrossingState(_)
-            | NativeOp::DdtState(_)
-            | NativeOp::DdtJacobian
-            | NativeOp::IdtState(_)
-            | NativeOp::IdtJacobian
-            | NativeOp::IdtModState(_)
-    ) || matches!(op, NativeOp::UnaryMath(op) if unary_math_uses_helper(*op))
-        || matches!(
-            op,
-            NativeOp::LoadVariableDyn { len, lower, .. }
-                if !dynamic_variable_inline_supported(*len, *lower)
-        )
+    X64Effects::for_op(*op).may_call()
 }
 
+#[cfg(test)]
 fn native_op_reads_entry_args(op: NativeOp) -> bool {
-    !matches!(
-        op,
-        NativeOp::Const(_)
-            | NativeOp::Add
-            | NativeOp::Sub
-            | NativeOp::Mul
-            | NativeOp::Div
-            | NativeOp::AddConst(_)
-            | NativeOp::SubConst(_)
-            | NativeOp::MulConst(_)
-            | NativeOp::DivConst(_)
-            | NativeOp::SubFromConst(_)
-            | NativeOp::DivFromConst(_)
-            | NativeOp::Neg
-            | NativeOp::Abs
-            | NativeOp::Square
-            | NativeOp::Sqrt
-            | NativeOp::Compare(_)
-            | NativeOp::CompareConst(_, _)
-            | NativeOp::Logical(_)
-            | NativeOp::LogicalConst(_, _)
-            | NativeOp::IfElse
-            | NativeOp::Extremum(_)
-            | NativeOp::ExtremumConst(_, _)
-            | NativeOp::ExtremumConstLhs(_, _)
-            | NativeOp::UnaryMath(_)
-            | NativeOp::BinaryMath(_)
-            | NativeOp::IntegerCast
-            | NativeOp::IntegerBinary(_)
-            | NativeOp::IntegerShiftConst(_, _)
-            | NativeOp::IntegerBinaryConst(_, _)
-            | NativeOp::WhiteNoise
-            | NativeOp::FlickerNoise
-    )
-}
-
-fn native_op_preserves_context_pointer_cache(op: NativeOp) -> bool {
-    match op {
-        NativeOp::LoadVariableDyn { len, lower, .. } => {
-            dynamic_variable_inline_supported(len, lower)
-        }
-        _ => matches!(
-            op,
-            NativeOp::Const(_)
-                | NativeOp::LoadParam(_)
-                | NativeOp::LoadParamGiven(_)
-                | NativeOp::LoadPortConnected(_)
-                | NativeOp::LoadVoltage { .. }
-                | NativeOp::LoadTemperature
-                | NativeOp::LoadThermalVoltage
-                | NativeOp::LoadTime
-                | NativeOp::Analysis(_)
-                | NativeOp::LoadMfactor
-                | NativeOp::LoadCurrent(_)
-                | NativeOp::LoadPriorCurrent(_)
-                | NativeOp::LoadInternalVoltage(_)
-                | NativeOp::LoadBranchUnknown(_)
-                | NativeOp::LoadVariable(_)
-                | NativeOp::Add
-                | NativeOp::Sub
-                | NativeOp::Mul
-                | NativeOp::Div
-                | NativeOp::AddConst(_)
-                | NativeOp::SubConst(_)
-                | NativeOp::MulConst(_)
-                | NativeOp::DivConst(_)
-                | NativeOp::SubFromConst(_)
-                | NativeOp::DivFromConst(_)
-                | NativeOp::Neg
-                | NativeOp::Abs
-                | NativeOp::Square
-                | NativeOp::Sqrt
-                | NativeOp::Compare(_)
-                | NativeOp::CompareConst(_, _)
-                | NativeOp::Logical(_)
-                | NativeOp::LogicalConst(_, _)
-                | NativeOp::IfElse
-                | NativeOp::Extremum(_)
-                | NativeOp::ExtremumConst(_, _)
-                | NativeOp::ExtremumConstLhs(_, _)
-                | NativeOp::UnaryMath(UnaryMathOp::Floor | UnaryMathOp::Ceil)
-                | NativeOp::IntegerCast
-                | NativeOp::IntegerBinary(_)
-                | NativeOp::IntegerShiftConst(_, _)
-                | NativeOp::IntegerBinaryConst(_, _)
-                | NativeOp::WhiteNoise
-                | NativeOp::FlickerNoise
-        ),
-    }
-}
-
-fn unary_math_uses_helper(op: UnaryMathOp) -> bool {
-    !matches!(op, UnaryMathOp::Floor | UnaryMathOp::Ceil)
-}
-
-fn dynamic_variable_inline_supported(len: usize, lower: i64) -> bool {
-    let Ok(len_i64) = i64::try_from(len) else {
-        return false;
-    };
-    let Some(upper) = lower
-        .checked_add(len_i64)
-        .and_then(|exclusive| exclusive.checked_sub(1))
-    else {
-        return false;
-    };
-    let supported = -INLINE_DYNAMIC_LOWER_ABS_LIMIT..=INLINE_DYNAMIC_LOWER_ABS_LIMIT;
-    supported.contains(&lower) && supported.contains(&upper)
-}
-
-fn xmm_stack_slot(register: Xmm) -> usize {
-    XMM_STACK
-        .iter()
-        .position(|candidate| *candidate == register)
-        .expect("register belongs to native XMM stack")
+    X64Effects::for_op(op).reads_entry_args()
 }
 
 fn byte_disp(index: usize) -> JitResult<i32> {
@@ -3640,111 +4423,55 @@ fn register_allocation_error(detail: String) -> JitError {
 }
 
 fn saved_ctx_arg_reg() -> Gpr {
-    Gpr::R12
+    HOST_ABI.saved_context
 }
 
 fn saved_vars_arg_reg() -> Gpr {
-    Gpr::R13
+    HOST_ABI.saved_variables
 }
 
-#[cfg(windows)]
 fn entry_ctx_arg_reg() -> Gpr {
-    Gpr::Rcx
+    HOST_ABI.entry_context
 }
 
-#[cfg(windows)]
 fn entry_vars_arg_reg() -> Gpr {
-    Gpr::Rdx
+    HOST_ABI.entry_variables
 }
 
-#[cfg(not(windows))]
-fn entry_ctx_arg_reg() -> Gpr {
-    Gpr::Rdi
+fn entry_kernel_io_arg_reg() -> Gpr {
+    HOST_ABI.entry_kernel_io
 }
 
-#[cfg(not(windows))]
-fn entry_vars_arg_reg() -> Gpr {
-    Gpr::Rsi
-}
-
-#[cfg(windows)]
 fn context_filter_ctx_arg_reg() -> Gpr {
-    Gpr::Rdx
+    HOST_ABI.context_filter[0]
 }
 
-#[cfg(windows)]
 fn context_filter_id_arg_reg() -> Gpr {
-    Gpr::R8
+    HOST_ABI.context_filter[1]
 }
 
-#[cfg(not(windows))]
-fn context_filter_ctx_arg_reg() -> Gpr {
-    Gpr::Rdi
-}
-
-#[cfg(not(windows))]
-fn context_filter_id_arg_reg() -> Gpr {
-    Gpr::Rsi
-}
-
-#[cfg(windows)]
 fn operand_filter_operands_arg_reg() -> Gpr {
-    Gpr::Rcx
+    HOST_ABI.operand_filter[0]
 }
 
-#[cfg(windows)]
 fn operand_filter_ctx_arg_reg() -> Gpr {
-    Gpr::Rdx
+    HOST_ABI.operand_filter[1]
 }
 
-#[cfg(windows)]
 fn operand_filter_id_arg_reg() -> Gpr {
-    Gpr::R8
+    HOST_ABI.operand_filter[2]
 }
 
-#[cfg(not(windows))]
-fn operand_filter_operands_arg_reg() -> Gpr {
-    Gpr::Rdi
-}
-
-#[cfg(not(windows))]
-fn operand_filter_ctx_arg_reg() -> Gpr {
-    Gpr::Rsi
-}
-
-#[cfg(not(windows))]
-fn operand_filter_id_arg_reg() -> Gpr {
-    Gpr::Rdx
-}
-
-#[cfg(windows)]
 fn dynamic_variable_ptr_arg_reg() -> Gpr {
-    Gpr::Rdx
+    HOST_ABI.dynamic_variable[0]
 }
 
-#[cfg(windows)]
 fn dynamic_variable_len_arg_reg() -> Gpr {
-    Gpr::R8
+    HOST_ABI.dynamic_variable[1]
 }
 
-#[cfg(windows)]
 fn dynamic_variable_lower_arg_reg() -> Gpr {
-    Gpr::R9
-}
-
-#[cfg(not(windows))]
-fn dynamic_variable_ptr_arg_reg() -> Gpr {
-    Gpr::Rdi
-}
-
-#[cfg(not(windows))]
-fn dynamic_variable_len_arg_reg() -> Gpr {
-    Gpr::Rsi
-}
-
-#[cfg(not(windows))]
-fn dynamic_variable_lower_arg_reg() -> Gpr {
-    Gpr::Rdx
+    HOST_ABI.dynamic_variable[2]
 }
 
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
@@ -3754,9 +4481,9 @@ mod tests {
         ContextFilterHelper, DYNAMIC_READ_FRAME_BYTES, FunctionCompiler, Gpr,
         I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN,
         LITERAL_POOL_ALIGNMENT, NativeAssignment, OperandContextFilterHelper, PARAMS_OFFSET,
-        Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, THERMAL_VOLTAGE_PER_K, TableHelper,
-        VECTOR_LITERAL_ALIGNMENT, VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK, Xmm,
-        assignment_uses_helper_calls, call_result_disp, compile_assignment_function,
+        Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, STACK_PROBE_INTERVAL_BYTES, THERMAL_VOLTAGE_PER_K,
+        TableHelper, VECTOR_LITERAL_ALIGNMENT, VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK,
+        Xmm, assignment_uses_helper_calls, call_result_disp, compile_assignment_function,
         compile_assignment_pass_function, compile_value_function, entry_ctx_arg_reg,
         entry_vars_arg_reg, native_op_reads_entry_args, native_op_uses_helper_call,
         program_uses_helper_calls, rspice_exp, value_program_needs_saved_entry_args,
@@ -3767,14 +4494,44 @@ mod tests {
         BinaryMathOp, CompareOp, EntryKind, ExtremumOp, IntegerBinaryOp, LogicalOp,
         NativeLoweringLimits, NativeOp, NativeProgram, UnaryMathOp,
     };
+    use crate::native::model::CodeOffset;
     use crate::native::runtime::ExecutableMemory;
     use crate::native::{EvalContext, rspice_limexp, rspice_limited_exp};
     use crate::vm::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
     use crate::zfilter::ZiFilter;
 
     #[test]
+    fn literal_layout_is_deduplicated_aligned_and_stable_before_emission() {
+        let scalars = [
+            super::LiteralPatch {
+                displacement_offset: 0,
+                value: 2.0,
+            },
+            super::LiteralPatch {
+                displacement_offset: 4,
+                value: 2.0,
+            },
+        ];
+        let vectors = [super::VectorLiteralPatch {
+            displacement_offset: 8,
+            lanes: [1, 2],
+        }];
+        let first =
+            super::FunctionLiteralLayout::build(7, &scalars, &vectors).expect("literal layout");
+        let second = super::FunctionLiteralLayout::build(7, &scalars, &vectors)
+            .expect("repeat literal layout");
+
+        assert_eq!(first, second, "layout must converge deterministically");
+        assert_eq!(first.scalar_start, 8);
+        assert_eq!(first.scalar_bits.len(), 1);
+        assert_eq!(first.vector_start, 16);
+        assert_eq!(first.final_len, 32);
+    }
+
+    #[test]
     fn literal_pool_reuses_identical_bit_patterns() {
-        let mut compiler = FunctionCompiler::new(false, false, false, 0, None, None, 0);
+        let mut compiler =
+            FunctionCompiler::new(false, false, false, 0, None, None, 0).expect("test frame");
         compiler.emit_literal_load(Xmm::Xmm0, 2.0);
         compiler.emit_literal_load(Xmm::Xmm1, 2.0);
         compiler.emit_literal_load(Xmm::Xmm2, 3.0);
@@ -3782,7 +4539,8 @@ mod tests {
 
         let bytes = compiler
             .finish_with_literals()
-            .expect("literal pool relocation succeeds");
+            .expect("literal pool relocation succeeds")
+            .bytes;
 
         assert_eq!(
             count_bytes(&bytes, &2.0_f64.to_le_bytes()),
@@ -3812,14 +4570,16 @@ mod tests {
 
     #[test]
     fn vector_literal_pool_reuses_abs_masks_and_aligns_to_16_bytes() {
-        let mut compiler = FunctionCompiler::new(false, false, false, 0, None, None, 0);
+        let mut compiler =
+            FunctionCompiler::new(false, false, false, 0, None, None, 0).expect("test frame");
         compiler.emit_abs_register(Xmm::Xmm0);
         compiler.emit_abs_register(Xmm::Xmm1);
         compiler.encoder.ret();
 
         let bytes = compiler
             .finish_with_literals()
-            .expect("vector literal pool relocation succeeds");
+            .expect("vector literal pool relocation succeeds")
+            .bytes;
         let mask = abs_value_mask_bytes();
         let mask_offset = find_bytes(&bytes, &mask).expect("abs mask literal is present");
 
@@ -3832,6 +4592,218 @@ mod tests {
             mask_offset % VECTOR_LITERAL_ALIGNMENT,
             0,
             "vector literal should be naturally aligned"
+        );
+    }
+
+    #[test]
+    fn generated_frame_rejects_negative_or_misaligned_sizes() {
+        for frame_bytes in [-16, 1, STACK_PROBE_INTERVAL_BYTES - 1] {
+            assert!(
+                FunctionCompiler::new(false, false, false, frame_bytes, None, None, 0).is_err(),
+                "invalid generated frame size {frame_bytes} must be rejected"
+            );
+        }
+        assert!(
+            FunctionCompiler::new(false, false, false, 16, Some(16), None, 0).is_err(),
+            "local slots must fit completely inside the generated frame"
+        );
+        assert!(
+            FunctionCompiler::new(
+                false,
+                false,
+                false,
+                16,
+                None,
+                None,
+                XMM_STACK.len() - super::CALLER_SAVED_XMM_COUNT + 1,
+            )
+            .is_err(),
+            "callee-saved XMM reservations must be valid for the target ABI"
+        );
+    }
+
+    #[test]
+    fn generated_frame_probes_each_crossed_stack_page_with_a_compact_loop() {
+        let small_frame_bytes = STACK_PROBE_INTERVAL_BYTES - 16;
+        let small_bytes =
+            FunctionCompiler::new(false, false, false, small_frame_bytes, None, None, 0)
+                .expect("small aligned frame")
+                .finish_assignment_pass_function()
+                .expect("finish small-frame function")
+                .bytes;
+        assert!(contains_bytes(
+            &small_bytes,
+            &sub_rsp_bytes(small_frame_bytes)
+        ));
+        assert!(
+            !contains_bytes(
+                &small_bytes,
+                &cmp_r64_imm32_bytes(Gpr::R11, STACK_PROBE_INTERVAL_BYTES)
+            ),
+            "sub-page frames should not pay for the probing loop"
+        );
+
+        let large_frame_bytes = STACK_PROBE_INTERVAL_BYTES * 3;
+        let large_bytes =
+            FunctionCompiler::new(false, false, false, large_frame_bytes, None, None, 0)
+                .expect("large aligned frame")
+                .finish_assignment_pass_function()
+                .expect("finish large-frame function")
+                .bytes;
+
+        assert!(contains_bytes(
+            &large_bytes,
+            &cmp_r64_imm32_bytes(Gpr::R11, STACK_PROBE_INTERVAL_BYTES)
+        ));
+        assert_eq!(
+            count_bytes(
+                &large_bytes,
+                &sub_r64_imm32_bytes(Gpr::R10, STACK_PROBE_INTERVAL_BYTES)
+            ),
+            1,
+            "page probing should be encoded as a loop, not code-size-linear unrolling"
+        );
+        assert!(contains_bytes(&large_bytes, &stack_probe_touch_bytes()));
+        assert!(contains_bytes(
+            &large_bytes,
+            &sub_rsp_bytes(large_frame_bytes)
+        ));
+        assert!(contains_bytes(
+            &large_bytes,
+            &add_rsp_bytes(large_frame_bytes)
+        ));
+
+        let memory = ExecutableMemory::allocate(&large_bytes).expect("allocate probed frame");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let function: extern "C" fn(*const EvalContext, *mut f64) =
+            unsafe { std::mem::transmute(entry) };
+        let context = eval_context(&[], &[], &[], &[]);
+        function(&context, std::ptr::null_mut());
+    }
+
+    #[test]
+    fn fused_stamp_kernel_inlines_value_and_jacobian_programs() {
+        let value = NativeProgram::from_ops_for_test(
+            vec![NativeOp::LoadVariable(0)],
+            1,
+            Vec::new(),
+            Vec::new(),
+        );
+        let artifact = super::compile_fused_stamp_kernel_artifact(
+            1024,
+            CodeOffset::new(0),
+            std::slice::from_ref(&value),
+            &[vec![value.clone(), value.clone()]],
+            &[None],
+        )
+        .expect("compile fused stamp kernel");
+        let verified = crate::native::x64::verifier::verify_exact_function(
+            &artifact.bytes[..artifact.code_len],
+            "fused stamp kernel test",
+        )
+        .expect("verify fused stamp kernel");
+
+        assert_eq!(
+            verified.direct_call_targets.len(),
+            1,
+            "the assignment pass should be the fused kernel's only sibling entry call"
+        );
+
+        let mut load = X64Encoder::new();
+        load.movsd_xmm_m64_base_disp32(Xmm::Xmm0, super::saved_vars_arg_reg(), 0);
+        assert_eq!(
+            count_bytes(&artifact.bytes[..artifact.code_len], &load.into_bytes()),
+            2,
+            "one value load plus one shared Jacobian load should be emitted"
+        );
+    }
+
+    #[test]
+    fn allocated_codegen_preserves_a_shared_ssa_operand() {
+        let ssa = crate::native::x64::ir::Program::from_ssa_for_test(
+            vec![
+                (NativeOp::LoadVariable(0), vec![]),
+                (NativeOp::Square, vec![0]),
+                (NativeOp::Add, vec![0, 1]),
+            ],
+            2,
+        )
+        .expect("shared SSA program");
+        let allocation = crate::native::x64::ir::RegisterAllocation::build(&ssa)
+            .expect("allocate shared SSA program");
+        let spill_bytes =
+            super::allocation_spill_frame_bytes(&allocation).expect("shared SSA spill frame");
+        let callee_saved = super::callee_saved_xmm_count_for_allocation(&allocation);
+        let frame_bytes = super::checked_local_frame_bytes(&[
+            spill_bytes,
+            super::callee_saved_xmm_frame_bytes(callee_saved),
+        ])
+        .expect("shared SSA frame");
+        let mut compiler = FunctionCompiler::new(
+            false,
+            false,
+            spill_bytes > 0,
+            frame_bytes,
+            None,
+            (spill_bytes > 0).then_some(0),
+            callee_saved,
+        )
+        .expect("shared SSA compiler");
+        compiler
+            .emit_allocated_program(&ssa, &allocation)
+            .expect("emit shared SSA");
+        let bytes = compiler
+            .finish_value_function()
+            .expect("finish shared SSA")
+            .bytes;
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate shared SSA leaf");
+        let entry = memory.ptr_at(0).expect("shared SSA entry");
+        let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let context = eval_context(&[], &[], &[], &[]);
+        let variables = [3.0_f64];
+        assert_eq!(
+            function(&context, variables.as_ptr()).to_bits(),
+            12.0_f64.to_bits()
+        );
+    }
+
+    #[test]
+    fn binary_helper_marshalling_preserves_swapped_xmm_arguments() {
+        // The second pow is deliberately allocated with its left operand in
+        // XMM1 and right operand in XMM0. Helper argument setup must implement
+        // that exchange as a parallel move.
+        let input = 1.42_f64;
+        let program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::Const(input),
+                NativeOp::Const(1.0),
+                NativeOp::Const(input),
+                NativeOp::DivConst(1.45),
+                NativeOp::Const(3.0),
+                NativeOp::BinaryMath(BinaryMathOp::Pow),
+                NativeOp::Add,
+                NativeOp::Const(0.33),
+                NativeOp::BinaryMath(BinaryMathOp::Pow),
+                NativeOp::Div,
+            ],
+            4,
+            Vec::new(),
+            Vec::new(),
+        );
+        let bytes = compile_value_function(&program).expect("compile swapped-argument pow leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate swapped-argument leaf");
+        let entry = memory.ptr_at(0).expect("swapped-argument entry");
+        let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let context = eval_context(&[], &[], &[], &[]);
+
+        let expected = input / (1.0 + (input / 1.45).powf(3.0)).powf(0.33);
+        let actual = function(&context, std::ptr::null());
+        assert!(
+            (actual - expected).abs() <= 1.0e-14,
+            "swapped helper arguments changed the result: expected={expected:.17e} actual={actual:.17e}"
         );
     }
 
@@ -4693,9 +5665,15 @@ mod tests {
         assert_eq!(program.max_stack_depth(), XMM_STACK.len());
 
         let bytes = compile_value_function(&program).expect("compile full-depth value function");
-        let callee_saved_count = super::callee_saved_xmm_count_for_depth(XMM_STACK.len());
-        let frame_bytes =
-            super::align_local_frame(super::callee_saved_xmm_frame_bytes(callee_saved_count));
+        let ssa = crate::native::x64::ir::Program::lower(&program).expect("lower full-depth SSA");
+        let allocation = crate::native::x64::ir::RegisterAllocation::build(&ssa)
+            .expect("allocate full-depth SSA");
+        let callee_saved_count = super::callee_saved_xmm_count_for_allocation(&allocation);
+        let frame_bytes = super::checked_local_frame_bytes(&[
+            super::allocation_spill_frame_bytes(&allocation).expect("liveness spill frame fits"),
+            super::callee_saved_xmm_frame_bytes(callee_saved_count),
+        ])
+        .expect("allocated XMM frame fits");
         assert!(
             contains_bytes(&bytes, &sub_rsp_bytes(frame_bytes)),
             "full-depth Win64 value leaf should reserve callee-saved XMM spill space"
@@ -4761,16 +5739,16 @@ mod tests {
         );
 
         let bytes = compile_value_function(&program).expect("compile helper result leaf");
-        let frame_bytes = call_frame_bytes(1);
+        let frame_bytes = call_frame_bytes(0);
         let old_fixed_frame_bytes = old_fixed_call_frame_bytes();
 
         assert!(
             contains_bytes(&bytes, &sub_rsp_bytes(frame_bytes)),
-            "single-prefix helper call should reserve only one XMM spill slot"
+            "a prefix already assigned a liveness home should not consume a call-frame slot"
         );
         assert!(
             contains_bytes(&bytes, &add_rsp_bytes(frame_bytes)),
-            "single-prefix helper call should release only one XMM spill slot"
+            "a prefix already assigned a liveness home should use the minimum call frame"
         );
         assert!(
             !contains_bytes(&bytes, &sub_rsp_bytes(old_fixed_frame_bytes)),
@@ -4786,12 +5764,12 @@ mod tests {
             "helper calls should address spills directly from rsp instead of materializing a call-frame base"
         );
         assert!(
-            contains_bytes(&bytes, &call_frame_spill_bytes(0, Xmm::Xmm0)),
-            "live prefix should spill directly to the call frame"
+            !contains_bytes(&bytes, &call_frame_spill_bytes(0, Xmm::Xmm0)),
+            "live-across-call values should use their reusable liveness home"
         );
         assert!(
-            contains_bytes(&bytes, &call_frame_load_bytes(Xmm::Xmm0, 0)),
-            "live prefix should reload directly from the call frame"
+            !contains_bytes(&bytes, &call_frame_load_bytes(Xmm::Xmm0, 0)),
+            "the helper call should not duplicate a value already held in its liveness home"
         );
 
         let mut old_result_store = X64Encoder::new();
@@ -5181,12 +6159,12 @@ mod tests {
                 "constant LHS arithmetic should stay helper-free at full XMM stack depth"
             );
             assert!(
-                contains_bytes(&bytes, &temp_sub_rsp),
-                "{name} should fall back to an RSP temp slot at full XMM stack depth"
+                !contains_bytes(&bytes, &temp_sub_rsp),
+                "{name} should use an allocator-provided scratch register"
             );
             assert!(
-                contains_bytes(&bytes, &temp_add_rsp),
-                "{name} should restore the RSP temp slot at full XMM stack depth"
+                !contains_bytes(&bytes, &temp_add_rsp),
+                "{name} should not create an instruction-local spill frame"
             );
 
             let memory = ExecutableMemory::allocate(&bytes)
@@ -5755,12 +6733,12 @@ mod tests {
         let bytes =
             compile_value_function(&program).expect("compile full-stack dynamic variable leaf");
         assert!(
-            contains_bytes(&bytes, &sub_rsp_bytes(DYNAMIC_READ_FRAME_BYTES)),
-            "full-stack dynamic read must keep the stack spill fallback"
+            !contains_bytes(&bytes, &sub_rsp_bytes(DYNAMIC_READ_FRAME_BYTES)),
+            "liveness allocation should avoid the instruction-local dynamic-read spill frame"
         );
         assert!(
-            contains_bytes(&bytes, &add_rsp_bytes(DYNAMIC_READ_FRAME_BYTES)),
-            "full-stack dynamic read must restore the stack spill fallback"
+            !contains_bytes(&bytes, &add_rsp_bytes(DYNAMIC_READ_FRAME_BYTES)),
+            "dynamic-read operands should use their allocated homes"
         );
 
         let memory =
@@ -7723,26 +8701,26 @@ mod tests {
         assert_eq!(program.max_stack_depth(), XMM_STACK.len());
         let bytes = compile_value_function(&program).expect("compile full-stack limit state leaf");
         assert!(
-            contains_bytes(&bytes, &sub_rsp_bytes(WORD_BYTES as i32)),
-            "full-stack limit state must keep the positive-step spill fallback"
+            !contains_bytes(&bytes, &sub_rsp_bytes(WORD_BYTES as i32)),
+            "liveness allocation should provide limit-state scratch without an instruction-local frame"
         );
         assert!(
-            contains_bytes(&bytes, &add_rsp_bytes(WORD_BYTES as i32)),
-            "full-stack limit state must restore the positive-step spill fallback"
+            !contains_bytes(&bytes, &add_rsp_bytes(WORD_BYTES as i32)),
+            "limit-state scratch should not require an instruction-local restore"
         );
         assert!(
-            contains_bytes(
+            !contains_bytes(
                 &bytes,
                 &stack_spill_store_bytes(XMM_STACK[XMM_STACK.len() - 1])
             ),
-            "full-stack limit state must spill the positive step to the stack"
+            "the positive step should remain in its allocated register"
         );
         assert!(
-            contains_bytes(
+            !contains_bytes(
                 &bytes,
                 &stack_spill_minsd_bytes(XMM_STACK[XMM_STACK.len() - 2])
             ),
-            "full-stack limit state must clamp from the spilled positive step"
+            "limit-state clamping should not reload an instruction-local spill"
         );
 
         let memory =
@@ -10181,12 +11159,12 @@ mod tests {
             "full-stack constant LHS min/max should remain helper-free"
         );
         assert!(
-            contains_bytes(&bytes, &sub_rsp_bytes(ROUND_TEMP_FRAME_BYTES)),
-            "full-stack constant LHS min/max must save the dynamic RHS"
+            !contains_bytes(&bytes, &sub_rsp_bytes(ROUND_TEMP_FRAME_BYTES)),
+            "allocated scratch should avoid saving the dynamic RHS in an instruction-local frame"
         );
         assert!(
-            contains_bytes(&bytes, &add_rsp_bytes(ROUND_TEMP_FRAME_BYTES)),
-            "full-stack constant LHS min/max must restore the temp frame"
+            !contains_bytes(&bytes, &add_rsp_bytes(ROUND_TEMP_FRAME_BYTES)),
+            "allocated scratch should avoid an instruction-local min/max restore"
         );
 
         let memory =
@@ -10364,12 +11342,12 @@ mod tests {
         assert_eq!(program.max_stack_depth(), XMM_STACK.len());
         let bytes = compile_value_function(&program).expect("compile full-stack floor leaf");
         assert!(
-            contains_bytes(&bytes, &sub_rsp_bytes(ROUND_TEMP_FRAME_BYTES)),
-            "full-stack floor must keep the original-value spill fallback"
+            !contains_bytes(&bytes, &sub_rsp_bytes(ROUND_TEMP_FRAME_BYTES)),
+            "liveness allocation should keep floor scratch in a register"
         );
         assert!(
-            contains_bytes(&bytes, &add_rsp_bytes(ROUND_TEMP_FRAME_BYTES)),
-            "full-stack floor must restore the original-value spill fallback"
+            !contains_bytes(&bytes, &add_rsp_bytes(ROUND_TEMP_FRAME_BYTES)),
+            "floor should not create an instruction-local spill restore"
         );
 
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate full-stack floor leaf");
@@ -11289,13 +12267,25 @@ mod tests {
 
         let state_vars = [2.0_f64];
         let previous_state = [0.0_f64, 1.5_f64];
+        let older_state = previous_state;
         let mut state_values = [0.0_f64, 0.0_f64];
+        let mut state_derivatives = [0.0_f64, 0.0_f64];
+        let previous_derivatives = [0.0_f64, 0.0_f64];
+        let mut state_initialized = [1_u8, 1_u8];
         let mut state_ctx = eval_context(&[], &[], &[], &[]);
-        state_ctx.timestep = 0.25;
+        set_backward_euler(&mut state_ctx, 0.25);
         state_ctx.state_prev = previous_state.as_ptr();
         state_ctx.state_prev_len = previous_state.len();
+        state_ctx.state_older = older_state.as_ptr();
+        state_ctx.state_older_len = older_state.len();
         state_ctx.state_values = state_values.as_mut_ptr();
         state_ctx.state_values_len = state_values.len();
+        state_ctx.state_derivatives = state_derivatives.as_mut_ptr();
+        state_ctx.state_derivatives_len = state_derivatives.len();
+        state_ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+        state_ctx.state_derivatives_prev_len = previous_derivatives.len();
+        state_ctx.state_initialized = state_initialized.as_mut_ptr();
+        state_ctx.state_initialized_len = state_initialized.len();
         run_native_value_microbench(
             "stateful_ddt",
             native_program(
@@ -11484,7 +12474,7 @@ mod tests {
     }
 
     fn abi_sentinel_compiler() -> FunctionCompiler {
-        FunctionCompiler::new(true, false, true, 0, None, None, 0)
+        FunctionCompiler::new(true, false, true, 0, None, None, 0).expect("ABI sentinel frame")
     }
 
     fn push_abi_sentinel_const(compiler: &mut FunctionCompiler, value: f64) -> Xmm {
@@ -11496,7 +12486,8 @@ mod tests {
     fn run_abi_sentinel_value(compiler: FunctionCompiler, ctx: &EvalContext) -> f64 {
         let bytes = compiler
             .finish_value_function()
-            .expect("finish ABI sentinel value function");
+            .expect("finish ABI sentinel value function")
+            .bytes;
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate ABI sentinel function");
         let entry = memory.ptr_at(0).expect("ABI sentinel entry point");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
@@ -11868,6 +12859,12 @@ mod tests {
     fn cmp_r64_imm32_bytes(register: Gpr, value: i32) -> Vec<u8> {
         let mut encoder = X64Encoder::new();
         encoder.cmp_r64_imm32(register, value);
+        encoder.into_bytes()
+    }
+
+    fn stack_probe_touch_bytes() -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.mov_r64_m64_base_disp32(Gpr::Rax, Gpr::R10, 0);
         encoder.into_bytes()
     }
 

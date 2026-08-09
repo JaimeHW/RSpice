@@ -5,7 +5,7 @@
 //! which invokes the assignment, contribution, and Jacobian entries inside
 //! the executable image and writes into caller-owned, preallocated buffers.
 
-use super::encoder::{ConditionCode, Gpr, X64Encoder, Xmm};
+use super::encoder::{ConditionCode, Gpr, Rel32Patch, X64Encoder, Xmm};
 use super::{CompiledX64Function, WindowsX64UnwindInfo, WindowsX64UnwindOperation};
 use crate::native::abi::NativeRuntimeStatus;
 use crate::native::model::{CodeOffset, NativeStampKernelIo};
@@ -112,7 +112,7 @@ fn compile_kernel_artifact(
         .ok_or_else(|| internal_error("native runtime status offset exceeds x64 disp32 range"))?;
 
     let mut encoder = X64Encoder::new();
-    let mut abort_branches = Vec::new();
+    let mut abort_branches: Vec<Rel32Patch> = Vec::new();
     let mut windows_unwind_operations = Vec::new();
     encoder.push_r64(Gpr::R12);
     record_windows_unwind_push(&mut windows_unwind_operations, &encoder, 12);
@@ -200,11 +200,9 @@ fn compile_kernel_artifact(
     let windows_unwind =
         windows_unwind_info(windows_unwind_prologue_size, windows_unwind_operations);
     let bytes = encoder.into_bytes();
-    super::verify_x64_function_code(&bytes, &format!("{driver_name} driver"))?;
-    Ok(CompiledX64Function {
-        bytes,
-        windows_unwind,
-    })
+    let artifact = CompiledX64Function::code_only(bytes, windows_unwind);
+    super::verify_x64_function_artifact(&artifact, &format!("{driver_name} driver"))?;
+    Ok(artifact)
 }
 
 fn current_windows_unwind_code_offset(encoder: &X64Encoder) -> u8 {
@@ -263,7 +261,7 @@ fn windows_unwind_info(
     }
 }
 
-fn emit_abort_if_failed(encoder: &mut X64Encoder, failed_offset: i32) -> usize {
+fn emit_abort_if_failed(encoder: &mut X64Encoder, failed_offset: i32) -> Rel32Patch {
     encoder.movzx_r32_m8_base_disp32(Gpr::Rax, Gpr::R12, failed_offset);
     encoder.test_r8_r8(Gpr::Rax, Gpr::Rax);
     encoder.jcc_rel32_placeholder(ConditionCode::NotEqual)
@@ -272,8 +270,8 @@ fn emit_abort_if_failed(encoder: &mut X64Encoder, failed_offset: i32) -> usize {
 fn emit_branch_if_finite(
     encoder: &mut X64Encoder,
     stamp_index: usize,
-    abort_branches: &mut Vec<usize>,
-) -> usize {
+    abort_branches: &mut Vec<Rel32Patch>,
+) -> Rel32Patch {
     const EXPONENT_MASK: u64 = 0x7ff0_0000_0000_0000;
 
     encoder.movq_r64_xmm(Gpr::R10, Xmm::Xmm0);
@@ -302,10 +300,9 @@ fn emit_entry_call(
 ) -> JitResult<()> {
     encoder.mov_r64_r64(host_ctx_arg_reg(), Gpr::R12);
     encoder.mov_r64_r64(host_vars_arg_reg(), Gpr::R13);
-    let displacement_offset = encoder.call_rel32_placeholder();
+    let call_patch = encoder.call_rel32_placeholder();
     let next_instruction = driver_image_offset
-        .checked_add(displacement_offset)
-        .and_then(|offset| offset.checked_add(std::mem::size_of::<i32>()))
+        .checked_add(call_patch.next_instruction_offset())
         .ok_or_else(|| internal_error("stamp-kernel call address overflow"))?;
     let displacement = i64::try_from(target.as_usize())
         .ok()
@@ -318,20 +315,18 @@ fn emit_entry_call(
         .ok_or_else(|| {
             internal_error("stamp-kernel call target is outside the x64 rel32 address range")
         })?;
-    encoder.patch_i32(displacement_offset, displacement);
+    encoder.patch_rel32(call_patch, displacement);
     Ok(())
 }
 
-fn patch_local_branch(encoder: &mut X64Encoder, displacement_offset: usize) -> JitResult<()> {
+fn patch_local_branch(encoder: &mut X64Encoder, patch: Rel32Patch) -> JitResult<()> {
     let target = encoder.position();
-    let next_instruction = displacement_offset
-        .checked_add(std::mem::size_of::<i32>())
-        .ok_or_else(|| internal_error("stamp-kernel branch address overflow"))?;
+    let next_instruction = patch.next_instruction_offset();
     let displacement = target
         .checked_sub(next_instruction)
         .and_then(|distance| i32::try_from(distance).ok())
         .ok_or_else(|| internal_error("stamp-kernel branch target is outside rel32 range"))?;
-    encoder.patch_i32(displacement_offset, displacement);
+    encoder.patch_rel32(patch, displacement);
     Ok(())
 }
 
