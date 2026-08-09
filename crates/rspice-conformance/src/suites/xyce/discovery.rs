@@ -464,9 +464,13 @@ impl XyceTestRunner {
         Self::validate_static_tran_analysis_contract(&netlist, &tran, print.as_ref())?;
         let timeint_conststep = Self::source_enables_constant_time_step_output(&source);
         let oracle = if scalar_measurement_only {
+            let input = Self::tran_remeasure_path_from_wrapper(&deck.path)?
+                .map(XyceScalarTranMeasurementInput::Remeasure)
+                .unwrap_or(XyceScalarTranMeasurementInput::Simulation);
             XyceStaticTranOracle::ScalarMeasurements {
                 reference_paths: scalar_measurement_reference_paths,
                 tolerance: XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+                input,
             }
         } else if let Some(reference_path) = reference_path {
             XyceStaticTranOracle::Waveform(reference_path)

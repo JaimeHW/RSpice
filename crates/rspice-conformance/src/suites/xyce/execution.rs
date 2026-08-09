@@ -4211,7 +4211,7 @@ impl XyceTestRunner {
         start: Instant,
     ) -> XyceTestResult {
         let contract = plan.result_contract();
-        let Some((measurement_reference_paths, measurement_tolerance)) =
+        let Some((measurement_reference_paths, measurement_tolerance, measurement_input)) =
             plan.scalar_measurement_oracle()
         else {
             return self.failure_result(
@@ -4223,54 +4223,76 @@ impl XyceTestRunner {
             );
         };
 
-        let transient = match self.run_transient_family_netlist(plan, netlist, start, None, None) {
-            Ok(transient) => transient,
-            Err(SimulationError::Aborted) => {
-                return self.failure_result(
-                    deck,
-                    start,
-                    contract,
-                    format!(
-                        "simulation exceeded timeout ({}ms)",
-                        self.config.max_time_per_test_ms
-                    ),
-                    Vec::new(),
-                );
+        let measurements = match measurement_input {
+            XyceScalarTranMeasurementInput::Simulation => {
+                let transient = match self
+                    .run_transient_family_netlist(plan, netlist, start, None, None)
+                {
+                    Ok(transient) => transient,
+                    Err(SimulationError::Aborted) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!(
+                                "simulation exceeded timeout ({}ms)",
+                                self.config.max_time_per_test_ms
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                    Err(error) if Self::is_expected_unsupported_runtime_error(&error) => {
+                        return self.expected_unsupported_result(
+                            deck,
+                            start,
+                            "unsupported_xyce_runtime",
+                            &format!(
+                                "RSpice runtime does not yet support this scalar TRAN measurement deck: {error}"
+                            ),
+                        );
+                    }
+                    Err(error) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!("scalar TRAN measurement simulation error: {error}"),
+                            Vec::new(),
+                        );
+                    }
+                };
+                if let Err(error) = Self::validate_transient_result_time_grid(&transient) {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("scalar TRAN measurement result grid is invalid: {error}"),
+                        Vec::new(),
+                    );
+                }
+                rspice_core::analysis::evaluate_tran_measurements(netlist, &transient)
             }
-            Err(error) if Self::is_expected_unsupported_runtime_error(&error) => {
-                return self.expected_unsupported_result(
-                    deck,
-                    start,
-                    "unsupported_xyce_runtime",
-                    &format!(
-                        "RSpice runtime does not yet support this scalar TRAN measurement deck: {error}"
-                    ),
-                );
-            }
-            Err(error) => {
-                return self.failure_result(
-                    deck,
-                    start,
-                    contract,
-                    format!("scalar TRAN measurement simulation error: {error}"),
-                    Vec::new(),
-                );
+            XyceScalarTranMeasurementInput::Remeasure(input_path) => {
+                let input = match Self::load_tran_remeasure_input(input_path) {
+                    Ok(input) => input,
+                    Err(error) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!("scalar TRAN remeasure input error: {error}"),
+                            Vec::new(),
+                        );
+                    }
+                };
+                let signals = input.signal_slices();
+                rspice_core::analysis::evaluate_tran_remeasurements(netlist, &input.time, &signals)
             }
         };
-        if let Err(error) = Self::validate_transient_result_time_grid(&transient) {
-            return self.failure_result(
-                deck,
-                start,
-                contract,
-                format!("scalar TRAN measurement result grid is invalid: {error}"),
-                Vec::new(),
-            );
-        }
 
-        // Keep post-processing inside the same per-test budget used by the
-        // adaptive transient run.  Reusing the original start instant avoids
-        // granting measurement evaluation or file comparison a fresh
-        // deadline after simulation completes.
+        // Keep input preparation or simulation and post-processing inside one
+        // per-test budget. Reusing the original start instant avoids granting
+        // measurement evaluation or file comparison a fresh deadline.
         let deadline = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         if deadline.is_aborted() {
             return self.failure_result(
@@ -4284,7 +4306,6 @@ impl XyceTestRunner {
                 Vec::new(),
             );
         }
-        let measurements = rspice_core::analysis::evaluate_tran_measurements(netlist, &transient);
         let mismatches = match self.compare_analysis_measurement_outputs(
             measurement_reference_paths,
             &[],

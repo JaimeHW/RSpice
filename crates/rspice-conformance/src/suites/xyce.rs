@@ -3797,7 +3797,14 @@ enum XyceStaticTranOracle {
     ScalarMeasurements {
         reference_paths: Vec<PathBuf>,
         tolerance: XyceFileCompareTolerance,
+        input: XyceScalarTranMeasurementInput,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum XyceScalarTranMeasurementInput {
+    Simulation,
+    Remeasure(PathBuf),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3870,12 +3877,19 @@ impl XyceStaticTranPlan {
         }
     }
 
-    fn scalar_measurement_oracle(&self) -> Option<(&[PathBuf], XyceFileCompareTolerance)> {
+    fn scalar_measurement_oracle(
+        &self,
+    ) -> Option<(
+        &[PathBuf],
+        XyceFileCompareTolerance,
+        &XyceScalarTranMeasurementInput,
+    )> {
         match &self.oracle {
             XyceStaticTranOracle::ScalarMeasurements {
                 reference_paths,
                 tolerance,
-            } => Some((reference_paths, *tolerance)),
+                input,
+            } => Some((reference_paths, *tolerance, input)),
             XyceStaticTranOracle::None | XyceStaticTranOracle::Waveform(_) => None,
         }
     }
@@ -3887,7 +3901,9 @@ impl XyceStaticTranPlan {
     ) -> Result<(), String> {
         match &self.oracle {
             XyceStaticTranOracle::ScalarMeasurements {
-                reference_paths, ..
+                reference_paths,
+                input,
+                ..
             } => {
                 if purpose != XyceStaticTranPlanPurpose::AbsoluteOracle
                     || !requires_wrapper
@@ -3900,6 +3916,10 @@ impl XyceStaticTranPlan {
                         .extension()
                         .is_none_or(|extension| !extension.eq_ignore_ascii_case("mt0"))
                     || !reference_paths[0].is_file()
+                    || matches!(
+                        input,
+                        XyceScalarTranMeasurementInput::Remeasure(path) if !path.is_file()
+                    )
                 {
                     return Err(
                         "scalar TRAN measurement oracle requires an absolute, wrapper-origin, unstepped, pointwise WrapperStatic plan with one checked-in .mt0 file and no output override"
@@ -3978,7 +3998,9 @@ impl XyceStaticTranPlan {
                 Ok(())
             }
             XyceStaticTranOracle::ScalarMeasurements {
-                reference_paths, ..
+                reference_paths,
+                input,
+                ..
             } => {
                 if reference_paths.len() != 1
                     || !reference_paths[0].is_file()
@@ -3986,6 +4008,10 @@ impl XyceStaticTranPlan {
                     || self.output_override
                     || self.contract != XyceStaticTranContract::WrapperStatic
                     || self.comparison_mode != XyceStaticTranComparisonMode::Pointwise
+                    || matches!(
+                        input,
+                        XyceScalarTranMeasurementInput::Remeasure(path) if !path.is_file()
+                    )
                 {
                     return Err(
                         "scalar TRAN execution requires one checked oracle, no STEP/output override, and the pointwise WrapperStatic contract"
@@ -6146,6 +6172,21 @@ impl XyceLeadCurrentTerminal {
 struct XycePrnTable {
     columns: Vec<String>,
     rows: Vec<Vec<f64>>,
+}
+
+#[derive(Debug)]
+struct XyceTranRemeasureInput {
+    time: Vec<Value>,
+    signals: HashMap<String, Vec<Value>>,
+}
+
+impl XyceTranRemeasureInput {
+    fn signal_slices(&self) -> HashMap<String, &[Value]> {
+        self.signals
+            .iter()
+            .map(|(name, values)| (name.clone(), values.as_slice()))
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -5300,12 +5300,13 @@ R1 out 0 1\n\
         .static_tran_plan_for_deck(&deck)
         .expect("ordinary wrapper scalar TRAN plan qualifies");
     assert!(plan.print.is_none());
-    let (reference_paths, tolerance) = plan
+    let (reference_paths, tolerance, input) = plan
         .scalar_measurement_oracle()
         .expect("plan has a scalar measurement oracle");
     assert_eq!(reference_paths.len(), 1);
     assert!(XyceTestRunner::same_path(&reference_paths[0], &output_path));
     assert_eq!(tolerance, XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT);
+    assert_eq!(input, &XyceScalarTranMeasurementInput::Simulation);
     assert_eq!(plan.result_contract(), "wrapper_scalar_measure_tran");
 
     let matching = runner.run_test(&deck_path);
@@ -5348,6 +5349,135 @@ R1 out 0 1\n\
     );
 
     fs::remove_dir_all(&root).expect("remove scalar TRAN execution fixture");
+}
+
+#[test]
+fn scalar_tran_measurement_plan_replays_wrapper_declared_input() {
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-scalar-tran-remeasure-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos()
+    ));
+    let relative = "Netlists/MEASURE/serialized-adapter.cir";
+    let deck_path = root.join(relative);
+    let deck_dir = deck_path.parent().expect("deck parent");
+    let output_path = root.join("OutputData/MEASURE/serialized-adapter.cir.mt0");
+    let replay_path = deck_dir.join("serialized-adapter.cir.remeasure.prn");
+    fs::create_dir_all(deck_dir).expect("create remeasure fixture directory");
+    fs::create_dir_all(output_path.parent().expect("output parent"))
+        .expect("create remeasure output directory");
+    fs::write(
+        &deck_path,
+        "serialized TRAN adapter execution\n\
+V1 out 0 1\n\
+R1 out 0 1\n\
+.TRAN 0 1m\n\
+.PRINT TRAN V(out)\n\
+.MEASURE TRAN AVG_OUT AVG V(out)\n\
+.END\n",
+    )
+    .expect("write remeasure deck");
+    fs::write(
+        deck_dir.join("serialized-adapterGSfile"),
+        "In OutputMgr::remeasure\n\
+file to reprocess through measure and/or fft functions: serialized-adapter.cir.remeasure.prn\n",
+    )
+    .expect("write remeasure transcript");
+    fs::write(
+        &replay_path,
+        "Index TIME V(out)\n\
+0 0.0 2.0\n\
+1 0.001 2.0\n\
+End of Xyce(TM) Simulation\n",
+    )
+    .expect("write remeasure input");
+    fs::write(&output_path, "AVG_OUT = 2.000000e+00\n").expect("write remeasure mt0");
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!("{relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+    )
+    .expect("write remeasure wrapper provenance");
+
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let deck = XyceDeck {
+        path: deck_path.clone(),
+        relative_path: relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let plan = runner
+        .static_tran_plan_for_deck(&deck)
+        .expect("wrapper-declared remeasure plan qualifies");
+    let (_, _, input) = plan
+        .scalar_measurement_oracle()
+        .expect("remeasure plan has scalar oracle");
+    let XyceScalarTranMeasurementInput::Remeasure(discovered_path) = input else {
+        panic!("wrapper transcript should select typed remeasure input");
+    };
+    assert!(XyceTestRunner::same_path(discovered_path, &replay_path));
+
+    let result = runner.run_test(&deck_path);
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "measurement must use serialized value 2 rather than simulated value 1: {result:?}"
+    );
+
+    fs::remove_dir_all(&root).expect("remove remeasure execution fixture");
+}
+
+#[test]
+fn transient_remeasure_table_rejects_invalid_axis_and_ambiguous_columns() {
+    let missing_time = XycePrnTable {
+        columns: vec!["Index".to_string(), "V(out)".to_string()],
+        rows: vec![vec![0.0, 1.0]],
+    };
+    let error = XyceTestRunner::tran_remeasure_input_from_table(missing_time)
+        .expect_err("remeasure input requires TIME after metadata");
+    assert!(error.contains("TIME"), "{error}");
+
+    let ambiguous = XycePrnTable {
+        columns: vec![
+            "TIME".to_string(),
+            "V(X1:OUT)".to_string(),
+            "v(x1.out)".to_string(),
+        ],
+        rows: vec![vec![0.0, 1.0, 2.0], vec![1.0, 1.0, 2.0]],
+    };
+    let error = XyceTestRunner::tran_remeasure_input_from_table(ambiguous)
+        .expect_err("canonical signal collisions must fail closed");
+    assert!(error.contains("normalize"), "{error}");
+
+    let reset_axis = XycePrnTable {
+        columns: vec!["TIME".to_string(), "V(out)".to_string()],
+        rows: vec![vec![1.0, 1.0], vec![0.0, 2.0]],
+    };
+    let error = XyceTestRunner::tran_remeasure_input_from_table(reset_axis)
+        .expect_err("untyped stepped resets must fail closed");
+    assert!(error.contains("decreases"), "{error}");
+
+    let non_finite_signal = XycePrnTable {
+        columns: vec!["TIME".to_string(), "V(out)".to_string()],
+        rows: vec![vec![0.0, Value::INFINITY]],
+    };
+    let error = XyceTestRunner::tran_remeasure_input_from_table(non_finite_signal)
+        .expect_err("serialized signal samples must be finite");
+    assert!(error.contains("V(out)"), "{error}");
+    assert!(error.contains("non-finite"), "{error}");
+}
+
+#[test]
+fn transient_remeasure_table_accepts_xyce_axis_positions_and_equal_times() {
+    let table = XycePrnTable {
+        columns: vec!["A".to_string(), "TIME".to_string(), "V(out)".to_string()],
+        rows: vec![vec![1.0, 0.0, 2.0], vec![3.0, 0.0, 4.0]],
+    };
+    let input = XyceTestRunner::tran_remeasure_input_from_table(table)
+        .expect("TIME in the second column and equal adjacent values are valid in Xyce");
+    assert_eq!(input.time, vec![0.0, 0.0]);
+    assert_eq!(input.signals["A"], vec![1.0, 3.0]);
+    assert_eq!(input.signals["V(out)"], vec![2.0, 4.0]);
 }
 
 #[test]

@@ -6661,6 +6661,7 @@ fn test_xyce_scalar_transient_measurement_artifact_oracles() {
         "Netlists/MEASURE/ErrorFuncTest.cir",
         "Netlists/MEASURE/ErrorTest.cir",
         "Netlists/MEASURE/FindWhenVariableTest.cir",
+        "Netlists/MEASURE/REMEASURE/ErrorFuncTest.cir",
         "Netlists/MEASURE/TrigTargTest.cir",
         "Netlists/Certification_Tests/BUG_1962/measure.cir",
     ] {

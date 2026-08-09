@@ -4904,6 +4904,251 @@ impl XyceTestRunner {
         candidate.is_file().then_some(candidate)
     }
 
+    /// Recover a transient `-remeasure` input from the checked-in wrapper
+    /// transcript.
+    ///
+    /// Wrapper transcripts are the authoritative provenance for whether a
+    /// scalar artifact came from a normal simulator run or from `-remeasure`.
+    /// Deriving the input from that transcript avoids inferring semantics from
+    /// a directory or deck name.
+    pub(super) fn tran_remeasure_path_from_wrapper(
+        deck_path: &Path,
+    ) -> Result<Option<PathBuf>, String> {
+        const REMEASURE_INPUT_LABEL: &str =
+            "file to reprocess through measure and/or fft functions";
+
+        let parent = deck_path
+            .parent()
+            .ok_or_else(|| format!("{} has no parent directory", deck_path.display()))?;
+        let stem = deck_path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .ok_or_else(|| format!("{} has no UTF-8 file stem", deck_path.display()))?;
+        let transcript_path = parent.join(format!("{stem}GSfile"));
+        if !transcript_path.is_file() {
+            return Ok(None);
+        }
+
+        let transcript = fs::read_to_string(&transcript_path)
+            .map_err(|error| format!("{}: {error}", transcript_path.display()))?;
+        let mut declared_input = None::<String>;
+        for line in transcript.lines() {
+            let Some((label, value)) = line.trim().split_once(':') else {
+                continue;
+            };
+            if !label.trim().eq_ignore_ascii_case(REMEASURE_INPUT_LABEL) {
+                continue;
+            }
+            let value = value.trim();
+            if value.is_empty() {
+                return Err(format!(
+                    "{} declares an empty transient remeasure input",
+                    transcript_path.display()
+                ));
+            }
+            let value = if let Some(quote) = value
+                .chars()
+                .next()
+                .filter(|quote| matches!(quote, '\'' | '"'))
+            {
+                let Some(unquoted) = value
+                    .strip_prefix(quote)
+                    .and_then(|value| value.strip_suffix(quote))
+                else {
+                    return Err(format!(
+                        "{} has an unterminated quoted remeasure input",
+                        transcript_path.display()
+                    ));
+                };
+                unquoted.to_string()
+            } else if value.ends_with(['\'', '"']) {
+                return Err(format!(
+                    "{} has an unterminated quoted remeasure input",
+                    transcript_path.display()
+                ));
+            } else {
+                value.to_string()
+            };
+            if value.is_empty() {
+                return Err(format!(
+                    "{} declares an empty transient remeasure input",
+                    transcript_path.display()
+                ));
+            }
+            if declared_input
+                .as_ref()
+                .is_some_and(|existing| existing != &value)
+            {
+                return Err(format!(
+                    "{} declares multiple transient remeasure inputs",
+                    transcript_path.display()
+                ));
+            }
+            declared_input = Some(value);
+        }
+        let Some(declared_input) = declared_input else {
+            return Ok(None);
+        };
+
+        let declared_path = Path::new(&declared_input);
+        if declared_path.is_absolute() {
+            return Err(format!(
+                "{} declares a non-portable absolute remeasure input {}",
+                transcript_path.display(),
+                declared_path.display()
+            ));
+        }
+        let canonical_parent = parent.canonicalize().map_err(|error| {
+            format!(
+                "could not canonicalize remeasure directory {}: {error}",
+                parent.display()
+            )
+        })?;
+        let input_path = parent.join(declared_path).canonicalize().map_err(|error| {
+            format!(
+                "could not resolve remeasure input '{}' declared by {}: {error}",
+                declared_path.display(),
+                transcript_path.display()
+            )
+        })?;
+        if !input_path.starts_with(&canonical_parent) {
+            return Err(format!(
+                "remeasure input {} escapes deck directory {}",
+                input_path.display(),
+                canonical_parent.display()
+            ));
+        }
+
+        let extension = input_path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or_default();
+        if !["prn", "csv", "csd"]
+            .iter()
+            .any(|supported| extension.eq_ignore_ascii_case(supported))
+        {
+            return Err(format!(
+                "transient remeasure input {} has unsupported format",
+                input_path.display()
+            ));
+        }
+        Ok(Some(input_path))
+    }
+
+    pub(super) fn load_tran_remeasure_input(
+        input_path: &Path,
+    ) -> Result<XyceTranRemeasureInput, String> {
+        let extension = input_path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or_default();
+        let table = if extension.eq_ignore_ascii_case("prn") {
+            Self::parse_prn_file(input_path)?
+        } else if extension.eq_ignore_ascii_case("csv") {
+            Self::parse_csv_file(input_path)?
+        } else if extension.eq_ignore_ascii_case("csd") {
+            Self::parse_tran_csd_file(input_path)?
+        } else {
+            return Err(format!(
+                "transient remeasure input {} has unsupported format",
+                input_path.display()
+            ));
+        };
+        Self::tran_remeasure_input_from_table(table)
+    }
+
+    pub(super) fn tran_remeasure_input_from_table(
+        table: XycePrnTable,
+    ) -> Result<XyceTranRemeasureInput, String> {
+        let time_column = table
+            .columns
+            .iter()
+            .take(3)
+            .position(|column| Self::normalize_probe(column) == "time")
+            .ok_or_else(|| {
+                format!(
+                    "expected Xyce transient remeasure input to contain TIME among its first three columns, got columns {:?}",
+                    table.columns
+                )
+            })?;
+        if table.rows.is_empty() {
+            return Err("transient remeasure input has no serialized rows".to_string());
+        }
+        if table.rows.len() > MAX_NATIVE_TRAN_ORACLE_STEPS as usize {
+            return Err(format!(
+                "transient remeasure input has {} rows, exceeding the {:.0}-row resource limit",
+                table.rows.len(),
+                MAX_NATIVE_TRAN_ORACLE_STEPS
+            ));
+        }
+
+        let mut time = Vec::with_capacity(table.rows.len());
+        let mut signals =
+            HashMap::<String, Vec<Value>>::with_capacity(table.columns.len().saturating_sub(1));
+        let mut canonical_columns = HashMap::<String, String>::new();
+        let canonical_time = rspice_core::analysis::canonical_measure_signal_name("TIME");
+        for (column_index, column) in table.columns.iter().enumerate() {
+            if column_index == time_column {
+                continue;
+            }
+            let canonical = rspice_core::analysis::canonical_measure_signal_name(column);
+            if canonical == canonical_time {
+                return Err(format!(
+                    "transient remeasure input contains more than one TIME column: '{}' and '{}'",
+                    table.columns[time_column], column
+                ));
+            }
+            if let Some(existing) = canonical_columns.insert(canonical.clone(), column.clone()) {
+                return Err(format!(
+                    "transient remeasure columns '{existing}' and '{column}' both normalize to '{canonical}'"
+                ));
+            }
+            signals.insert(column.clone(), Vec::with_capacity(table.rows.len()));
+        }
+
+        let mut previous_time = None;
+        for (row_index, row) in table.rows.iter().enumerate() {
+            if row.len() != table.columns.len() {
+                return Err(format!(
+                    "transient remeasure row {row_index} has {} columns, expected {}",
+                    row.len(),
+                    table.columns.len()
+                ));
+            }
+            let row_time = row[time_column];
+            if !row_time.is_finite() {
+                return Err(format!(
+                    "transient remeasure row {row_index} has non-finite TIME {row_time}"
+                ));
+            }
+            if previous_time.is_some_and(|previous| row_time < previous) {
+                return Err(format!(
+                    "transient remeasure TIME decreases at row {row_index}"
+                ));
+            }
+            time.push(row_time);
+            previous_time = Some(row_time);
+
+            for (column_index, column) in table.columns.iter().enumerate() {
+                if column_index == time_column {
+                    continue;
+                }
+                let value = row[column_index];
+                if !value.is_finite() {
+                    return Err(format!(
+                        "transient remeasure row {row_index} column '{column}' contains non-finite value {value}"
+                    ));
+                }
+                signals
+                    .get_mut(column)
+                    .expect("serialized column allocated above")
+                    .push(value);
+            }
+        }
+
+        Ok(XyceTranRemeasureInput { time, signals })
+    }
+
     pub(super) fn static_output_reference_path(
         &self,
         deck_path: &Path,
