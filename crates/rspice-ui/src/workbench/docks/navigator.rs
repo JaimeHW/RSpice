@@ -841,6 +841,13 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         .ctx()
         .data(|data| data.get_temp::<ResultsBrowserSort>(results_browser_sort_id()))
         .unwrap_or_default();
+    let scope = ui
+        .ctx()
+        .data(|data| data.get_temp::<ResultsBrowserScope>(results_browser_scope_id()))
+        .unwrap_or_default();
+    // Snapshots keep the scope predicates borrow-free inside the run map.
+    let favorite_signals = app.state.ui.results.favorite_signals.clone();
+    let recent_signals = app.state.ui.results.recent_signals.clone();
     let active_run = app.state.simulation.active_run_idx;
     let active_analysis = app.state.simulation.active_analysis_idx;
     let selected_trace = app
@@ -893,6 +900,15 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                 ResultsBrowserKind::Voltage => !current,
                             }
                         })
+                        .filter(|(_, waveform)| match scope {
+                            ResultsBrowserScope::All => true,
+                            ResultsBrowserScope::Favorites => {
+                                favorite_signals.contains(&waveform.name)
+                            }
+                            ResultsBrowserScope::Recent => recent_signals
+                                .iter()
+                                .any(|recent| recent == &waveform.name),
+                        })
                         .map(|(waveform_index, waveform)| {
                             let unit =
                                 crate::workbench::documents::result_document::browser_signal_unit(
@@ -922,7 +938,15 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             }
                         })
                         .collect::<Vec<_>>();
-                    if sort == ResultsBrowserSort::Name {
+                    if scope == ResultsBrowserScope::Recent {
+                        // Recent means recency order; the sort facet yields.
+                        signals.sort_by_key(|signal| {
+                            recent_signals
+                                .iter()
+                                .position(|recent| recent == &signal.name)
+                                .unwrap_or(usize::MAX)
+                        });
+                    } else if sort == ResultsBrowserSort::Name {
                         signals.sort_by(|left, right| left.name.cmp(&right.name));
                     }
                     let matches_analysis = query.is_empty()
@@ -1019,9 +1043,10 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             }
         });
     }
-    // The mockup's status band: one line owns the live inventory count —
-    // "matching / total" while a query filters, a plain total at rest —
-    // with the provenance sentence riding its tooltip.
+    // The mockup's status band: the signals tab owns the scope control on
+    // the left — All | Favorites | Recent over the session's real star and
+    // recency state — and every tab keeps the live inventory count on the
+    // right, with the provenance sentence riding its tooltip.
     {
         let t = Tokens::get(ui.ctx());
         let filtering = !query.is_empty();
@@ -1032,22 +1057,63 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         };
         let count_copy = if filtering {
             format!("{shown} matching")
+        } else if tab == ResultsBrowserTab::Signals {
+            match scope {
+                ResultsBrowserScope::All => format!("{shown} {noun}"),
+                ResultsBrowserScope::Favorites => format!("{shown} starred"),
+                ResultsBrowserScope::Recent => format!("{shown} recent"),
+            }
         } else {
             format!("{shown} {noun}")
         };
         ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), 22.0),
-            egui::Layout::right_to_left(egui::Align::Center),
+            egui::vec2(ui.available_width(), 24.0),
+            egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
-                ui.add_space(8.0);
-                ui.label(
-                    egui::RichText::new(count_copy)
-                        .font(theme::mono(tokens::FS_MICRO, FontWeight::Medium))
-                        .color(t.color.text_faint),
-                )
-                .on_hover_text(
-                    "Live inventory of the retained evidence behind this tab · exact metadata · stable IDs",
-                );
+                ui.add_space(6.0);
+                if tab == ResultsBrowserTab::Signals {
+                    ui.spacing_mut().item_spacing.x = 3.0;
+                    let mut scope_now = scope;
+                    for (value, label, purpose) in [
+                        (
+                            ResultsBrowserScope::All,
+                            "All",
+                            "Every signal of the active dataset",
+                        ),
+                        (
+                            ResultsBrowserScope::Favorites,
+                            "Favorites",
+                            "Signals starred in this session",
+                        ),
+                        (
+                            ResultsBrowserScope::Recent,
+                            "Recent",
+                            "Signals selected or shown most recently",
+                        ),
+                    ] {
+                        let response = crate::ui::widgets::chip(ui, label, scope_now == value)
+                            .on_hover_text(purpose);
+                        if response.clicked() {
+                            scope_now = value;
+                        }
+                    }
+                    if scope_now != scope {
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(results_browser_scope_id(), scope_now);
+                        });
+                    }
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_space(8.0);
+                    ui.label(
+                        egui::RichText::new(count_copy)
+                            .font(theme::mono(tokens::FS_MICRO, FontWeight::Medium))
+                            .color(t.color.text_faint),
+                    )
+                    .on_hover_text(
+                        "Live inventory of the retained evidence behind this tab · exact metadata · stable IDs",
+                    );
+                });
             },
         );
     }
@@ -1104,6 +1170,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                     color,
                                     signal_selected,
                                     signal.visible,
+                                    Some(app.state.ui.results.is_favorite_signal(&signal.name)),
                                 );
                                 if responses.visibility.clicked() {
                                     crate::workbench::documents::result_document::toggle_visibility(
@@ -1111,6 +1178,16 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                         analysis.analysis_index,
                                         signal.waveform_index,
                                     );
+                                }
+                                if responses
+                                    .favorite
+                                    .as_ref()
+                                    .is_some_and(|star| star.clicked())
+                                {
+                                    app.state
+                                        .ui
+                                        .results
+                                        .toggle_favorite_signal(&signal.name);
                                 }
                                 if responses.selection.clicked() {
                                     select_result_signal(
@@ -1130,7 +1207,17 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             if app.state.simulation.runs.is_empty() {
                                 "Run a simulation to create an immutable result dataset."
                             } else {
-                                "No signal of the active dataset matches this filter."
+                                match scope {
+                                    ResultsBrowserScope::Favorites => {
+                                        "Star a signal to build the Favorites scope."
+                                    }
+                                    ResultsBrowserScope::Recent => {
+                                        "Signals you select or show collect here."
+                                    }
+                                    ResultsBrowserScope::All => {
+                                        "No signal of the active dataset matches this filter."
+                                    }
+                                }
                             },
                         );
                     }
@@ -1219,6 +1306,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             t.color.traces[*expression_index % t.color.traces.len()],
                             false,
                             expression.visible,
+                            None,
                         );
                         if responses.visibility.clicked() {
                             toggled_expression = Some(*expression_index);
@@ -1318,12 +1406,27 @@ enum ResultsBrowserSort {
     Name,
 }
 
+/// Working-set scope of the signals tab: everything, the user's starred
+/// signals, or the signals touched most recently. Backed by the real
+/// favorite/recency state on `ResultsState`, never a static filter.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum ResultsBrowserScope {
+    #[default]
+    All,
+    Favorites,
+    Recent,
+}
+
 fn results_browser_kind_id() -> egui::Id {
     egui::Id::new("workbench.results.browser-kind-facet")
 }
 
 fn results_browser_sort_id() -> egui::Id {
     egui::Id::new("workbench.results.browser-sort-facet")
+}
+
+fn results_browser_scope_id() -> egui::Id {
+    egui::Id::new("workbench.results.browser-scope")
 }
 
 /// The mockup's data-browser tab band: three equal columns on one 30 px
@@ -1680,6 +1783,8 @@ fn expression_header(ui: &mut Ui, app: &mut RSpiceApp) {
 struct SignalRowResponses {
     selection: egui::Response,
     visibility: egui::Response,
+    /// Hover-revealed star toggle; present only while the row shows it.
+    favorite: Option<egui::Response>,
 }
 
 fn signal_row(
@@ -1690,6 +1795,7 @@ fn signal_row(
     color: egui::Color32,
     selected: bool,
     visible: bool,
+    favorite: Option<bool>,
 ) -> SignalRowResponses {
     let t = Tokens::get(ui.ctx());
     let row_height = responsive_result_control_height(SIGNAL_ROW_HEIGHT, t.metrics.ctl_h);
@@ -1697,6 +1803,9 @@ fn signal_row(
         egui::vec2(ui.available_width(), row_height),
         egui::Sense::hover(),
     );
+    // `None` means this row kind has no Favorites membership (expressions).
+    let star_shown =
+        favorite == Some(true) || (favorite.is_some() && ui.rect_contains_pointer(rect));
     let visibility_rect = egui::Rect::from_center_size(
         egui::pos2(rect.left() + 19.0, rect.center().y),
         egui::vec2(26.0, row_height),
@@ -1765,15 +1874,57 @@ fn signal_row(
             t.color.text_dim
         },
     );
+    // The star is a row affordance, not a standing column: it surfaces on
+    // hover and stays put once the signal is a favorite, and the preview
+    // value cedes exactly its width in those states.
+    let value_right = if star_shown {
+        rect.right() - 26.0
+    } else {
+        rect.right() - 8.0
+    };
     if let Some(value) = value {
         ui.painter().text(
-            egui::pos2(rect.right() - 8.0, rect.center().y),
+            egui::pos2(value_right, rect.center().y),
             egui::Align2::RIGHT_CENTER,
             value,
             theme::mono(tokens::FS_0, FontWeight::Regular),
             t.color.text_faint,
         );
     }
+    let favorite_response = star_shown.then(|| {
+        let starred = favorite == Some(true);
+        let star_rect = egui::Rect::from_center_size(
+            egui::pos2(rect.right() - 14.0, rect.center().y),
+            egui::vec2(18.0, row_height),
+        )
+        .intersect(rect);
+        let response = ui.interact(star_rect, id.with("favorite"), egui::Sense::click());
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::Button,
+                ui.is_enabled(),
+                starred,
+                format!("{name} favorite"),
+            )
+        });
+        ui.painter().text(
+            star_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            if starred { "★" } else { "☆" },
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            if starred {
+                t.color.accent
+            } else {
+                t.color.text_faint
+            },
+        );
+        theme::paint_focus_ring(ui, &response, star_rect);
+        response.on_hover_text(if starred {
+            format!("Unstar {name}")
+        } else {
+            format!("Star {name}")
+        })
+    });
     theme::paint_focus_ring(ui, &visibility, visibility_rect);
     theme::paint_focus_ring(ui, &selection, selection_rect);
     let visibility = visibility.on_hover_text(if visible {
@@ -1785,6 +1936,7 @@ fn signal_row(
     SignalRowResponses {
         selection,
         visibility,
+        favorite: favorite_response,
     }
 }
 
@@ -1853,7 +2005,10 @@ fn select_result_signal(
     // next Results frame cannot clear the selection as if it belonged to the
     // previously active dataset.
     crate::workbench::documents::result_document::prepare_viewer_state(app);
+    let name = selected.source_name().to_owned();
     app.state.ui.results.selected_trace = Some(selected);
+    // Selecting a trace is a deliberate act; feed the browser's Recent scope.
+    app.state.ui.results.note_recent_signal(&name);
     true
 }
 

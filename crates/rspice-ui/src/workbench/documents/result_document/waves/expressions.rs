@@ -562,6 +562,7 @@ pub(crate) fn toggle_visibility(
         return;
     };
     let mut name: Option<String> = None;
+    let mut now_visible = false;
     if let Some(waveform) = state
         .simulation
         .runs
@@ -570,7 +571,12 @@ pub(crate) fn toggle_visibility(
         .and_then(|analysis| analysis.waveforms.get_mut(waveform_index))
     {
         waveform.visible = !waveform.visible;
+        now_visible = waveform.visible;
         name = Some(waveform.name.clone());
+    }
+    // Revealing a trace is a deliberate act; feed the browser's Recent scope.
+    if now_visible && let Some(name) = &name {
+        state.ui.results.note_recent_signal(name);
     }
     // Mirror into the live waveform list when this is the active analysis.
     if state.simulation.active_analysis_idx == Some(analysis_index)

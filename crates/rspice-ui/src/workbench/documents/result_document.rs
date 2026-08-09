@@ -536,6 +536,13 @@ pub struct ResultsState {
     pub(crate) selected_trace: Option<SelectedResultTrace>,
     /// User-placed markers across every waveform strip.
     pub markers: Vec<ResultMarker>,
+    /// Signals starred in the results data browser. A deliberate,
+    /// session-scoped mark like `markers`, keyed by retained waveform name:
+    /// the browser's Favorites scope reads exactly this set.
+    pub(crate) favorite_signals: std::collections::BTreeSet<String>,
+    /// Most-recent-first waveform names the user selected or revealed,
+    /// deduplicated and bounded: the browser's Recent scope is this order.
+    pub(crate) recent_signals: Vec<String>,
     /// Id allocator for `markers`. Monotonic within a session so a marker
     /// label never silently changes meaning after a deletion.
     next_marker_id: u32,
@@ -958,6 +965,31 @@ impl ResultsState {
         page_id: crate::results::visualization_document::PageId,
     ) {
         self.persistent_document_pages.insert(document_id, page_id);
+    }
+
+    /// Flip one signal's membership in the browser's Favorites scope.
+    pub(crate) fn toggle_favorite_signal(&mut self, name: &str) {
+        if !self.favorite_signals.remove(name) {
+            self.favorite_signals.insert(name.to_owned());
+        }
+    }
+
+    pub(crate) fn is_favorite_signal(&self, name: &str) -> bool {
+        self.favorite_signals.contains(name)
+    }
+
+    /// Record a deliberate signal interaction for the Recent scope: front
+    /// insertion, deduplicated, bounded so the scope stays a shortlist.
+    pub(crate) fn note_recent_signal(&mut self, name: &str) {
+        const RECENT_SIGNAL_CAP: usize = 24;
+        self.recent_signals.retain(|recent| recent != name);
+        self.recent_signals.insert(0, name.to_owned());
+        self.recent_signals.truncate(RECENT_SIGNAL_CAP);
+    }
+
+    /// Position in the Recent shortlist; `None` when never noted.
+    pub(crate) fn recent_signal_rank(&self, name: &str) -> Option<usize> {
+        self.recent_signals.iter().position(|recent| recent == name)
     }
 
     /// The zoom/pan override for a single-pane plot.

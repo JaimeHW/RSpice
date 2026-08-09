@@ -1310,3 +1310,31 @@ fn browser_classification_reads_the_accessor_through_derived_wrappers() {
         assert_eq!(browser_signal_is_current(name), current, "{name}");
     }
 }
+
+#[test]
+fn favorite_toggle_is_a_strict_membership_flip() {
+    let mut state = AppState::default();
+    let results = &mut state.ui.results;
+    assert!(!results.is_favorite_signal("V(out)"));
+    results.toggle_favorite_signal("V(out)");
+    assert!(results.is_favorite_signal("V(out)"));
+    results.toggle_favorite_signal("V(out)");
+    assert!(!results.is_favorite_signal("V(out)"));
+}
+
+#[test]
+fn recent_signals_front_insert_deduplicate_and_age_out() {
+    let mut state = AppState::default();
+    let results = &mut state.ui.results;
+    for index in 0..30 {
+        results.note_recent_signal(&format!("V(n{index})"));
+    }
+    // Re-noting an older name moves it to the front without duplicating it.
+    results.note_recent_signal("V(n20)");
+    assert_eq!(results.recent_signal_rank("V(n20)"), Some(0));
+    assert_eq!(results.recent_signal_rank("V(n29)"), Some(1));
+    // The shortlist is bounded: the oldest names have aged out entirely.
+    assert!(results.recent_signal_rank("V(n6)").is_some());
+    assert_eq!(results.recent_signal_rank("V(n5)"), None);
+    assert_eq!(results.recent_signal_rank("V(n0)"), None);
+}
