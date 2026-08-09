@@ -132,84 +132,80 @@ fn strip_model(cloud: &CloudSessionSnapshot, availability: CloudAccountAvailabil
             error: None,
             actions: Vec::new(),
         },
-        CloudAccountAvailability::BrowserPending => StripModel {
-            title: signed_out_title,
-            detail: "Browser sign-in arrives with the hosted deployment.".to_owned(),
-            meta: "Use the desktop application to sign in and manage licensing today.".to_owned(),
-            avatar: "—".to_owned(),
-            badge: ("LOCAL / OFFLINE".to_owned(), BadgeTone::Warn),
-            error: None,
-            actions: Vec::new(),
-        },
-        CloudAccountAvailability::Native => match &cloud.phase {
-            CloudSessionPhase::SignedOut { last_error } => StripModel {
-                title: signed_out_title,
-                detail: "Sign in to connect licensing, web publishing, and collaboration."
-                    .to_owned(),
-                meta: "Signing in opens your browser; RSpice never sees your password.".to_owned(),
-                avatar: "—".to_owned(),
-                badge: ("LOCAL / OFFLINE".to_owned(), BadgeTone::Warn),
-                error: last_error.clone(),
-                actions: vec![AccountAction::SignIn],
-            },
-            CloudSessionPhase::WaitingForBrowser => StripModel {
-                title: "Waiting for the browser…".to_owned(),
-                detail: "Complete sign-in in the browser window that just opened.".to_owned(),
-                meta: "Nothing happens in RSpice until the browser hands the sign-in back."
-                    .to_owned(),
-                avatar: "…".to_owned(),
-                badge: ("SIGNING IN".to_owned(), BadgeTone::Warn),
-                error: None,
-                actions: vec![AccountAction::ReopenSignInPage, AccountAction::CancelSignIn],
-            },
-            CloudSessionPhase::ExchangingTokens | CloudSessionPhase::Bootstrapping => StripModel {
-                title: "Signing in…".to_owned(),
-                detail: "Establishing the account session.".to_owned(),
-                meta: String::new(),
-                avatar: "…".to_owned(),
-                badge: ("SIGNING IN".to_owned(), BadgeTone::Warn),
-                error: None,
-                actions: Vec::new(),
-            },
-            CloudSessionPhase::Active => {
-                let (title, detail) = identity_lines(cloud);
-                StripModel {
-                    avatar: initials(&title),
-                    meta: cloud
-                        .verified_at
-                        .as_deref()
-                        .map(|stamp| format!("Account verified {}", humanize_stamp(stamp)))
-                        .unwrap_or_default(),
-                    title,
-                    detail,
-                    badge: ("SIGNED IN".to_owned(), BadgeTone::Ok),
+        CloudAccountAvailability::Native | CloudAccountAvailability::Browser => {
+            match &cloud.phase {
+                CloudSessionPhase::SignedOut { last_error } => StripModel {
+                    title: signed_out_title,
+                    detail: "Sign in to connect licensing, web publishing, and collaboration."
+                        .to_owned(),
+                    meta: "Signing in opens your browser; RSpice never sees your password."
+                        .to_owned(),
+                    avatar: "—".to_owned(),
+                    badge: ("LOCAL / OFFLINE".to_owned(), BadgeTone::Warn),
+                    error: last_error.clone(),
+                    actions: vec![AccountAction::SignIn],
+                },
+                CloudSessionPhase::WaitingForBrowser => StripModel {
+                    title: "Waiting for the browser…".to_owned(),
+                    detail: "Complete sign-in in the browser window that just opened.".to_owned(),
+                    meta: "Nothing happens in RSpice until the browser hands the sign-in back."
+                        .to_owned(),
+                    avatar: "…".to_owned(),
+                    badge: ("SIGNING IN".to_owned(), BadgeTone::Warn),
                     error: None,
-                    actions: vec![AccountAction::RefreshSession, AccountAction::SignOut],
+                    actions: vec![AccountAction::ReopenSignInPage, AccountAction::CancelSignIn],
+                },
+                CloudSessionPhase::ExchangingTokens | CloudSessionPhase::Bootstrapping => {
+                    StripModel {
+                        title: "Signing in…".to_owned(),
+                        detail: "Establishing the account session.".to_owned(),
+                        meta: String::new(),
+                        avatar: "…".to_owned(),
+                        badge: ("SIGNING IN".to_owned(), BadgeTone::Warn),
+                        error: None,
+                        actions: Vec::new(),
+                    }
+                }
+                CloudSessionPhase::Active => {
+                    let (title, detail) = identity_lines(cloud);
+                    StripModel {
+                        avatar: initials(&title),
+                        meta: cloud
+                            .verified_at
+                            .as_deref()
+                            .map(|stamp| format!("Account verified {}", humanize_stamp(stamp)))
+                            .unwrap_or_default(),
+                        title,
+                        detail,
+                        badge: ("SIGNED IN".to_owned(), BadgeTone::Ok),
+                        error: None,
+                        actions: vec![AccountAction::RefreshSession, AccountAction::SignOut],
+                    }
+                }
+                CloudSessionPhase::OfflineLicensed => {
+                    let (title, detail) = identity_lines(cloud);
+                    let meta = cloud
+                        .native_license
+                        .as_ref()
+                        .map(|license| {
+                            format!(
+                                "Offline — this device stays licensed through {}",
+                                unix_date(license.expires_at_unix_seconds)
+                            )
+                        })
+                        .unwrap_or_default();
+                    StripModel {
+                        avatar: initials(&title),
+                        title,
+                        detail,
+                        meta,
+                        badge: ("OFFLINE · LICENSED".to_owned(), BadgeTone::Warn),
+                        error: None,
+                        actions: vec![AccountAction::RefreshSession, AccountAction::SignOut],
+                    }
                 }
             }
-            CloudSessionPhase::OfflineLicensed => {
-                let (title, detail) = identity_lines(cloud);
-                let meta = cloud
-                    .native_license
-                    .as_ref()
-                    .map(|license| {
-                        format!(
-                            "Offline — this device stays licensed through {}",
-                            unix_date(license.expires_at_unix_seconds)
-                        )
-                    })
-                    .unwrap_or_default();
-                StripModel {
-                    avatar: initials(&title),
-                    title,
-                    detail,
-                    meta,
-                    badge: ("OFFLINE · LICENSED".to_owned(), BadgeTone::Warn),
-                    error: None,
-                    actions: vec![AccountAction::RefreshSession, AccountAction::SignOut],
-                }
-            }
-        },
+        }
     }
 }
 
@@ -389,11 +385,11 @@ fn data_rows(availability: CloudAccountAvailability) -> Vec<(String, String)> {
         CloudAccountAvailability::Native => {
             "sign-in, licensing, and RSpice Cloud services only".to_owned()
         }
+        CloudAccountAvailability::Browser => {
+            "sign-in and RSpice Cloud live collaboration only".to_owned()
+        }
         CloudAccountAvailability::UnconfiguredBuild => {
             "none — this build reaches no account service".to_owned()
-        }
-        CloudAccountAvailability::BrowserPending => {
-            "the hosted deployment serves this session".to_owned()
         }
     };
     vec![

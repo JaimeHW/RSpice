@@ -11,11 +11,14 @@
 //! Availability is explicit and fails closed:
 //! - a build without release-pinned cloud endpoints reports
 //!   [`CloudAccountAvailability::UnconfiguredBuild`] and exposes no actions;
-//! - browser builds report [`CloudAccountAvailability::BrowserPending`] until
-//!   the hosted deployment carries the sign-in callback page — server-side
-//!   entitlement enforcement already covers every browser operation, so no
-//!   offline lease is missing there.
+//! - configured browser builds use authorization-code + PKCE, memory-only
+//!   tokens, bounded Fetch, and the authenticated v2 WebSocket relay. Native
+//!   offline license leases remain desktop-only.
 
+#[cfg(target_arch = "wasm32")]
+mod browser_executor;
+#[cfg(target_arch = "wasm32")]
+mod browser_live_relay;
 pub(crate) mod config;
 #[cfg(not(target_arch = "wasm32"))]
 mod executor;
@@ -23,7 +26,6 @@ mod executor;
 mod live_relay;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_login;
-#[cfg(not(target_arch = "wasm32"))]
 mod oidc;
 #[cfg(not(target_arch = "wasm32"))]
 mod publish;
@@ -45,15 +47,12 @@ pub(crate) enum CloudAccountAvailability {
     /// Native build with release-configured endpoints: full sign-in, refresh,
     /// entitlements, and offline license leases.
     Native,
+    /// Browser build with release-pinned endpoints and callback URI. Account
+    /// state is online-only and tokens live only in WebAssembly memory.
+    Browser,
     /// This build was produced without pinned cloud endpoints, so every cloud
     /// account surface reports the boundary instead of offering actions.
     UnconfiguredBuild,
-    /// Browser build: sign-in arrives with the hosted deployment's callback
-    /// page; until then the boundary is reported explicitly.
-    // Constructed only by the wasm arm of `CloudAccountService::new`; native
-    // builds match on it without ever constructing it.
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    BrowserPending,
 }
 
 /// Lifecycle phase of the cloud session.
@@ -276,28 +275,87 @@ impl LiveFrameClass {
 /// Hard per-frame bound: the relay closes the connection over anything
 /// larger, so senders must chunk beneath it.
 pub(crate) const MAX_LIVE_FRAME_BYTES: usize = 1024 * 1024;
+/// Relay-delivered v2 frames add two authenticated UUIDs after the class
+/// byte. This overhead is outside the peer-controlled frame-size allowance.
+pub(crate) const LIVE_RELAY_AUTHENTICATED_SENDER_BYTES: usize = 32;
+pub(crate) const MAX_LIVE_RELAY_WIRE_BYTES: usize =
+    MAX_LIVE_FRAME_BYTES + LIVE_RELAY_AUTHENTICATED_SENDER_BYTES;
+/// Finite queues bound retained document data when either the browser socket
+/// or UI frame loop stalls. One 64 MiB document batch needs 128 chunks.
+pub(crate) const LIVE_RELAY_OUTBOUND_QUEUE_CAPACITY: usize = 144;
+pub(crate) const LIVE_RELAY_INBOUND_QUEUE_CAPACITY: usize = 144;
 
-/// One live-relay frame: a class byte followed by an opaque payload the
-/// relay never interprets. Payload protocols are peer-owned.
+/// Per-client full-jitter exponential retry delay. It is deterministic
+/// for one installation/run identity and attempt, but distinct client UUIDs
+/// spread a replica or bus recovery over the whole backoff window without
+/// relying on another runtime entropy source. Server-side admission remains
+/// the final protection against an unhealthy or malicious client.
+fn client_retry_delay(attempt: u32, client_instance_id: uuid::Uuid) -> std::time::Duration {
+    const BASE_MILLISECONDS: u64 = 1_000;
+    const MAX_MILLISECONDS: u64 = 30_000;
+    let multiplier = 1_u64 << attempt.min(5);
+    let ceiling = BASE_MILLISECONDS
+        .saturating_mul(multiplier)
+        .min(MAX_MILLISECONDS);
+    let floor = ceiling / 2;
+
+    let bytes = client_instance_id.as_bytes();
+    let mut seed = u64::from_be_bytes(bytes[..8].try_into().expect("UUID half is eight bytes"))
+        ^ u64::from_be_bytes(bytes[8..].try_into().expect("UUID half is eight bytes"))
+        ^ u64::from(attempt).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    // SplitMix64 finalizer: stable, cheap diffusion for timing jitter only.
+    seed ^= seed >> 30;
+    seed = seed.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    seed ^= seed >> 27;
+    seed = seed.wrapping_mul(0x94d0_49bb_1331_11eb);
+    seed ^= seed >> 31;
+    let milliseconds = floor + seed % (ceiling - floor + 1);
+    std::time::Duration::from_millis(milliseconds)
+}
+
+/// Identity stamped by the relay from the consumed one-time ticket. Payload
+/// identity fields are compatibility data only and never authority.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct LiveRelayIdentity {
+    pub principal_id: uuid::Uuid,
+    pub client_instance_id: uuid::Uuid,
+}
+
+/// One live-relay frame. Outbound bytes contain class + payload; inbound v2
+/// bytes contain class + the relay-authenticated sender + payload.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct LiveFrame {
     pub class: LiveFrameClass,
+    pub authenticated_sender: Option<LiveRelayIdentity>,
     pub payload: Vec<u8>,
 }
 
 impl LiveFrame {
     pub(crate) fn encode(&self) -> Vec<u8> {
+        debug_assert!(
+            self.authenticated_sender.is_none(),
+            "relay-delivered frames must never be sent back as local authority"
+        );
         let mut bytes = Vec::with_capacity(1 + self.payload.len());
         bytes.push(self.class.as_byte());
         bytes.extend_from_slice(&self.payload);
         bytes
     }
 
-    pub(crate) fn decode(bytes: &[u8]) -> Option<Self> {
-        let (class_byte, payload) = bytes.split_first()?;
+    pub(crate) fn decode_authenticated(bytes: &[u8]) -> Option<Self> {
+        let (class_byte, stamped) = bytes.split_first()?;
+        if stamped.len() < LIVE_RELAY_AUTHENTICATED_SENDER_BYTES {
+            return None;
+        }
+        let principal_id = uuid::Uuid::from_slice(&stamped[..16]).ok()?;
+        let client_instance_id = uuid::Uuid::from_slice(&stamped[16..32]).ok()?;
         Some(Self {
             class: LiveFrameClass::from_byte(*class_byte)?,
-            payload: payload.to_vec(),
+            authenticated_sender: Some(LiveRelayIdentity {
+                principal_id,
+                client_instance_id,
+            }),
+            payload: stamped[32..].to_vec(),
         })
     }
 }
@@ -310,7 +368,7 @@ pub(crate) struct LiveRelayPort {
     /// session tickets; payload protocols stamp it on outbound messages.
     pub client_instance_id: uuid::Uuid,
     /// Frames to broadcast to the other participants.
-    pub outbound: tokio::sync::mpsc::UnboundedSender<LiveFrame>,
+    pub outbound: tokio::sync::mpsc::Sender<LiveFrame>,
     /// Frames the other participants broadcast, in arrival order.
     pub inbound: std::sync::mpsc::Receiver<LiveFrame>,
 }
@@ -463,10 +521,8 @@ pub(crate) enum CloudAccountCommand {
     #[cfg(not(target_arch = "wasm32"))]
     SignInFailed { reason: String },
     /// The relay socket attached (sent by the socket thread, never the UI).
-    #[cfg(not(target_arch = "wasm32"))]
     LiveRelayAttached { generation: u64 },
     /// The relay socket ended (sent by the socket thread, never the UI).
-    #[cfg(not(target_arch = "wasm32"))]
     LiveRelayClosed {
         generation: u64,
         closure: LiveRelayClosure,
@@ -474,7 +530,6 @@ pub(crate) enum CloudAccountCommand {
 }
 
 /// Why a relay socket ended, as the socket thread reports it.
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum LiveRelayClosure {
     /// The executor asked the socket to stop; no state change follows.
@@ -500,6 +555,121 @@ pub(crate) enum CloudAccountEvent {
     PublishCompleted(Box<PublishReceipt>),
 }
 
+/// Fixed-size, coalescing executor-to-UI mailbox. Only the newest value of
+/// each event class can be useful to the application: snapshots supersede
+/// snapshots, a later browser request replaces an unopened predecessor, and
+/// the service itself exposes only the newest unconsumed publication receipt.
+/// Keeping those three slots here prevents a paused/minimized UI from growing
+/// an unbounded cross-thread queue.
+#[derive(Default)]
+struct CloudAccountEventSlots {
+    snapshot: Option<Box<CloudSessionSnapshot>>,
+    browser_url: Option<String>,
+    publish_receipt: Option<Box<PublishReceipt>>,
+}
+
+#[derive(Clone)]
+pub(super) struct CloudAccountEventSender {
+    slots: std::sync::Arc<std::sync::Mutex<CloudAccountEventSlots>>,
+}
+
+pub(super) struct CloudAccountEventReceiver {
+    slots: std::sync::Arc<std::sync::Mutex<CloudAccountEventSlots>>,
+}
+
+pub(super) fn cloud_account_event_mailbox() -> (CloudAccountEventSender, CloudAccountEventReceiver)
+{
+    let slots = std::sync::Arc::new(std::sync::Mutex::new(CloudAccountEventSlots::default()));
+    (
+        CloudAccountEventSender {
+            slots: std::sync::Arc::clone(&slots),
+        },
+        CloudAccountEventReceiver { slots },
+    )
+}
+
+impl CloudAccountEventSender {
+    pub(super) fn send(&self, event: CloudAccountEvent) -> Result<(), ()> {
+        let mut slots = self
+            .slots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match event {
+            CloudAccountEvent::Snapshot(snapshot) => slots.snapshot = Some(snapshot),
+            CloudAccountEvent::OpenBrowser(url) => slots.browser_url = Some(url),
+            CloudAccountEvent::PublishCompleted(receipt) => {
+                slots.publish_receipt = Some(receipt);
+            }
+        }
+        Ok(())
+    }
+}
+
+impl CloudAccountEventReceiver {
+    fn try_recv(&self) -> Result<CloudAccountEvent, std::sync::mpsc::TryRecvError> {
+        let mut slots = self
+            .slots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(snapshot) = slots.snapshot.take() {
+            return Ok(CloudAccountEvent::Snapshot(snapshot));
+        }
+        if let Some(url) = slots.browser_url.take() {
+            return Ok(CloudAccountEvent::OpenBrowser(url));
+        }
+        if let Some(receipt) = slots.publish_receipt.take() {
+            return Ok(CloudAccountEvent::PublishCompleted(receipt));
+        }
+        Err(std::sync::mpsc::TryRecvError::Empty)
+    }
+}
+
+struct LiveRelayPortSlot {
+    value: Option<LiveRelayPort>,
+}
+
+#[derive(Clone)]
+pub(super) struct LiveRelayPortSender {
+    slot: std::sync::Arc<std::sync::Mutex<LiveRelayPortSlot>>,
+}
+
+pub(super) struct LiveRelayPortReceiver {
+    slot: std::sync::Arc<std::sync::Mutex<LiveRelayPortSlot>>,
+}
+
+pub(super) fn live_relay_port_mailbox() -> (LiveRelayPortSender, LiveRelayPortReceiver) {
+    let slot = std::sync::Arc::new(std::sync::Mutex::new(LiveRelayPortSlot { value: None }));
+    (
+        LiveRelayPortSender {
+            slot: std::sync::Arc::clone(&slot),
+        },
+        LiveRelayPortReceiver { slot },
+    )
+}
+
+impl LiveRelayPortSender {
+    pub(super) fn send(&self, port: LiveRelayPort) -> Result<(), ()> {
+        self.slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .value = Some(port);
+        Ok(())
+    }
+}
+
+impl LiveRelayPortReceiver {
+    fn try_recv(&self) -> Result<LiveRelayPort, std::sync::mpsc::TryRecvError> {
+        self.slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .value
+            .take()
+            .ok_or(std::sync::mpsc::TryRecvError::Empty)
+    }
+}
+
+const MAX_PENDING_CLOUD_COMMANDS: usize = 8;
+
 /// The application-facing service. Owns the executor and the latest snapshot.
 pub(crate) struct CloudAccountService {
     availability: CloudAccountAvailability,
@@ -508,12 +678,16 @@ pub(crate) struct CloudAccountService {
     pending_publish_receipt: Option<PublishReceipt>,
     /// The newest relay port awaiting pickup by the workbench.
     pending_live_relay: Option<LiveRelayPort>,
+    /// A presentation-safe local service error awaiting the application
+    /// message center. It never replaces a still-valid authenticated snapshot.
+    pending_local_error: Option<String>,
+    pending_commands: std::collections::VecDeque<CloudAccountCommand>,
+    #[cfg(target_arch = "wasm32")]
+    commands: Option<tokio::sync::mpsc::Sender<CloudAccountCommand>>,
     #[cfg(not(target_arch = "wasm32"))]
-    commands: Option<std::sync::mpsc::Sender<CloudAccountCommand>>,
-    #[cfg(not(target_arch = "wasm32"))]
-    events: Option<std::sync::mpsc::Receiver<CloudAccountEvent>>,
-    #[cfg(not(target_arch = "wasm32"))]
-    relay_ports: Option<std::sync::mpsc::Receiver<LiveRelayPort>>,
+    commands: Option<std::sync::mpsc::SyncSender<CloudAccountCommand>>,
+    events: Option<CloudAccountEventReceiver>,
+    relay_ports: Option<LiveRelayPortReceiver>,
 }
 
 impl CloudAccountService {
@@ -522,13 +696,35 @@ impl CloudAccountService {
     pub(crate) fn new(repaint: Option<egui::Context>) -> Self {
         #[cfg(target_arch = "wasm32")]
         {
-            let _ = repaint;
-            Self {
-                availability: CloudAccountAvailability::BrowserPending,
-                snapshot: CloudSessionSnapshot::default(),
-                pending_browser_url: None,
-                pending_publish_receipt: None,
-                pending_live_relay: None,
+            match config::CloudAccountConfig::resolve() {
+                Some(configuration) => {
+                    let (commands, events, relay_ports) =
+                        browser_executor::spawn(configuration, repaint);
+                    Self {
+                        availability: CloudAccountAvailability::Browser,
+                        snapshot: CloudSessionSnapshot::default(),
+                        pending_browser_url: None,
+                        pending_publish_receipt: None,
+                        pending_live_relay: None,
+                        pending_local_error: None,
+                        pending_commands: std::collections::VecDeque::new(),
+                        commands: Some(commands),
+                        events: Some(events),
+                        relay_ports: Some(relay_ports),
+                    }
+                }
+                None => Self {
+                    availability: CloudAccountAvailability::UnconfiguredBuild,
+                    snapshot: CloudSessionSnapshot::default(),
+                    pending_browser_url: None,
+                    pending_publish_receipt: None,
+                    pending_live_relay: None,
+                    pending_local_error: None,
+                    pending_commands: std::collections::VecDeque::new(),
+                    commands: None,
+                    events: None,
+                    relay_ports: None,
+                },
             }
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -542,6 +738,8 @@ impl CloudAccountService {
                         pending_browser_url: None,
                         pending_publish_receipt: None,
                         pending_live_relay: None,
+                        pending_local_error: None,
+                        pending_commands: std::collections::VecDeque::new(),
                         commands: Some(commands),
                         events: Some(events),
                         relay_ports: Some(relay_ports),
@@ -553,6 +751,8 @@ impl CloudAccountService {
                     pending_browser_url: None,
                     pending_publish_receipt: None,
                     pending_live_relay: None,
+                    pending_local_error: None,
+                    pending_commands: std::collections::VecDeque::new(),
                     commands: None,
                     events: None,
                     relay_ports: None,
@@ -571,11 +771,10 @@ impl CloudAccountService {
             pending_browser_url: None,
             pending_publish_receipt: None,
             pending_live_relay: None,
-            #[cfg(not(target_arch = "wasm32"))]
+            pending_local_error: None,
+            pending_commands: std::collections::VecDeque::new(),
             commands: None,
-            #[cfg(not(target_arch = "wasm32"))]
             events: None,
-            #[cfg(not(target_arch = "wasm32"))]
             relay_ports: None,
         }
     }
@@ -590,47 +789,45 @@ impl CloudAccountService {
 
     /// Drain executor events into the snapshot. Returns whether it changed.
     pub(crate) fn poll(&mut self) -> bool {
-        #[cfg(target_arch = "wasm32")]
-        {
-            false
+        let mut changed = false;
+        self.flush_pending_commands();
+        if let Some(ports) = self.relay_ports.as_ref() {
+            // Newest wins: a reconnection's port supersedes its predecessor
+            // before the workbench ever saw it.
+            while let Ok(port) = ports.try_recv() {
+                self.pending_live_relay = Some(port);
+                changed = true;
+            }
         }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let mut changed = false;
-            if let Some(ports) = self.relay_ports.as_ref() {
-                // Newest wins: a reconnection's port supersedes its
-                // predecessor before the workbench ever saw it.
-                while let Ok(port) = ports.try_recv() {
-                    self.pending_live_relay = Some(port);
+        let Some(events) = self.events.as_ref() else {
+            return changed;
+        };
+        while let Ok(event) = events.try_recv() {
+            match event {
+                CloudAccountEvent::Snapshot(snapshot) => {
+                    self.snapshot = *snapshot;
+                    changed = true;
+                }
+                CloudAccountEvent::OpenBrowser(url) => {
+                    self.pending_browser_url = Some(url);
+                    changed = true;
+                }
+                CloudAccountEvent::PublishCompleted(receipt) => {
+                    self.pending_publish_receipt = Some(*receipt);
                     changed = true;
                 }
             }
-            let Some(events) = self.events.as_ref() else {
-                return changed;
-            };
-            while let Ok(event) = events.try_recv() {
-                match event {
-                    CloudAccountEvent::Snapshot(snapshot) => {
-                        self.snapshot = *snapshot;
-                        changed = true;
-                    }
-                    CloudAccountEvent::OpenBrowser(url) => {
-                        self.pending_browser_url = Some(url);
-                        changed = true;
-                    }
-                    CloudAccountEvent::PublishCompleted(receipt) => {
-                        self.pending_publish_receipt = Some(*receipt);
-                        changed = true;
-                    }
-                }
-            }
-            changed
         }
+        changed
     }
 
     /// A sign-in URL the UI should open in the system browser, at most once.
     pub(crate) fn take_browser_request(&mut self) -> Option<String> {
         self.pending_browser_url.take()
+    }
+
+    pub(crate) fn take_local_error(&mut self) -> Option<String> {
+        self.pending_local_error.take()
     }
 
     pub(crate) fn sign_in(&mut self) {
@@ -749,24 +946,138 @@ impl CloudAccountService {
         self.pending_live_relay.take()
     }
 
-    #[allow(unused_variables)]
     fn send(&mut self, command: CloudAccountCommand) {
+        // Once one action is deferred, every later action must join the same
+        // FIFO. Sending a newer action straight to newly available executor
+        // capacity would let it overtake an earlier start/end, admission, or
+        // policy mutation before the next UI poll flushes the backlog.
+        if !self.pending_commands.is_empty() {
+            self.defer_command(command);
+            return;
+        }
+        #[cfg(target_arch = "wasm32")]
+        if let Some(commands) = self.commands.as_ref() {
+            match commands.try_send(command) {
+                Ok(()) => {}
+                Err(tokio::sync::mpsc::error::TrySendError::Full(command)) => {
+                    self.defer_command(command);
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    self.snapshot = CloudSessionSnapshot {
+                        phase: CloudSessionPhase::SignedOut {
+                            last_error: Some(
+                                "The cloud session service stopped; reload RSpice to sign in."
+                                    .to_owned(),
+                            ),
+                        },
+                        ..CloudSessionSnapshot::default()
+                    };
+                    self.commands = None;
+                    self.events = None;
+                    self.relay_ports = None;
+                    self.pending_commands.clear();
+                }
+            }
+        }
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(commands) = self.commands.as_ref() {
-            // A send failure means the executor thread is gone; surface that
-            // as a signed-out session rather than silently dropping input.
-            if commands.send(command).is_err() {
-                self.snapshot = CloudSessionSnapshot {
-                    phase: CloudSessionPhase::SignedOut {
-                        last_error: Some(
-                            "The cloud session service stopped; restart RSpice to sign in."
-                                .to_owned(),
-                        ),
-                    },
-                    ..CloudSessionSnapshot::default()
-                };
-                self.commands = None;
-                self.events = None;
+            match commands.try_send(command) {
+                Ok(()) => {}
+                Err(std::sync::mpsc::TrySendError::Full(command)) => {
+                    self.defer_command(command);
+                }
+                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                    self.snapshot = CloudSessionSnapshot {
+                        phase: CloudSessionPhase::SignedOut {
+                            last_error: Some(
+                                "The cloud session service stopped; restart RSpice to sign in."
+                                    .to_owned(),
+                            ),
+                        },
+                        ..CloudSessionSnapshot::default()
+                    };
+                    self.commands = None;
+                    self.events = None;
+                    self.relay_ports = None;
+                    self.pending_commands.clear();
+                }
+            }
+        }
+    }
+
+    fn defer_command(&mut self, command: CloudAccountCommand) {
+        if self.pending_commands.len() < MAX_PENDING_CLOUD_COMMANDS {
+            self.pending_commands.push_back(command);
+        } else {
+            self.pending_local_error = Some(
+                "The cloud service is busy and could not accept that action. Wait a moment and retry."
+                    .to_owned(),
+            );
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn flush_pending_commands(&mut self) {
+        let Some(commands) = self.commands.as_ref() else {
+            self.pending_commands.clear();
+            return;
+        };
+        while let Some(command) = self.pending_commands.pop_front() {
+            match commands.try_send(command) {
+                Ok(()) => {}
+                Err(tokio::sync::mpsc::error::TrySendError::Full(command)) => {
+                    self.pending_commands.push_front(command);
+                    return;
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    self.pending_commands.clear();
+                    self.snapshot = CloudSessionSnapshot {
+                        phase: CloudSessionPhase::SignedOut {
+                            last_error: Some(
+                                "The cloud session service stopped; reload RSpice to sign in."
+                                    .to_owned(),
+                            ),
+                        },
+                        ..CloudSessionSnapshot::default()
+                    };
+                    self.commands = None;
+                    self.events = None;
+                    self.relay_ports = None;
+                    return;
+                }
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn flush_pending_commands(&mut self) {
+        let Some(commands) = self.commands.as_ref() else {
+            self.pending_commands.clear();
+            return;
+        };
+        while let Some(command) = self.pending_commands.pop_front() {
+            match commands.try_send(command) {
+                Ok(()) => {}
+                Err(std::sync::mpsc::TrySendError::Full(command)) => {
+                    self.pending_commands.push_front(command);
+                    return;
+                }
+                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                    self.pending_commands.clear();
+                    self.snapshot = CloudSessionSnapshot {
+                        phase: CloudSessionPhase::SignedOut {
+                            last_error: Some(
+                                "The cloud session service stopped; restart RSpice to sign in."
+                                    .to_owned(),
+                            ),
+                        },
+                        ..CloudSessionSnapshot::default()
+                    };
+                    self.commands = None;
+                    self.events = None;
+                    self.relay_ports = None;
+                    return;
+                }
             }
         }
     }
@@ -775,6 +1086,131 @@ impl CloudAccountService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn executor_mailboxes_coalesce_to_finite_latest_state() {
+        let (events, event_receiver) = cloud_account_event_mailbox();
+        let mut first = CloudSessionSnapshot::default();
+        first.phase = CloudSessionPhase::WaitingForBrowser;
+        let mut latest = CloudSessionSnapshot::default();
+        latest.phase = CloudSessionPhase::Active;
+        events
+            .send(CloudAccountEvent::Snapshot(Box::new(first)))
+            .expect("mailbox remains available");
+        events
+            .send(CloudAccountEvent::Snapshot(Box::new(latest.clone())))
+            .expect("mailbox remains available");
+        events
+            .send(CloudAccountEvent::OpenBrowser(
+                "https://old.invalid".to_owned(),
+            ))
+            .expect("mailbox remains available");
+        events
+            .send(CloudAccountEvent::OpenBrowser(
+                "https://identity.example/authorize".to_owned(),
+            ))
+            .expect("mailbox remains available");
+
+        assert_eq!(
+            event_receiver.try_recv(),
+            Ok(CloudAccountEvent::Snapshot(Box::new(latest)))
+        );
+        assert_eq!(
+            event_receiver.try_recv(),
+            Ok(CloudAccountEvent::OpenBrowser(
+                "https://identity.example/authorize".to_owned()
+            ))
+        );
+        assert_eq!(
+            event_receiver.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        );
+
+        let (ports, port_receiver) = live_relay_port_mailbox();
+        for client_instance_id in [uuid::Uuid::from_u128(1), uuid::Uuid::from_u128(2)] {
+            let (outbound, _outbound_receiver) = tokio::sync::mpsc::channel(1);
+            let (_inbound_sender, inbound) = std::sync::mpsc::channel();
+            ports
+                .send(LiveRelayPort {
+                    client_instance_id,
+                    outbound,
+                    inbound,
+                })
+                .expect("mailbox remains available");
+        }
+        assert_eq!(
+            port_receiver
+                .try_recv()
+                .expect("latest relay port")
+                .client_instance_id,
+            uuid::Uuid::from_u128(2)
+        );
+        assert!(port_receiver.try_recv().is_err());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_ui_command_backpressure_is_finite_and_nonblocking() {
+        let (commands, receiver) = std::sync::mpsc::sync_channel(1);
+        let mut service = CloudAccountService::unconfigured();
+        service.commands = Some(commands);
+
+        service.refresh();
+        for _ in 0..MAX_PENDING_CLOUD_COMMANDS {
+            service.refresh();
+        }
+        assert_eq!(service.pending_commands.len(), MAX_PENDING_CLOUD_COMMANDS);
+        assert!(service.pending_local_error.is_none());
+
+        service.refresh();
+        assert_eq!(service.pending_commands.len(), MAX_PENDING_CLOUD_COMMANDS);
+        assert!(service.pending_local_error.is_some());
+
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(CloudAccountCommand::Refresh)
+        ));
+        service.sign_out();
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+        assert_eq!(service.pending_commands.len(), MAX_PENDING_CLOUD_COMMANDS);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn deferred_ui_commands_preserve_fifo_order_when_executor_capacity_reopens() {
+        let (commands, receiver) = std::sync::mpsc::sync_channel(1);
+        let mut service = CloudAccountService::unconfigured();
+        service.commands = Some(commands);
+
+        service.refresh();
+        service.refresh();
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(CloudAccountCommand::Refresh)
+        ));
+
+        // Capacity is available again, but SignOut must not jump ahead of the
+        // Refresh already waiting in the service FIFO.
+        service.sign_out();
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+
+        service.poll();
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(CloudAccountCommand::Refresh)
+        ));
+        service.poll();
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(CloudAccountCommand::SignOut)
+        ));
+    }
 
     #[test]
     fn signed_in_covers_exactly_the_verified_phases() {
@@ -789,7 +1225,9 @@ mod tests {
     }
 
     #[test]
-    fn live_frames_round_trip_their_class_byte() {
+    fn live_frames_encode_outbound_and_decode_ticket_stamped_identity() {
+        let principal_id = uuid::Uuid::from_u128(11);
+        let client_instance_id = uuid::Uuid::from_u128(12);
         for (class, byte) in [
             (LiveFrameClass::Presence, 0u8),
             (LiveFrameClass::Cursor, 1),
@@ -799,17 +1237,53 @@ mod tests {
         ] {
             let frame = LiveFrame {
                 class,
+                authenticated_sender: None,
                 payload: vec![9, 8, 7],
             };
             let encoded = frame.encode();
             assert_eq!(encoded[0], byte);
-            assert_eq!(LiveFrame::decode(&encoded), Some(frame));
+            let mut delivered = vec![byte];
+            delivered.extend_from_slice(principal_id.as_bytes());
+            delivered.extend_from_slice(client_instance_id.as_bytes());
+            delivered.extend_from_slice(&[9, 8, 7]);
+            let decoded = LiveFrame::decode_authenticated(&delivered).expect("stamped frame");
+            assert_eq!(decoded.class, class);
+            assert_eq!(decoded.payload, vec![9, 8, 7]);
+            assert_eq!(
+                decoded.authenticated_sender,
+                Some(LiveRelayIdentity {
+                    principal_id,
+                    client_instance_id,
+                })
+            );
         }
-        assert_eq!(LiveFrame::decode(&[]), None, "no class byte");
-        assert_eq!(LiveFrame::decode(&[7]), None, "unknown class");
-        let empty = LiveFrame::decode(&[3]).expect("class byte alone is a frame");
-        assert_eq!(empty.class, LiveFrameClass::RunRequest);
-        assert!(empty.payload.is_empty());
+        assert_eq!(LiveFrame::decode_authenticated(&[]), None, "no class byte");
+        assert_eq!(
+            LiveFrame::decode_authenticated(&[0; 32]),
+            None,
+            "truncated identity stamp"
+        );
+    }
+
+    #[test]
+    fn client_retry_is_capped_deterministic_and_client_jittered() {
+        let first = uuid::Uuid::from_u128(11);
+        let second = uuid::Uuid::from_u128(12);
+        for attempt in 0..16 {
+            let delay = client_retry_delay(attempt, first);
+            let ceiling = std::time::Duration::from_millis(
+                1_000_u64
+                    .saturating_mul(1_u64 << attempt.min(5))
+                    .min(30_000),
+            );
+            assert!(delay >= ceiling / 2 && delay <= ceiling);
+            assert_eq!(delay, client_retry_delay(attempt, first));
+        }
+        assert_ne!(
+            client_retry_delay(4, first),
+            client_retry_delay(4, second),
+            "different clients should not synchronize their fourth reconnect"
+        );
     }
 
     /// The UI-facing class enum must stay byte-for-byte the relay contract's.

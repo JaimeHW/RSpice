@@ -13,6 +13,7 @@ use crate::services::cloud_account::{
     CloudAccountAvailability, LIVE_COLLABORATION_FEATURE, LiveParticipantSummary,
     LiveSessionPolicySummary, LiveSessionState, LiveSessionSummary,
 };
+use crate::services::live_protocol::PeerIdentity;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
@@ -50,6 +51,8 @@ enum LiveDialogAction {
     SetEditor(String, bool),
     Remove(String),
     RequestHostRun,
+    ApproveHostRun(PeerIdentity),
+    DenyHostRun(PeerIdentity),
 }
 
 impl RSpiceApp {
@@ -58,7 +61,7 @@ impl RSpiceApp {
     pub(crate) fn open_live_session_dialog(&mut self) {
         if !matches!(
             self.cloud_account.availability(),
-            CloudAccountAvailability::Native
+            CloudAccountAvailability::Native | CloudAccountAvailability::Browser
         ) || !self
             .cloud_account
             .snapshot()
@@ -95,14 +98,9 @@ impl RSpiceApp {
             .cloud_publication()
             .map(|binding| binding.circuit_id().to_owned());
         let project_open = self.state.project_lifecycle.project_open;
-        #[cfg(not(target_arch = "wasm32"))]
         let incompatible_peer = self.live_session.incompatible_peer_seen();
-        #[cfg(target_arch = "wasm32")]
-        let incompatible_peer = false;
-        #[cfg(not(target_arch = "wasm32"))]
         let host_run: Option<String> = self.live_session.guest_run_status().map(describe_run);
-        #[cfg(target_arch = "wasm32")]
-        let host_run: Option<String> = None;
+        let pending_run_requests = self.live_session.pending_run_requests();
 
         // Resolve the dialog chrome for the current lifecycle state.
         let (eyebrow, title, primary, primary_enabled, secondary): (
@@ -240,7 +238,13 @@ impl RSpiceApp {
                     }
                 }
                 Some(LiveSessionState::Hosting(summary)) => {
-                    render_hosting(ui, dialog_state, summary, &mut actions);
+                    render_hosting(
+                        ui,
+                        dialog_state,
+                        summary,
+                        &pending_run_requests,
+                        &mut actions,
+                    );
                 }
                 Some(LiveSessionState::Participating(summary)) => {
                     render_participating(ui, summary, mirroring, host_run.clone(), &mut actions);
@@ -262,10 +266,12 @@ impl RSpiceApp {
                 LiveDialogAction::Remove(principal_id) => self
                     .cloud_account
                     .remove_live_session_participant(principal_id),
-                LiveDialogAction::RequestHostRun =>
-                {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    self.live_session.request_run()
+                LiveDialogAction::RequestHostRun => self.live_session.request_run(),
+                LiveDialogAction::ApproveHostRun(sender) => self
+                    .live_session
+                    .approve_run_request(&mut self.state, sender),
+                LiveDialogAction::DenyHostRun(sender) => {
+                    self.live_session.deny_run_request(sender);
                 }
             }
         }
@@ -394,6 +400,7 @@ fn render_hosting(
     ui: &mut egui::Ui,
     dialog: &mut LiveSessionDialogState,
     summary: &LiveSessionSummary,
+    pending_run_requests: &[(PeerIdentity, String)],
     actions: &mut Vec<LiveDialogAction>,
 ) {
     let t = Tokens::get(ui.ctx());
@@ -401,6 +408,22 @@ fn render_hosting(
 
     if let Some(notice) = &summary.notice {
         note(ui, notice, c.warn);
+        ui.add_space(tokens::SP_4);
+    }
+
+    if !pending_run_requests.is_empty() {
+        section_head(ui, "Run requests · host approval required");
+        for (sender, name) in pending_run_requests {
+            ui.horizontal(|ui| {
+                ui.label(format!("{name} requested a simulation run."));
+                if ui.button("Run").clicked() {
+                    actions.push(LiveDialogAction::ApproveHostRun(*sender));
+                }
+                if ui.button("Deny").clicked() {
+                    actions.push(LiveDialogAction::DenyHostRun(*sender));
+                }
+            });
+        }
         ui.add_space(tokens::SP_4);
     }
 
@@ -554,9 +577,19 @@ fn render_participating(
     if let Some(line) = host_run {
         kv_row(ui, "Host run", &line, c.text);
     }
+    if mirroring {
+        note(
+            ui,
+            "Host result datasets are not transmitted in this protocol. Run the synchronized project locally to inspect results on this device.",
+            c.text_faint,
+        );
+    }
     if mirroring && summary.editor {
         ui.add_space(tokens::SP_4);
-        if ui.button("Request a run on the host").clicked() {
+        if ui
+            .button("Request a run on the host · status only")
+            .clicked()
+        {
             actions.push(LiveDialogAction::RequestHostRun);
         }
     }
@@ -735,7 +768,6 @@ fn license_banner(ui: &mut egui::Ui) {
 }
 
 /// One presentation line for the host's freshest run report.
-#[cfg(not(target_arch = "wasm32"))]
 fn describe_run(status: &crate::services::live_protocol::RunStatusPayload) -> String {
     let phase = match &status.phase {
         crate::services::live_protocol::RunPhase::Started => "started",

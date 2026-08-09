@@ -57,7 +57,7 @@ impl LoopbackListener {
         self,
         expected_state: String,
         cancel: Arc<AtomicBool>,
-        commands: std::sync::mpsc::Sender<CloudAccountCommand>,
+        commands: std::sync::mpsc::SyncSender<CloudAccountCommand>,
     ) {
         let deadline = std::time::Instant::now() + SIGN_IN_DEADLINE;
         loop {
@@ -236,7 +236,7 @@ mod tests {
             port,
         };
 
-        let (sender, receiver) = std::sync::mpsc::channel();
+        let (sender, receiver) = std::sync::mpsc::sync_channel(4);
         let cancel = Arc::new(AtomicBool::new(false));
         let request = request.replace("{port}", &port.to_string());
         let handle = {
@@ -296,7 +296,7 @@ mod tests {
             listener: raw,
             port,
         };
-        let (sender, receiver) = std::sync::mpsc::channel();
+        let (sender, receiver) = std::sync::mpsc::sync_channel(4);
         let cancel = Arc::new(AtomicBool::new(false));
         let handle = {
             let cancel = Arc::clone(&cancel);

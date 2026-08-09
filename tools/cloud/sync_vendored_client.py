@@ -49,6 +49,14 @@ VENDORED_TESTDATA = (
 )
 
 SOURCE_REPOSITORY = "JaimeHW/RSpice-Cloud"
+SOURCE_ORIGINS = frozenset(
+    {
+        "https://github.com/jaimehw/rspice-cloud",
+        "git@github.com:jaimehw/rspice-cloud",
+        "ssh://git@github.com/jaimehw/rspice-cloud",
+    }
+)
+CANONICAL_COMMIT = re.compile(r"^[0-9a-f]{40}$")
 
 VENDOR_MARKER = (
     "# VENDORED from {repository}@{sha} — do not edit.\n"
@@ -101,15 +109,45 @@ def sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def sync(source: Path) -> int:
-    if not (source / "crates").is_dir():
-        raise SystemExit(f"{source} does not look like an RSpice-Cloud checkout")
-    source_sha = subprocess.run(
-        ["git", "-C", str(source), "rev-parse", "HEAD"],
+def source_origin_is_authoritative(value: str) -> bool:
+    """Admit only credential-free canonical transports for the source repo."""
+    normalized = value.strip().removesuffix("/").removesuffix(".git").lower()
+    return normalized in SOURCE_ORIGINS
+
+
+def git_output(source: Path, *arguments: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(source), *arguments],
         check=True,
         capture_output=True,
         text=True,
     ).stdout.strip()
+
+
+def admit_source(source: Path) -> str:
+    """Bind a clean authoritative checkout to one canonical commit."""
+    try:
+        root = Path(git_output(source, "rev-parse", "--show-toplevel")).resolve()
+        source_sha = git_output(source, "rev-parse", "HEAD")
+        origin = git_output(source, "remote", "get-url", "origin")
+        dirty = git_output(source, "status", "--porcelain=v1", "--untracked-files=all")
+    except subprocess.CalledProcessError as error:
+        raise SystemExit("source checkout failed Git provenance admission") from error
+    if root != source:
+        raise SystemExit("source path must be the RSpice-Cloud checkout root")
+    if not CANONICAL_COMMIT.fullmatch(source_sha):
+        raise SystemExit("source checkout HEAD is not a canonical commit")
+    if not source_origin_is_authoritative(origin):
+        raise SystemExit(f"source checkout origin is not {SOURCE_REPOSITORY}")
+    if dirty:
+        raise SystemExit("source checkout has uncommitted or untracked files; commit it before re-sync")
+    return source_sha
+
+
+def sync(source: Path) -> int:
+    if not (source / "crates").is_dir():
+        raise SystemExit(f"{source} does not look like an RSpice-Cloud checkout")
+    source_sha = admit_source(source)
 
     marker = VENDOR_MARKER.format(repository=SOURCE_REPOSITORY, sha=source_sha)
     recorded: dict[str, str] = {}
@@ -140,6 +178,9 @@ def sync(source: Path) -> int:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(payload)
         recorded[relative] = sha256_bytes(payload)
+
+    if admit_source(source) != source_sha:
+        raise SystemExit("source checkout changed during vendoring; discard the partial sync and retry")
 
     manifest = {
         "source_repository": SOURCE_REPOSITORY,

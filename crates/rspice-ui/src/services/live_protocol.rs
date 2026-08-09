@@ -13,11 +13,11 @@
 //! Headers are JSON for tolerant evolution; document content stays raw bytes
 //! so large documents never pay a base64 or escaping tax.
 //!
-//! Trust model: the relay authenticates every participant and enforces
-//! write authority by frame class, but it does not stamp sender identity on
-//! relayed frames — the `sender` fields here are peer-asserted, which every
-//! participant of an approved, seat-holding session is trusted for. Frames
-//! that fail to decode are dropped by the consumer, never fatal.
+//! Trust model: the relay authenticates every participant, enforces write
+//! authority by frame class, and stamps the ticket-bound principal and client
+//! instance on every delivered v2 frame. The consumer binds all payload
+//! `sender` claims to that authenticated stamp and the current roster. Frames
+//! that fail decoding or authorization are dropped and never mutate state.
 
 use std::collections::HashMap;
 
@@ -126,14 +126,15 @@ pub(crate) struct RunStatusPayload {
     pub progress: Option<serde_json::Value>,
 }
 
-/// Messages on the run-status class. Result data travels here — not on the
-/// document class — because results are host-produced run artifacts, and
-/// the relay already restricts this class to the host.
+/// Messages on the host-only run-status class. v2 transmits status only;
+/// the result-chunk shape remains decodable for forward compatibility but is
+/// deliberately ignored until an artifact contract can preserve dataset
+/// provenance, precision, licensing, and bounded storage end to end.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RunStatusMessage {
     Status(RunStatusPayload),
-    /// One chunk of a result dataset, using the same chunk contract as
-    /// document replaces (`doc` names the result, e.g. `results/<run_id>`).
+    /// Reserved future result artifact chunk. Current clients never send or
+    /// retain it.
     ResultChunk {
         header: ChunkHeader,
         chunk: Vec<u8>,
@@ -225,7 +226,11 @@ fn encode_envelope(class: LiveFrameClass, kind: u8, header: &[u8], body: &[u8]) 
     );
     payload.extend_from_slice(header);
     payload.extend_from_slice(body);
-    LiveFrame { class, payload }
+    LiveFrame {
+        class,
+        authenticated_sender: None,
+        payload,
+    }
 }
 
 fn decode_envelope(payload: &[u8]) -> Result<(u8, &[u8], &[u8]), LiveProtocolError> {
@@ -918,6 +923,7 @@ mod tests {
         assert_eq!(
             LiveMessage::decode(&LiveFrame {
                 class: LiveFrameClass::Presence,
+                authenticated_sender: None,
                 payload: vec![LIVE_PROTOCOL_VERSION, 0],
             }),
             Err(LiveProtocolError::Malformed),
@@ -938,6 +944,7 @@ mod tests {
         // A document kind on a class the relay would never carry it on.
         let misclassed = LiveFrame {
             class: LiveFrameClass::Cursor,
+            authenticated_sender: None,
             payload: LiveMessage::Document(DocumentMessage::LeaseRelease {
                 doc: "sheet/abc".to_owned(),
                 holder: sender,

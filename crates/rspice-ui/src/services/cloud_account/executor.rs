@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
 
 use rspice_cloud_client::contract::{
     Entitlement, IssueLicenseLeaseRequest, LicenseLease, LiveSession, LiveSessionAdmission,
@@ -23,11 +23,14 @@ use rspice_cloud_client::{
 
 use super::config::CloudAccountConfig;
 use super::{
-    CloudAccountCommand, CloudAccountEvent, CloudSessionPhase, CloudSessionSnapshot,
-    EntitlementSummary, LeaseSummary, LiveParticipantSummary, LiveRelayClosure, LiveRelayPort,
-    LiveSessionPolicySummary, LiveSessionState, LiveSessionSummary, NativeLicenseSummary,
-    PrincipalSummary, PublicationSummary, PublishState, WorkspaceSummary, live_relay, native_login,
-    oidc, publish, store,
+    CloudAccountCommand, CloudAccountEvent, CloudAccountEventReceiver, CloudAccountEventSender,
+    CloudSessionPhase, CloudSessionSnapshot, EntitlementSummary, LIVE_RELAY_INBOUND_QUEUE_CAPACITY,
+    LIVE_RELAY_OUTBOUND_QUEUE_CAPACITY, LeaseSummary, LiveParticipantSummary, LiveRelayClosure,
+    LiveRelayPort, LiveRelayPortReceiver, LiveRelayPortSender, LiveSessionPolicySummary,
+    LiveSessionState, LiveSessionSummary, NativeLicenseSummary, PrincipalSummary,
+    PublicationSummary, PublishState, WorkspaceSummary, client_retry_delay,
+    cloud_account_event_mailbox, live_relay, live_relay_port_mailbox, native_login, oidc, publish,
+    store,
 };
 
 /// Collection page size for bootstrap reads.
@@ -49,23 +52,21 @@ const PAGE_POLL_PERIOD: std::time::Duration = std::time::Duration::from_secs(5);
 /// and streaming arrive over the relay connection; this poll carries only
 /// membership, admissions, and policy.
 const LIVE_SESSION_POLL_PERIOD: std::time::Duration = std::time::Duration::from_secs(5);
-/// Pause before re-establishing an interrupted relay connection. Every
-/// reconnect re-mints a single-use ticket over HTTP, so this keeps a flapping
-/// network from turning into a join-request loop.
-const RELAY_RESUME_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
-
+/// UI commands are always finite. The executor's network operations have
+/// deadlines, while the UI keeps a further small non-blocking overflow queue.
+const COMMAND_CAPACITY: usize = 64;
 /// Spawn the executor thread; it restores any stored session immediately.
 pub(super) fn spawn(
     configuration: CloudAccountConfig,
     repaint: Option<egui::Context>,
 ) -> (
-    Sender<CloudAccountCommand>,
-    Receiver<CloudAccountEvent>,
-    Receiver<LiveRelayPort>,
+    SyncSender<CloudAccountCommand>,
+    CloudAccountEventReceiver,
+    LiveRelayPortReceiver,
 ) {
-    let (command_sender, command_receiver) = std::sync::mpsc::channel();
-    let (event_sender, event_receiver) = std::sync::mpsc::channel();
-    let (port_sender, port_receiver) = std::sync::mpsc::channel();
+    let (command_sender, command_receiver) = std::sync::mpsc::sync_channel(COMMAND_CAPACITY);
+    let (event_sender, event_receiver) = cloud_account_event_mailbox();
+    let (port_sender, port_receiver) = live_relay_port_mailbox();
     let listener_commands = command_sender.clone();
     std::thread::Builder::new()
         .name("rspice-cloud-account".to_owned())
@@ -87,9 +88,9 @@ fn run(
     configuration: CloudAccountConfig,
     repaint: Option<egui::Context>,
     commands: Receiver<CloudAccountCommand>,
-    listener_commands: Sender<CloudAccountCommand>,
-    events: Sender<CloudAccountEvent>,
-    relay_ports: Sender<LiveRelayPort>,
+    listener_commands: SyncSender<CloudAccountCommand>,
+    events: CloudAccountEventSender,
+    relay_ports: LiveRelayPortSender,
 ) {
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -132,6 +133,7 @@ fn run(
         relay: None,
         relay_generation: 0,
         relay_retry_at: None,
+        relay_retry_attempt: 0,
         relay_blocked: false,
         relay_ports,
         snapshot: CloudSessionSnapshot::default(),
@@ -191,9 +193,6 @@ struct LiveSessionRuntime {
     /// Idempotency key of this hosting run: replaying it rotates the join
     /// code, so it lives exactly as long as the hosted session.
     create_key: Option<String>,
-    /// The code this guest presented, held for the admitted re-join that
-    /// mints a connect ticket when the relay connection is established.
-    presented_code: Option<String>,
     /// Stable per-run connection identity echoed by every issued ticket.
     client_instance_id: uuid::Uuid,
     /// The display-form join code, held only while hosting.
@@ -229,15 +228,17 @@ struct Executor {
     relay_generation: u64,
     /// No relay (re)connection attempt before this instant.
     relay_retry_at: Option<std::time::Instant>,
+    /// Consecutive failures since the last completed WebSocket handshake.
+    relay_retry_attempt: u32,
     /// A relay closure blamed this client (protocol defect); reconnecting
     /// would loop, so attempts pause until the next explicit user action.
     relay_blocked: bool,
     /// Hands each attached socket's duplex port to the UI thread.
-    relay_ports: Sender<LiveRelayPort>,
+    relay_ports: LiveRelayPortSender,
     snapshot: CloudSessionSnapshot,
     next_deadline: Option<std::time::Instant>,
-    listener_commands: Sender<CloudAccountCommand>,
-    events: Sender<CloudAccountEvent>,
+    listener_commands: SyncSender<CloudAccountCommand>,
+    events: CloudAccountEventSender,
     repaint: Option<egui::Context>,
     runtime: tokio::runtime::Runtime,
 }
@@ -361,6 +362,7 @@ impl Executor {
                 // relay: lift the pause, then let the roster read reattach.
                 self.relay_blocked = false;
                 self.relay_retry_at = None;
+                self.relay_retry_attempt = 0;
                 self.refresh_live_session();
             }
             CloudAccountCommand::ApplyLiveSessionPolicy { policy } => {
@@ -394,6 +396,7 @@ impl Executor {
                 {
                     relay.attached = true;
                     self.relay_retry_at = None;
+                    self.relay_retry_attempt = 0;
                     self.set_relay_connected(true);
                 }
             }
@@ -795,7 +798,6 @@ impl Executor {
                     session_id: created.session.id,
                     hosting: true,
                     create_key: Some(create_key),
-                    presented_code: None,
                     client_instance_id,
                     join_code: Some(created.join_code.clone()),
                 });
@@ -907,7 +909,6 @@ impl Executor {
                     session_id: joined.session.id,
                     hosting: false,
                     create_key: None,
-                    presented_code: Some(code.to_owned()),
                     client_instance_id,
                     join_code: None,
                 });
@@ -1142,7 +1143,10 @@ impl Executor {
     /// so this runs immediately after minting, and the credential travels
     /// only inside the socket thread's subprotocol offer.
     fn attach_live_relay(&mut self, ticket: &LiveSessionTicketProtocol) {
-        self.stop_live_relay();
+        if let Some(relay) = self.relay.take() {
+            let _ = relay.stop.send(());
+        }
+        self.relay_retry_at = None;
         let Some(client_instance_id) = self
             .live_session
             .as_ref()
@@ -1155,13 +1159,16 @@ impl Executor {
         else {
             // Unreachable with a validated ticket and release-pinned origin.
             log::warn!("live relay endpoint could not be derived from the release origin");
+            self.schedule_live_relay_retry();
             return;
         };
         self.relay_generation += 1;
         let generation = self.relay_generation;
         let (stop, stop_receiver) = tokio::sync::oneshot::channel();
-        let (outbound, outbound_receiver) = tokio::sync::mpsc::unbounded_channel();
-        let (inbound_sender, inbound) = std::sync::mpsc::channel();
+        let (outbound, outbound_receiver) =
+            tokio::sync::mpsc::channel(LIVE_RELAY_OUTBOUND_QUEUE_CAPACITY);
+        let (inbound_sender, inbound) =
+            std::sync::mpsc::sync_channel(LIVE_RELAY_INBOUND_QUEUE_CAPACITY);
         live_relay::spawn(
             live_relay::LiveRelayConnection {
                 url,
@@ -1198,12 +1205,29 @@ impl Executor {
             let _ = relay.stop.send(());
         }
         self.relay_retry_at = None;
+        self.relay_retry_attempt = 0;
+    }
+
+    fn schedule_live_relay_retry(&mut self) {
+        let Some(client_instance_id) = self
+            .live_session
+            .as_ref()
+            .map(|runtime| runtime.client_instance_id)
+        else {
+            self.relay_retry_at = None;
+            return;
+        };
+        let delay = client_retry_delay(self.relay_retry_attempt, client_instance_id);
+        self.relay_retry_attempt = self.relay_retry_attempt.saturating_add(1);
+        self.relay_retry_at = Some(std::time::Instant::now() + delay);
+        self.arm_live_relay_retry();
     }
 
     /// Attach the relay when the session is admitted and no socket is live.
-    /// Reconnections re-mint a single-use ticket by re-joining with the code
-    /// this runtime already holds — the host's own code or the one the guest
-    /// presented — and failures retry on the roster-poll cadence.
+    /// Reconnections re-mint a single-use ticket through the session-scoped
+    /// admitted-participant endpoint. The human join code is never retained
+    /// as a reconnect credential; failures use capped per-client jittered
+    /// exponential backoff beneath the server's ticket-rate admission gate.
     fn ensure_live_relay(&mut self) {
         if self.relay.is_some() || self.relay_blocked {
             return;
@@ -1223,34 +1247,24 @@ impl Executor {
         let Some(runtime) = self.live_session.as_ref() else {
             return;
         };
-        let Some(code) = runtime
-            .join_code
-            .clone()
-            .or_else(|| runtime.presented_code.clone())
-        else {
-            return;
-        };
+        let session_id = runtime.session_id;
         let client_instance_id = runtime.client_instance_id;
         let Some(access) = self.access.as_ref().map(|access| access.token.clone()) else {
             return;
         };
-        // Rate-limit before attempting: every attempt is a join round-trip.
+        // Rate-limit before attempting: every attempt is a ticket round-trip.
         self.relay_retry_at = Some(std::time::Instant::now() + LIVE_SESSION_POLL_PERIOD);
-        let outcome = self.runtime.block_on(join_live_session(
+        let outcome = self.runtime.block_on(issue_live_session_ticket(
             &self.cloud,
             &access,
-            &code,
+            session_id,
             client_instance_id,
         ));
         match outcome {
-            Ok(joined) => {
-                if let Some(ticket) = joined.ticket.as_ref() {
-                    self.attach_live_relay(ticket);
-                }
-            }
+            Ok(ticket) => self.attach_live_relay(&ticket),
             // A session the server no longer admits surfaces through the
-            // roster poll; transient failures retry on the same cadence.
-            Err(_) => self.arm_live_relay_retry(),
+            // roster poll; transient failures retain the session and back off.
+            Err(_) => self.schedule_live_relay_retry(),
         }
     }
 
@@ -1269,20 +1283,21 @@ impl Executor {
             LiveRelayClosure::Local => {}
             LiveRelayClosure::SessionOver { message } => {
                 self.relay_retry_at = None;
+                self.relay_retry_attempt = 0;
                 self.relay_blocked = false;
                 self.live_session = None;
                 self.snapshot.live_session = Some(LiveSessionState::Failed { message });
                 self.publish();
             }
             LiveRelayClosure::Rejected => {
+                self.relay_retry_attempt = 0;
                 self.relay_blocked = true;
                 self.set_relay_connected(false);
                 self.set_live_notice("The live connection failed.".to_owned());
             }
             LiveRelayClosure::Interrupted => {
-                self.relay_retry_at = Some(std::time::Instant::now() + RELAY_RESUME_DELAY);
                 self.set_relay_connected(false);
-                self.arm_live_relay_retry();
+                self.schedule_live_relay_retry();
             }
         }
     }
@@ -1745,6 +1760,20 @@ async fn join_live_session(
         .map_err(|error| live_session_error_message(&error))
 }
 
+async fn issue_live_session_ticket(
+    cloud: &CloudClient,
+    access: &str,
+    session_id: uuid::Uuid,
+    client_instance_id: uuid::Uuid,
+) -> Result<LiveSessionTicketProtocol, String> {
+    let token = BearerToken::new(access).map_err(|_| LIVE_SESSION_UNREACHABLE.to_owned())?;
+    cloud
+        .issue_live_session_ticket(&token, session_id, client_instance_id)
+        .await
+        .map(rspice_cloud_client::CloudResponse::into_body)
+        .map_err(|error| live_session_error_message(&error))
+}
+
 async fn read_live_session(
     cloud: &CloudClient,
     access: &str,
@@ -1753,7 +1782,9 @@ async fn read_live_session(
     let token = BearerToken::new(access).map_err(|_| LiveSessionReadFailure::Transient)?;
     match cloud.get_live_session(&token, session_id).await {
         Ok(response) => Ok(response.into_body()),
-        Err(CloudError::Problem { .. }) => Err(LiveSessionReadFailure::Gone),
+        Err(CloudError::Problem { details, .. }) if matches!(details.status, 403 | 404 | 410) => {
+            Err(LiveSessionReadFailure::Gone)
+        }
         Err(_) => Err(LiveSessionReadFailure::Transient),
     }
 }

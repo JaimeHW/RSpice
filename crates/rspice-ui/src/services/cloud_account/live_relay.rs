@@ -8,7 +8,7 @@
 //! peers. The connect credential enters this module only inside the
 //! subprotocol offer and is never logged or echoed.
 
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{SyncSender, TrySendError};
 
 use futures_util::{SinkExt, StreamExt};
 use rspice_cloud_client::contract::LIVE_SESSION_PROTOCOL;
@@ -16,9 +16,13 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
-use super::{CloudAccountCommand, LiveFrame, LiveRelayClosure, MAX_LIVE_FRAME_BYTES};
+use super::{
+    CloudAccountCommand, LiveFrame, LiveFrameClass, LiveRelayClosure, MAX_LIVE_FRAME_BYTES,
+    MAX_LIVE_RELAY_WIRE_BYTES,
+};
 
 /// Everything one socket connection needs. Carries the bearer ticket inside
 /// `protocols`, so this type must never derive or implement `Debug`.
@@ -63,10 +67,10 @@ pub(super) fn subprotocol_offer(ticket_protocol: &str) -> String {
 /// generation, so the executor can distinguish it from a successor's.
 pub(super) fn spawn(
     connection: LiveRelayConnection,
-    outbound: tokio::sync::mpsc::UnboundedReceiver<LiveFrame>,
-    inbound: std::sync::mpsc::Sender<LiveFrame>,
+    outbound: tokio::sync::mpsc::Receiver<LiveFrame>,
+    inbound: SyncSender<LiveFrame>,
     stop: tokio::sync::oneshot::Receiver<()>,
-    commands: Sender<CloudAccountCommand>,
+    commands: SyncSender<CloudAccountCommand>,
     repaint: Option<egui::Context>,
 ) {
     let generation = connection.generation;
@@ -98,10 +102,10 @@ pub(super) fn spawn(
 
 async fn pump(
     connection: LiveRelayConnection,
-    mut outbound: tokio::sync::mpsc::UnboundedReceiver<LiveFrame>,
-    inbound: std::sync::mpsc::Sender<LiveFrame>,
+    mut outbound: tokio::sync::mpsc::Receiver<LiveFrame>,
+    inbound: SyncSender<LiveFrame>,
     mut stop: tokio::sync::oneshot::Receiver<()>,
-    commands: &Sender<CloudAccountCommand>,
+    commands: &SyncSender<CloudAccountCommand>,
     repaint: Option<egui::Context>,
 ) -> LiveRelayClosure {
     let mut request = match connection.url.as_str().into_client_request() {
@@ -122,10 +126,17 @@ async fn pump(
     // a consumed or expired credential, and the executor's re-mint path is
     // the correct response. A genuinely dead session surfaces through the
     // roster poll instead.
-    let (mut socket, response) = match tokio_tungstenite::connect_async(request).await {
-        Ok(connected) => connected,
-        Err(_) => return LiveRelayClosure::Interrupted,
-    };
+    let socket_config = WebSocketConfig::default()
+        .max_frame_size(Some(MAX_LIVE_RELAY_WIRE_BYTES))
+        .max_message_size(Some(MAX_LIVE_RELAY_WIRE_BYTES))
+        .max_write_buffer_size(MAX_LIVE_RELAY_WIRE_BYTES.saturating_mul(2));
+    let (mut socket, response) =
+        match tokio_tungstenite::connect_async_with_config(request, Some(socket_config), false)
+            .await
+        {
+            Ok(connected) => connected,
+            Err(_) => return LiveRelayClosure::Interrupted,
+        };
     let selected = response
         .headers()
         .get(http::header::SEC_WEBSOCKET_PROTOCOL)
@@ -153,12 +164,14 @@ async fn pump(
                 Some(frame) => {
                     let encoded = frame.encode();
                     if encoded.len() > MAX_LIVE_FRAME_BYTES {
-                        // The relay would end the connection over it (1009).
+                        // This is a local protocol defect. Do not silently
+                        // drop authoritative traffic and let the room diverge.
                         log::error!(
-                            "live relay frame of {} bytes dropped before send",
+                            "live relay frame of {} bytes rejected before send",
                             encoded.len()
                         );
-                        continue;
+                        let _ = socket.close(None).await;
+                        return LiveRelayClosure::Rejected;
                     }
                     if socket.send(Message::Binary(encoded.into())).await.is_err() {
                         return LiveRelayClosure::Interrupted;
@@ -172,22 +185,40 @@ async fn pump(
             },
             received = socket.next() => match received {
                 Some(Ok(Message::Binary(bytes))) => {
-                    // The relay validates every class byte before relaying,
-                    // so an undecodable frame is dropped, not fatal.
-                    if let Some(frame) = LiveFrame::decode(&bytes) {
-                        if inbound.send(frame).is_err() {
-                            // The workbench dropped its port.
-                            let _ = socket.close(None).await;
-                            return LiveRelayClosure::Local;
+                    if let Some(frame) = LiveFrame::decode_authenticated(&bytes) {
+                        let disposable = matches!(
+                            frame.class,
+                            LiveFrameClass::Presence | LiveFrameClass::Cursor
+                        );
+                        match inbound.try_send(frame) {
+                            Ok(()) => {}
+                            Err(TrySendError::Full(_)) if disposable => {}
+                            Err(TrySendError::Full(_)) => {
+                                // Reconnect and request an authoritative sync.
+                                let _ = socket.close(None).await;
+                                return LiveRelayClosure::Interrupted;
+                            }
+                            Err(TrySendError::Disconnected(_)) => {
+                                // The workbench dropped its port.
+                                let _ = socket.close(None).await;
+                                return LiveRelayClosure::Local;
+                            }
                         }
                         if let Some(repaint) = &repaint {
                             repaint.request_repaint();
                         }
+                    } else {
+                        let _ = socket.close(None).await;
+                        return LiveRelayClosure::Rejected;
                     }
                 }
                 Some(Ok(Message::Close(frame))) => return closure_from_close(frame.as_ref()),
                 // Pings are answered by the protocol layer while this loop
-                // keeps polling; the relay never sends text.
+                // keeps polling. Text violates the binary-only contract.
+                Some(Ok(Message::Text(_))) => {
+                    let _ = socket.close(None).await;
+                    return LiveRelayClosure::Rejected;
+                }
                 Some(Ok(_)) => {}
                 Some(Err(_)) | None => return LiveRelayClosure::Interrupted,
             },
@@ -262,7 +293,7 @@ mod tests {
     fn subprotocol_offers_are_one_comma_joined_value() {
         assert_eq!(
             subprotocol_offer("rspice.ticket.CREDENTIAL"),
-            "rspice.live-session.v1, rspice.ticket.CREDENTIAL"
+            format!("{LIVE_SESSION_PROTOCOL}, rspice.ticket.CREDENTIAL")
         );
     }
 
@@ -310,6 +341,8 @@ mod tests {
     #[test]
     fn relay_pump_streams_frames_and_reports_the_server_close() {
         let (port_sender, port_receiver) = std::sync::mpsc::channel();
+        let relay_principal = uuid::Uuid::from_u128(41);
+        let relay_client = uuid::Uuid::from_u128(42);
         let server = std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -329,7 +362,7 @@ mod tests {
                         .and_then(|value| value.to_str().ok())
                         .unwrap_or_default();
                     assert!(
-                        offer.starts_with("rspice.live-session.v1, rspice.ticket."),
+                        offer.starts_with(&format!("{LIVE_SESSION_PROTOCOL}, rspice.ticket.")),
                         "protocol offer was {offer:?}"
                     );
                     assert!(
@@ -352,8 +385,12 @@ mod tests {
                     }
                 };
                 assert_eq!(received.as_ref(), [0u8, b'h', b'i']);
+                let mut delivered = vec![1u8];
+                delivered.extend_from_slice(relay_principal.as_bytes());
+                delivered.extend_from_slice(relay_client.as_bytes());
+                delivered.push(42);
                 socket
-                    .send(Message::Binary(vec![1u8, 42].into()))
+                    .send(Message::Binary(delivered.into()))
                     .await
                     .expect("relay a frame back");
                 socket
@@ -375,13 +412,14 @@ mod tests {
             "/api/v1/live-sessions/0/connect",
         )
         .expect("endpoint");
-        let (outbound_sender, outbound_receiver) = tokio::sync::mpsc::unbounded_channel();
-        let (inbound_sender, inbound_receiver) = std::sync::mpsc::channel();
+        let (outbound_sender, outbound_receiver) = tokio::sync::mpsc::channel(4);
+        let (inbound_sender, inbound_receiver) = std::sync::mpsc::sync_channel(4);
         let (stop_sender, stop_receiver) = tokio::sync::oneshot::channel();
-        let (command_sender, command_receiver) = std::sync::mpsc::channel();
+        let (command_sender, command_receiver) = std::sync::mpsc::sync_channel(8);
         outbound_sender
-            .send(LiveFrame {
+            .try_send(LiveFrame {
                 class: LiveFrameClass::Presence,
+                authenticated_sender: None,
                 payload: b"hi".to_vec(),
             })
             .expect("queue before attach");
@@ -408,6 +446,13 @@ mod tests {
             .expect("relayed frame");
         assert_eq!(echoed.class, LiveFrameClass::Cursor);
         assert_eq!(echoed.payload, vec![42]);
+        assert_eq!(
+            echoed.authenticated_sender,
+            Some(super::super::LiveRelayIdentity {
+                principal_id: uuid::Uuid::from_u128(41),
+                client_instance_id: uuid::Uuid::from_u128(42),
+            })
+        );
         match command_receiver.recv_timeout(Duration::from_secs(10)) {
             Ok(CloudAccountCommand::LiveRelayClosed {
                 generation: 7,

@@ -1,4 +1,4 @@
-//! OIDC authorization-code + PKCE engine (native).
+//! Cross-platform OIDC authorization-code + PKCE engine.
 //!
 //! The cloud client crate deliberately owns no identity flow, so this module
 //! implements the parts the application is responsible for: provider
@@ -15,6 +15,13 @@
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use sha2::Digest as _;
+
+const MAX_DISCOVERY_BYTES: usize = 64 * 1024;
+const MAX_TOKEN_RESPONSE_BYTES: usize = 32 * 1024;
+const MAX_TOKEN_BYTES: usize = 16 * 1024;
+const MAX_CALLBACK_PARAMETERS_BYTES: usize = 8 * 1024;
+const MIN_ACCESS_TOKEN_LIFETIME_SECONDS: u64 = 10;
+const MAX_ACCESS_TOKEN_LIFETIME_SECONDS: u64 = 24 * 60 * 60;
 
 /// Discovered provider endpoints, validated against release policy.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -69,6 +76,64 @@ pub(super) enum IdentityError {
     Rejected,
 }
 
+/// Bounded classification of parameters on the registered browser callback.
+/// Unknown route parameters are ignored; known OAuth parameters make the URL
+/// credential-bearing and therefore subject to immediate history cleanup.
+#[derive(Debug, Default, Eq, PartialEq)]
+pub(super) struct AuthorizationCallbackParameters {
+    pub code: Option<String>,
+    pub state: Option<String>,
+    pub has_error: bool,
+    pub has_oauth_parameter: bool,
+    pub has_duplicate: bool,
+}
+
+pub(super) fn parse_authorization_callback_parameters(
+    encoded: Option<&str>,
+) -> Result<AuthorizationCallbackParameters, ()> {
+    let Some(encoded) = encoded else {
+        return Ok(AuthorizationCallbackParameters::default());
+    };
+    if encoded.len() > MAX_CALLBACK_PARAMETERS_BYTES {
+        return Err(());
+    }
+    let mut parsed = AuthorizationCallbackParameters::default();
+    let mut error_seen = false;
+    for (key, value) in url::form_urlencoded::parse(encoded.as_bytes()) {
+        match key.as_ref() {
+            "code" => {
+                parsed.has_oauth_parameter = true;
+                if parsed.code.replace(value.into_owned()).is_some() {
+                    parsed.has_duplicate = true;
+                }
+            }
+            "state" => {
+                parsed.has_oauth_parameter = true;
+                if parsed.state.replace(value.into_owned()).is_some() {
+                    parsed.has_duplicate = true;
+                }
+            }
+            "error" => {
+                parsed.has_oauth_parameter = true;
+                parsed.has_error = true;
+                if error_seen {
+                    parsed.has_duplicate = true;
+                }
+                error_seen = true;
+            }
+            _ => {}
+        }
+    }
+    Ok(parsed)
+}
+
+pub(super) fn is_exact_browser_callback_route(current: &url::Url, redirect: &url::Url) -> bool {
+    current.scheme() == redirect.scheme()
+        && current.host_str() == redirect.host_str()
+        && current.port_or_known_default() == redirect.port_or_known_default()
+        && current.path() == redirect.path()
+}
+
 impl std::fmt::Display for IdentityError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -86,10 +151,14 @@ impl std::fmt::Display for IdentityError {
 
 /// HTTP client for identity traffic: no redirects, bounded time.
 pub(super) fn identity_http_client() -> Result<reqwest::Client, IdentityError> {
-    reqwest::Client::builder()
+    #[cfg(not(target_arch = "wasm32"))]
+    let builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(30))
-        .user_agent(concat!("rspice/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("rspice/", env!("CARGO_PKG_VERSION")));
+    #[cfg(target_arch = "wasm32")]
+    let builder = reqwest::Client::builder();
+    builder
         .build()
         .map_err(|_| IdentityError::Contract("client construction failed"))
 }
@@ -100,6 +169,8 @@ pub(super) async fn discover(
     issuer: &str,
     development: bool,
 ) -> Result<ProviderEndpoints, IdentityError> {
+    #[cfg(target_arch = "wasm32")]
+    let _ = http;
     #[derive(serde::Deserialize)]
     struct DiscoveryDocument {
         issuer: String,
@@ -115,18 +186,37 @@ pub(super) async fn discover(
         "{}/.well-known/openid-configuration",
         issuer.trim_end_matches('/')
     );
-    let response = http
-        .get(&url)
-        .send()
-        .await
-        .map_err(|_| IdentityError::Unreachable)?;
-    if !response.status().is_success() {
-        return Err(IdentityError::Contract("discovery request failed"));
-    }
-    let document: DiscoveryDocument = response
-        .json()
-        .await
-        .map_err(|_| IdentityError::Contract("discovery document was not valid JSON"))?;
+    #[cfg(not(target_arch = "wasm32"))]
+    let document: DiscoveryDocument = {
+        let response = http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|_| IdentityError::Unreachable)?;
+        if !response.status().is_success() {
+            return Err(IdentityError::Contract("discovery request failed"));
+        }
+        require_json_content_type(
+            response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+        )?;
+        let body = bounded_native_body(response, MAX_DISCOVERY_BYTES).await?;
+        serde_json::from_slice(&body)
+            .map_err(|_| IdentityError::Contract("discovery document was not valid JSON"))?
+    };
+    #[cfg(target_arch = "wasm32")]
+    let document: DiscoveryDocument = {
+        let (status, body, content_type) =
+            browser_request("GET", &url, None, MAX_DISCOVERY_BYTES).await?;
+        if !(200..300).contains(&status) {
+            return Err(IdentityError::Contract("discovery request failed"));
+        }
+        require_json_content_type(content_type.as_deref())?;
+        serde_json::from_slice(&body)
+            .map_err(|_| IdentityError::Contract("discovery document was not valid JSON"))?
+    };
 
     // The API matches `iss` byte-for-byte; hold discovery to the same bar so
     // a misconfigured provider fails here instead of at the first API call.
@@ -180,7 +270,15 @@ fn endpoint_admissible(endpoint: &str, development: bool) -> bool {
 /// Random bytes from the operating system.
 fn random_bytes<const N: usize>() -> Result<[u8; N], IdentityError> {
     let mut bytes = [0_u8; N];
+    #[cfg(not(target_arch = "wasm32"))]
     getrandom::fill(&mut bytes).map_err(|_| IdentityError::Contract("no entropy source"))?;
+    #[cfg(target_arch = "wasm32")]
+    web_sys::window()
+        .ok_or(IdentityError::Contract("no browser window"))?
+        .crypto()
+        .map_err(|_| IdentityError::Contract("no browser entropy source"))?
+        .get_random_values_with_u8_array(&mut bytes)
+        .map_err(|_| IdentityError::Contract("no browser entropy source"))?;
     Ok(bytes)
 }
 
@@ -269,21 +367,33 @@ pub(super) async fn revoke_refresh_token(
     client_id: &str,
     refresh_token: &str,
 ) -> Result<(), IdentityError> {
+    #[cfg(target_arch = "wasm32")]
+    let _ = http;
     let Some(revocation_endpoint) = endpoints.revocation_endpoint.as_deref() else {
         return Ok(());
     };
-    let response = http
+    let body = form_body(&[
+        ("client_id", client_id),
+        ("token", refresh_token),
+        ("token_type_hint", "refresh_token"),
+    ]);
+    #[cfg(not(target_arch = "wasm32"))]
+    let success = http
         .post(revocation_endpoint)
         .header("content-type", "application/x-www-form-urlencoded")
-        .body(form_body(&[
-            ("client_id", client_id),
-            ("token", refresh_token),
-            ("token_type_hint", "refresh_token"),
-        ]))
+        .body(body)
         .send()
         .await
-        .map_err(|_| IdentityError::Unreachable)?;
-    if response.status().is_success() {
+        .map_err(|_| IdentityError::Unreachable)?
+        .status()
+        .is_success();
+    #[cfg(target_arch = "wasm32")]
+    let success = {
+        let (status, _, _) =
+            browser_request("POST", revocation_endpoint, Some(&body), 4096).await?;
+        (200..300).contains(&status)
+    };
+    if success {
         Ok(())
     } else {
         Err(IdentityError::Rejected)
@@ -305,33 +415,226 @@ async fn token_request(
     token_endpoint: &str,
     form: &[(&str, &str)],
 ) -> Result<TokenGrant, IdentityError> {
-    let response = http
-        .post(token_endpoint)
-        .header("content-type", "application/x-www-form-urlencoded")
-        .body(form_body(form))
-        .send()
-        .await
-        .map_err(|_| IdentityError::Unreachable)?;
-    let status = response.status();
-    if status.is_client_error() {
-        return Err(IdentityError::Rejected);
-    }
-    if !status.is_success() {
-        return Err(IdentityError::Contract("token endpoint failure"));
-    }
-    let grant: TokenGrant = response
-        .json()
-        .await
-        .map_err(|_| IdentityError::Contract("token response was not valid JSON"))?;
+    #[cfg(target_arch = "wasm32")]
+    let _ = http;
+    let form = form_body(form);
+    #[cfg(not(target_arch = "wasm32"))]
+    let grant: TokenGrant = {
+        let response = http
+            .post(token_endpoint)
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(form)
+            .send()
+            .await
+            .map_err(|_| IdentityError::Unreachable)?;
+        let status = response.status();
+        if status.is_client_error() {
+            return Err(IdentityError::Rejected);
+        }
+        if !status.is_success() {
+            return Err(IdentityError::Contract("token endpoint failure"));
+        }
+        require_json_content_type(
+            response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+        )?;
+        let body = bounded_native_body(response, MAX_TOKEN_RESPONSE_BYTES).await?;
+        serde_json::from_slice(&body)
+            .map_err(|_| IdentityError::Contract("token response was not valid JSON"))?
+    };
+    #[cfg(target_arch = "wasm32")]
+    let grant: TokenGrant = {
+        let (status, body, content_type) = browser_request(
+            "POST",
+            token_endpoint,
+            Some(&form),
+            MAX_TOKEN_RESPONSE_BYTES,
+        )
+        .await?;
+        if (400..500).contains(&status) {
+            return Err(IdentityError::Rejected);
+        }
+        if !(200..300).contains(&status) {
+            return Err(IdentityError::Contract("token endpoint failure"));
+        }
+        require_json_content_type(content_type.as_deref())?;
+        serde_json::from_slice(&body)
+            .map_err(|_| IdentityError::Contract("token response was not valid JSON"))?
+    };
     if !grant.token_type.eq_ignore_ascii_case("bearer") {
         return Err(IdentityError::Contract("unsupported token type"));
     }
-    if grant.expires_in == 0 || grant.access_token.is_empty() {
+    if !(MIN_ACCESS_TOKEN_LIFETIME_SECONDS..=MAX_ACCESS_TOKEN_LIFETIME_SECONDS)
+        .contains(&grant.expires_in)
+        || grant.access_token.is_empty()
+        || grant.access_token.len() > MAX_TOKEN_BYTES
+        || grant
+            .refresh_token
+            .as_ref()
+            .is_some_and(|token| token.is_empty() || token.len() > MAX_TOKEN_BYTES)
+    {
         return Err(IdentityError::Contract(
-            "empty or non-expiring access token",
+            "token size or lifetime outside policy",
         ));
     }
     Ok(grant)
+}
+
+fn require_json_content_type(content_type: Option<&str>) -> Result<(), IdentityError> {
+    let Some(essence) = content_type
+        .and_then(|value| value.split(';').next())
+        .map(str::trim)
+        .map(str::to_ascii_lowercase)
+    else {
+        return Err(IdentityError::Contract("JSON content type missing"));
+    };
+    if essence == "application/json" || essence.ends_with("+json") {
+        Ok(())
+    } else {
+        Err(IdentityError::Contract("JSON content type required"))
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn bounded_native_body(
+    mut response: reqwest::Response,
+    max_response_bytes: usize,
+) -> Result<Vec<u8>, IdentityError> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > u64::try_from(max_response_bytes).expect("usize fits u64"))
+    {
+        return Err(IdentityError::Contract("identity response too large"));
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| IdentityError::Unreachable)?
+    {
+        let next = bytes
+            .len()
+            .checked_add(chunk.len())
+            .ok_or(IdentityError::Contract("identity response too large"))?;
+        if next > max_response_bytes {
+            return Err(IdentityError::Contract("identity response too large"));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
+/// Browser identity Fetch with redirect rejection before credentials can be
+/// forwarded, omitted cookies/referrer, a hard deadline, and streaming body
+/// bounds. Reqwest's wasm backend cannot currently express redirect:error.
+#[cfg(target_arch = "wasm32")]
+async fn browser_request(
+    method: &str,
+    url: &str,
+    body: Option<&str>,
+    max_response_bytes: usize,
+) -> Result<(u16, Vec<u8>, Option<String>), IdentityError> {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use futures_util::StreamExt as _;
+    use wasm_bindgen::JsCast as _;
+    use wasm_bindgen_futures::JsFuture;
+
+    let headers = web_sys::Headers::new()
+        .map_err(|_| IdentityError::Contract("request headers unavailable"))?;
+    if body.is_some() {
+        headers
+            .set("content-type", "application/x-www-form-urlencoded")
+            .map_err(|_| IdentityError::Contract("request headers unavailable"))?;
+    }
+    headers
+        .set("accept", "application/json")
+        .map_err(|_| IdentityError::Contract("request headers unavailable"))?;
+    let controller = web_sys::AbortController::new()
+        .map_err(|_| IdentityError::Contract("request cancellation unavailable"))?;
+    let timed_out = Rc::new(Cell::new(false));
+    let timeout_flag = Rc::clone(&timed_out);
+    let timeout_controller = controller.clone();
+    let timeout = gloo_timers::callback::Timeout::new(30_000, move || {
+        timeout_flag.set(true);
+        timeout_controller.abort();
+    });
+    let init = web_sys::RequestInit::new();
+    init.set_method(method);
+    init.set_headers_headers(&headers);
+    init.set_mode(web_sys::RequestMode::Cors);
+    init.set_credentials(web_sys::RequestCredentials::Omit);
+    init.set_cache(web_sys::RequestCache::NoStore);
+    init.set_redirect(web_sys::RequestRedirect::Error);
+    init.set_referrer_policy(web_sys::ReferrerPolicy::NoReferrer);
+    init.set_signal(Some(&controller.signal()));
+    if let Some(body) = body {
+        init.set_body(&wasm_bindgen::JsValue::from_str(body));
+    }
+    let request = web_sys::Request::new_with_str_and_init(url, &init)
+        .map_err(|_| IdentityError::Contract("request construction failed"))?;
+    let window = web_sys::window().ok_or(IdentityError::Contract("browser window unavailable"))?;
+    let value = JsFuture::from(window.fetch_with_request(&request))
+        .await
+        .map_err(|_| IdentityError::Unreachable)?;
+    let response = value
+        .dyn_into::<web_sys::Response>()
+        .map_err(|_| IdentityError::Contract("invalid Fetch response"))?;
+    let requested_url = url::Url::parse(url)
+        .map_err(|_| IdentityError::Contract("identity request URL invalid"))?;
+    let response_url = url::Url::parse(&response.url())
+        .map_err(|_| IdentityError::Contract("identity response URL invalid"))?;
+    if response.redirected() || response_url != requested_url {
+        controller.abort();
+        return Err(IdentityError::Contract("identity redirect rejected"));
+    }
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .map_err(|_| IdentityError::Contract("invalid response headers"))?;
+    if let Some(length) = response
+        .headers()
+        .get("content-length")
+        .map_err(|_| IdentityError::Contract("invalid response headers"))?
+    {
+        let length = length
+            .parse::<u64>()
+            .map_err(|_| IdentityError::Contract("invalid response length"))?;
+        if length > u64::try_from(max_response_bytes).expect("usize fits u64") {
+            controller.abort();
+            return Err(IdentityError::Contract("identity response too large"));
+        }
+    }
+    let mut bytes = Vec::new();
+    if let Some(stream) = response.body() {
+        let mut stream = wasm_streams::ReadableStream::from_raw(stream).into_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk
+                .map_err(|_| IdentityError::Unreachable)?
+                .dyn_into::<js_sys::Uint8Array>()
+                .map_err(|_| IdentityError::Contract("invalid response body"))?;
+            let length = usize::try_from(chunk.length()).expect("Uint8Array length fits usize");
+            let next = bytes
+                .len()
+                .checked_add(length)
+                .ok_or(IdentityError::Contract("identity response too large"))?;
+            if next > max_response_bytes {
+                controller.abort();
+                return Err(IdentityError::Contract("identity response too large"));
+            }
+            let offset = bytes.len();
+            bytes.resize(next, 0);
+            chunk.copy_to(&mut bytes[offset..]);
+        }
+    }
+    if timed_out.get() {
+        return Err(IdentityError::Unreachable);
+    }
+    drop(timeout);
+    Ok((response.status(), bytes, content_type))
 }
 
 #[cfg(test)]
@@ -391,6 +694,67 @@ mod tests {
             "https://user:pw@id.rspice.app/auth",
             false
         ));
+    }
+
+    #[test]
+    fn browser_callback_parser_preserves_routes_and_classifies_oauth_strictly() {
+        assert_eq!(
+            parse_authorization_callback_parameters(Some("project=abc&panel=live")),
+            Ok(AuthorizationCallbackParameters::default())
+        );
+        let parsed = parse_authorization_callback_parameters(Some(
+            "project=abc&code=authorization-code&state=returned-state",
+        ))
+        .expect("bounded callback");
+        assert!(parsed.has_oauth_parameter);
+        assert!(!parsed.has_duplicate);
+        assert!(!parsed.has_error);
+        assert_eq!(parsed.code.as_deref(), Some("authorization-code"));
+        assert_eq!(parsed.state.as_deref(), Some("returned-state"));
+
+        let duplicate =
+            parse_authorization_callback_parameters(Some("code=first&code=second&state=s"))
+                .expect("bounded callback");
+        assert!(duplicate.has_oauth_parameter);
+        assert!(duplicate.has_duplicate);
+        assert_eq!(duplicate.code.as_deref(), Some("second"));
+
+        let denied = parse_authorization_callback_parameters(Some(
+            "error=access_denied&state=returned-state",
+        ))
+        .expect("bounded callback");
+        assert!(denied.has_oauth_parameter);
+        assert!(denied.has_error);
+        assert_eq!(denied.state.as_deref(), Some("returned-state"));
+
+        let oversized = "x".repeat(MAX_CALLBACK_PARAMETERS_BYTES + 1);
+        assert_eq!(
+            parse_authorization_callback_parameters(Some(&oversized)),
+            Err(())
+        );
+    }
+
+    #[test]
+    fn browser_callback_route_match_is_exact() {
+        let redirect =
+            url::Url::parse("https://app.rspice.test/oauth/callback").expect("redirect URL");
+        for candidate in [
+            "https://app.rspice.test/oauth/callback",
+            "https://app.rspice.test/oauth/callback?code=a",
+            "https://app.rspice.test/oauth/callback#code=a",
+        ] {
+            let candidate = url::Url::parse(candidate).expect("candidate URL");
+            assert!(is_exact_browser_callback_route(&candidate, &redirect));
+        }
+        for candidate in [
+            "https://app.rspice.test/oauth/callback/",
+            "https://app.rspice.test/other",
+            "https://other.rspice.test/oauth/callback",
+            "http://app.rspice.test/oauth/callback",
+        ] {
+            let candidate = url::Url::parse(candidate).expect("candidate URL");
+            assert!(!is_exact_browser_callback_route(&candidate, &redirect));
+        }
     }
 
     #[test]

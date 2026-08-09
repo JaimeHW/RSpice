@@ -23,6 +23,7 @@ struct PresencePeer {
     name: String,
     role: &'static str,
     is_self: bool,
+    connected: bool,
 }
 
 /// The presence cluster's facts, resolved from the session snapshot. None
@@ -32,6 +33,7 @@ struct PresenceFacts {
     relay_connected: bool,
     started_at: String,
     peers: Vec<PresencePeer>,
+    connected_count: usize,
 }
 
 fn presence_facts(app: &RSpiceApp) -> Option<PresenceFacts> {
@@ -41,7 +43,12 @@ fn presence_facts(app: &RSpiceApp) -> Option<PresenceFacts> {
         LiveSessionState::Participating(summary) => (false, summary),
         _ => return None,
     };
-    let peers = summary
+    let connected_principals: std::collections::HashSet<String> = app
+        .live_session
+        .peers()
+        .map(|peer| peer.identity.principal_id.to_string())
+        .collect();
+    let peers: Vec<_> = summary
         .participants
         .iter()
         .map(|participant| PresencePeer {
@@ -57,13 +64,20 @@ fn presence_facts(app: &RSpiceApp) -> Option<PresenceFacts> {
                 "viewer"
             },
             is_self: participant.is_self,
+            connected: if participant.is_self {
+                summary.relay_connected
+            } else {
+                connected_principals.contains(&participant.principal_id)
+            },
         })
         .collect();
+    let connected_count = peers.iter().filter(|peer| peer.connected).count();
     Some(PresenceFacts {
         hosting,
         relay_connected: summary.relay_connected,
         started_at: summary.started_at.clone(),
         peers,
+        connected_count,
     })
 }
 
@@ -86,9 +100,7 @@ pub(super) enum PresenceAction {
     OpenDialog,
     EndSession,
     LeaveSession,
-    #[cfg(not(target_arch = "wasm32"))]
     RequestLease(String),
-    #[cfg(not(target_arch = "wasm32"))]
     ReleaseLease(String),
 }
 
@@ -123,7 +135,7 @@ pub(super) fn session_presence_cluster(
     let admitted: Vec<&PresencePeer> = facts
         .peers
         .iter()
-        .filter(|peer| peer.role != "pending")
+        .filter(|peer| peer.connected && peer.role != "pending")
         .collect();
     let chip_count = admitted.len().min(3);
     let overflow = admitted.len().saturating_sub(chip_count);
@@ -137,7 +149,7 @@ pub(super) fn session_presence_cluster(
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
     let accessible_label = format!(
         "Live session — {} in session, {}. Opens participants and session controls.",
-        facts.peers.len(),
+        facts.connected_count,
         if facts.relay_connected {
             "streaming"
         } else {
@@ -218,26 +230,34 @@ fn render_presence_popover(
         );
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.label(
-                egui::RichText::new(format!("{} in session", facts.peers.len()))
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
+                egui::RichText::new(format!(
+                    "{} connected · {} in roster",
+                    facts.connected_count,
+                    facts.peers.len()
+                ))
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_dim),
             );
         });
     });
     ui.add_space(4.0);
     // Where each participant works right now, from their presence frames.
-    #[cfg(not(target_arch = "wasm32"))]
     let focused: std::collections::HashMap<String, String> = app
         .live_session
         .peers()
         .filter_map(|peer| {
-            peer.focused_doc
-                .as_ref()
-                .map(|doc| (peer.identity.principal_id.to_string(), presented_doc(doc)))
+            let location = match peer.cursor.as_ref() {
+                Some(crate::services::live_protocol::CursorLocus::Netlist { doc, line }) => {
+                    format!("{} · line {line}", presented_doc(doc))
+                }
+                Some(crate::services::live_protocol::CursorLocus::Canvas { doc, .. }) => {
+                    presented_doc(doc)
+                }
+                None => presented_doc(peer.focused_doc.as_ref()?),
+            };
+            Some((peer.identity.principal_id.to_string(), location))
         })
         .collect();
-    #[cfg(target_arch = "wasm32")]
-    let focused: std::collections::HashMap<String, String> = Default::default();
     for peer in &facts.peers {
         ui.horizontal(|ui| {
             let name = if peer.is_self {
@@ -252,7 +272,10 @@ fn render_presence_popover(
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let detail = match focused.get(&peer.principal_id) {
-                    Some(doc) if !peer.is_self => format!("{} · {doc}", peer.role),
+                    Some(doc) if !peer.is_self && peer.connected => {
+                        format!("{} · {doc}", peer.role)
+                    }
+                    _ if !peer.connected => format!("{} · offline", peer.role),
                     _ => peer.role.to_owned(),
                 };
                 ui.label(
@@ -275,7 +298,6 @@ fn render_presence_popover(
     ui.add_space(6.0);
 
     // Write-lease affordance for the document in front of a mirroring guest.
-    #[cfg(not(target_arch = "wasm32"))]
     if !facts.hosting && app.state.workbench.live_write_locks.mirror {
         let (doc, held_by_other) =
             if app.state.workbench.workspace == crate::workbench::state::Workspace::Netlist {
@@ -313,9 +335,6 @@ fn render_presence_popover(
             }
         }
     }
-    #[cfg(target_arch = "wasm32")]
-    let _ = app;
-
     if ui.button("Invite and session policy…").clicked() {
         actions.push(PresenceAction::OpenDialog);
         ui.close();
@@ -332,7 +351,6 @@ fn render_presence_popover(
 }
 
 /// A wire document key as the roster shows it.
-#[cfg(not(target_arch = "wasm32"))]
 fn presented_doc(doc: &str) -> String {
     doc.strip_prefix("schematic/").unwrap_or(doc).to_owned()
 }

@@ -25,11 +25,19 @@ pub(crate) struct CloudAccountConfig {
     /// Public OIDC client this application authenticates as.
     pub oidc_client_id: String,
     /// Release-pinned native license policy for `NativeLicenseVerifier`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub license_issuer: String,
+    #[cfg(not(target_arch = "wasm32"))]
     pub license_audience: String,
+    #[cfg(not(target_arch = "wasm32"))]
     pub license_product: String,
     /// Loopback ports registered as OAuth redirect URIs, tried in order.
+    #[cfg(not(target_arch = "wasm32"))]
     pub loopback_ports: Vec<u16>,
+    /// Exact redirect URI registered to the browser public client. It is
+    /// release-pinned and verified against the page origin at runtime.
+    #[cfg(target_arch = "wasm32")]
+    pub browser_redirect_uri: String,
     /// Loopback development stack (plain HTTP on 127.0.0.1) instead of
     /// production TLS endpoints.
     pub development: bool,
@@ -39,19 +47,21 @@ pub(crate) struct CloudAccountConfig {
 ///
 /// Fixed because the provider matches redirect URIs exactly; three ports keep
 /// sign-in working when one is taken by another process.
+#[cfg(not(target_arch = "wasm32"))]
 const DEFAULT_LOOPBACK_PORTS: [u16; 3] = [17_872, 27_194, 38_641];
 
 impl CloudAccountConfig {
     /// The configuration this build was produced with, or `None` when the
     /// build carries no cloud endpoints (fail closed, no partial sets).
     pub(crate) fn resolve() -> Option<Self> {
-        #[cfg(rspice_development_build)]
+        #[cfg(all(rspice_development_build, not(target_arch = "wasm32")))]
         if let Some(configuration) = Self::from_runtime_environment() {
             return Some(configuration);
         }
         Self::from_build_environment()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn from_build_environment() -> Option<Self> {
         Self::from_parts(
             option_env!("RSPICE_CLOUD_API_ORIGIN")?,
@@ -65,8 +75,19 @@ impl CloudAccountConfig {
         )
     }
 
+    #[cfg(target_arch = "wasm32")]
+    fn from_build_environment() -> Option<Self> {
+        Self::from_browser_parts(
+            option_env!("RSPICE_CLOUD_API_ORIGIN")?,
+            option_env!("RSPICE_CLOUD_OBJECT_STORAGE_ORIGIN")?,
+            option_env!("RSPICE_CLOUD_OIDC_ISSUER")?,
+            option_env!("RSPICE_CLOUD_BROWSER_OIDC_CLIENT_ID")?,
+            option_env!("RSPICE_CLOUD_BROWSER_REDIRECT_URI")?,
+        )
+    }
+
     /// Development builds may point at a local stack via runtime variables.
-    #[cfg(rspice_development_build)]
+    #[cfg(all(rspice_development_build, not(target_arch = "wasm32")))]
     fn from_runtime_environment() -> Option<Self> {
         let variable = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
         Self::from_parts(
@@ -81,6 +102,7 @@ impl CloudAccountConfig {
         )
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[allow(clippy::too_many_arguments)]
     fn from_parts(
         api_origin: &str,
@@ -121,8 +143,76 @@ impl CloudAccountConfig {
             development,
         })
     }
+
+    #[cfg(target_arch = "wasm32")]
+    fn from_browser_parts(
+        api_origin: &str,
+        object_storage_origin: &str,
+        oidc_issuer: &str,
+        oidc_client_id: &str,
+        browser_redirect_uri: &str,
+    ) -> Option<Self> {
+        let required = [
+            api_origin,
+            object_storage_origin,
+            oidc_issuer,
+            oidc_client_id,
+            browser_redirect_uri,
+        ];
+        if required.iter().any(|value| value.trim().is_empty()) {
+            return None;
+        }
+        let api = url::Url::parse(api_origin).ok()?;
+        let oidc = url::Url::parse(oidc_issuer).ok()?;
+        let redirect = url::Url::parse(browser_redirect_uri).ok()?;
+        if api.username() != ""
+            || api.password().is_some()
+            || oidc.username() != ""
+            || oidc.password().is_some()
+            || oidc.query().is_some()
+            || oidc.fragment().is_some()
+            || redirect.username() != ""
+            || redirect.password().is_some()
+            || redirect.query().is_some()
+            || redirect.fragment().is_some()
+        {
+            return None;
+        }
+        let development = api.scheme() == "http";
+        let schemes_are_safe = if development {
+            api.scheme() == "http"
+                && oidc.scheme() == "http"
+                && redirect.scheme() == "http"
+                && matches!(
+                    api.host_str(),
+                    Some("127.0.0.1") | Some("localhost") | Some("[::1]")
+                )
+                && matches!(
+                    oidc.host_str(),
+                    Some("127.0.0.1") | Some("localhost") | Some("[::1]")
+                )
+                && matches!(
+                    redirect.host_str(),
+                    Some("127.0.0.1") | Some("localhost") | Some("[::1]")
+                )
+        } else {
+            api.scheme() == "https" && oidc.scheme() == "https" && redirect.scheme() == "https"
+        };
+        if !schemes_are_safe {
+            return None;
+        }
+        Some(Self {
+            api_origin: api_origin.trim_end_matches('/').to_owned(),
+            object_storage_origin: object_storage_origin.trim_end_matches('/').to_owned(),
+            oidc_issuer: oidc_issuer.to_owned(),
+            oidc_client_id: oidc_client_id.to_owned(),
+            browser_redirect_uri: browser_redirect_uri.to_owned(),
+            development,
+        })
+    }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_ports(list: &str) -> Option<Vec<u16>> {
     let ports = list
         .split(',')
@@ -131,7 +221,7 @@ fn parse_ports(list: &str) -> Option<Vec<u16>> {
     if ports.is_empty() { None } else { Some(ports) }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
 

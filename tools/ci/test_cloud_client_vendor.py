@@ -14,6 +14,8 @@ import json
 import unittest
 from pathlib import Path
 
+from tools.cloud.sync_vendored_client import source_origin_is_authoritative
+
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = ROOT / "tools" / "cloud" / "vendor-manifest.json"
 
@@ -29,6 +31,23 @@ class CloudClientVendorTests(unittest.TestCase):
             self.manifest["crates"],
             ["rspice-cloud-domain", "rspice-cloud-contract", "rspice-cloud-client"],
         )
+
+    def test_sync_admits_only_the_authoritative_credential_free_origin(self) -> None:
+        for admitted in (
+            "https://github.com/JaimeHW/RSpice-Cloud.git",
+            "git@github.com:JaimeHW/RSpice-Cloud.git",
+            "ssh://git@github.com/JaimeHW/RSpice-Cloud.git",
+        ):
+            with self.subTest(origin=admitted):
+                self.assertTrue(source_origin_is_authoritative(admitted))
+        for rejected in (
+            "https://user:token@github.com/JaimeHW/RSpice-Cloud.git",
+            "https://github.com/other/RSpice-Cloud.git",
+            "C:/Users/example/RSpice-Cloud",
+            "",
+        ):
+            with self.subTest(origin=rejected):
+                self.assertFalse(source_origin_is_authoritative(rejected))
 
     def test_every_vendored_file_matches_its_recorded_digest(self) -> None:
         for relative, digest in self.manifest["files"].items():

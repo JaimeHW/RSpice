@@ -33,7 +33,7 @@ pub const COLLABORATION_PROTOCOL: &str = "rspice.automerge.v1";
 /// Prefix for the client-offered, never-selected collaboration ticket protocol.
 pub const COLLABORATION_TICKET_PROTOCOL_PREFIX: &str = "rspice.ticket.";
 /// Selected WebSocket subprotocol for ephemeral live-session relays (ADR 0082).
-pub const LIVE_SESSION_PROTOCOL: &str = "rspice.live-session.v1";
+pub const LIVE_SESSION_PROTOCOL: &str = "rspice.live-session.v2";
 
 /// Class byte prefixing every live-session relay frame. The relay enforces
 /// participant capability by class alone and never interprets payload bytes:
@@ -472,6 +472,17 @@ pub struct LiveSession {
 #[derive(Deserialize, Eq, PartialEq, Serialize)]
 pub struct JoinLiveSessionRequest {
     pub join_code: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_instance_id: Option<Uuid>,
+}
+
+/// Re-mints a one-time relay ticket for an already-admitted participant.
+/// This session-scoped operation deliberately does not accept a join code:
+/// rotating the human code must not strand connected participants or turn
+/// that code into a long-lived reconnect credential.
+#[derive(Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateLiveSessionTicketRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_instance_id: Option<Uuid>,
 }

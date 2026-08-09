@@ -11,12 +11,13 @@ use rspice_cloud_contract::{
     API_VERSION, Artifact, ArtifactDownload, ArtifactState, ArtifactUpload, AuditEvent, BuildInfo,
     Circuit, CircuitRevision, CircuitShare, CollaborationTicketProtocol,
     CreateArtifactUploadRequest, CreateCircuitRequest, CreateCircuitRevisionRequest,
-    CreateCollaborationTicketRequest, CreateLiveSessionRequest, CreatePublicationRequest,
-    CreateSimulationRunRequest, CreateWorkspaceRequest, CreatedCircuitShare, CreatedLiveSession,
-    CreatedWorkspaceInvitation, CurrentPrincipal, Entitlement, IssueLicenseLeaseRequest,
-    IssuedLicenseLease, JoinLiveSessionRequest, JoinedLiveSession, LicenseJwkSet, LicenseLeaseList,
-    LiveSession, LiveSessionPolicy, Page, ProblemDetails, PublicPublication, Publication,
-    SharedCircuit, SimulationRun, UpdateCircuitRequest, UpdateLiveSessionParticipantRequest,
+    CreateCollaborationTicketRequest, CreateLiveSessionRequest, CreateLiveSessionTicketRequest,
+    CreatePublicationRequest, CreateSimulationRunRequest, CreateWorkspaceRequest,
+    CreatedCircuitShare, CreatedLiveSession, CreatedWorkspaceInvitation, CurrentPrincipal,
+    Entitlement, IssueLicenseLeaseRequest, IssuedLicenseLease, JoinLiveSessionRequest,
+    JoinedLiveSession, LicenseJwkSet, LicenseLeaseList, LiveSession, LiveSessionPolicy,
+    LiveSessionTicketProtocol, Page, ProblemDetails, PublicPublication, Publication, SharedCircuit,
+    SimulationRun, UpdateCircuitRequest, UpdateLiveSessionParticipantRequest,
     UpdateLiveSessionPolicyRequest, UpdateWorkspaceMemberRequest, UpdateWorkspaceRequest, Uuid,
     Workspace, WorkspaceInvitation, WorkspaceMember,
 };
@@ -981,6 +982,41 @@ impl CloudClient {
             return Err(CloudError::Protocol {
                 failure: live_session_ticket_protocol_failure(failure),
                 status: Some(StatusCode::OK.as_u16()),
+                metadata: response.metadata,
+            });
+        }
+        Ok(response)
+    }
+
+    /// Re-mints one single-use relay ticket for an already-admitted member.
+    /// Unlike joining, this operation is session scoped and carries no human
+    /// join code, so reconnect remains valid after the host rotates that code.
+    pub async fn issue_live_session_ticket(
+        &self,
+        token: &BearerToken<'_>,
+        session_id: Uuid,
+        client_instance_id: Uuid,
+    ) -> Result<CloudResponse<LiveSessionTicketProtocol>, CloudError> {
+        let session_id_path = session_id.to_string();
+        let url = self.url([
+            "api",
+            API_VERSION,
+            "live-sessions",
+            session_id_path.as_str(),
+            "ticket-protocols",
+        ])?;
+        let request = CreateLiveSessionTicketRequest {
+            client_instance_id: Some(client_instance_id),
+        };
+        let response: CloudResponse<LiveSessionTicketProtocol> = self
+            .mutation_json(Method::POST, url, token, &request, &[StatusCode::CREATED])
+            .await?;
+        if let Err(failure) =
+            validate_live_session_ticket(&response.body, session_id, client_instance_id)
+        {
+            return Err(CloudError::Protocol {
+                failure: live_session_ticket_protocol_failure(failure),
+                status: Some(StatusCode::CREATED.as_u16()),
                 metadata: response.metadata,
             });
         }

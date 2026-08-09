@@ -15,17 +15,19 @@
 //! the host applies and rebroadcasts, with content digests recognizing the
 //! echo so the leaseholder never fights its own edits.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use crate::diagnostics::ConsoleMessage;
 use crate::io::schematic_io::{load_schematic_text, serialize_schematic_for_wire};
-use crate::services::cloud_account::{CloudAccountService, LiveRelayPort, LiveSessionState};
+use crate::services::cloud_account::{
+    CloudAccountService, LiveFrame, LiveFrameClass, LiveRelayPort, LiveSessionState,
+};
 use crate::services::live_protocol::{
-    CompletedContent, ContentReassembler, CursorLocus, DocumentMessage, LeaseDecision, LeaseTable,
-    LiveMessage, LiveProtocolError, ManifestEntry, PeerIdentity, PresencePayload, RunIntent,
-    RunPhase, RunRequestPayload, RunStatusMessage, RunStatusPayload, content_digest,
-    replace_messages,
+    CompletedContent, ContentReassembler, CursorLocus, CursorPayload, DocumentMessage,
+    LeaseDecision, LeaseTable, LiveMessage, LiveProtocolError, ManifestEntry, PeerIdentity,
+    PresencePayload, RunIntent, RunPhase, RunRequestPayload, RunStatusMessage, RunStatusPayload,
+    content_digest, replace_messages,
 };
 use crate::state::SchematicState;
 use crate::workbench::AppState;
@@ -33,10 +35,13 @@ use crate::workbench::state::LiveWriteLocks;
 
 /// Presence cadence; doubles as the relay keepalive under its idle timeout.
 const PRESENCE_PERIOD: Duration = Duration::from_secs(15);
+/// Cursor traffic is ephemeral and coalesced to at most 20 updates/second.
+const CURSOR_PERIOD: Duration = Duration::from_millis(50);
 /// Drop peers whose presence went quiet (they left or lost the relay).
 const PEER_TIMEOUT: Duration = Duration::from_secs(60);
 /// Minimum progress-fraction movement worth a run-status frame.
 const RUN_PROGRESS_STEP: f64 = 0.01;
+const MAX_PENDING_RUN_REQUESTS: usize = 32;
 
 /// Wire content contract of a schematic cell-view buffer.
 const SCHEMATIC_CONTENT_TYPE: &str = "rspice.schematic-view.v1";
@@ -177,6 +182,11 @@ struct Connection {
     dead: bool,
 }
 
+struct PendingRunRequest {
+    sender: PeerIdentity,
+    requested_at: Instant,
+}
+
 /// The per-frame live-session pump. Owned by the application shell right
 /// next to the cloud account service it drains.
 pub(crate) struct LiveSessionEngine {
@@ -186,8 +196,12 @@ pub(crate) struct LiveSessionEngine {
     /// Roster display names by principal, refreshed from the session
     /// snapshot; frames never carry names.
     roster: HashMap<uuid::Uuid, String>,
+    editors: HashSet<uuid::Uuid>,
     host_principal: Option<uuid::Uuid>,
+    pending_run_requests: Vec<PendingRunRequest>,
     presence_sent_at: Option<Instant>,
+    cursor_sent_at: Option<Instant>,
+    last_cursor_sent: Option<Option<CursorLocus>>,
     /// The active schematic's content version as last reconciled into the
     /// workspace buffer map.
     active_synced_version: Option<(String, u64)>,
@@ -204,8 +218,12 @@ impl Default for LiveSessionEngine {
             role: Role::Idle,
             peers: HashMap::new(),
             roster: HashMap::new(),
+            editors: HashSet::new(),
             host_principal: None,
+            pending_run_requests: Vec::new(),
             presence_sent_at: None,
+            cursor_sent_at: None,
+            last_cursor_sent: None,
             active_synced_version: None,
             incompatible_peer: false,
             mirror_discard_pending: false,
@@ -248,6 +266,7 @@ impl LiveSessionEngine {
         self.broadcast_local_changes(state);
         self.stream_run_status(state);
         self.send_presence_heartbeat(state);
+        self.send_cursor_update(state);
         self.prune_peers();
         self.project_locks(state);
     }
@@ -298,6 +317,34 @@ impl LiveSessionEngine {
     /// Whether an incompatible peer build was heard this session.
     pub(crate) fn incompatible_peer_seen(&self) -> bool {
         self.incompatible_peer
+    }
+
+    /// Host-side run requests awaiting an explicit human decision.
+    pub(crate) fn pending_run_requests(&self) -> Vec<(PeerIdentity, String)> {
+        self.pending_run_requests
+            .iter()
+            .map(|request| (request.sender, self.display_name(&request.sender)))
+            .collect()
+    }
+
+    /// Approve exactly one authenticated request and dispatch on the host.
+    pub(crate) fn approve_run_request(&mut self, state: &mut AppState, sender: PeerIdentity) {
+        if !matches!(self.role, Role::Host(_)) {
+            return;
+        }
+        if let Some(index) = self
+            .pending_run_requests
+            .iter()
+            .position(|request| request.sender == sender)
+        {
+            self.pending_run_requests.remove(index);
+            state.request_run_set_simulation();
+        }
+    }
+
+    pub(crate) fn deny_run_request(&mut self, sender: PeerIdentity) {
+        self.pending_run_requests
+            .retain(|request| request.sender != sender);
     }
 
     /// Guest affordance: ask the host for one document's write lease.
@@ -497,6 +544,12 @@ impl LiveSessionEngine {
                     .map(|id| (id, participant.display_name.clone()))
             })
             .collect();
+        self.editors = summary
+            .participants
+            .iter()
+            .filter(|participant| participant.editor && !participant.pending)
+            .filter_map(|participant| participant.principal_id.parse().ok())
+            .collect();
         self.host_principal = summary
             .participants
             .iter()
@@ -541,7 +594,10 @@ impl LiveSessionEngine {
         }
         self.connection = None;
         self.peers.clear();
+        self.pending_run_requests.clear();
         self.presence_sent_at = None;
+        self.cursor_sent_at = None;
+        self.last_cursor_sent = None;
         self.incompatible_peer = false;
         state.workbench.live_write_locks = LiveWriteLocks::default();
         // The read-only flag is this engine's to own; clearing it never
@@ -597,6 +653,8 @@ impl LiveSessionEngine {
             dead: false,
         });
         self.presence_sent_at = None;
+        self.cursor_sent_at = None;
+        self.last_cursor_sent = None;
         match &mut self.role {
             Role::Host(_) => {
                 // A (re)connected host reintroduces the whole document set:
@@ -635,10 +693,19 @@ impl LiveSessionEngine {
         let Some(connection) = self.connection.as_mut() else {
             return;
         };
-        if connection.port.outbound.send(message.encode()).is_err() {
-            // The socket died; the cloud service reconnects and delivers a
-            // fresh port, whose adoption rebroadcasts anything missed.
-            connection.dead = true;
+        let frame = message.encode();
+        let disposable = matches!(
+            frame.class,
+            LiveFrameClass::Presence | LiveFrameClass::Cursor
+        );
+        match connection.port.outbound.try_send(frame) {
+            Ok(()) => {}
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) if disposable => {}
+            Err(_) => {
+                // Losing authoritative traffic requires a fresh socket and
+                // document resynchronization; never silently drop it.
+                connection.dead = true;
+            }
         }
     }
 
@@ -654,7 +721,12 @@ impl LiveSessionEngine {
                 Err(_) => return,
             };
             match LiveMessage::decode(&frame) {
-                Ok(message) => self.handle_message(state, message),
+                Ok(message) if self.authorize_inbound(&frame, &message) => {
+                    self.handle_message(state, message);
+                }
+                Ok(_) => {
+                    log::warn!("live frame with a forged or unauthorized sender was dropped");
+                }
                 Err(LiveProtocolError::UnsupportedVersion(version)) => {
                     if !self.incompatible_peer {
                         self.incompatible_peer = true;
@@ -666,6 +738,74 @@ impl LiveSessionEngine {
                 }
                 Err(LiveProtocolError::Malformed) => {
                     log::debug!("malformed live frame dropped (class {:?})", frame.class);
+                }
+            }
+        }
+    }
+
+    /// Bind every payload identity claim to the relay's ticket-authenticated
+    /// v2 stamp. The relay capability matrix limits classes; this method
+    /// supplies the finer host/guest semantics within each class.
+    fn authorize_inbound(&self, frame: &LiveFrame, message: &LiveMessage) -> bool {
+        let Some(stamp) = frame.authenticated_sender else {
+            return false;
+        };
+        let sender = PeerIdentity {
+            principal_id: stamp.principal_id,
+            client_instance_id: stamp.client_instance_id,
+        };
+        if !self.roster.contains_key(&sender.principal_id) {
+            return false;
+        }
+        match &self.role {
+            Role::Idle => false,
+            Role::Host(_) => match message {
+                LiveMessage::Presence(payload) => payload.sender == sender,
+                LiveMessage::Cursor(payload) => payload.sender == sender,
+                LiveMessage::RunRequest(payload) => payload.sender == sender,
+                LiveMessage::RunStatus(_) => false,
+                LiveMessage::Document(DocumentMessage::Replace { header, .. }) => {
+                    header.sender == sender
+                }
+                LiveMessage::Document(DocumentMessage::LeaseRequest { sender: claim, .. })
+                | LiveMessage::Document(DocumentMessage::SyncRequest { sender: claim, .. }) => {
+                    *claim == sender
+                }
+                LiveMessage::Document(DocumentMessage::LeaseRelease { holder, .. }) => {
+                    *holder == sender
+                }
+                LiveMessage::Document(
+                    DocumentMessage::LeaseGrant { .. }
+                    | DocumentMessage::LeaseDeny { .. }
+                    | DocumentMessage::Manifest { .. },
+                ) => false,
+            },
+            Role::Guest(_) => {
+                let from_host = self.host_principal == Some(sender.principal_id);
+                match message {
+                    LiveMessage::Presence(payload) => payload.sender == sender,
+                    LiveMessage::Cursor(payload) => payload.sender == sender,
+                    LiveMessage::RunRequest(payload) => payload.sender == sender,
+                    LiveMessage::RunStatus(RunStatusMessage::Status(payload)) => {
+                        from_host && payload.sender == sender
+                    }
+                    LiveMessage::RunStatus(RunStatusMessage::ResultChunk { header, .. }) => {
+                        from_host && header.sender == sender
+                    }
+                    LiveMessage::Document(DocumentMessage::Replace { header, .. }) => {
+                        from_host && header.sender == sender
+                    }
+                    LiveMessage::Document(DocumentMessage::Manifest { sender: claim, .. }) => {
+                        from_host && *claim == sender
+                    }
+                    LiveMessage::Document(
+                        DocumentMessage::LeaseGrant { .. }
+                        | DocumentMessage::LeaseDeny { .. }
+                        | DocumentMessage::LeaseRelease { .. },
+                    ) => from_host,
+                    LiveMessage::Document(
+                        DocumentMessage::LeaseRequest { .. } | DocumentMessage::SyncRequest { .. },
+                    ) => false,
                 }
             }
         }
@@ -705,12 +845,22 @@ impl LiveSessionEngine {
                 Role::Idle => {}
             },
             LiveMessage::RunRequest(payload) => {
-                if matches!(self.role, Role::Host(_)) {
+                if matches!(self.role, Role::Host(_))
+                    && self.editors.contains(&payload.sender.principal_id)
+                    && !self
+                        .pending_run_requests
+                        .iter()
+                        .any(|request| request.sender == payload.sender)
+                    && self.pending_run_requests.len() < MAX_PENDING_RUN_REQUESTS
+                {
                     let requester = self.display_name(&payload.sender);
                     state.push_user_message(ConsoleMessage::info(format!(
-                        "{requester} requested a run from the live session."
+                        "{requester} requested a run. Review it in the Live session dialog."
                     )));
-                    state.request_run_set_simulation();
+                    self.pending_run_requests.push(PendingRunRequest {
+                        sender: payload.sender,
+                        requested_at: Instant::now(),
+                    });
                 }
             }
             LiveMessage::RunStatus(RunStatusMessage::Status(payload)) => {
@@ -1336,10 +1486,61 @@ impl LiveSessionEngine {
         self.presence_sent_at = Some(Instant::now());
     }
 
+    fn send_cursor_update(&mut self, state: &AppState) {
+        if self.connection.is_none()
+            || self
+                .cursor_sent_at
+                .is_some_and(|sent| sent.elapsed() < CURSOR_PERIOD)
+        {
+            return;
+        }
+        let locus = if state.workbench.workspace == crate::workbench::state::Workspace::Design {
+            state.ui.canvas_hover.and_then(|(x, y)| {
+                let (x, y) = (x as f32, y as f32);
+                (x.is_finite() && y.is_finite()).then(|| CursorLocus::Canvas {
+                    doc: schematic_doc_key(&state.workspace.active_key()),
+                    x,
+                    y,
+                })
+            })
+        } else if state.workbench.workspace == crate::workbench::state::Workspace::Netlist
+            && state.ui.netlist.active_document
+                == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
+        {
+            Some(CursorLocus::Netlist {
+                doc: NETLIST_DOC.to_owned(),
+                line: u32::try_from(state.ui.netlist.cursor_line.saturating_add(1))
+                    .unwrap_or(u32::MAX),
+            })
+        } else {
+            None
+        };
+        if self.last_cursor_sent.as_ref() == Some(&locus) {
+            return;
+        }
+        let Some(identity) = self
+            .connection
+            .as_ref()
+            .map(|connection| connection.identity)
+        else {
+            return;
+        };
+        self.send(&LiveMessage::Cursor(CursorPayload {
+            sender: identity,
+            locus: locus.clone(),
+        }));
+        self.last_cursor_sent = Some(locus);
+        self.cursor_sent_at = Some(Instant::now());
+    }
+
     /// Retire peers whose presence went quiet, reclaiming whatever they left
     /// half-sent. A departed peer that also held write leases frees them:
     /// otherwise a document stays locked behind someone who is gone.
     fn prune_peers(&mut self) {
+        self.pending_run_requests.retain(|request| {
+            request.requested_at.elapsed() < PEER_TIMEOUT
+                && self.editors.contains(&request.sender.principal_id)
+        });
         let departed: Vec<PeerIdentity> = self
             .peers
             .values()
@@ -1530,5 +1731,147 @@ fn serialize_host_document(state: &AppState, doc: &str) -> Option<Vec<u8>> {
         let cell_key = doc.strip_prefix(SCHEMATIC_DOC_PREFIX)?;
         let buffer = state.workspace.schematic_buffers.get(cell_key)?;
         serialize_schematic_for_wire(buffer).ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::cloud_account::LiveRelayIdentity;
+
+    fn identity(principal: u128, client: u128) -> PeerIdentity {
+        PeerIdentity {
+            principal_id: uuid::Uuid::from_u128(principal),
+            client_instance_id: uuid::Uuid::from_u128(client),
+        }
+    }
+
+    fn stamped(message: LiveMessage, authenticated: PeerIdentity) -> LiveFrame {
+        let mut frame = message.encode();
+        frame.authenticated_sender = Some(LiveRelayIdentity {
+            principal_id: authenticated.principal_id,
+            client_instance_id: authenticated.client_instance_id,
+        });
+        frame
+    }
+
+    fn attach_for_test(
+        engine: &mut LiveSessionEngine,
+        local: PeerIdentity,
+    ) -> std::sync::mpsc::SyncSender<LiveFrame> {
+        let (inbound_tx, inbound) = std::sync::mpsc::sync_channel(4);
+        let (outbound, _outbound_rx) = tokio::sync::mpsc::channel(4);
+        engine.connection = Some(Connection {
+            port: LiveRelayPort {
+                client_instance_id: local.client_instance_id,
+                outbound,
+                inbound,
+            },
+            identity: local,
+            dead: false,
+        });
+        inbound_tx
+    }
+
+    #[test]
+    fn forged_run_request_identity_is_dropped() {
+        let host = identity(1, 11);
+        let editor = identity(2, 22);
+        let attacker = identity(3, 33);
+        let mut engine = LiveSessionEngine {
+            role: Role::Host(Box::new(HostRole::new("session".to_owned()))),
+            ..LiveSessionEngine::default()
+        };
+        engine
+            .roster
+            .insert(editor.principal_id, "Editor".to_owned());
+        engine
+            .roster
+            .insert(attacker.principal_id, "Attacker".to_owned());
+        engine.editors.insert(editor.principal_id);
+        let inbound = attach_for_test(&mut engine, host);
+        inbound
+            .send(stamped(
+                LiveMessage::RunRequest(RunRequestPayload {
+                    sender: editor,
+                    run: RunIntent::Simulate,
+                }),
+                attacker,
+            ))
+            .expect("test relay remains attached");
+
+        let mut state = AppState::default();
+        engine.drain_inbound(&mut state);
+
+        assert!(engine.pending_run_requests.is_empty());
+        assert!(!state.simulation.trigger_simulation);
+    }
+
+    #[test]
+    fn authenticated_run_request_requires_explicit_host_approval() {
+        let host = identity(1, 11);
+        let editor = identity(2, 22);
+        let mut engine = LiveSessionEngine {
+            role: Role::Host(Box::new(HostRole::new("session".to_owned()))),
+            ..LiveSessionEngine::default()
+        };
+        engine
+            .roster
+            .insert(editor.principal_id, "Editor".to_owned());
+        engine.editors.insert(editor.principal_id);
+        let inbound = attach_for_test(&mut engine, host);
+        inbound
+            .send(stamped(
+                LiveMessage::RunRequest(RunRequestPayload {
+                    sender: editor,
+                    run: RunIntent::Simulate,
+                }),
+                editor,
+            ))
+            .expect("test relay remains attached");
+
+        let mut state = AppState::default();
+        engine.drain_inbound(&mut state);
+
+        assert_eq!(engine.pending_run_requests.len(), 1);
+        assert!(!state.simulation.trigger_simulation);
+
+        engine.approve_run_request(&mut state, editor);
+
+        assert!(engine.pending_run_requests.is_empty());
+        assert!(state.simulation.trigger_simulation);
+    }
+
+    #[test]
+    fn guest_rejects_host_authoritative_frames_from_non_host_stamp() {
+        let guest = identity(1, 11);
+        let host = identity(2, 22);
+        let attacker = identity(3, 33);
+        let mut engine = LiveSessionEngine {
+            role: Role::Guest(Box::new(GuestRole::new("session".to_owned(), false))),
+            host_principal: Some(host.principal_id),
+            ..LiveSessionEngine::default()
+        };
+        engine.roster.insert(host.principal_id, "Host".to_owned());
+        engine
+            .roster
+            .insert(attacker.principal_id, "Attacker".to_owned());
+        let inbound = attach_for_test(&mut engine, guest);
+        inbound
+            .send(stamped(
+                LiveMessage::RunStatus(RunStatusMessage::Status(RunStatusPayload {
+                    sender: attacker,
+                    run_id: 1,
+                    phase: RunPhase::Started,
+                    progress: None,
+                })),
+                attacker,
+            ))
+            .expect("test relay remains attached");
+
+        let mut state = AppState::default();
+        engine.drain_inbound(&mut state);
+
+        assert!(engine.guest_run_status().is_none());
     }
 }
