@@ -336,8 +336,7 @@ impl CircuitData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Netlist;
-    use crate::engine::{Engine, SimulationConfig, SpiceDialect};
+    use crate::{Engine, Netlist, SimulationConfig, SpiceDialect};
 
     const BH_LEVEL2_DECK: &str = "Xyce direct Core DAE capability\n\
         .tran 0 4\n\

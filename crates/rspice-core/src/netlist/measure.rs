@@ -72,10 +72,10 @@ pub enum MeasureOperand {
 }
 
 /// Xyce's default absolute equality tolerance for conditional measurements.
-pub const XYCE_DEFAULT_MEASURE_MINVAL: Value = 1.0e-12;
+pub(crate) const XYCE_DEFAULT_MEASURE_MINVAL: Value = 1.0e-12;
 
 /// Complete Xyce 7.10 `.MEASURE` type-keyword vocabulary.
-pub const XYCE_MEASURE_TYPE_KEYWORDS: &[&str] = &[
+pub(crate) const XYCE_MEASURE_TYPE_KEYWORDS: &[&str] = &[
     "TRIG",
     "TARG",
     "AVG",
@@ -112,7 +112,7 @@ pub const XYCE_MEASURE_TYPE_KEYWORDS: &[&str] = &[
 /// This includes measure families not yet executable in RSpice. Recognizing
 /// the full vocabulary is still essential: unsupported qualifiers must never
 /// be mistaken for equation text or discarded as anonymous operands.
-pub const XYCE_MEASURE_QUALIFIER_KEYWORDS: &[&str] = &[
+pub(crate) const XYCE_MEASURE_QUALIFIER_KEYWORDS: &[&str] = &[
     "GOAL",
     "DEFAULT_VAL",
     "PRINT",
@@ -203,24 +203,6 @@ pub struct TrigSpec {
     pub occurrence_explicit: bool,
 }
 
-impl TrigSpec {
-    pub fn new(signal: &str, value: Value) -> Self {
-        Self {
-            event: TriggerEvent::When(WhenCondition {
-                left: signal.to_string(),
-                right: MeasureOperand::Constant(value),
-                occurrence: EventOccurrence {
-                    edge: EdgeType::Cross,
-                    number: 1,
-                },
-            }),
-            td: None,
-            frac_max: None,
-            occurrence_explicit: false,
-        }
-    }
-}
-
 /// Authored scalar source for Xyce `PARAM`/`EQN` measures.
 ///
 /// Xyce routes bare parameter/measurement references and most unbraced output
@@ -233,38 +215,38 @@ impl TrigSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MeasureExpression {
     pub text: String,
-    pub kind: MeasureExpressionKind,
+    pub(crate) kind: MeasureExpressionKind,
 }
 
 impl MeasureExpression {
-    pub fn raw_reference(text: impl Into<String>) -> Self {
+    pub(crate) fn raw_reference(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             kind: MeasureExpressionKind::RawReference,
         }
     }
 
-    pub fn raw_output_operator(text: impl Into<String>) -> Self {
+    pub(crate) fn raw_output_operator(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             kind: MeasureExpressionKind::RawOutputOperator,
         }
     }
 
-    pub fn expression(text: impl Into<String>) -> Self {
+    pub(crate) fn expression(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             kind: MeasureExpressionKind::Expression,
         }
     }
 
-    pub fn is_expression(&self) -> bool {
+    pub(crate) fn is_expression(&self) -> bool {
         self.kind == MeasureExpressionKind::Expression
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MeasureExpressionKind {
+pub(crate) enum MeasureExpressionKind {
     RawReference,
     RawOutputOperator,
     Expression,

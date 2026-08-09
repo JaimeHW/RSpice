@@ -2828,23 +2828,19 @@ pub struct SimulationOptions {
 }
 
 impl SimulationOptions {
-    /// Create empty options (all defaults)
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Effective Xyce continuous-measurement file-routing policy.
     pub fn measure_use_cont_files(&self) -> bool {
         self.measure_use_cont_files.unwrap_or(true)
     }
 
     /// Effective Xyce legacy TRIG/TARG compatibility policy.
-    pub fn measure_use_lttm(&self) -> bool {
+    pub(crate) fn measure_use_lttm(&self) -> bool {
         self.measure_use_lttm.unwrap_or(false)
     }
 
-    /// Merge another options set, preferring values from `other`
-    pub fn merge(&mut self, other: &SimulationOptions) {
+    /// Merge another options set, preferring values from `other`.
+    #[cfg(test)]
+    pub(crate) fn merge(&mut self, other: &SimulationOptions) {
         if other.replace_ground.is_some() {
             self.replace_ground = other.replace_ground;
         }

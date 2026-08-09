@@ -30,7 +30,17 @@ use std::sync::Arc;
 #[cfg(feature = "veriloga-builtins-base")]
 pub use rspice_veriloga_models::registry as builtins;
 
-pub use rspice_veriloga_runtime::*;
+pub use rspice_veriloga_runtime::{
+    GENERATED_PERSISTENT_STATE_VERSION, GeneratedAnalysisKind, GeneratedDdtCoefficients,
+    GeneratedDerivative, GeneratedEvalContext, GeneratedEvaluationError, GeneratedEvaluationMode,
+    GeneratedMappedNoiseDescriptor, GeneratedNoiseDescriptor, GeneratedNoiseEndpoint,
+    GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef,
+    GeneratedNoiseInjection, GeneratedNoiseKind, GeneratedNoiseTopologyError,
+    GeneratedReactiveStamper, GeneratedSimulationParameters, GeneratedStampLane, GeneratedStamper,
+    GeneratedStaticStampCache, GeneratedVerilogAEvaluationError,
+    GeneratedVerilogAInstanceCheckpoint, GeneratedVerilogAPersistentState,
+    GeneratedVerilogARollbackState, Value,
+};
 
 #[cfg(feature = "veriloga-builtins-base")]
 #[derive(Clone)]
@@ -119,7 +129,7 @@ impl std::fmt::Debug for BuiltinVerilogAInstance {
 
 #[cfg(feature = "veriloga-builtins-base")]
 #[derive(Debug, Clone, Default)]
-pub struct BuiltinVerilogADevices {
+pub(crate) struct BuiltinVerilogADevices {
     devices: Vec<BuiltinVerilogAInstance>,
 }
 
@@ -132,29 +142,29 @@ pub(crate) struct BuiltinVerilogADevicesRollback {
 #[cfg(feature = "veriloga-builtins-base")]
 impl BuiltinVerilogADevices {
     #[inline]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             devices: Vec::new(),
         }
     }
 
     #[inline]
-    pub fn add(&mut self, device: BuiltinVerilogAInstance) {
+    pub(crate) fn add(&mut self, device: BuiltinVerilogAInstance) {
         self.devices.push(device);
     }
 
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.devices.is_empty()
     }
 
     #[inline]
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.devices.len()
     }
 
     #[inline]
-    pub fn iter(&self) -> impl Iterator<Item = &BuiltinVerilogAInstance> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &BuiltinVerilogAInstance> {
         self.devices.iter()
     }
 
@@ -233,13 +243,13 @@ impl BuiltinVerilogADevices {
         }
     }
 
-    pub fn link_static_stamps(&mut self, matrix: &StaticMatrix, num_nodes: usize) {
+    pub(crate) fn link_static_stamps(&mut self, matrix: &StaticMatrix, num_nodes: usize) {
         for device in &mut self.devices {
             device.link_static_stamps(matrix, num_nodes);
         }
     }
 
-    pub fn stamp_all(
+    pub(crate) fn stamp_all(
         &mut self,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
@@ -290,21 +300,21 @@ impl BuiltinVerilogADevices {
     }
 
     #[inline]
-    pub fn all_converged(&self) -> bool {
+    pub(crate) fn all_converged(&self) -> bool {
         self.devices
             .iter()
             .all(BuiltinVerilogAInstance::is_converged)
     }
 
     #[inline]
-    pub fn set_temperature(&mut self, temperature: Value) {
+    pub(crate) fn set_temperature(&mut self, temperature: Value) {
         for device in &mut self.devices {
             device.set_temperature(temperature);
         }
     }
 
     #[inline]
-    pub fn set_timepoint(
+    pub(crate) fn set_timepoint(
         &mut self,
         time: Value,
         timestep: Value,
@@ -316,20 +326,20 @@ impl BuiltinVerilogADevices {
     }
 
     #[inline]
-    pub fn set_analysis_step(&mut self, initial: bool, final_step: bool) {
+    pub(crate) fn set_analysis_step(&mut self, initial: bool, final_step: bool) {
         for device in &mut self.devices {
             device.set_analysis_step(initial, final_step);
         }
     }
 
     #[inline]
-    pub fn accept_timestep(&mut self) {
+    pub(crate) fn accept_timestep(&mut self) {
         for device in &mut self.devices {
             device.accept_timestep();
         }
     }
 
-    pub fn stamp_ac_real_all(
+    pub(crate) fn stamp_ac_real_all(
         &mut self,
         matrix: &mut ComplexMatrix,
         voltages: &[Value],
@@ -348,7 +358,7 @@ impl BuiltinVerilogADevices {
         Ok(())
     }
 
-    pub fn stamp_reactive_all(
+    pub(crate) fn stamp_reactive_all(
         &mut self,
         matrix: &mut ComplexMatrix,
         voltages: &[Value],
@@ -473,7 +483,7 @@ impl BuiltinVerilogAInstance {
     }
 
     #[inline]
-    pub fn is_converged(&self) -> bool {
+    pub(crate) fn is_converged(&self) -> bool {
         self.kind.limiter_converged()
     }
 
@@ -685,7 +695,7 @@ impl BuiltinVerilogAInstance {
     }
 
     #[inline]
-    pub fn set_temperature(&mut self, temperature: Value) {
+    pub(crate) fn set_temperature(&mut self, temperature: Value) {
         if temperature.is_finite() && temperature > 0.0 {
             self.temperature = temperature;
         }
@@ -702,18 +712,18 @@ impl BuiltinVerilogAInstance {
     }
 
     #[inline]
-    pub fn set_analysis_step(&mut self, initial: bool, final_step: bool) {
+    pub(crate) fn set_analysis_step(&mut self, initial: bool, final_step: bool) {
         self.analysis_initial_step = initial;
         self.analysis_final_step = final_step;
     }
 
     #[inline]
-    pub fn accept_timestep(&mut self) {
+    pub(crate) fn accept_timestep(&mut self) {
         self.kind.accept_timestep();
     }
 
     #[inline]
-    pub fn stamp_ac_real(
+    pub(crate) fn stamp_ac_real(
         &mut self,
         matrix: &mut ComplexMatrix,
         voltages: &[Value],
