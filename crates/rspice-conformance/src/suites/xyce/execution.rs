@@ -41,6 +41,65 @@ impl XyceTestRunner {
     pub(super) fn run_discovered_test(&self, deck: &XyceDeck) -> XyceTestResult {
         let start = Instant::now();
         if deck.section != XyceDeckSection::Netlists {
+            return self.run_discovered_test_unqualified(deck);
+        }
+        let upstream_exclusion = match &self.upstream_exclusions {
+            Ok(exclusions) => exclusions
+                .get(&Self::normalize_manifest_key(&deck.relative_path))
+                .cloned(),
+            Err(error) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    "upstream_exclusion_manifest_error",
+                    error.clone(),
+                    Vec::new(),
+                );
+            }
+        };
+        let Some(upstream_exclusion) = upstream_exclusion else {
+            return self.run_discovered_test_unqualified(deck);
+        };
+        match upstream_exclusion.disposition {
+            XyceUpstreamExclusionDisposition::Excluded => {
+                self.upstream_excluded_result(deck, start, &upstream_exclusion.source)
+            }
+            XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                expected_contract,
+            } => {
+                let mut result = self.run_discovered_test_unqualified(deck);
+                let actual_contract = result.contract.clone();
+                let actual_passed = result.passed;
+                let actual_expected_unsupported = result.expected_unsupported;
+                let promotion_is_valid = result.passed
+                    && !result.expected_unsupported
+                    && !result.upstream_excluded
+                    && actual_contract == expected_contract;
+                result.upstream_exclusion_source = Some(upstream_exclusion.source);
+                if !promotion_is_valid {
+                    let underlying_error = result.error.take();
+                    result.passed = false;
+                    result.expected_unsupported = false;
+                    result.upstream_excluded = false;
+                    result.contract = "upstream_exclusion_promotion_mismatch".to_string();
+                    result.error = Some(format!(
+                        "RSpice independent qualification expected contract {expected_contract:?}, but the deck produced contract {actual_contract:?} with passed={}, expected_unsupported={}{}",
+                        actual_passed,
+                        actual_expected_unsupported,
+                        underlying_error
+                            .as_deref()
+                            .map(|error| format!("; underlying result: {error}"))
+                            .unwrap_or_default()
+                    ));
+                }
+                result
+            }
+        }
+    }
+
+    fn run_discovered_test_unqualified(&self, deck: &XyceDeck) -> XyceTestResult {
+        let start = Instant::now();
+        if deck.section != XyceDeckSection::Netlists {
             return self.expected_unsupported_result(
                 deck,
                 start,

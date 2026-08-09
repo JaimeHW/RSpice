@@ -43,6 +43,7 @@ use rspice_core::netlist::{
 };
 use rspice_core::numerics::integration::TransientLteReference;
 use rspice_core::{Complex64, Engine, Value};
+use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -50,7 +51,24 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const EXPECTED_UNSUPPORTED_MARKER: &str = "EXPECTED_UNSUPPORTED:";
+const UPSTREAM_EXCLUDED_MARKER: &str = "UPSTREAM_EXCLUDED:";
 const HARNESS_MANIFEST_FILE: &str = "RSPICE-HARNESS-MANIFEST.tsv";
+const UPSTREAM_EXCLUSIONS_MANIFEST_FILE: &str = "RSPICE-UPSTREAM-EXCLUSIONS.tsv";
+const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
+const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
+const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
+const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 123;
+const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
+    "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
+const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
+    "ea6bf8b78d0510df524c2e67c39bbe2836057e99929d0a45d283d1e51c31c5f9";
+const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
+    "fdf9797e7224a16e775772b2318a91333f17bb688bace0829b8c1c7dd4f5255c";
+const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
+    "6e3aeff9a4b2e4c28a132afdd3ebcdafeb61a51fb82b9e4674dd992dccad5c92";
+const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
+const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
 const MAX_NATIVE_TRAN_ORACLE_STEPS: f64 = 250_000.0;
 const MAX_NATIVE_TRAN_TARGET_COMPACT_DEVICE_STEPS: f64 = 10_000.0;
@@ -2556,6 +2574,13 @@ pub struct XyceTestResult {
     /// Whether this is a named, expected unsupported result rather than a
     /// numeric comparison.
     pub expected_unsupported: bool,
+    /// Whether the upstream Xyce regression harness explicitly excludes this
+    /// retained deck. This is provenance, not an RSpice feature gap.
+    pub upstream_excluded: bool,
+    /// Original upstream `exclude` file, when the deck has upstream exclusion
+    /// provenance. Independently qualified RSpice executions retain this
+    /// metadata even though `upstream_excluded` is false for their result.
+    pub upstream_exclusion_source: Option<String>,
     /// Error or expected-unsupported reason.
     pub error: Option<String>,
     /// Numeric mismatches for executed decks.
@@ -2574,6 +2599,7 @@ pub struct XyceStatistics {
     pub passed: usize,
     pub failed: usize,
     pub expected_unsupported: usize,
+    pub upstream_excluded: usize,
     pub total_time_ms: u128,
 }
 
@@ -2600,6 +2626,19 @@ pub struct XyceTestRunner {
     root: PathBuf,
     config: XyceRunnerConfig,
     upstream_wrapper_decks: BTreeSet<String>,
+    upstream_exclusions: Result<BTreeMap<String, XyceUpstreamExclusion>, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceUpstreamExclusion {
+    source: String,
+    disposition: XyceUpstreamExclusionDisposition,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum XyceUpstreamExclusionDisposition {
+    Excluded,
+    RspiceIndependentlyQualified { expected_contract: String },
 }
 
 #[derive(Debug, Clone)]

@@ -7,6 +7,293 @@
 
 use super::*;
 
+fn upstream_exclusion_manifest(rows: &[&str]) -> String {
+    let mut manifest = format!(
+        "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\n\
+         source_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}\n\
+         source_netlists_tree\t{UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE}\n"
+    );
+    for row in rows {
+        manifest.push_str(row);
+        manifest.push('\n');
+    }
+    manifest
+}
+
+fn write_upstream_exclusion_deck(root: &Path, relative_path: &str, source: &str) -> PathBuf {
+    let path = root.join(relative_path.replace('/', std::path::MAIN_SEPARATOR_STR));
+    fs::create_dir_all(path.parent().expect("fixture deck has a parent"))
+        .expect("create exclusion fixture directory");
+    fs::write(&path, source).expect("write exclusion fixture deck");
+    path
+}
+
+#[test]
+fn upstream_exclusion_manifest_preserves_excluded_and_promoted_provenance() {
+    let root = tempfile::tempdir().expect("create upstream-exclusion fixture");
+    write_upstream_exclusion_deck(
+        root.path(),
+        "Netlists/EXCLUDED/invalid.cir",
+        "this is deliberately not a valid netlist\n",
+    );
+    write_upstream_exclusion_deck(
+        root.path(),
+        "Netlists/PROMOTED/simple.cir",
+        "promotion fixture\nV1 1 0 1\nR1 1 0 1\n.DC V1 1 1 1\n.PRINT DC V(1)\n.END\n",
+    );
+    let output = root.path().join("OutputData/PROMOTED");
+    fs::create_dir_all(&output).expect("create promotion reference directory");
+    fs::write(
+        output.join("simple.cir.prn"),
+        "Index V(1)\n0 1.00000000e+00\nEnd of Xyce(TM) Simulation\n",
+    )
+    .expect("write promotion reference");
+    fs::write(
+        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[
+            "Netlists/EXCLUDED/invalid.cir\tNetlists/EXCLUDED/exclude\tupstream_excluded",
+            "Netlists/PROMOTED/simple.cir\tNetlists/PROMOTED/exclude\trspice_independently_qualified\tstatic_prn_dc",
+        ]),
+    )
+    .expect("write upstream-exclusion manifest");
+
+    let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
+    let excluded = runner.run_test(root.path().join("Netlists/EXCLUDED/invalid.cir"));
+    assert!(excluded.passed);
+    assert!(excluded.upstream_excluded);
+    assert!(!excluded.expected_unsupported);
+    assert_eq!(excluded.contract, "upstream_excluded");
+    assert_eq!(
+        excluded.upstream_exclusion_source.as_deref(),
+        Some("Netlists/EXCLUDED/exclude")
+    );
+
+    let promoted = runner.run_test(root.path().join("Netlists/PROMOTED/simple.cir"));
+    assert!(promoted.passed, "promoted deck must execute: {promoted:?}");
+    assert!(!promoted.upstream_excluded);
+    assert!(!promoted.expected_unsupported);
+    assert_eq!(promoted.contract, "static_prn_dc");
+    assert_eq!(
+        promoted.upstream_exclusion_source.as_deref(),
+        Some("Netlists/PROMOTED/exclude")
+    );
+
+    fs::write(
+        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[
+            "Netlists/PROMOTED/simple.cir\tNetlists/PROMOTED/exclude\trspice_independently_qualified\tstatic_csv_dc",
+        ]),
+    )
+    .expect("write wrong-contract promotion manifest");
+    let stale_runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
+    let stale = stale_runner.run_test(root.path().join("Netlists/PROMOTED/simple.cir"));
+    assert!(!stale.passed, "wrong native contract must fail: {stale:?}");
+    assert_eq!(stale.contract, "upstream_exclusion_promotion_mismatch");
+    assert!(
+        stale
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("static_prn_dc")),
+        "wrong-contract failure must report the actual native contract: {stale:?}"
+    );
+}
+
+#[test]
+fn upstream_exclusion_promotions_fail_closed_when_contracts_go_stale() {
+    let root = tempfile::tempdir().expect("create stale-promotion fixture");
+    write_upstream_exclusion_deck(
+        root.path(),
+        "Netlists/STALE/no_analysis.cir",
+        "stale promotion fixture\nR1 1 0 1\n.END\n",
+    );
+    fs::write(
+        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[
+            "Netlists/STALE/no_analysis.cir\tNetlists/STALE/exclude\trspice_independently_qualified\tstatic_prn_dc",
+        ]),
+    )
+    .expect("write stale-promotion manifest");
+
+    let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
+    let result = runner.run_test(root.path().join("Netlists/STALE/no_analysis.cir"));
+    assert!(!result.passed, "stale promotion must fail: {result:?}");
+    assert!(!result.expected_unsupported);
+    assert!(!result.upstream_excluded);
+    assert_eq!(result.contract, "upstream_exclusion_promotion_mismatch");
+    assert_eq!(
+        result.upstream_exclusion_source.as_deref(),
+        Some("Netlists/STALE/exclude")
+    );
+    assert!(
+        result
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("unsupported_xyce_contract")),
+        "promotion mismatch must retain the underlying contract: {result:?}"
+    );
+}
+
+#[test]
+fn upstream_exclusion_manifest_rejects_malformed_or_unsafe_records() {
+    let cases = [
+        (
+            "missing-source-tree",
+            format!(
+                "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\nsource_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}\n"
+            ),
+        ),
+        (
+            "traversal",
+            upstream_exclusion_manifest(&[
+                "Netlists/../fixture.cir\tNetlists/exclude\tupstream_excluded",
+            ]),
+        ),
+        (
+            "backslash-path",
+            upstream_exclusion_manifest(&[
+                "Netlists\\FAMILY\\fixture.cir\tNetlists\\FAMILY\\exclude\tupstream_excluded",
+            ]),
+        ),
+        (
+            "wrong-owner",
+            upstream_exclusion_manifest(&[
+                "Netlists/FAMILY/fixture.cir\tNetlists/OTHER/exclude\tupstream_excluded",
+            ]),
+        ),
+        (
+            "missing-contract",
+            upstream_exclusion_manifest(&[
+                "Netlists/FAMILY/fixture.cir\tNetlists/FAMILY/exclude\trspice_independently_qualified",
+            ]),
+        ),
+        (
+            "unknown-disposition",
+            upstream_exclusion_manifest(&[
+                "Netlists/FAMILY/fixture.cir\tNetlists/FAMILY/exclude\tunknown",
+            ]),
+        ),
+        (
+            "duplicate",
+            upstream_exclusion_manifest(&[
+                "Netlists/FAMILY/fixture.cir\tNetlists/FAMILY/exclude\tupstream_excluded",
+                "Netlists/FAMILY/fixture.cir\tNetlists/FAMILY/exclude\tupstream_excluded",
+            ]),
+        ),
+    ];
+
+    for (label, manifest) in cases {
+        let root = tempfile::tempdir().expect("create malformed-manifest fixture");
+        write_upstream_exclusion_deck(
+            root.path(),
+            "Netlists/FAMILY/fixture.cir",
+            "fixture\n.END\n",
+        );
+        fs::write(
+            root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+            manifest,
+        )
+        .expect("write malformed manifest");
+        assert!(
+            XyceTestRunner::load_upstream_exclusions(root.path()).is_err(),
+            "{label} manifest must fail closed"
+        );
+    }
+}
+
+#[test]
+fn upstream_exclusion_manifest_rejects_noncanonical_text_bytes() {
+    for (label, bytes) in [
+        (
+            "crlf",
+            upstream_exclusion_manifest(&[])
+                .replace('\n', "\r\n")
+                .into_bytes(),
+        ),
+        (
+            "bom",
+            [
+                &[0xef, 0xbb, 0xbf][..],
+                upstream_exclusion_manifest(&[]).as_bytes(),
+            ]
+            .concat(),
+        ),
+        (
+            "missing-final-lf",
+            upstream_exclusion_manifest(&[])
+                .trim_end_matches('\n')
+                .as_bytes()
+                .to_vec(),
+        ),
+    ] {
+        let root = tempfile::tempdir().expect("create noncanonical-manifest fixture");
+        fs::write(root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE), bytes)
+            .expect("write noncanonical manifest");
+        assert!(
+            XyceTestRunner::load_upstream_exclusions(root.path()).is_err(),
+            "{label} manifest text must fail closed"
+        );
+    }
+}
+
+#[test]
+fn vendored_corpus_marker_requires_the_complete_exclusion_manifest() {
+    let root = tempfile::tempdir().expect("create missing-manifest fixture");
+    fs::write(root.path().join("RSPICE-VENDORING.md"), "vendored corpus\n")
+        .expect("write vendoring provenance marker");
+    let deck = write_upstream_exclusion_deck(
+        root.path(),
+        "Netlists/FAMILY/fixture.cir",
+        "fixture\n.END\n",
+    );
+
+    let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
+    let result = runner.run_test(deck);
+    assert!(
+        !result.passed,
+        "missing canonical manifest must fail: {result:?}"
+    );
+    assert_eq!(result.contract, "upstream_exclusion_manifest_error");
+    assert!(
+        result
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("missing required"))
+    );
+}
+
+#[test]
+fn upstream_exclusion_statistics_separate_provenance_disposition() {
+    let result = |passed,
+                  expected_unsupported,
+                  upstream_excluded,
+                  upstream_exclusion_source: Option<&str>| XyceTestResult {
+        name: "fixture".to_string(),
+        relative_path: "Netlists/FAMILY/fixture.cir".to_string(),
+        passed,
+        expected_unsupported,
+        upstream_excluded,
+        upstream_exclusion_source: upstream_exclusion_source.map(str::to_string),
+        error: None,
+        mismatches: Vec::new(),
+        duration_ms: 1,
+        contract: "fixture".to_string(),
+    };
+    let results = [
+        result(true, false, false, Some("Netlists/FAMILY/exclude")),
+        result(true, false, true, Some("Netlists/FAMILY/exclude")),
+        result(true, true, false, None),
+        result(false, false, false, None),
+    ];
+
+    let stats = XyceTestRunner::statistics(&results);
+    assert_eq!(stats.total, 4);
+    assert_eq!(stats.executed, 2);
+    assert_eq!(stats.passed, 1);
+    assert_eq!(stats.failed, 1);
+    assert_eq!(stats.expected_unsupported, 1);
+    assert_eq!(stats.upstream_excluded, 1);
+}
+
 #[test]
 fn hierarchical_team_resistance_probes_resolve_xyce_colon_aliases() {
     let netlist = Netlist::parse(

@@ -14,10 +14,12 @@ impl XyceTestRunner {
             .canonicalize()
             .unwrap_or_else(|_| root.as_ref().to_path_buf());
         let upstream_wrapper_decks = Self::load_upstream_wrapper_decks(&root);
+        let upstream_exclusions = Self::load_upstream_exclusions(&root);
         Self {
             root,
             config,
             upstream_wrapper_decks,
+            upstream_exclusions,
         }
     }
 
@@ -80,7 +82,9 @@ impl XyceTestRunner {
         };
         for result in results {
             stats.total_time_ms += result.duration_ms;
-            if result.expected_unsupported {
+            if result.upstream_excluded {
+                stats.upstream_excluded += 1;
+            } else if result.expected_unsupported {
                 stats.expected_unsupported += 1;
             } else {
                 stats.executed += 1;
@@ -108,6 +112,8 @@ impl XyceTestRunner {
             relative_path: deck.relative_path.clone(),
             passed: false,
             expected_unsupported: false,
+            upstream_excluded: false,
+            upstream_exclusion_source: None,
             error: Some(error),
             mismatches,
             duration_ms: start.elapsed().as_millis(),
@@ -126,6 +132,8 @@ impl XyceTestRunner {
             relative_path: deck.relative_path.clone(),
             passed: true,
             expected_unsupported: false,
+            upstream_excluded: false,
+            upstream_exclusion_source: None,
             error: None,
             mismatches: Vec::new(),
             duration_ms: start.elapsed().as_millis(),

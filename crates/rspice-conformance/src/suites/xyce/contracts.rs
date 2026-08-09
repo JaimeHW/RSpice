@@ -19,10 +19,34 @@ impl XyceTestRunner {
             relative_path: deck.relative_path.clone(),
             passed: true,
             expected_unsupported: true,
+            upstream_excluded: false,
+            upstream_exclusion_source: None,
             error: Some(format!("{EXPECTED_UNSUPPORTED_MARKER} {reason}")),
             mismatches: Vec::new(),
             duration_ms: start.elapsed().as_millis(),
             contract: contract.to_string(),
+        }
+    }
+
+    pub(super) fn upstream_excluded_result(
+        &self,
+        deck: &XyceDeck,
+        start: Instant,
+        source: &str,
+    ) -> XyceTestResult {
+        XyceTestResult {
+            name: Self::deck_name(&deck.path),
+            relative_path: deck.relative_path.clone(),
+            passed: true,
+            expected_unsupported: false,
+            upstream_excluded: true,
+            upstream_exclusion_source: Some(source.to_string()),
+            error: Some(format!(
+                "{UPSTREAM_EXCLUDED_MARKER} upstream exclusion recorded by {source}"
+            )),
+            mismatches: Vec::new(),
+            duration_ms: start.elapsed().as_millis(),
+            contract: "upstream_excluded".to_string(),
         }
     }
 

@@ -5194,6 +5194,304 @@ impl XyceTestRunner {
         decks
     }
 
+    pub(super) fn load_upstream_exclusions(
+        root: &Path,
+    ) -> Result<BTreeMap<String, XyceUpstreamExclusion>, String> {
+        let vendoring_path = root.join("RSPICE-VENDORING.md");
+        let is_vendored_corpus = match fs::symlink_metadata(&vendoring_path) {
+            Ok(metadata)
+                if !metadata.file_type().is_symlink() && metadata.file_type().is_file() =>
+            {
+                true
+            }
+            Ok(_) => {
+                return Err(format!(
+                    "Xyce vendoring provenance {} must be a regular non-symlink file",
+                    vendoring_path.display()
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => {
+                return Err(format!(
+                    "failed to inspect Xyce vendoring provenance {}: {error}",
+                    vendoring_path.display()
+                ));
+            }
+        };
+        let manifest_path = root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE);
+        let metadata = match fs::symlink_metadata(&manifest_path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if is_vendored_corpus {
+                    return Err(format!(
+                        "vendored Xyce corpus is missing required upstream-exclusions manifest {}",
+                        manifest_path.display()
+                    ));
+                }
+                return Ok(BTreeMap::new());
+            }
+            Err(error) => {
+                return Err(format!(
+                    "failed to inspect upstream-exclusions manifest {}: {error}",
+                    manifest_path.display()
+                ));
+            }
+        };
+        if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+            return Err(format!(
+                "upstream-exclusions manifest {} must be a regular non-symlink file",
+                manifest_path.display()
+            ));
+        }
+        let bytes = fs::read(&manifest_path).map_err(|error| {
+            format!(
+                "failed to read upstream-exclusions manifest {}: {error}",
+                manifest_path.display()
+            )
+        })?;
+        if bytes.starts_with(&[0xef, 0xbb, 0xbf]) {
+            return Err("upstream-exclusions manifest must not contain a UTF-8 BOM".to_string());
+        }
+        if bytes.contains(&b'\r') || bytes.contains(&b'\0') {
+            return Err(
+                "upstream-exclusions manifest must contain canonical LF text without NUL bytes"
+                    .to_string(),
+            );
+        }
+        if bytes.last() != Some(&b'\n') {
+            return Err(
+                "upstream-exclusions manifest must end with exactly represented LF text"
+                    .to_string(),
+            );
+        }
+        let content = std::str::from_utf8(&bytes)
+            .map_err(|error| format!("upstream-exclusions manifest is not UTF-8: {error}"))?;
+
+        fn safe_relative_path(raw: &str, required_suffix: &str) -> Option<String> {
+            if !raw.starts_with("Netlists/")
+                || raw.contains(':')
+                || raw.contains('\\')
+                || !raw.ends_with(required_suffix)
+                || raw
+                    .split('/')
+                    .any(|component| component.is_empty() || matches!(component, "." | ".."))
+            {
+                return None;
+            }
+            Some(raw.to_string())
+        }
+
+        fn sha256_hex(bytes: &[u8]) -> String {
+            format!("{:x}", Sha256::digest(bytes))
+        }
+
+        let mut exclusions = BTreeMap::new();
+        let mut record_lines = Vec::new();
+        let mut retained_paths = Vec::new();
+        let mut promotion_lines = Vec::new();
+        let mut previous_deck: Option<String> = None;
+        let mut header_index = 0usize;
+        for (line_index, raw_line) in content.lines().enumerate() {
+            let line_number = line_index + 1;
+            if raw_line.trim() != raw_line {
+                return Err(format!(
+                    "upstream-exclusions manifest line {line_number} has noncanonical surrounding whitespace"
+                ));
+            }
+            if raw_line.is_empty() || raw_line.starts_with('#') {
+                continue;
+            }
+            let fields = raw_line.split('\t').collect::<Vec<_>>();
+            if header_index < 3 {
+                let expected = match header_index {
+                    0 => ["schema_version", UPSTREAM_EXCLUSIONS_SCHEMA_VERSION],
+                    1 => ["source_commit", UPSTREAM_EXCLUSIONS_SOURCE_COMMIT],
+                    2 => [
+                        "source_netlists_tree",
+                        UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE,
+                    ],
+                    _ => unreachable!(),
+                };
+                if fields.as_slice() != expected {
+                    return Err(format!(
+                        "upstream-exclusions manifest line {line_number} must declare {}<TAB>{}",
+                        expected[0], expected[1]
+                    ));
+                }
+                header_index += 1;
+                continue;
+            }
+            if !matches!(fields.len(), 3 | 4) {
+                return Err(format!(
+                    "upstream-exclusions manifest line {line_number} must contain deck<TAB>source-exclude-file<TAB>disposition[<TAB>expected-contract]"
+                ));
+            }
+            let deck = safe_relative_path(fields[0], ".cir").ok_or_else(|| {
+                format!(
+                    "upstream-exclusions manifest line {line_number} has an unsafe or non-deck path"
+                )
+            })?;
+            if previous_deck
+                .as_ref()
+                .is_some_and(|previous| previous >= &deck)
+            {
+                return Err(format!(
+                    "upstream-exclusions manifest line {line_number} deck {deck} is not in unique ordinal source-case order"
+                ));
+            }
+            previous_deck = Some(deck.clone());
+            let source = safe_relative_path(fields[1], "/exclude").ok_or_else(|| {
+                format!(
+                    "upstream-exclusions manifest line {line_number} has an unsafe exclusion-source path"
+                )
+            })?;
+            let expected_source = format!(
+                "{}/exclude",
+                deck.rsplit_once('/')
+                    .map(|(directory, _)| directory)
+                    .ok_or_else(|| format!(
+                        "upstream-exclusions manifest line {line_number} deck has no parent directory"
+                    ))?
+            );
+            if source != expected_source {
+                return Err(format!(
+                    "upstream-exclusions manifest line {line_number} source {source} does not own deck {deck}; expected {expected_source}"
+                ));
+            }
+            let disposition = match fields[2] {
+                UPSTREAM_EXCLUDED_DISPOSITION if fields.len() == 3 => {
+                    XyceUpstreamExclusionDisposition::Excluded
+                }
+                RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION if fields.len() == 4 => {
+                    let expected_contract = fields[3];
+                    if expected_contract.is_empty()
+                        || !expected_contract.bytes().all(|byte| {
+                            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'
+                        })
+                    {
+                        return Err(format!(
+                            "upstream-exclusions manifest line {line_number} has an invalid expected contract"
+                        ));
+                    }
+                    XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                        expected_contract: expected_contract.to_string(),
+                    }
+                }
+                UPSTREAM_EXCLUDED_DISPOSITION => {
+                    return Err(format!(
+                        "upstream-exclusions manifest line {line_number} disposition {UPSTREAM_EXCLUDED_DISPOSITION} must not name an expected contract"
+                    ));
+                }
+                RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION => {
+                    return Err(format!(
+                        "upstream-exclusions manifest line {line_number} disposition {RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION} requires an expected contract"
+                    ));
+                }
+                disposition => {
+                    return Err(format!(
+                        "upstream-exclusions manifest line {line_number} has unknown disposition {disposition:?}"
+                    ));
+                }
+            };
+            let record_line = match &disposition {
+                XyceUpstreamExclusionDisposition::Excluded => {
+                    format!("{deck}\t{source}\t{UPSTREAM_EXCLUDED_DISPOSITION}")
+                }
+                XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
+                    expected_contract,
+                } => {
+                    promotion_lines.push(format!("{deck}\t{expected_contract}"));
+                    format!(
+                        "{deck}\t{source}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{expected_contract}"
+                    )
+                }
+            };
+            retained_paths.push(deck.clone());
+            record_lines.push(record_line);
+            let deck_path = root.join(deck.replace('/', std::path::MAIN_SEPARATOR_STR));
+            let deck_metadata = fs::symlink_metadata(&deck_path).map_err(|error| {
+                format!(
+                    "upstream-exclusions manifest line {line_number} references missing deck {}: {error}",
+                    deck_path.display()
+                )
+            })?;
+            if deck_metadata.file_type().is_symlink() || !deck_metadata.file_type().is_file() {
+                return Err(format!(
+                    "upstream-exclusions manifest line {line_number} deck {} must be a regular non-symlink file",
+                    deck_path.display()
+                ));
+            }
+            let key = Self::normalize_manifest_key(&deck);
+            if exclusions
+                .insert(
+                    key,
+                    XyceUpstreamExclusion {
+                        source,
+                        disposition,
+                    },
+                )
+                .is_some()
+            {
+                return Err(format!(
+                    "upstream-exclusions manifest line {line_number} duplicates deck {deck}"
+                ));
+            }
+        }
+        if header_index != 3 {
+            return Err(format!(
+                "upstream-exclusions manifest {} is missing required provenance headers",
+                manifest_path.display(),
+            ));
+        }
+        if is_vendored_corpus {
+            if exclusions.len() != UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT {
+                return Err(format!(
+                    "vendored upstream-exclusions manifest contains {} retained decks; expected {} from source tree {}",
+                    exclusions.len(),
+                    UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT,
+                    UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE
+                ));
+            }
+            if promotion_lines.len() != UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT {
+                return Err(format!(
+                    "vendored upstream-exclusions manifest contains {} independent qualifications; expected {}",
+                    promotion_lines.len(),
+                    UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT
+                ));
+            }
+            let canonical_stream = |lines: &[String]| format!("{}\n", lines.join("\n"));
+            for (label, actual, expected) in [
+                (
+                    "retained path set",
+                    sha256_hex(canonical_stream(&retained_paths).as_bytes()),
+                    UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256,
+                ),
+                (
+                    "independent qualification tuples",
+                    sha256_hex(canonical_stream(&promotion_lines).as_bytes()),
+                    UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256,
+                ),
+                (
+                    "complete exclusion records",
+                    sha256_hex(canonical_stream(&record_lines).as_bytes()),
+                    UPSTREAM_EXCLUSIONS_RECORDS_SHA256,
+                ),
+                (
+                    "complete manifest",
+                    sha256_hex(&bytes),
+                    UPSTREAM_EXCLUSIONS_MANIFEST_SHA256,
+                ),
+            ] {
+                if actual != expected {
+                    return Err(format!(
+                        "vendored upstream-exclusions {label} SHA-256 is {actual}; expected {expected}"
+                    ));
+                }
+            }
+        }
+        Ok(exclusions)
+    }
+
     pub(super) fn parse_bjt_external_node_member_file_name(
         file_name: &str,
     ) -> Option<(String, u8)> {

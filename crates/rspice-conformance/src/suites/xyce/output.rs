@@ -16,8 +16,13 @@ impl XyceTestRunner {
         let stats = Self::statistics(results);
         println!("\nXyce corpus summary");
         println!(
-            "  total: {} | executed: {} | passed: {} | failed: {} | expected unsupported: {}",
-            stats.total, stats.executed, stats.passed, stats.failed, stats.expected_unsupported
+            "  total: {} | executed: {} | passed: {} | failed: {} | expected unsupported: {} | upstream excluded: {}",
+            stats.total,
+            stats.executed,
+            stats.passed,
+            stats.failed,
+            stats.expected_unsupported,
+            stats.upstream_excluded
         );
         println!(
             "  executed pass rate: {:.1}% | executed coverage: {:.1}%",

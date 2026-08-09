@@ -173,6 +173,8 @@ fn xyce_watchdog_error_result(
         relative_path: deck.relative_path.clone(),
         passed: false,
         expected_unsupported: false,
+        upstream_excluded: false,
+        upstream_exclusion_source: None,
         error: Some(error),
         mismatches: Vec::new(),
         duration_ms,
@@ -221,6 +223,12 @@ fn decode_xyce_test_result(encoded: &str) -> Result<XyceTestResult, String> {
     let passed = parse_xyce_result_field::<bool>(&mut fields, "passed")?;
     let expected_unsupported =
         parse_xyce_result_field::<bool>(&mut fields, "expected_unsupported")?;
+    let upstream_excluded = parse_xyce_result_field::<bool>(&mut fields, "upstream_excluded")?;
+    let upstream_exclusion_source =
+        match take_xyce_result_field(&mut fields, "upstream_exclusion_source")? {
+            value if value.is_empty() => None,
+            value => Some(value),
+        };
     let duration_ms = parse_xyce_result_field::<u128>(&mut fields, "duration_ms")?;
     let error = match take_xyce_result_field(&mut fields, "error")? {
         value if value.is_empty() => None,
@@ -238,6 +246,8 @@ fn decode_xyce_test_result(encoded: &str) -> Result<XyceTestResult, String> {
         relative_path,
         passed,
         expected_unsupported,
+        upstream_excluded,
+        upstream_exclusion_source,
         error,
         mismatches,
         duration_ms,
@@ -489,6 +499,10 @@ fn test_xyce_corpus_root_is_scoped_under_tests_xyce() {
     assert!(
         root.join("RSPICE-HARNESS-MANIFEST.tsv").is_file(),
         "RSpice Xyce harness manifest missing"
+    );
+    assert!(
+        root.join("RSPICE-UPSTREAM-EXCLUSIONS.tsv").is_file(),
+        "RSpice Xyce upstream-exclusion manifest missing"
     );
     assert!(
         root.join("RSPICE-VENDORING.md").is_file(),
@@ -8973,12 +8987,60 @@ fn test_xyce_startup_diagnostic_wrappers_run_with_exact_typed_contracts() {
     }
 }
 
+#[test]
+fn test_xyce_bug991_upstream_exclusion_is_typed_without_hiding_sibling_coverage() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let config = XyceRunnerConfig::default();
+    let runner = XyceTestRunner::new(&root, config.clone());
+    const EXCLUDED: &str = "Netlists/Certification_Tests/BUG_991_SON/BH_nogap_lv2.cir";
+    let deck = runner
+        .discover_tests()
+        .into_iter()
+        .find(|deck| deck.relative_path == EXCLUDED)
+        .expect("discover BUG 991 excluded deck");
+    let excluded = run_xyce_case_with_watchdog(&root, &config, &deck, 1, 1);
+    assert!(
+        excluded.passed,
+        "upstream exclusion is accepted: {excluded:?}"
+    );
+    assert!(excluded.upstream_excluded);
+    assert!(!excluded.expected_unsupported);
+    assert_eq!(excluded.contract, "upstream_excluded");
+    assert_eq!(
+        excluded.upstream_exclusion_source.as_deref(),
+        Some("Netlists/Certification_Tests/BUG_991_SON/exclude")
+    );
+    assert!(excluded.mismatches.is_empty());
+
+    let mut family_results = vec![excluded];
+    for sibling in ["BH_nogap.cir", "BH_test.cir", "BH_test_lv2.cir"] {
+        let relative = format!("Netlists/Certification_Tests/BUG_991_SON/{sibling}");
+        let result = runner.run_test(root.join(&relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "BUG 991 sibling {sibling} must retain native coverage: {result:?}"
+        );
+        assert_eq!(result.contract, "static_xyce_verify_prn_tran");
+        assert!(result.upstream_exclusion_source.is_none());
+        family_results.push(result);
+    }
+
+    let stats = XyceTestRunner::statistics(&family_results);
+    assert_eq!(stats.total, 4);
+    assert_eq!(stats.executed, 3);
+    assert_eq!(stats.passed, 3);
+    assert_eq!(stats.failed, 0);
+    assert_eq!(stats.expected_unsupported, 0);
+    assert_eq!(stats.upstream_excluded, 1);
+}
+
 // The aggregate intentionally replays every retained deck and therefore has
 // release-profile runtime requirements. Individual supported contracts remain
 // in the normal test tier above, while nightly release CI runs this full census.
 #[cfg_attr(
     debug_assertions,
-    ignore = "release-only full Xyce corpus; run with `cargo test --release -p rspice-core --test xyce_regression test_full_xyce_suite_summary_accounts_for_every_deck`"
+    ignore = "release-only full Xyce corpus; run with `cargo test --release -p rspice-conformance --test xyce_regression test_full_xyce_suite_summary_accounts_for_every_deck`"
 )]
 #[test]
 fn test_full_xyce_suite_summary_accounts_for_every_deck() {
@@ -9013,7 +9075,7 @@ fn test_full_xyce_suite_summary_accounts_for_every_deck() {
     );
     assert_eq!(
         stats.failed, 0,
-        "Xyce full suite has {} failing deck(s): {} executed pass, {} expected unsupported",
-        stats.failed, stats.passed, stats.expected_unsupported
+        "Xyce full suite has {} failing deck(s): {} executed pass, {} expected unsupported, {} upstream excluded",
+        stats.failed, stats.passed, stats.expected_unsupported, stats.upstream_excluded
     );
 }

@@ -61,6 +61,15 @@ fn encode_xyce_test_result(result: &XyceTestResult) -> String {
         "expected_unsupported",
         result.expected_unsupported,
     );
+    push_field(&mut output, "upstream_excluded", result.upstream_excluded);
+    push_field(
+        &mut output,
+        "upstream_exclusion_source",
+        result
+            .upstream_exclusion_source
+            .as_deref()
+            .unwrap_or_default(),
+    );
     push_field(&mut output, "duration_ms", result.duration_ms);
     push_field(
         &mut output,
