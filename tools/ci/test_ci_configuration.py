@@ -659,7 +659,10 @@ class CiConfigurationTests(unittest.TestCase):
         workflow = read_text(".github/workflows/ci.yml")
 
         self.assertIn("cargo check --locked -p rspice-wasm --target wasm32-unknown-unknown", workflow)
-        self.assertIn("cargo check --locked -p rspice-ui --target wasm32-unknown-unknown", workflow)
+        self.assertIn(
+            "cargo check --locked -p rspice-ui --features generated-veriloga-catalog --target wasm32-unknown-unknown",
+            workflow,
+        )
         self.assertIn(
             "cargo check --locked -p rspice-ui --bin rspice-ui-worker --features browser-worker --target wasm32-unknown-unknown",
             workflow,

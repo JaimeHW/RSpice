@@ -1097,20 +1097,12 @@ pub(crate) fn start_browser_checkpoint_publish(
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn start_browser_checkpoint_list(
     project_prefix: String,
-    complete: impl FnOnce(
-        Result<
-            (
-                Vec<(String, Option<String>, String, Option<Vec<u8>>)>,
-                Vec<String>,
-            ),
-            String,
-        >,
-    ) + 'static,
+    mut visit: impl FnMut(String, Option<String>, String, Option<Vec<u8>>) + 'static,
+    complete: impl FnOnce(Result<Vec<String>, String>) + 'static,
 ) {
     wasm_bindgen_futures::spawn_local(async move {
         let result = async {
             let manifest_keys = indexed_db_matching_keys(&project_prefix, ".manifest").await?;
-            let mut records = Vec::with_capacity(manifest_keys.len());
             let mut paired_snapshot_keys = std::collections::HashSet::new();
             for manifest_key in manifest_keys {
                 let Some(stem) = manifest_key.strip_suffix(".manifest") else {
@@ -1124,14 +1116,14 @@ pub(crate) fn start_browser_checkpoint_list(
                 let snapshot = indexed_db_get(&snapshot_key)
                     .await?
                     .map(|value| js_sys::Uint8Array::new(&value).to_vec());
-                records.push((manifest_key, manifest, snapshot_key, snapshot));
+                visit(manifest_key, manifest, snapshot_key, snapshot);
             }
             let orphan_snapshots = indexed_db_matching_keys(&project_prefix, ".snapshot")
                 .await?
                 .into_iter()
                 .filter(|key| !paired_snapshot_keys.contains(key))
-                .collect();
-            Ok((records, orphan_snapshots))
+                .collect::<Vec<_>>();
+            Ok(orphan_snapshots)
         }
         .await;
         complete(result);

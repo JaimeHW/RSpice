@@ -244,6 +244,7 @@ impl SymbolSelection {
 
     pub fn in_rect(
         document: &crate::state::SymbolDocument,
+        metadata: &crate::state::SymbolEditorMetadata,
         start: crate::state::Point,
         end: crate::state::Point,
     ) -> Self {
@@ -267,11 +268,25 @@ impl SymbolSelection {
                 bounds_intersect(min, max, shape_min, shape_max).then_some(index)
             })
             .collect();
+        // Hidden labels are not on the canvas, so a canvas marquee cannot
+        // take them.
+        let attributes = metadata
+            .attributes
+            .iter()
+            .filter(|attribute| attribute.shown && point_in_bounds(attribute.position, min, max))
+            .map(|attribute| attribute.kind)
+            .collect();
+        let texts = metadata
+            .texts
+            .iter()
+            .filter(|text| text.shown && point_in_bounds(text.position, min, max))
+            .map(|text| text.id)
+            .collect();
         Self {
             pins,
             shapes,
-            attributes: std::collections::BTreeSet::new(),
-            texts: std::collections::BTreeSet::new(),
+            attributes,
+            texts,
         }
     }
 
@@ -312,6 +327,42 @@ impl SymbolSelection {
             && self.shapes.is_empty()
             && self.attributes.is_empty()
             && self.texts.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.pins.len() + self.shapes.len() + self.attributes.len() + self.texts.len()
+    }
+
+    pub fn union(&mut self, other: Self) {
+        self.pins.extend(other.pins);
+        self.shapes.extend(other.shapes);
+        self.attributes.extend(other.attributes);
+        self.texts.extend(other.texts);
+    }
+
+    pub fn toggle_pin(&mut self, name: impl Into<String>) {
+        let name = name.into();
+        if !self.pins.remove(&name) {
+            self.pins.insert(name);
+        }
+    }
+
+    pub fn toggle_shape(&mut self, index: usize) {
+        if !self.shapes.remove(&index) {
+            self.shapes.insert(index);
+        }
+    }
+
+    pub fn toggle_attribute(&mut self, kind: crate::state::SymbolAttributeKind) {
+        if !self.attributes.remove(&kind) {
+            self.attributes.insert(kind);
+        }
+    }
+
+    pub fn toggle_text(&mut self, id: u64) {
+        if !self.texts.remove(&id) {
+            self.texts.insert(id);
+        }
     }
 }
 
@@ -385,6 +436,10 @@ pub struct SymbolUiState {
     pub dragging_shape: Option<(usize, crate::state::Point)>,
     pub dragging_label: Option<String>,
     pub dragging_origin: bool,
+    /// Last drag point of a whole-selection move. Set instead of the
+    /// single-object drags when the grabbed object belongs to a
+    /// multi-object selection.
+    pub dragging_group: Option<crate::state::Point>,
     pub drag_undo_recorded: bool,
     /// `true` once the open inspector field has pushed its undo snapshot.
     /// Typing into a coordinate is one edit, not one per keystroke; the flag
@@ -422,6 +477,7 @@ impl Default for SymbolUiState {
             dragging_shape: None,
             dragging_label: None,
             dragging_origin: false,
+            dragging_group: None,
             drag_undo_recorded: false,
             inspector_undo_recorded: false,
             marquee_start: None,
@@ -503,6 +559,7 @@ impl SymbolUiState {
         self.dragging_shape = None;
         self.dragging_label = None;
         self.dragging_origin = false;
+        self.dragging_group = None;
         self.drag_undo_recorded = false;
     }
 }
@@ -641,6 +698,9 @@ pub struct UiSessionState {
     /// Decimal-mark information supplied by the native/web platform edge.
     /// `None` is deliberate: engineering code must not guess the host locale.
     pub number_locale: crate::quantity::UiNumberLocale,
+    /// Device-local UI message locale. Engineering source, identifiers, and
+    /// portable numeric syntax never consult this presentation setting.
+    pub text_locale: crate::workbench::UiTextLocale,
     /// Browser-only opt-in for egui's Web Speech interaction feedback.
     /// Native assistive technology is negotiated automatically by AccessKit.
     pub browser_spoken_feedback: bool,
@@ -736,6 +796,11 @@ impl UiSessionState {
         self.number_locale = locale;
     }
 
+    #[must_use]
+    pub(crate) const fn messages(&self) -> crate::workbench::MessageCatalog {
+        crate::workbench::MessageCatalog::new(self.text_locale)
+    }
+
     pub(crate) fn set_grid_style(&mut self, style: GridStyle) {
         if style.visible() {
             self.grid_restore_style = style;
@@ -798,6 +863,8 @@ pub struct UiSessionStateSer {
     #[serde(default)]
     browser_spoken_feedback: bool,
     #[serde(default)]
+    text_locale: crate::workbench::UiTextLocale,
+    #[serde(default)]
     result_viewer: crate::workbench::documents::result_document::ResultViewer,
 }
 
@@ -847,6 +914,7 @@ impl From<&UiSessionState> for UiSessionStateSer {
             autosave_minutes: normalize_autosave_minutes(session.autosave_minutes),
             preferences: session.preferences.clone(),
             browser_spoken_feedback: session.browser_spoken_feedback,
+            text_locale: session.text_locale,
             result_viewer: session.results.viewer,
         }
     }
@@ -894,6 +962,7 @@ impl From<UiSessionStateSer> for UiSessionState {
             autosave_minutes: normalize_autosave_minutes(ser.autosave_minutes),
             preferences,
             browser_spoken_feedback: ser.browser_spoken_feedback,
+            text_locale: ser.text_locale,
             ..Self::new()
         };
         session.results.viewer = ser.result_viewer;
@@ -954,6 +1023,30 @@ mod symbol_selection_tests {
         assert_eq!(
             restored.schematic_selection_filter,
             session.schematic_selection_filter
+        );
+    }
+
+    #[test]
+    fn ui_text_locale_round_trips_and_legacy_sessions_default_to_english() {
+        let mut session = UiSessionState::new();
+        session.text_locale = crate::workbench::UiTextLocale::PseudoExpanded;
+        let serialized =
+            serde_json::to_value(UiSessionStateSer::from(&session)).expect("serialize session");
+        let restored = UiSessionState::from(
+            serde_json::from_value::<UiSessionStateSer>(serialized).expect("deserialize session"),
+        );
+        assert_eq!(
+            restored.text_locale,
+            crate::workbench::UiTextLocale::PseudoExpanded
+        );
+
+        let legacy = UiSessionState::from(
+            serde_json::from_value::<UiSessionStateSer>(serde_json::json!({}))
+                .expect("legacy session"),
+        );
+        assert_eq!(
+            legacy.text_locale,
+            crate::workbench::UiTextLocale::EnglishUnitedStates
         );
     }
 

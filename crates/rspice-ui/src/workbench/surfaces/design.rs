@@ -33,6 +33,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 &mut app.state,
                 app.symbol_library.as_ref(),
             );
+            paint_live_cursors(ui, app, content_rect);
         }
         ViewType::Symbol => crate::schematic::symbol_editor::show(ui, &mut app.state),
         ViewType::Layout => layout_editor::show(ui, app),
@@ -44,6 +45,105 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         && app.state.workbench.current_route().surface_id() == super::super::SurfaceId::Design
     {
         crate::schematic::view::show_mobile_canvas_controls(ui.ctx(), app, content_rect);
+    }
+}
+
+fn paint_live_cursors(ui: &mut Ui, app: &RSpiceApp, canvas: Rect) {
+    use crate::services::live_protocol::CursorLocus;
+
+    let doc = format!("schematic/{}", app.state.workspace.active_key());
+    let cursors: Vec<_> = app
+        .live_session
+        .peers()
+        .filter_map(|peer| match peer.cursor.as_ref() {
+            Some(CursorLocus::Canvas {
+                doc: peer_doc,
+                x,
+                y,
+            }) if peer_doc == &doc && x.is_finite() && y.is_finite() => Some((
+                peer.identity,
+                app.live_session.display_name(&peer.identity),
+                *x,
+                *y,
+            )),
+            _ => None,
+        })
+        .collect();
+    if cursors.is_empty() {
+        return;
+    }
+
+    let t = Tokens::get(ui.ctx());
+    let painter = ui.painter_at(canvas);
+    let grid = app.state.schematic.grid_size.max(1) as f32;
+    let zoom = app.state.schematic.zoom as f32;
+    let pan = egui::vec2(
+        app.state.schematic.pan.0 as f32,
+        app.state.schematic.pan.1 as f32,
+    );
+    const COLORS: [egui::Color32; 8] = [
+        egui::Color32::from_rgb(0x2F, 0xC7, 0xE5),
+        egui::Color32::from_rgb(0xFF, 0x9F, 0x43),
+        egui::Color32::from_rgb(0xA7, 0x7B, 0xFF),
+        egui::Color32::from_rgb(0x37, 0xD6, 0x7A),
+        egui::Color32::from_rgb(0xFF, 0x61, 0x91),
+        egui::Color32::from_rgb(0xFF, 0xD1, 0x66),
+        egui::Color32::from_rgb(0x52, 0x8B, 0xFF),
+        egui::Color32::from_rgb(0xE8, 0x70, 0xFF),
+    ];
+    let mut accessible = Vec::with_capacity(cursors.len());
+    for (identity, name, x, y) in cursors {
+        let point = canvas.min + pan + egui::vec2(x * zoom * grid, y * zoom * grid);
+        if !canvas.expand(16.0).contains(point) {
+            continue;
+        }
+        let color = COLORS[(identity.principal_id.as_u128() as usize) % COLORS.len()];
+        let tip = point;
+        painter.add(egui::Shape::convex_polygon(
+            vec![
+                tip,
+                tip + egui::vec2(7.0, 18.0),
+                tip + egui::vec2(11.0, 11.0),
+            ],
+            color,
+            egui::Stroke::new(1.0, t.color.bg_app),
+        ));
+        let galley = painter.layout_no_wrap(
+            name.clone(),
+            theme::sans(tokens::FS_0, FontWeight::SemiBold),
+            t.color.text,
+        );
+        let desired = tip + egui::vec2(12.0, 13.0);
+        let label_size = galley.size() + egui::vec2(10.0, 6.0);
+        let label_min = egui::pos2(
+            desired
+                .x
+                .min((canvas.right() - label_size.x).max(canvas.left())),
+            desired
+                .y
+                .min((canvas.bottom() - label_size.y).max(canvas.top())),
+        );
+        let label = Rect::from_min_size(label_min, label_size);
+        painter.rect_filled(label, 4.0, t.color.bg_panel);
+        painter.rect_stroke(
+            label,
+            4.0,
+            egui::Stroke::new(1.0, color),
+            egui::StrokeKind::Inside,
+        );
+        painter.galley(label.min + egui::vec2(5.0, 3.0), galley, t.color.text);
+        accessible.push(format!("{name} cursor at {x:.1}, {y:.1}"));
+    }
+    if !accessible.is_empty() {
+        let response = ui.interact(
+            Rect::from_min_size(canvas.min, Vec2::splat(1.0)),
+            Id::new("live-cursor-accessibility"),
+            Sense::hover(),
+        );
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(egui::accesskit::Role::Status);
+            node.set_label(format!("Live collaboration: {}", accessible.join("; ")));
+        });
     }
 }
 

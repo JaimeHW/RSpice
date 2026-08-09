@@ -51,8 +51,8 @@ pub(crate) mod frame;
 pub(crate) mod hardcopy_adapters;
 mod layout;
 pub(crate) mod lifecycle;
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod live_session;
+pub(crate) mod localization;
 pub(crate) mod logging;
 pub(crate) mod menu_bar;
 pub(crate) mod platform;
@@ -83,6 +83,8 @@ pub use lifecycle::session::{
     mirror_shape_v_about, rotate_point_cw_about, rotate_shape_cw_about,
 };
 pub use lifecycle::window_session::ApplicationWindowId;
+pub use localization::UiTextLocale;
+pub(crate) use localization::{MessageCatalog, MessageId};
 pub(crate) use preferences::DrawingSheetPersonalPreferences;
 pub use preferences::{
     BackgroundTaskAttention, ChoicePreference, ComplexNumberDisplay, ConsoleLaunchBehavior,

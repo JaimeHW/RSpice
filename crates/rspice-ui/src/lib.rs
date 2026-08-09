@@ -147,6 +147,11 @@ pub(crate) mod product;
 
 /// Strict project-scoped Automation/CI workflow language and deterministic
 /// evidence artifact rendering. This domain is UI-framework independent.
+#[cfg(not(target_arch = "wasm32"))]
+mod automation_runtime;
+#[cfg(target_arch = "wasm32")]
+#[path = "automation_runtime_browser.rs"]
+mod automation_runtime;
 pub(crate) mod automation_workflow;
 
 // =============================================================================

@@ -232,7 +232,7 @@ jobs:
         with:
           key: nightly-release-${{ matrix.os }}
       - name: Build shipped binaries
-        run: cargo build --locked --release -p rspice-ui -p rspice-cli
+        run: cargo build --locked --release -p rspice-ui -p rspice-cli --features rspice-ui/generated-veriloga-catalog
       - name: Stage release artifacts
         shell: bash
         run: |

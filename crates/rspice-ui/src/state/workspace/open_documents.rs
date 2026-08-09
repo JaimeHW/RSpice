@@ -199,30 +199,88 @@ impl ProjectWorkspace {
     /// Create a new default project and ensure its editable top cell exists in
     /// the shared library manager.
     pub fn new_bootstrapped(libraries: &mut LibraryManager) -> Self {
-        let mut project_sources = ProjectSourceRegistry::try_from_documents([
-            ProjectSourceDocument::try_new(
+        let verilog_a = crate::state::ProjectSourceBundle::try_new(
+            crate::state::ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
+            ProjectSourceLanguage::VerilogA,
                 "sensor_bridge.va",
-                ProjectSourceLanguage::VerilogA,
                 "`include \"constants.vams\"\nmodule sensor_bridge(out, inp, inn);\n  parameter real gain = 100.0 from (0:inf);\n  analog V(out) <+ gain * (V(inp)-V(inn));\nendmodule",
-            )
-            .expect("the built-in Verilog-A example is valid"),
-            ProjectSourceDocument::try_new(
-                "characterize.rspice",
+            [],
+            [],
+        )
+        .expect("the built-in Verilog-A example is valid");
+        let automation = crate::state::ProjectSourceBundle::try_new_with_roles(
+            crate::state::ProjectSourceOwner::code_workspace(
                 ProjectSourceLanguage::RSpiceAutomation,
-                "plan = project.plan(\"Lab characterization\")\nrun = plan.with_corners(\"all\").execute(target=\"local\")\nrun.require(specs=\"release\")\nrun.compare(baseline=\"main\", waveforms=True)\nrun.export([\"junit\", \"summary.json\", \"report.pdf\"])",
-            )
-            .expect("the built-in Automation example is valid"),
-        ])
-        .expect("the bootstrapped Code source registry is valid");
-        // The canonical demonstration project opens with both exact examples
-        // already validated. File > New uses `new_empty_bootstrapped`, and any
-        // subsequent byte edit invalidates this identity immediately.
+            ),
+            ProjectSourceLanguage::RSpiceAutomation,
+            crate::automation_workflow::AutomationStarterFile::PythonEntry.path(),
+            crate::automation_workflow::DEFAULT_AUTOMATION_PYTHON,
+            [
+                crate::state::ProjectSourceFile::try_new(
+                    crate::automation_workflow::AutomationStarterFile::RunPlan.path(),
+                    crate::automation_workflow::DEFAULT_AUTOMATION_RUN_PLAN,
+                )
+                .expect("the built-in run plan is valid"),
+                crate::state::ProjectSourceFile::try_new(
+                    crate::automation_workflow::AutomationStarterFile::EnvironmentLock.path(),
+                    crate::automation_workflow::DEFAULT_ENVIRONMENT_LOCK,
+                )
+                .expect("the built-in environment lock is valid"),
+                crate::state::ProjectSourceFile::try_new(
+                    crate::automation_workflow::AutomationStarterFile::Permissions.path(),
+                    crate::automation_workflow::DEFAULT_AUTOMATION_PERMISSIONS,
+                )
+                .expect("the built-in permission manifest is valid"),
+            ],
+            [
+                crate::state::ProjectSourceDependency::try_new(
+                    crate::automation_workflow::AutomationStarterFile::PythonEntry.path(),
+                    crate::automation_workflow::AutomationStarterFile::RunPlan.path(),
+                )
+                .expect("the run-plan dependency is valid"),
+                crate::state::ProjectSourceDependency::try_new(
+                    crate::automation_workflow::AutomationStarterFile::PythonEntry.path(),
+                    crate::automation_workflow::AutomationStarterFile::EnvironmentLock.path(),
+                )
+                .expect("the environment-lock dependency is valid"),
+                crate::state::ProjectSourceDependency::try_new(
+                    crate::automation_workflow::AutomationStarterFile::PythonEntry.path(),
+                    crate::automation_workflow::AutomationStarterFile::Permissions.path(),
+                )
+                .expect("the permission-manifest dependency is valid"),
+            ],
+            [
+                crate::state::ProjectSourceRoleBinding::try_new(
+                    crate::automation_workflow::AutomationStarterFile::PythonEntry.path(),
+                    crate::state::ProjectSourceRole::AutomationEntry,
+                )
+                .expect("the Automation entry role is valid"),
+                crate::state::ProjectSourceRoleBinding::try_new(
+                    crate::automation_workflow::AutomationStarterFile::RunPlan.path(),
+                    crate::state::ProjectSourceRole::AutomationRunPlan,
+                )
+                .expect("the Automation run-plan role is valid"),
+                crate::state::ProjectSourceRoleBinding::try_new(
+                    crate::automation_workflow::AutomationStarterFile::EnvironmentLock.path(),
+                    crate::state::ProjectSourceRole::AutomationEnvironmentLock,
+                )
+                .expect("the Automation environment-lock role is valid"),
+                crate::state::ProjectSourceRoleBinding::try_new(
+                    crate::automation_workflow::AutomationStarterFile::Permissions.path(),
+                    crate::state::ProjectSourceRole::AutomationPermissionManifest,
+                )
+                .expect("the Automation permission role is valid"),
+            ],
+        )
+        .expect("the built-in Automation workspace is valid");
+        let mut project_sources = ProjectSourceRegistry::try_from_bundles([verilog_a, automation])
+            .expect("the bootstrapped Code source registry is valid");
+        // The canonical Verilog-A fixture is compiled during bootstrap. Python
+        // Automation is intentionally left unvalidated: only the exact
+        // packaged CPython worker may create that receipt.
         project_sources
             .mark_validated(ProjectSourceLanguage::VerilogA)
             .expect("the built-in Verilog-A identity is valid");
-        project_sources
-            .mark_validated(ProjectSourceLanguage::RSpiceAutomation)
-            .expect("the built-in Automation identity is valid");
         let mut workspace = Self {
             project_sources,
             ..Self::default()
@@ -828,6 +886,167 @@ impl ProjectWorkspace {
         Ok(changed)
     }
 
+    /// Replace one exact document in a project-owned source closure and enter
+    /// the same persisted dirty lifecycle as root-document edits.
+    pub fn replace_project_source_bundle_file(
+        &mut self,
+        bundle_id: crate::state::ProjectSourceId,
+        logical_path: &str,
+        content: String,
+    ) -> Result<bool, ProjectSourceError> {
+        let changed =
+            self.project_sources
+                .replace_bundle_file_content(bundle_id, logical_path, content)?;
+        if changed {
+            self.project_sources_dirty = true;
+        }
+        Ok(changed)
+    }
+
+    /// Commit a workspace-wide replacement as one persisted source-graph
+    /// transaction. Partial replacement is never observable.
+    pub fn replace_project_source_bundle_files_transactionally(
+        &mut self,
+        bundle_id: crate::state::ProjectSourceId,
+        replacements: impl IntoIterator<Item = (String, String)>,
+    ) -> Result<usize, ProjectSourceError> {
+        let changed = self
+            .project_sources
+            .replace_bundle_files_transactionally(bundle_id, replacements)?;
+        if changed > 0 {
+            self.project_sources_dirty = true;
+        }
+        Ok(changed)
+    }
+
+    /// Add one project-owned source document and its authenticated dependency
+    /// edge as a single dirty-state transaction.
+    pub fn add_project_source_bundle_file(
+        &mut self,
+        bundle_id: crate::state::ProjectSourceId,
+        importer_path: &str,
+        file: crate::state::ProjectSourceFile,
+    ) -> Result<bool, ProjectSourceError> {
+        let changed = self
+            .project_sources
+            .add_bundle_file(bundle_id, importer_path, file)?;
+        if changed {
+            self.project_sources_dirty = true;
+        }
+        Ok(changed)
+    }
+
+    /// Persist a source document and its semantic role as one authenticated
+    /// source-graph revision.
+    pub fn add_project_source_bundle_file_with_role(
+        &mut self,
+        bundle_id: crate::state::ProjectSourceId,
+        importer_path: &str,
+        file: crate::state::ProjectSourceFile,
+        role: crate::state::ProjectSourceRole,
+    ) -> Result<bool, ProjectSourceError> {
+        let changed =
+            self.project_sources
+                .add_bundle_file_with_role(bundle_id, importer_path, file, role)?;
+        if changed {
+            self.project_sources_dirty = true;
+        }
+        Ok(changed)
+    }
+
+    pub fn append_project_source_qualification(
+        &mut self,
+        bundle_id: crate::state::ProjectSourceId,
+        record: crate::state::ProjectSourceQualificationRecord,
+    ) -> Result<u64, ProjectSourceError> {
+        let sequence = self
+            .project_sources
+            .append_bundle_qualification(bundle_id, record)?;
+        self.project_sources_dirty = true;
+        Ok(sequence)
+    }
+
+    /// Rename a project-owned source while atomically migrating its roles,
+    /// dependency edges, and language-specific include references.
+    pub fn rename_project_source_bundle_file(
+        &mut self,
+        bundle_id: crate::state::ProjectSourceId,
+        current_path: &str,
+        new_path: &str,
+    ) -> Result<bool, ProjectSourceError> {
+        let changed = self
+            .project_sources
+            .rename_bundle_file(bundle_id, current_path, new_path)?;
+        if changed {
+            self.project_sources_dirty = true;
+        }
+        Ok(changed)
+    }
+
+    /// Remove a non-root project-owned source only after the bundle's role and
+    /// dependency invariants accept the transaction.
+    pub fn remove_project_source_bundle_file(
+        &mut self,
+        bundle_id: crate::state::ProjectSourceId,
+        logical_path: &str,
+    ) -> Result<bool, ProjectSourceError> {
+        let changed = self
+            .project_sources
+            .remove_bundle_file(bundle_id, logical_path)?;
+        if changed {
+            self.project_sources_dirty = true;
+        }
+        Ok(changed)
+    }
+
+    /// Assign or clear one persisted non-entry Automation role in a single
+    /// dirty source-graph transaction.
+    pub fn set_project_source_bundle_non_entry_role(
+        &mut self,
+        bundle_id: crate::state::ProjectSourceId,
+        logical_path: &str,
+        role: Option<crate::state::ProjectSourceRole>,
+    ) -> Result<bool, ProjectSourceError> {
+        let changed =
+            self.project_sources
+                .set_bundle_non_entry_role(bundle_id, logical_path, role)?;
+        if changed {
+            self.project_sources_dirty = true;
+        }
+        Ok(changed)
+    }
+
+    /// Insert a new project-owned source bundle and participate in the
+    /// ordinary project dirty/save/recovery lifecycle.
+    pub fn insert_project_source_bundle(
+        &mut self,
+        bundle: crate::state::ProjectSourceBundle,
+    ) -> Result<(), ProjectSourceError> {
+        self.project_sources.insert_bundle(bundle)?;
+        self.project_sources_dirty = true;
+        Ok(())
+    }
+
+    /// Restore a retained project-source revision as a new monotonic dirty
+    /// revision. The registry owns the complete graph transaction; the
+    /// workspace owns only the ordinary persisted dirty lifecycle.
+    pub fn restore_project_source_bundle_revision(
+        &mut self,
+        bundle_id: crate::state::ProjectSourceId,
+        expected_current: crate::product::ObjectRevision,
+        retained_revision: crate::product::ObjectRevision,
+    ) -> Result<bool, ProjectSourceError> {
+        let changed = self.project_sources.restore_bundle_revision(
+            bundle_id,
+            expected_current,
+            retained_revision,
+        )?;
+        if changed {
+            self.project_sources_dirty = true;
+        }
+        Ok(changed)
+    }
+
     /// Replace one language slot from an explicitly imported UTF-8 file while
     /// preserving monotonic slot revision and invalidating old validation.
     pub fn replace_imported_project_source(
@@ -868,6 +1087,23 @@ impl ProjectWorkspace {
             .get(language)
             .and_then(ProjectSourceDocument::validated_identity);
         let identity = self.project_sources.mark_validated(language)?;
+        if before != Some(identity) {
+            self.project_sources_dirty = true;
+        }
+        Ok(identity)
+    }
+
+    /// Retain validation for an exact source bundle, including every
+    /// dependency file in its authenticated closure.
+    pub fn mark_project_source_bundle_validated(
+        &mut self,
+        bundle_id: crate::state::ProjectSourceId,
+    ) -> Result<ProjectSourceValidationIdentity, ProjectSourceError> {
+        let before = self
+            .project_sources
+            .get_bundle(bundle_id)
+            .and_then(crate::state::ProjectSourceBundle::validated_identity);
+        let identity = self.project_sources.mark_bundle_validated(bundle_id)?;
         if before != Some(identity) {
             self.project_sources_dirty = true;
         }

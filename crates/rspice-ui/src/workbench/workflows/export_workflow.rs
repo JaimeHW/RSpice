@@ -66,6 +66,19 @@ pub(crate) trait ExportWorkflowIo {
         ))
     }
 
+    /// Reuse a previously observed durable-file digest for an ordinary Save.
+    /// Native publication then performs a real compare-and-exchange against
+    /// the last imported/saved bytes instead of accepting and overwriting an
+    /// external editor's newer version. Browser and in-memory backends do not
+    /// expose reopenable paths and may retain their backend-managed behavior.
+    fn observe_destination_at_sha256(
+        &self,
+        path: &Path,
+        _expected_sha256: [u8; 32],
+    ) -> Result<ObservedExportDestination, String> {
+        self.observe_destination(path)
+    }
+
     /// Publish already-complete text bytes against the accepted destination.
     fn write_text_file_observed(
         &self,
@@ -170,6 +183,18 @@ impl ExportWorkflowIo for NativeExportWorkflowIo {
         Ok(ObservedExportDestination {
             path: path.to_path_buf(),
             expectation,
+        })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn observe_destination_at_sha256(
+        &self,
+        path: &Path,
+        expected_sha256: [u8; 32],
+    ) -> Result<ObservedExportDestination, String> {
+        Ok(ObservedExportDestination {
+            path: path.to_path_buf(),
+            expectation: ExportDestinationExpectation::Digest(expected_sha256),
         })
     }
 

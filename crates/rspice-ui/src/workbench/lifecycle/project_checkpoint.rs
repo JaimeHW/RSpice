@@ -637,107 +637,132 @@ fn browser_project_prefix(project_id: &str) -> String {
 }
 
 #[cfg(target_arch = "wasm32")]
+struct BrowserCheckpointAccumulator {
+    project_id: String,
+    checkpoints: Vec<ProjectCheckpointSummary>,
+    quarantined: Vec<ProjectCheckpointQuarantine>,
+}
+
+#[cfg(target_arch = "wasm32")]
+fn visit_browser_checkpoint_record(
+    accumulator: &mut BrowserCheckpointAccumulator,
+    manifest_key: String,
+    value: Option<String>,
+    snapshot_key: String,
+    snapshot: Option<Vec<u8>>,
+) {
+    let Some(value) = value else {
+        accumulator.quarantined.push(ProjectCheckpointQuarantine {
+            label: manifest_key.clone(),
+            reason: "checkpoint manifest is not a JSON string".to_owned(),
+            artifact_keys: vec![manifest_key, snapshot_key],
+        });
+        return;
+    };
+    let manifest = match serde_json::from_str::<ProjectCheckpointManifest>(&value) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            accumulator.quarantined.push(ProjectCheckpointQuarantine {
+                label: manifest_key.clone(),
+                reason: format!("checkpoint manifest is invalid: {error}"),
+                artifact_keys: vec![manifest_key, snapshot_key],
+            });
+            return;
+        }
+    };
+    if manifest.project_id != accumulator.project_id {
+        accumulator.quarantined.push(ProjectCheckpointQuarantine {
+            label: manifest_key.clone(),
+            reason: "checkpoint key ownership and manifest project identity disagree".to_owned(),
+            artifact_keys: vec![manifest_key, snapshot_key],
+        });
+        return;
+    }
+    let (expected_manifest_key, expected_snapshot_key) = browser_keys(&manifest);
+    if manifest_key != expected_manifest_key || snapshot_key != expected_snapshot_key {
+        accumulator.quarantined.push(ProjectCheckpointQuarantine {
+            label: manifest.checkpoint_id.to_string(),
+            reason: "checkpoint manifest is not bound to its canonical IndexedDB keys".to_owned(),
+            artifact_keys: vec![manifest_key, snapshot_key],
+        });
+        return;
+    }
+    let Some(snapshot) = snapshot else {
+        accumulator.quarantined.push(ProjectCheckpointQuarantine {
+            label: manifest.checkpoint_id.to_string(),
+            reason: "checkpoint snapshot is missing".to_owned(),
+            artifact_keys: vec![manifest_key, snapshot_key],
+        });
+        return;
+    };
+    let summary = match summary_from_manifest(
+        manifest,
+        ProjectCheckpointLocator::Browser {
+            manifest_key: manifest_key.clone(),
+            snapshot_key: snapshot_key.clone(),
+        },
+    ) {
+        Ok(summary) => summary,
+        Err(error) => {
+            accumulator.quarantined.push(ProjectCheckpointQuarantine {
+                label: manifest_key.clone(),
+                reason: error,
+                artifact_keys: vec![manifest_key, snapshot_key],
+            });
+            return;
+        }
+    };
+    match validate_snapshot_bytes(&summary, &snapshot) {
+        Ok(_) => accumulator.checkpoints.push(summary),
+        Err(error) => accumulator.quarantined.push(ProjectCheckpointQuarantine {
+            label: summary.checkpoint_id.to_string(),
+            reason: error,
+            artifact_keys: vec![manifest_key, snapshot_key],
+        }),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn start_list(
     state: &AppState,
     complete: impl FnOnce(Result<ProjectCheckpointCatalog, String>) + 'static,
 ) {
     let project_id = state.workspace.project.id().to_string();
     let prefix = browser_project_prefix(&project_id);
+    let accumulator = std::rc::Rc::new(std::cell::RefCell::new(BrowserCheckpointAccumulator {
+        project_id,
+        checkpoints: Vec::new(),
+        quarantined: Vec::new(),
+    }));
+    let visit_accumulator = std::rc::Rc::clone(&accumulator);
     crate::workbench::lifecycle::project_lifecycle::start_browser_checkpoint_list(
         prefix,
-        move |records| {
-            complete(records.map(|(records, orphan_snapshots)| {
-                let mut checkpoints = Vec::new();
-                let mut quarantined = Vec::new();
-                for (manifest_key, value, snapshot_key, snapshot) in records {
-                    let Some(value) = value else {
-                        quarantined.push(ProjectCheckpointQuarantine {
-                            label: manifest_key.clone(),
-                            reason: "checkpoint manifest is not a JSON string".to_owned(),
-                            artifact_keys: vec![manifest_key, snapshot_key],
-                        });
-                        continue;
-                    };
-                    let manifest = match serde_json::from_str::<ProjectCheckpointManifest>(&value) {
-                        Ok(manifest) => manifest,
-                        Err(error) => {
-                            quarantined.push(ProjectCheckpointQuarantine {
-                                label: manifest_key.clone(),
-                                reason: format!("checkpoint manifest is invalid: {error}"),
-                                artifact_keys: vec![manifest_key, snapshot_key],
-                            });
-                            continue;
-                        }
-                    };
-                    if manifest.project_id != project_id {
-                        quarantined.push(ProjectCheckpointQuarantine {
-                            label: manifest_key.clone(),
-                            reason:
-                                "checkpoint key ownership and manifest project identity disagree"
-                                    .to_owned(),
-                            artifact_keys: vec![manifest_key, snapshot_key],
-                        });
-                        continue;
-                    }
-                    let (expected_manifest_key, expected_snapshot_key) = browser_keys(&manifest);
-                    if manifest_key != expected_manifest_key
-                        || snapshot_key != expected_snapshot_key
-                    {
-                        quarantined.push(ProjectCheckpointQuarantine {
-                            label: manifest.checkpoint_id.to_string(),
-                            reason:
-                                "checkpoint manifest is not bound to its canonical IndexedDB keys"
-                                    .to_owned(),
-                            artifact_keys: vec![manifest_key, snapshot_key],
-                        });
-                        continue;
-                    }
-                    let Some(snapshot) = snapshot else {
-                        quarantined.push(ProjectCheckpointQuarantine {
-                            label: manifest.checkpoint_id.to_string(),
-                            reason: "checkpoint snapshot is missing".to_owned(),
-                            artifact_keys: vec![manifest_key, snapshot_key],
-                        });
-                        continue;
-                    };
-                    let summary = match summary_from_manifest(
-                        manifest,
-                        ProjectCheckpointLocator::Browser {
-                            manifest_key: manifest_key.clone(),
-                            snapshot_key: snapshot_key.clone(),
-                        },
-                    ) {
-                        Ok(summary) => summary,
-                        Err(error) => {
-                            quarantined.push(ProjectCheckpointQuarantine {
-                                label: manifest_key.clone(),
-                                reason: error,
-                                artifact_keys: vec![manifest_key, snapshot_key],
-                            });
-                            continue;
-                        }
-                    };
-                    match validate_snapshot_bytes(&summary, &snapshot) {
-                        Ok(_) => checkpoints.push(summary),
-                        Err(error) => quarantined.push(ProjectCheckpointQuarantine {
-                            label: summary.checkpoint_id.to_string(),
-                            reason: error,
-                            artifact_keys: vec![manifest_key, snapshot_key],
-                        }),
-                    }
-                }
+        move |manifest_key, value, snapshot_key, snapshot| {
+            visit_browser_checkpoint_record(
+                &mut visit_accumulator.borrow_mut(),
+                manifest_key,
+                value,
+                snapshot_key,
+                snapshot,
+            );
+        },
+        move |result| {
+            complete(result.map(|orphan_snapshots| {
+                let mut accumulator = accumulator.borrow_mut();
                 for snapshot_key in orphan_snapshots {
-                    quarantined.push(ProjectCheckpointQuarantine {
+                    accumulator.quarantined.push(ProjectCheckpointQuarantine {
                         label: snapshot_key.clone(),
                         reason: "checkpoint snapshot has no committed manifest".to_owned(),
                         artifact_keys: vec![snapshot_key],
                     });
                 }
-                sort_newest_first(&mut checkpoints);
-                quarantined.sort_by(|left, right| right.label.cmp(&left.label));
+                sort_newest_first(&mut accumulator.checkpoints);
+                accumulator
+                    .quarantined
+                    .sort_by(|left, right| right.label.cmp(&left.label));
                 ProjectCheckpointCatalog {
-                    checkpoints,
-                    quarantined,
+                    checkpoints: std::mem::take(&mut accumulator.checkpoints),
+                    quarantined: std::mem::take(&mut accumulator.quarantined),
                 }
             }));
         },
@@ -823,6 +848,170 @@ mod tests {
             !matches_current_state(&summary, &changed_state)
                 .expect("changed state digest compares")
         );
+    }
+
+    #[test]
+    fn checkpoint_closes_over_arbitrary_netlist_veriloga_and_automation_sources() {
+        use crate::state::{
+            ProjectSourceBundle, ProjectSourceDependency, ProjectSourceFile, ProjectSourceLanguage,
+            ProjectSourceOwner, ProjectSourceRegistry, ProjectSourceRole, ProjectSourceRoleBinding,
+        };
+
+        fn file(path: &str, content: &str) -> ProjectSourceFile {
+            ProjectSourceFile::try_new(path, content).expect("source file fixture is valid")
+        }
+
+        fn dependency(importer: &str, imported: &str) -> ProjectSourceDependency {
+            ProjectSourceDependency::try_new(importer, imported)
+                .expect("source dependency fixture is valid")
+        }
+
+        fn role(path: &str, source_role: ProjectSourceRole) -> ProjectSourceRoleBinding {
+            ProjectSourceRoleBinding::try_new(path, source_role)
+                .expect("source role fixture is valid")
+        }
+
+        let netlist = "* production-owned deck\r\nVBIAS bias 0 1.250\r\n.op\r\n.end\r\n";
+        let veriloga_root =
+            "`include \"physics/thermal_constants.vams\"\nmodule sensor_core; endmodule\n";
+        let veriloga_dependency = "`define ROOM_TEMPERATURE 300.15\n";
+        let automation_entry =
+            "from automation_helpers.naming import run_label\nprint(run_label('tt'))\n";
+        let automation_helper = "def run_label(corner):\n    return f'production-{corner}'\n";
+        let run_plan = "schema: rspice.run-plan/v1\nanalyses: [op]\n";
+        let environment_lock = "format = \"rspice-python-lock/v1\"\npython = \"3.14.6\"\n";
+        let permission_manifest = "schema = \"rspice.permissions/v1\"\nnetwork = \"deny\"\n";
+
+        let veriloga = ProjectSourceBundle::try_new(
+            ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
+            ProjectSourceLanguage::VerilogA,
+            "devices/sensor_core.va",
+            veriloga_root,
+            [file("physics/thermal_constants.vams", veriloga_dependency)],
+            [dependency(
+                "devices/sensor_core.va",
+                "physics/thermal_constants.vams",
+            )],
+        )
+        .expect("Verilog-A source closure is valid");
+        let veriloga_id = veriloga.id();
+
+        let automation = ProjectSourceBundle::try_new_with_roles(
+            ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation),
+            ProjectSourceLanguage::RSpiceAutomation,
+            "flows/production_sweep.py",
+            automation_entry,
+            [
+                file("automation_helpers/naming.py", automation_helper),
+                file("plans/qualified-release.plan", run_plan),
+                file("environment/native-runtime.lock", environment_lock),
+                file("security/least-authority.policy", permission_manifest),
+            ],
+            [
+                dependency("flows/production_sweep.py", "automation_helpers/naming.py"),
+                dependency("flows/production_sweep.py", "plans/qualified-release.plan"),
+                dependency(
+                    "flows/production_sweep.py",
+                    "environment/native-runtime.lock",
+                ),
+                dependency(
+                    "flows/production_sweep.py",
+                    "security/least-authority.policy",
+                ),
+            ],
+            [
+                role(
+                    "flows/production_sweep.py",
+                    ProjectSourceRole::AutomationEntry,
+                ),
+                role(
+                    "plans/qualified-release.plan",
+                    ProjectSourceRole::AutomationRunPlan,
+                ),
+                role(
+                    "environment/native-runtime.lock",
+                    ProjectSourceRole::AutomationEnvironmentLock,
+                ),
+                role(
+                    "security/least-authority.policy",
+                    ProjectSourceRole::AutomationPermissionManifest,
+                ),
+            ],
+        )
+        .expect("Automation source closure is valid");
+        let automation_id = automation.id();
+
+        let mut state = AppState::default();
+        assert!(state.workspace.make_netlist_editable_copy(netlist));
+        state.workspace.project_sources =
+            ProjectSourceRegistry::try_from_bundles([veriloga, automation])
+                .expect("source registry is valid");
+        state.workspace.project_sources_dirty = true;
+
+        let (manifest, serialized) = prepare_checkpoint(&state, ProjectCheckpointReason::Manual)
+            .expect("complete Code workspace checkpoint prepares");
+        assert_eq!(manifest.snapshot_digest, digest(serialized.as_bytes()));
+        assert_eq!(manifest.snapshot_byte_len, serialized.len() as u64);
+
+        let restored = crate::io::project_io::load_project_text(&serialized, None)
+            .expect("checkpoint project restores");
+        assert_eq!(restored.workspace.netlist_source.as_deref(), Some(netlist));
+
+        let restored_veriloga = restored
+            .workspace
+            .project_sources
+            .get_bundle(veriloga_id)
+            .expect("Verilog-A closure restores by stable identity");
+        assert_eq!(
+            restored_veriloga.root().logical_path(),
+            "devices/sensor_core.va"
+        );
+        assert_eq!(restored_veriloga.root().content(), veriloga_root);
+        assert_eq!(
+            restored_veriloga.file_content("physics/thermal_constants.vams"),
+            Some(veriloga_dependency)
+        );
+
+        let restored_automation = restored
+            .workspace
+            .project_sources
+            .get_bundle(automation_id)
+            .expect("Automation closure restores by stable identity");
+        assert_eq!(
+            restored_automation.root().logical_path(),
+            "flows/production_sweep.py"
+        );
+        assert_eq!(restored_automation.root().content(), automation_entry);
+        assert_eq!(
+            restored_automation.file_content("automation_helpers/naming.py"),
+            Some(automation_helper)
+        );
+        assert_eq!(
+            restored_automation.role_for_path("plans/qualified-release.plan"),
+            Some(ProjectSourceRole::AutomationRunPlan)
+        );
+        assert_eq!(
+            restored_automation.role_for_path("environment/native-runtime.lock"),
+            Some(ProjectSourceRole::AutomationEnvironmentLock)
+        );
+        assert_eq!(
+            restored_automation.role_for_path("security/least-authority.policy"),
+            Some(ProjectSourceRole::AutomationPermissionManifest)
+        );
+
+        assert!(
+            state
+                .workspace
+                .replace_editable_netlist_source("* changed after checkpoint\n.end\n".to_owned())
+        );
+        assert_ne!(
+            crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
+                .expect("changed project snapshots")
+                .workspace
+                .netlist_source,
+            restored.workspace.netlist_source
+        );
+        assert_eq!(manifest.snapshot_digest, digest(serialized.as_bytes()));
     }
 
     #[test]

@@ -157,11 +157,9 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                             PresenceAction::LeaveSession => {
                                 app.cloud_account.leave_live_session();
                             }
-                            #[cfg(not(target_arch = "wasm32"))]
                             PresenceAction::RequestLease(doc) => {
                                 app.live_session.request_lease(&doc);
                             }
-                            #[cfg(not(target_arch = "wasm32"))]
                             PresenceAction::ReleaseLease(doc) => {
                                 app.live_session.release_lease(&doc);
                             }

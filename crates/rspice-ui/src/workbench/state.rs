@@ -597,7 +597,6 @@ pub(crate) enum ProjectCloseDestination {
     EmptyWorkbench,
     /// Joining a live session: after the close transaction, this install
     /// waits for the session host's project snapshot instead of a launcher.
-    #[cfg(not(target_arch = "wasm32"))]
     LiveMirror,
 }
 
@@ -779,7 +778,6 @@ pub struct LiveWriteLocks {
     pub mirror: bool,
     /// Whether the session policy lets this mirror be saved as a copy.
     /// Meaningful only while `mirror` is set.
-    #[cfg(not(target_arch = "wasm32"))]
     pub mirror_save_copy_allowed: bool,
 }
 
@@ -884,7 +882,6 @@ pub struct WorkbenchState {
     pub(crate) project_close_destination: ProjectCloseDestination,
     /// One-shot request raised by a completed close-to-mirror transaction;
     /// the live-session engine consumes it to start mirroring the host.
-    #[cfg(not(target_arch = "wasm32"))]
     #[serde(skip)]
     pub(crate) live_mirror_entry_pending: bool,
     /// Focus is requested only on the frame in which the launcher opens.
@@ -1125,7 +1122,6 @@ impl Default for WorkbenchState {
             safe_mode: LocalSafeModeState::default(),
             live_write_locks: LiveWriteLocks::default(),
             project_close_destination: ProjectCloseDestination::Launcher,
-            #[cfg(not(target_arch = "wasm32"))]
             live_mirror_entry_pending: false,
             focus_project_launcher_search: false,
             navigator_width: default_navigator_width(),
@@ -1245,12 +1241,10 @@ impl WorkbenchState {
 
     /// Raise the one-shot live-mirror entry request; the live-session engine
     /// consumes it on its next pump.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn request_live_mirror_entry(&mut self) {
         self.live_mirror_entry_pending = true;
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn take_live_mirror_entry(&mut self) -> bool {
         std::mem::take(&mut self.live_mirror_entry_pending)
     }

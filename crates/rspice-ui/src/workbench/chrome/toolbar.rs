@@ -776,7 +776,7 @@ fn results_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             ui,
             app,
             Command::WaveformCalculator,
-            WorkbenchIcon::Target,
+            WorkbenchIcon::Sliders,
             layout,
         );
         context_separator(ui, layout);
@@ -795,14 +795,7 @@ fn results_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         WorkbenchIcon::Folder,
         layout,
     );
-    toolbar_text_command(
-        ui,
-        app,
-        Command::ExportWaveformsCsv,
-        WorkbenchIcon::Export,
-        "Export active result document data",
-        layout,
-    );
+    toolbar_icon_command(ui, app, Command::ExportWaveformsCsv, WorkbenchIcon::Export, layout);
     toolbar_icon_command(ui, app, Command::PrintHardcopy, WorkbenchIcon::File, layout);
 }
 

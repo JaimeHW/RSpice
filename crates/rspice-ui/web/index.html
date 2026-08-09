@@ -143,7 +143,11 @@
       : name === "simulation-worker.js"
         ? "./simulation-worker.js"
         : `./pkg/${name}`;
-    const url = new URL(path, import.meta.url);
+    // The OIDC callback may load this same entrypoint at a nested route. All
+    // release and development assets are origin-rooted so that callback paths
+    // cannot redirect executable fetches into a nonexistent route-relative
+    // directory. Browser deployments are intentionally origin-scoped.
+    const url = new URL(path, `${location.origin}/`);
     if (!IS_RELEASE) {
       url.searchParams.set("v", DEVELOPMENT_ASSET_VERSION);
     }

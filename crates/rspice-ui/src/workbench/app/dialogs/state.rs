@@ -534,6 +534,72 @@ impl BusTapDialogState {
     }
 }
 
+/// Isolated pre-placement contract for a registry-backed XSPICE device with
+/// one or more vector ports. Width edits remain runtime-only until the
+/// primary action materializes and validates the exact durable binding.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct BuiltinXspicePlacementDialogState {
+    pub(crate) open: bool,
+    pub(crate) stable_id: String,
+    pub(crate) display_name: String,
+    pub(crate) vector_ports: Vec<crate::state::CatalogXspiceVectorPort>,
+    pub(crate) widths: std::collections::BTreeMap<String, usize>,
+    pub(crate) design_execution_epoch: u64,
+    pub(crate) active_schematic_epoch: u64,
+    pub(crate) view_path: String,
+    pub(crate) dirty: bool,
+    pub(crate) discard_confirm: bool,
+    pub(crate) validation_error: Option<String>,
+}
+
+impl BuiltinXspicePlacementDialogState {
+    pub(crate) fn open(
+        &mut self,
+        stable_id: impl Into<String>,
+        display_name: impl Into<String>,
+        vector_ports: Vec<crate::state::CatalogXspiceVectorPort>,
+        design_execution_epoch: u64,
+        active_schematic_epoch: u64,
+        view_path: impl Into<String>,
+    ) {
+        let widths = vector_ports
+            .iter()
+            .map(|port| (port.name.clone(), port.default_width))
+            .collect();
+        *self = Self {
+            open: true,
+            stable_id: stable_id.into(),
+            display_name: display_name.into(),
+            vector_ports,
+            widths,
+            design_execution_epoch,
+            active_schematic_epoch,
+            view_path: view_path.into(),
+            dirty: false,
+            discard_confirm: false,
+            validation_error: None,
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(crate) fn mark_edited(&mut self) {
+        self.dirty = true;
+        self.discard_confirm = false;
+        self.validation_error = None;
+    }
+
+    pub(crate) fn attempt_close(&mut self) {
+        if self.dirty && !self.discard_confirm {
+            self.discard_confirm = true;
+        } else {
+            self.close();
+        }
+    }
+}
+
 /// Isolated draft for one snapped, typed net-label placement.
 ///
 /// The canvas click supplies only the anchor and immutable document
@@ -2224,6 +2290,9 @@ pub struct DialogState {
     /// Validated configuration transaction for Place bus tap.
     pub(crate) bus_tap: BusTapDialogState,
 
+    /// Exact vector-port widths for a built-in XSPICE placement.
+    pub(crate) builtin_xspice_placement: BuiltinXspicePlacementDialogState,
+
     /// Snapped, typed net-label placement transaction.
     pub(crate) net_label_placement: NetLabelPlacementDialogState,
 
@@ -2371,6 +2440,7 @@ impl DialogState {
             || self.unpublish_web.open
             || self.command_palette.open
             || self.bus_tap.open
+            || self.builtin_xspice_placement.open
             || self.net_label_placement.open
             || self.schematic_visibility.open
             || self.drawing_sheet_layers.open
@@ -2454,6 +2524,7 @@ mod tests {
         assert_blocks_shortcuts(|dialogs| dialogs.unpublish_web.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.command_palette.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.bus_tap.open());
+        assert_blocks_shortcuts(|dialogs| dialogs.builtin_xspice_placement.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.net_label_placement.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.schematic_visibility.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.drawing_sheet_layers.open = true);

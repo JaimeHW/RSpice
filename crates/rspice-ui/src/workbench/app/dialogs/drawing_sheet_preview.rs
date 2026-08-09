@@ -81,13 +81,20 @@ pub(super) fn drawing_sheet_preview_with_content(
     drawing_sheet_preview_impl(ui, format, height, label, Some(content), invalid, None);
 }
 
+/// One sheet drawn at the scale its whole set shares.
+///
+/// The ruler is the bounding page of the set — its widest page by its tallest —
+/// so every sheet in a strip is measured against the same rule and an A3 among
+/// A4s still reads as the larger page. Ruling on the longest edge alone squared
+/// the ruler instead, which drew a landscape page at barely half the width of
+/// the card that carried it and left the rest as desk.
 pub(super) fn drawing_sheet_preview_at_common_scale(
     ui: &mut Ui,
     format: &SchematicSheetFormat,
     height: f32,
     label: &str,
     content: Option<&DrawingSheetPreviewContent>,
-    common_edge_um: u64,
+    common_extent_um: (u64, u64),
 ) {
     drawing_sheet_preview_impl(
         ui,
@@ -96,9 +103,13 @@ pub(super) fn drawing_sheet_preview_at_common_scale(
         label,
         content,
         false,
-        Some(common_edge_um),
+        Some(common_extent_um),
     );
 }
+
+/// The share of the ruler kept clear around the drawn page, matching the 6 %
+/// pad a single preview leaves around its own paper.
+pub(super) const DRAWING_SHEET_COMMON_RULER_PAD: f32 = 1.12;
 
 fn drawing_sheet_preview_impl(
     ui: &mut Ui,
@@ -107,7 +118,7 @@ fn drawing_sheet_preview_impl(
     label: &str,
     content: Option<&DrawingSheetPreviewContent>,
     invalid: bool,
-    common_edge_um: Option<u64>,
+    common_extent_um: Option<(u64, u64)>,
 ) {
     let t = Tokens::get(ui.ctx());
     let palette = SheetPreviewPalette::for_text_color(t.color.text);
@@ -163,15 +174,18 @@ fn drawing_sheet_preview_impl(
     let max_y_um = paper.height_um as f32 + pad_um;
     let extent_um = vec2(max_x_um - min_x_um, max_y_um - min_y_um);
     let available = canvas.shrink2(vec2(10.0, 9.0));
-    let scale = common_edge_um.map_or_else(
+    let scale = common_extent_um.map_or_else(
         || {
             (available.width() / extent_um.x)
                 .min(available.height() / extent_um.y)
                 .max(f32::EPSILON)
         },
-        |common_edge_um| {
-            let ruler_extent_um = common_edge_um.max(1) as f32 * 1.12;
-            (available.width().min(available.height()) / ruler_extent_um).max(f32::EPSILON)
+        |(ruler_width_um, ruler_height_um)| {
+            let ruler_width = ruler_width_um.max(1) as f32 * DRAWING_SHEET_COMMON_RULER_PAD;
+            let ruler_height = ruler_height_um.max(1) as f32 * DRAWING_SHEET_COMMON_RULER_PAD;
+            (available.width() / ruler_width)
+                .min(available.height() / ruler_height)
+                .max(f32::EPSILON)
         },
     );
     let extent_screen = Rect::from_center_size(available.center(), extent_um * scale);

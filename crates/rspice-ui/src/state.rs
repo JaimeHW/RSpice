@@ -60,14 +60,15 @@ pub use model_bound_symbol::{
     SymbolPinDefinition, SymbolPinSide, SymbolSourceContract,
 };
 pub use model_library::ModelLibraryManager;
-pub(crate) use netlist_document::parse_include_directives;
 pub use netlist_document::{
-    DependencyMetadata, DependencyResolution, DiagnosticSeverity, DocumentOwnership, FindDirection,
-    FindError, FindMatch, FindOptions, GeneratedArtifact, GeneratedProvenance,
-    GeneratedSourceMapEntry, GenerationInput, NetlistDocument, NetlistDocumentId, NetlistOutline,
-    OutlineEntry, OutlineEntryKind, ReplaceScope, SourceLocator, ValidationDiagnostic,
-    content_digest, find_all_in_source, replace_in_source,
+    BoundedFindMatches, DependencyMetadata, DependencyResolution, DependencySourceAuthority,
+    DiagnosticSeverity, DocumentOwnership, FindDirection, FindError, FindMatch, FindOptions,
+    GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry, GenerationInput,
+    NetlistDocument, NetlistDocumentId, NetlistOutline, OutlineEntry, OutlineEntryKind,
+    ReplaceScope, SourceLocator, ValidationDiagnostic, content_digest, find_all_in_source,
+    find_all_in_source_bounded, replace_in_source, replace_source_ranges,
 };
+pub(crate) use netlist_document::{expand_retained_netlist_dependencies, parse_include_directives};
 pub use params_string::{format_params_string, parse_params_string};
 pub use physical_layout::{
     LayoutDocumentError, LayoutEdit, LayoutGeometry, LayoutLayerPurpose, LayoutObjectId,
@@ -75,16 +76,20 @@ pub use physical_layout::{
 };
 #[cfg(test)]
 pub use physical_layout::{LayoutInstance, LayoutOrientation, LayoutTransform};
-#[cfg(test)]
-pub use project_sources::ProjectSourceDependency;
-pub(crate) use project_sources::{CanonicalCellViewOwnerKey, canonical_cell_view_owner_key};
+pub(crate) use project_sources::{
+    CanonicalCellViewOwnerKey, canonical_cell_view_owner_key, project_source_path_key,
+    project_source_paths_equal,
+};
 pub use project_sources::{
     MAX_PROJECT_CODE_SOURCE_BYTES, MAX_PROJECT_SOURCE_BUNDLE_BYTES,
     MAX_PROJECT_SOURCE_DEPENDENCY_DEPTH, MAX_PROJECT_SOURCE_FILES,
-    MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES, PROJECT_SOURCE_REGISTRY_SCHEMA_VERSION,
-    ProjectSourceBundle, ProjectSourceDocument, ProjectSourceFile, ProjectSourceId,
-    ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry,
-    project_veriloga_bundle_alias, project_veriloga_bundle_source_key,
+    MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES, MAX_PROJECT_SOURCE_QUALIFICATION_RECORDS,
+    PROJECT_SOURCE_REGISTRY_SCHEMA_VERSION, ProjectSourceBundle, ProjectSourceDependency,
+    ProjectSourceDocument, ProjectSourceFile, ProjectSourceId, ProjectSourceLanguage,
+    ProjectSourceOwner, ProjectSourceQualificationCheck, ProjectSourceQualificationDisposition,
+    ProjectSourceQualificationRecord, ProjectSourceQualificationTarget, ProjectSourceRegistry,
+    ProjectSourceRole, ProjectSourceRoleBinding, project_veriloga_bundle_alias,
+    project_veriloga_bundle_source_key,
 };
 pub use property_types::{
     DisplayMode, PropertyDefinition, PropertyRegistry, PropertySheet, PropertyType, PropertyValue,
@@ -123,15 +128,17 @@ pub use symbol_resolver::{
 pub(crate) use workspace::PreparedProjectLibraryMutation;
 pub use workspace::{
     CellViewRef, DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
-    DesignVariableRange, DesignVariableScope, DesignVariableSweepEligibility, OpenCellView,
-    OwnedNetlistDescriptor, OwnedNetlistEditStrategy, OwnedNetlistSaveRecord,
-    PROJECT_DESCRIPTOR_SCHEMA_VERSION, PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION,
-    ProjectCloudPublicationBinding, ProjectDescriptor, ProjectLibraryMutation,
-    ProjectTechnologyBinding, ProjectTechnologyChangeAuthority, ProjectTechnologyChangeContext,
-    ProjectWorkspace, RegressionComparisonMethod, RegressionComparisonWindow, RegressionTargetKind,
-    RegressionTargetSelector, RegressionToleranceRule, ResolvedHierarchyBinding, SavedOutput,
-    SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision,
-    SavedOutputStreaming, SimulationPlanPayload, SimulationPlanPayloadRecord, SpecEntry,
+    DesignVariableRange, DesignVariableScope, DesignVariableSweepEligibility,
+    NetlistExecutionProfile, NetlistLineEnding, NetlistSourceDialect, NetlistTextEncoding,
+    OpenCellView, OwnedNetlistDescriptor, OwnedNetlistEditStrategy, OwnedNetlistIncludeDescriptor,
+    OwnedNetlistSaveRecord, PROJECT_DESCRIPTOR_SCHEMA_VERSION,
+    PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION, ProjectCloudPublicationBinding, ProjectDescriptor,
+    ProjectLibraryMutation, ProjectTechnologyBinding, ProjectTechnologyChangeAuthority,
+    ProjectTechnologyChangeContext, ProjectWorkspace, RegressionComparisonMethod,
+    RegressionComparisonWindow, RegressionTargetKind, RegressionTargetSelector,
+    RegressionToleranceRule, ResolvedHierarchyBinding, SavedOutput, SavedOutputCompatibility,
+    SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+    SimulationPlanPayload, SimulationPlanPayloadRecord, SpecEntry,
 };
 
 #[cfg(test)]

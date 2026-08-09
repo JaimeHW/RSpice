@@ -478,7 +478,9 @@ pub(crate) fn configured_topology_revision(state: &AppState) -> (String, u64, Ve
                     (component.kind == crate::state::ComponentType::CellInstance)
                         .then_some(component.library_cell.as_ref())
                         .flatten()
-                        .filter(|binding| binding.source_path.is_none())
+                        .filter(|binding| {
+                            binding.source_path.is_none() && !binding.is_executable_builtin()
+                        })
                         .map(|binding| {
                             format!(
                                 "{}/{}/schematic",

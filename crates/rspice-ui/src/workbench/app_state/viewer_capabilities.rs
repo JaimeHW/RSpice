@@ -635,7 +635,6 @@ mod tests {
         *results.plot_view_mut(ResultViewer::Waves, 0) = PlotView {
             x: Some((0.0, 1.0)),
             y: Some((-1.0, 1.0)),
-            y_right: None,
         };
         results.analysis_exprs.insert(
             analysis_key,

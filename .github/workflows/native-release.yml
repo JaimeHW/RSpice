@@ -1,4 +1,4 @@
-name: Native backend release
+name: Native desktop release
 
 on:
   push:
@@ -19,6 +19,12 @@ env:
   CARGO_DENY_VERSION: "0.19.9"
   CARGO_AUDIT_VERSION: "0.22.2"
   CARGO_CYCLONEDX_VERSION: "0.5.9"
+  UV_VERSION: "0.12.1"
+  MANAGED_PYTHON_VERSION: "3.14.6"
+  MANAGED_PYTHON_ABI: "cp314"
+  AUTOMATION_API_VERSION: "1.0.0"
+  AUTOMATION_ENVIRONMENT_DIGEST: "d445b1443965be4e6b1b191ee023176dbd35430ac3cd00603458384ea03b8518"
+  AUTOMATION_RUNTIME_KEY_ID: "rspice-managed-runtime-2026-01"
 
 jobs:
   validate:
@@ -91,16 +97,22 @@ jobs:
         include:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
+            architecture: x86_64
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
+            architecture: aarch64
           - os: macos-15
             target: aarch64-apple-darwin
+            architecture: aarch64
           - os: macos-15-intel
             target: x86_64-apple-darwin
+            architecture: x86_64
           - os: windows-2025
             target: x86_64-pc-windows-msvc
+            architecture: x86_64
           - os: windows-11-arm
             target: aarch64-pc-windows-msvc
+            architecture: aarch64
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -109,16 +121,130 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.14"
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --target ${{ matrix.target }}
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: native-release-${{ matrix.target }}
+      - name: Stage exact app-local managed CPython
+        id: stage_python
+        shell: bash
+        run: |
+          set -euo pipefail
+          python_install_root="$RUNNER_TEMP/rspice-managed-python-install"
+          runtime_root="$RUNNER_TEMP/rspice-release-stage/runtimes/python"
+          UV_PYTHON_INSTALL_DIR="$python_install_root" \
+            uv python install --managed-python "$MANAGED_PYTHON_VERSION"
+          managed_python=$(UV_PYTHON_INSTALL_DIR="$python_install_root" \
+            uv python find --managed-python "$MANAGED_PYTHON_VERSION")
+          python tools/release/stage_managed_python.py \
+            --python-executable "$managed_python" \
+            --output-root "$runtime_root" \
+            --worker assets/automation_runtime/rspice_worker.py \
+            --expected-version "$MANAGED_PYTHON_VERSION" \
+            --source-identity "astral-sh/python-build-standalone via uv ${UV_VERSION}" \
+            >> "$GITHUB_OUTPUT"
+      - name: Build managed-runtime signing authority
+        env:
+          RUSTFLAGS: -D warnings
+        run: >-
+          cargo build --locked --release
+          -p rspice-automation-runtime
+          --bin rspice-managed-runtime-packager
+      - name: Inventory, sign, and self-verify managed CPython
+        id: runtime
+        shell: bash
+        env:
+          RSPICE_AUTOMATION_RUNTIME_SIGNING_SEED_HEX: ${{ secrets.RSPICE_AUTOMATION_RUNTIME_SIGNING_SEED_HEX }}
+          RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
+          RELEASE_TARGET: ${{ matrix.target }}
+          RELEASE_ARCHITECTURE: ${{ matrix.architecture }}
+          RUNTIME_ROOT: ${{ steps.stage_python.outputs.runtime_root }}
+          PYTHON_EXECUTABLE: ${{ steps.stage_python.outputs.python_executable }}
+        run: |
+          set -euo pipefail
+          if ! [[ "${RSPICE_AUTOMATION_RUNTIME_SIGNING_SEED_HEX:-}" =~ ^[0-9a-fA-F]{64}$ ]]; then
+            echo "release signing seed is unavailable or malformed" >&2
+            exit 1
+          fi
+          umask 077
+          signing_key="$RUNNER_TEMP/rspice-managed-runtime-signing-seed"
+          printf '%s' "$RSPICE_AUTOMATION_RUNTIME_SIGNING_SEED_HEX" > "$signing_key"
+          unset RSPICE_AUTOMATION_RUNTIME_SIGNING_SEED_HEX
+          trap 'rm -f "$signing_key"' EXIT
+          runtime_packager=target/release/rspice-managed-runtime-packager
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            runtime_packager="${runtime_packager}.exe"
+          fi
+          "$runtime_packager" \
+            --runtime-root "$RUNTIME_ROOT" \
+            --runtime-build "rspice-cpython-${MANAGED_PYTHON_VERSION}+${RELEASE_COMMIT}" \
+            --target "$RELEASE_TARGET" \
+            --architecture "$RELEASE_ARCHITECTURE" \
+            --python-version "$MANAGED_PYTHON_VERSION" \
+            --python-abi "$MANAGED_PYTHON_ABI" \
+            --api-version "$AUTOMATION_API_VERSION" \
+            --python-executable "$PYTHON_EXECUTABLE" \
+            --worker-bootstrap worker/rspice_worker.py \
+            --environment-digest "$AUTOMATION_ENVIRONMENT_DIGEST" \
+            --key-id "$AUTOMATION_RUNTIME_KEY_ID" \
+            --signing-key-file "$signing_key" \
+            >> "$GITHUB_OUTPUT"
+      - name: Build managed-runtime release qualifier
+        env:
+          RUSTFLAGS: -D warnings
+        run: >-
+          cargo build --locked --release
+          -p rspice-automation-runtime
+          --bin rspice-managed-runtime-qualifier
+          --target ${{ matrix.target }}
+      - name: Qualify signed managed CPython execution and cancellation
+        shell: bash
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+          RELEASE_ARCHITECTURE: ${{ matrix.architecture }}
+          RUNTIME_ROOT: ${{ steps.stage_python.outputs.runtime_root }}
+          RUNTIME_KEY_ID: ${{ steps.runtime.outputs.signing_key_id }}
+          RUNTIME_PUBLIC_KEY_HEX: ${{ steps.runtime.outputs.public_key_hex }}
+        run: |
+          set -euo pipefail
+          qualifier="target/${RELEASE_TARGET}/release/rspice-managed-runtime-qualifier"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            qualifier="${qualifier}.exe"
+          fi
+          "$qualifier" \
+            --runtime-root "$RUNTIME_ROOT" \
+            --key-id "$RUNTIME_KEY_ID" \
+            --public-key-hex "$RUNTIME_PUBLIC_KEY_HEX" \
+            --target "$RELEASE_TARGET" \
+            --architecture "$RELEASE_ARCHITECTURE" \
+            --python-version "$MANAGED_PYTHON_VERSION" \
+            --api-version "$AUTOMATION_API_VERSION" \
+            --environment-digest "$AUTOMATION_ENVIRONMENT_DIGEST" \
+            > managed-runtime-qualification.json
+          python - <<'PY'
+          import json
+          with open("managed-runtime-qualification.json", encoding="utf-8") as source:
+              evidence = json.load(source)
+          assert evidence["passed"] is True, evidence
+          assert evidence["system_python_path_used"] is False, evidence
+          PY
       - name: Build locked release backend
         env:
           RSPICE_BUILD_COMMIT: ${{ needs.validate.outputs.commit }}
           RUSTFLAGS: -D warnings
         run: cargo build --locked --release -p rspice-cli --target ${{ matrix.target }}
+      - name: Build locked desktop application with the release trust root
+        env:
+          RSPICE_BUILD_COMMIT: ${{ needs.validate.outputs.commit }}
+          RSPICE_AUTOMATION_RUNTIME_KEY_ID: ${{ steps.runtime.outputs.signing_key_id }}
+          RSPICE_AUTOMATION_RUNTIME_PUBLIC_KEY_HEX: ${{ steps.runtime.outputs.public_key_hex }}
+          RUSTFLAGS: -D warnings -A dead-code
+        run: cargo build --locked --release -p rspice-ui --features generated-veriloga-catalog --target ${{ matrix.target }}
       - name: Smoke packaged backend identity and readiness
         shell: bash
         env:
@@ -152,11 +278,14 @@ jobs:
         run: |
           set -euo pipefail
           binary="target/${RELEASE_TARGET}/release/rspice"
+          ui_binary="target/${RELEASE_TARGET}/release/rspice-ui"
           case "$RELEASE_TARGET" in
-            *windows*) binary="${binary}.exe" ;;
+            *windows*) binary="${binary}.exe"; ui_binary="${ui_binary}.exe" ;;
           esac
           python tools/release/package_native.py \
             --binary "$binary" \
+            --ui-binary "$ui_binary" \
+            --runtime-root "${{ steps.stage_python.outputs.runtime_root }}" \
             --target "$RELEASE_TARGET" \
             --version "$RELEASE_VERSION" \
             --commit "$RELEASE_COMMIT" \
@@ -205,7 +334,7 @@ jobs:
           python tools/security/check_advisory_exceptions.py
           cargo deny check advisories bans licenses sources
           cargo audit
-      - name: Generate release SBOM and checksum
+      - name: Generate release SBOMs and checksums
         env:
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
           SOURCE_DATE_EPOCH: ${{ needs.validate.outputs.source_date_epoch }}
@@ -214,10 +343,21 @@ jobs:
           cargo cyclonedx --format json --spec-version 1.5 --target all \
             --manifest-path crates/rspice-cli/Cargo.toml \
             --override-filename rspice-cli.cdx
+          cargo cyclonedx --format json --spec-version 1.5 --target all \
+            --manifest-path crates/rspice-ui/Cargo.toml \
+            --override-filename rspice-ui.cdx
+          cargo cyclonedx --format json --spec-version 1.5 --target all \
+            --manifest-path crates/rspice-automation-runtime/Cargo.toml \
+            --override-filename rspice-automation-runtime.cdx
           mkdir -p dist
-          mv crates/rspice-cli/rspice-cli.cdx.json "dist/rspice-${RELEASE_VERSION}.cdx.json"
+          mv crates/rspice-cli/rspice-cli.cdx.json "dist/rspice-${RELEASE_VERSION}-cli.cdx.json"
+          mv crates/rspice-ui/rspice-ui.cdx.json "dist/rspice-${RELEASE_VERSION}-ui.cdx.json"
+          mv crates/rspice-automation-runtime/rspice-automation-runtime.cdx.json \
+            "dist/rspice-${RELEASE_VERSION}-automation-runtime.cdx.json"
           cd dist
-          sha256sum "rspice-${RELEASE_VERSION}.cdx.json" > "rspice-${RELEASE_VERSION}.cdx.json.sha256"
+          for sbom in *.cdx.json; do
+            sha256sum "$sbom" > "${sbom}.sha256"
+          done
       - name: Upload release SBOM
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -255,8 +395,8 @@ jobs:
             exit 1
           fi
           checksum_count=$(find . -maxdepth 1 -type f -name '*.sha256' | wc -l)
-          if [ "$checksum_count" -ne 7 ]; then
-            echo "expected seven checksum sidecars, found $checksum_count" >&2
+          if [ "$checksum_count" -ne 9 ]; then
+            echo "expected nine checksum sidecars, found $checksum_count" >&2
             exit 1
           fi
           sha256sum --check --strict ./*.sha256

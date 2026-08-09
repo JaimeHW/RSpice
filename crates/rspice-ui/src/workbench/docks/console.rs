@@ -1067,7 +1067,8 @@ fn active_measurement_rows(
     let Some(run) = app.state.simulation.active_run() else {
         return Vec::new();
     };
-    run.analyses
+    let mut rows: Vec<MeasurementTableRow> = run
+        .analyses
         .iter()
         .flat_map(|analysis| {
             analysis.measurements.iter().map(move |measurement| {
@@ -1077,7 +1078,45 @@ fn active_measurement_rows(
                 measurement_table_row(measurement, &analysis.label, spec)
             })
         })
-        .collect()
+        .collect();
+    // Derived AC stability margins join the table as first-class rows: a
+    // `phase_margin` specification binds to them exactly like a .measure
+    // result, and the numbers are the stability inspector card's own. A
+    // deck-declared measurement of the same name keeps authority.
+    if let Some(summary) =
+        crate::state::ac_bode_summary_for_selection(run, app.state.simulation.active_analysis_idx)
+    {
+        let label = run
+            .analyses
+            .get(summary.analysis_index)
+            .map_or("AC", |analysis| analysis.label.as_str());
+        let metrics = summary.metrics;
+        for (name, value, event_axis) in [
+            ("phase_margin", metrics.pm_deg, metrics.ugf),
+            ("gain_margin", metrics.gm_db, metrics.f180),
+            ("unity_gain_freq", metrics.ugf, metrics.ugf),
+            ("bandwidth_3db", metrics.f3db, metrics.f3db),
+        ] {
+            let Some(value) = value else { continue };
+            if rows.iter().any(|row| row.name.eq_ignore_ascii_case(name)) {
+                continue;
+            }
+            let spec = specifications
+                .iter()
+                .find(|spec| spec.measurement.eq_ignore_ascii_case(name));
+            let derived = rspice_core::MeasureResult {
+                name: name.to_owned(),
+                value: Some(value),
+                error: None,
+                passed: true,
+                expected: None,
+                tolerance: None,
+                event_axis,
+            };
+            rows.push(measurement_table_row(&derived, label, spec));
+        }
+    }
+    rows
 }
 
 fn measurement_table_row(

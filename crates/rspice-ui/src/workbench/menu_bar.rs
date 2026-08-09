@@ -13,6 +13,8 @@ mod simulate_menu;
 mod tools_menu;
 mod waveform_export;
 
+#[cfg(test)]
+pub(crate) use export_actions::build_generated_bundle;
 pub(crate) use export_actions::{
     action_export_generated_netlist_with_options, action_export_netlist_with_io,
     action_view_netlist, build_menu_netlist,

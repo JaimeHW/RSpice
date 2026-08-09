@@ -357,7 +357,7 @@ struct BundleEntry {
     bytes: Vec<u8>,
 }
 
-fn build_generated_bundle(
+pub(crate) fn build_generated_bundle(
     artifact: &crate::state::GeneratedArtifact,
     format: crate::io::NetlistFormat,
     include_source_map: bool,
@@ -503,6 +503,7 @@ fn build_generated_bundle(
         manifest_dependencies.push(serde_json::json!({
             "requested_locator": dependency.requested_locator(),
             "logical_identity": dependency.locator().logical_identity(),
+            "authority": dependency.authority(),
             "bundle_entry": entry_names[index],
             "content_digest": crate::state::content_digest(&materialized).to_string(),
             "retained_entry": retained_entry,

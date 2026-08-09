@@ -24,7 +24,6 @@ pub(crate) enum ProjectLoadOrigin<'a> {
     PersistentPath(&'a Path),
     /// A live-session host's project snapshot; carries the host's display
     /// name. Never touches recent files or persistence bindings.
-    #[cfg(not(target_arch = "wasm32"))]
     LiveSession(&'a str),
     #[cfg(any(test, target_arch = "wasm32"))]
     BrowserImport(&'a str),
@@ -37,7 +36,6 @@ impl<'a> ProjectLoadOrigin<'a> {
         match self {
             #[cfg(not(target_arch = "wasm32"))]
             Self::PersistentPath(path) => path.display().to_string(),
-            #[cfg(not(target_arch = "wasm32"))]
             Self::LiveSession(host) => host.to_string(),
             #[cfg(any(test, target_arch = "wasm32"))]
             Self::BrowserImport(name) | Self::BrowserCanonical(name) => name.to_string(),
@@ -48,7 +46,6 @@ impl<'a> ProjectLoadOrigin<'a> {
         match self {
             #[cfg(not(target_arch = "wasm32"))]
             Self::PersistentPath(path) => Some(path),
-            #[cfg(not(target_arch = "wasm32"))]
             Self::LiveSession(_) => None,
             #[cfg(any(test, target_arch = "wasm32"))]
             Self::BrowserImport(_) | Self::BrowserCanonical(_) => None,
@@ -59,7 +56,6 @@ impl<'a> ProjectLoadOrigin<'a> {
         match self {
             #[cfg(not(target_arch = "wasm32"))]
             Self::PersistentPath(_) => "Opened project",
-            #[cfg(not(target_arch = "wasm32"))]
             Self::LiveSession(_) => "Synchronized live session project",
             #[cfg(any(test, target_arch = "wasm32"))]
             Self::BrowserImport(_) => "Imported project",
@@ -198,18 +194,25 @@ pub(crate) fn save_active_for_continuation(state: &mut AppState) -> SaveRequestO
     save_scope_outcome(state, SaveScope::ActiveDocument)
 }
 
-/// While mirroring a live session whose policy withholds save-copy rights,
-/// every project persistence path refuses with this message.
-#[cfg(not(target_arch = "wasm32"))]
-fn live_mirror_save_block(state: &AppState) -> Option<&'static str> {
+/// A streamed mirror never acquires a canonical local binding implicitly.
+/// Policy may authorize an explicit independent copy through Save As; it
+/// never authorizes ordinary Save/Save All to retain or overwrite the mirror.
+fn live_mirror_save_block(state: &AppState, project_copy: bool) -> Option<&'static str> {
     let locks = &state.workbench.live_write_locks;
-    (locks.mirror && !locks.mirror_save_copy_allowed)
-        .then_some("The live session's policy does not allow saving a copy of the host's project.")
+    if !locks.mirror {
+        None
+    } else if !locks.mirror_save_copy_allowed {
+        Some("The live session's policy does not allow saving a copy of the host's project.")
+    } else if !project_copy {
+        Some("A live mirror cannot be saved in place. Use Save As to create an independent copy.")
+    } else {
+        None
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn save_scope_outcome(state: &mut AppState, scope: SaveScope) -> SaveRequestOutcome {
-    if let Some(message) = live_mirror_save_block(state) {
+    if let Some(message) = live_mirror_save_block(state, false) {
         state.push_user_message(ConsoleMessage::warning(message));
         return SaveRequestOutcome::Failed(message.to_owned());
     }
@@ -269,6 +272,10 @@ fn save_native_scope(
 
 #[cfg(target_arch = "wasm32")]
 fn save_scope_outcome(state: &mut AppState, scope: SaveScope) -> SaveRequestOutcome {
+    if let Some(message) = live_mirror_save_block(state, false) {
+        state.push_user_message(ConsoleMessage::warning(message));
+        return SaveRequestOutcome::Failed(message.to_owned());
+    }
     save_project_in_browser(state, scope)
 }
 
@@ -716,8 +723,7 @@ fn canonical_save_continuation_event(
 }
 
 pub(crate) fn save_project_as(state: &mut AppState) -> bool {
-    #[cfg(not(target_arch = "wasm32"))]
-    if let Some(message) = live_mirror_save_block(state) {
+    if let Some(message) = live_mirror_save_block(state, true) {
         state.push_user_message(ConsoleMessage::warning(message));
         return false;
     }
@@ -898,7 +904,6 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
                 .workbench
                 .activate(crate::workbench::state::Workspace::Project);
         }
-        #[cfg(not(target_arch = "wasm32"))]
         ProjectCloseDestination::LiveMirror => {
             state.workbench.project_launcher_open = false;
             state
@@ -1016,7 +1021,6 @@ fn apply_loaded_project_authorized(
         ProjectLoadOrigin::PersistentPath(_) => {
             state.browser_project_save_name = None;
         }
-        #[cfg(not(target_arch = "wasm32"))]
         ProjectLoadOrigin::LiveSession(_) => {
             // The host's on-disk location is meaningless on this machine and
             // must never become a save target here.
@@ -1076,7 +1080,6 @@ fn apply_loaded_project_authorized(
 }
 
 /// Outcome of applying a live-session host's project snapshot.
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) enum LiveProjectApply {
     Applied,
     /// A local run or lifecycle transaction owns the project right now;
@@ -1088,7 +1091,6 @@ pub(crate) enum LiveProjectApply {
 /// Replace the whole workbench project with a live-session host's snapshot.
 /// The join flow already confirmed closing local work and the session
 /// arbitrates write authority, so no dialog or recent-file bookkeeping runs.
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn apply_live_project_snapshot(
     state: &mut AppState,
     bytes: &[u8],
@@ -1723,6 +1725,21 @@ mod tests {
             save_all_for_continuation(&mut state),
             SaveRequestOutcome::Failed(_)
         ));
+    }
+
+    #[test]
+    fn save_copy_permission_never_turns_a_live_mirror_into_a_canonical_project() {
+        let mut state = AppState::default();
+        state.workbench.live_write_locks.mirror = true;
+        state.workbench.live_write_locks.mirror_save_copy_allowed = true;
+
+        assert_eq!(
+            live_mirror_save_block(&state, false),
+            Some(
+                "A live mirror cannot be saved in place. Use Save As to create an independent copy."
+            )
+        );
+        assert_eq!(live_mirror_save_block(&state, true), None);
     }
 
     fn project_named_with_results(path: &str) -> ProjectFile {

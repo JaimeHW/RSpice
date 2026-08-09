@@ -143,18 +143,18 @@ pub(crate) use dialogs::hardcopy::run_worker_request_value as run_hardcopy_worke
 pub(crate) use dialogs::hardcopy::{HardcopyDialogState, HardcopyWorkflow, open_hardcopy_workflow};
 
 pub(crate) use dialogs::state::{
-    ArraySelectionDialogState, ArraySelectionPreviewCache, BusObjectPropertiesDraft,
-    BusTapDialogState, BusTapObjectPropertiesDraft, DescendHierarchyDialogState,
-    DesignNoteDialogState, DesignNoteObjectPropertiesDraft, DocumentationShapeDialogState,
-    DocumentationShapeObjectPropertiesDraft, EngineeringTableDialogPage,
-    EngineeringTableDialogState, EngineeringTableExportFormat, EngineeringTableExportScope,
-    FullScreenPanels, FullScreenScope, GridSnapRoutingDialogState, GridSnapRoutingDraft,
-    GridSnapRoutingFocusTarget, GridSnapSpacingChoice, HelpCenterPage, HierarchyDescendEditMode,
-    HierarchyParentContext, MoveSelectionDialogState, NamedNetObjectPropertiesDraft,
-    NetLabelObjectPropertiesDraft, NetLabelPlacementDialogState, NewWindowInitialContent,
-    ObjectPropertiesDraft, PinPortDialogState, RenameSelectionTarget, ReplaceInstanceOpen,
-    StretchSelectionDialogState, TechnologyAttachmentDialogState, ViewOperation,
-    ViewOperationDialogState, WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
+    ArraySelectionDialogState, ArraySelectionPreviewCache, BuiltinXspicePlacementDialogState,
+    BusObjectPropertiesDraft, BusTapDialogState, BusTapObjectPropertiesDraft,
+    DescendHierarchyDialogState, DesignNoteDialogState, DesignNoteObjectPropertiesDraft,
+    DocumentationShapeDialogState, DocumentationShapeObjectPropertiesDraft,
+    EngineeringTableDialogPage, EngineeringTableDialogState, EngineeringTableExportFormat,
+    EngineeringTableExportScope, FullScreenPanels, FullScreenScope, GridSnapRoutingDialogState,
+    GridSnapRoutingDraft, GridSnapRoutingFocusTarget, GridSnapSpacingChoice, HelpCenterPage,
+    HierarchyDescendEditMode, HierarchyParentContext, MoveSelectionDialogState,
+    NamedNetObjectPropertiesDraft, NetLabelObjectPropertiesDraft, NetLabelPlacementDialogState,
+    NewWindowInitialContent, ObjectPropertiesDraft, PinPortDialogState, RenameSelectionTarget,
+    ReplaceInstanceOpen, StretchSelectionDialogState, TechnologyAttachmentDialogState,
+    ViewOperation, ViewOperationDialogState, WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
 };
 pub use dialogs::state::{DialogState, LicensePhase};
 
@@ -187,7 +187,8 @@ pub(crate) use dialogs::view_operations::{
 pub(crate) use dialogs::window_session::open_window_workflow;
 
 pub(crate) use actions::property_edit::{
-    open_property_editor, open_selected_object_properties, selected_object_properties_available,
+    authoritative_component_property_sheet, open_property_editor, open_selected_object_properties,
+    selected_object_properties_available,
 };
 
 pub(crate) use dialogs::placement::net_label::open_net_label_placement;
@@ -238,11 +239,20 @@ pub struct RSpiceApp {
     pub(crate) symbol_library: Option<crate::schematic::symbols::SymbolLibrary>,
     /// Simulation controller for running analyses
     pub(crate) simulation_controller: crate::simulation::SimulationController,
+    /// Verified application-local Python worker service. It is deliberately
+    /// outside persisted state and absent from browser builds, which own a Web
+    /// Worker backend instead.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) automation_runtime: crate::automation_runtime::NativeAutomationRuntime,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) automation_runtime: crate::automation_runtime::BrowserAutomationRuntime,
+    /// Project identity currently authorized to own the process/worker. Any
+    /// identity change terminates the worker before another event is polled.
+    automation_runtime_project_id: crate::product::ProjectId,
     /// Cloud account session boundary (sign-in, entitlements, license leases).
     pub(crate) cloud_account: crate::services::cloud_account::CloudAccountService,
     /// Live-session engine: document sync, write leases, and presence over
     /// the relay port the cloud service hands out.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) live_session: crate::workbench::live_session::LiveSessionEngine,
     /// File workflow IO backend (native in production, injectable in tests).
     pub(crate) file_workflow_io:
@@ -265,6 +275,31 @@ fn configure_platform_input_contract(ctx: &Context) {
 }
 
 impl RSpiceApp {
+    fn terminate_automation_runtime_after_project_change(&mut self) {
+        let project_id = self.state.workspace.project.id();
+        if project_id == self.automation_runtime_project_id {
+            return;
+        }
+        let _ = self.automation_runtime.terminate();
+        self.automation_runtime_project_id = project_id;
+        self.state.ui.code_workspace = Default::default();
+        self.simulation_controller.clear_prepared_run();
+    }
+
+    pub(crate) fn automation_runtime_unavailable_reason(&mut self) -> Option<String> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.automation_runtime.poll_discovery();
+            self.automation_runtime
+                .availability_reason()
+                .map(str::to_owned)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.automation_runtime.availability_reason()
+        }
+    }
+
     /// Drop every authorization and presentation artifact derived from a
     /// mutable simulation input. Call this at the same commit boundary as
     /// plan, PVT, solver-option, model, variable, output, or topology edits.
@@ -298,14 +333,18 @@ impl RSpiceApp {
 
     #[cfg(all(test, not(target_arch = "wasm32")))]
     pub(crate) fn test_instance() -> Self {
+        let state = AppState::default();
+        let automation_runtime_project_id = state.workspace.project.id();
         Self {
-            state: AppState::default(),
+            state,
             first_frame: false,
             autosave_last: None,
             applied_theme: None,
             last_window_title: String::new(),
             symbol_library: None,
             simulation_controller: crate::simulation::SimulationController::new(),
+            automation_runtime: crate::automation_runtime::NativeAutomationRuntime::discover(),
+            automation_runtime_project_id,
             cloud_account: crate::services::cloud_account::CloudAccountService::unconfigured(),
             live_session: crate::workbench::live_session::LiveSessionEngine::default(),
             file_workflow_io: Box::new(
@@ -390,6 +429,7 @@ impl RSpiceApp {
         // Log startup
         log::info!("RSpice egui application initialized");
 
+        let automation_runtime_project_id = state.workspace.project.id();
         Self {
             state,
             first_frame: true,
@@ -399,10 +439,14 @@ impl RSpiceApp {
             last_window_title: String::new(),
             symbol_library,
             simulation_controller: crate::simulation::SimulationController::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            automation_runtime: crate::automation_runtime::NativeAutomationRuntime::discover(),
+            #[cfg(target_arch = "wasm32")]
+            automation_runtime: crate::automation_runtime::BrowserAutomationRuntime::discover(),
+            automation_runtime_project_id,
             cloud_account: crate::services::cloud_account::CloudAccountService::new(Some(
                 cc.egui_ctx.clone(),
             )),
-            #[cfg(not(target_arch = "wasm32"))]
             live_session: crate::workbench::live_session::LiveSessionEngine::default(),
             file_workflow_io: Box::new(
                 crate::workbench::workflows::file_workflow::NativeFileWorkflowIo,
@@ -437,6 +481,20 @@ impl RSpiceApp {
         // leaving painter-owned title text absent while icons are visible.
         if initializing_frame {
             ctx.request_repaint();
+        }
+
+        self.terminate_automation_runtime_after_project_change();
+        #[cfg(not(target_arch = "wasm32"))]
+        self.automation_runtime.poll_discovery();
+        crate::workbench::documents::code_workspace::poll_automation_workflow(self);
+        crate::workbench::documents::code_workspace::settle_pending_python_execute(self);
+        crate::workbench::documents::code_workspace::poll_managed_automation_runtime(self);
+        let automation = &self.state.ui.code_workspace.automation;
+        if automation.pending_runtime_validation.is_some()
+            || automation.runtime_execution.is_some()
+            || automation.execution.is_active()
+        {
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
 
         #[cfg(target_arch = "wasm32")]
@@ -498,14 +556,19 @@ impl RSpiceApp {
     /// Keep the OS window title (or browser tab title) in sync with the
     /// active document: `cell* — project — RSpice`.
     fn sync_window_title(&mut self, ctx: &Context) {
-        let has_unsaved_changes = should_warn_before_browser_unload(
-            crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&self.state),
+        let project_has_unsaved_changes =
+            crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&self.state);
+        let should_warn_before_unload = should_warn_before_browser_unload(
+            project_has_unsaved_changes,
             false,
+            self.state.workbench.live_write_locks.mirror,
         );
         #[cfg(target_arch = "wasm32")]
-        update_browser_before_unload_guard(has_unsaved_changes);
+        update_browser_before_unload_guard(should_warn_before_unload);
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = should_warn_before_unload;
 
-        let dirty = if has_unsaved_changes { "*" } else { "" };
+        let dirty = if project_has_unsaved_changes { "*" } else { "" };
         let view = &self.state.workspace.active_view;
         let title = format!(
             "{}{dirty} — {} — RSpice",
@@ -669,6 +732,7 @@ impl RSpiceApp {
         self.render_unpublish_web_dialog(ctx);
         self.render_command_palette(ctx);
         self.render_bus_tap_dialog(ctx);
+        self.render_builtin_xspice_placement_dialog(ctx);
         self.render_net_label_dialog(ctx);
         self.render_grid_snap_routing_dialog(ctx);
         self.render_drawing_sheet_layers_dialog(ctx);
@@ -1055,11 +1119,22 @@ impl eframe::App for RSpiceApp {
         }
         self.prepare_frame(&ctx);
         self.cloud_account.poll();
+        if let Some(error) = self.cloud_account.take_local_error() {
+            self.state
+                .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+        }
         if let Some(url) = self.cloud_account.take_browser_request() {
+            #[cfg(not(target_arch = "wasm32"))]
             ctx.open_url(egui::OpenUrl::new_tab(url));
+            #[cfg(target_arch = "wasm32")]
+            if web_sys::window()
+                .and_then(|window| window.location().assign(&url).ok())
+                .is_none()
+            {
+                log::error!("browser sign-in navigation was rejected");
+            }
         }
         self.record_publish_receipt();
-        #[cfg(not(target_arch = "wasm32"))]
         self.live_session
             .pump(&mut self.state, &mut self.cloud_account);
         if let Some(text) = self.state.ui.clipboard_text_request.take() {
@@ -1073,10 +1148,14 @@ impl eframe::App for RSpiceApp {
         self.render_frame_dialogs(&ctx);
         self.invalidate_simulation_preflight_after_frame_edit(&simulation_input_before_frame);
         crate::workbench::synchronize_schematic_cross_probe(&mut self.state);
+        // A project replacement can commit from a dialog after prepare_frame.
+        // Terminate at the same frame boundary so old authority cannot survive.
+        self.terminate_automation_runtime_after_project_change();
     }
 
     /// Called by eframe when the application is shutting down.
     fn on_exit(&mut self) {
+        let _ = self.automation_runtime.terminate();
         log::info!("eframe on_exit — application shutting down");
         #[cfg(target_arch = "wasm32")]
         if let Err(error) = crate::workbench::browser::navigation::uninstall_popstate_listener() {
@@ -1086,6 +1165,15 @@ impl eframe::App for RSpiceApp {
 
     /// Save state on exit
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        // A live mirror is streamed session data, not device-owned recovery
+        // state. Never let eframe autosave, browser local storage, or the
+        // global Verilog-A library silently retain it. The previously stored
+        // local session stays intact; after the live session ends, normal
+        // persistence resumes only if policy allowed the mirror to remain.
+        if !should_persist_application_state(&self.state) {
+            log::debug!("save: skipped while a live-session mirror is active");
+            return;
+        }
         log::debug!("save: sync schematic");
         self.state.sync_active_schematic_to_workspace();
         log::debug!("save: veriloga library");
@@ -1128,8 +1216,16 @@ impl RSpiceApp {
     }
 }
 
-fn should_warn_before_browser_unload(schematic_dirty: bool, workspace_dirty: bool) -> bool {
-    schematic_dirty || workspace_dirty
+fn should_warn_before_browser_unload(
+    schematic_dirty: bool,
+    workspace_dirty: bool,
+    volatile_live_mirror: bool,
+) -> bool {
+    schematic_dirty || workspace_dirty || volatile_live_mirror
+}
+
+fn should_persist_application_state(state: &AppState) -> bool {
+    !state.workbench.live_write_locks.mirror
 }
 
 fn configured_autosave_interval(minutes: u8) -> std::time::Duration {
@@ -1466,10 +1562,11 @@ mod tests {
 
     #[test]
     fn browser_unload_warning_tracks_schematic_or_workspace_dirty_state() {
-        assert!(!should_warn_before_browser_unload(false, false));
-        assert!(should_warn_before_browser_unload(true, false));
-        assert!(should_warn_before_browser_unload(false, true));
-        assert!(should_warn_before_browser_unload(true, true));
+        assert!(!should_warn_before_browser_unload(false, false, false));
+        assert!(should_warn_before_browser_unload(true, false, false));
+        assert!(should_warn_before_browser_unload(false, true, false));
+        assert!(should_warn_before_browser_unload(true, true, false));
+        assert!(should_warn_before_browser_unload(false, false, true));
     }
 
     #[test]
@@ -1490,6 +1587,19 @@ mod tests {
             configured_autosave_interval(0),
             std::time::Duration::from_secs(60)
         );
+    }
+
+    #[test]
+    fn live_mirror_never_enters_application_persistence() {
+        let mut state = AppState::default();
+        assert!(should_persist_application_state(&state));
+
+        state.workbench.live_write_locks.mirror = true;
+        state.workbench.live_write_locks.mirror_save_copy_allowed = true;
+        assert!(!should_persist_application_state(&state));
+
+        state.workbench.live_write_locks.mirror_save_copy_allowed = false;
+        assert!(!should_persist_application_state(&state));
     }
 
     #[test]

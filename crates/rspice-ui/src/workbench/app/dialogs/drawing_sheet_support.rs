@@ -7,8 +7,8 @@
 use std::collections::BTreeMap;
 
 use egui::{
-    Align, ComboBox, Context, Frame, Grid, Layout, Margin, RichText, ScrollArea, Stroke, TextEdit,
-    Ui, vec2,
+    Align, ComboBox, Context, Frame, Grid, Layout, Margin, Rect, RichText, ScrollArea, Stroke,
+    TextEdit, Ui, pos2, vec2,
 };
 use egui_extras::{Column, TableBuilder};
 
@@ -491,108 +491,235 @@ fn sheet_format_manager_body(
     authority_error: Option<&str>,
 ) {
     let t = Tokens::get(ui.ctx());
-    manager_thumbnails(ui, &state.rows, &state.preview_content);
-    ui.add_space(10.0);
-    ScrollArea::horizontal()
-        .id_salt("sheet-format-manager-table")
-        .show(ui, |ui| {
-            Grid::new("sheet-format-manager-grid")
-                .striped(true)
-                .min_col_width(82.0)
-                .spacing(vec2(14.0, 8.0))
-                .show(ui, |ui| {
-                    for heading in [
-                        "Sheet",
-                        "Page",
-                        "Format",
-                        "Dimensions",
-                        "Zones",
-                        "Title block",
-                        "Source",
-                        "State",
-                    ] {
-                        ui.label(
-                            RichText::new(heading)
-                                .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                                .color(t.color.text_dim),
-                        );
-                    }
-                    ui.end_row();
-                    for row in &mut state.rows {
-                        ui.horizontal(|ui| {
-                            ui.checkbox(&mut row.selected, "");
-                            ui.label(&row.name);
-                        });
-                        ui.monospace(format!("{} / {}", row.page, row.page_count));
-                        ui.label(row.format.authored_size.label());
-                        let (width, height) = row.format.oriented_dimensions_um();
-                        ui.monospace(row.format.display_unit.format_size_um(width, height));
-                        ui.monospace(
-                            row.format
-                                .geometry()
-                                .ok()
-                                .and_then(|geometry| geometry.zones)
-                                .map_or_else(
-                                    || "\u{2014}".to_owned(),
-                                    |zones| format!("{} \u{00d7} {}", zones.columns, zones.rows),
-                                ),
-                        );
-                        ui.label(title_template_label(row.format.title_block.template));
-                        ui.label(inheritance_label(row.format.inheritance));
-                        ui.label(if format_is_organization_managed(&row.format) {
-                            "managed · skipped"
-                        } else if row.active {
-                            "open"
-                        } else if !row.has_geometry {
-                            "no geometry yet"
-                        } else {
-                            "drawn"
-                        });
-                        ui.end_row();
-                    }
-                });
-        });
-    ui.add_space(14.0);
+    if manager_thumbnails(ui, &state.rows, &state.preview_content) {
+        ui.add_space(11.0);
+    }
+    manager_format_table(ui, &mut state.rows, &t);
+    ui.add_space(11.0);
     Frame::NONE
         .fill(t.color.bg_panel)
         .stroke(Stroke::new(1.0, t.color.border))
         .corner_radius(t.radius)
         .inner_margin(Margin::same(11))
         .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
             if sheet_format_manager_controls_stack(ui.available_width()) {
                 manager_format_selector(ui, state, &t);
-                ui.add_space(12.0);
+                ui.add_space(MANAGER_APPLY_GAP);
                 manager_apply_notes(ui);
             } else {
-                ui.columns(2, |columns| {
-                    manager_format_selector(&mut columns[0], state, &t);
-                    manager_apply_notes(&mut columns[1]);
+                // The reference splits this row 0.6fr / 1fr, not in half: the
+                // selector is one line of format text, the notes beside it are
+                // two paragraphs, and an even split left the selector padded
+                // with empty panel while the notes wrapped early.
+                let total = ui.available_width();
+                let selector_width =
+                    ((total - MANAGER_APPLY_GAP) * MANAGER_SELECTOR_SHARE).max(220.0);
+                let notes_width = (total - MANAGER_APPLY_GAP - selector_width).max(1.0);
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = MANAGER_APPLY_GAP;
+                    ui.allocate_ui_with_layout(
+                        vec2(selector_width, 0.0),
+                        Layout::top_down(Align::Min),
+                        |ui| manager_format_selector(ui, state, &t),
+                    );
+                    ui.allocate_ui_with_layout(
+                        vec2(notes_width, 0.0),
+                        Layout::top_down(Align::Min),
+                        manager_apply_notes,
+                    );
                 });
             }
         });
-    ui.add_space(10.0);
+    // Allocated only when there is something to say. A reserved band held an
+    // empty strip of dialog above the footer on every well-formed selection.
     let error = authority_error.or(state.error.as_deref());
-    ui.allocate_ui_with_layout(
-        vec2(ui.available_width(), 38.0),
-        egui::Layout::top_down(egui::Align::Min),
-        |ui| {
-            if let Some(error) = error {
-                ui.colored_label(t.color.err, error);
-            } else if !state.rows.iter().any(|row| row.selected) {
-                ui.colored_label(t.color.warn, "Select at least one sheet.");
-            }
-        },
-    );
+    if let Some(error) = error {
+        ui.add_space(9.0);
+        ui.colored_label(t.color.err, error);
+    } else if !state.rows.iter().any(|row| row.selected) {
+        ui.add_space(9.0);
+        ui.colored_label(t.color.warn, "Select at least one sheet.");
+    }
 }
 
 fn sheet_format_manager_controls_stack(available_width: f32) -> bool {
     available_width < 620.0
 }
 
+/// The lead between the selector and the notes beside it, and the selector's
+/// share of the row â€” the reference's `0.6fr / 1fr` split with a 13 pt gap.
+const MANAGER_APPLY_GAP: f32 = 13.0;
+const MANAGER_SELECTOR_SHARE: f32 = 0.375;
+
+/// Below this the dialog body scrolls sideways rather than shortening a sheet
+/// name or an engineering dimension to fit.
+const MANAGER_TABLE_MIN_WIDTH: f32 = 960.0;
+const MANAGER_HEADER_HEIGHT: f32 = 27.0;
+/// The reference's cell gutter, carried by the cell rather than by a gap
+/// between cells so the header band and a selected row read as one bar.
+const MANAGER_CELL_PAD: f32 = 8.0;
+/// Column shares read off the reference table, each with the width its own
+/// content needs. The last column takes the remainder instead of a share, which
+/// is what carries the header band and a selected row's wash all the way to the
+/// right edge instead of stopping at the last cell that holds text.
+const MANAGER_COLUMNS: [(&str, f32, f32); 8] = [
+    ("Sheet", 0.164, 150.0),
+    ("Page", 0.082, 74.0),
+    ("Format", 0.129, 116.0),
+    ("Dimensions", 0.148, 140.0),
+    ("Zones", 0.095, 84.0),
+    ("Title block", 0.135, 130.0),
+    ("Source", 0.136, 140.0),
+    ("State", 0.0, 120.0),
+];
+
+/// Every sheet of the document, one row each, across the full width of the
+/// dialog. Column widths are stated as shares of that width rather than left to
+/// the widest cell: content-sized columns left the whole table hugging the left
+/// half of the surface with its rules and row bands stopping in mid-air.
+fn manager_format_table(ui: &mut Ui, rows: &mut [SheetFormatManagerRow], t: &Tokens) {
+    let table_width = ui.available_width().max(MANAGER_TABLE_MIN_WIDTH);
+    ScrollArea::horizontal()
+        .id_salt("sheet-format-manager-table")
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            ui.set_min_width(table_width);
+            // Cells butt against each other and carry their own gutter, as the
+            // reference's do. Inheriting the dialog's item spacing gutter-ed the
+            // columns apart and pushed the header band past the body inset.
+            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+            let mut table = TableBuilder::new(ui)
+                .id_salt("sheet-format-manager")
+                .vscroll(false)
+                .cell_layout(Layout::left_to_right(Align::Center));
+            let (last, leading) = MANAGER_COLUMNS.split_last().expect("eight fixed columns");
+            for (_, share, minimum) in leading {
+                table = table.column(
+                    Column::initial((table_width * share).max(*minimum)).at_least(*minimum),
+                );
+            }
+            table
+                .column(Column::remainder().at_least(last.2))
+                .header(MANAGER_HEADER_HEIGHT, |mut header| {
+                    for (heading, _, _) in MANAGER_COLUMNS {
+                        header.col(|ui| {
+                            // The band is what separates the headings from the
+                            // first row: eight labels alone above the rows read
+                            // as a ninth row of data.
+                            let band = ui.max_rect();
+                            ui.painter().rect_filled(band, 0.0, t.color.bg_panel_2);
+                            ui.painter().hline(
+                                band.x_range(),
+                                band.bottom() - 0.5,
+                                Stroke::new(1.0, t.color.border),
+                            );
+                            ui.add_space(MANAGER_CELL_PAD);
+                            ui.label(
+                                RichText::new(heading.to_uppercase())
+                                    .font(theme::sans(tokens::FS_0, FontWeight::Medium))
+                                    .color(t.color.text_dim),
+                            );
+                        });
+                    }
+                })
+                .body(|mut body| {
+                    for row in rows {
+                        body.row(t.metrics.row_h, |mut cells| {
+                            let selected = row.selected;
+                            cells.col(|ui| {
+                                manager_cell(ui, t, selected, true);
+                                ui.checkbox(&mut row.selected, "");
+                                ui.add_space(MANAGER_CELL_PAD);
+                                ui.label(&row.name);
+                            });
+                            cells.col(|ui| {
+                                manager_cell(ui, t, selected, false);
+                                ui.monospace(format!("{} / {}", row.page, row.page_count));
+                            });
+                            cells.col(|ui| {
+                                manager_cell(ui, t, selected, false);
+                                ui.label(row.format.authored_size.label());
+                            });
+                            cells.col(|ui| {
+                                manager_cell(ui, t, selected, false);
+                                let (width, height) = row.format.oriented_dimensions_um();
+                                ui.monospace(row.format.display_unit.format_size_um(width, height));
+                            });
+                            cells.col(|ui| {
+                                manager_cell(ui, t, selected, false);
+                                ui.monospace(
+                                    row.format
+                                        .geometry()
+                                        .ok()
+                                        .and_then(|geometry| geometry.zones)
+                                        .map_or_else(
+                                            || "\u{2014}".to_owned(),
+                                            |zones| {
+                                                format!("{} \u{00d7} {}", zones.columns, zones.rows)
+                                            },
+                                        ),
+                                );
+                            });
+                            cells.col(|ui| {
+                                manager_cell(ui, t, selected, false);
+                                ui.label(title_template_label(row.format.title_block.template));
+                            });
+                            cells.col(|ui| {
+                                manager_cell(ui, t, selected, false);
+                                ui.label(inheritance_label(row.format.inheritance));
+                            });
+                            cells.col(|ui| {
+                                manager_cell(ui, t, selected, false);
+                                let (state, color) = if format_is_organization_managed(&row.format)
+                                {
+                                    ("managed \u{00b7} skipped", t.color.warn)
+                                } else if row.active {
+                                    ("open", t.color.ok)
+                                } else if row.has_geometry {
+                                    ("drawn", t.color.text_dim)
+                                } else {
+                                    ("no geometry yet", t.color.text_faint)
+                                };
+                                ui.label(RichText::new(state).color(color));
+                            });
+                        });
+                    }
+                });
+        });
+}
+
+/// One table cell's own furniture, painted before its content so every mark
+/// stays under the text: the row rule that separates it from the next row, the
+/// accent wash the reference gives a selected row, the 2 pt accent rule down
+/// that row's leading edge, and the cell's leading gutter.
+fn manager_cell(ui: &mut Ui, t: &Tokens, selected: bool, leading: bool) {
+    let rect = ui.max_rect();
+    if selected {
+        ui.painter().rect_filled(rect, 0.0, t.color.accent_dim);
+        if leading {
+            ui.painter().rect_filled(
+                Rect::from_min_max(rect.min, pos2(rect.left() + 2.0, rect.bottom())),
+                0.0,
+                t.color.accent,
+            );
+        }
+    }
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        Stroke::new(1.0, t.color.border),
+    );
+    ui.add_space(MANAGER_CELL_PAD);
+}
+
 fn manager_format_selector(ui: &mut Ui, state: &mut SheetFormatManagerState, t: &Tokens) {
+    // A field label, set as every other field label on these surfaces is. The
+    // reference does not shout it: a mono all-caps kicker over one select reads
+    // as a section heading for a section that is a single control.
     ui.label(
-        RichText::new("FORMAT TO APPLY")
-            .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
+        RichText::new("Format to apply")
+            .font(theme::sans(tokens::FS_0, FontWeight::Medium))
             .color(t.color.text_dim),
     );
     ui.add_space(6.0);
@@ -885,7 +1012,7 @@ const TITLE_FIELD_TABLE_MIN_WIDTH: f32 = 760.0;
 const TITLE_FIELD_HEADER_HEIGHT: f32 = 27.0;
 /// The reference row is 29 pt around a 22 pt input. Ours is stated against the
 /// live control height instead of a constant, so a row can never be shorter
-/// than the control it holds — a row that has to grow to fit its own cell
+/// than the control it holds â€” a row that has to grow to fit its own cell
 /// leaves the table without a common rhythm.
 const TITLE_FIELD_ROW_PADDING: f32 = 7.0;
 
@@ -1450,7 +1577,7 @@ fn title_field_automatic_values(
     values.insert(
         DrawingSheetTitleFieldId::Format,
         format!(
-            "{} · {}",
+            "{} Â· {}",
             format.authored_size.label(),
             format.orientation.label().to_lowercase()
         ),
@@ -1522,35 +1649,97 @@ fn title_template_label(template: crate::state::DrawingSheetTitleBlockTemplate) 
     }
 }
 
+/// Strip geometry: the reference's 9 pt gutter, 140 pt minimum track and 7 pt
+/// card padding, with the page drawn between these two heights.
+const MANAGER_THUMB_GAP: f32 = 9.0;
+const MANAGER_THUMB_MIN_WIDTH: f32 = 140.0;
+const MANAGER_THUMB_MIN_PREVIEW: f32 = 120.0;
+const MANAGER_THUMB_MAX_PREVIEW: f32 = 280.0;
+const MANAGER_THUMB_PADDING: i8 = 7;
+/// What the preview itself spends on desk margin and its caption track, held
+/// here so a card can be sized to the page it will actually draw.
+const MANAGER_THUMB_PREVIEW_INSET_X: f32 = 20.0;
+const MANAGER_THUMB_PREVIEW_INSET_Y: f32 = 18.0;
+const MANAGER_THUMB_CAPTION: f32 = 20.0;
+
+/// How many cards the strip lays across one row.
+///
+/// The reference track is `auto-fit`, which collapses the tracks a short
+/// document does not fill, so three sheets are three cards across the strip.
+/// Sizing every card to the 140 pt minimum instead left the cards bunched at
+/// the left edge of an otherwise empty panel.
+fn manager_thumbnail_columns(available_width: f32, sheets: usize) -> usize {
+    let fits = ((available_width + MANAGER_THUMB_GAP)
+        / (MANAGER_THUMB_MIN_WIDTH + MANAGER_THUMB_GAP))
+        .floor()
+        .max(1.0) as usize;
+    fits.min(sheets.max(1))
+}
+
+/// The height a card of this width is drawn at, for a set of pages whose
+/// bounding ruler has the given aspect (height over width).
+///
+/// The card is sized to its page rather than the page fitted into whatever card
+/// the row hands out: a card taller than the page it carries is desk, and a
+/// strip of desk is what the dialog is here to avoid. The ceiling stops a
+/// two-sheet document from spending a third of the dialog on its previews.
+fn manager_thumbnail_preview_height(item_width: f32, ruler_aspect: f32) -> f32 {
+    let page_width =
+        (item_width - 2.0 * f32::from(MANAGER_THUMB_PADDING) - MANAGER_THUMB_PREVIEW_INSET_X)
+            .max(1.0);
+    let page_height = page_width * ruler_aspect;
+    (page_height + MANAGER_THUMB_PREVIEW_INSET_Y + MANAGER_THUMB_CAPTION)
+        .clamp(MANAGER_THUMB_MIN_PREVIEW, MANAGER_THUMB_MAX_PREVIEW)
+}
+
+/// The comparison strip, drawn only when there is a comparison to make.
+///
+/// One sheet has nothing to compare itself against: the strip became a band of
+/// empty desk around a thumbnail of the page the table below already states in
+/// full. Returns whether anything was drawn so the caller can skip its lead.
 fn manager_thumbnails(
     ui: &mut Ui,
     rows: &[SheetFormatManagerRow],
     preview_content: &DrawingSheetPreviewContent,
-) {
+) -> bool {
+    if rows.len() < 2 {
+        return false;
+    }
     let t = Tokens::get(ui.ctx());
-    let largest_edge = rows
+    // The ruler every card in the strip is drawn against: the widest page in the
+    // set by the tallest, so a mixed set is compared rather than each sheet
+    // being drawn to its own card.
+    let ruler = rows
         .iter()
-        .map(|row| {
-            let (width, height) = row.format.oriented_dimensions_um();
-            width.max(height)
-        })
-        .max()
-        .unwrap_or(1);
-    let gap = 9.0;
-    let available = ui.available_width().max(140.0);
-    let columns = ((available + gap) / (140.0 + gap)).floor().max(1.0);
-    let item_width = ((available - gap * (columns - 1.0)) / columns).max(140.0);
+        .map(|row| row.format.oriented_dimensions_um())
+        .fold((1_u64, 1_u64), |(width, height), (row_w, row_h)| {
+            (width.max(row_w), height.max(row_h))
+        });
+    let ruler_aspect = ruler.1 as f32 / ruler.0.max(1) as f32;
+    let gap = MANAGER_THUMB_GAP;
     Frame::NONE
         .fill(t.color.canvas_bg)
         .stroke(Stroke::new(1.0, t.color.border))
         .corner_radius(t.radius)
         .inner_margin(Margin::same(11))
         .show(ui, |ui| {
+            // Without this the strip shrinks to its cards and the panel around
+            // them stops short of the table below it.
+            ui.set_min_width(ui.available_width());
+            let available = ui.available_width().max(MANAGER_THUMB_MIN_WIDTH);
+            let columns = manager_thumbnail_columns(available, rows.len());
+            // Floored, because a card wider than its share by even a fraction of
+            // a point wraps the last card of the row onto a row of its own.
+            let item_width = ((available - gap * (columns as f32 - 1.0)) / columns as f32)
+                .floor()
+                .max(MANAGER_THUMB_MIN_WIDTH);
+            let preview_height = manager_thumbnail_preview_height(item_width, ruler_aspect);
+            let item_height = preview_height + 2.0 * f32::from(MANAGER_THUMB_PADDING);
             ui.spacing_mut().item_spacing = vec2(gap, gap);
             ui.horizontal_wrapped(|ui| {
                 for row in rows {
                     ui.allocate_ui_with_layout(
-                        vec2(item_width, 150.0),
+                        vec2(item_width, item_height),
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| {
                             let active_fill = egui::Color32::from_rgba_unmultiplied(
@@ -1570,15 +1759,15 @@ fn manager_thumbnails(
                                     },
                                 ))
                                 .corner_radius(t.radius)
-                                .inner_margin(Margin::same(7))
+                                .inner_margin(Margin::same(MANAGER_THUMB_PADDING))
                                 .show(ui, |ui| {
                                     drawing_sheet_preview_at_common_scale(
                                         ui,
                                         &row.format,
-                                        120.0,
+                                        preview_height,
                                         &format!("{} \u{00b7} {}", row.page, row.name),
                                         row.active.then_some(preview_content),
-                                        largest_edge,
+                                        ruler,
                                     );
                                 });
                         },
@@ -1586,6 +1775,7 @@ fn manager_thumbnails(
                 }
             });
         });
+    true
 }
 
 fn title_field_summary(ui: &mut Ui, state: &TitleBlockFieldsState) {
@@ -1733,13 +1923,18 @@ fn manager_apply_note(ui: &mut Ui, heading: &str, body: &str) {
     let t = Tokens::get(ui.ctx());
     ui.label(
         RichText::new(heading)
-            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+            .font(theme::sans(tokens::FS_0, FontWeight::Medium))
             .color(t.color.text),
     );
-    ui.label(
-        RichText::new(body)
-            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-            .color(t.color.text_dim),
+    // Stated, because the note sits in a column the caller sized: without it the
+    // detail line lays out against the panel and runs under the footer.
+    ui.add(
+        egui::Label::new(
+            RichText::new(body)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_dim),
+        )
+        .wrap(),
     );
 }
 
@@ -1782,6 +1977,85 @@ mod tests {
         assert!(sheet_format_manager_controls_stack(619.0));
         assert!(!sheet_format_manager_controls_stack(620.0));
         assert!(!sheet_format_manager_controls_stack(760.0));
+    }
+
+    #[test]
+    fn thumbnail_strip_collapses_the_tracks_a_short_document_does_not_fill() {
+        // Three sheets are three cards across the strip, exactly as the
+        // reference's `auto-fit` track does, rather than three 140 pt tiles
+        // bunched against the left edge of an empty panel.
+        assert_eq!(manager_thumbnail_columns(1_136.0, 3), 3);
+        // Once the document is longer than the row, the row is the limit.
+        assert_eq!(manager_thumbnail_columns(1_136.0, 12), 7);
+        assert_eq!(manager_thumbnail_columns(300.0, 12), 2);
+        // A phone-width strip still lays one readable card.
+        assert_eq!(manager_thumbnail_columns(120.0, 4), 1);
+    }
+
+    #[test]
+    fn thumbnail_card_is_sized_to_the_page_it_draws() {
+        // A4 landscape: the card a three-sheet strip hands out is spent on the
+        // page, with only the desk margin and the caption left over.
+        let landscape = 210.0 / 297.0;
+        let card = 300.0;
+        let height = manager_thumbnail_preview_height(card, landscape);
+        assert!(
+            height < MANAGER_THUMB_MAX_PREVIEW,
+            "{height} hit the ceiling"
+        );
+        let page_height = height - MANAGER_THUMB_PREVIEW_INSET_Y - MANAGER_THUMB_CAPTION;
+        let page_width = page_height / landscape;
+        let card_inner = card - 2.0 * f32::from(MANAGER_THUMB_PADDING);
+        assert!(
+            page_width >= card_inner - MANAGER_THUMB_PREVIEW_INSET_X - 1.0,
+            "the page should fill its card: {page_width} in {card_inner}"
+        );
+        // Both bounds hold: a two-sheet strip stops at the ceiling and a full
+        // row of narrow cards never draws a page too small to read.
+        assert_eq!(
+            manager_thumbnail_preview_height(900.0, landscape),
+            MANAGER_THUMB_MAX_PREVIEW
+        );
+        assert_eq!(
+            manager_thumbnail_preview_height(140.0, landscape),
+            MANAGER_THUMB_MIN_PREVIEW
+        );
+        // A portrait set is taller for the same card, which is the whole point
+        // of ruling the strip on the set's own bounding page.
+        assert!(
+            manager_thumbnail_preview_height(372.0, 297.0 / 210.0)
+                > manager_thumbnail_preview_height(372.0, landscape)
+        );
+    }
+
+    #[test]
+    fn manager_columns_spend_the_whole_table_width() {
+        // The body width of the drawing-sheet dialog, which is the width the
+        // reference table's column shares were read at.
+        const REFERENCE_WIDTH: f32 = 1_136.0;
+        let (last, leading) = MANAGER_COLUMNS.split_last().unwrap();
+        let shares: f32 = leading.iter().map(|(_, share, _)| share).sum();
+        // The seven stated columns leave the eighth a remainder wide enough for
+        // its longest value, so the header band and a selected row's wash reach
+        // the right edge of the table instead of stopping mid-surface.
+        assert!(shares < 1.0, "the stated shares must leave a remainder");
+        let stated: f32 = leading
+            .iter()
+            .map(|(_, share, minimum)| (REFERENCE_WIDTH * share).max(*minimum))
+            .sum();
+        let remainder = REFERENCE_WIDTH - stated;
+        assert!(
+            remainder >= last.2,
+            "the last column is {remainder}, under its own {} minimum",
+            last.2
+        );
+        // Every column can still state its content at the width below which the
+        // body scrolls sideways rather than shortening a value.
+        let minima: f32 = MANAGER_COLUMNS.iter().map(|(_, _, minimum)| minimum).sum();
+        assert!(
+            minima <= MANAGER_TABLE_MIN_WIDTH,
+            "{minima} exceeds the {MANAGER_TABLE_MIN_WIDTH} scroll floor"
+        );
     }
 
     #[test]

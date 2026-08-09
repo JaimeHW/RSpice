@@ -327,7 +327,7 @@ fn validate_component_contract(
                 );
             }
         }
-        ComponentType::VSwitch | ComponentType::ISwitch => {
+        ComponentType::VSwitch | ComponentType::ISwitch | ComponentType::GenericSwitch => {
             if let (Some(on), Some(off)) = (number("ron"), number("roff"))
                 && (on <= 0.0 || off <= on)
             {
@@ -648,6 +648,7 @@ fn generated_inline_model_name(component: &Component) -> Option<String> {
         ComponentType::Pmesfet => "pmf",
         ComponentType::VSwitch => "sw",
         ComponentType::ISwitch => "isw",
+        ComponentType::GenericSwitch => "sw",
         ComponentType::Diode => "d",
         ComponentType::SaturableInductor => "core",
         ComponentType::Memristor => "mem",
@@ -795,12 +796,8 @@ fn component_terminal_direction(component: &Component, index: usize, pin: &str) 
                 "input"
             }
         }
-        ComponentType::VSwitch | ComponentType::ISwitch => {
-            if index < 2 {
-                "passive"
-            } else {
-                "input"
-            }
+        ComponentType::VSwitch | ComponentType::ISwitch | ComponentType::GenericSwitch => {
+            if index < 2 { "passive" } else { "input" }
         }
         ComponentType::Ground => "ground",
         kind if kind.is_source() => "output",

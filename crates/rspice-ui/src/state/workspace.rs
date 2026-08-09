@@ -47,7 +47,8 @@ use crate::product::{
 };
 use crate::state::{
     AnalysisResultSourceDomain, Cell, ComponentType, Library, LibraryCellInstance, LibraryManager,
-    SchematicState, View, ViewType,
+    SchematicState, View, ViewType, validate_builtin_xspice_binding,
+    validate_generated_veriloga_binding,
 };
 
 /// Default editable design library created for new projects.
@@ -780,15 +781,6 @@ impl OwnedNetlistEditStrategy {
         Self::IncludeOrderOverride,
         Self::AnalysisOnlyDeck,
     ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::OwnedSource => "Owned source derived from generated output",
-            Self::ParameterOptionOverride => "Parameter and option override",
-            Self::IncludeOrderOverride => "Include-order override",
-            Self::AnalysisOnlyDeck => "Analysis-only deck",
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -799,13 +791,1278 @@ pub struct OwnedNetlistSaveRecord {
     pub message: String,
 }
 
+pub const MAX_OWNED_NETLIST_HISTORY_REVISIONS: usize = 64;
+pub const MAX_OWNED_NETLIST_HISTORY_BYTES: usize = 16 * 1024 * 1024;
+
+/// Content-complete, bounded revision evidence for a project-owned deck.
+/// Dependency bytes are retained with the authored root so compare, revert,
+/// recovery, and merge never have to reopen an ambient filesystem path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OwnedNetlistRevisionSnapshot {
+    pub document_revision: u64,
+    pub content_digest: crate::product::ContentDigest,
+    pub source: String,
+    #[serde(default)]
+    pub dependencies: Vec<crate::state::DependencyMetadata>,
+    /// Exact include-document ownership catalog at this revision. Restoring a
+    /// root snapshot restores ownership and dependency bytes together so no
+    /// stale editable authority can survive across history boundaries.
+    #[serde(default)]
+    pub owned_includes: Vec<OwnedNetlistIncludeDescriptor>,
+    pub message: String,
+    #[serde(default)]
+    pub source_encoding: NetlistTextEncoding,
+    #[serde(default)]
+    pub source_line_ending: NetlistLineEnding,
+}
+
+/// Stable project ownership for one dependency document retained by an owned
+/// netlist. The source bytes remain canonical in `NetlistDocument` so
+/// execution, editor, history, and archive export cannot diverge.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OwnedNetlistIncludeDescriptor {
+    pub document_id: Uuid,
+    pub logical_identity: String,
+    pub display_name: String,
+    pub revision: u64,
+    pub content_digest: crate::product::ContentDigest,
+}
+
+impl OwnedNetlistIncludeDescriptor {
+    pub fn try_new(dependency: &crate::state::DependencyMetadata) -> Result<Self, String> {
+        let source = dependency.source().ok_or_else(|| {
+            "Only a resolved dependency can be copied into the project.".to_owned()
+        })?;
+        let value = Self {
+            document_id: Uuid::new_v4(),
+            logical_identity: dependency.locator().logical_identity().to_owned(),
+            display_name: dependency.locator().display_name().to_owned(),
+            revision: 1,
+            content_digest: crate::state::content_digest(source),
+        };
+        value.validate()?;
+        Ok(value)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.document_id.is_nil() {
+            return Err("owned include document identity cannot be nil".to_owned());
+        }
+        if self.logical_identity.trim().is_empty()
+            || self.logical_identity != self.logical_identity.trim()
+            || self.logical_identity.len() > 4_096
+            || self.logical_identity.chars().any(char::is_control)
+        {
+            return Err("owned include logical identity is invalid".to_owned());
+        }
+        if self.display_name.trim().is_empty()
+            || self.display_name != self.display_name.trim()
+            || self.display_name.len() > 4_096
+            || self.display_name.chars().any(char::is_control)
+            || self.revision == 0
+        {
+            return Err("owned include display name or revision is invalid".to_owned());
+        }
+        Ok(())
+    }
+}
+
+impl OwnedNetlistRevisionSnapshot {
+    pub fn from_document(
+        document: &crate::state::NetlistDocument,
+        message: impl Into<String>,
+        source_encoding: NetlistTextEncoding,
+        source_line_ending: NetlistLineEnding,
+    ) -> Result<Self, String> {
+        let snapshot = Self {
+            document_revision: document.revision().get(),
+            content_digest: document.content_digest(),
+            source: document.source().to_owned(),
+            dependencies: document.dependencies().to_vec(),
+            owned_includes: Vec::new(),
+            message: message.into(),
+            source_encoding,
+            source_line_ending,
+        };
+        snapshot.validate()?;
+        Ok(snapshot)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.document_revision == 0 {
+            return Err("owned netlist history revision must be non-zero".to_owned());
+        }
+        if self.content_digest != crate::state::content_digest(&self.source) {
+            return Err("owned netlist history digest does not identify its source".to_owned());
+        }
+        if self.message.trim().is_empty()
+            || self.message != self.message.trim()
+            || self.message.chars().count() > 240
+            || self.message.chars().any(char::is_control)
+        {
+            return Err("owned netlist history message is invalid".to_owned());
+        }
+        let mut document_ids = HashSet::new();
+        let mut identities = HashSet::new();
+        for include in &self.owned_includes {
+            include.validate()?;
+            if !document_ids.insert(include.document_id)
+                || !identities.insert(include.logical_identity.as_str())
+            {
+                return Err("owned netlist history repeats an include identity".to_owned());
+            }
+            let dependency = self
+                .dependencies
+                .iter()
+                .find(|dependency| {
+                    dependency.locator().logical_identity() == include.logical_identity
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "owned netlist history include '{}' is absent from its dependency closure",
+                        include.logical_identity
+                    )
+                })?;
+            let source = dependency.source().ok_or_else(|| {
+                format!(
+                    "owned netlist history include '{}' has no retained source",
+                    include.logical_identity
+                )
+            })?;
+            if include.content_digest != crate::state::content_digest(source) {
+                return Err(format!(
+                    "owned netlist history include '{}' digest does not identify its retained source",
+                    include.logical_identity
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn retained_bytes(&self) -> usize {
+        self.source.len()
+            + self.message.len()
+            + self
+                .dependencies
+                .iter()
+                .filter_map(crate::state::DependencyMetadata::source_bytes)
+                .map(<[u8]>::len)
+                .sum::<usize>()
+            + self
+                .owned_includes
+                .iter()
+                .map(|include| include.logical_identity.len() + include.display_name.len() + 80)
+                .sum::<usize>()
+    }
+}
+
+/// Encoding used by a project-owned netlist at its durable file boundary.
+///
+/// The editor and parser operate on Rust UTF-8 strings, but an imported deck
+/// can legitimately be UTF-8 with a BOM, UTF-16, or legacy ISO-8859-1. The
+/// encoding is therefore retained as project metadata and reapplied on Save;
+/// RSpice never silently converts an imported source file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum NetlistTextEncoding {
+    #[default]
+    Utf8,
+    Utf8Bom,
+    Utf16LeBom,
+    Utf16BeBom,
+    Latin1,
+}
+
+impl NetlistTextEncoding {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Utf8 => "UTF-8",
+            Self::Utf8Bom => "UTF-8 with BOM",
+            Self::Utf16LeBom => "UTF-16 LE with BOM",
+            Self::Utf16BeBom => "UTF-16 BE with BOM",
+            Self::Latin1 => "ISO-8859-1",
+        }
+    }
+
+    pub fn encode(self, source: &str) -> Result<Vec<u8>, String> {
+        match self {
+            Self::Utf8 => Ok(source.as_bytes().to_vec()),
+            Self::Utf8Bom => {
+                let mut bytes = Vec::with_capacity(source.len().saturating_add(3));
+                bytes.extend_from_slice(&[0xef, 0xbb, 0xbf]);
+                bytes.extend_from_slice(source.as_bytes());
+                Ok(bytes)
+            }
+            Self::Utf16LeBom | Self::Utf16BeBom => {
+                let mut bytes =
+                    Vec::with_capacity(source.len().saturating_mul(2).saturating_add(2));
+                bytes.extend_from_slice(if self == Self::Utf16LeBom {
+                    &[0xff, 0xfe]
+                } else {
+                    &[0xfe, 0xff]
+                });
+                for unit in source.encode_utf16() {
+                    let encoded = if self == Self::Utf16LeBom {
+                        unit.to_le_bytes()
+                    } else {
+                        unit.to_be_bytes()
+                    };
+                    bytes.extend_from_slice(&encoded);
+                }
+                Ok(bytes)
+            }
+            Self::Latin1 => {
+                let mut bytes = Vec::with_capacity(source.chars().count());
+                for (character_index, character) in source.chars().enumerate() {
+                    let value = u32::from(character);
+                    if value > u32::from(u8::MAX) {
+                        return Err(format!(
+                            "character {} (U+{value:04X}) cannot be represented in ISO-8859-1; use Save As with UTF-8 or remove the character",
+                            character_index + 1
+                        ));
+                    }
+                    bytes.push(value as u8);
+                }
+                Ok(bytes)
+            }
+        }
+    }
+}
+
+/// Line-ending form observed in the imported source. Source text retains its
+/// exact separators; this value is durable evidence for the editor status and
+/// import review rather than a request to rewrite the deck.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum NetlistLineEnding {
+    #[default]
+    None,
+    Lf,
+    Crlf,
+    Cr,
+    Mixed,
+}
+
+impl NetlistLineEnding {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::None => "no line terminators",
+            Self::Lf => "LF",
+            Self::Crlf => "CRLF",
+            Self::Cr => "CR",
+            Self::Mixed => "mixed",
+        }
+    }
+
+    pub fn detect(source: &str) -> Self {
+        let bytes = source.as_bytes();
+        let mut lf = 0usize;
+        let mut crlf = 0usize;
+        let mut cr = 0usize;
+        let mut index = 0usize;
+        while index < bytes.len() {
+            match bytes[index] {
+                b'\r' if bytes.get(index + 1) == Some(&b'\n') => {
+                    crlf += 1;
+                    index += 2;
+                }
+                b'\r' => {
+                    cr += 1;
+                    index += 1;
+                }
+                b'\n' => {
+                    lf += 1;
+                    index += 1;
+                }
+                _ => index += 1,
+            }
+        }
+        match (lf > 0, crlf > 0, cr > 0) {
+            (false, false, false) => Self::None,
+            (true, false, false) => Self::Lf,
+            (false, true, false) => Self::Crlf,
+            (false, false, true) => Self::Cr,
+            _ => Self::Mixed,
+        }
+    }
+}
+
+/// Declared source dialect retained with an imported owned deck. Detection is
+/// advisory; a non-native dialect requires an explicit compatibility review
+/// before the staged import can commit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum NetlistSourceDialect {
+    #[default]
+    RSpice,
+    Spice3Ngspice,
+    Hspice,
+    Pspice,
+    Spectre,
+    Ads,
+    Unknown,
+}
+
+impl NetlistSourceDialect {
+    pub const ALL: [Self; 7] = [
+        Self::RSpice,
+        Self::Spice3Ngspice,
+        Self::Hspice,
+        Self::Pspice,
+        Self::Spectre,
+        Self::Ads,
+        Self::Unknown,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::RSpice => "RSpice canonical SPICE",
+            Self::Spice3Ngspice => "SPICE3 / ngspice",
+            Self::Hspice => "HSPICE",
+            Self::Pspice => "PSpice",
+            Self::Spectre => "Cadence Spectre",
+            Self::Ads => "Keysight ADS netlist",
+            Self::Unknown => "Unknown SPICE-family dialect",
+        }
+    }
+
+    pub const fn requires_compatibility_review(self) -> bool {
+        !matches!(self, Self::RSpice)
+    }
+
+    /// Exact executable semantics qualified for this source dialect.
+    ///
+    /// This is intentionally fallible. A display label or a completed review
+    /// must never manufacture an execution adapter for a vendor dialect.
+    pub const fn execution_profile(self) -> Option<NetlistExecutionProfile> {
+        match self {
+            Self::RSpice => Some(NetlistExecutionProfile::RSpiceCanonicalV1),
+            Self::Spice3Ngspice => Some(NetlistExecutionProfile::Spice3NgspiceV2),
+            Self::Hspice => Some(NetlistExecutionProfile::HspiceDeclarativeV1),
+            Self::Pspice => Some(NetlistExecutionProfile::PspiceDeclarativeV2),
+            Self::Spectre => Some(NetlistExecutionProfile::SpectreSpiceV1),
+            Self::Ads => Some(NetlistExecutionProfile::AdsSpiceExportV1),
+            Self::Unknown => None,
+        }
+    }
+}
+
+/// Versioned, persisted netlist-semantics contract.
+///
+/// The source dialect is user-facing provenance; this profile is the exact
+/// parser/device-default contract authenticated into prepared runs and worker
+/// messages. Versioned variants ensure a future compatibility change cannot
+/// silently reinterpret a previously reviewed project.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum NetlistExecutionProfile {
+    #[default]
+    RSpiceCanonicalV1,
+    Spice3NgspiceV1,
+    Spice3NgspiceV2,
+    HspiceDeclarativeV1,
+    PspiceDeclarativeV1,
+    PspiceDeclarativeV2,
+    SpectreSpiceV1,
+    AdsSpiceExportV1,
+}
+
+impl NetlistExecutionProfile {
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::RSpiceCanonicalV1 => "rspice-canonical/1",
+            Self::Spice3NgspiceV1 => "spice3-ngspice/1",
+            Self::Spice3NgspiceV2 => "spice3-ngspice/2",
+            Self::HspiceDeclarativeV1 => "hspice-declarative/1",
+            Self::PspiceDeclarativeV1 => "pspice-declarative/1",
+            Self::PspiceDeclarativeV2 => "pspice-declarative/2",
+            Self::SpectreSpiceV1 => "spectre-spice/1",
+            Self::AdsSpiceExportV1 => "ads-spice-export/1",
+        }
+    }
+
+    pub const fn source_dialect(self) -> NetlistSourceDialect {
+        match self {
+            Self::RSpiceCanonicalV1 => NetlistSourceDialect::RSpice,
+            Self::Spice3NgspiceV1 | Self::Spice3NgspiceV2 => NetlistSourceDialect::Spice3Ngspice,
+            Self::HspiceDeclarativeV1 => NetlistSourceDialect::Hspice,
+            Self::PspiceDeclarativeV1 | Self::PspiceDeclarativeV2 => NetlistSourceDialect::Pspice,
+            Self::SpectreSpiceV1 => NetlistSourceDialect::Spectre,
+            Self::AdsSpiceExportV1 => NetlistSourceDialect::Ads,
+        }
+    }
+
+    pub const fn spice_dialect(self) -> rspice_core::SpiceDialect {
+        match self {
+            Self::RSpiceCanonicalV1 => rspice_core::SpiceDialect::BestAvailable,
+            Self::Spice3NgspiceV1 | Self::Spice3NgspiceV2 => rspice_core::SpiceDialect::Ngspice,
+            Self::HspiceDeclarativeV1 => rspice_core::SpiceDialect::BestAvailable,
+            Self::PspiceDeclarativeV1 | Self::PspiceDeclarativeV2 => {
+                rspice_core::SpiceDialect::BestAvailable
+            }
+            Self::SpectreSpiceV1 => rspice_core::SpiceDialect::BestAvailable,
+            Self::AdsSpiceExportV1 => rspice_core::SpiceDialect::BestAvailable,
+        }
+    }
+
+    pub const fn expression_dialect(self) -> rspice_core::config::ExpressionDialect {
+        match self {
+            Self::RSpiceCanonicalV1
+            | Self::Spice3NgspiceV1
+            | Self::Spice3NgspiceV2
+            | Self::HspiceDeclarativeV1
+            | Self::PspiceDeclarativeV1
+            | Self::PspiceDeclarativeV2
+            | Self::SpectreSpiceV1
+            | Self::AdsSpiceExportV1 => rspice_core::config::ExpressionDialect::Ngspice,
+        }
+    }
+
+    /// Reject source constructs that this versioned profile cannot execute
+    /// without dropping imperative side effects or changing their meaning.
+    pub fn validate_source(self, source: &str) -> Result<(), String> {
+        if self == Self::Spice3NgspiceV2 {
+            return validate_ngspice_v2_source(source);
+        }
+        match self {
+            Self::HspiceDeclarativeV1 => validate_profile_marker_presence(
+                source,
+                self.id(),
+                "qualified .OPTION POST or .PROTECT/.UNPROTECT marker",
+                is_hspice_presentation_directive,
+            )?,
+            Self::PspiceDeclarativeV1 => validate_profile_marker_presence(
+                source,
+                self.id(),
+                "PSpice .PROBE marker",
+                is_pspice_probe_marker,
+            )?,
+            Self::PspiceDeclarativeV2 => validate_profile_marker_presence(
+                source,
+                self.id(),
+                "PSpice .PROBE, .PROBE64, or .PROBE/CSDF marker",
+                is_pspice_v2_probe_marker,
+            )?,
+            Self::SpectreSpiceV1 => validate_required_profile_marker(
+                source,
+                self.id(),
+                "simulator lang=spice",
+                |line| line.eq_ignore_ascii_case("simulator lang=spice"),
+            )?,
+            Self::AdsSpiceExportV1 => validate_required_profile_marker(
+                source,
+                self.id(),
+                "qualified ADS SPICE-export Options header",
+                is_ads_spice_export_header,
+            )?,
+            _ => {}
+        }
+        self.validate_source_commands(source)
+    }
+
+    /// Validate the sealed parser input produced by [`Self::adapt_source`].
+    /// Foreign profile markers are no longer executable statements at this
+    /// boundary; they must instead be present as the exact line-preserving
+    /// adapter receipts emitted by this profile.
+    pub fn validate_executable_source(self, source: &str) -> Result<(), String> {
+        if self == Self::Spice3NgspiceV2 {
+            return validate_ngspice_v2_source(source);
+        }
+        match self {
+            Self::HspiceDeclarativeV1 => validate_profile_marker_presence(
+                source,
+                self.id(),
+                "adapted HSPICE presentation-directive receipt",
+                |line| {
+                    is_profile_adapter_receipt(line, self.id(), is_hspice_presentation_directive)
+                },
+            )?,
+            Self::PspiceDeclarativeV1 => validate_profile_marker_presence(
+                source,
+                self.id(),
+                "PSpice .PROBE marker",
+                is_pspice_probe_marker,
+            )?,
+            Self::PspiceDeclarativeV2 => validate_profile_marker_presence(
+                source,
+                self.id(),
+                "PSpice .PROBE, .PROBE64, or .PROBE/CSDF marker",
+                is_pspice_v2_probe_marker,
+            )?,
+            Self::SpectreSpiceV1 => validate_required_profile_marker(
+                source,
+                self.id(),
+                "adapted simulator lang=spice receipt",
+                |line| {
+                    is_profile_adapter_receipt(line, self.id(), |original| {
+                        original.eq_ignore_ascii_case("simulator lang=spice")
+                    })
+                },
+            )?,
+            Self::AdsSpiceExportV1 => validate_required_profile_marker(
+                source,
+                self.id(),
+                "adapted ADS SPICE-export Options receipt",
+                |line| is_profile_adapter_receipt(line, self.id(), is_ads_spice_export_header),
+            )?,
+            _ => {}
+        }
+        self.validate_source_commands(source)
+    }
+
+    /// Validate constructs discovered only after canonical parsing and include
+    /// expansion. Text-only profile checks cannot see a `PWL FILE` card inside
+    /// an included deck, so import review must apply this second boundary to
+    /// the resolved AST before calling the source executable.
+    pub fn validate_parsed_netlist(self, netlist: &rspice_core::Netlist) -> Result<(), String> {
+        if matches!(self, Self::PspiceDeclarativeV1 | Self::PspiceDeclarativeV2)
+            && let Some((element, path)) = parsed_file_backed_pwl(netlist)
+        {
+            return Err(format!(
+                "profile {} rejects unsealed file-backed PWL input on element '{}' ({})",
+                self.id(),
+                element,
+                path
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_source_commands(self, source: &str) -> Result<(), String> {
+        if matches!(self, Self::PspiceDeclarativeV1 | Self::PspiceDeclarativeV2)
+            && let Some(line) = pspice_file_backed_pwl_line(source)
+        {
+            return Err(format!(
+                "profile {} rejects unsealed file-backed PWL input on line {line}",
+                self.id()
+            ));
+        }
+        let rejected = source.lines().enumerate().find_map(|(index, raw)| {
+            let trimmed = raw.trim();
+            let head = trimmed.split_whitespace().next()?;
+            let normalized = head.to_ascii_lowercase();
+            let unsupported = match self {
+                Self::Spice3NgspiceV1 => matches!(
+                    normalized.as_str(),
+                    ".control" | ".endc" | "wrdata" | "setplot"
+                ),
+                Self::Spice3NgspiceV2 => unreachable!("handled before the generic scan"),
+                Self::PspiceDeclarativeV1 => {
+                    matches!(
+                        normalized.as_str(),
+                        ".distribution" | ".stimulus" | ".probe64" | ".probe/csdf"
+                    ) || normalized.starts_with(".probe/")
+                        || is_pspice_v2_extended_source_line(trimmed)
+                }
+                Self::PspiceDeclarativeV2 => {
+                    normalized == ".stimulus"
+                        || (normalized.starts_with(".probe/") && normalized != ".probe/csdf")
+                }
+                Self::HspiceDeclarativeV1 => {
+                    if normalized == ".alter" {
+                        true
+                    } else if normalized == ".protect" || normalized == ".unprotect" {
+                        !matches!(
+                            trimmed.to_ascii_lowercase().as_str(),
+                            ".protect" | ".unprotect"
+                        )
+                    } else if normalized == ".option" {
+                        let compact = trimmed
+                            .chars()
+                            .filter(|character| !character.is_whitespace())
+                            .collect::<String>()
+                            .to_ascii_lowercase();
+                        !matches!(
+                            compact.as_str(),
+                            ".optionpost" | ".optionpost=0" | ".optionpost=1" | ".optionpost=2"
+                        )
+                    } else {
+                        false
+                    }
+                }
+                Self::SpectreSpiceV1 => {
+                    let lower = trimmed.to_ascii_lowercase();
+                    (normalized == "simulator" && lower != "simulator lang=spice")
+                        || matches!(
+                            normalized.as_str(),
+                            "ahdl_include" | "parameters" | "saveoptions"
+                        )
+                }
+                Self::AdsSpiceExportV1 => {
+                    matches!(
+                        normalized.as_str(),
+                        "#uselib" | "define" | "simulatoroptions"
+                    ) || (normalized == "options" && !is_ads_spice_export_header(trimmed))
+                }
+                Self::RSpiceCanonicalV1 => false,
+            };
+            unsupported.then(|| (index + 1, head.to_owned()))
+        });
+        if let Some((line, command)) = rejected {
+            return Err(format!(
+                "profile {} rejects unsupported command '{command}' on line {line}",
+                self.id()
+            ));
+        }
+        Ok(())
+    }
+
+    /// Convert the explicitly qualified, simulation-neutral surface syntax
+    /// of a foreign profile into the canonical parser input. The retained
+    /// project source is never modified. Replacements preserve physical line
+    /// count so parser diagnostics and source mapping remain exact.
+    pub fn adapt_source<'a>(self, source: &'a str) -> Result<std::borrow::Cow<'a, str>, String> {
+        self.validate_source(source)?;
+        if self == Self::Spice3NgspiceV2 {
+            if !source
+                .lines()
+                .any(|line| line.trim().eq_ignore_ascii_case(".control"))
+            {
+                return Ok(std::borrow::Cow::Borrowed(source));
+            }
+            return adapt_ngspice_v2_source(source).map(std::borrow::Cow::Owned);
+        }
+        if !matches!(
+            self,
+            Self::HspiceDeclarativeV1 | Self::SpectreSpiceV1 | Self::AdsSpiceExportV1
+        ) {
+            return Ok(std::borrow::Cow::Borrowed(source));
+        }
+
+        let needs_adapter = source.lines().any(|raw| {
+            let line = raw.trim().to_ascii_lowercase();
+            match self {
+                Self::HspiceDeclarativeV1 => is_hspice_presentation_directive(&line),
+                Self::SpectreSpiceV1 => line == "simulator lang=spice",
+                Self::AdsSpiceExportV1 => is_ads_spice_export_header(raw.trim()),
+                _ => false,
+            }
+        });
+        if !needs_adapter {
+            return Ok(std::borrow::Cow::Borrowed(source));
+        }
+
+        let mut adapted = String::with_capacity(source.len());
+        for raw in source.split_inclusive('\n') {
+            let (body, ending) = raw.strip_suffix("\r\n").map_or_else(
+                || {
+                    raw.strip_suffix('\n')
+                        .map_or((raw, ""), |body| (body, "\n"))
+                },
+                |body| (body, "\r\n"),
+            );
+            let line = body.trim().to_ascii_lowercase();
+            let is_adapter_directive = match self {
+                Self::HspiceDeclarativeV1 => is_hspice_presentation_directive(&line),
+                Self::SpectreSpiceV1 => line == "simulator lang=spice",
+                Self::AdsSpiceExportV1 => is_ads_spice_export_header(body.trim()),
+                _ => false,
+            };
+            if is_adapter_directive {
+                adapted.push_str("* RSpice ");
+                adapted.push_str(self.id());
+                adapted.push_str(" presentation directive: ");
+                adapted.push_str(body.trim());
+                adapted.push_str(ending);
+            } else {
+                adapted.push_str(raw);
+            }
+        }
+        Ok(std::borrow::Cow::Owned(adapted))
+    }
+}
+
+fn validate_profile_marker_presence(
+    source: &str,
+    profile: &str,
+    marker_name: &str,
+    is_marker: impl Fn(&str) -> bool,
+) -> Result<(), String> {
+    let mut marker_line = None;
+    let mut seen_end = false;
+    for (index, raw) in source.lines().enumerate() {
+        let line = index + 1;
+        let trimmed = raw.trim();
+        if is_marker(trimmed) {
+            if seen_end {
+                return Err(format!(
+                    "profile {profile} rejects {marker_name} after .END on line {line}"
+                ));
+            }
+            marker_line.get_or_insert(line);
+        }
+        if trimmed
+            .split_whitespace()
+            .next()
+            .is_some_and(|head| head.eq_ignore_ascii_case(".end"))
+        {
+            seen_end = true;
+        }
+    }
+    if marker_line.is_none() {
+        return Err(format!(
+            "profile {profile} requires at least one pre-.END {marker_name}"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_required_profile_marker(
+    source: &str,
+    profile: &str,
+    marker_name: &str,
+    is_marker: impl Fn(&str) -> bool,
+) -> Result<(), String> {
+    let mut marker_line = None;
+    let mut seen_end = false;
+    for (index, raw) in source.lines().enumerate() {
+        let line = index + 1;
+        let trimmed = raw.trim();
+        if is_marker(trimmed) {
+            if seen_end {
+                return Err(format!(
+                    "profile {profile} rejects {marker_name} after .END on line {line}"
+                ));
+            }
+            if let Some(first_line) = marker_line {
+                return Err(format!(
+                    "profile {profile} rejects duplicate {marker_name} on line {line}; first declared on line {first_line}"
+                ));
+            }
+            marker_line = Some(line);
+        }
+        if trimmed
+            .split_whitespace()
+            .next()
+            .is_some_and(|head| head.eq_ignore_ascii_case(".end"))
+        {
+            seen_end = true;
+        }
+    }
+    if marker_line.is_none() {
+        return Err(format!(
+            "profile {profile} requires exactly one {marker_name}"
+        ));
+    }
+    Ok(())
+}
+
+fn is_hspice_presentation_directive(line: &str) -> bool {
+    let lower = line.trim().to_ascii_lowercase();
+    if matches!(lower.as_str(), ".protect" | ".unprotect") {
+        return true;
+    }
+    let compact = lower
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>();
+    matches!(
+        compact.as_str(),
+        ".optionpost" | ".optionpost=0" | ".optionpost=1" | ".optionpost=2"
+    )
+}
+
+fn is_pspice_probe_marker(line: &str) -> bool {
+    line.trim().split_whitespace().next().is_some_and(|head| {
+        let lower = head.to_ascii_lowercase();
+        lower == ".probe" || lower.starts_with(".probe/")
+    })
+}
+
+fn is_pspice_v2_probe_marker(line: &str) -> bool {
+    line.trim().split_whitespace().next().is_some_and(|head| {
+        let lower = head.to_ascii_lowercase();
+        matches!(lower.as_str(), ".probe" | ".probe64" | ".probe/csdf")
+    })
+}
+
+/// Source forms first qualified by `pspice-declarative/2`. Keeping this scan
+/// in the v1 validator prevents a persisted v1 review from silently acquiring
+/// syntax that the v1 parser boundary rejected.
+fn is_pspice_v2_extended_source_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    let Some(head) = trimmed.split_whitespace().next() else {
+        return false;
+    };
+    let rest = trimmed[head.len()..].trim_start();
+
+    if head.eq_ignore_ascii_case(".lib") {
+        let Some(first) = rest.chars().next() else {
+            return false;
+        };
+        let operand = rest
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .trim_matches(|character| matches!(character, '"' | '\''));
+        return matches!(first, '"' | '\'')
+            || operand.contains('/')
+            || operand.contains('\\')
+            || std::path::Path::new(operand).extension().is_some();
+    }
+
+    if head.eq_ignore_ascii_case(".nodeset") || head.eq_ignore_ascii_case(".ic") {
+        return rest
+            .split_whitespace()
+            .any(|target| target.starts_with('('));
+    }
+
+    if head.eq_ignore_ascii_case(".mc") {
+        return rest.split_whitespace().nth(1).is_some_and(|analysis| {
+            matches!(analysis.to_ascii_lowercase().as_str(), "dc" | "ac" | "tran")
+        });
+    }
+
+    let tokens = rest
+        .to_ascii_lowercase()
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .filter(|token| !token.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if tokens.iter().any(|token| token == "chebyshev")
+        && (head == "+"
+            || head.as_bytes().first().is_some_and(|byte| {
+                byte.eq_ignore_ascii_case(&b'e') || byte.eq_ignore_ascii_case(&b'g')
+            }))
+    {
+        return true;
+    }
+    if head.eq_ignore_ascii_case(".options") && tokens.iter().any(|token| token == "advconv") {
+        return true;
+    }
+    if head.eq_ignore_ascii_case(".autoconverge") {
+        return true;
+    }
+    if head.eq_ignore_ascii_case(".model") && tokens.get(1).is_some_and(|token| token == "trn") {
+        return true;
+    }
+    if head
+        .as_bytes()
+        .first()
+        .is_some_and(|byte| byte.eq_ignore_ascii_case(&b't'))
+        && tokens.iter().any(|token| token == "ic")
+    {
+        return true;
+    }
+    if head
+        .as_bytes()
+        .first()
+        .is_some_and(|byte| byte.eq_ignore_ascii_case(&b't'))
+        && tokens.iter().any(|token| token == "len")
+        && tokens
+            .iter()
+            .any(|token| matches!(token.as_str(), "r" | "l" | "g" | "c"))
+    {
+        return true;
+    }
+
+    let body = trimmed.strip_prefix('+').unwrap_or(trimmed).trim_start();
+    let has_pwl_token = body.split_whitespace().any(|token| {
+        let token = token.trim_start_matches('+').to_ascii_lowercase();
+        token == "pwl" || token.starts_with("pwl(")
+    });
+    if !has_pwl_token {
+        return false;
+    }
+    let compact = body
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    compact.contains(")(")
+        || compact.contains("repeatforever")
+        || compact.contains("repeatfor")
+        || compact.contains("time_scale_factor=")
+        || compact.contains("value_scale_factor=")
+}
+
+/// Return the first physical line of a PSpice logical source card that combines
+/// `PWL` with `FILE`. Continuation folding matters because Capture commonly
+/// emits `PWL` on the element line and `+ FILE "..."` on the next line.
+fn pspice_file_backed_pwl_line(source: &str) -> Option<usize> {
+    let mut logical = String::new();
+    let mut first_line = 0usize;
+
+    let classify = |logical: &str| {
+        let tokens = logical
+            .to_ascii_lowercase()
+            .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+            .filter(|token| !token.is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        tokens.iter().any(|token| token == "pwl") && tokens.iter().any(|token| token == "file")
+    };
+
+    for (index, raw) in source.lines().enumerate() {
+        let line = index + 1;
+        let trimmed = raw.trim();
+        if trimmed.is_empty() || trimmed.starts_with('*') {
+            continue;
+        }
+        if let Some(continuation) = trimmed.strip_prefix('+') {
+            if !logical.is_empty() {
+                logical.push(' ');
+                logical.push_str(continuation.trim_start());
+            }
+            continue;
+        }
+        if !logical.is_empty() && classify(&logical) {
+            return Some(first_line);
+        }
+        logical.clear();
+        logical.push_str(trimmed);
+        first_line = line;
+    }
+    (!logical.is_empty() && classify(&logical)).then_some(first_line)
+}
+
+fn parsed_file_backed_pwl(netlist: &rspice_core::Netlist) -> Option<(String, String)> {
+    fn source_path(spec: &rspice_core::netlist::SourceSpec) -> Option<&str> {
+        match spec {
+            rspice_core::netlist::SourceSpec::PwlFile { path, .. } => Some(path),
+            rspice_core::netlist::SourceSpec::Distortion { inner, .. }
+            | rspice_core::netlist::SourceSpec::RfPort { inner, .. }
+            | rspice_core::netlist::SourceSpec::DcTransient {
+                transient: inner, ..
+            }
+            | rspice_core::netlist::SourceSpec::DcAcTransient {
+                transient: inner, ..
+            } => source_path(inner),
+            _ => None,
+        }
+    }
+
+    fn elements(elements: &[rspice_core::netlist::Element]) -> Option<(String, String)> {
+        elements.iter().find_map(|element| {
+            let spec = match &element.kind {
+                rspice_core::netlist::ElementKind::VoltageSource(spec)
+                | rspice_core::netlist::ElementKind::CurrentSource(spec) => spec,
+                _ => return None,
+            };
+            source_path(spec).map(|path| (element.name.clone(), path.to_owned()))
+        })
+    }
+
+    fn subcircuits(
+        definitions: &[rspice_core::netlist::SubcircuitDef],
+    ) -> Option<(String, String)> {
+        definitions.iter().find_map(|definition| {
+            elements(&definition.elements).or_else(|| subcircuits(&definition.nested_subcircuits))
+        })
+    }
+
+    elements(&netlist.elements).or_else(|| subcircuits(&netlist.subcircuits))
+}
+
+fn is_profile_adapter_receipt(
+    line: &str,
+    profile: &str,
+    is_original_marker: impl Fn(&str) -> bool,
+) -> bool {
+    line.strip_prefix("* RSpice ")
+        .and_then(|rest| rest.strip_prefix(profile))
+        .and_then(|rest| rest.strip_prefix(" presentation directive: "))
+        .is_some_and(|original| is_original_marker(original.trim()))
+}
+
+fn validate_ngspice_v2_source(source: &str) -> Result<(), String> {
+    let profile = NetlistExecutionProfile::Spice3NgspiceV2.id();
+    let mut in_control = false;
+    let mut seen_end = false;
+    for (index, raw) in source.lines().enumerate() {
+        let line = index + 1;
+        let trimmed = raw.trim();
+        let Some(head) = trimmed.split_whitespace().next() else {
+            continue;
+        };
+        if head.eq_ignore_ascii_case(".control") {
+            if seen_end {
+                return Err(format!(
+                    "profile {profile} rejects .CONTROL after .END on line {line}"
+                ));
+            }
+            if in_control || !trimmed.eq_ignore_ascii_case(".control") {
+                return Err(format!(
+                    "profile {profile} rejects malformed or nested .CONTROL on line {line}"
+                ));
+            }
+            in_control = true;
+            continue;
+        }
+        if head.eq_ignore_ascii_case(".endc") {
+            if !in_control || !trimmed.eq_ignore_ascii_case(".endc") {
+                return Err(format!(
+                    "profile {profile} rejects unmatched or malformed .ENDC on line {line}"
+                ));
+            }
+            in_control = false;
+            continue;
+        }
+        if in_control {
+            if is_ngspice_control_comment(trimmed) {
+                continue;
+            }
+            if trimmed.contains(';') {
+                return Err(format!(
+                    "profile {profile} rejects multi-command control syntax on line {line}"
+                ));
+            }
+            let body = trimmed.strip_prefix('.').unwrap_or(trimmed);
+            let command = body.split_whitespace().next().unwrap_or("");
+            if !is_ngspice_v2_promotable_control_command(body) {
+                return Err(format!(
+                    "profile {profile} rejects unsupported or malformed control command '{command}' on line {line}"
+                ));
+            }
+        } else if matches!(head.to_ascii_lowercase().as_str(), "wrdata" | "setplot") {
+            return Err(format!(
+                "profile {profile} rejects unsupported command '{head}' on line {line}"
+            ));
+        } else if head.eq_ignore_ascii_case(".end") {
+            seen_end = true;
+        }
+    }
+    if in_control {
+        return Err(format!(
+            "profile {profile} rejects .CONTROL without a matching .ENDC"
+        ));
+    }
+    Ok(())
+}
+
+fn is_ngspice_control_comment(line: &str) -> bool {
+    line.is_empty() || line.starts_with('*') || line.starts_with('$')
+}
+
+fn is_ngspice_v2_promotable_control_command(body: &str) -> bool {
+    let tokens = body.split_whitespace().collect::<Vec<_>>();
+    let Some(command) = tokens.first().map(|token| token.to_ascii_lowercase()) else {
+        return false;
+    };
+    match command.as_str() {
+        "op" => tokens.len() == 1,
+        "save" => tokens.len() >= 2,
+        "tran" => tokens.len() >= 3,
+        "dc" | "ac" | "sp" => tokens.len() >= 5,
+        "meas" | "measure" => {
+            tokens.len() >= 5
+                && matches!(
+                    tokens[3].to_ascii_lowercase().as_str(),
+                    "avg" | "max" | "min" | "pp" | "rms" | "integ"
+                )
+        }
+        _ => false,
+    }
+}
+
+fn adapt_ngspice_v2_source(source: &str) -> Result<String, String> {
+    let profile = NetlistExecutionProfile::Spice3NgspiceV2.id();
+    let mut adapted = String::with_capacity(source.len());
+    let mut in_control = false;
+    for raw in source.split_inclusive('\n') {
+        let (body, ending) = raw.strip_suffix("\r\n").map_or_else(
+            || {
+                raw.strip_suffix('\n')
+                    .map_or((raw, ""), |body| (body, "\n"))
+            },
+            |body| (body, "\r\n"),
+        );
+        let trimmed = body.trim();
+        if trimmed.eq_ignore_ascii_case(".control") {
+            in_control = true;
+            adapted.push_str("* RSpice ");
+            adapted.push_str(profile);
+            adapted.push_str(" declarative control boundary: ");
+            adapted.push_str(trimmed);
+            adapted.push_str(ending);
+            continue;
+        }
+        if trimmed.eq_ignore_ascii_case(".endc") {
+            in_control = false;
+            adapted.push_str("* RSpice ");
+            adapted.push_str(profile);
+            adapted.push_str(" declarative control boundary: ");
+            adapted.push_str(trimmed);
+            adapted.push_str(ending);
+            continue;
+        }
+        if !in_control {
+            adapted.push_str(raw);
+            continue;
+        }
+        if trimmed.is_empty() || trimmed.starts_with('*') {
+            adapted.push_str(raw);
+            continue;
+        }
+        if trimmed.starts_with('$') {
+            adapted.push_str("* RSpice ");
+            adapted.push_str(profile);
+            adapted.push_str(" control comment: ");
+            adapted.push_str(trimmed);
+            adapted.push_str(ending);
+            continue;
+        }
+        let command = trimmed.strip_prefix('.').unwrap_or(trimmed);
+        adapted.push('.');
+        adapted.push_str(command);
+        adapted.push_str(ending);
+    }
+    if in_control {
+        return Err(format!(
+            "profile {profile} rejects .CONTROL without a matching .ENDC"
+        ));
+    }
+    Ok(adapted)
+}
+
+fn is_ads_spice_export_header(line: &str) -> bool {
+    let mut tokens = line.split_whitespace();
+    if !tokens
+        .next()
+        .is_some_and(|head| head.eq_ignore_ascii_case("options"))
+    {
+        return false;
+    }
+    let mut resource_usage = false;
+    let mut nutmeg_format = false;
+    let mut top_design_name = false;
+    for token in tokens {
+        let lower = token.to_ascii_lowercase();
+        if matches!(lower.as_str(), "resourceusage=yes" | "resourceusage=no") {
+            if resource_usage {
+                return false;
+            }
+            resource_usage = true;
+        } else if matches!(lower.as_str(), "usenutmegformat=yes" | "usenutmegformat=no") {
+            if nutmeg_format {
+                return false;
+            }
+            nutmeg_format = true;
+        } else if lower.starts_with("topdesignname=") {
+            if top_design_name {
+                return false;
+            }
+            let Some((_, name)) = token.split_once('=') else {
+                return false;
+            };
+            if name.len() < 3 || !name.starts_with('"') || !name.ends_with('"') {
+                return false;
+            }
+            let design_name = &name[1..name.len() - 1];
+            if design_name.is_empty() || design_name.contains('"') {
+                return false;
+            }
+            top_design_name = true;
+        } else {
+            return false;
+        }
+    }
+    resource_usage && nutmeg_format && top_design_name
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OwnedNetlistDescriptor {
     pub artifact_name: String,
     pub strategy: OwnedNetlistEditStrategy,
     #[serde(default)]
+    pub source_encoding: NetlistTextEncoding,
+    #[serde(default)]
+    pub source_line_ending: NetlistLineEnding,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_dialect: Option<NetlistSourceDialect>,
+    #[serde(default)]
+    pub compatibility_reviewed: bool,
+    /// Exact reviewed execution semantics. Legacy canonical projects may omit
+    /// this field; a non-canonical dialect without an exact profile is always
+    /// rejected at preflight and must be reviewed again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_profile: Option<NetlistExecutionProfile>,
+    /// SHA-256 of the last imported or successfully published raw file. This
+    /// is the compare-and-exchange baseline used by ordinary Save so an
+    /// external edit is never overwritten silently.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_file_sha256: Option<[u8; 32]>,
+    #[serde(default)]
     pub save_history: Vec<OwnedNetlistSaveRecord>,
+    /// Exact project-persisted source/dependency snapshots. This is separate
+    /// from the compact save ledger because recovery may retain an unsaved
+    /// pre-restore working revision as well as externally published states.
+    #[serde(default)]
+    pub revision_history: Vec<OwnedNetlistRevisionSnapshot>,
+    /// Explicit copy-to-project ownership for dependency documents. Any
+    /// retained dependency absent from this list remains find-only/read-only.
+    #[serde(default)]
+    pub owned_includes: Vec<OwnedNetlistIncludeDescriptor>,
+}
+
+impl OwnedNetlistDescriptor {
+    /// Whether this source is intentionally retained but cannot execute until
+    /// its exact current bytes receive a versioned compatibility receipt.
+    #[must_use]
+    pub fn execution_profile_review_required(&self) -> bool {
+        let dialect = self
+            .imported_dialect
+            .unwrap_or(NetlistSourceDialect::RSpice);
+        dialect.requires_compatibility_review()
+            && (!self.compatibility_reviewed
+                || self.execution_profile != dialect.execution_profile()
+                || self.execution_profile.is_none())
+    }
+
+    #[must_use]
+    pub fn owned_include(&self, logical_identity: &str) -> Option<&OwnedNetlistIncludeDescriptor> {
+        self.owned_includes
+            .iter()
+            .find(|include| include.logical_identity == logical_identity)
+    }
+
+    pub fn retain_revision(
+        &mut self,
+        document: &crate::state::NetlistDocument,
+        message: impl Into<String>,
+    ) -> Result<(), String> {
+        let mut snapshot = OwnedNetlistRevisionSnapshot::from_document(
+            document,
+            message,
+            self.source_encoding,
+            self.source_line_ending,
+        )?;
+        snapshot.owned_includes.clone_from(&self.owned_includes);
+        snapshot.validate()?;
+        if let Some(last) = self.revision_history.last() {
+            if last.document_revision == snapshot.document_revision
+                && last.content_digest == snapshot.content_digest
+            {
+                return Ok(());
+            }
+            if last.document_revision >= snapshot.document_revision {
+                return Err(
+                    "owned netlist history cannot append a non-monotonic revision".to_owned(),
+                );
+            }
+        }
+        if snapshot.retained_bytes() > MAX_OWNED_NETLIST_HISTORY_BYTES {
+            return Err("owned netlist revision exceeds the bounded history size".to_owned());
+        }
+        let mut next = self.revision_history.clone();
+        next.push(snapshot);
+        let mut retained_bytes = next
+            .iter()
+            .map(OwnedNetlistRevisionSnapshot::retained_bytes)
+            .sum::<usize>();
+        while next.len() > MAX_OWNED_NETLIST_HISTORY_REVISIONS
+            || (retained_bytes > MAX_OWNED_NETLIST_HISTORY_BYTES && next.len() > 1)
+        {
+            retained_bytes = retained_bytes.saturating_sub(next[0].retained_bytes());
+            next.remove(0);
+        }
+        self.revision_history = next;
+        Ok(())
+    }
 }
 
 // The source bundle API, re-exported from its historical workspace path. This
@@ -1106,6 +2363,27 @@ fn validate_physical_layout_document_catalog(
 }
 
 impl ProjectWorkspace {
+    /// Migrate legacy noncanonical ownership metadata into an explicit,
+    /// non-executable quarantine. An old boolean review can never be promoted
+    /// into the new versioned parser/engine receipt implicitly.
+    pub(crate) fn quarantine_unreceipted_netlist_profile(&mut self) -> bool {
+        let Some(descriptor) = self.netlist_descriptor.as_mut() else {
+            return false;
+        };
+        let dialect = descriptor
+            .imported_dialect
+            .unwrap_or(NetlistSourceDialect::RSpice);
+        if dialect.requires_compatibility_review()
+            && descriptor.execution_profile.is_none()
+            && descriptor.compatibility_reviewed
+        {
+            descriptor.compatibility_reviewed = false;
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn physical_layout_documents(
         &self,
     ) -> &BTreeMap<String, crate::state::PhysicalLayoutDocument> {
@@ -1572,6 +2850,39 @@ impl ProjectWorkspace {
                     },
                 );
             }
+            let declared_dialect = descriptor
+                .imported_dialect
+                .unwrap_or(NetlistSourceDialect::RSpice);
+            let expected_profile = declared_dialect.execution_profile();
+            if descriptor.execution_profile.is_some()
+                && descriptor.execution_profile != expected_profile
+            {
+                return Err(
+                    SimulationConfigurationError::InvalidNetlistDocumentProjection {
+                        message: format!(
+                            "owned netlist dialect {} does not match its recorded execution profile",
+                            declared_dialect.label()
+                        ),
+                    },
+                );
+            }
+            if declared_dialect.requires_compatibility_review() {
+                let reviewed = descriptor.compatibility_reviewed
+                    && descriptor.execution_profile == expected_profile
+                    && expected_profile.is_some();
+                let quarantined =
+                    !descriptor.compatibility_reviewed && descriptor.execution_profile.is_none();
+                if !reviewed && !quarantined {
+                    return Err(
+                        SimulationConfigurationError::InvalidNetlistDocumentProjection {
+                            message: format!(
+                                "owned non-canonical netlist dialect {} has neither an exact reviewed executable profile nor a fail-closed quarantine",
+                                declared_dialect.label()
+                            ),
+                        },
+                    );
+                }
+            }
             let mut previous_revision = 0_u64;
             for record in &descriptor.save_history {
                 if record.document_revision == 0
@@ -1588,6 +2899,103 @@ impl ProjectWorkspace {
                     );
                 }
                 previous_revision = record.document_revision;
+            }
+            if descriptor.revision_history.len() > MAX_OWNED_NETLIST_HISTORY_REVISIONS {
+                return Err(
+                    SimulationConfigurationError::InvalidNetlistDocumentProjection {
+                        message: "owned source revision history exceeds its bounded entry limit"
+                            .to_owned(),
+                    },
+                );
+            }
+            let mut previous_revision = 0_u64;
+            let mut retained_bytes = 0_usize;
+            for snapshot in &descriptor.revision_history {
+                snapshot.validate().map_err(|message| {
+                    SimulationConfigurationError::InvalidNetlistDocumentProjection { message }
+                })?;
+                if snapshot.document_revision <= previous_revision
+                    || snapshot.document_revision > document.revision().get()
+                {
+                    return Err(
+                        SimulationConfigurationError::InvalidNetlistDocumentProjection {
+                            message:
+                                "owned source revision history is not strictly revision ordered"
+                                    .to_owned(),
+                        },
+                    );
+                }
+                retained_bytes = retained_bytes
+                    .checked_add(snapshot.retained_bytes())
+                    .ok_or_else(|| {
+                        SimulationConfigurationError::InvalidNetlistDocumentProjection {
+                            message: "owned source revision history size overflowed".to_owned(),
+                        }
+                    })?;
+                previous_revision = snapshot.document_revision;
+            }
+            if retained_bytes > MAX_OWNED_NETLIST_HISTORY_BYTES {
+                return Err(
+                    SimulationConfigurationError::InvalidNetlistDocumentProjection {
+                        message: "owned source revision history exceeds its bounded byte limit"
+                            .to_owned(),
+                    },
+                );
+            }
+            if descriptor.owned_includes.len() > crate::state::MAX_PROJECT_SOURCE_FILES {
+                return Err(
+                    SimulationConfigurationError::InvalidNetlistDocumentProjection {
+                        message: "owned include catalog exceeds the project file limit".to_owned(),
+                    },
+                );
+            }
+            let mut include_ids = HashSet::new();
+            let mut include_identities = HashSet::new();
+            for include in &descriptor.owned_includes {
+                include.validate().map_err(|message| {
+                    SimulationConfigurationError::InvalidNetlistDocumentProjection { message }
+                })?;
+                if !include_ids.insert(include.document_id)
+                    || !include_identities.insert(include.logical_identity.as_str())
+                {
+                    return Err(
+                        SimulationConfigurationError::InvalidNetlistDocumentProjection {
+                            message: "owned include identities must be unique".to_owned(),
+                        },
+                    );
+                }
+                let dependency = document
+                    .dependencies()
+                    .iter()
+                    .find(|dependency| {
+                        dependency.locator().logical_identity() == include.logical_identity
+                    })
+                    .ok_or_else(|| {
+                        SimulationConfigurationError::InvalidNetlistDocumentProjection {
+                            message: format!(
+                                "owned include '{}' is absent from the canonical dependency closure",
+                                include.logical_identity
+                            ),
+                        }
+                    })?;
+                let source = dependency.source().ok_or_else(|| {
+                    SimulationConfigurationError::InvalidNetlistDocumentProjection {
+                        message: format!(
+                            "owned include '{}' has no retained source bytes",
+                            include.logical_identity
+                        ),
+                    }
+                })?;
+                if include.content_digest != crate::state::content_digest(source) {
+                    return Err(
+                        SimulationConfigurationError::InvalidNetlistDocumentProjection {
+                            message: format!(
+                                "owned include '{}' digest does not identify its retained bytes",
+                                include.logical_identity
+                            ),
+                        },
+                    );
+                }
             }
         } else if self.netlist_descriptor.is_some() {
             return Err(

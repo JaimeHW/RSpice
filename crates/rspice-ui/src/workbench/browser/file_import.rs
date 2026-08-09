@@ -8,6 +8,9 @@
 pub(crate) struct PickedTextFile {
     pub name: String,
     pub contents: String,
+    /// Exact bytes are retained only for source kinds whose import contract
+    /// must preserve BOM/encoding and bind a review to the selected artifact.
+    pub original_bytes: Option<Vec<u8>>,
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -22,6 +25,10 @@ pub(crate) enum BrowserTextImportKind {
     EngineeringTableView,
     SymbolDefinition,
     VerilogA,
+    // This module is compiled on desktop only to exercise browser contracts;
+    // Automation imports themselves are a browser production route.
+    #[cfg_attr(all(test, not(target_arch = "wasm32")), allow(dead_code))]
+    Automation,
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -36,6 +43,7 @@ impl BrowserTextImportKind {
             Self::EngineeringTableView => "engineering table view",
             Self::SymbolDefinition => "symbol definition",
             Self::VerilogA => "Verilog-A source",
+            Self::Automation => "Automation source",
         }
     }
 
@@ -50,7 +58,7 @@ impl BrowserTextImportKind {
                 crate::workbench::workflows::result_import_workflow::MAX_RESULT_DATASET_BYTES
             }
             Self::SymbolDefinition => crate::workbench::app::MAX_SYMBOL_DEFINITION_IMPORT_BYTES,
-            Self::Netlist | Self::Project | Self::Schematic | Self::VerilogA => {
+            Self::Netlist | Self::Project | Self::Schematic | Self::VerilogA | Self::Automation => {
                 crate::io::project_io::MAX_PROJECT_FILE_BYTES
             }
         }
@@ -171,7 +179,8 @@ pub(crate) fn pick_text_file(
     // The initiating workflow owns the active import lease. Capture its limit
     // before starting the non-abortable browser promise so a later replacement
     // picker cannot change the authority applied to this read.
-    let max_bytes = active_text_import_kind()
+    let import_kind = active_text_import_kind();
+    let max_bytes = import_kind
         .map(BrowserTextImportKind::max_bytes)
         .unwrap_or(crate::io::project_io::MAX_PROJECT_FILE_BYTES);
     wasm_bindgen_futures::spawn_local(async move {
@@ -197,9 +206,39 @@ pub(crate) fn pick_text_file(
                             name, max_bytes
                         ))
                     } else {
-                        String::from_utf8(bytes)
-                            .map(|contents| Some(PickedTextFile { name, contents }))
-                            .map_err(|error| format!("Selected file is not valid UTF-8: {error}"))
+                        if import_kind == Some(BrowserTextImportKind::Netlist)
+                            && bytes.starts_with(b"PK\x03\x04")
+                        {
+                            Ok(Some(PickedTextFile {
+                                name,
+                                contents: String::new(),
+                                original_bytes: Some(bytes),
+                            }))
+                        } else if import_kind == Some(BrowserTextImportKind::Netlist) {
+                            rspice_core::netlist::decode_source_bytes(&bytes)
+                                .map(|contents| {
+                                    Some(PickedTextFile {
+                                        name,
+                                        contents,
+                                        original_bytes: Some(bytes),
+                                    })
+                                })
+                                .map_err(|error| {
+                                    format!("Selected SPICE deck could not be decoded: {error}")
+                                })
+                        } else {
+                            String::from_utf8(bytes)
+                                .map(|contents| {
+                                    Some(PickedTextFile {
+                                        name,
+                                        contents,
+                                        original_bytes: None,
+                                    })
+                                })
+                                .map_err(|error| {
+                                    format!("Selected file is not valid UTF-8: {error}")
+                                })
+                        }
                     }
                 }
             }

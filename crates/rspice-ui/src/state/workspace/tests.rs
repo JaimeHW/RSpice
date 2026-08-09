@@ -5,7 +5,7 @@
 //! mismatched slot rather than accepting stale evidence for it.
 
 use super::*;
-use crate::state::Point;
+use crate::state::{Point, ProjectSourceRole};
 
 fn reference(cell: &str) -> CellViewRef {
     CellViewRef::new("work", cell, "schematic")
@@ -2183,7 +2183,7 @@ fn legacy_workspaces_restore_with_no_project_source_examples() {
 }
 
 #[test]
-fn only_bootstrapped_projects_receive_exact_mockup_sources() {
+fn only_bootstrapped_projects_receive_exact_canonical_code_sources() {
     let mut libraries = LibraryManager::default();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
     let verilog_a = workspace
@@ -2200,10 +2200,57 @@ fn only_bootstrapped_projects_receive_exact_mockup_sources() {
         verilog_a.content(),
         "`include \"constants.vams\"\nmodule sensor_bridge(out, inp, inn);\n  parameter real gain = 100.0 from (0:inf);\n  analog V(out) <+ gain * (V(inp)-V(inn));\nendmodule"
     );
-    assert_eq!(automation.file_name(), "characterize.rspice");
+    assert_eq!(automation.file_name(), "characterize.py");
     assert_eq!(
         automation.content(),
-        "plan = project.plan(\"Lab characterization\")\nrun = plan.with_corners(\"all\").execute(target=\"local\")\nrun.require(specs=\"release\")\nrun.compare(baseline=\"main\", waveforms=True)\nrun.export([\"junit\", \"summary.json\", \"report.pdf\"])",
+        crate::automation_workflow::DEFAULT_AUTOMATION_PYTHON,
+    );
+    let automation_bundle = workspace
+        .project_sources
+        .bundle_for_owner(&ProjectSourceOwner::code_workspace(
+            ProjectSourceLanguage::RSpiceAutomation,
+        ))
+        .expect("bootstrapped Automation bundle");
+    assert_eq!(
+        automation_bundle
+            .files()
+            .iter()
+            .map(|file| (file.logical_path(), file.content()))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                "permissions.toml",
+                crate::automation_workflow::DEFAULT_AUTOMATION_PERMISSIONS,
+            ),
+            (
+                "requirements.lock",
+                crate::automation_workflow::DEFAULT_ENVIRONMENT_LOCK,
+            ),
+            (
+                "runplan.rspice.yaml",
+                crate::automation_workflow::DEFAULT_AUTOMATION_RUN_PLAN,
+            ),
+        ]
+    );
+    assert_eq!(automation_bundle.dependencies().len(), 3);
+    assert_eq!(
+        automation_bundle
+            .roles()
+            .iter()
+            .map(|binding| (binding.logical_path(), binding.role()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("characterize.py", ProjectSourceRole::AutomationEntry),
+            ("runplan.rspice.yaml", ProjectSourceRole::AutomationRunPlan,),
+            (
+                "requirements.lock",
+                ProjectSourceRole::AutomationEnvironmentLock,
+            ),
+            (
+                "permissions.toml",
+                ProjectSourceRole::AutomationPermissionManifest,
+            ),
+        ]
     );
     assert!(!workspace.any_dirty());
     assert!(ProjectWorkspace::default().project_sources.is_empty());

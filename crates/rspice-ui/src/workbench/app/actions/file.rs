@@ -441,6 +441,7 @@ mod tests {
         state: crate::workbench::app_state::AppState,
         file_io: TestFileWorkflowIo,
     ) -> RSpiceApp {
+        let automation_runtime_project_id = state.workspace.project.id();
         RSpiceApp {
             state,
             first_frame: false,
@@ -449,6 +450,8 @@ mod tests {
             last_window_title: String::new(),
             symbol_library: None,
             simulation_controller: crate::simulation::SimulationController::new(),
+            automation_runtime: crate::automation_runtime::NativeAutomationRuntime::discover(),
+            automation_runtime_project_id,
             cloud_account: crate::services::cloud_account::CloudAccountService::unconfigured(),
             live_session: crate::workbench::live_session::LiveSessionEngine::default(),
             file_workflow_io: Box::new(file_io),

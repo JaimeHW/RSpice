@@ -56,21 +56,63 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
             .expect("the canonical bootstrapped Verilog-A source must compile"),
         );
     }
-    if let Some(document) = workspace
-        .project_sources
-        .get(crate::state::ProjectSourceLanguage::RSpiceAutomation)
-    {
-        let _plan = crate::automation_workflow::compile_workflow(document.content())
-            .expect("the canonical bootstrapped Automation source must compile");
-        ui.code_workspace.automation.receipt = Some(
-            crate::workbench::documents::code_workspace::AutomationValidationReceipt {
-                token: crate::workbench::documents::code_workspace::SourceOperationToken {
-                    project_id: workspace.project.id(),
-                    revision: document.revision().get(),
-                    content_digest: document.content_digest(),
-                },
-            },
-        );
+    if let Some(bundle) = workspace.project_sources.bundle_for_owner(
+        &crate::state::ProjectSourceOwner::code_workspace(
+            crate::state::ProjectSourceLanguage::RSpiceAutomation,
+        ),
+    ) {
+        let mut documents = vec![crate::automation_workflow::AutomationSourceDocument {
+            path: bundle.root().logical_path(),
+            source: bundle.root().content(),
+        }];
+        documents.extend(bundle.files().iter().map(|file| {
+            crate::automation_workflow::AutomationSourceDocument {
+                path: file.logical_path(),
+                source: file.content(),
+            }
+        }));
+        let roles = bundle
+            .roles()
+            .iter()
+            .filter_map(|binding| {
+                let role = match binding.role() {
+                    crate::state::ProjectSourceRole::VerilogABuildProfile
+                    | crate::state::ProjectSourceRole::AutomationEntry => return None,
+                    crate::state::ProjectSourceRole::AutomationRunPlan => {
+                        crate::automation_workflow::AutomationSourceRole::RunPlan
+                    }
+                    crate::state::ProjectSourceRole::AutomationEnvironmentLock => {
+                        crate::automation_workflow::AutomationSourceRole::EnvironmentLock
+                    }
+                    crate::state::ProjectSourceRole::AutomationPermissionManifest => {
+                        crate::automation_workflow::AutomationSourceRole::PermissionManifest
+                    }
+                };
+                Some(crate::automation_workflow::AutomationRoleBinding {
+                    path: binding.logical_path(),
+                    role,
+                })
+            })
+            .collect::<Vec<_>>();
+        let (_plan, manifest) = crate::automation_workflow::compile_automation_documents(
+            bundle.root().logical_path(),
+            &documents,
+            &roles,
+        )
+        .expect("the canonical bootstrapped Automation workspace must compile");
+        let runtime_snapshot = crate::automation_workflow::build_automation_runtime_snapshot(
+            workspace.project.id(),
+            bundle,
+            &manifest,
+            Vec::new(),
+        )
+        .expect("the canonical bootstrapped Automation worker snapshot must be valid");
+        ui.code_workspace.automation.manifest = Some(manifest);
+        ui.code_workspace.automation.runtime_snapshot = Some(runtime_snapshot);
+        // Static compilation prepares editor metadata and the immutable worker
+        // snapshot, but it cannot authorize Python execution. The managed
+        // runtime creates the validation receipt after authoritative CPython
+        // compilation.
     }
     #[cfg(all(not(test), not(target_arch = "wasm32")))]
     let (mut pdk_config, pdk_load_error) = match crate::state::pdk_config::PdkConfig::load() {
@@ -160,23 +202,34 @@ mod tests {
     use crate::state::ProjectSourceLanguage;
 
     #[test]
-    fn bootstrapped_code_sources_have_exact_current_runtime_receipts() {
+    fn bootstrapped_code_sources_prepare_an_exact_snapshot_without_execution_authority() {
         let state = super::default_app_state();
         let automation = state
             .workspace
             .project_sources
-            .get(ProjectSourceLanguage::RSpiceAutomation)
-            .expect("bootstrapped Automation source");
-        let receipt = state
+            .bundle_for_owner(&crate::state::ProjectSourceOwner::code_workspace(
+                ProjectSourceLanguage::RSpiceAutomation,
+            ))
+            .expect("bootstrapped Automation workspace");
+        let snapshot = state
             .ui
             .code_workspace
             .automation
-            .receipt
-            .expect("bootstrapped Automation receipt");
+            .runtime_snapshot
+            .as_ref()
+            .expect("bootstrapped Automation runtime snapshot");
 
-        assert_eq!(receipt.token.project_id, state.workspace.project.id());
-        assert_eq!(receipt.token.revision, automation.revision().get());
-        assert_eq!(receipt.token.content_digest, automation.content_digest());
+        assert_eq!(snapshot.project_id, state.workspace.project.id().as_uuid());
+        assert_eq!(snapshot.workspace_revision, automation.revision().get());
+        assert_eq!(
+            snapshot.closure_digest.0,
+            *automation.closure_digest().as_bytes()
+        );
+        assert!(
+            state.ui.code_workspace.automation.receipt.is_none(),
+            "static startup parsing must not impersonate managed-CPython validation"
+        );
+        assert!(state.ui.code_workspace.automation.manifest.is_some());
         assert!(state.ui.code_workspace.veriloga.receipt.is_some());
     }
 }

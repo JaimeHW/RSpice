@@ -947,6 +947,13 @@ impl AppState {
         } else {
             crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
         };
+        if self.ui.netlist.active_dependency_identity.is_some() {
+            return Some(
+                self.ui
+                    .messages()
+                    .text(crate::workbench::MessageId::NetlistDependencyCannotRun),
+            );
+        }
         let source = if active_document
             == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
         {

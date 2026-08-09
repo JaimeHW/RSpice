@@ -1652,7 +1652,19 @@ pub fn workspace_title_row(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
     let shown = egui::Frame::new()
         .inner_margin(egui::Margin::same(8))
         .show(ui, |ui| {
-            ui.set_width(ui.available_width().max(1.0));
+            // Some workbench surfaces deliberately retain a wider minimum
+            // document extent for horizontal scrolling. A title bar belongs
+            // to the visible pane, not that off-screen content extent.
+            let available = ui.available_rect_before_wrap();
+            let visible = available.intersect(ui.clip_rect()).intersect(ui.max_rect());
+            // When the clip boundary, rather than the ordinary available
+            // rectangle, limits the row, Frame has already advanced past its
+            // left inset but its right inset still lies beyond the clip.
+            // Reserve that trailing eight points explicitly.
+            let clipped_on_right = visible.right() + f32::EPSILON < available.right();
+            let visible_width =
+                (visible.width() - if clipped_on_right { 8.0 } else { 0.0 }).max(1.0);
+            ui.set_width(visible_width);
             content(ui);
         });
     ui.painter().hline(
@@ -1682,9 +1694,96 @@ pub fn empty_state(ui: &mut Ui, icon: WorkbenchIcon, title: &str, description: &
     });
 }
 
+/// Empty document state with a compact, caller-owned recovery action row.
+/// Actions are part of the state rather than permanent workspace chrome and
+/// disappear as soon as the missing source authority is created or imported.
+pub fn empty_state_with_actions(
+    ui: &mut Ui,
+    icon: WorkbenchIcon,
+    title: &str,
+    description: &str,
+    mut actions: impl FnMut(&mut Ui),
+) {
+    let t = Tokens::get(ui.ctx());
+    ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+        ui.add_space((ui.available_height() * 0.18).min(100.0));
+        let (rect, _) = ui.allocate_exact_size(Vec2::splat(48.0), Sense::hover());
+        icon.paint(ui.painter(), rect.shrink(8.0), t.color.text_faint);
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new(title)
+                .font(theme::sans(tokens::FS_4, FontWeight::SemiBold))
+                .color(t.color.text),
+        );
+        ui.label(
+            egui::RichText::new(description)
+                .font(theme::sans(tokens::FS_2, FontWeight::Regular))
+                .color(t.color.text_dim),
+        );
+        ui.add_space(12.0);
+        let measure_origin = ui.next_widget_position();
+        let mut measure_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("empty-state-recovery-action-measure")
+                .max_rect(Rect::from_min_size(
+                    measure_origin,
+                    Vec2::new(ui.available_width(), ui.spacing().interact_size.y),
+                ))
+                .layout(egui::Layout::left_to_right(egui::Align::Center))
+                .sizing_pass()
+                .invisible(),
+        );
+        measure_ui.spacing_mut().item_spacing.x = 6.0;
+        actions(&mut measure_ui);
+        let action_width = measure_ui.min_rect().width();
+        ui.horizontal(|ui| {
+            let leading_space = ((ui.available_width() - action_width) * 0.5).max(0.0);
+            if leading_space > 0.0 {
+                ui.add_space(leading_space);
+            }
+            ui.scope(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                actions(ui);
+            });
+        });
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workspace_title_row_uses_visible_pane_not_offscreen_content_extent() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut measured_width = f32::INFINITY;
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(900.0, 700.0))),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let content_rect =
+                        Rect::from_min_max(egui::pos2(306.0, 80.0), egui::pos2(1_206.0, 700.0));
+                    let mut surface = ui.new_child(egui::UiBuilder::new().max_rect(content_rect));
+                    surface.set_clip_rect(Rect::from_min_max(
+                        content_rect.min,
+                        egui::pos2(900.0, 700.0),
+                    ));
+                    workspace_title_row(&mut surface, |row| {
+                        measured_width = row.available_width();
+                    });
+                });
+            },
+        );
+
+        assert!(
+            measured_width <= 578.0,
+            "title content escaped the 594 px visible pane: {measured_width}"
+        );
+    }
 
     fn shape_contains_text(shape: &Shape) -> bool {
         match shape {
@@ -1848,6 +1947,83 @@ mod tests {
         assert!(nodes.iter().any(|(_, node)| {
             node.label() == Some("Library cell") && node.value() == Some(read_only_value)
         }));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn empty_state_recovery_actions_are_exposed_as_named_buttons() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+
+        let nodes = ctx
+            .run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(900.0, 700.0))),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        empty_state_with_actions(
+                            ui,
+                            WorkbenchIcon::Code,
+                            "No project source workspace",
+                            "Create or import one to continue.",
+                            |ui| {
+                                let _ = ui.button("Create source workspace…");
+                                let _ = ui.button("Import root source…");
+                            },
+                        );
+                    });
+                },
+            )
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit empty-state tree")
+            .nodes;
+
+        for label in ["Create source workspace…", "Import root source…"] {
+            assert!(nodes.iter().any(|(_, node)| {
+                node.role() == egui::accesskit::Role::Button && node.label() == Some(label)
+            }));
+        }
+    }
+
+    #[test]
+    fn empty_state_recovery_action_group_is_centered_under_the_copy() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut content_center = 0.0;
+        let mut first = Rect::NOTHING;
+        let mut second = Rect::NOTHING;
+
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(900.0, 700.0))),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    content_center = ui.available_rect_before_wrap().center().x;
+                    empty_state_with_actions(
+                        ui,
+                        WorkbenchIcon::Code,
+                        "No project source workspace",
+                        "Create or import one to continue.",
+                        |ui| {
+                            first = ui.button("Create source workspace…").rect;
+                            second = ui.button("Import root source…").rect;
+                        },
+                    );
+                });
+            },
+        );
+
+        let group_center = first.union(second).center().x;
+        assert!(
+            (group_center - content_center).abs() <= 1.0,
+            "recovery action group centered at {group_center}, expected {content_center}"
+        );
     }
 
     #[test]

@@ -902,6 +902,7 @@ mod tests {
                 crate::workbench::browser::file_import::PickedTextFile {
                     name: "keybindings.jsonc".to_owned(),
                     contents: "[invalid]".to_owned(),
+                    original_bytes: None,
                 },
             )),
         )

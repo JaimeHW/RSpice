@@ -592,6 +592,7 @@ mod tests {
     };
 
     fn app_with_state(state: crate::workbench::app_state::AppState) -> RSpiceApp {
+        let automation_runtime_project_id = state.workspace.project.id();
         RSpiceApp {
             state,
             first_frame: false,
@@ -601,6 +602,11 @@ mod tests {
             last_window_title: String::new(),
             symbol_library: None,
             simulation_controller: crate::simulation::SimulationController::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            automation_runtime: crate::automation_runtime::NativeAutomationRuntime::discover(),
+            #[cfg(target_arch = "wasm32")]
+            automation_runtime: crate::automation_runtime::BrowserAutomationRuntime::discover(),
+            automation_runtime_project_id,
             cloud_account: crate::services::cloud_account::CloudAccountService::unconfigured(),
             live_session: crate::workbench::live_session::LiveSessionEngine::default(),
             file_workflow_io: Box::new(
