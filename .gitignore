@@ -3,6 +3,9 @@
 # probes under benchmarks/, agent worktrees, and crates/rspice-core all grow
 # their own target/ directory.
 target/
+# Local per-task build directories produced by Codex and ad-hoc qualification
+# runs. They contain only rebuildable Cargo artifacts.
+/target-codex-*/
 
 # Standalone benchmark probes are throwaway harnesses rebuilt on demand, so
 # their lockfiles are not part of the reproducible build. Drop this rule if a
@@ -66,3 +69,6 @@ __pycache__/
 /_site
 /_site-*/
 /_site-source/
+/.codex-candidates/
+/.qualification-worktrees/
+/rust_out.pdb
