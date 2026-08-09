@@ -9,10 +9,11 @@
 //! Rendering and parsing are both here and both exact — an unparseable
 //! manifest is treated as stale rather than guessed at.
 
-/// Schema 5 records the stable Cargo feature and package that own each model.
+/// Schema 6 records the stable Cargo feature/package boundary and the
+/// versioned runtime catalog descriptors emitted for schematic consumers.
 /// This makes the manifest authenticate both generated source and its reusable
 /// compilation-artifact boundary.
-pub const GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION: u32 = 5;
+pub const GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GeneratedBuiltinManifestFile {

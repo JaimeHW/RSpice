@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rspice.dev/schemas/benchmark-suite-v1.json",
+  "title": "RSpice benchmark suite manifest projection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "suite_id", "suite_version", "methodology_version", "description", "decks"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "suite_id": { "type": "string", "minLength": 1 },
+    "suite_version": { "type": "integer", "minimum": 1 },
+    "methodology_version": { "type": "integer", "minimum": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "decks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "path", "blake3", "category", "analyses", "correctness"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "blake3": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+          "category": { "type": "string", "minLength": 1 },
+          "analyses": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+          "correctness": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["contract_id", "minimum_runs", "minimum_outputs"],
+            "properties": {
+              "contract_id": { "type": "string", "minLength": 1 },
+              "minimum_runs": { "type": "integer", "minimum": 1 },
+              "minimum_outputs": { "type": "integer", "minimum": 1 },
+              "minimum_measurements": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

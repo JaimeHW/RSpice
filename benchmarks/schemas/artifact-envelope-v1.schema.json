@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rspice.dev/schemas/benchmark-artifact-envelope-v1.json",
+  "title": "RSpice focused benchmark artifact envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "benchmark_id",
+    "generated_at_unix_ms",
+    "trusted",
+    "tool",
+    "host",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "benchmark_id": {
+      "enum": [
+        "rspice-klu",
+        "rspice-native-jit",
+        "rspice-generated-rust",
+        "rspice-generated-stamp"
+      ]
+    },
+    "generated_at_unix_ms": { "type": "integer", "minimum": 0 },
+    "trusted": { "type": "boolean" },
+    "tool": { "$ref": "#/$defs/tool" },
+    "host": { "$ref": "#/$defs/host" },
+    "payload": { "type": "object", "minProperties": 1 }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "trusted": { "const": true } } },
+      "then": {
+        "properties": {
+          "tool": {
+            "properties": {
+              "git_commit": { "type": "string", "minLength": 1 },
+              "git_dirty": { "const": false },
+              "cargo_lock_blake3": { "$ref": "#/$defs/digest" },
+              "executable_blake3": { "$ref": "#/$defs/digest" }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "nullableDigest": {
+      "oneOf": [
+        { "$ref": "#/$defs/digest" },
+        { "type": "null" }
+      ]
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "profile",
+        "target",
+        "rustc",
+        "git_commit",
+        "git_dirty",
+        "cargo_lock_blake3",
+        "executable_name",
+        "executable_blake3"
+      ],
+      "properties": {
+        "name": { "const": "rspice-bench" },
+        "version": { "type": "string", "minLength": 1 },
+        "profile": { "enum": ["debug", "release"] },
+        "target": { "type": "string", "minLength": 1 },
+        "rustc": { "type": "string", "minLength": 1 },
+        "git_commit": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "git_dirty": { "type": ["boolean", "null"] },
+        "cargo_lock_blake3": { "$ref": "#/$defs/nullableDigest" },
+        "executable_name": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "executable_blake3": { "$ref": "#/$defs/nullableDigest" }
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "arch", "os_version", "cpu_model", "cpu_count", "fingerprint"],
+      "properties": {
+        "os": { "type": "string", "minLength": 1 },
+        "arch": { "type": "string", "minLength": 1 },
+        "os_version": { "type": "string", "minLength": 1 },
+        "cpu_model": { "type": "string", "minLength": 1 },
+        "cpu_count": { "type": "integer", "minimum": 1 },
+        "fingerprint": { "$ref": "#/$defs/digest" }
+      }
+    }
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "generated_with": "rspice-bench",
+  "host": {
+    "os": "windows x86_64",
+    "cpu_count": 28
+  },
+  "repeats": 5,
+  "methodology": "wall-clock of the full child process (parse + solve + output) timed with std::time::Instant around spawn/wait; child stdin/stdout/stderr attached to the null device; one untimed warmup run per deck/simulator precedes the timed repeats; cold OS cache not controlled",
+  "rspice_exe": "C:\\Users\\James\\Desktop\\RSpice\\target\\release\\rspice.exe",
+  "ngspice_exe": "C:/Users/James/Desktop/ngspice-46-release/Spice64/bin/ngspice_con.exe",
+  "ngspice_note": null,
+  "results": [
+    {
+      "deck": "diode_rectifier.cir",
+      "rspice_ms": {
+        "min": 96.0661,
+        "median": 96.0661,
+        "mean": 96.0661
+      },
+      "rspice_all_ok": false,
+      "ngspice_ms": {
+        "min": 32.0272,
+        "median": 32.482200000000006,
+        "mean": 32.50582
+      },
+      "ngspice_all_ok": true,
+      "speedup_median": null,
+      "both_succeeded": false
+    },
+    {
+      "deck": "divider_ac.cir",
+      "rspice_ms": {
+        "min": 17.6064,
+        "median": 22.2831,
+        "mean": 21.371660000000002
+      },
+      "rspice_all_ok": true,
+      "ngspice_ms": {
+        "min": 38.932700000000004,
+        "median": 43.2423,
+        "mean": 42.362939999999995
+      },
+      "ngspice_all_ok": true,
+      "speedup_median": 1.9405872611979482,
+      "both_succeeded": true
+    },
+    {
+      "deck": "rc_ladder_100.cir",
+      "rspice_ms": {
+        "min": 138.0313,
+        "median": 138.70479999999998,
+        "mean": 141.23416
+      },
+      "rspice_all_ok": true,
+      "ngspice_ms": {
+        "min": 112.1126,
+        "median": 112.2663,
+        "mean": 112.26520000000001
+      },
+      "ngspice_all_ok": true,
+      "speedup_median": 0.8093901580911405,
+      "both_succeeded": true
+    },
+    {
+      "deck": "rc_ladder_1000.cir",
+      "rspice_ms": {
+        "min": 1217.0038000000002,
+        "median": 1230.365,
+        "mean": 1226.88284
+      },
+      "rspice_all_ok": true,
+      "ngspice_ms": {
+        "min": 706.6367,
+        "median": 715.1791,
+        "mean": 714.55742
+      },
+      "ngspice_all_ok": true,
+      "speedup_median": 0.5812739309066821,
+      "both_succeeded": true
+    },
+    {
+      "deck": "rc_ladder_10000.cir",
+      "rspice_ms": {
+        "min": 1354.6807000000001,
+        "median": 1370.5218000000002,
+        "mean": 1367.51494
+      },
+      "rspice_all_ok": true,
+      "ngspice_ms": {
+        "min": 990.4642,
+        "median": 998.1806,
+        "mean": 998.00378
+      },
+      "ngspice_all_ok": true,
+      "speedup_median": 0.7283215779566584,
+      "both_succeeded": true
+    },
+    {
+      "deck": "ring51.cir",
+      "rspice_ms": {
+        "min": 822.7303,
+        "median": 828.4403,
+        "mean": 829.1663400000001
+      },
+      "rspice_all_ok": true,
+      "ngspice_ms": {
+        "min": 171.24030000000002,
+        "median": 173.8897,
+        "mean": 174.79429999999996
+      },
+      "ngspice_all_ok": true,
+      "speedup_median": 0.2099000978103069,
+      "both_succeeded": true
+    }
+  ]
+}

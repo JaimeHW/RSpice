@@ -1840,6 +1840,22 @@ mod tests {
             "{registry}"
         );
         assert!(
+            registry.contains("pub const BUILTIN_DESCRIPTORS:"),
+            "{registry}"
+        );
+        assert!(
+            registry.contains("terminals: &first_model::Instance::TERMINALS"),
+            "{registry}"
+        );
+        assert!(
+            registry.contains("parameters: &second_model::Instance::PARAMETER_DESCRIPTORS"),
+            "{registry}"
+        );
+        assert!(
+            registry.contains("pub fn descriptor(model_name: &str)"),
+            "{registry}"
+        );
+        assert!(
             registry.contains("Self::Device0(device) => device.limiter_converged()"),
             "{registry}"
         );
@@ -2394,6 +2410,40 @@ fn write_registry(
     out.push_str("    BUILTIN_NAMES\n");
     out.push_str("}\n");
     out.push('\n');
+    out.push_str(
+        "pub const BUILTIN_DESCRIPTORS: &[super::GeneratedVerilogAModelDescriptor] = &[\n",
+    );
+    for ((device, registry_name), feature) in devices
+        .iter()
+        .zip(&registry_model_names)
+        .zip(&feature_names)
+    {
+        writeln!(
+            out,
+            "    #[cfg(feature = {feature:?})]\n    super::GeneratedVerilogAModelDescriptor {{ abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: {registry_name:?}, module_name: {:?}, source_digest: {:?}, checkpoint_identity: {}::Instance::CHECKPOINT_MODEL_IDENTITY, terminals: &{}::Instance::TERMINALS, parameters: &{}::Instance::PARAMETER_DESCRIPTORS, total_node_count: {}::Instance::NODE_COUNT, internal_node_names: &{}::Instance::INTERNAL_NODE_NAMES, branch_count: {}::Instance::BRANCH_COUNT }},",
+            device.module_name,
+            device.source_digest,
+            device.folder_name,
+            device.folder_name,
+            device.folder_name,
+            device.folder_name,
+            device.folder_name,
+            device.folder_name,
+        )?;
+    }
+    out.push_str("];\n\n");
+    out.push_str(
+        "pub fn builtin_descriptors() -> &'static [super::GeneratedVerilogAModelDescriptor] {\n",
+    );
+    out.push_str("    BUILTIN_DESCRIPTORS\n");
+    out.push_str("}\n\n");
+    out.push_str(
+        "pub fn descriptor(model_name: &str) -> Option<&'static super::GeneratedVerilogAModelDescriptor> {\n",
+    );
+    out.push_str(
+        "    BUILTIN_DESCRIPTORS.iter().find(|descriptor| descriptor.model_name.eq_ignore_ascii_case(model_name))\n",
+    );
+    out.push_str("}\n\n");
     out.push_str("pub fn node_count(model_name: &str) -> Option<usize> {\n");
     out.push_str("    match model_name.to_ascii_uppercase().as_str() {\n");
     for ((device, registry_name), feature) in devices

@@ -1,0 +1,48 @@
+* divider_ac -- 20-stage RC low-pass divider chain, dense AC sweep
+* .ac dec 1000 1 1G = 9 decades x 1000 points/decade (~9000 complex solves).
+* Common RSpice/ngspice dialect only.
+VIN in 0 DC 0 AC 1
+R1 in n1 1k
+C1 n1 0 1n
+R2 n1 n2 1k
+C2 n2 0 1n
+R3 n2 n3 1k
+C3 n3 0 1n
+R4 n3 n4 1k
+C4 n4 0 1n
+R5 n4 n5 1k
+C5 n5 0 1n
+R6 n5 n6 1k
+C6 n6 0 1n
+R7 n6 n7 1k
+C7 n7 0 1n
+R8 n7 n8 1k
+C8 n8 0 1n
+R9 n8 n9 1k
+C9 n9 0 1n
+R10 n9 n10 1k
+C10 n10 0 1n
+R11 n10 n11 1k
+C11 n11 0 1n
+R12 n11 n12 1k
+C12 n12 0 1n
+R13 n12 n13 1k
+C13 n13 0 1n
+R14 n13 n14 1k
+C14 n14 0 1n
+R15 n14 n15 1k
+C15 n15 0 1n
+R16 n15 n16 1k
+C16 n16 0 1n
+R17 n16 n17 1k
+C17 n17 0 1n
+R18 n17 n18 1k
+C18 n18 0 1n
+R19 n18 n19 1k
+C19 n19 0 1n
+R20 n19 n20 1k
+C20 n20 0 1n
+.options noacct
+.ac dec 1000 1 1G
+.print ac v(n20)
+.end

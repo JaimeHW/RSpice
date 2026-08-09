@@ -1,0 +1,61 @@
+schema_version = 1
+suite_id = "macro-v1"
+suite_version = 1
+methodology_version = 2
+description = "Native end-to-end simulator workloads from startup scale through 10,000-node sparse transient solves"
+
+[[decks]]
+name = "divider-ac"
+path = "decks/divider_ac.cir"
+blake3 = "8b4786963c6c5f68a49b1cde031f088df50afdc598dc79889afba5cb6c964f43"
+category = "linear-frequency-domain"
+analyses = ["ac"]
+correctness = { contract_id = "macro-v1/divider-ac", minimum_runs = 1, minimum_outputs = 1 }
+
+[[decks]]
+name = "diode-rectifier"
+path = "decks/diode_rectifier.cir"
+blake3 = "7a0fb6c3dd861ce22c093572b8ce7d2e8e8346b5796043631725f5b28c53b1f4"
+category = "nonlinear-transient"
+analyses = ["tran"]
+correctness = { contract_id = "macro-v1/diode-rectifier", minimum_runs = 1, minimum_outputs = 1 }
+
+[[decks]]
+name = "ring51"
+path = "decks/ring51.cir"
+blake3 = "919b31a3482aa001b70c92cafff2c17805f4441ae7d1597677aac62099bb7ffb"
+category = "mos-device-transient"
+analyses = ["tran"]
+correctness = { contract_id = "macro-v1/ring51", minimum_runs = 1, minimum_outputs = 1 }
+
+[[decks]]
+name = "mos-array-4096"
+path = "decks/mos_array_4096.cir"
+blake3 = "2ec277d1fb81d844d1b9488345f3593c360f15c5448752a6357bcdbbf550069f"
+category = "device-evaluation-throughput"
+analyses = ["tran"]
+correctness = { contract_id = "macro-v1/mos-array-4096", minimum_runs = 1, minimum_outputs = 1 }
+
+[[decks]]
+name = "rc-ladder-100"
+path = "decks/rc_ladder_100.cir"
+blake3 = "e2ed7702613cb3ce80117fe9627ae5a199d7033ca87252e1dc82014fe6619f9c"
+category = "small-sparse-linear-transient"
+analyses = ["tran"]
+correctness = { contract_id = "macro-v1/rc-ladder-100", minimum_runs = 1, minimum_outputs = 1 }
+
+[[decks]]
+name = "rc-ladder-1000"
+path = "decks/rc_ladder_1000.cir"
+blake3 = "d8d8eefe05efa5deaff1413648ca9c2d716a900af23ae9167fe5aa0a5097f8ec"
+category = "medium-sparse-linear-transient"
+analyses = ["tran"]
+correctness = { contract_id = "macro-v1/rc-ladder-1000", minimum_runs = 1, minimum_outputs = 1 }
+
+[[decks]]
+name = "rc-ladder-10000"
+path = "decks/rc_ladder_10000.cir"
+blake3 = "5945869a85ae177c2be9a5d3dc3d89ad7eca28e344fa7a7e1d6f07256c58d469"
+category = "large-sparse-linear-transient"
+analyses = ["tran"]
+correctness = { contract_id = "macro-v1/rc-ladder-10000", minimum_runs = 1, minimum_outputs = 1 }

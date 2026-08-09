@@ -1,0 +1,20 @@
+* diode_rectifier -- full-wave diode bridge with RC smoothing load
+* 50 Hz sine through a 10 ohm source impedance into a 4-diode bridge;
+* 10MEG bleed resistors keep the floating bridge nodes well conditioned.
+* Transient covers two mains cycles with 4000 output timepoints.
+* Common RSpice/ngspice dialect only.
+VIN src 0 DC 0 SIN(0 10 50)
+RSRC src ac 10
+D1 ac plus DBRIDGE
+D2 0 plus DBRIDGE
+D3 minus ac DBRIDGE
+D4 minus 0 DBRIDGE
+RLOAD plus minus 1k
+CLOAD plus minus 100u
+RBLEEDP plus 0 10MEG
+RBLEEDN minus 0 10MEG
+.model DBRIDGE D(IS=1e-9 RS=0.2 N=1.8 CJO=100p)
+.options noacct
+.tran 10u 40m
+.print tran v(plus) v(minus)
+.end

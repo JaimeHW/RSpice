@@ -1,0 +1,218 @@
+* ring51 -- 51-stage CMOS ring oscillator, MOS level=1
+* Stage 1 is a NOR2 start-up gate: EN holds the ring in a known state until
+* t=5ns, then releases it for deterministic oscillation in any simulator.
+* Adapted from the tests/ ring-oscillator family; simple level-1 models only.
+VDD vdd 0 DC 5
+VEN en 0 PULSE(5 0 5n 0.5n 0.5n 1 2)
+* stage 1: NOR2(en, s51) -> s1
+MP1A p1a en vdd vdd PMOS1 L=1u W=8u
+MP1B s1 s51 p1a vdd PMOS1 L=1u W=8u
+MN1A s1 en 0 0 NMOS1 L=1u W=4u
+MN1B s1 s51 0 0 NMOS1 L=1u W=4u
+C1 s1 0 50f
+* stage 2: inverter s1 -> s2
+MP2 s2 s1 vdd vdd PMOS1 L=1u W=8u
+MN2 s2 s1 0 0 NMOS1 L=1u W=4u
+C2 s2 0 50f
+* stage 3: inverter s2 -> s3
+MP3 s3 s2 vdd vdd PMOS1 L=1u W=8u
+MN3 s3 s2 0 0 NMOS1 L=1u W=4u
+C3 s3 0 50f
+* stage 4: inverter s3 -> s4
+MP4 s4 s3 vdd vdd PMOS1 L=1u W=8u
+MN4 s4 s3 0 0 NMOS1 L=1u W=4u
+C4 s4 0 50f
+* stage 5: inverter s4 -> s5
+MP5 s5 s4 vdd vdd PMOS1 L=1u W=8u
+MN5 s5 s4 0 0 NMOS1 L=1u W=4u
+C5 s5 0 50f
+* stage 6: inverter s5 -> s6
+MP6 s6 s5 vdd vdd PMOS1 L=1u W=8u
+MN6 s6 s5 0 0 NMOS1 L=1u W=4u
+C6 s6 0 50f
+* stage 7: inverter s6 -> s7
+MP7 s7 s6 vdd vdd PMOS1 L=1u W=8u
+MN7 s7 s6 0 0 NMOS1 L=1u W=4u
+C7 s7 0 50f
+* stage 8: inverter s7 -> s8
+MP8 s8 s7 vdd vdd PMOS1 L=1u W=8u
+MN8 s8 s7 0 0 NMOS1 L=1u W=4u
+C8 s8 0 50f
+* stage 9: inverter s8 -> s9
+MP9 s9 s8 vdd vdd PMOS1 L=1u W=8u
+MN9 s9 s8 0 0 NMOS1 L=1u W=4u
+C9 s9 0 50f
+* stage 10: inverter s9 -> s10
+MP10 s10 s9 vdd vdd PMOS1 L=1u W=8u
+MN10 s10 s9 0 0 NMOS1 L=1u W=4u
+C10 s10 0 50f
+* stage 11: inverter s10 -> s11
+MP11 s11 s10 vdd vdd PMOS1 L=1u W=8u
+MN11 s11 s10 0 0 NMOS1 L=1u W=4u
+C11 s11 0 50f
+* stage 12: inverter s11 -> s12
+MP12 s12 s11 vdd vdd PMOS1 L=1u W=8u
+MN12 s12 s11 0 0 NMOS1 L=1u W=4u
+C12 s12 0 50f
+* stage 13: inverter s12 -> s13
+MP13 s13 s12 vdd vdd PMOS1 L=1u W=8u
+MN13 s13 s12 0 0 NMOS1 L=1u W=4u
+C13 s13 0 50f
+* stage 14: inverter s13 -> s14
+MP14 s14 s13 vdd vdd PMOS1 L=1u W=8u
+MN14 s14 s13 0 0 NMOS1 L=1u W=4u
+C14 s14 0 50f
+* stage 15: inverter s14 -> s15
+MP15 s15 s14 vdd vdd PMOS1 L=1u W=8u
+MN15 s15 s14 0 0 NMOS1 L=1u W=4u
+C15 s15 0 50f
+* stage 16: inverter s15 -> s16
+MP16 s16 s15 vdd vdd PMOS1 L=1u W=8u
+MN16 s16 s15 0 0 NMOS1 L=1u W=4u
+C16 s16 0 50f
+* stage 17: inverter s16 -> s17
+MP17 s17 s16 vdd vdd PMOS1 L=1u W=8u
+MN17 s17 s16 0 0 NMOS1 L=1u W=4u
+C17 s17 0 50f
+* stage 18: inverter s17 -> s18
+MP18 s18 s17 vdd vdd PMOS1 L=1u W=8u
+MN18 s18 s17 0 0 NMOS1 L=1u W=4u
+C18 s18 0 50f
+* stage 19: inverter s18 -> s19
+MP19 s19 s18 vdd vdd PMOS1 L=1u W=8u
+MN19 s19 s18 0 0 NMOS1 L=1u W=4u
+C19 s19 0 50f
+* stage 20: inverter s19 -> s20
+MP20 s20 s19 vdd vdd PMOS1 L=1u W=8u
+MN20 s20 s19 0 0 NMOS1 L=1u W=4u
+C20 s20 0 50f
+* stage 21: inverter s20 -> s21
+MP21 s21 s20 vdd vdd PMOS1 L=1u W=8u
+MN21 s21 s20 0 0 NMOS1 L=1u W=4u
+C21 s21 0 50f
+* stage 22: inverter s21 -> s22
+MP22 s22 s21 vdd vdd PMOS1 L=1u W=8u
+MN22 s22 s21 0 0 NMOS1 L=1u W=4u
+C22 s22 0 50f
+* stage 23: inverter s22 -> s23
+MP23 s23 s22 vdd vdd PMOS1 L=1u W=8u
+MN23 s23 s22 0 0 NMOS1 L=1u W=4u
+C23 s23 0 50f
+* stage 24: inverter s23 -> s24
+MP24 s24 s23 vdd vdd PMOS1 L=1u W=8u
+MN24 s24 s23 0 0 NMOS1 L=1u W=4u
+C24 s24 0 50f
+* stage 25: inverter s24 -> s25
+MP25 s25 s24 vdd vdd PMOS1 L=1u W=8u
+MN25 s25 s24 0 0 NMOS1 L=1u W=4u
+C25 s25 0 50f
+* stage 26: inverter s25 -> s26
+MP26 s26 s25 vdd vdd PMOS1 L=1u W=8u
+MN26 s26 s25 0 0 NMOS1 L=1u W=4u
+C26 s26 0 50f
+* stage 27: inverter s26 -> s27
+MP27 s27 s26 vdd vdd PMOS1 L=1u W=8u
+MN27 s27 s26 0 0 NMOS1 L=1u W=4u
+C27 s27 0 50f
+* stage 28: inverter s27 -> s28
+MP28 s28 s27 vdd vdd PMOS1 L=1u W=8u
+MN28 s28 s27 0 0 NMOS1 L=1u W=4u
+C28 s28 0 50f
+* stage 29: inverter s28 -> s29
+MP29 s29 s28 vdd vdd PMOS1 L=1u W=8u
+MN29 s29 s28 0 0 NMOS1 L=1u W=4u
+C29 s29 0 50f
+* stage 30: inverter s29 -> s30
+MP30 s30 s29 vdd vdd PMOS1 L=1u W=8u
+MN30 s30 s29 0 0 NMOS1 L=1u W=4u
+C30 s30 0 50f
+* stage 31: inverter s30 -> s31
+MP31 s31 s30 vdd vdd PMOS1 L=1u W=8u
+MN31 s31 s30 0 0 NMOS1 L=1u W=4u
+C31 s31 0 50f
+* stage 32: inverter s31 -> s32
+MP32 s32 s31 vdd vdd PMOS1 L=1u W=8u
+MN32 s32 s31 0 0 NMOS1 L=1u W=4u
+C32 s32 0 50f
+* stage 33: inverter s32 -> s33
+MP33 s33 s32 vdd vdd PMOS1 L=1u W=8u
+MN33 s33 s32 0 0 NMOS1 L=1u W=4u
+C33 s33 0 50f
+* stage 34: inverter s33 -> s34
+MP34 s34 s33 vdd vdd PMOS1 L=1u W=8u
+MN34 s34 s33 0 0 NMOS1 L=1u W=4u
+C34 s34 0 50f
+* stage 35: inverter s34 -> s35
+MP35 s35 s34 vdd vdd PMOS1 L=1u W=8u
+MN35 s35 s34 0 0 NMOS1 L=1u W=4u
+C35 s35 0 50f
+* stage 36: inverter s35 -> s36
+MP36 s36 s35 vdd vdd PMOS1 L=1u W=8u
+MN36 s36 s35 0 0 NMOS1 L=1u W=4u
+C36 s36 0 50f
+* stage 37: inverter s36 -> s37
+MP37 s37 s36 vdd vdd PMOS1 L=1u W=8u
+MN37 s37 s36 0 0 NMOS1 L=1u W=4u
+C37 s37 0 50f
+* stage 38: inverter s37 -> s38
+MP38 s38 s37 vdd vdd PMOS1 L=1u W=8u
+MN38 s38 s37 0 0 NMOS1 L=1u W=4u
+C38 s38 0 50f
+* stage 39: inverter s38 -> s39
+MP39 s39 s38 vdd vdd PMOS1 L=1u W=8u
+MN39 s39 s38 0 0 NMOS1 L=1u W=4u
+C39 s39 0 50f
+* stage 40: inverter s39 -> s40
+MP40 s40 s39 vdd vdd PMOS1 L=1u W=8u
+MN40 s40 s39 0 0 NMOS1 L=1u W=4u
+C40 s40 0 50f
+* stage 41: inverter s40 -> s41
+MP41 s41 s40 vdd vdd PMOS1 L=1u W=8u
+MN41 s41 s40 0 0 NMOS1 L=1u W=4u
+C41 s41 0 50f
+* stage 42: inverter s41 -> s42
+MP42 s42 s41 vdd vdd PMOS1 L=1u W=8u
+MN42 s42 s41 0 0 NMOS1 L=1u W=4u
+C42 s42 0 50f
+* stage 43: inverter s42 -> s43
+MP43 s43 s42 vdd vdd PMOS1 L=1u W=8u
+MN43 s43 s42 0 0 NMOS1 L=1u W=4u
+C43 s43 0 50f
+* stage 44: inverter s43 -> s44
+MP44 s44 s43 vdd vdd PMOS1 L=1u W=8u
+MN44 s44 s43 0 0 NMOS1 L=1u W=4u
+C44 s44 0 50f
+* stage 45: inverter s44 -> s45
+MP45 s45 s44 vdd vdd PMOS1 L=1u W=8u
+MN45 s45 s44 0 0 NMOS1 L=1u W=4u
+C45 s45 0 50f
+* stage 46: inverter s45 -> s46
+MP46 s46 s45 vdd vdd PMOS1 L=1u W=8u
+MN46 s46 s45 0 0 NMOS1 L=1u W=4u
+C46 s46 0 50f
+* stage 47: inverter s46 -> s47
+MP47 s47 s46 vdd vdd PMOS1 L=1u W=8u
+MN47 s47 s46 0 0 NMOS1 L=1u W=4u
+C47 s47 0 50f
+* stage 48: inverter s47 -> s48
+MP48 s48 s47 vdd vdd PMOS1 L=1u W=8u
+MN48 s48 s47 0 0 NMOS1 L=1u W=4u
+C48 s48 0 50f
+* stage 49: inverter s48 -> s49
+MP49 s49 s48 vdd vdd PMOS1 L=1u W=8u
+MN49 s49 s48 0 0 NMOS1 L=1u W=4u
+C49 s49 0 50f
+* stage 50: inverter s49 -> s50
+MP50 s50 s49 vdd vdd PMOS1 L=1u W=8u
+MN50 s50 s49 0 0 NMOS1 L=1u W=4u
+C50 s50 0 50f
+* stage 51: inverter s50 -> s51
+MP51 s51 s50 vdd vdd PMOS1 L=1u W=8u
+MN51 s51 s50 0 0 NMOS1 L=1u W=4u
+C51 s51 0 50f
+.model NMOS1 NMOS(LEVEL=1 VTO=0.7 KP=120u GAMMA=0.4 PHI=0.65 LAMBDA=0.02 TOX=20n CGSO=0.3n CGDO=0.3n)
+.model PMOS1 PMOS(LEVEL=1 VTO=-0.7 KP=40u GAMMA=0.4 PHI=0.65 LAMBDA=0.02 TOX=20n CGSO=0.3n CGDO=0.3n)
+.options noacct
+.tran 10p 40n
+.print tran v(s51)
+.end

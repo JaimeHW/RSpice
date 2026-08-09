@@ -1,0 +1,325 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rspice.dev/schemas/macro-result-v2.json",
+  "title": "RSpice native macro benchmark result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "benchmark_id",
+    "generated_at_unix_ms",
+    "trusted",
+    "methodology",
+    "tool",
+    "host",
+    "suite",
+    "configuration",
+    "simulators",
+    "results"
+  ],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "benchmark_id": { "const": "rspice-macro" },
+    "generated_at_unix_ms": { "type": "integer", "minimum": 0 },
+    "trusted": { "type": "boolean" },
+    "methodology": { "type": "string", "minLength": 1 },
+    "tool": { "$ref": "#/$defs/tool" },
+    "host": { "$ref": "#/$defs/host" },
+    "suite": { "$ref": "#/$defs/suite" },
+    "configuration": { "$ref": "#/$defs/configuration" },
+    "simulators": { "$ref": "#/$defs/simulators" },
+    "results": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/deckResult" }
+    },
+    "regression_gate": { "$ref": "#/$defs/regressionGate" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "trusted": { "const": true } } },
+      "then": {
+        "properties": {
+          "tool": {
+            "properties": {
+              "profile": { "const": "release" },
+              "git_commit": { "type": "string", "minLength": 1 },
+              "git_dirty": { "const": false },
+              "cargo_lock_blake3": { "$ref": "#/$defs/digest" },
+              "executable_blake3": { "$ref": "#/$defs/digest" }
+            }
+          },
+          "simulators": {
+            "properties": {
+              "rspice": {
+                "properties": {
+                  "executable_blake3": { "$ref": "#/$defs/digest" },
+                  "version_command_success": { "const": true }
+                }
+              },
+              "ngspice": {
+                "properties": {
+                  "executable_blake3": { "$ref": "#/$defs/digest" },
+                  "version_command_success": { "const": true }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "nullableDigest": {
+      "oneOf": [
+        { "$ref": "#/$defs/digest" },
+        { "type": "null" }
+      ]
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "profile",
+        "target",
+        "rustc",
+        "git_commit",
+        "git_dirty",
+        "cargo_lock_blake3",
+        "executable_name",
+        "executable_blake3"
+      ],
+      "properties": {
+        "name": { "const": "rspice-bench" },
+        "version": { "type": "string", "minLength": 1 },
+        "profile": { "enum": ["debug", "release"] },
+        "target": { "type": "string", "minLength": 1 },
+        "rustc": { "type": "string", "minLength": 1 },
+        "git_commit": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "git_dirty": { "type": ["boolean", "null"] },
+        "cargo_lock_blake3": { "$ref": "#/$defs/nullableDigest" },
+        "executable_name": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "executable_blake3": { "$ref": "#/$defs/nullableDigest" }
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "arch", "os_version", "cpu_model", "cpu_count", "fingerprint"],
+      "properties": {
+        "os": { "type": "string", "minLength": 1 },
+        "arch": { "type": "string", "minLength": 1 },
+        "os_version": { "type": "string", "minLength": 1 },
+        "cpu_model": { "type": "string", "minLength": 1 },
+        "cpu_count": { "type": "integer", "minimum": 1 },
+        "fingerprint": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "suite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "methodology_version", "description", "manifest", "manifest_blake3"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "version": { "type": "integer", "minimum": 1 },
+        "methodology_version": { "type": "integer", "minimum": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "manifest": { "type": "string", "minLength": 1 },
+        "manifest_blake3": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repeats", "warmups", "timeout_secs", "sample_order", "output_mode", "correctness_preflight"],
+      "properties": {
+        "repeats": { "type": "integer", "minimum": 1 },
+        "warmups": { "type": "integer", "minimum": 1 },
+        "timeout_secs": { "type": "integer", "minimum": 1 },
+        "sample_order": { "type": "string", "minLength": 1 },
+        "output_mode": { "type": "string", "minLength": 1 },
+        "correctness_preflight": { "const": true }
+      }
+    },
+    "simulator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "executable_name", "executable_blake3", "version_command_success", "version_output"],
+      "properties": {
+        "name": { "enum": ["rspice", "ngspice"] },
+        "executable_name": { "type": "string", "minLength": 1 },
+        "executable_blake3": { "$ref": "#/$defs/nullableDigest" },
+        "version_command_success": { "type": "boolean" },
+        "version_output": { "type": "string", "minLength": 1 }
+      }
+    },
+    "simulators": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rspice"],
+      "properties": {
+        "rspice": {
+          "allOf": [
+            { "$ref": "#/$defs/simulator" },
+            { "properties": { "name": { "const": "rspice" } } }
+          ]
+        },
+        "ngspice": {
+          "allOf": [
+            { "$ref": "#/$defs/simulator" },
+            { "properties": { "name": { "const": "ngspice" } } }
+          ]
+        },
+        "ngspice_note": { "type": "string", "minLength": 1 }
+      }
+    },
+    "timingStats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min", "median", "p95", "mean", "stddev", "mad"],
+      "properties": {
+        "min": { "type": "number", "exclusiveMinimum": 0 },
+        "median": { "type": "number", "exclusiveMinimum": 0 },
+        "p95": { "type": "number", "exclusiveMinimum": 0 },
+        "mean": { "type": "number", "exclusiveMinimum": 0 },
+        "stddev": { "type": "number", "minimum": 0 },
+        "mad": { "type": "number", "minimum": 0 }
+      }
+    },
+    "nullableTimingStats": {
+      "oneOf": [
+        { "$ref": "#/$defs/timingStats" },
+        { "type": "null" }
+      ]
+    },
+    "preflight": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_id",
+        "passed",
+        "summary_schema_version",
+        "runs",
+        "passed_runs",
+        "measurements",
+        "passed_measurements",
+        "outputs",
+        "summary_blake3"
+      ],
+      "properties": {
+        "contract_id": { "type": "string", "minLength": 1 },
+        "passed": { "type": "boolean" },
+        "summary_schema_version": { "type": ["integer", "null"], "minimum": 1 },
+        "runs": { "type": "integer", "minimum": 0 },
+        "passed_runs": { "type": "integer", "minimum": 0 },
+        "measurements": { "type": "integer", "minimum": 0 },
+        "passed_measurements": { "type": "integer", "minimum": 0 },
+        "outputs": { "type": "integer", "minimum": 0 },
+        "summary_blake3": { "$ref": "#/$defs/nullableDigest" },
+        "failure": { "type": "string", "minLength": 1 }
+      }
+    },
+    "deckResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "file",
+        "blake3",
+        "category",
+        "analyses",
+        "correctness",
+        "rspice_ms",
+        "rspice_samples_ms",
+        "rspice_all_ok",
+        "ngspice_ms",
+        "speedup_median",
+        "both_succeeded"
+      ],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "file": { "type": "string", "minLength": 1 },
+        "blake3": { "$ref": "#/$defs/digest" },
+        "category": { "type": "string", "minLength": 1 },
+        "analyses": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "correctness": { "$ref": "#/$defs/preflight" },
+        "rspice_ms": { "$ref": "#/$defs/nullableTimingStats" },
+        "rspice_samples_ms": {
+          "type": "array",
+          "items": { "type": "number", "exclusiveMinimum": 0 }
+        },
+        "rspice_all_ok": { "type": "boolean" },
+        "rspice_failure": { "type": "string", "minLength": 1 },
+        "ngspice_ms": { "$ref": "#/$defs/nullableTimingStats" },
+        "ngspice_samples_ms": {
+          "type": "array",
+          "items": { "type": "number", "exclusiveMinimum": 0 }
+        },
+        "ngspice_all_ok": { "type": "boolean" },
+        "ngspice_failure": { "type": "string", "minLength": 1 },
+        "speedup_median": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "both_succeeded": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "rspice_all_ok": { "const": true } } },
+          "then": {
+            "properties": {
+              "rspice_ms": { "$ref": "#/$defs/timingStats" },
+              "rspice_samples_ms": { "minItems": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "regressionResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deck", "baseline_median_ms", "current_median_ms", "change_percent", "passed"],
+      "properties": {
+        "deck": { "type": "string", "minLength": 1 },
+        "baseline_median_ms": { "type": "number", "exclusiveMinimum": 0 },
+        "current_median_ms": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "change_percent": { "type": ["number", "null"] },
+        "passed": { "type": "boolean" }
+      }
+    },
+    "regressionGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseline", "max_regression_percent", "host_match", "passed", "results"],
+      "properties": {
+        "baseline": { "type": "string", "minLength": 1 },
+        "max_regression_percent": { "type": "number", "minimum": 0 },
+        "host_match": { "type": "boolean" },
+        "passed": { "type": "boolean" },
+        "results": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/regressionResult" }
+        }
+      }
+    }
+  }
+}
