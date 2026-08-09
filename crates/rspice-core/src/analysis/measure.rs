@@ -280,7 +280,9 @@ impl ContinuousMeasureResult {
 // Measurement Engine
 //=============================================================================
 
-pub(super) fn canonical_measure_signal_name(name: &str) -> String {
+/// Normalize a serialized measurement signal name under SPICE's
+/// case-insensitive hierarchy namespace.
+pub fn canonical_measure_signal_name(name: &str) -> String {
     canonical_symbol(
         &name
             .chars()

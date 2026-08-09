@@ -1743,35 +1743,122 @@ pub fn evaluate_tran_measurements(
     netlist: &Netlist,
     result: &TransientResult,
 ) -> Vec<MeasureResult> {
+    let signals = transient_signal_map(result);
+    evaluate_tran_measurements_with_signals(netlist, &result.time, &signals)
+}
+
+/// Re-evaluate the netlist's transient `.MEAS` statements over a serialized
+/// point stream, such as a PRN or CSV file read by a `-remeasure` workflow.
+///
+/// The caller owns column parsing and supplies each serialized variable under
+/// its authored header name. The independent axis is authoritative: `TIME`
+/// spellings in `signals` are replaced with `time`. Signal lookup retains the
+/// same case-insensitive, hierarchy-aware, ambiguity-checking semantics used
+/// for native transient results.
+pub fn evaluate_tran_remeasurements(
+    netlist: &Netlist,
+    time: &[Value],
+    signals: &HashMap<String, &[Value]>,
+) -> Vec<MeasureResult> {
+    let mut signals = signals.clone();
+    insert_case_variants(&mut signals, "Time", time);
+    if let Err(error) = augment_remeasure_voltage_spellings(&mut signals) {
+        let statements = measurements_for_analysis(netlist, "TRAN");
+        return failed_measurements(&statements, &error);
+    }
+    evaluate_tran_measurements_with_signals(netlist, time, &signals)
+}
+
+/// Xyce registers a serialized `V(node)` column as solution symbol `node`.
+/// Retain both spellings so measurements resolve identically whether a replay
+/// producer wrote the wrapped probe or the underlying solution name. Distinct
+/// columns that describe the same voltage fail closed instead of depending on
+/// input-column or hash iteration order.
+fn augment_remeasure_voltage_spellings<'a>(
+    signals: &mut HashMap<String, &'a [Value]>,
+) -> Result<(), String> {
+    let index = CanonicalMeasureSignalIndex::new(signals);
+    let aliases = signals
+        .iter()
+        .filter_map(|(name, waveform)| {
+            remeasure_voltage_alias(name).map(|alias| (alias, *waveform))
+        })
+        .collect::<Vec<_>>();
+
+    for (alias, waveform) in aliases {
+        if let Some(existing) = index.get(&alias)? {
+            if existing.len() != waveform.len()
+                || !std::ptr::eq(existing.as_ptr(), waveform.as_ptr())
+            {
+                return Err(format!(
+                    "serialized voltage column '{alias}' conflicts with an equivalent column"
+                ));
+            }
+        }
+        insert_case_variants(signals, &alias, waveform);
+    }
+    Ok(())
+}
+
+fn remeasure_voltage_alias(name: &str) -> Option<String> {
+    let name = name.trim();
+    if name.is_empty() || name.eq_ignore_ascii_case("TIME") {
+        return None;
+    }
+
+    if name.len() >= 4
+        && name.as_bytes()[0].eq_ignore_ascii_case(&b'v')
+        && name.as_bytes()[1] == b'('
+        && name.ends_with(')')
+    {
+        let node = name[2..name.len() - 1].trim();
+        if !node.is_empty() && !node.contains(',') {
+            return Some(node.to_string());
+        }
+        return None;
+    }
+
+    (!name.contains(['(', ')', '{', '}', ','])).then(|| format!("V({name})"))
+}
+
+fn evaluate_tran_measurements_with_signals(
+    netlist: &Netlist,
+    time: &[Value],
+    source_signals: &HashMap<String, &[Value]>,
+) -> Vec<MeasureResult> {
     let statements = measurements_for_analysis(netlist, "TRAN");
     if statements.is_empty() {
         return Vec::new();
     }
-    let alias_projection = match InterfaceNodeAliasProjection::new(
-        netlist,
-        OutputAnalysisKind::Tran,
-        result.time.len(),
-    ) {
-        Ok(projection) => projection,
-        Err(error) => return failed_measurements(&statements, &error),
-    };
-    let mut signals = transient_signal_map(result);
+    let alias_projection =
+        match InterfaceNodeAliasProjection::new(netlist, OutputAnalysisKind::Tran, time.len()) {
+            Ok(projection) => projection,
+            Err(error) => return failed_measurements(&statements, &error),
+        };
+    // Reborrow caller-owned slices into a map whose lifetime is scoped to this
+    // evaluation. Alias and differential projections own local waveforms, so
+    // pinning the map to the caller's longer lifetime would make inserting
+    // those safe local borrows impossible.
+    let mut signals = source_signals
+        .iter()
+        .map(|(name, waveform)| (name.clone(), &**waveform))
+        .collect::<HashMap<String, &[Value]>>();
     if let Err(error) = alias_projection.augment(&mut signals) {
         return failed_measurements(&statements, &error);
     }
     let differential_signals =
-        match materialize_differential_voltage_signals(&statements, result.time.len(), &signals) {
+        match materialize_differential_voltage_signals(&statements, time.len(), &signals) {
             Ok(signals) => signals,
             Err(error) => return failed_measurements(&statements, &error),
         };
     for (name, waveform) in &differential_signals {
         insert_case_variants(&mut signals, name, waveform);
     }
-    let mut results = evaluate_statements(&statements, &result.time, &signals, &netlist.params);
+    let mut results = evaluate_statements(&statements, time, &signals, &netlist.params);
     overlay_continuous_equation_results(
         &statements,
         &mut results,
-        evaluate_equation_measurements(netlist, "TRAN", &result.time, &signals, -1.0, None),
+        evaluate_equation_measurements(netlist, "TRAN", time, &signals, -1.0, None),
         "TRAN",
     );
     results
@@ -2255,6 +2342,74 @@ mod tests {
         assert!(signals.contains_key("v(OUT)"));
         assert!(signals.contains_key("I(v1)"));
         assert_eq!(signals["TIME"], result.time.as_slice());
+    }
+
+    #[test]
+    fn transient_remeasurement_uses_the_serialized_point_stream() {
+        let netlist = Netlist::parse(
+            "serialized transient measurement\n\
+             .MEASURE TRAN ERR1MV1.5 ERR1 V(1) V(2) MINVAL=1.5\n\
+             .END\n",
+        )
+        .expect("remeasure deck parses");
+        let time = (0..=10)
+            .map(|index| index as Value * 0.1)
+            .collect::<Vec<_>>();
+        let first = time.iter().map(|time| 5.0 * time).collect::<Vec<_>>();
+        let second = time.iter().map(|time| 3.75 * time).collect::<Vec<_>>();
+        let authored_time = vec![99.0; time.len()];
+        let signals = HashMap::from([
+            ("TIME".to_string(), authored_time.as_slice()),
+            ("V(1)".to_string(), first.as_slice()),
+            ("V(2)".to_string(), second.as_slice()),
+        ]);
+
+        let results = evaluate_tran_remeasurements(&netlist, &time, &signals);
+        assert_eq!(results.len(), 1);
+        assert!(results[0].passed, "{:?}", results[0].error);
+        let value = results[0].value.expect("serialized ERR1 result");
+        assert!(
+            (value - 2.312_406e-1).abs() <= 5.0e-8,
+            "serialized ERR1 mismatch: {:.12e}",
+            value
+        );
+
+        let bare_signals = HashMap::from([
+            ("1".to_string(), first.as_slice()),
+            ("2".to_string(), second.as_slice()),
+        ]);
+        let bare_results = evaluate_tran_remeasurements(&netlist, &time, &bare_signals);
+        assert!(bare_results[0].passed, "{:?}", bare_results[0].error);
+        assert_eq!(bare_results[0].value, results[0].value);
+    }
+
+    #[test]
+    fn transient_remeasurement_rejects_conflicting_voltage_spellings() {
+        let netlist = Netlist::parse(
+            "conflicting serialized columns\n\
+             .MEASURE TRAN VMAX MAX V(out)\n\
+             .END\n",
+        )
+        .expect("remeasure deck parses");
+        let time = [0.0, 1.0];
+        let bare = [1.0, 2.0];
+        let wrapped = [3.0, 4.0];
+        let signals = HashMap::from([
+            ("out".to_string(), bare.as_slice()),
+            ("V(out)".to_string(), wrapped.as_slice()),
+        ]);
+
+        let results = evaluate_tran_remeasurements(&netlist, &time, &signals);
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].passed);
+        assert!(
+            results[0]
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("conflicts")),
+            "{:?}",
+            results[0].error
+        );
     }
 
     #[test]

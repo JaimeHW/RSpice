@@ -71,7 +71,7 @@ pub use measure::{
     ContinuousMeasureFailureMetadata, ContinuousMeasureRecord, ContinuousMeasureResult, EdgeType,
     ErrorFunctionNorm, EventOccurrence, ExtremaOutput, FileErrorNorm, MeasureEngine,
     MeasureOperand, MeasurePrintPolicy, MeasureResult, MeasureStatement, MeasureType, TrigSpec,
-    TriggerEvent, WhenCondition,
+    TriggerEvent, WhenCondition, canonical_measure_signal_name,
 };
 pub use measure_signals::{
     AcSweepSeries, DcSweepSeries, EquationMeasureTrace, NoiseSweepSeries,
@@ -81,8 +81,8 @@ pub use measure_signals::{
     evaluate_dc_measurements, evaluate_dc_measurements_with_parameter_contexts,
     evaluate_noise_continuous_measurements, evaluate_noise_equation_measurements,
     evaluate_noise_measurements, evaluate_tran_continuous_measurements,
-    evaluate_tran_equation_measurements, evaluate_tran_measurements, measurements_for_analysis,
-    transient_signal_map, unevaluated_measurements,
+    evaluate_tran_equation_measurements, evaluate_tran_measurements, evaluate_tran_remeasurements,
+    measurements_for_analysis, transient_signal_map, unevaluated_measurements,
 };
 pub use monte_carlo::{
     Distribution, MonteCarloConfig, MonteCarloResult, MonteCarloRunner, Tolerance,
