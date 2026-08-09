@@ -65,4 +65,50 @@ impl Symbol {
             (self.bounds.1 + self.bounds.3) / 2.0,
         )
     }
+
+    /// Distinct path vertices that land on the authored view-box boundary,
+    /// transformed into centered schematic coordinates at `target_width` ×
+    /// `target_height`. Clean device SVGs terminate every electrical lead on
+    /// that boundary, so this is the fail-closed bridge between artwork and
+    /// the separately authoritative electrical terminal contract.
+    pub fn boundary_anchors(&self, target_width: f32, target_height: f32) -> Vec<(f32, f32)> {
+        let tolerance = self.width().max(self.height()).max(1.0) * 0.001;
+        let (min_x, min_y, max_x, max_y) = self.bounds;
+        let (center_x, center_y) = self.center();
+        let scale_x = target_width / self.width().max(0.001);
+        let scale_y = target_height / self.height().max(0.001);
+        let mut anchors = Vec::new();
+        let mut consider = |x: f32, y: f32| {
+            let boundary = (x - min_x).abs() <= tolerance
+                || (x - max_x).abs() <= tolerance
+                || (y - min_y).abs() <= tolerance
+                || (y - max_y).abs() <= tolerance;
+            if !boundary {
+                return;
+            }
+            let transformed = ((x - center_x) * scale_x, (y - center_y) * scale_y);
+            if !anchors.iter().any(|(existing_x, existing_y)| {
+                let dx: f32 = *existing_x - transformed.0;
+                let dy: f32 = *existing_y - transformed.1;
+                dx.abs() <= 0.01 && dy.abs() <= 0.01
+            }) {
+                anchors.push(transformed);
+            }
+        };
+        for path in &self.paths {
+            for command in &path.commands {
+                match command {
+                    PathCommand::MoveTo(x, y) | PathCommand::LineTo(x, y) => consider(*x, *y),
+                    PathCommand::CurveTo { end, .. } => consider(end.0, end.1),
+                    PathCommand::Close => {}
+                }
+            }
+        }
+        anchors.sort_by(|left, right| {
+            left.0
+                .total_cmp(&right.0)
+                .then_with(|| left.1.total_cmp(&right.1))
+        });
+        anchors
+    }
 }

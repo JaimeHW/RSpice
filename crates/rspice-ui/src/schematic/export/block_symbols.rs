@@ -2,7 +2,8 @@
 
 use std::fmt::Write;
 
-use crate::state::{ComponentType, PortDirection};
+use crate::schematic::symbols::{PathCommand, Symbol};
+use crate::state::{Component, ComponentType, PortDirection};
 
 use super::SvgExportConfig;
 
@@ -32,11 +33,141 @@ pub(super) fn write_block_symbol(
 
 pub(super) fn write_cell_instance_symbol(
     svg: &mut String,
-    cx: f64,
-    cy: f64,
+    component: &Component,
     config: &SvgExportConfig,
 ) {
-    write_block_symbol(svg, cx, cy, "X", config);
+    let cx = component.pos.x as f64 * config.grid_size;
+    let cy = component.pos.y as f64 * config.grid_size;
+    let (_, height) = component.symbol_dimensions();
+    let half_body_height = (height / 2 - 5).max(15);
+    let local = |point: crate::state::Point| {
+        let x = if component.mirror_h {
+            -point.x
+        } else {
+            point.x
+        };
+        let y = if component.mirror_v {
+            -point.y
+        } else {
+            point.y
+        };
+        (
+            cx + f64::from(x) * config.grid_size,
+            cy + f64::from(y) * config.grid_size,
+        )
+    };
+    let corners = [
+        local(crate::state::Point::new(-20, -half_body_height)),
+        local(crate::state::Point::new(20, -half_body_height)),
+        local(crate::state::Point::new(20, half_body_height)),
+        local(crate::state::Point::new(-20, half_body_height)),
+    ];
+    writeln!(
+        svg,
+        r#"<polygon class="component" points="{},{} {},{} {},{} {},{}"/>"#,
+        corners[0].0,
+        corners[0].1,
+        corners[1].0,
+        corners[1].1,
+        corners[2].0,
+        corners[2].1,
+        corners[3].0,
+        corners[3].1,
+    )
+    .unwrap();
+    for (name, terminal) in component.instance_pin_layout() {
+        let inner = if terminal.y.abs() > half_body_height {
+            crate::state::Point::new(terminal.x, terminal.y.signum() * half_body_height)
+        } else {
+            crate::state::Point::new(terminal.x.signum() * 20, terminal.y)
+        };
+        let terminal = local(terminal);
+        let inner = local(inner);
+        writeln!(
+            svg,
+            r#"<line class="component" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
+            terminal.0, terminal.1, inner.0, inner.1
+        )
+        .unwrap();
+        writeln!(
+            svg,
+            r#"<circle class="component" fill="{}" cx="{}" cy="{}" r="{}"/>"#,
+            config.component_color,
+            terminal.0,
+            terminal.1,
+            1.6 * config.grid_size,
+        )
+        .unwrap();
+        if let Some(name) = name {
+            writeln!(
+                svg,
+                r#"<text class="text" x="{}" y="{}" text-anchor="middle">{}</text>"#,
+                inner.0,
+                inner.1,
+                super::escape_xml(&name),
+            )
+            .unwrap();
+        }
+    }
+}
+
+pub(super) fn write_catalog_asset_symbol(
+    svg: &mut String,
+    component: &Component,
+    symbol: &Symbol,
+    target_width: f32,
+    target_height: f32,
+    config: &SvgExportConfig,
+) {
+    let cx = component.pos.x as f64 * config.grid_size;
+    let cy = component.pos.y as f64 * config.grid_size;
+    let (symbol_cx, symbol_cy) = symbol.center();
+    let scale_x = f64::from(target_width / symbol.width().max(0.001)) * config.grid_size;
+    let scale_y = f64::from(target_height / symbol.height().max(0.001)) * config.grid_size;
+    let point = |x: f32, y: f32| {
+        let mut x = (f64::from(x) - f64::from(symbol_cx)) * scale_x;
+        let mut y = (f64::from(y) - f64::from(symbol_cy)) * scale_y;
+        if component.mirror_h {
+            x = -x;
+        }
+        if component.mirror_v {
+            y = -y;
+        }
+        (cx + x, cy + y)
+    };
+    for path in &symbol.paths {
+        let mut data = String::new();
+        for command in &path.commands {
+            match command {
+                PathCommand::MoveTo(x, y) => {
+                    let (x, y) = point(*x, *y);
+                    write!(data, "M {x} {y} ").unwrap();
+                }
+                PathCommand::LineTo(x, y) => {
+                    let (x, y) = point(*x, *y);
+                    write!(data, "L {x} {y} ").unwrap();
+                }
+                PathCommand::CurveTo { ctrl1, ctrl2, end } => {
+                    let (x1, y1) = point(ctrl1.0, ctrl1.1);
+                    let (x2, y2) = point(ctrl2.0, ctrl2.1);
+                    let (x, y) = point(end.0, end.1);
+                    write!(data, "C {x1} {y1} {x2} {y2} {x} {y} ").unwrap();
+                }
+                PathCommand::Close => data.push_str("Z "),
+            }
+        }
+        writeln!(
+            svg,
+            r#"<path class="component" d="{}" fill="{}"/>"#,
+            data.trim(),
+            if path.filled {
+                config.component_color.to_string()
+            } else {
+                "none".to_owned()
+            },
+        )
+        .unwrap();
+    }
 }
 
 /// Interface port: a flag whose tip is the attachment point at (-10, 0).

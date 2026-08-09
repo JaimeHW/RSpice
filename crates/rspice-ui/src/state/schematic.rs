@@ -23,8 +23,11 @@ mod clipboard;
 mod component;
 mod component_type;
 mod design_note;
+mod device_catalog;
+mod device_descriptor;
 mod document_policy;
 mod documentation_shape;
+mod generated_veriloga_catalog;
 mod hierarchy;
 mod net_highlight;
 mod net_label;
@@ -59,13 +62,21 @@ pub use bus::{
 };
 pub use clipboard::ClipboardData;
 pub use component::{
-    Component, ComponentDisplayMode, LibraryCellInstance, validate_library_netlist_template,
+    BuiltinXspiceInstance, BuiltinXspicePortBinding, BuiltinXspicePortDirection,
+    BuiltinXspicePortType, Component, ComponentDisplayMode, GeneratedVerilogAInstance,
+    LibraryCellInstance, validate_library_netlist_template,
 };
 pub use component_type::ComponentType;
 pub use design_note::{
     DesignNote, DesignNoteKind, DesignNoteLayer, DesignNoteRenderContext, DesignReviewMutation,
     DesignReviewState, PendingDesignNotePlacement, RequirementTarget,
 };
+pub use device_catalog::{
+    CatalogXspiceVectorPort, builtin_xspice_library_binding,
+    builtin_xspice_library_binding_with_vector_widths, builtin_xspice_vector_ports,
+    engine_only_xspice_devices, validate_builtin_xspice_binding,
+};
+pub use device_descriptor::DeviceImplementation;
 pub use document_policy::{
     NetNamingPolicy, OperatingPointAnnotationPolicy, PropertyCommitPolicy, SchematicDocumentPolicy,
     SchematicGridPitch, SchematicPageOrientation, SchematicPageSize, SelectionCrossingPolicy,
@@ -76,6 +87,10 @@ pub use documentation_shape::{
     DocumentationShape, DocumentationShapeError, DocumentationShapeGeometry,
     DocumentationShapeKind, DocumentationShapeLayer, PendingDocumentationShapePlacement,
     arc_parameters, geometry_from_points,
+};
+pub use generated_veriloga_catalog::{
+    generated_veriloga_devices, generated_veriloga_library_binding,
+    validate_generated_veriloga_binding,
 };
 pub(crate) use hierarchy::SheetMoveConnectivityPlan;
 pub use hierarchy::{

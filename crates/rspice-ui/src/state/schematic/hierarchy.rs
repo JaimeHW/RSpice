@@ -1017,6 +1017,21 @@ pub fn hierarchy_terminal_direction(
 /// resolved against their master interface by the application because that
 /// requires project/library authority unavailable to the schematic core.
 pub fn hierarchy_terminal_discipline(component: &Component, terminal_name: &str) -> PortDiscipline {
+    if let Some(binding) = component.library_cell.as_ref()
+        && binding.is_generated_veriloga()
+        && let Ok(descriptor) = super::validate_generated_veriloga_binding(binding)
+        && let Some(terminal) = descriptor
+            .terminals
+            .iter()
+            .find(|terminal| terminal.name.eq_ignore_ascii_case(terminal_name))
+    {
+        return match terminal.discipline.to_ascii_lowercase().as_str() {
+            "logic" | "digital" => PortDiscipline::Logic,
+            "wreal" | "real" => PortDiscipline::Wreal,
+            "thermal" | "temperature" | "heat" => PortDiscipline::Thermal,
+            _ => PortDiscipline::Electrical,
+        };
+    }
     match component.kind {
         ComponentType::XspiceAdcBridge => {
             if terminal_name.eq_ignore_ascii_case("out") {

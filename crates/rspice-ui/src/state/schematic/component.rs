@@ -138,6 +138,89 @@ pub struct LibraryCellInstance {
     /// fallback geometry.
     #[serde(default)]
     pub interface_bound: bool,
+    /// Executable built-in XSPICE binding. Unlike an ordinary L/C/V binding,
+    /// this is resolved from RSpice's compiled code-model registry and needs
+    /// no source file or project-cell master.
+    #[serde(default)]
+    pub builtin_xspice: Option<BuiltinXspiceInstance>,
+    /// Executable build-time generated Verilog-A binding. The frozen identity
+    /// is revalidated against the running engine before editing or netlisting.
+    #[serde(default)]
+    pub generated_veriloga: Option<GeneratedVerilogAInstance>,
+}
+
+/// Frozen catalog identity for a build-time generated Verilog-A placement.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GeneratedVerilogAInstance {
+    pub schema_revision: u32,
+    pub stable_id: String,
+    pub descriptor_abi_version: u32,
+    pub model_name: String,
+    pub module_name: String,
+    pub source_digest: String,
+    pub checkpoint_identity: String,
+    pub descriptor_signature: String,
+}
+
+/// Frozen executable contract for one built-in XSPICE catalog placement.
+///
+/// The exact connection shaping is persisted with the instance. A future
+/// registry change therefore makes an old placement explicitly stale instead
+/// of silently changing its pin order or scalar/vector interpretation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BuiltinXspiceInstance {
+    pub schema_revision: u32,
+    pub stable_id: String,
+    pub model_type: String,
+    pub symbol_asset: String,
+    pub schema_signature: String,
+    pub ports: Vec<BuiltinXspicePortBinding>,
+}
+
+/// One code-model port and the schematic terminal indices that implement it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BuiltinXspicePortBinding {
+    pub name: String,
+    pub direction: BuiltinXspicePortDirection,
+    pub port_type: BuiltinXspicePortType,
+    pub is_vector: bool,
+    /// Number of logical elements materialized for this port. Scalar ports
+    /// always use one. A nullable vector may use zero, which emits a literal
+    /// null connection and deliberately owns no schematic terminals.
+    #[serde(default = "default_xspice_port_width")]
+    pub vector_width: usize,
+    pub null_allowed: bool,
+    pub terminals: Vec<usize>,
+}
+
+const fn default_xspice_port_width() -> usize {
+    1
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum BuiltinXspicePortDirection {
+    In,
+    Out,
+    InOut,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum BuiltinXspicePortType {
+    Voltage,
+    DifferentialVoltage,
+    Conductance,
+    DifferentialConductance,
+    Hybrid,
+    DifferentialHybrid,
+    Current,
+    DifferentialCurrent,
+    VoltageName,
+    Digital,
+    Real,
+    Integer,
+    UserDefined,
 }
 
 /// Validate the deliberately small instance-template language used by
@@ -203,7 +286,21 @@ impl LibraryCellInstance {
             terminal_order: Vec::new(),
             terminal_dirs: Vec::new(),
             interface_bound: false,
+            builtin_xspice: None,
+            generated_veriloga: None,
         }
+    }
+
+    pub fn is_builtin_xspice(&self) -> bool {
+        self.builtin_xspice.is_some()
+    }
+
+    pub fn is_generated_veriloga(&self) -> bool {
+        self.generated_veriloga.is_some()
+    }
+
+    pub fn is_executable_builtin(&self) -> bool {
+        self.is_builtin_xspice() || self.is_generated_veriloga()
     }
 
     /// Bind this instance to a cell interface: terminal order and
@@ -666,7 +763,7 @@ impl Component {
         let prefix = self
             .library_cell
             .as_ref()
-            .filter(|binding| binding.netlist_template.is_some())
+            .filter(|binding| binding.netlist_template.is_some() || binding.is_executable_builtin())
             .and_then(LibraryCellInstance::effective_reference_prefix)
             .unwrap_or_else(|| self.kind.spice_prefix());
         if prefix.is_empty() {

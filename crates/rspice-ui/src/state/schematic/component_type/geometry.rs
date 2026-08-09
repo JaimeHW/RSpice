@@ -192,6 +192,9 @@ impl ComponentType {
                 ("c+", Point { x: 0, y: -20 }),
                 ("c-", Point { x: 0, y: 20 }),
             ],
+            ComponentType::GenericSwitch => {
+                &[("1", Point { x: -20, y: 0 }), ("2", Point { x: 20, y: 0 })]
+            }
             // (60, 40): hw 30, hh/2 10 — port a left, port b right
             ComponentType::TransmissionLine | ComponentType::LossyTransmissionLine => &[
                 ("a+", Point { x: -30, y: -10 }),
@@ -329,6 +332,7 @@ impl ComponentType {
             | ComponentType::Cccs => (40, 40),
             ComponentType::OpAmp => (40, 40),
             ComponentType::VSwitch => (40, 40),
+            ComponentType::GenericSwitch => (40, 40),
             ComponentType::TransmissionLine | ComponentType::LossyTransmissionLine => (60, 40),
             ComponentType::CoupledTransmissionLine => (60, 60),
             ComponentType::CoupledInductor => (40, 20),
@@ -404,6 +408,7 @@ mod tests {
         ComponentType::BehavioralSource,
         ComponentType::VSwitch,
         ComponentType::ISwitch,
+        ComponentType::GenericSwitch,
         ComponentType::TransmissionLine,
         ComponentType::LossyTransmissionLine,
         ComponentType::CoupledTransmissionLine,

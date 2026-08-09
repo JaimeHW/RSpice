@@ -9,7 +9,9 @@ use crate::schematic::{ComponentPaletteEntry, component_palette};
 use crate::simulation::netlist_gen::{DesignNet, HierarchySource, design_nets_with_hierarchy};
 use crate::state::{
     ComponentType, LibraryCellInstance, LibraryCellPlacementCandidate, PortDirection,
-    SavedOutputKind, Tool, library_cell_placement_candidates,
+    SavedOutputKind, Tool, builtin_xspice_library_binding, builtin_xspice_vector_ports,
+    engine_only_xspice_devices, generated_veriloga_devices, generated_veriloga_library_binding,
+    library_cell_placement_candidates,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -1149,11 +1151,15 @@ fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
     let query = normalized(&app.state.workbench.placement_query);
     let visible_matches = component_shelf_match_count(app, &query);
     let mut primitive = None;
+    let mut builtin = None;
+    let mut generated = None;
     let mut cell = None;
     ScrollArea::vertical()
         .id_salt("workbench.design.component_shelf")
         .show(ui, |ui| {
             primitive = pinned(ui, app).or_else(|| primitive_catalog(ui, app));
+            builtin = builtin_xspice_catalog(ui, app);
+            generated = generated_veriloga_catalog(ui, app);
             cell = project_library(ui, app);
             if !query.is_empty() && visible_matches == 0 {
                 empty_navigator_row(ui, "No component or cell matches this filter");
@@ -1161,6 +1167,10 @@ fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
         });
     if let Some(kind) = primitive {
         arm_primitive(app, kind, ui.ctx());
+    } else if let Some(binding) = builtin {
+        arm_cell(app, binding, ui.ctx());
+    } else if let Some(binding) = generated {
+        arm_cell(app, binding, ui.ctx());
     } else if let Some(binding) = cell {
         arm_cell(app, binding, ui.ctx());
     }
@@ -1185,7 +1195,33 @@ fn component_shelf_match_count(app: &RSpiceApp, query: &str) -> usize {
             )
         })
         .count();
-    primitive_matches + library_matches
+    let builtin_matches = engine_only_xspice_devices()
+        .iter()
+        .filter(|descriptor| {
+            matches_query(
+                query,
+                &[
+                    descriptor.display_name,
+                    descriptor.model_type,
+                    descriptor.stable_id,
+                ],
+            )
+        })
+        .count();
+    let generated_matches = generated_veriloga_devices()
+        .iter()
+        .filter(|descriptor| {
+            matches_query(
+                query,
+                &[
+                    descriptor.model_name,
+                    descriptor.module_name,
+                    descriptor.source_digest,
+                ],
+            )
+        })
+        .count();
+    primitive_matches + builtin_matches + generated_matches + library_matches
 }
 
 fn shelf_search(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -1452,6 +1488,183 @@ fn primitive_rows(
         }
         if response.clicked() {
             armed = Some(entry.kind);
+        }
+    }
+    armed
+}
+
+fn builtin_xspice_catalog(ui: &mut Ui, app: &mut RSpiceApp) -> Option<LibraryCellInstance> {
+    let query = normalized(&app.state.workbench.placement_query);
+    let descriptors = engine_only_xspice_devices()
+        .iter()
+        .filter(|descriptor| {
+            matches_query(
+                &query,
+                &[
+                    descriptor.display_name,
+                    descriptor.model_type,
+                    descriptor.stable_id,
+                ],
+            )
+        })
+        .collect::<Vec<_>>();
+    if descriptors.is_empty() {
+        return None;
+    }
+
+    let visible = if query.is_empty() {
+        catalog_group_row(
+            ui,
+            "component-shelf-builtin-xspice",
+            WorkbenchIcon::Design,
+            "Built-in XSPICE",
+            descriptors.len(),
+        )
+    } else {
+        shelf_section_header(ui, "Built-in XSPICE", Some(&descriptors.len().to_string()));
+        true
+    };
+    if !visible {
+        return None;
+    }
+
+    let mut armed = None;
+    for descriptor in descriptors {
+        let selected = app
+            .state
+            .schematic
+            .pending_library_cell
+            .as_ref()
+            .and_then(|binding| binding.builtin_xspice.as_ref())
+            .is_some_and(|binding| binding.stable_id == descriptor.stable_id)
+            && app.state.schematic.tool == Tool::Place(ComponentType::CellInstance);
+        let response = schematic_nav_row_indented_drag_response(
+            ui,
+            WorkbenchIcon::Design,
+            descriptor.display_name,
+            selected,
+            Some(descriptor.model_type),
+            if query.is_empty() { 2 } else { 0 },
+            false,
+            false,
+            false,
+        );
+        match builtin_xspice_library_binding(descriptor) {
+            Ok(binding) => {
+                response
+                    .dnd_set_drag_payload(SchematicShelfDragPayload::library_cell(binding.clone()));
+                if response.clicked() {
+                    match builtin_xspice_vector_ports(descriptor) {
+                        Ok(vector_ports)
+                            if vector_ports.iter().any(|port| {
+                                port.maximum.is_none_or(|maximum| maximum != port.minimum)
+                            }) =>
+                        {
+                            app.state.dialogs.builtin_xspice_placement.open(
+                                descriptor.stable_id,
+                                descriptor.display_name,
+                                vector_ports,
+                                app.state.design_execution_epoch,
+                                app.state.active_schematic_epoch,
+                                app.state.workspace.active_view.display_path(),
+                            );
+                        }
+                        Ok(_) => armed = Some(binding),
+                        Err(error) => {
+                            log::error!(
+                                "Cannot configure {} in the XSPICE catalog: {error}",
+                                descriptor.stable_id
+                            );
+                        }
+                    }
+                }
+            }
+            Err(error) => {
+                log::error!(
+                    "Cannot expose {} in the XSPICE catalog: {error}",
+                    descriptor.stable_id
+                );
+            }
+        }
+    }
+    armed
+}
+
+fn generated_veriloga_catalog(ui: &mut Ui, app: &RSpiceApp) -> Option<LibraryCellInstance> {
+    let query = normalized(&app.state.workbench.placement_query);
+    let descriptors = generated_veriloga_devices()
+        .iter()
+        .filter(|descriptor| {
+            matches_query(
+                &query,
+                &[
+                    descriptor.model_name,
+                    descriptor.module_name,
+                    descriptor.source_digest,
+                ],
+            )
+        })
+        .collect::<Vec<_>>();
+    if descriptors.is_empty() {
+        return None;
+    }
+    let visible = if query.is_empty() {
+        catalog_group_row(
+            ui,
+            "component-shelf-generated-veriloga",
+            WorkbenchIcon::Design,
+            "Generated Verilog-A",
+            descriptors.len(),
+        )
+    } else {
+        shelf_section_header(
+            ui,
+            "Generated Verilog-A",
+            Some(&descriptors.len().to_string()),
+        );
+        true
+    };
+    if !visible {
+        return None;
+    }
+
+    let mut armed = None;
+    for descriptor in descriptors {
+        let selected = app
+            .state
+            .schematic
+            .pending_library_cell
+            .as_ref()
+            .and_then(|binding| binding.generated_veriloga.as_ref())
+            .is_some_and(|binding| binding.model_name == descriptor.model_name)
+            && app.state.schematic.tool == Tool::Place(ComponentType::CellInstance);
+        let response = schematic_nav_row_indented_drag_response(
+            ui,
+            WorkbenchIcon::Design,
+            descriptor.model_name,
+            selected,
+            Some(&format!(
+                "{} pin · {}",
+                descriptor.terminals.len(),
+                descriptor.module_name
+            )),
+            if query.is_empty() { 2 } else { 0 },
+            false,
+            false,
+            false,
+        );
+        match generated_veriloga_library_binding(descriptor) {
+            Ok(binding) => {
+                response
+                    .dnd_set_drag_payload(SchematicShelfDragPayload::library_cell(binding.clone()));
+                if response.clicked() {
+                    armed = Some(binding);
+                }
+            }
+            Err(error) => log::error!(
+                "Cannot expose generated Verilog-A model '{}': {error}",
+                descriptor.model_name
+            ),
         }
     }
     armed

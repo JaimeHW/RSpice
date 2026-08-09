@@ -31,6 +31,7 @@ required-features = ["browser-worker"]
 default = []
 desktop = []
 veriloga = []
+generated-veriloga-catalog = ["rspice-core/veriloga-builtins"]
 browser-worker = []
 
 [dependencies]

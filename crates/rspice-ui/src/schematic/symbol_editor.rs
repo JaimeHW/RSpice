@@ -908,7 +908,7 @@ fn handle_canvas_interaction(
             state
                 .ui
                 .symbol
-                .set_selection(SymbolSelection::in_rect(document, start, end));
+                .set_selection(SymbolSelection::in_rect(document, editor, start, end));
         }
         state.ui.symbol.clear_drag_state();
     }

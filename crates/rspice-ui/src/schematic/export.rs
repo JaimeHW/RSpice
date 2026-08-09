@@ -25,7 +25,9 @@ pub use self::config::SvgColor;
 pub use self::config::SvgExportConfig;
 
 use self::bjt_diode_symbols::{write_diode_symbol, write_npn_symbol, write_pnp_symbol};
-use self::block_symbols::{write_cell_instance_symbol, write_port_symbol, write_xspice_symbol};
+use self::block_symbols::{
+    write_catalog_asset_symbol, write_cell_instance_symbol, write_port_symbol, write_xspice_symbol,
+};
 use self::controlled_symbols::{
     write_cccs_symbol, write_ccvs_symbol, write_opamp_symbol, write_vccs_symbol, write_vcvs_symbol,
     write_vswitch_symbol,
@@ -157,6 +159,9 @@ fn export_to_svg_with_resolved_symbol_entries(
     context: SvgDesignContext<'_>,
 ) -> String {
     let mut svg = String::new();
+    let symbol_library = crate::schematic::SymbolLibrary::load_embedded()
+        .map_err(|error| log::error!("Cannot load embedded symbols for SVG export: {error}"))
+        .ok();
 
     // Calculate bounds
     let (min_x, min_y, max_x, max_y) =
@@ -227,6 +232,7 @@ fn export_to_svg_with_resolved_symbol_entries(
             component,
             config,
             find_resolved_symbol(component, resolved_symbols),
+            symbol_library.as_ref(),
         );
     }
 
@@ -327,6 +333,7 @@ fn write_component(
     component: &Component,
     config: &SvgExportConfig,
     resolved_symbol: Option<&ResolvedCellSymbol>,
+    symbol_library: Option<&crate::schematic::SymbolLibrary>,
 ) {
     let cx = component.pos.x as f64 * config.grid_size;
     let cy = component.pos.y as f64 * config.grid_size;
@@ -409,14 +416,42 @@ fn write_component(
         ComponentType::Vccs => write_vccs_symbol(svg, cx, cy, config),
         ComponentType::Ccvs => write_ccvs_symbol(svg, cx, cy, config),
         ComponentType::Cccs => write_cccs_symbol(svg, cx, cy, config),
-        ComponentType::VSwitch | ComponentType::ISwitch => {
+        ComponentType::VSwitch | ComponentType::ISwitch | ComponentType::GenericSwitch => {
             write_vswitch_symbol(svg, cx, cy, config)
         }
         ComponentType::CellInstance => {
             if let Some(symbol) = resolved_symbol {
                 write_resolved_symbol_svg(svg, component, symbol, config);
+            } else if let Some((symbol, width, height)) = component
+                .library_cell
+                .as_ref()
+                .and_then(|binding| binding.builtin_xspice.as_ref())
+                .and_then(|contract| {
+                    let library = symbol_library?;
+                    let (width, height) = component.symbol_dimensions();
+                    let offsets = component
+                        .instance_pin_layout()
+                        .into_iter()
+                        .map(|(_, offset)| offset)
+                        .collect::<Vec<_>>();
+                    library
+                        .asset_matches_terminal_offsets(
+                            &contract.symbol_asset,
+                            width as f32,
+                            height as f32,
+                            &offsets,
+                        )
+                        .then(|| {
+                            library
+                                .get_asset(&contract.symbol_asset)
+                                .map(|symbol| (symbol, width as f32, height as f32))
+                        })
+                        .flatten()
+                })
+            {
+                write_catalog_asset_symbol(svg, component, symbol, width, height, config);
             } else {
-                write_cell_instance_symbol(svg, cx, cy, config);
+                write_cell_instance_symbol(svg, component, config);
             }
         }
         ComponentType::XspiceGain

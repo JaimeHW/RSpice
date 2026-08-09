@@ -1531,21 +1531,62 @@ impl<'a> SemanticSceneCompiler<'a> {
         stroke: StrokeStyle,
         mapped_fill: Option<SceneFill>,
     ) -> Result<(), HardcopyRenderError> {
-        let (symbol, rotation) = library
-            .get_with_rotation_variant(
-                component.kind,
-                component.rotation.degrees(),
-                component.symbol_variant.as_deref(),
-            )
-            .ok_or_else(|| {
-                conversion_error(format!(
-                    "no production symbol is registered for {:?}",
-                    component.kind
-                ))
-            })?;
+        let builtin_asset = component
+            .library_cell
+            .as_ref()
+            .and_then(|binding| binding.builtin_xspice.as_ref())
+            .and_then(|contract| {
+                let (width, height) = component.symbol_dimensions();
+                let offsets = component
+                    .instance_pin_layout()
+                    .into_iter()
+                    .map(|(_, offset)| offset)
+                    .collect::<Vec<_>>();
+                library
+                    .asset_matches_terminal_offsets(
+                        &contract.symbol_asset,
+                        width as f32,
+                        height as f32,
+                        &offsets,
+                    )
+                    .then(|| {
+                        library.get_asset(&contract.symbol_asset).map(|symbol| {
+                            (
+                                symbol,
+                                component.rotation.degrees(),
+                                width as f32,
+                                height as f32,
+                            )
+                        })
+                    })
+                    .flatten()
+            });
+        let (symbol, rotation, target_width, target_height) = if let Some(asset) = builtin_asset {
+            asset
+        } else if component
+            .library_cell
+            .as_ref()
+            .is_some_and(|binding| binding.is_executable_builtin())
+        {
+            return self.generated_cell_instance(component, stroke);
+        } else {
+            let (symbol, rotation) = library
+                .get_with_rotation_variant(
+                    component.kind,
+                    component.rotation.degrees(),
+                    component.symbol_variant.as_deref(),
+                )
+                .ok_or_else(|| {
+                    conversion_error(format!(
+                        "no production symbol is registered for {:?}",
+                        component.kind
+                    ))
+                })?;
+            (symbol, rotation, symbol.target_width, symbol.target_height)
+        };
         let (cx, cy) = symbol.center();
-        let scale_x = f64::from(symbol.target_width / symbol.width().max(0.001));
-        let scale_y = f64::from(symbol.target_height / symbol.height().max(0.001));
+        let scale_x = f64::from(target_width / symbol.width().max(0.001));
+        let scale_y = f64::from(target_height / symbol.height().max(0.001));
         let radians = f64::from(rotation).to_radians();
         let (cosine, sine) = (radians.cos(), radians.sin());
         let transform = |x: f32, y: f32| {
@@ -1624,6 +1665,71 @@ impl<'a> SemanticSceneCompiler<'a> {
                 }
             }
             flush(self, &mut points)?;
+        }
+        Ok(())
+    }
+
+    fn generated_cell_instance(
+        &mut self,
+        component: &Component,
+        stroke: StrokeStyle,
+    ) -> Result<(), HardcopyRenderError> {
+        let (_, height) = component.symbol_dimensions();
+        let half_body_height = (height / 2 - 5).max(15);
+        let world = |local: crate::state::Point| {
+            let transformed = component.transform_point(local);
+            SchematicPoint::new(
+                component.pos.x.saturating_add(transformed.x),
+                component.pos.y.saturating_add(transformed.y),
+            )
+        };
+        let corners = [
+            world(crate::state::Point::new(-20, -half_body_height)),
+            world(crate::state::Point::new(20, -half_body_height)),
+            world(crate::state::Point::new(20, half_body_height)),
+            world(crate::state::Point::new(-20, half_body_height)),
+        ];
+        self.primitives.push(ScenePrimitive::Polyline {
+            points: corners
+                .into_iter()
+                .map(|point| self.schematic_point(point))
+                .collect::<Result<_, _>>()?,
+            closed: true,
+            stroke,
+            fill: None,
+        });
+
+        for (name, terminal) in component.instance_pin_layout() {
+            let inner = if terminal.y.abs() > half_body_height {
+                crate::state::Point::new(terminal.x, terminal.y.signum() * half_body_height)
+            } else {
+                crate::state::Point::new(terminal.x.signum() * 20, terminal.y)
+            };
+            self.primitives.push(ScenePrimitive::Line {
+                from: self.schematic_point(world(terminal))?,
+                to: self.schematic_point(world(inner))?,
+                stroke,
+            });
+            self.primitives.push(ScenePrimitive::Circle {
+                center: self.schematic_point(world(terminal))?,
+                radius: Length::from_micrometres(500),
+                stroke: Some(stroke),
+                fill: None,
+            });
+            if let Some(name) = name {
+                let inset = if terminal.y.abs() > half_body_height {
+                    crate::state::Point::new(inner.x, inner.y - inner.y.signum() * 3)
+                } else {
+                    crate::state::Point::new(inner.x - inner.x.signum() * 3, inner.y)
+                };
+                self.add_text(
+                    self.schematic_point(world(inset))?,
+                    &name,
+                    SceneFont::Sans,
+                    1_900,
+                    stroke.color,
+                )?;
+            }
         }
         Ok(())
     }

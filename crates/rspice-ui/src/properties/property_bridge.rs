@@ -86,6 +86,7 @@ pub fn get_primary_property_name(kind: ComponentType) -> &'static str {
         ComponentType::Ccvs => "rm",
         ComponentType::Cccs => "gain",
         ComponentType::OpAmp => "gain",
+        ComponentType::GenericSwitch => "control",
         ComponentType::CurrentSourceNoise => "na",
         ComponentType::Ground => "name",
         // Catch-all for any other component types

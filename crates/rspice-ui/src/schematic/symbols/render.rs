@@ -27,10 +27,12 @@ pub struct BakedSymbol {
     corner_dots: Vec<Vec2>,
 }
 
-/// Flatten `symbol` under the given orientation. Called once per
-/// (symbol, rotation, mirror) and cached by the symbol library.
-pub fn bake_symbol(
+/// Flatten a symbol into caller-selected schematic dimensions without
+/// mutating the immutable embedded asset.
+pub fn bake_symbol_with_dimensions(
     symbol: &Symbol,
+    target_width: f32,
+    target_height: f32,
     rotation_degrees: i32,
     mirror_h: bool,
     mirror_v: bool,
@@ -39,8 +41,8 @@ pub fn bake_symbol(
     let cos_r = rotation_rad.cos();
     let sin_r = rotation_rad.sin();
     let (cx, cy) = symbol.center();
-    let view_scale_x = symbol.target_width / symbol.width().max(0.001);
-    let view_scale_y = symbol.target_height / symbol.height().max(0.001);
+    let view_scale_x = target_width / symbol.width().max(0.001);
+    let view_scale_y = target_height / symbol.height().max(0.001);
 
     let mut baked = BakedSymbol::default();
 
@@ -206,6 +208,34 @@ pub fn draw_symbol(
     mirror_v: bool,
     stroke: Stroke,
 ) {
+    draw_symbol_with_dimensions(
+        painter,
+        symbol,
+        symbol.target_width,
+        symbol.target_height,
+        center,
+        scale,
+        rotation_degrees,
+        mirror_h,
+        mirror_v,
+        stroke,
+    );
+}
+
+/// Draw immutable asset geometry at placement-specific dimensions.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_symbol_with_dimensions(
+    painter: &Painter,
+    symbol: &Symbol,
+    target_width: f32,
+    target_height: f32,
+    center: Pos2,
+    scale: f32,
+    rotation_degrees: i32,
+    mirror_h: bool,
+    mirror_v: bool,
+    stroke: Stroke,
+) {
     let rotation_rad = (rotation_degrees as f32) * PI / 180.0;
     let cos_r = rotation_rad.cos();
     let sin_r = rotation_rad.sin();
@@ -216,8 +246,8 @@ pub fn draw_symbol(
     // Non-uniform scaling to exactly fill target dimensions:
     // This ensures terminal leads reach their expected positions on the grid.
     // For transistors, gate lead must reach -hw and D/S leads must reach ±hh.
-    let view_scale_x = symbol.target_width / symbol.width().max(0.001);
-    let view_scale_y = symbol.target_height / symbol.height().max(0.001);
+    let view_scale_x = target_width / symbol.width().max(0.001);
+    let view_scale_y = target_height / symbol.height().max(0.001);
     let total_scale_x = scale * view_scale_x;
     let total_scale_y = scale * view_scale_y;
 

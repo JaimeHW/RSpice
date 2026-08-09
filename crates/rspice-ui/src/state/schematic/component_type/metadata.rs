@@ -52,6 +52,7 @@ impl ComponentType {
             ComponentType::BehavioralSource => "B",
             ComponentType::VSwitch => "S",
             ComponentType::ISwitch => "W",
+            ComponentType::GenericSwitch => "S",
             ComponentType::TransmissionLine => "T",
             ComponentType::LossyTransmissionLine => "O",
             ComponentType::CoupledTransmissionLine => "P",
@@ -165,6 +166,7 @@ impl ComponentType {
             ComponentType::BehavioralSource => "Behavioral Source",
             ComponentType::VSwitch => "V-Switch (S)",
             ComponentType::ISwitch => "I-Switch (W)",
+            ComponentType::GenericSwitch => "Expression Switch (S)",
             ComponentType::TransmissionLine => "Transmission Line",
             ComponentType::LossyTransmissionLine => "Lossy T-Line",
             ComponentType::CoupledTransmissionLine => "Coupled T-Line",
@@ -215,6 +217,7 @@ impl ComponentType {
             ComponentType::OpAmp => "100k",
             // The whole V=<expr> / I=<expr> expression is the value.
             ComponentType::BehavioralSource => "V=0",
+            ComponentType::GenericSwitch => "0",
             ComponentType::CellInstance => "",
             _ => "",
         }

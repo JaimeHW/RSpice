@@ -7,12 +7,12 @@ use egui::{Painter, Rect, Response, Stroke, Vec2};
 
 use crate::state::{
     Bus, BusTap, Component, ComponentType, DesignNote, NetLabel, Point, PortDirection,
-    ResolvedCellSymbol, SchematicArrayKind, SchematicArrayPlacement, SnapResult, SnapTarget,
-    SnapTargetType, SymbolResolver, Tool, geometry_from_points,
+    SchematicArrayKind, SchematicArrayPlacement, SnapResult, SnapTarget, SnapTargetType,
+    SymbolResolver, Tool, geometry_from_points,
 };
 use crate::workbench::app_state::AppState;
 
-use super::super::symbols::{SymbolLibrary, draw_symbol};
+use super::super::symbols::{SymbolLibrary, draw_symbol, draw_symbol_with_dimensions};
 use super::SchematicShelfDragPayload;
 use super::SchematicSymbolContext;
 use super::array_interaction::array_placement;
@@ -23,8 +23,8 @@ use super::documentation_shapes::{
     draw_documentation_shape, draw_geometry, preview_anchor_color, preview_stroke,
 };
 use super::drawing::{
-    draw_bus, draw_bus_tap, draw_component, draw_junction, draw_port_symbol, draw_wire,
-    nearest_wire_screen_hit,
+    compatible_builtin_xspice_asset, draw_bus, draw_bus_tap, draw_cell_instance_symbol,
+    draw_component, draw_junction, draw_port_symbol, draw_wire, nearest_wire_screen_hit,
 };
 use super::net_labels::draw_net_label;
 use super::resolved_symbol_render::draw_resolved_symbol;
@@ -991,11 +991,12 @@ fn net_name_at_snap_target(state: &AppState, target: Point) -> Option<&str> {
         })
 }
 
+#[cfg(test)]
 fn pending_library_cell_preview<'a>(
     state: &AppState,
     symbol_context: &'a SchematicSymbolContext,
     grid_pos: Point,
-) -> Option<(Component, &'a ResolvedCellSymbol)> {
+) -> Option<(Component, &'a crate::state::ResolvedCellSymbol)> {
     let binding = state.schematic.pending_library_cell.clone()?;
     let symbol = symbol_context.pending_library_symbol()?;
     let component = Component::new(0, ComponentType::CellInstance, grid_pos)
@@ -1003,6 +1004,15 @@ fn pending_library_cell_preview<'a>(
         .with_mirror_h(state.schematic.preview_mirror_h)
         .with_library_cell(binding);
     Some((component, symbol))
+}
+
+fn pending_library_cell_component(state: &AppState, grid_pos: Point) -> Option<Component> {
+    Some(
+        Component::new(0, ComponentType::CellInstance, grid_pos)
+            .with_rotation(state.schematic.preview_rotation)
+            .with_mirror_h(state.schematic.preview_mirror_h)
+            .with_library_cell(state.schematic.pending_library_cell.clone()?),
+    )
 }
 
 fn draw_component_preview(
@@ -1037,17 +1047,43 @@ fn draw_component_preview(
         );
 
         if component_type == ComponentType::CellInstance
-            && let Some((preview_component, symbol)) =
-                pending_library_cell_preview(state, symbol_context, grid_pos)
+            && let Some(preview_component) = pending_library_cell_component(state, grid_pos)
         {
-            draw_resolved_symbol(
-                painter,
-                preview_pos,
-                viewport.zoom,
-                &preview_component,
-                symbol,
-                preview_stroke,
-            );
+            if let Some(symbol) = symbol_context.pending_library_symbol() {
+                draw_resolved_symbol(
+                    painter,
+                    preview_pos,
+                    viewport.zoom,
+                    &preview_component,
+                    symbol,
+                    preview_stroke,
+                );
+            } else if let Some((library, filename, width, height)) = symbol_library
+                .and_then(|library| compatible_builtin_xspice_asset(&preview_component, library))
+                && let Some((symbol, adjusted_rotation)) =
+                    library.get_asset_with_rotation(filename, preview_rotation_degrees)
+            {
+                draw_symbol_with_dimensions(
+                    painter,
+                    symbol,
+                    width,
+                    height,
+                    preview_pos,
+                    viewport.zoom,
+                    adjusted_rotation,
+                    preview_component.mirror_h,
+                    preview_component.mirror_v,
+                    preview_stroke,
+                );
+            } else {
+                draw_cell_instance_symbol(
+                    painter,
+                    preview_pos,
+                    viewport.zoom,
+                    &preview_component,
+                    preview_stroke,
+                );
+            }
             return;
         }
 
@@ -1151,6 +1187,37 @@ pub(super) fn draw_shelf_drag_preview(
             );
             return;
         }
+        let component = Component::new(0, ComponentType::CellInstance, grid_pos)
+            .with_rotation(rotation)
+            .with_mirror_h(mirror_h)
+            .with_library_cell(binding.clone());
+        if let Some((library, filename, width, height)) =
+            symbol_library.and_then(|library| compatible_builtin_xspice_asset(&component, library))
+            && let Some((symbol, adjusted_rotation)) =
+                library.get_asset_with_rotation(filename, rotation_degrees)
+        {
+            draw_symbol_with_dimensions(
+                painter,
+                symbol,
+                width,
+                height,
+                preview_pos,
+                viewport.zoom,
+                adjusted_rotation,
+                mirror_h,
+                false,
+                preview_stroke,
+            );
+        } else {
+            draw_cell_instance_symbol(
+                painter,
+                preview_pos,
+                viewport.zoom,
+                &component,
+                preview_stroke,
+            );
+        }
+        return;
     }
 
     let component_type = payload.component_type();

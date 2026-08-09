@@ -12,5 +12,5 @@ mod render;
 mod types;
 
 pub use self::library::SymbolLibrary;
-pub use self::render::{draw_baked, draw_symbol};
-pub use self::types::PathCommand;
+pub use self::render::{draw_baked, draw_symbol, draw_symbol_with_dimensions};
+pub use self::types::{PathCommand, Symbol};

@@ -109,6 +109,8 @@ pub enum ComponentType {
     /// Current-controlled switch — senses the current through a named
     /// V source (SPICE prefix: W)
     ISwitch,
+    /// Expression-controlled two-terminal switch (SPICE prefix: S)
+    GenericSwitch,
     /// Lossless transmission line (SPICE prefix: T)
     TransmissionLine,
     /// Lossy transmission line bound to an LTRA or TXL model
@@ -173,7 +175,7 @@ impl ComponentType {
     /// Exhaustive component-family inventory used by schema, editor, and
     /// netlist contract tests. Adding a new enum variant must update this
     /// list, making missing commercial editor coverage visible immediately.
-    pub const ALL: [Self; 73] = [
+    pub const ALL: [Self; 74] = [
         Self::Resistor,
         Self::Capacitor,
         Self::Inductor,
@@ -220,6 +222,7 @@ impl ComponentType {
         Self::BehavioralSource,
         Self::VSwitch,
         Self::ISwitch,
+        Self::GenericSwitch,
         Self::TransmissionLine,
         Self::LossyTransmissionLine,
         Self::CoupledTransmissionLine,

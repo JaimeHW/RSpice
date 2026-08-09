@@ -27,6 +27,21 @@ pub(super) fn component_panel(
     };
     let evidence = component_model_evidence(&app.state, &component);
     let editable = !app.state.schematic_edit_read_only();
+    let builtin_descriptor = component
+        .library_cell
+        .as_ref()
+        .filter(|binding| binding.is_builtin_xspice())
+        .and_then(|binding| crate::state::validate_builtin_xspice_binding(binding).ok());
+    let builtin_model = component
+        .library_cell
+        .as_ref()
+        .and_then(|binding| binding.builtin_xspice.as_ref())
+        .map(|contract| contract.model_type.as_str());
+    let generated_descriptor = component
+        .library_cell
+        .as_ref()
+        .filter(|binding| binding.is_generated_veriloga())
+        .and_then(|binding| crate::state::validate_generated_veriloga_binding(binding).ok());
 
     hero(
         ui,
@@ -38,12 +53,24 @@ pub(super) fn component_panel(
                 component.name,
                 component_occurrence_path(&app.state, &component)
             ),
-            title: if component.value.trim().is_empty() {
+            title: if let Some(descriptor) = builtin_descriptor {
+                descriptor.display_name.to_owned()
+            } else if let Some(descriptor) = generated_descriptor {
+                descriptor.model_name.to_owned()
+            } else if component.value.trim().is_empty() {
                 component.kind.display_name().to_owned()
             } else {
                 component.value.clone()
             },
-            subtitle: component.kind.display_name().to_owned(),
+            subtitle: builtin_model.map_or_else(
+                || {
+                    generated_descriptor.map_or_else(
+                        || component.kind.display_name().to_owned(),
+                        |descriptor| format!("Generated Verilog-A · {}", descriptor.module_name),
+                    )
+                },
+                |model| format!("Built-in XSPICE · {model}"),
+            ),
             statuses: vec![
                 (
                     evidence.status.clone(),
@@ -103,7 +130,23 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
     }
     properties.on_disabled_hover_text("the active document is read-only");
     let instance_rejection = edit_row(ui, app, component, InlineEditField::Instance, "Instance");
-    let value_rejection = edit_row(ui, app, component, InlineEditField::Value, "Value");
+    let value_rejection = if let Some(contract) = component
+        .library_cell
+        .as_ref()
+        .and_then(|binding| binding.builtin_xspice.as_ref())
+    {
+        property_row(ui, "Executable model", &contract.model_type);
+        None
+    } else if let Some(contract) = component
+        .library_cell
+        .as_ref()
+        .and_then(|binding| binding.generated_veriloga.as_ref())
+    {
+        property_row(ui, "Executable model", &contract.model_name);
+        None
+    } else {
+        edit_row(ui, app, component, InlineEditField::Value, "Value")
+    };
     let library_cell = component.library_cell.as_ref().map_or_else(
         || format!("primitives/{}", component.kind.display_name()),
         |binding| format!("{}/{}", binding.library, binding.cell),
@@ -534,14 +577,28 @@ pub(super) fn parameters_section(
         "inherit · {} °C",
         app.state.sim_setup.reference_pvt.temperature_celsius
     );
-    let mut rejection = edit_row_with_hint(
-        ui,
-        app,
-        component,
-        InlineEditField::Parameter(TEMPERATURE_PARAM.to_owned()),
-        "Temperature",
-        &inherited,
-    );
+    let supports_temperature = component
+        .library_cell
+        .as_ref()
+        .filter(|binding| binding.is_executable_builtin())
+        .is_none_or(|binding| {
+            binding
+                .parameter_order
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(TEMPERATURE_PARAM))
+        });
+    let mut rejection = supports_temperature
+        .then(|| {
+            edit_row_with_hint(
+                ui,
+                app,
+                component,
+                InlineEditField::Parameter(TEMPERATURE_PARAM.to_owned()),
+                "Temperature",
+                &inherited,
+            )
+        })
+        .flatten();
 
     // Every parameter declared by the authoritative family sheet is present
     // even on a freshly placed instance whose durable parameter string is
@@ -611,7 +668,9 @@ pub(super) fn inline_parameter_contract(
     let primary = crate::properties::property_bridge::get_primary_property_name(component.kind);
     let mut rows = Vec::new();
     let mut seen = HashSet::new();
-    if let Some(sheet) = state.property_registry.get(component.kind) {
+    if let Ok(Some(sheet)) =
+        crate::workbench::app::authoritative_component_property_sheet(state, component)
+    {
         for definition in sheet.iter().filter(|definition| {
             definition.display_mode != DisplayMode::Hidden
                 && definition.name != "name"

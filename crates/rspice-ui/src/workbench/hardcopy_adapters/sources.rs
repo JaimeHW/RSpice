@@ -1684,6 +1684,11 @@ fn resolve_component_symbol(
             reason: "cell instance has no library/cell/view binding".to_owned(),
         }
     })?;
+    if binding.is_executable_builtin() {
+        // Compiled catalog devices are not authored project masters. Preserve
+        // the instance for deterministic catalog/fallback rendering.
+        return Ok((None, None));
+    }
     let resolver = resolver.ok_or_else(|| HardcopySourceError::UnresolvedCellSymbol {
         component_id: component.id,
         reason: "no symbol resolver was supplied for the active project snapshot".to_owned(),

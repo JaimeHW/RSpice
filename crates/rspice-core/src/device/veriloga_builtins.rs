@@ -42,6 +42,34 @@ pub use rspice_veriloga_runtime::{
     GeneratedVerilogARollbackState, Value,
 };
 
+/// Exact catalog contracts compiled into this build.
+///
+/// An empty slice means no generated-model feature was selected; callers must
+/// not present models that the running engine cannot instantiate.
+#[cfg(feature = "veriloga-builtins-base")]
+pub fn generated_veriloga_model_descriptors() -> &'static [GeneratedVerilogAModelDescriptor] {
+    builtins::builtin_descriptors()
+}
+
+#[cfg(not(feature = "veriloga-builtins-base"))]
+pub fn generated_veriloga_model_descriptors() -> &'static [GeneratedVerilogAModelDescriptor] {
+    &[]
+}
+
+#[cfg(feature = "veriloga-builtins-base")]
+pub fn generated_veriloga_model_descriptor(
+    model_name: &str,
+) -> Option<&'static GeneratedVerilogAModelDescriptor> {
+    builtins::descriptor(model_name)
+}
+
+#[cfg(not(feature = "veriloga-builtins-base"))]
+pub fn generated_veriloga_model_descriptor(
+    _model_name: &str,
+) -> Option<&'static GeneratedVerilogAModelDescriptor> {
+    None
+}
+
 #[cfg(feature = "veriloga-builtins-base")]
 #[derive(Clone)]
 pub struct BuiltinVerilogAInstance {
@@ -239,6 +267,23 @@ impl BuiltinVerilogADevices {
                 .iter()
                 .map(|device| device.kind.capture_rollback_state()),
         );
+    }
+
+    #[inline]
+    pub(crate) fn capture_rollback_state_into(
+        &self,
+        rollback: &mut BuiltinVerilogADevicesRollback,
+    ) {
+        if rollback.states.len() != self.devices.len() {
+            *rollback = self.capture_rollback_state();
+            return;
+        }
+
+        for (state, device) in rollback.states.iter_mut().zip(&self.devices) {
+            let captured = device.kind.capture_rollback_state();
+            state.values.clone_from(&captured.values);
+            state.flags.clone_from(&captured.flags);
+        }
     }
 
     #[inline]

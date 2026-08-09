@@ -240,8 +240,8 @@ fn project_cells(schematic: &SchematicState) -> Vec<(String, String)> {
         let Some(binding) = component.library_cell.as_ref() else {
             continue;
         };
-        if binding.source_path.is_some() {
-            continue; // file-backed: handled by .include/.VERILOGA
+        if binding.source_path.is_some() || binding.is_executable_builtin() {
+            continue; // file-backed or executable built-in: not a project .SUBCKT
         }
         let key = format!(
             "{}/{}",
@@ -758,6 +758,71 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(source_path);
+    }
+
+    #[test]
+    fn configured_builtin_xspice_is_a_valid_executable_leaf() {
+        let mut workspace = ProjectWorkspace::default();
+        let mut libraries = LibraryManager::default();
+        workspace.ensure_library_model(&mut libraries);
+        let descriptor = crate::state::engine_only_xspice_devices()
+            .iter()
+            .find(|descriptor| descriptor.model_type == "astate")
+            .expect("astate catalog descriptor");
+        let binding = crate::state::builtin_xspice_library_binding(descriptor)
+            .expect("astate placement binding");
+        let top = workspace
+            .schematic_buffers
+            .get_mut(&CellViewRef::default_top().key())
+            .expect("top schematic");
+        top.components.clear();
+        top.add_library_cell_component(Point::new(100, 100), binding.clone());
+        assert_eq!(top.components[0].name, "A1");
+
+        workspace
+            .configuration_sets
+            .create(ConfigurationSetDefinition {
+                name: "Built-in code model".to_owned(),
+                root: CellViewRef::default_top(),
+                dut_path: "/top/A1".to_owned(),
+                executable_view_policy: vec!["schematic".to_owned(), "spice".to_owned()],
+                stop_views: vec!["spice".to_owned()],
+                unresolved_policy: UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: Vec::new(),
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "Catalog test".to_owned(),
+            })
+            .expect("configuration creates");
+
+        let active = workspace.active_view.clone();
+        let top = workspace
+            .schematic_buffers
+            .get(&CellViewRef::default_top().key())
+            .expect("top schematic")
+            .clone();
+        let projection = workspace
+            .configuration_execution_projection(&libraries, &active, &top)
+            .expect("built-in resolves under configuration");
+        let execution = projection
+            .plan()
+            .and_then(|plan| plan.binding("/top/A1"))
+            .expect("exact built-in execution binding");
+        assert_eq!(execution.resolved_view_type(), ViewType::Custom);
+        assert_eq!(execution.materialized_binding(), Some(&binding));
+        assert!(execution.stop_boundary());
+
+        let hierarchy = HierarchySource::from_execution_projection(&libraries, &projection);
+        let result = generate_netlist_hierarchical(
+            projection.root_schematic().expect("root schematic"),
+            &[],
+            &hierarchy,
+        );
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+        assert!(result.netlist.contains(".MODEL a1_model astate"));
+        assert!(result.netlist.lines().any(|line| line.starts_with("A1 ")));
+        rspice_core::Netlist::parse(&result.netlist).expect("configured built-in deck parses");
     }
 
     #[test]

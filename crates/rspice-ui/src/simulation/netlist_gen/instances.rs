@@ -39,6 +39,7 @@ impl<'a> NetlistGenerator<'a> {
             .iter()
             .map(|(_, pos)| self.get_node_name(*pos))
             .collect();
+        let terminal_points = terminals.iter().map(|(_, pos)| *pos).collect::<Vec<_>>();
         let instance_name = self.instance_name(component);
 
         match component.kind {
@@ -85,58 +86,25 @@ impl<'a> NetlistGenerator<'a> {
                 Some(format!("{} {} {} {}", instance_name, nodes, value, model))
             }
 
-            // Two-terminal voltage sources: V name node+ node- value [params]
-            // Spectre format: V1 net1 0 DC 5 acmag=1 acphase=0
-            ComponentType::VoltageSource | ComponentType::VoltageSourceAc => {
-                let nodes = self.format_nodes(&node_names, 2);
-                let source_value = self.format_source_value(component);
-                let runtime_params = if component.kind == ComponentType::VoltageSourceAc {
-                    self.filter_component_params(&component.params, &["acphase", "phase"])
-                } else {
-                    component.params.clone()
-                };
-                let params = self.format_params(&runtime_params);
-                Some(format!(
-                    "{} {} {}{}",
-                    instance_name, nodes, source_value, params
-                ))
-            }
-            // Voltage sources with positional params (SIN, PULSE, etc.) - no extra params needed
-            ComponentType::VoltageSourcePulse
+            // Independent source properties are editor semantics, not arbitrary
+            // instance assignments.  Lower AC excitation and parasitics to
+            // native cards and reject unsupported PAC/XF data before a deck can
+            // reach the simulator.
+            ComponentType::VoltageSource
+            | ComponentType::VoltageSourceAc
+            | ComponentType::VoltageSourcePulse
             | ComponentType::VoltageSourceSin
             | ComponentType::VoltageSourcePwl
             | ComponentType::VoltageSourceExp
-            | ComponentType::VoltageSourceSffm => {
-                let nodes = self.format_nodes(&node_names, 2);
-                let source_value = self.format_source_value(component);
-                Some(format!("{} {} {}", instance_name, nodes, source_value))
-            }
-
-            // Two-terminal current sources: I name node+ node- value [params]
-            // Spectre format: I1 net1 0 DC 1m acmag=1
-            ComponentType::CurrentSource | ComponentType::CurrentSourceAc => {
-                let nodes = self.format_nodes(&node_names, 2);
-                let source_value = self.format_source_value(component);
-                let runtime_params = if component.kind == ComponentType::CurrentSourceAc {
-                    self.filter_component_params(&component.params, &["acphase", "phase"])
-                } else {
-                    component.params.clone()
-                };
-                let params = self.format_params(&runtime_params);
-                Some(format!(
-                    "{} {} {}{}",
-                    instance_name, nodes, source_value, params
-                ))
-            }
-            // Current sources with positional params (SIN, PULSE, etc.) - no extra params needed
-            ComponentType::CurrentSourcePulse
+            | ComponentType::VoltageSourceSffm
+            | ComponentType::CurrentSource
+            | ComponentType::CurrentSourceAc
+            | ComponentType::CurrentSourcePulse
             | ComponentType::CurrentSourceSin
             | ComponentType::CurrentSourcePwl
             | ComponentType::CurrentSourceExp
             | ComponentType::CurrentSourceNoise => {
-                let nodes = self.format_nodes(&node_names, 2);
-                let source_value = self.format_source_value(component);
-                Some(format!("{} {} {}", instance_name, nodes, source_value))
+                self.generate_independent_source(component, &node_names, &instance_name)
             }
 
             // Behavioral source: B name node+ node- V=<expr> | I=<expr>
@@ -268,19 +236,12 @@ impl<'a> NetlistGenerator<'a> {
             }
 
             // Controlled sources (4 terminals: + - control+ control-)
-            // Spectre format: E1 out+ out- in+ in- gain [params]
-            ComponentType::Vcvs => {
-                let nodes = self.format_nodes(&node_names, 4);
-                let gain_with_params =
-                    self.format_value_with_params(&component.value, &component.params);
-                Some(format!("{} {} {}", instance_name, nodes, gain_with_params))
-            }
-
-            ComponentType::Vccs => {
-                let nodes = self.format_nodes(&node_names, 4);
-                let gain_with_params =
-                    self.format_value_with_params(&component.value, &component.params);
-                Some(format!("{} {} {}", instance_name, nodes, gain_with_params))
+            // Linear E/G cards do not accept arbitrary instance assignments.
+            // Lower the editor's multiplier, polynomial, and output limits to
+            // an exact linear expression or a behavioral source instead of
+            // appending invalid `m=`, `poly=`, `vmax=`, ... tokens.
+            ComponentType::Vcvs | ComponentType::Vccs => {
+                self.generate_voltage_controlled_source(component, &node_names, &instance_name)
             }
 
             // Current-controlled sources: SPICE H/F take a controlling
@@ -328,7 +289,7 @@ impl<'a> NetlistGenerator<'a> {
                 let upper = params.get(upper_key).map(String::as_str);
                 let lower = params.get(lower_key).map(String::as_str);
 
-                if upper.is_some() || lower.is_some() {
+                if polynomial.is_some() || upper.is_some() || lower.is_some() {
                     let current = format!("i({sense_name})");
                     let mut expression = if let Some(coefficients) = polynomial {
                         polynomial_expression(coefficients, &current)
@@ -338,11 +299,13 @@ impl<'a> NetlistGenerator<'a> {
                     if let Some(multiplier) = multiplier {
                         expression = format!("({multiplier})*({expression})");
                     }
-                    expression = format!(
-                        "limit({expression},{},{})",
-                        lower.unwrap_or("-1e308"),
-                        upper.unwrap_or("1e308")
-                    );
+                    if upper.is_some() || lower.is_some() {
+                        expression = format!(
+                            "limit({expression},{},{})",
+                            lower.unwrap_or("-1e308"),
+                            upper.unwrap_or("1e308")
+                        );
+                    }
                     let behavioral_name = format!(
                         "B{}",
                         instance_name
@@ -357,18 +320,6 @@ impl<'a> NetlistGenerator<'a> {
                     Some(format!(
                         "{} {} {} {}={{{}}}",
                         behavioral_name, node_names[0], node_names[1], quantity, expression
-                    ))
-                } else if let Some(coefficients) = polynomial {
-                    let multiplier_suffix =
-                        multiplier.map_or_else(String::new, |value| format!(" M={value}"));
-                    Some(format!(
-                        "{} {} {} POLY(1) {} {}{}",
-                        instance_name,
-                        node_names[0],
-                        node_names[1],
-                        sense_name,
-                        coefficients,
-                        multiplier_suffix
                     ))
                 } else {
                     let gain = multiplier
@@ -388,6 +339,48 @@ impl<'a> NetlistGenerator<'a> {
                 let (explicit_model, _) = Self::extract_model_override(component);
                 let model = self.get_switch_model(component, explicit_model.as_deref());
                 Some(format!("{} {} {}", instance_name, nodes, model))
+            }
+
+            // Xyce expression-controlled generic switch:
+            // S name n+ n- model [ON|OFF] CONTROL={expr}.
+            ComponentType::GenericSwitch => {
+                let nodes = self.format_nodes(&node_names, 2);
+                let expression = component.value.trim();
+                if expression.is_empty() || expression.chars().any(char::is_control) {
+                    self.errors.push(format!(
+                        "Expression switch '{}' requires a single-line control expression",
+                        component.name
+                    ));
+                    return None;
+                }
+                let expression = expression
+                    .strip_prefix('{')
+                    .and_then(|inner| inner.strip_suffix('}'))
+                    .unwrap_or(expression)
+                    .trim();
+                if expression.is_empty() {
+                    self.errors.push(format!(
+                        "Expression switch '{}' has an empty control expression",
+                        component.name
+                    ));
+                    return None;
+                }
+                let params = crate::state::parse_params_string(&component.params);
+                let explicit_model = params
+                    .get("model")
+                    .map(String::as_str)
+                    .map(str::trim)
+                    .filter(|model| !model.is_empty());
+                let model = self.get_switch_model(component, explicit_model);
+                let state = match params.get("state").map(String::as_str) {
+                    Some("on") => " ON",
+                    Some("off") => " OFF",
+                    _ => "",
+                };
+                Some(format!(
+                    "{} {} {}{} CONTROL={{{}}}",
+                    instance_name, nodes, model, state, expression
+                ))
             }
 
             // Current-controlled switch: W name n+ n- <vsrc> model [ON|OFF].
@@ -506,6 +499,56 @@ impl<'a> NetlistGenerator<'a> {
                         return None;
                     }
                 };
+
+                if binding.is_builtin_xspice() {
+                    return self.generate_builtin_xspice_instance(
+                        component,
+                        &binding,
+                        &node_names,
+                        &terminal_points,
+                        &instance_name,
+                    );
+                }
+                if binding.is_generated_veriloga() {
+                    let descriptor =
+                        match crate::state::validate_generated_veriloga_binding(&binding) {
+                            Ok(descriptor) => descriptor,
+                            Err(error) => {
+                                self.errors.push(format!(
+                                    "Generated Verilog-A instance '{}' is not executable: {error}",
+                                    component.name
+                                ));
+                                return None;
+                            }
+                        };
+                    if node_names.len() != descriptor.terminals.len() {
+                        self.errors.push(format!(
+                            "Generated Verilog-A instance '{}' expects {} terminals for model '{}', found {}",
+                            component.name,
+                            descriptor.terminals.len(),
+                            descriptor.model_name,
+                            node_names.len()
+                        ));
+                        return None;
+                    }
+                    let params = match model_bound_instance_params(&binding, &component.params) {
+                        Ok(params) => params,
+                        Err(error) => {
+                            self.errors.push(format!(
+                                "Generated Verilog-A instance '{}' has invalid parameters: {error}",
+                                component.name
+                            ));
+                            return None;
+                        }
+                    };
+                    return Some(format!(
+                        "{} {} {}{}",
+                        instance_name,
+                        node_names.join(" "),
+                        descriptor.model_name,
+                        params
+                    ));
+                }
 
                 // Project cells (no source file) resolve their interface
                 // through the workspace hierarchy: the master's port order
@@ -626,23 +669,569 @@ impl<'a> NetlistGenerator<'a> {
                 }
             }
 
-            // XSPICE components: A name <shaped ports> model, plus the
-            // code-model .MODEL card. Port shaping and card emission live
-            // in netlist_gen::xspice.
-            _ if component.kind.is_xspice() => {
+            // Legacy enum-backed XSPICE components: A name <shaped ports>
+            // model, plus the code-model .MODEL card.  This list is
+            // deliberately exhaustive so a new enum variant cannot fall into
+            // guessed generic-card emission.
+            ComponentType::XspiceGain
+            | ComponentType::XspiceSummer
+            | ComponentType::XspiceMultiplier
+            | ComponentType::XspiceDivider
+            | ComponentType::XspiceLimiter
+            | ComponentType::XspiceIntegrator
+            | ComponentType::XspiceDifferentiator
+            | ComponentType::XspiceInverter
+            | ComponentType::XspiceBuffer
+            | ComponentType::XspiceAndGate
+            | ComponentType::XspiceOrGate
+            | ComponentType::XspiceNandGate
+            | ComponentType::XspiceNorGate
+            | ComponentType::XspiceXorGate
+            | ComponentType::XspiceTristate
+            | ComponentType::XspiceDFlipFlop
+            | ComponentType::XspiceJkFlipFlop
+            | ComponentType::XspiceSrLatch
+            | ComponentType::XspiceAdcBridge
+            | ComponentType::XspiceDacBridge => {
                 self.generate_xspice_instance(component, &node_names, &instance_name)
-            }
-
-            // Catch-all for unhandled types
-            // Include params for forward compatibility
-            _ => {
-                let nodes = node_names.join(" ");
-                let value_with_params =
-                    self.format_value_with_params(&component.value, &component.params);
-                Some(format!("{} {} {}", instance_name, nodes, value_with_params))
             }
         }
     }
+
+    fn generate_voltage_controlled_source(
+        &mut self,
+        component: &Component,
+        node_names: &[String],
+        instance_name: &str,
+    ) -> Option<String> {
+        if node_names.len() < 4 {
+            self.errors.push(format!(
+                "{} '{}' is missing control terminals",
+                component.kind.display_name(),
+                component.name
+            ));
+            return None;
+        }
+
+        let params = crate::state::parse_params_string(&component.params);
+        let ac_magnitude_key = if component.kind == ComponentType::Vcvs {
+            "ac_gain"
+        } else {
+            "ac_gm"
+        };
+        let authored_ac_magnitude = params
+            .get(ac_magnitude_key)
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty() && !matches!(*value, "0" | "0.0"));
+        let authored_ac_phase = params
+            .get("ac_phase")
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty() && !matches!(*value, "0" | "0.0"));
+        if authored_ac_magnitude.is_some() || authored_ac_phase.is_some() {
+            self.errors.push(format!(
+                "{} '{}' requests a separate AC gain/phase, but the RSpice controlled-source engine does not yet support AC overrides; clear those fields before simulation",
+                component.kind.display_name(),
+                component.name
+            ));
+            return None;
+        }
+
+        let gain = self.format_value(&component.value);
+        let multiplier = params
+            .get("m")
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty() && *value != "1");
+        let polynomial = params
+            .get("poly")
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty());
+        let (upper_key, lower_key) = if component.kind == ComponentType::Vcvs {
+            ("vmax", "vmin")
+        } else {
+            ("imax", "imin")
+        };
+        let upper = params.get(upper_key).map(String::as_str);
+        let lower = params.get(lower_key).map(String::as_str);
+
+        if polynomial.is_some() || upper.is_some() || lower.is_some() {
+            let control = format!("v({},{})", node_names[2], node_names[3]);
+            let mut expression = if let Some(coefficients) = polynomial {
+                polynomial_expression(coefficients, &control)
+            } else {
+                format!("({gain})*({control})")
+            };
+            if let Some(multiplier) = multiplier {
+                expression = format!("({multiplier})*({expression})");
+            }
+            if upper.is_some() || lower.is_some() {
+                expression = format!(
+                    "limit({expression},{},{})",
+                    lower.unwrap_or("-1e308"),
+                    upper.unwrap_or("1e308")
+                );
+            }
+            let behavioral_name = behavioral_controlled_source_name(component, instance_name);
+            let quantity = if component.kind == ComponentType::Vcvs {
+                "V"
+            } else {
+                "I"
+            };
+            return Some(format!(
+                "{} {} {} {}={{{}}}",
+                behavioral_name, node_names[0], node_names[1], quantity, expression
+            ));
+        }
+
+        let effective_gain = multiplier
+            .map(|multiplier| format!("{{({gain})*({multiplier})}}"))
+            .unwrap_or(gain);
+        Some(format!(
+            "{} {} {} {} {} {}",
+            instance_name,
+            node_names[0],
+            node_names[1],
+            node_names[2],
+            node_names[3],
+            effective_gain
+        ))
+    }
+
+    fn generate_independent_source(
+        &mut self,
+        component: &Component,
+        node_names: &[String],
+        instance_name: &str,
+    ) -> Option<String> {
+        if node_names.len() < 2 {
+            self.errors.push(format!(
+                "{} '{}' is missing a terminal",
+                component.kind.display_name(),
+                component.name
+            ));
+            return None;
+        }
+
+        let params = crate::state::parse_params_string(&component.params);
+        let allowed = independent_source_parameter_names(component.kind);
+        let mut unknown = params
+            .keys()
+            .filter(|name| !allowed.contains(&name.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        unknown.sort();
+        if !unknown.is_empty() {
+            self.errors.push(format!(
+                "{} '{}' has unsupported source parameter(s): {}",
+                component.kind.display_name(),
+                component.name,
+                unknown.join(", ")
+            ));
+            return None;
+        }
+
+        let unsupported_analysis_parameters = ["xfmag", "pacmag", "pacdbm", "pacphase"]
+            .into_iter()
+            .filter(|name| {
+                params
+                    .get(*name)
+                    .is_some_and(|value| source_analysis_parameter_is_active(name, value))
+            })
+            .collect::<Vec<_>>();
+        if !unsupported_analysis_parameters.is_empty() {
+            self.errors.push(format!(
+                "{} '{}' configures {}, but source-level XF/PAC excitation is not yet connected to the RSpice analysis engine",
+                component.kind.display_name(),
+                component.name,
+                unsupported_analysis_parameters.join(", ")
+            ));
+            return None;
+        }
+
+        let is_voltage = matches!(
+            component.kind,
+            ComponentType::VoltageSource
+                | ComponentType::VoltageSourceAc
+                | ComponentType::VoltageSourcePulse
+                | ComponentType::VoltageSourceSin
+                | ComponentType::VoltageSourcePwl
+                | ComponentType::VoltageSourceExp
+                | ComponentType::VoltageSourceSffm
+        );
+        let noise_suffix = params
+            .get("isnoisy")
+            .is_some_and(|value| source_boolean_is_false(value))
+            .then_some(" NOISY=0")
+            .unwrap_or("");
+
+        let mut positive_node = node_names[0].as_str();
+        let internal_node;
+        if is_voltage
+            && let Some(series_resistance) = params
+                .get("rs")
+                .map(String::as_str)
+                .filter(|value| !source_value_is_zero_or_blank(value))
+        {
+            internal_node = format!("__rspice_source_{}_internal", component.id);
+            let resistance_name = format!("R__RSPICE_SOURCE_{}_RS", component.id);
+            self.lines.push(format!(
+                "{} {} {} {}{}",
+                resistance_name,
+                node_names[0],
+                internal_node,
+                series_resistance.trim(),
+                noise_suffix
+            ));
+            positive_node = &internal_node;
+        }
+
+        if let Some(parallel_resistance) = params
+            .get("rp")
+            .map(String::as_str)
+            .filter(|value| !value.trim().is_empty())
+        {
+            if source_value_is_zero_or_blank(parallel_resistance) {
+                self.errors.push(format!(
+                    "{} '{}' parallel resistance must be positive or blank",
+                    component.kind.display_name(),
+                    component.name
+                ));
+                return None;
+            }
+            self.lines.push(format!(
+                "R__RSPICE_SOURCE_{}_RP {} {} {}{}",
+                component.id,
+                node_names[0],
+                node_names[1],
+                parallel_resistance.trim(),
+                noise_suffix
+            ));
+        }
+        if let Some(parallel_capacitance) = params
+            .get("cpar")
+            .map(String::as_str)
+            .filter(|value| !source_value_is_zero_or_blank(value))
+        {
+            self.lines.push(format!(
+                "C__RSPICE_SOURCE_{}_CPAR {} {} {}",
+                component.id,
+                node_names[0],
+                node_names[1],
+                parallel_capacitance.trim()
+            ));
+        }
+
+        let mut specification = self.format_source_value(component);
+        if !matches!(
+            component.kind,
+            ComponentType::VoltageSourceAc | ComponentType::CurrentSourceAc
+        ) && (params.contains_key("ac") || params.contains_key("acphase"))
+        {
+            let magnitude = params
+                .get("ac")
+                .map(String::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("0");
+            let phase = params
+                .get("acphase")
+                .map(String::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("0");
+            specification.push_str(&format!(" AC {} {}", magnitude.trim(), phase.trim()));
+        }
+
+        Some(format!(
+            "{} {} {} {}",
+            instance_name, positive_node, node_names[1], specification
+        ))
+    }
+}
+
+fn independent_source_parameter_names(kind: ComponentType) -> &'static [&'static str] {
+    const COMMON_VOLTAGE: &[&str] = &[
+        "ac",
+        "acphase",
+        "xfmag",
+        "pacmag",
+        "pacdbm",
+        "pacphase",
+        "rs",
+        "rp",
+        "cpar",
+        "isnoisy",
+        "model_library",
+        "model_corner",
+    ];
+    const COMMON_CURRENT: &[&str] = &[
+        "ac",
+        "acphase",
+        "xfmag",
+        "pacmag",
+        "pacdbm",
+        "pacphase",
+        "rp",
+        "cpar",
+        "isnoisy",
+        "model_library",
+        "model_corner",
+    ];
+    match kind {
+        ComponentType::VoltageSource => COMMON_VOLTAGE,
+        ComponentType::VoltageSourceAc => &[
+            "dc",
+            "ac",
+            "acphase",
+            "phase",
+            "xfmag",
+            "pacmag",
+            "pacdbm",
+            "pacphase",
+            "rs",
+            "rp",
+            "cpar",
+            "isnoisy",
+            "model_library",
+            "model_corner",
+        ],
+        ComponentType::VoltageSourcePulse => &[
+            "v1",
+            "v2",
+            "td",
+            "tr",
+            "tf",
+            "pw",
+            "per",
+            "period",
+            "ac",
+            "acphase",
+            "xfmag",
+            "pacmag",
+            "pacdbm",
+            "pacphase",
+            "rs",
+            "rp",
+            "cpar",
+            "isnoisy",
+            "model_library",
+            "model_corner",
+        ],
+        ComponentType::VoltageSourceSin => &[
+            "vo",
+            "va",
+            "freq",
+            "td",
+            "theta",
+            "phase",
+            "ac",
+            "acphase",
+            "xfmag",
+            "pacmag",
+            "pacdbm",
+            "pacphase",
+            "rs",
+            "rp",
+            "cpar",
+            "isnoisy",
+            "model_library",
+            "model_corner",
+        ],
+        ComponentType::VoltageSourcePwl => &[
+            "pwl_data",
+            "td",
+            "repeat",
+            "ac",
+            "acphase",
+            "xfmag",
+            "pacmag",
+            "pacdbm",
+            "pacphase",
+            "rs",
+            "rp",
+            "cpar",
+            "isnoisy",
+            "model_library",
+            "model_corner",
+        ],
+        ComponentType::VoltageSourceExp => &[
+            "v1",
+            "v2",
+            "td1",
+            "tau1",
+            "td2",
+            "tau2",
+            "ac",
+            "acphase",
+            "xfmag",
+            "pacmag",
+            "pacdbm",
+            "pacphase",
+            "rs",
+            "rp",
+            "cpar",
+            "isnoisy",
+            "model_library",
+            "model_corner",
+        ],
+        ComponentType::VoltageSourceSffm => &[
+            "vo",
+            "va",
+            "fc",
+            "mdi",
+            "fs",
+            "ac",
+            "acphase",
+            "xfmag",
+            "pacmag",
+            "pacdbm",
+            "pacphase",
+            "rs",
+            "rp",
+            "cpar",
+            "isnoisy",
+            "model_library",
+            "model_corner",
+        ],
+        ComponentType::CurrentSource => COMMON_CURRENT,
+        ComponentType::CurrentSourceAc => &[
+            "dc",
+            "ac",
+            "acphase",
+            "phase",
+            "xfmag",
+            "pacmag",
+            "pacdbm",
+            "pacphase",
+            "rp",
+            "cpar",
+            "isnoisy",
+            "model_library",
+            "model_corner",
+        ],
+        ComponentType::CurrentSourcePulse => &[
+            "i1",
+            "i2",
+            "td",
+            "tr",
+            "tf",
+            "pw",
+            "per",
+            "period",
+            "ac",
+            "acphase",
+            "xfmag",
+            "pacmag",
+            "pacdbm",
+            "pacphase",
+            "rp",
+            "cpar",
+            "isnoisy",
+            "model_library",
+            "model_corner",
+        ],
+        ComponentType::CurrentSourceSin => &[
+            "io",
+            "ia",
+            "freq",
+            "td",
+            "theta",
+            "phase",
+            "ac",
+            "acphase",
+            "xfmag",
+            "pacmag",
+            "pacdbm",
+            "pacphase",
+            "rp",
+            "cpar",
+            "isnoisy",
+            "model_library",
+            "model_corner",
+        ],
+        ComponentType::CurrentSourcePwl => &[
+            "pwl_data",
+            "td",
+            "repeat",
+            "ac",
+            "acphase",
+            "xfmag",
+            "pacmag",
+            "pacdbm",
+            "pacphase",
+            "rp",
+            "cpar",
+            "isnoisy",
+            "model_library",
+            "model_corner",
+        ],
+        ComponentType::CurrentSourceExp => &[
+            "i1",
+            "i2",
+            "td1",
+            "tau1",
+            "td2",
+            "tau2",
+            "ac",
+            "acphase",
+            "xfmag",
+            "pacmag",
+            "pacdbm",
+            "pacphase",
+            "rp",
+            "cpar",
+            "isnoisy",
+            "model_library",
+            "model_corner",
+        ],
+        ComponentType::CurrentSourceNoise => &[
+            "dc",
+            "na",
+            "nt",
+            "nalpha",
+            "namp",
+            "ac",
+            "acphase",
+            "xfmag",
+            "pacmag",
+            "pacdbm",
+            "pacphase",
+            "rp",
+            "cpar",
+            "isnoisy",
+            "model_library",
+            "model_corner",
+        ],
+        _ => &[],
+    }
+}
+
+fn source_analysis_parameter_is_active(name: &str, value: &str) -> bool {
+    if name == "pacdbm" {
+        !value.trim().is_empty()
+    } else {
+        !source_value_is_zero_or_blank(value)
+    }
+}
+
+fn source_value_is_zero_or_blank(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "" | "0" | "+0" | "-0" | "0.0" | "0v" | "0a" | "0f" | "0ohm" | "0Ω"
+    )
+}
+
+fn source_boolean_is_false(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "0" | "false" | "no" | "off"
+    )
+}
+
+fn behavioral_controlled_source_name(component: &Component, instance_name: &str) -> String {
+    format!(
+        "B{}",
+        instance_name
+            .strip_prefix(component.kind.spice_prefix())
+            .unwrap_or(instance_name)
+    )
 }
 
 fn polynomial_expression(coefficients: &str, variable: &str) -> String {
@@ -723,7 +1312,7 @@ fn render_model_bound_instance_template(
     Ok(rendered)
 }
 
-fn model_bound_instance_params(
+pub(super) fn model_bound_instance_params(
     binding: &crate::state::LibraryCellInstance,
     raw: &str,
 ) -> Result<String, String> {
@@ -779,6 +1368,51 @@ fn same_terminal_sequence(master_ports: &[String], placed_ports: &[String]) -> b
             .iter()
             .zip(placed_ports)
             .all(|(master, placed)| master.eq_ignore_ascii_case(placed))
+}
+
+#[cfg(all(test, feature = "generated-veriloga-catalog"))]
+mod generated_veriloga_netlist_tests {
+    use crate::simulation::netlist_gen::generate_netlist;
+    use crate::state::{
+        Component, ComponentType, Point, SchematicState, generated_veriloga_devices,
+        generated_veriloga_library_binding,
+    };
+    use rspice_core::engine::{Engine, SimulationConfig};
+    use rspice_core::netlist::Netlist;
+
+    #[test]
+    fn exact_generated_binding_netlists_and_routes_to_the_compiled_engine() {
+        let descriptor = generated_veriloga_devices()
+            .iter()
+            .find(|descriptor| descriptor.model_name.eq_ignore_ascii_case("r2_cmc"))
+            .expect("the shipped R2 CMC model is compiled");
+        let binding = generated_veriloga_library_binding(descriptor).expect("valid binding");
+        let component = Component::new(1, ComponentType::CellInstance, Point::origin())
+            .with_library_cell(binding)
+            .with_name_value("X1", descriptor.model_name);
+        let mut schematic = SchematicState::default();
+        schematic.components.push(component);
+
+        let generated = generate_netlist(&schematic);
+        assert!(generated.errors.is_empty(), "{:?}", generated.errors);
+        let instance_line = generated
+            .netlist
+            .lines()
+            .find(|line| line.starts_with("X1 "))
+            .expect("generated instance line");
+        assert_eq!(
+            instance_line.split_whitespace().count(),
+            descriptor.terminals.len() + 2,
+            "{instance_line}"
+        );
+        assert!(instance_line.ends_with(descriptor.model_name));
+
+        let parsed = Netlist::parse(&generated.netlist).expect("generated deck parses");
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&parsed)
+            .expect("generated deck builds");
+        assert!(circuit.has_generated_veriloga_devices());
+    }
 }
 
 #[cfg(test)]
@@ -877,5 +1511,187 @@ mod model_bound_template_tests {
             .with_name_value("M17", "nmos_18");
 
         assert_eq!(generator.instance_name(&component), "M17");
+    }
+}
+
+#[cfg(test)]
+mod controlled_source_lowering_tests {
+    use crate::simulation::netlist_gen::NetlistGenerator;
+    use crate::state::{Component, ComponentType, Point, SchematicState};
+
+    fn nodes() -> Vec<String> {
+        ["outp", "outn", "inp", "inn"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[test]
+    fn vcvs_multiplier_is_lowered_into_the_linear_gain_expression() {
+        let schematic = SchematicState::default();
+        let mut generator = NetlistGenerator::new(&schematic);
+        let mut component =
+            Component::new(1, ComponentType::Vcvs, Point::origin()).with_name_value("E1", "10");
+        component.params = "m=2".to_owned();
+
+        let line = generator
+            .generate_voltage_controlled_source(&component, &nodes(), "E1")
+            .expect("VCVS line");
+
+        assert_eq!(line, "E1 outp outn inp inn {(10)*(2)}");
+        assert!(generator.errors().is_empty());
+        rspice_core::netlist::parse_netlist(&format!("controlled\n{line}\n.end\n"))
+            .expect("lowered VCVS must parse");
+    }
+
+    #[test]
+    fn vcvs_polynomial_and_limits_lower_to_a_behavioral_voltage_source() {
+        let schematic = SchematicState::default();
+        let mut generator = NetlistGenerator::new(&schematic);
+        let mut component =
+            Component::new(1, ComponentType::Vcvs, Point::origin()).with_name_value("E7", "1");
+        component.params = "poly=\"1,2,3\" m=4 vmin=-5 vmax=5".to_owned();
+
+        let line = generator
+            .generate_voltage_controlled_source(&component, &nodes(), "E7")
+            .expect("behavioral VCVS line");
+
+        assert!(line.starts_with("B7 outp outn V={limit("), "{line}");
+        assert!(line.contains("v(inp,inn)"), "{line}");
+        assert!(line.contains("pow((v(inp,inn)),2)"), "{line}");
+        rspice_core::netlist::parse_netlist(&format!("controlled\n{line}\n.end\n"))
+            .expect("behavioral VCVS must parse");
+    }
+
+    #[test]
+    fn vccs_polynomial_lowers_to_a_behavioral_current_source() {
+        let schematic = SchematicState::default();
+        let mut generator = NetlistGenerator::new(&schematic);
+        let mut component =
+            Component::new(1, ComponentType::Vccs, Point::origin()).with_name_value("G3", "1m");
+        component.params = "poly=\"0,1m\"".to_owned();
+
+        let line = generator
+            .generate_voltage_controlled_source(&component, &nodes(), "G3")
+            .expect("behavioral VCCS line");
+
+        assert!(line.starts_with("B3 outp outn I={"), "{line}");
+        assert!(line.contains("v(inp,inn)"), "{line}");
+        rspice_core::netlist::parse_netlist(&format!("controlled\n{line}\n.end\n"))
+            .expect("behavioral VCCS must parse");
+    }
+
+    #[test]
+    fn unsupported_controlled_source_ac_override_fails_before_netlisting() {
+        let schematic = SchematicState::default();
+        let mut generator = NetlistGenerator::new(&schematic);
+        let mut component =
+            Component::new(1, ComponentType::Vcvs, Point::origin()).with_name_value("E1", "10");
+        component.params = "ac_gain=2 ac_phase=45".to_owned();
+
+        assert!(
+            generator
+                .generate_voltage_controlled_source(&component, &nodes(), "E1")
+                .is_none()
+        );
+        assert!(generator.errors().iter().any(|error| error.contains("AC")));
+    }
+}
+
+#[cfg(test)]
+mod independent_source_lowering_tests {
+    use crate::simulation::netlist_gen::NetlistGenerator;
+    use crate::state::{Component, ComponentType, Point, SchematicState};
+
+    fn nodes() -> Vec<String> {
+        vec!["source_p".to_owned(), "source_n".to_owned()]
+    }
+
+    fn assert_generated_cards_parse(generator: &NetlistGenerator<'_>, main: &str) {
+        let mut cards = generator.lines.clone();
+        cards.push(main.to_owned());
+        rspice_core::netlist::parse_netlist(&format!(
+            "independent source lowering\n{}\n.end\n",
+            cards.join("\n")
+        ))
+        .expect("lowered independent-source cards must parse");
+    }
+
+    #[test]
+    fn transient_voltage_source_preserves_ac_excitation_and_lowers_parasitics() {
+        let schematic = SchematicState::default();
+        let mut generator = NetlistGenerator::new(&schematic);
+        let mut component = Component::new(17, ComponentType::VoltageSourcePulse, Point::origin())
+            .with_name_value("V1", "0");
+        component.params =
+            "v2=5 pw=1u per=2u ac=2 acphase=90 rs=5 rp=1k cpar=1p isnoisy=false".to_owned();
+
+        let main = generator
+            .generate_independent_source(&component, &nodes(), "V1")
+            .expect("source line");
+
+        assert!(
+            main.starts_with("V1 __rspice_source_17_internal source_n PULSE("),
+            "{main}"
+        );
+        assert!(main.ends_with(" AC 2 90"), "{main}");
+        assert_eq!(generator.lines.len(), 3);
+        assert!(generator.lines[0].contains(" 5 NOISY=0"));
+        assert!(generator.lines[1].contains(" 1k NOISY=0"));
+        assert!(generator.lines[2].contains(" 1p"));
+        assert_generated_cards_parse(&generator, &main);
+    }
+
+    #[test]
+    fn explicit_ac_source_keeps_its_dc_operating_point() {
+        let schematic = SchematicState::default();
+        let mut generator = NetlistGenerator::new(&schematic);
+        let mut component = Component::new(2, ComponentType::CurrentSourceAc, Point::origin())
+            .with_name_value("I2", "3m");
+        component.params = "dc=1m acphase=-45".to_owned();
+
+        let main = generator
+            .generate_independent_source(&component, &nodes(), "I2")
+            .expect("source line");
+
+        assert_eq!(main, "I2 source_p source_n DC 1m AC 3m -45");
+        assert_generated_cards_parse(&generator, &main);
+    }
+
+    #[test]
+    fn source_level_pac_and_xf_fields_fail_before_netlisting() {
+        let schematic = SchematicState::default();
+        let mut generator = NetlistGenerator::new(&schematic);
+        let mut component = Component::new(1, ComponentType::VoltageSource, Point::origin())
+            .with_name_value("V1", "1");
+        component.params = "pacmag=1 pacphase=30".to_owned();
+
+        assert!(
+            generator
+                .generate_independent_source(&component, &nodes(), "V1")
+                .is_none()
+        );
+        assert!(generator.errors().iter().any(|error| error.contains("PAC")));
+    }
+
+    #[test]
+    fn unknown_source_assignments_fail_closed() {
+        let schematic = SchematicState::default();
+        let mut generator = NetlistGenerator::new(&schematic);
+        let mut component = Component::new(1, ComponentType::CurrentSource, Point::origin())
+            .with_name_value("I1", "1m");
+        component.params = "invented_parameter=7".to_owned();
+
+        assert!(
+            generator
+                .generate_independent_source(&component, &nodes(), "I1")
+                .is_none()
+        );
+        assert!(
+            generator
+                .errors()
+                .iter()
+                .any(|error| error.contains("invented_parameter"))
+        );
     }
 }

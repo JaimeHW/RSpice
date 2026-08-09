@@ -1,5 +1,6 @@
 //! Schematic object placement transactions.
 
+pub(in crate::workbench) mod builtin_xspice;
 pub(in crate::workbench) mod bus_tap;
 pub(in crate::workbench) mod design_note;
 pub(in crate::workbench) mod documentation_shape;

@@ -230,6 +230,10 @@ const CONTROLLED: &[ComponentPaletteEntry] = &[
         kind: ComponentType::ISwitch,
         label: "I-Switch (W)",
     },
+    ComponentPaletteEntry {
+        kind: ComponentType::GenericSwitch,
+        label: "Expression Switch (S)",
+    },
 ];
 
 const BEHAVIORAL: &[ComponentPaletteEntry] = &[

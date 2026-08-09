@@ -39,7 +39,10 @@ pub fn extract_drc_data_with_hierarchy_and_junctions(
             let Some(binding) = comp.library_cell.as_ref() else {
                 return Some(false);
             };
-            if binding.source_path.is_some() || binding.netlist_template.is_some() {
+            if binding.source_path.is_some()
+                || binding.netlist_template.is_some()
+                || binding.is_executable_builtin()
+            {
                 return Some(true);
             }
             if hierarchy.has_execution_plan() {

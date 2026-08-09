@@ -11,10 +11,10 @@ use crate::state::ComponentType;
 
 use super::error::SymbolError;
 use super::parser::parse_svg;
-use super::render::{BakedSymbol, bake_symbol};
+use super::render::{BakedSymbol, bake_symbol_with_dimensions};
 use super::types::Symbol;
 
-type BakedSymbolKey = (usize, i32, bool, bool);
+type BakedSymbolKey = (usize, u32, u32, i32, bool, bool);
 type BakedSymbolCache = RefCell<HashMap<BakedSymbolKey, Rc<BakedSymbol>>>;
 
 mod embedded_symbols {
@@ -72,6 +72,8 @@ impl SymbolLibrary {
     ) -> Rc<BakedSymbol> {
         let key = (
             symbol as *const Symbol as usize,
+            symbol.target_width.to_bits(),
+            symbol.target_height.to_bits(),
             rotation_degrees.rem_euclid(360),
             mirror_h,
             mirror_v,
@@ -79,9 +81,50 @@ impl SymbolLibrary {
         if let Some(hit) = self.baked.borrow().get(&key) {
             return Rc::clone(hit);
         }
-        let baked = Rc::new(bake_symbol(symbol, rotation_degrees, mirror_h, mirror_v));
+        let baked = Rc::new(bake_symbol_with_dimensions(
+            symbol,
+            symbol.target_width,
+            symbol.target_height,
+            rotation_degrees,
+            mirror_h,
+            mirror_v,
+        ));
         self.baked.borrow_mut().insert(key, Rc::clone(&baked));
         baked
+    }
+
+    /// Placement-sized baked geometry for an immutable embedded asset.
+    pub fn baked_asset(
+        &self,
+        filename: &str,
+        target_width: f32,
+        target_height: f32,
+        rotation_degrees: i32,
+        mirror_h: bool,
+        mirror_v: bool,
+    ) -> Option<Rc<BakedSymbol>> {
+        let symbol = self.get_asset(filename)?;
+        let key = (
+            symbol as *const Symbol as usize,
+            target_width.to_bits(),
+            target_height.to_bits(),
+            rotation_degrees.rem_euclid(360),
+            mirror_h,
+            mirror_v,
+        );
+        if let Some(hit) = self.baked.borrow().get(&key) {
+            return Some(Rc::clone(hit));
+        }
+        let baked = Rc::new(bake_symbol_with_dimensions(
+            symbol,
+            target_width,
+            target_height,
+            rotation_degrees,
+            mirror_h,
+            mirror_v,
+        ));
+        self.baked.borrow_mut().insert(key, Rc::clone(&baked));
+        Some(baked)
     }
 
     /// Load all embedded SVG symbols from the assets directory.
@@ -91,241 +134,20 @@ impl SymbolLibrary {
 
         library.embedded_assets = Self::load_all_embedded_assets()?;
 
-        // Map ComponentType to default SVG filename.
-        let default_mappings: &[(ComponentType, &str, &str)] = &[
-            (ComponentType::Resistor, "resistor.svg", "Resistor"),
-            (ComponentType::Capacitor, "cap_unpolarized.svg", "Capacitor"),
-            (ComponentType::Inductor, "inductor.svg", "Inductor"),
-            (
-                ComponentType::Transformer,
-                "transformer_symmetrical.svg",
-                "Transformer",
-            ),
-            (
-                ComponentType::SaturableInductor,
-                "inductor_saturable.svg",
-                "Saturable Inductor",
-            ),
-            (
-                ComponentType::VoltageSource,
-                "v_src_dc.svg",
-                "Voltage Source",
-            ),
-            (
-                ComponentType::VoltageSourceAc,
-                "v_src_ac_vertical.svg",
-                "AC Voltage Source",
-            ),
-            (
-                ComponentType::VoltageSourceSin,
-                "v_src_ac_vertical.svg",
-                "Sinusoidal Voltage Source",
-            ),
-            (
-                ComponentType::VoltageSourcePulse,
-                "v_src_pulse.svg",
-                "Pulse Voltage Source",
-            ),
-            (
-                ComponentType::VoltageSourcePwl,
-                "v_src_pwl.svg",
-                "PWL Voltage Source",
-            ),
-            (
-                ComponentType::VoltageSourceExp,
-                "v_src_exp.svg",
-                "Exponential Voltage Source",
-            ),
-            (
-                ComponentType::VoltageSourceSffm,
-                "v_src_sffm.svg",
-                "SFFM Voltage Source",
-            ),
-            (ComponentType::CurrentSource, "i_src.svg", "Current Source"),
-            (
-                ComponentType::CurrentSourceAc,
-                "i_src_ac.svg",
-                "AC Current Source",
-            ),
-            (
-                ComponentType::CurrentSourcePulse,
-                "i_src_pulse.svg",
-                "Pulse Current Source",
-            ),
-            (
-                ComponentType::CurrentSourceSin,
-                "i_src_ac.svg",
-                "Sinusoidal Current Source",
-            ),
-            (
-                ComponentType::CurrentSourcePwl,
-                "i_src_pwl.svg",
-                "PWL Current Source",
-            ),
-            (
-                ComponentType::CurrentSourceExp,
-                "i_src_exp.svg",
-                "Exponential Current Source",
-            ),
-            (
-                ComponentType::CurrentSourceNoise,
-                "i_src_noise.svg",
-                "Noise Current Source",
-            ),
-            (
-                ComponentType::BehavioralSource,
-                "b_src.svg",
-                "Behavioral Source",
-            ),
-            (ComponentType::Ground, "ground_signal.svg", "Ground"),
-            (ComponentType::Port, "port.svg", "Port"),
-            (ComponentType::Diode, "diode.svg", "Diode"),
-            (
-                ComponentType::Nmos,
-                "mos_n_chan_enh_no_substrate.svg",
-                "NMOS",
-            ),
-            (
-                ComponentType::Pmos,
-                "mos_p_chan_enh_no_substrate.svg",
-                "PMOS",
-            ),
-            (ComponentType::Njfet, "jfet_n_chan.svg", "N-JFET"),
-            (ComponentType::Pjfet, "jfet_p_chan.svg", "P-JFET"),
-            (ComponentType::Nmesfet, "mesfet_n_chan.svg", "N-MESFET"),
-            (ComponentType::Pmesfet, "mesfet_p_chan.svg", "P-MESFET"),
-            (
-                ComponentType::NVdmos,
-                "mos_n_chan_enh_body_diode_discrete.svg",
-                "N-VDMOS",
-            ),
-            (
-                ComponentType::PVdmos,
-                "mos_p_chan_enh_body_diode_discrete.svg",
-                "P-VDMOS",
-            ),
-            (ComponentType::NmosSoi, "mos_n_soi.svg", "NMOS SOI"),
-            (ComponentType::PmosSoi, "mos_p_soi.svg", "PMOS SOI"),
-            (ComponentType::NpnBjt, "bjt_npn.svg", "NPN BJT"),
-            (ComponentType::PnpBjt, "bjt_pnp.svg", "PNP BJT"),
-            (
-                ComponentType::NpnBjt4,
-                "bjt_npn_substrate.svg",
-                "NPN BJT 4T",
-            ),
-            (
-                ComponentType::PnpBjt4,
-                "bjt_pnp_substrate.svg",
-                "PNP BJT 4T",
-            ),
-            (ComponentType::NpnBjt5, "bjt_npn_thermal.svg", "NPN BJT 5T"),
-            (ComponentType::PnpBjt5, "bjt_pnp_thermal.svg", "PNP BJT 5T"),
-            (ComponentType::OpAmp, "opamp.svg", "Op-Amp"),
-            (ComponentType::Vcvs, "vcvs.svg", "VCVS (E)"),
-            (ComponentType::Vccs, "vccs.svg", "VCCS (G)"),
-            (ComponentType::Ccvs, "ccvs.svg", "CCVS (H)"),
-            (ComponentType::Cccs, "cccs.svg", "CCCS (F)"),
-            (ComponentType::VSwitch, "switch_voltage.svg", "V-Switch (S)"),
-            (ComponentType::ISwitch, "switch_current.svg", "I-Switch (W)"),
-            (
-                ComponentType::TransmissionLine,
-                "transmission_line.svg",
-                "Transmission Line",
-            ),
-            (
-                ComponentType::LossyTransmissionLine,
-                "tline_lossy.svg",
-                "Lossy T-Line",
-            ),
-            (
-                ComponentType::CoupledTransmissionLine,
-                "tline_coupled.svg",
-                "Coupled T-Line",
-            ),
-            (ComponentType::RfPort, "rf_port.svg", "RF Port"),
-            (ComponentType::Memristor, "memristor.svg", "Memristor"),
-            (
-                ComponentType::CoupledInductor,
-                "k_coupling.svg",
-                "K Coupling",
-            ),
-            (ComponentType::XspiceGain, "xspice_gain.svg", "Gain"),
-            (ComponentType::XspiceSummer, "xspice_summer.svg", "Summer"),
-            (
-                ComponentType::XspiceMultiplier,
-                "xspice_multiplier.svg",
-                "Multiplier",
-            ),
-            (
-                ComponentType::XspiceDivider,
-                "xspice_divider.svg",
-                "Divider",
-            ),
-            (
-                ComponentType::XspiceLimiter,
-                "xspice_limiter.svg",
-                "Limiter",
-            ),
-            (
-                ComponentType::XspiceIntegrator,
-                "xspice_integrator.svg",
-                "Integrator",
-            ),
-            (
-                ComponentType::XspiceDifferentiator,
-                "xspice_differentiator.svg",
-                "Differentiator",
-            ),
-            (
-                ComponentType::XspiceInverter,
-                "xspice_inverter.svg",
-                "Inverter",
-            ),
-            (ComponentType::XspiceBuffer, "xspice_buffer.svg", "Buffer"),
-            (ComponentType::XspiceAndGate, "xspice_and.svg", "AND Gate"),
-            (ComponentType::XspiceOrGate, "xspice_or.svg", "OR Gate"),
-            (
-                ComponentType::XspiceNandGate,
-                "xspice_nand.svg",
-                "NAND Gate",
-            ),
-            (ComponentType::XspiceNorGate, "xspice_nor.svg", "NOR Gate"),
-            (ComponentType::XspiceXorGate, "xspice_xor.svg", "XOR Gate"),
-            (
-                ComponentType::XspiceTristate,
-                "xspice_tristate.svg",
-                "Tri-State Buffer",
-            ),
-            (
-                ComponentType::XspiceDFlipFlop,
-                "xspice_dff.svg",
-                "D Flip-Flop",
-            ),
-            (
-                ComponentType::XspiceJkFlipFlop,
-                "xspice_jkff.svg",
-                "JK Flip-Flop",
-            ),
-            (
-                ComponentType::XspiceSrLatch,
-                "xspice_sr_latch.svg",
-                "SR Latch",
-            ),
-            (
-                ComponentType::XspiceAdcBridge,
-                "xspice_adc_bridge.svg",
-                "ADC Bridge",
-            ),
-            (
-                ComponentType::XspiceDacBridge,
-                "xspice_dac_bridge.svg",
-                "DAC Bridge",
-            ),
-        ];
-
-        for (component_type, filename, name) in default_mappings {
-            let symbol = library.prepare_symbol(*component_type, filename, name, false)?;
-            library.symbols.insert(*component_type, symbol);
+        // Default bindings come from the authoritative device descriptors.
+        // A missing file is fatal here, so catalog drift cannot degrade into a
+        // procedural fallback or an empty palette entry.
+        for component_type in ComponentType::ALL {
+            let Some(filename) = component_type.descriptor().default_symbol_asset else {
+                continue;
+            };
+            let symbol = library.prepare_symbol(
+                component_type,
+                filename,
+                component_type.display_name(),
+                false,
+            )?;
+            library.symbols.insert(component_type, symbol);
         }
 
         // Load non-default visual variants for symbol families that already share
@@ -443,6 +265,8 @@ impl SymbolLibrary {
                 ))
             })?;
             symbol.name = filename.to_string();
+            symbol.target_width = (symbol.bounds.2 - symbol.bounds.0).max(1.0);
+            symbol.target_height = (symbol.bounds.3 - symbol.bounds.1).max(1.0);
             assets.insert(filename.to_string(), symbol);
         }
 
@@ -485,10 +309,43 @@ impl SymbolLibrary {
         self.symbols.get(&component_type)
     }
 
-    /// Get a parsed embedded asset by filename.
-    #[cfg(test)]
+    /// Get a parsed embedded asset by filename. Catalog-backed devices use
+    /// this path because many stable device IDs intentionally share the one
+    /// generic `CellInstance` placement kind.
     pub fn get_asset(&self, filename: &str) -> Option<&Symbol> {
         self.embedded_assets.get(filename)
+    }
+
+    pub fn get_asset_with_rotation(
+        &self,
+        filename: &str,
+        rotation_degrees: i32,
+    ) -> Option<(&Symbol, i32)> {
+        self.get_asset(filename)
+            .map(|symbol| (symbol, rotation_degrees))
+    }
+
+    /// Whether the asset's authored boundary lead anchors exactly match the
+    /// supplied electrical terminal offsets at the requested dimensions.
+    pub fn asset_matches_terminal_offsets(
+        &self,
+        filename: &str,
+        target_width: f32,
+        target_height: f32,
+        terminal_offsets: &[crate::state::Point],
+    ) -> bool {
+        let Some(symbol) = self.get_asset(filename) else {
+            return false;
+        };
+        let anchors = symbol.boundary_anchors(target_width, target_height);
+        if anchors.len() != terminal_offsets.len() {
+            return false;
+        }
+        terminal_offsets.iter().all(|terminal| {
+            anchors.iter().any(|(x, y)| {
+                (*x - terminal.x as f32).abs() <= 0.25 && (*y - terminal.y as f32).abs() <= 0.25
+            })
+        })
     }
 
     /// Return all parsed embedded asset filenames.
@@ -583,65 +440,40 @@ mod tests {
     fn embedded_library_loads_and_covers_mapped_types() {
         let library = SymbolLibrary::load_embedded().expect("embedded symbol assets must parse");
 
-        let must_have = [
-            ComponentType::Resistor,
-            ComponentType::Capacitor,
-            ComponentType::Inductor,
-            ComponentType::SaturableInductor,
-            ComponentType::Transformer,
-            ComponentType::Diode,
-            ComponentType::NpnBjt,
-            ComponentType::PnpBjt,
-            ComponentType::Nmos,
-            ComponentType::Pmos,
-            ComponentType::Njfet,
-            ComponentType::Pjfet,
-            ComponentType::NVdmos,
-            ComponentType::PVdmos,
-            ComponentType::VoltageSource,
-            ComponentType::VoltageSourceAc,
-            ComponentType::VoltageSourcePulse,
-            ComponentType::VoltageSourcePwl,
-            ComponentType::VoltageSourceExp,
-            ComponentType::VoltageSourceSffm,
-            ComponentType::CurrentSource,
-            ComponentType::CurrentSourceAc,
-            ComponentType::CurrentSourcePulse,
-            ComponentType::CurrentSourcePwl,
-            ComponentType::CurrentSourceExp,
-            ComponentType::CurrentSourceNoise,
-            ComponentType::Vcvs,
-            ComponentType::Vccs,
-            ComponentType::Ccvs,
-            ComponentType::Cccs,
-            ComponentType::Ground,
-            ComponentType::XspiceGain,
-            ComponentType::XspiceSummer,
-            ComponentType::XspiceMultiplier,
-            ComponentType::XspiceDivider,
-            ComponentType::XspiceLimiter,
-            ComponentType::XspiceIntegrator,
-            ComponentType::XspiceDifferentiator,
-            ComponentType::XspiceInverter,
-            ComponentType::XspiceBuffer,
-            ComponentType::XspiceAndGate,
-            ComponentType::XspiceOrGate,
-            ComponentType::XspiceNandGate,
-            ComponentType::XspiceNorGate,
-            ComponentType::XspiceXorGate,
-            ComponentType::XspiceTristate,
-            ComponentType::XspiceDFlipFlop,
-            ComponentType::XspiceJkFlipFlop,
-            ComponentType::XspiceSrLatch,
-            ComponentType::XspiceAdcBridge,
-            ComponentType::XspiceDacBridge,
-        ];
-        for kind in must_have {
+        for kind in ComponentType::ALL {
+            let descriptor = kind.descriptor();
+            match descriptor.default_symbol_asset {
+                Some(asset) => {
+                    assert!(
+                        library.get(kind).is_some(),
+                        "{} ({}) has no symbol mapping",
+                        descriptor.stable_id,
+                        asset
+                    );
+                    assert!(
+                        library.get_asset(asset).is_some(),
+                        "{} references missing embedded asset {}",
+                        descriptor.stable_id,
+                        asset
+                    );
+                }
+                None => assert_eq!(kind, ComponentType::CellInstance),
+            }
+        }
+
+        for descriptor in crate::state::engine_only_xspice_devices() {
             assert!(
-                library.get(kind).is_some(),
-                "{kind:?} has no symbol mapping"
+                library.get_asset(descriptor.symbol_asset).is_some(),
+                "{} references missing embedded asset {}",
+                descriptor.stable_id,
+                descriptor.symbol_asset
             );
         }
+
+        assert!(
+            library.get_asset("switch_expression.svg").is_some(),
+            "the generic expression-controlled switch asset is missing"
+        );
     }
 
     /// New-style assets are authored in viewBox coordinates: the parser must

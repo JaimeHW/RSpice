@@ -5,6 +5,7 @@ use crate::state::{
     PropertyDefinition, PropertySheet, PropertyType, PropertyValue, SymbolSourceContract,
 };
 use crate::workbench::app_state::AppState;
+use rspice_core::xspice::{CodeModelRegistry, ParamSpec, ParamType};
 
 /// Resolve the exact persistent parameter contract owned by a placed cell's
 /// library master. Returning `None` is intentional for legacy and explicitly
@@ -20,6 +21,12 @@ fn authoritative_cell_instance_sheet(
     let Some(binding) = component.library_cell.as_ref() else {
         return Ok(None);
     };
+    if binding.is_builtin_xspice() {
+        return builtin_xspice_property_sheet(binding).map(Some);
+    }
+    if binding.is_generated_veriloga() {
+        return generated_veriloga_property_sheet(binding).map(Some);
+    }
     let Some(cell) = state
         .library_manager
         .get_library(&binding.library)
@@ -91,6 +98,228 @@ fn authoritative_cell_instance_sheet(
             .required(),
     );
     Ok(Some(sheet))
+}
+
+/// Exact property contract used by both the modal editor and inline
+/// inspector. Dynamic catalog/library cells must never fall back to the
+/// generic `CellInstance` registry sheet.
+pub(crate) fn authoritative_component_property_sheet(
+    state: &AppState,
+    component: &Component,
+) -> Result<Option<PropertySheet>, String> {
+    if component.kind == ComponentType::CellInstance {
+        authoritative_cell_instance_sheet(state, component)
+    } else {
+        Ok(state.property_registry.get(component.kind).cloned())
+    }
+}
+
+fn builtin_xspice_property_sheet(
+    binding: &crate::state::LibraryCellInstance,
+) -> Result<PropertySheet, String> {
+    let contract = binding
+        .builtin_xspice
+        .as_ref()
+        .ok_or_else(|| "built-in XSPICE binding is missing its executable contract".to_owned())?;
+    let descriptor = crate::state::validate_builtin_xspice_binding(binding)?;
+
+    let registry = CodeModelRegistry::with_builtins();
+    let model = registry
+        .get(&contract.model_type)
+        .ok_or_else(|| format!("XSPICE model '{}' is unavailable", contract.model_type))?;
+    let mut sheet = cell_instance_identity_sheet();
+    for (index, parameter) in model.parameters().iter().enumerate() {
+        let (property_type, mut default_value) = xspice_parameter_property(parameter);
+        if parameter.required {
+            default_value = match parameter.param_type {
+                ParamType::String | ParamType::StringVector => PropertyValue::string(""),
+                _ => PropertyValue::expression(""),
+            };
+        }
+        let mut definition = PropertyDefinition::new(&parameter.name)
+            .with_display_name(parameter.name.replace('_', " "))
+            .with_description(if parameter.description.trim().is_empty() {
+                format!(
+                    "{} model parameter ({:?}).",
+                    descriptor.display_name, parameter.param_type
+                )
+            } else {
+                parameter.description.clone()
+            })
+            .with_type(property_type)
+            .with_default(default_value)
+            .with_max_length(512)
+            .with_order(index as i32)
+            .with_category("Model parameters");
+        if !parameter.min_is_soft {
+            definition.min_value = parameter.min;
+        }
+        if !parameter.max_is_soft {
+            definition.max_value = parameter.max;
+        }
+        if parameter.required {
+            definition = definition.required();
+        }
+        sheet.add(definition);
+    }
+    Ok(sheet)
+}
+
+fn generated_veriloga_property_sheet(
+    binding: &crate::state::LibraryCellInstance,
+) -> Result<PropertySheet, String> {
+    let descriptor = crate::state::validate_generated_veriloga_binding(binding)?;
+    let mut sheet = cell_instance_identity_sheet();
+    for (index, parameter) in descriptor.parameters.iter().enumerate() {
+        let scope = match parameter.scope {
+            rspice_core::device::veriloga_builtins::GeneratedVerilogAParameterScope::Model => {
+                "model"
+            }
+            rspice_core::device::veriloga_builtins::GeneratedVerilogAParameterScope::Instance => {
+                "instance"
+            }
+        };
+        let default = parameter
+            .default
+            .map(|value| {
+                if parameter.is_integer {
+                    PropertyValue::expression((value as i64).to_string())
+                } else {
+                    PropertyValue::expression(value.to_string())
+                }
+            })
+            .unwrap_or_else(|| PropertyValue::expression(""));
+        let mut description = format!(
+            "Generated Verilog-A {scope} parameter for {}.",
+            descriptor.model_name
+        );
+        if parameter.has_dynamic_constraints {
+            description.push_str(
+                " Its final range depends on other parameters; the compiled model validates the complete set.",
+            );
+        }
+        if !parameter.aliases.is_empty() {
+            description.push_str(&format!(" Aliases: {}.", parameter.aliases.join(", ")));
+        }
+        let mut definition = PropertyDefinition::new(parameter.name)
+            .with_display_name(parameter.name.replace('_', " "))
+            .with_description(description)
+            .with_type(PropertyType::Expression)
+            .with_default(default)
+            .with_max_length(512)
+            .with_order(index as i32)
+            .with_category(if scope == "model" {
+                "Model parameters"
+            } else {
+                "Instance parameters"
+            });
+        if !parameter.has_dynamic_constraints {
+            definition.min_value = parameter
+                .minimum
+                .filter(|bound| !bound.exclusive)
+                .map(|bound| bound.value);
+            definition.max_value = parameter
+                .maximum
+                .filter(|bound| !bound.exclusive)
+                .map(|bound| bound.value);
+        }
+        sheet.add(definition);
+    }
+    Ok(sheet)
+}
+
+fn xspice_parameter_property(parameter: &ParamSpec) -> (PropertyType, PropertyValue) {
+    match parameter.param_type {
+        ParamType::Real => (
+            PropertyType::Expression,
+            PropertyValue::expression(parameter.default.to_string()),
+        ),
+        ParamType::Integer => (
+            PropertyType::Expression,
+            PropertyValue::expression((parameter.default as i64).to_string()),
+        ),
+        ParamType::Boolean => (
+            PropertyType::Boolean,
+            PropertyValue::boolean(parameter.default != 0.0),
+        ),
+        ParamType::Complex => {
+            let value = parameter.complex_default.unwrap_or_default();
+            (
+                PropertyType::Expression,
+                PropertyValue::expression(format!("<{} {}>", value.re, value.im)),
+            )
+        }
+        ParamType::String => (
+            PropertyType::String,
+            PropertyValue::string(parameter.string_default.clone().unwrap_or_default()),
+        ),
+        ParamType::StringVector => (
+            PropertyType::String,
+            PropertyValue::string(format_string_vector(
+                parameter
+                    .string_vector_default
+                    .as_deref()
+                    .unwrap_or_default(),
+            )),
+        ),
+        ParamType::RealVector => (
+            PropertyType::Expression,
+            PropertyValue::expression(format_numeric_vector(
+                parameter.real_vector_default.as_deref().unwrap_or_default(),
+            )),
+        ),
+        ParamType::IntegerVector => (
+            PropertyType::Expression,
+            PropertyValue::expression(format_numeric_vector(
+                parameter
+                    .integer_vector_default
+                    .as_deref()
+                    .unwrap_or_default(),
+            )),
+        ),
+        ParamType::ComplexVector => (
+            PropertyType::Expression,
+            PropertyValue::expression(format_complex_vector(
+                parameter
+                    .complex_vector_default
+                    .as_deref()
+                    .unwrap_or_default(),
+            )),
+        ),
+    }
+}
+
+fn format_numeric_vector<T: std::fmt::Display>(values: &[T]) -> String {
+    format!(
+        "[{}]",
+        values
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(" ")
+    )
+}
+
+fn format_string_vector(values: &[String]) -> String {
+    format!(
+        "[{}]",
+        values
+            .iter()
+            .map(|value| format!("\"{}\"", value.replace('"', "\\\"")))
+            .collect::<Vec<_>>()
+            .join(" ")
+    )
+}
+
+fn format_complex_vector(values: &[rspice_core::Complex64]) -> String {
+    format!(
+        "[{}]",
+        values
+            .iter()
+            .map(|value| format!("<{} {}>", value.re, value.im))
+            .collect::<Vec<_>>()
+            .join(" ")
+    )
 }
 
 /// Identity-only contract for legacy, hierarchical, and review-only cell

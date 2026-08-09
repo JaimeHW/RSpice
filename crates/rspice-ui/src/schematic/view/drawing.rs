@@ -453,6 +453,23 @@ pub(super) fn draw_component(
         // Typed interface direction is component-owned runtime data; the
         // static library glyph cannot represent it without lying.
         false
+    } else if component.kind == ComponentType::CellInstance {
+        symbol_library
+            .and_then(|library| compatible_builtin_xspice_asset(component, library))
+            .and_then(|(library, filename, width, height)| {
+                library.baked_asset(
+                    filename,
+                    width,
+                    height,
+                    rotation_degrees,
+                    component.mirror_h,
+                    component.mirror_v,
+                )
+            })
+            .is_some_and(|baked| {
+                draw_baked(painter, &baked, pos, scale, stroke);
+                true
+            })
     } else if let Some(library) = symbol_library {
         if let Some((symbol, adjusted_rotation)) = library.get_with_rotation_variant(
             component.kind,
@@ -572,6 +589,35 @@ pub(super) fn draw_component(
     }
 }
 
+/// Resolve authored artwork only when every visible lead anchor is exactly
+/// the same point as the frozen executable terminal layout. The fallback is
+/// the generated direction-aware symbol, never approximate artwork.
+pub(super) fn compatible_builtin_xspice_asset<'a>(
+    component: &'a Component,
+    library: &'a SymbolLibrary,
+) -> Option<(&'a SymbolLibrary, &'a str, f32, f32)> {
+    let contract = component.library_cell.as_ref()?.builtin_xspice.as_ref()?;
+    let (width, height) = component.symbol_dimensions();
+    let offsets = component
+        .instance_pin_layout()
+        .into_iter()
+        .map(|(_, offset)| offset)
+        .collect::<Vec<_>>();
+    library
+        .asset_matches_terminal_offsets(
+            &contract.symbol_asset,
+            width as f32,
+            height as f32,
+            &offsets,
+        )
+        .then_some((
+            library,
+            contract.symbol_asset.as_str(),
+            width as f32,
+            height as f32,
+        ))
+}
+
 /// Interface port: a flag whose tip is the attachment point at (-10, 0).
 /// It must read as "this net leaves the cell", not as a floating label —
 /// the filled tip distinguishes it from a net label at a glance.
@@ -638,7 +684,7 @@ pub(super) fn draw_port_symbol(
 /// Geometry comes from the same `instance_pin_layout` the netlister reads,
 /// transformed through the component's full mirror+rotation, so the drawn
 /// stubs land exactly on the electrical terminals in every orientation.
-fn draw_cell_instance_symbol(
+pub(super) fn draw_cell_instance_symbol(
     painter: &Painter,
     pos: Pos2,
     scale: f32,
@@ -794,7 +840,7 @@ fn infer_terminal_axis(component: &Component) -> TerminalAxis {
 }
 
 fn compute_label_layout(pos: Pos2, scale: f32, component: &Component) -> LabelLayout {
-    let (width, height) = component.kind.symbol_dimensions();
+    let (width, height) = component.symbol_dimensions();
     let is_rotated_vertical = component.rotation.is_vertical(); // R90 or R270
 
     // Determine effective dimensions after rotation.
@@ -1025,6 +1071,27 @@ mod tests {
         assert!((wire_stroke_width(false, false, zoom) - 2.2).abs() < f32::EPSILON);
         assert!((wire_stroke_width(true, false, zoom) - 4.0).abs() < f32::EPSILON);
         assert!((wire_stroke_width(false, true, zoom) - 4.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn catalog_svg_is_used_only_when_its_leads_match_every_electrical_terminal() {
+        let library = SymbolLibrary::load_embedded().expect("symbol library");
+        let component = |model_type: &str| {
+            let descriptor = crate::state::engine_only_xspice_devices()
+                .iter()
+                .find(|descriptor| descriptor.model_type == model_type)
+                .expect("catalog descriptor");
+            let binding =
+                crate::state::builtin_xspice_library_binding(descriptor).expect("catalog binding");
+            Component::new(1, ComponentType::CellInstance, Point::origin())
+                .with_library_cell(binding)
+        };
+
+        assert!(compatible_builtin_xspice_asset(&component("astate"), &library).is_some());
+        assert!(
+            compatible_builtin_xspice_asset(&component("nco"), &library).is_none(),
+            "the compact NCO bus artwork must not impersonate seven scalar wire terminals"
+        );
     }
 
     #[test]

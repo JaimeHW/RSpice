@@ -113,6 +113,10 @@ complete set of ways to reach it.
 
 ## Devices
 
+The executable engine, schematic-editor, symbol, generated-model, and target
+release contracts are tracked in the
+[device support and release matrix](DEVICE_SUPPORT_RELEASE_MATRIX.md).
+
 | Family | Models |
 | :--- | :--- |
 | MOSFET | Every accepted `M`-card level is native: BSIM4 v4.8 (`LEVEL=14/54`), BSIM3v3.3 (`LEVEL=8/49` plus BSIM3-shaped `LEVEL=9`, `CAPMOD=2/3`), BSIM-SOI in DD/FD/PD variants (`LEVEL=10/55/56/57`), VDMOS (`LEVEL=18`), EKV 2.6 (`LEVEL=260`) and EKV3 (`LEVEL=301`), Berkeley MOS1/MOS2/MOS3/MOS6 and ngspice MOS9, legacy BSIM1/BSIM2 (`LEVEL=4/5`) |

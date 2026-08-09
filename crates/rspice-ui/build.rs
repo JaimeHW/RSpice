@@ -3,6 +3,37 @@ use std::fs;
 use std::path::PathBuf;
 
 fn main() {
+    println!(
+        "cargo:rustc-env=RSPICE_BUILD_TARGET={}",
+        env::var("TARGET").expect("Cargo must provide TARGET")
+    );
+    println!(
+        "cargo:rustc-env=RSPICE_BUILD_ARCH={}",
+        env::var("CARGO_CFG_TARGET_ARCH").expect("Cargo must provide CARGO_CFG_TARGET_ARCH")
+    );
+    println!("cargo:rerun-if-env-changed=RSPICE_AUTOMATION_RUNTIME_KEY_ID");
+    println!("cargo:rerun-if-env-changed=RSPICE_AUTOMATION_RUNTIME_PUBLIC_KEY_HEX");
+    let runtime_key_id = env::var("RSPICE_AUTOMATION_RUNTIME_KEY_ID").unwrap_or_default();
+    let runtime_public_key =
+        env::var("RSPICE_AUTOMATION_RUNTIME_PUBLIC_KEY_HEX").unwrap_or_default();
+    if runtime_key_id.is_empty() != runtime_public_key.is_empty() {
+        panic!(
+            "RSPICE_AUTOMATION_RUNTIME_KEY_ID and RSPICE_AUTOMATION_RUNTIME_PUBLIC_KEY_HEX must be supplied together"
+        );
+    }
+    if !runtime_public_key.is_empty()
+        && (runtime_public_key.len() != 64
+            || !runtime_public_key
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit()))
+    {
+        panic!(
+            "RSPICE_AUTOMATION_RUNTIME_PUBLIC_KEY_HEX must contain exactly 64 hexadecimal digits"
+        );
+    }
+    println!("cargo:rustc-env=RSPICE_AUTOMATION_RUNTIME_KEY_ID={runtime_key_id}");
+    println!("cargo:rustc-env=RSPICE_AUTOMATION_RUNTIME_PUBLIC_KEY_HEX={runtime_public_key}");
+
     // Development license material is an explicit build-profile capability,
     // not a side effect of `debug_assertions` (which can be enabled for a
     // release profile). Standard debug builds retain the signed sample-key
