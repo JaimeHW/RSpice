@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use super::{SelectedVerilogASource, VerilogACompileOutcome};
 use crate::simulation::veriloga::WasmJitWorkerArtifact;
 
-const VERILOGA_WORKER_PROTOCOL_VERSION: u32 = 1;
+const VERILOGA_WORKER_PROTOCOL_VERSION: u32 = 2;
 const MAX_VERILOGA_WORKER_RESPONSE_BYTES: usize = 128 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +51,8 @@ impl VerilogAWorkerRequest {
         self.bundle
             .validate()
             .map_err(|error| format!("Verilog-A worker source bundle is invalid: {error}"))?;
+        super::veriloga_profile::resolve_veriloga_build_profile(&self.bundle)
+            .map_err(|error| format!("Verilog-A worker build profile is invalid: {error}"))?;
         if self.selected_module.as_ref().is_some_and(|module| {
             module.is_empty()
                 || module.len() > crate::state::MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES
@@ -433,16 +435,18 @@ mod browser {
 pub(crate) use browser::{cancel, start};
 
 pub(super) fn transport_failure_outcome(message: String) -> VerilogACompileOutcome {
-    VerilogACompileOutcome::Failure(vec![super::CodeEditorDiagnostic {
-        severity: super::CodeEditorSeverity::Error,
-        message: "Browser compiler worker failed".to_owned(),
-        detail: message,
-        source_path: None,
-        source: None,
-        byte_range: None,
-        line: None,
-        column: None,
-    }])
+    VerilogACompileOutcome::Failure(vec![super::CodeEditorDiagnostic::current(
+        "rspice.veriloga.browser-worker",
+        "VA-WORKER-TRANSPORT",
+        super::CodeEditorSeverity::Error,
+        "Browser compiler worker failed",
+        message,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )])
 }
 
 #[cfg(test)]
@@ -459,6 +463,17 @@ mod tests {
                 "module worker(p, n); inout p, n; electrical p, n; endmodule\n",
                 [],
                 [],
+            )
+            .unwrap(),
+            selected_module: Some("worker".to_owned()),
+        }
+    }
+
+    fn selected_source_with_profile() -> SelectedVerilogASource {
+        SelectedVerilogASource {
+            bundle: super::super::source_files::new_imported_veriloga_workspace_bundle(
+                "worker.va",
+                "module worker(p, n); inout p, n; electrical p, n; endmodule\n".to_owned(),
             )
             .unwrap(),
             selected_module: Some("worker".to_owned()),
@@ -501,6 +516,31 @@ mod tests {
     }
 
     #[test]
+    fn transferred_build_profile_is_revalidated_after_deserialization() {
+        let request = VerilogAWorkerRequest::try_new(12, &selected_source_with_profile()).unwrap();
+        let mut encoded = serde_json::to_value(request).unwrap();
+        encoded["bundle"]["files"][0]["content"] =
+            serde_json::json!("schema = \"untrusted.profile/v99\"");
+        let request: VerilogAWorkerRequest = serde_json::from_value(encoded).unwrap();
+
+        let error = VerilogAWorkerResponse::from_request(request).unwrap_err();
+        assert!(error.contains("build profile is invalid"), "{error}");
+    }
+
+    #[test]
+    fn malformed_transferred_specialist_evidence_is_rejected() {
+        let request = VerilogAWorkerRequest::try_new(13, &selected_source()).unwrap();
+        let response = VerilogAWorkerResponse::from_request(request).unwrap();
+        let mut encoded = serde_json::to_value(response).unwrap();
+        encoded["outcome"]["Success"]["specialist"]["module_name"] =
+            serde_json::json!("different_module");
+        let response: VerilogAWorkerResponse = serde_json::from_value(encoded).unwrap();
+
+        let error = response.into_outcome(13).unwrap_err();
+        assert!(error.contains("specialist report"), "{error}");
+    }
+
+    #[test]
     fn browser_worker_script_has_a_separate_compile_protocol() {
         let source = include_str!("../../../../web/simulation-worker.js");
         assert!(source.contains("compile-veriloga"));
@@ -517,7 +557,10 @@ mod tests {
             panic!("transport failure cannot become success");
         };
         assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].message, "Browser compiler worker failed");
-        assert_eq!(diagnostics[0].detail, "decode failed");
+        assert_eq!(
+            diagnostics[0].message.as_ref(),
+            "Browser compiler worker failed"
+        );
+        assert_eq!(diagnostics[0].detail.as_ref(), "decode failed");
     }
 }

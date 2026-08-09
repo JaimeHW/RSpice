@@ -10,7 +10,7 @@ use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::{AppState, MessageCatalog, MessageId, RSpiceApp};
 
 use super::super::design_system::{WorkbenchIcon, empty_state, icon_button};
 use crate::state::{
@@ -26,7 +26,9 @@ const CODE_TOOLBAR_ACTION_GUTTER: f32 = 12.0;
 const CODE_TOOLBAR_COMPACT_BREAKPOINT: f32 = 720.0;
 const PHONE_BREAKPOINT: f32 = 560.0;
 const PHONE_PRIMARY_WIDTH: f32 = 154.0;
-const PHONE_ACTION_WIDTH: f32 = PHONE_PRIMARY_WIDTH + CODE_TOOLBAR_GAP + 28.0;
+const EDITOR_MENU_WIDTH: f32 = 58.0;
+const PHONE_ACTION_WIDTH: f32 =
+    PHONE_PRIMARY_WIDTH + CODE_TOOLBAR_GAP * 2.0 + 28.0 + EDITOR_MENU_WIDTH;
 
 pub(super) fn prepare_workspace(app: &mut RSpiceApp) {
     reconcile_documents(app);
@@ -34,21 +36,33 @@ pub(super) fn prepare_workspace(app: &mut RSpiceApp) {
 }
 
 pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
+    handle_netlist_file_drop(ui.ctx(), app);
     code_toolbar(ui, app);
+    execution_profile_review_banner(ui, app);
+    if crate::workbench::documents::text_editor_commands::take_format_document_request(
+        ui,
+        crate::workbench::documents::netlist_document::editor_id(),
+    ) {
+        format_owned_netlist(ui.ctx(), app);
+    }
     let t = Tokens::get(ui.ctx());
     egui::Frame::new().fill(t.color.bg_inset).show(ui, |ui| {
         ui.set_min_size(ui.available_size());
         if generated_primary_unavailable(&app.state) {
+            let messages = app.state.ui.messages();
+            let title = messages.text(MessageId::NetlistGeneratedUnavailable);
+            let default_description =
+                messages.text(MessageId::NetlistGeneratedUnavailableDescription);
             empty_state(
                 ui,
                 WorkbenchIcon::Netlist,
-                "Generated netlist unavailable",
+                &title,
                 app.state
                     .ui
                     .netlist
                     .generation_error
                     .as_deref()
-                    .unwrap_or("Add a circuit before generating the primary netlist."),
+                    .unwrap_or(&default_description),
             );
         } else {
             crate::workbench::documents::netlist_document::show_editor(ui, &mut app.state);
@@ -58,11 +72,246 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
     ownership_dialog_window(ui.ctx(), app);
     comparison_dialog_window(ui.ctx(), app);
     save_source_dialog_window(ui.ctx(), app);
+    external_change_dialog_window(ui.ctx(), app);
     export_generated_dialog_window(ui.ctx(), app);
+    import_review_dialog_window(ui.ctx(), app);
+}
+
+fn execution_profile_review_banner(ui: &mut Ui, app: &mut RSpiceApp) {
+    let Some(descriptor) = app
+        .state
+        .workspace
+        .netlist_descriptor
+        .as_ref()
+        .filter(|descriptor| descriptor.execution_profile_review_required())
+    else {
+        return;
+    };
+    let dialect = descriptor
+        .imported_dialect
+        .unwrap_or(crate::state::NetlistSourceDialect::RSpice);
+    let messages = app.state.ui.messages();
+    let description = messages.format(
+        MessageId::NetlistProfileReviewRequiredDescription,
+        &[("dialect", dialect.label())],
+    );
+    let t = Tokens::get(ui.ctx());
+    let mut review = false;
+    egui::Frame::new()
+        .fill(t.color.warn.gamma_multiply(0.10))
+        .stroke(egui::Stroke::new(1.0, t.color.warn.gamma_multiply(0.65)))
+        .inner_margin(8)
+        .show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    egui::RichText::new(messages.text(MessageId::NetlistProfileReviewRequired))
+                        .strong()
+                        .color(t.color.warn),
+                );
+                ui.label(description);
+                review = ui
+                    .button(messages.text(MessageId::NetlistProfileReviewAction))
+                    .clicked();
+            });
+        });
+    if review {
+        crate::workbench::workflows::netlist_workflow::begin_owned_netlist_profile_review(
+            &mut app.state,
+        );
+    }
+}
+
+fn handle_netlist_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
+    if app.state.application_modal_open() {
+        return;
+    }
+    let dropped = ctx.input(|input| input.raw.dropped_files.clone());
+    if dropped.is_empty() {
+        return;
+    }
+    if dropped.len() != 1 {
+        app.state.push_user_message(ConsoleMessage::warning(
+            "Drop one SPICE deck or RSpice netlist bundle at a time so the staged import review has one exact source identity.",
+        ));
+        return;
+    }
+    let file = &dropped[0];
+    let source_path = file.path.clone();
+    let display_name = (!file.name.trim().is_empty())
+        .then(|| file.name.clone())
+        .or_else(|| {
+            source_path
+                .as_deref()
+                .and_then(std::path::Path::file_name)
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| "dropped-netlist.spice".to_owned());
+    let bytes = if let Some(bytes) = file.bytes.as_ref() {
+        Ok(bytes.to_vec())
+    } else {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            source_path
+                .as_deref()
+                .ok_or_else(|| "Dropped file has neither bytes nor a native path.".to_owned())
+                .and_then(|path| std::fs::read(path).map_err(|error| error.to_string()))
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            Err("Browser drop did not provide immutable file bytes.".to_owned())
+        }
+    };
+    match bytes {
+        Ok(bytes) => {
+            crate::workbench::workflows::netlist_workflow::stage_dropped_netlist_import(
+                &mut app.state,
+                bytes,
+                source_path,
+                display_name,
+            );
+        }
+        Err(error) => app.state.push_user_message(ConsoleMessage::error(format!(
+            "Dropped SPICE source could not be read: {error}"
+        ))),
+    }
+}
+
+fn format_owned_netlist(ctx: &egui::Context, app: &mut RSpiceApp) {
+    if !crate::workbench::documents::netlist_document::active_netlist_source_is_editable(&app.state)
+    {
+        return;
+    }
+    let source = app.state.simulation.netlist_content.clone();
+    let dependency_document = app.state.ui.netlist.active_dependency_identity.is_some();
+    if dependency_document {
+        let has_errors = app.state.ui.netlist.diagnostics.iter().any(|diagnostic| {
+            diagnostic.is_current()
+                && diagnostic.severity
+                    == crate::workbench::documents::netlist_document::DiagnosticSeverity::Error
+        });
+        if has_errors {
+            app.state.push_user_message(ConsoleMessage::error(
+                "Include formatting is blocked until the current document has no syntax errors.",
+            ));
+            return;
+        }
+        let formatted = normalize_owned_netlist_whitespace(&source);
+        if formatted == source {
+            app.state.push_user_message(ConsoleMessage::info(
+                "The owned include already matches the deterministic source format.",
+            ));
+        } else if crate::workbench::documents::netlist_document::replace_owned_dependency_source(
+            &mut app.state,
+            formatted,
+        ) {
+            app.state.push_user_message(ConsoleMessage::info(
+                "Formatted the exact project-owned include revision; root-deck validation was invalidated.",
+            ));
+        }
+        return;
+    }
+    let digest = source_content_digest(&source);
+    let validation_current = app
+        .state
+        .ui
+        .netlist
+        .validation
+        .as_ref()
+        .is_some_and(|receipt| {
+            receipt.visible_content_digest == digest
+                && receipt.project_revision == app.state.workspace.project.revision().get()
+        });
+    if !validation_current {
+        crate::workbench::workflows::netlist_workflow::validate_visible_netlist_source(app);
+    }
+    let validation_current = app
+        .state
+        .ui
+        .netlist
+        .validation
+        .as_ref()
+        .is_some_and(|receipt| {
+            receipt.visible_content_digest == digest
+                && receipt.project_revision == app.state.workspace.project.revision().get()
+        });
+    if !validation_current {
+        let message = app
+            .state
+            .ui
+            .netlist
+            .validation_error
+            .clone()
+            .unwrap_or_else(|| {
+                "Formatting is blocked until the exact owned source passes executable validation."
+                    .to_owned()
+            });
+        app.state
+            .push_user_message(ConsoleMessage::error(message.clone()));
+        app.state
+            .ui
+            .toasts
+            .error_with_title(ctx, "Netlist format blocked", message);
+        return;
+    }
+
+    let formatted = normalize_owned_netlist_whitespace(&source);
+    if formatted == source {
+        app.state.push_user_message(ConsoleMessage::info(
+            "The owned netlist already matches the deterministic source format.",
+        ));
+        return;
+    }
+    if crate::workbench::documents::netlist_document::replace_owned_source(
+        &mut app.state,
+        formatted,
+    ) {
+        app.state.push_user_message(ConsoleMessage::info(
+            "Formatted the exact owned netlist revision; prior validation was invalidated.",
+        ));
+    } else {
+        app.state.push_user_message(ConsoleMessage::error(
+            "The owned netlist changed before formatting could commit. Review the current revision and retry.",
+        ));
+    }
+}
+
+fn normalize_owned_netlist_whitespace(source: &str) -> String {
+    if source.is_empty() {
+        return String::new();
+    }
+    let preferred_eol = if source.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let mut formatted = String::with_capacity(source.len().saturating_add(preferred_eol.len()));
+    for (line, segment) in source.split_inclusive('\n').enumerate() {
+        let (body, eol) = segment.strip_suffix("\r\n").map_or_else(
+            || {
+                segment
+                    .strip_suffix('\n')
+                    .map_or((segment, ""), |body| (body, "\n"))
+            },
+            |body| (body, "\r\n"),
+        );
+        // The first physical card is the circuit title and is user data, not
+        // executable whitespace. Preserve it byte-for-byte.
+        if line == 0 {
+            formatted.push_str(body);
+        } else {
+            formatted.push_str(body.trim_end_matches([' ', '\t']));
+        }
+        formatted.push_str(eol);
+    }
+    if !source.ends_with('\n') {
+        formatted.push_str(preferred_eol);
+    }
+    formatted
 }
 
 fn generated_primary_unavailable(state: &AppState) -> bool {
-    state.ui.netlist.active_document == ActiveNetlistDocument::Generated
+    state.ui.netlist.active_dependency_identity.is_none()
+        && state.ui.netlist.active_document == ActiveNetlistDocument::Generated
         && !generated_primary_ready(state)
 }
 
@@ -71,6 +320,9 @@ fn generated_primary_ready(state: &AppState) -> bool {
 }
 
 fn active_document_available(state: &AppState) -> bool {
+    if state.ui.netlist.active_dependency_identity.is_some() {
+        return crate::workbench::documents::netlist_document::active_dependency(state).is_some();
+    }
     match state.ui.netlist.active_document {
         ActiveNetlistDocument::Generated => generated_primary_ready(state),
         ActiveNetlistDocument::OwnedSource => state.workspace.netlist_source.is_some(),
@@ -78,13 +330,18 @@ fn active_document_available(state: &AppState) -> bool {
     }
 }
 
-fn generation_block_reason(state: &AppState) -> &str {
+fn generation_block_reason(state: &AppState) -> String {
     state
         .ui
         .netlist
         .generation_error
-        .as_deref()
-        .unwrap_or("Generate a primary netlist before using this action.")
+        .clone()
+        .unwrap_or_else(|| {
+            state
+                .ui
+                .messages()
+                .text(MessageId::NetlistGenerateBeforeAction)
+        })
 }
 
 /// Rebuild the immutable generated primary whenever any authoritative project
@@ -104,15 +361,27 @@ fn reconcile_documents(app: &mut RSpiceApp) {
         app.state.ui.netlist.active_document_initialized = true;
     }
 
+    if app.state.ui.netlist.active_dependency_identity.is_some()
+        && crate::workbench::documents::netlist_document::active_dependency(&app.state).is_none()
+    {
+        crate::workbench::documents::netlist_document::close_active_dependency(&mut app.state);
+        app.state.push_user_message(ConsoleMessage::warning(
+            "The previously open dependency is no longer in the canonical source closure; its root document was restored.",
+        ));
+    }
+
     refresh_generated_artifact(app);
 
-    let projected = match app.state.ui.netlist.active_document {
-        ActiveNetlistDocument::Generated => Some(app.state.ui.netlist.generated_source.clone()),
-        ActiveNetlistDocument::OwnedSource => app.state.workspace.netlist_source.clone(),
-        ActiveNetlistDocument::GeneratedDiff => {
-            Some(app.state.ui.netlist.generated_diff_source.clone())
-        }
-    };
+    let projected = crate::workbench::documents::netlist_document::active_dependency(&app.state)
+        .and_then(crate::state::DependencyMetadata::source)
+        .map(str::to_owned)
+        .or_else(|| match app.state.ui.netlist.active_document {
+            ActiveNetlistDocument::Generated => Some(app.state.ui.netlist.generated_source.clone()),
+            ActiveNetlistDocument::OwnedSource => app.state.workspace.netlist_source.clone(),
+            ActiveNetlistDocument::GeneratedDiff => {
+                Some(app.state.ui.netlist.generated_diff_source.clone())
+            }
+        });
     if let Some(projected) = projected
         && app.state.simulation.netlist_content != projected
     {
@@ -325,14 +594,10 @@ fn generated_project_source_dependencies(
             bundle.root().logical_path(),
         )
         .map_err(|error| error.to_string())?;
-        let virtual_bundle =
-            crate::workbench::documents::code_workspace::project_bundle_as_virtual(bundle)?;
-        let compilation = rspice_veriloga::VerilogACompiler::default()
-            .compile_virtual_runtime_diagnosed(
-                &virtual_bundle,
-                binding.selected_module(),
-                crate::simulation::veriloga::project_virtual_compile_limits(),
-            )
+        let compilation = crate::workbench::documents::code_workspace::compile_project_bundle_virtual_for_provenance(
+            bundle,
+            binding.selected_module(),
+        )
             .map_err(|failure| {
                 format!(
                     "Could not authenticate generated Verilog-A provenance for {}: {failure}",
@@ -542,6 +807,7 @@ fn source_line_component(
 }
 
 fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
+    let messages = app.state.ui.messages();
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width();
     let compact = code_toolbar_compact(width);
@@ -556,12 +822,20 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
 
     let content = rect.shrink2(vec2(CODE_TOOLBAR_PADDING_X, 0.0));
     let active = app.state.ui.netlist.active_document;
+    let dependency_visible = app.state.ui.netlist.active_dependency_identity.is_some();
+    let dependency_owned =
+        crate::workbench::documents::netlist_document::active_dependency_is_owned(&app.state);
+    let dependency_authority =
+        crate::workbench::documents::netlist_document::active_dependency(&app.state)
+            .map(crate::state::DependencyMetadata::authority);
     let generated_ready = generated_primary_ready(&app.state);
     let active_available = active_document_available(&app.state);
     let action_width: f32 = if compact {
         PHONE_ACTION_WIDTH
+    } else if dependency_visible {
+        if dependency_owned { 280.0 } else { 390.0 }
     } else {
-        match active {
+        (match active {
             ActiveNetlistDocument::Generated => {
                 if app.state.workspace.netlist_source.is_some() {
                     175.0
@@ -571,31 +845,56 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             }
             ActiveNetlistDocument::OwnedSource => 348.0,
             ActiveNetlistDocument::GeneratedDiff => 152.0,
-        }
+        }) + EDITOR_MENU_WIDTH
+            + CODE_TOOLBAR_GAP
     };
     let (left_rect, right_rect) = code_toolbar_regions(content, action_width);
     let language = match active {
-        ActiveNetlistDocument::Generated => "SPICE · GENERATED · IMMUTABLE · SOURCE MAPPED",
+        ActiveNetlistDocument::Generated => messages.text(MessageId::NetlistLanguageGenerated),
         ActiveNetlistDocument::OwnedSource => {
-            app.state.workspace.netlist_descriptor.as_ref().map_or(
-                "SPICE · OWNED · EDITABLE",
-                |descriptor| match descriptor.strategy {
-                    crate::state::OwnedNetlistEditStrategy::OwnedSource => {
-                        "SPICE · OWNED · EDITABLE"
-                    }
-                    crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride => {
-                        "SPICE INCLUDE · PARAMETER OVERRIDE · EDITABLE"
-                    }
-                    crate::state::OwnedNetlistEditStrategy::IncludeOrderOverride => {
-                        "SPICE INCLUDE · INCLUDE ORDER · EDITABLE"
-                    }
-                    crate::state::OwnedNetlistEditStrategy::AnalysisOnlyDeck => {
-                        "SPICE · ANALYSIS DECK · EDITABLE"
-                    }
+            app.state.workspace.netlist_descriptor.as_ref().map_or_else(
+                || messages.text(MessageId::NetlistLanguageOwned),
+                |descriptor| {
+                    messages.text(match descriptor.strategy {
+                        crate::state::OwnedNetlistEditStrategy::OwnedSource => {
+                            MessageId::NetlistLanguageOwned
+                        }
+                        crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride => {
+                            MessageId::NetlistLanguageParameterOverride
+                        }
+                        crate::state::OwnedNetlistEditStrategy::IncludeOrderOverride => {
+                            MessageId::NetlistLanguageIncludeOrderOverride
+                        }
+                        crate::state::OwnedNetlistEditStrategy::AnalysisOnlyDeck => {
+                            MessageId::NetlistLanguageAnalysisDeck
+                        }
+                    })
                 },
             )
         }
-        ActiveNetlistDocument::GeneratedDiff => "SPICE DIFF · GENERATED COMPARISON · IMMUTABLE",
+        ActiveNetlistDocument::GeneratedDiff => messages.text(MessageId::NetlistLanguageDiff),
+    };
+    let language = if dependency_visible {
+        if dependency_owned {
+            messages.text(MessageId::NetlistLanguageOwnedInclude)
+        } else {
+            messages.text(match dependency_authority.unwrap_or_default() {
+                crate::state::DependencySourceAuthority::External => {
+                    MessageId::NetlistLanguageExternalInclude
+                }
+                crate::state::DependencySourceAuthority::Vendor => {
+                    MessageId::NetlistLanguageVendorInclude
+                }
+                crate::state::DependencySourceAuthority::TechnologyPackage => {
+                    MessageId::NetlistLanguageTechnologyInclude
+                }
+                crate::state::DependencySourceAuthority::StandardLibrary => {
+                    MessageId::NetlistLanguageStandardInclude
+                }
+            })
+        }
+    } else {
+        language
     };
     let (status, status_tone) = document_syntax_status(&app.state);
     let status_color = match status_tone {
@@ -611,8 +910,9 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             .diagnostics
             .iter()
             .filter(|diagnostic| {
-                diagnostic.severity
-                    != crate::workbench::documents::netlist_document::DiagnosticSeverity::Error
+                diagnostic.is_current()
+                    && diagnostic.severity
+                        != crate::workbench::documents::netlist_document::DiagnosticSeverity::Error
             })
             .count()
             + app
@@ -636,7 +936,7 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
     } else {
         0.0
     };
-    let language_width = label_width(language, t.color.text_dim);
+    let language_width = label_width(&language, t.color.text_dim);
     let advisory_count = advisory_candidate.filter(|count| {
         let label = format!("{count} advisor{}", if *count == 1 { "y" } else { "ies" });
         toolbar_advisory_fits(
@@ -672,7 +972,7 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
         );
         language_ui.add(
             egui::Label::new(
-                egui::RichText::new(language)
+                egui::RichText::new(&language)
                     .font(status_font.clone())
                     .color(t.color.text_dim),
             )
@@ -713,29 +1013,89 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
     actions.spacing_mut().item_spacing.x = CODE_TOOLBAR_GAP;
     if compact {
         actions.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.add_enabled_ui(active_available, |ui| {
+                crate::workbench::documents::text_editor_commands::editor_command_menu(
+                    ui,
+                    crate::workbench::documents::netlist_document::editor_id(),
+                    crate::workbench::documents::netlist_document::active_netlist_source_is_editable(
+                        &app.state,
+                    ),
+                    false,
+                );
+            })
+            .response
+            .on_disabled_hover_text(messages.text(MessageId::NetlistEditorCommandsUnavailable));
             let mut find_clicked = false;
             ui.add_enabled_ui(active_available, |ui| {
                 find_clicked = icon_button(
                     ui,
                     WorkbenchIcon::Search,
-                    "Find in active netlist document",
+                    &messages.text(MessageId::NetlistFindActiveDocument),
                     false,
                     vec2(28.0, 28.0),
                 )
                 .clicked();
             })
             .response
-            .on_disabled_hover_text("Open or generate a netlist document before searching.");
+            .on_disabled_hover_text(messages.text(MessageId::NetlistSearchUnavailable));
             if find_clicked {
                 action = Some(NetlistToolbarAction::Find);
             }
+            if dependency_visible {
+                let (label, candidate) = if dependency_owned {
+                    (
+                        messages.text(MessageId::NetlistReturnRoot),
+                        NetlistToolbarAction::CloseDependency,
+                    )
+                } else {
+                    (
+                        messages.text(MessageId::NetlistCopyProject),
+                        NetlistToolbarAction::CopyDependency,
+                    )
+                };
+                if ui
+                    .add_sized(
+                        [PHONE_PRIMARY_WIDTH, 28.0],
+                        egui::Button::new(&label).truncate(),
+                    )
+                    .clicked()
+                {
+                    action = Some(candidate);
+                }
+                if !dependency_owned
+                    && icon_button(
+                        ui,
+                        WorkbenchIcon::ArrowLeft,
+                        &messages.text(MessageId::NetlistReturnRoot),
+                        false,
+                        vec2(28.0, 28.0),
+                    )
+                    .clicked()
+                {
+                    action = Some(NetlistToolbarAction::CloseDependency);
+                }
+                if icon_button(
+                    ui,
+                    WorkbenchIcon::Refresh,
+                    &messages.text(MessageId::NetlistRelinkTooltip),
+                    false,
+                    vec2(28.0, 28.0),
+                )
+                .clicked()
+                {
+                    action = Some(NetlistToolbarAction::RelinkDependency);
+                }
+            } else {
             match active {
                 ActiveNetlistDocument::Generated => {
                     let (label, candidate) = if app.state.workspace.netlist_source.is_some() {
-                        ("Open editable source", NetlistToolbarAction::OpenOwned)
+                        (
+                            messages.text(MessageId::NetlistOpenEditable),
+                            NetlistToolbarAction::OpenOwned,
+                        )
                     } else {
                         (
-                            "Create editable source from generated netlist…",
+                            messages.text(MessageId::NetlistCreateEditable),
                             NetlistToolbarAction::OpenOwnershipDialog(
                                 crate::state::OwnedNetlistEditStrategy::OwnedSource,
                             ),
@@ -746,7 +1106,7 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                     if ui
                         .add_enabled(
                             primary_ready,
-                            egui::Button::new(label)
+                            egui::Button::new(&label)
                                 .truncate()
                                 .min_size(vec2(PHONE_PRIMARY_WIDTH, 28.0)),
                         )
@@ -761,12 +1121,12 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                     if ui
                         .add_enabled(
                             save_ready,
-                            egui::Button::new("Save source deck")
+                            egui::Button::new(messages.text(MessageId::NetlistSaveSourceDeck))
                                 .truncate()
                                 .min_size(vec2(PHONE_PRIMARY_WIDTH, 28.0)),
                         )
                         .on_disabled_hover_text(
-                            "Validate a modified source revision before saving it",
+                            messages.text(MessageId::NetlistValidateBeforeSave),
                         )
                         .clicked()
                     {
@@ -777,34 +1137,68 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                     if ui
                         .add_sized(
                             [PHONE_PRIMARY_WIDTH, 28.0],
-                            egui::Button::new("Return to generated primary").truncate(),
+                            egui::Button::new(
+                                messages.text(MessageId::NetlistReturnGeneratedPrimary),
+                            )
+                            .truncate(),
                         )
                         .clicked()
                     {
-                        action = Some(NetlistToolbarAction::OpenGenerated);
+                        action = Some(NetlistToolbarAction::CloseComparison);
                     }
                 }
+            }
             }
         });
     } else {
         actions.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.add_enabled_ui(active_available, |ui| {
+                crate::workbench::documents::text_editor_commands::editor_command_menu(
+                    ui,
+                    crate::workbench::documents::netlist_document::editor_id(),
+                    crate::workbench::documents::netlist_document::active_netlist_source_is_editable(
+                        &app.state,
+                    ),
+                    false,
+                );
+            })
+            .response
+            .on_disabled_hover_text(messages.text(MessageId::NetlistEditorCommandsUnavailable));
             let mut find_clicked = false;
             ui.add_enabled_ui(active_available, |ui| {
                 find_clicked = icon_button(
                     ui,
                     WorkbenchIcon::Search,
-                    "Find in active netlist document",
+                    &messages.text(MessageId::NetlistFindActiveDocument),
                     false,
                     vec2(28.0, 28.0),
                 )
                 .clicked();
             })
             .response
-            .on_disabled_hover_text("Open or generate a netlist document before searching.");
+            .on_disabled_hover_text(messages.text(MessageId::NetlistSearchUnavailable));
             if find_clicked {
                 action = Some(NetlistToolbarAction::Find);
             }
 
+            if dependency_visible {
+                if ui
+                    .button(messages.text(MessageId::NetlistReturnRoot))
+                    .clicked()
+                {
+                    action = Some(NetlistToolbarAction::CloseDependency);
+                }
+                if ui.button(messages.text(MessageId::NetlistRelink)).clicked() {
+                    action = Some(NetlistToolbarAction::RelinkDependency);
+                }
+                if !dependency_owned
+                    && ui
+                        .button(messages.text(MessageId::NetlistCopyProject))
+                        .clicked()
+                {
+                    action = Some(NetlistToolbarAction::CopyDependency);
+                }
+            } else {
             match active {
                 ActiveNetlistDocument::Generated => {
                     let mut override_clicked = false;
@@ -828,16 +1222,16 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                         ));
                     }
                     let label = if app.state.workspace.netlist_source.is_some() {
-                        "Open editable source"
+                        messages.text(MessageId::NetlistOpenEditable)
                     } else {
-                        "Create editable source from generated netlist…"
+                        messages.text(MessageId::NetlistCreateEditable)
                     };
                     let primary_ready =
                         app.state.workspace.netlist_source.is_some() || generated_ready;
                     let response = ui
                         .add_enabled(
                             primary_ready,
-                            egui::Button::new(label).min_size(vec2(0.0, 28.0)),
+                            egui::Button::new(&label).min_size(vec2(0.0, 28.0)),
                         )
                         .on_disabled_hover_text(generation_block_reason(&app.state));
                     if response.clicked() {
@@ -853,26 +1247,39 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                 ActiveNetlistDocument::OwnedSource => {
                     let save_ready = owned_source_save_ready(app);
                     if ui
-                        .add_enabled(save_ready, egui::Button::new("Save source deck"))
+                        .add_enabled(
+                            save_ready,
+                            egui::Button::new(messages.text(MessageId::NetlistSaveSourceDeck)),
+                        )
                         .on_disabled_hover_text(
-                            "Validate a modified source revision before saving it",
+                            messages.text(MessageId::NetlistValidateBeforeSave),
                         )
                         .clicked()
                     {
                         action = Some(NetlistToolbarAction::Save);
                     }
-                    if ui.button("Validate source").clicked() {
+                    if ui
+                        .button(messages.text(MessageId::NetlistValidateSource))
+                        .clicked()
+                    {
                         action = Some(NetlistToolbarAction::Validate);
                     }
-                    if ui.button("Return to primary").clicked() {
+                    if ui
+                        .button(messages.text(MessageId::NetlistReturnPrimary))
+                        .clicked()
+                    {
                         action = Some(NetlistToolbarAction::OpenGenerated);
                     }
                 }
                 ActiveNetlistDocument::GeneratedDiff => {
-                    if ui.button("Return to primary").clicked() {
-                        action = Some(NetlistToolbarAction::OpenGenerated);
+                    if ui
+                        .button(messages.text(MessageId::NetlistReturnPrimary))
+                        .clicked()
+                    {
+                        action = Some(NetlistToolbarAction::CloseComparison);
                     }
                 }
+            }
             }
         });
     }
@@ -886,18 +1293,43 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                 &mut app.state,
             );
         }
+        Some(NetlistToolbarAction::CloseComparison) => {
+            crate::workbench::documents::netlist_document::close_revision_comparison(
+                &mut app.state,
+            );
+        }
+        Some(NetlistToolbarAction::CloseDependency) => {
+            crate::workbench::documents::netlist_document::close_active_dependency(&mut app.state);
+        }
+        Some(NetlistToolbarAction::CopyDependency) => {
+            match crate::workbench::documents::netlist_document::copy_active_dependency_to_project(
+                &mut app.state,
+            ) {
+                Ok(_) => app.state.push_user_message(ConsoleMessage::info(
+                    messages.text(MessageId::NetlistCopySucceeded),
+                )),
+                Err(error) => app.state.push_user_message(ConsoleMessage::error(error)),
+            }
+        }
+        Some(NetlistToolbarAction::RelinkDependency) => {
+            if let Some(identity) = app.state.ui.netlist.active_dependency_identity.clone() {
+                crate::workbench::workflows::netlist_workflow::request_dependency_relink(
+                    &mut app.state,
+                    &identity,
+                );
+            }
+        }
         Some(NetlistToolbarAction::OpenOwnershipDialog(strategy)) => {
             open_ownership_dialog(&mut app.state, strategy);
         }
         Some(NetlistToolbarAction::Validate) => {
-            crate::workbench::workflows::netlist_workflow::validate_visible_netlist_source(app);
+            crate::workbench::commands::vocabulary::Command::ValidateCodeDocument.execute(app);
         }
         Some(NetlistToolbarAction::Save) => {
-            app.state.ui.netlist.save_dialog.open = true;
-            app.state.ui.netlist.save_dialog.error = None;
+            crate::workbench::commands::vocabulary::Command::Save.execute(app);
         }
         Some(NetlistToolbarAction::Find) => {
-            app.state.ui.netlist.find.open = true;
+            crate::workbench::commands::vocabulary::Command::FindCodeDocument.execute(app);
         }
         None => {}
     }
@@ -960,6 +1392,10 @@ const fn toolbar_status_visible(phone: bool, tone: DocumentStatusTone) -> bool {
 enum NetlistToolbarAction {
     OpenOwned,
     OpenGenerated,
+    CloseComparison,
+    CloseDependency,
+    CopyDependency,
+    RelinkDependency,
     OpenOwnershipDialog(crate::state::OwnedNetlistEditStrategy),
     Validate,
     Save,
@@ -976,6 +1412,8 @@ enum FindWindowAction {
 #[derive(Debug, Clone)]
 struct NetlistSearchDocument {
     active_document: ActiveNetlistDocument,
+    dependency_identity: Option<String>,
+    editable: bool,
     label: String,
     source: String,
 }
@@ -994,11 +1432,15 @@ fn netlist_search_documents(
 
     let generated = || NetlistSearchDocument {
         active_document: ActiveNetlistDocument::Generated,
+        dependency_identity: None,
+        editable: false,
         label: "generated.sp".to_owned(),
         source: state.ui.netlist.generated_source.clone(),
     };
     let owned = || NetlistSearchDocument {
         active_document: ActiveNetlistDocument::OwnedSource,
+        dependency_identity: None,
+        editable: true,
         label: state
             .workspace
             .netlist_descriptor
@@ -1017,32 +1459,105 @@ fn netlist_search_documents(
     };
 
     match scope {
-        NetlistFindScope::CurrentDocument => vec![match state.ui.netlist.active_document {
-            ActiveNetlistDocument::Generated => generated(),
-            ActiveNetlistDocument::OwnedSource => owned(),
-            ActiveNetlistDocument::GeneratedDiff => NetlistSearchDocument {
-                active_document: ActiveNetlistDocument::GeneratedDiff,
-                label: "generated.diff".to_owned(),
-                source: state.ui.netlist.generated_diff_source.clone(),
-            },
-        }],
-        NetlistFindScope::AllOwnedSources => state
-            .workspace
-            .netlist_source
-            .as_ref()
-            .map(|_| vec![owned()])
-            .unwrap_or_default(),
+        NetlistFindScope::CurrentDocument => {
+            if let Some(dependency) =
+                crate::workbench::documents::netlist_document::active_dependency(state)
+            {
+                vec![NetlistSearchDocument {
+                    active_document: state
+                        .ui
+                        .netlist
+                        .active_dependency_root
+                        .unwrap_or(state.ui.netlist.active_document),
+                    dependency_identity: Some(dependency.locator().logical_identity().to_owned()),
+                    editable:
+                        crate::workbench::documents::netlist_document::active_dependency_is_owned(
+                            state,
+                        ),
+                    label: dependency.locator().display_name().to_owned(),
+                    source: dependency.source().unwrap_or_default().to_owned(),
+                }]
+            } else {
+                vec![match state.ui.netlist.active_document {
+                    ActiveNetlistDocument::Generated => generated(),
+                    ActiveNetlistDocument::OwnedSource => owned(),
+                    ActiveNetlistDocument::GeneratedDiff => NetlistSearchDocument {
+                        active_document: ActiveNetlistDocument::GeneratedDiff,
+                        dependency_identity: None,
+                        editable: false,
+                        label: "generated.diff".to_owned(),
+                        source: state.ui.netlist.generated_diff_source.clone(),
+                    },
+                }]
+            }
+        }
+        NetlistFindScope::AllOwnedSources => {
+            let mut documents = state
+                .workspace
+                .netlist_source
+                .as_ref()
+                .map(|_| vec![owned()])
+                .unwrap_or_default();
+            documents.extend(dependency_search_documents(
+                state,
+                ActiveNetlistDocument::OwnedSource,
+                true,
+            ));
+            documents
+        }
         NetlistFindScope::ProjectReferences => {
-            let mut documents = Vec::with_capacity(2);
+            let mut documents = Vec::new();
             if !state.ui.netlist.generated_source.is_empty() {
                 documents.push(generated());
+                documents.extend(dependency_search_documents(
+                    state,
+                    ActiveNetlistDocument::Generated,
+                    false,
+                ));
             }
             if state.workspace.netlist_source.is_some() {
                 documents.push(owned());
+                documents.extend(dependency_search_documents(
+                    state,
+                    ActiveNetlistDocument::OwnedSource,
+                    false,
+                ));
             }
             documents
         }
     }
+}
+
+fn dependency_search_documents(
+    state: &AppState,
+    root: ActiveNetlistDocument,
+    owned_only: bool,
+) -> Vec<NetlistSearchDocument> {
+    let document = match root {
+        ActiveNetlistDocument::Generated => state.ui.netlist.generated_document.as_ref(),
+        ActiveNetlistDocument::OwnedSource => state.ui.netlist.owned_document.as_ref(),
+        ActiveNetlistDocument::GeneratedDiff => None,
+    };
+    let owned = state.workspace.netlist_descriptor.as_ref();
+    document
+        .into_iter()
+        .flat_map(crate::state::NetlistDocument::dependencies)
+        .filter_map(|dependency| {
+            let source = dependency.source()?;
+            let identity = dependency.locator().logical_identity();
+            let editable = root == ActiveNetlistDocument::OwnedSource
+                && owned
+                    .and_then(|value| value.owned_include(identity))
+                    .is_some();
+            (!owned_only || editable).then(|| NetlistSearchDocument {
+                active_document: root,
+                dependency_identity: Some(identity.to_owned()),
+                editable,
+                label: dependency.locator().display_name().to_owned(),
+                source: source.to_owned(),
+            })
+        })
+        .collect()
 }
 
 fn open_ownership_dialog(state: &mut AppState, strategy: crate::state::OwnedNetlistEditStrategy) {
@@ -1072,6 +1587,46 @@ fn default_owned_artifact_name(strategy: crate::state::OwnedNetlistEditStrategy)
     }
 }
 
+fn owned_strategy_label(
+    messages: MessageCatalog,
+    strategy: crate::state::OwnedNetlistEditStrategy,
+) -> String {
+    messages.text(match strategy {
+        crate::state::OwnedNetlistEditStrategy::OwnedSource => {
+            MessageId::NetlistStrategyOwnedSource
+        }
+        crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride => {
+            MessageId::NetlistStrategyParameterOverride
+        }
+        crate::state::OwnedNetlistEditStrategy::IncludeOrderOverride => {
+            MessageId::NetlistStrategyIncludeOverride
+        }
+        crate::state::OwnedNetlistEditStrategy::AnalysisOnlyDeck => {
+            MessageId::NetlistStrategyAnalysisDeck
+        }
+    })
+}
+
+fn owned_strategy_description(
+    messages: MessageCatalog,
+    strategy: crate::state::OwnedNetlistEditStrategy,
+) -> String {
+    messages.text(match strategy {
+        crate::state::OwnedNetlistEditStrategy::OwnedSource => {
+            MessageId::NetlistStrategyOwnedSourceDescription
+        }
+        crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride => {
+            MessageId::NetlistStrategyParameterOverrideDescription
+        }
+        crate::state::OwnedNetlistEditStrategy::IncludeOrderOverride => {
+            MessageId::NetlistStrategyIncludeOverrideDescription
+        }
+        crate::state::OwnedNetlistEditStrategy::AnalysisOnlyDeck => {
+            MessageId::NetlistStrategyAnalysisDeckDescription
+        }
+    })
+}
+
 fn ownership_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
     if !app.state.ui.netlist.ownership_dialog.open {
         return;
@@ -1082,77 +1637,68 @@ fn ownership_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
     };
     let base_revision = generated.revision().get();
     let mut dialog = app.state.ui.netlist.ownership_dialog.clone();
+    let messages = app.state.ui.messages();
     let owned_deck = dialog.strategy == crate::state::OwnedNetlistEditStrategy::OwnedSource;
     let title = if owned_deck {
-        "Create editable source from generated netlist"
+        messages.text(MessageId::NetlistOwnershipCreateSourceTitle)
     } else {
-        "Create generated-netlist override"
+        messages.text(MessageId::NetlistOwnershipCreateOverrideTitle)
     };
     let primary = if owned_deck {
-        "Create owned source"
+        messages.text(MessageId::NetlistOwnershipCreateSource)
     } else {
-        "Create override patch"
+        messages.text(MessageId::NetlistOwnershipCreatePatch)
     };
-    let choice = Dialog::new("NETLIST OWNERSHIP", title, primary)
-        .description(
-            "Create a project-owned source artifact while preserving the immutable generated primary, its base revision, and regeneration behavior.",
-        )
-        .size(DialogSize::Transaction)
-        .initial_focus(DialogInitialFocus::BodyControl)
-        .ghost("Cancel")
-        .show_with_initial_body_focus(ctx, |ui| {
-            let t = Tokens::get(ctx);
-            egui::Frame::new()
-                .fill(t.color.bg_inset)
-                .stroke(egui::Stroke::new(1.0, t.color.border))
-                .corner_radius(t.radius)
-                .inner_margin(10)
-                .show(ui, |ui| {
-                    ui.label(
-                        "The generated schematic netlist remains immutable. The editable artifact records its base revision, ownership, and regeneration behavior.",
-                    );
-                });
-            ui.add_space(8.0);
-            ui.label("Artifact name");
-            let artifact_name = ui.add(
-                egui::TextEdit::singleline(&mut dialog.artifact_name)
-                    .desired_width(f32::INFINITY),
-            );
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.label("Base revision");
-                ui.monospace(base_revision.to_string());
+    let choice = Dialog::new(
+        messages.text(MessageId::NetlistOwnershipEyebrow),
+        title,
+        primary,
+    )
+    .description(messages.text(MessageId::NetlistOwnershipDescription))
+    .size(DialogSize::Transaction)
+    .initial_focus(DialogInitialFocus::BodyControl)
+    .ghost(messages.text(MessageId::CommonCancel))
+    .show_with_initial_body_focus(ctx, |ui| {
+        let t = Tokens::get(ctx);
+        egui::Frame::new()
+            .fill(t.color.bg_inset)
+            .stroke(egui::Stroke::new(1.0, t.color.border))
+            .corner_radius(t.radius)
+            .inner_margin(10)
+            .show(ui, |ui| {
+                ui.label(messages.text(MessageId::NetlistOwnershipNotice));
             });
-            ui.add_space(8.0);
-            ui.label("Edit strategy");
-            egui::ComboBox::from_id_salt("rspice.code.ownership-strategy")
-                .selected_text(dialog.strategy.label())
-                .width(ui.available_width().max(1.0))
-                .show_ui(ui, |ui| {
-                    for strategy in crate::state::OwnedNetlistEditStrategy::ALL {
-                        ui.selectable_value(&mut dialog.strategy, strategy, strategy.label());
-                    }
-                });
-            ui.label(match dialog.strategy {
-                crate::state::OwnedNetlistEditStrategy::OwnedSource => {
-                    "Own the complete deck as an independently editable source revision."
-                }
-                crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride => {
-                    "Own only .param, .option, and .temp cards; execution composes them with the frozen generated base."
-                }
-                crate::state::OwnedNetlistEditStrategy::IncludeOrderOverride => {
-                    "Own include and library ordering while retaining the frozen generated circuit and analyses."
-                }
-                crate::state::OwnedNetlistEditStrategy::AnalysisOnlyDeck => {
-                    "Own analysis, measurement, save, and probe cards while retaining the frozen generated circuit."
-                }
-            });
-            if let Some(error) = &dialog.error {
-                ui.add_space(6.0);
-                ui.colored_label(Tokens::get(ctx).color.err, error);
-            }
-            Some(artifact_name.id)
+        ui.add_space(8.0);
+        ui.label(messages.text(MessageId::NetlistArtifactName));
+        let artifact_name = ui.add(
+            egui::TextEdit::singleline(&mut dialog.artifact_name).desired_width(f32::INFINITY),
+        );
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label(messages.text(MessageId::NetlistBaseRevision));
+            ui.monospace(base_revision.to_string());
         });
+        ui.add_space(8.0);
+        ui.label(messages.text(MessageId::NetlistEditStrategy));
+        egui::ComboBox::from_id_salt("rspice.code.ownership-strategy")
+            .selected_text(owned_strategy_label(messages, dialog.strategy))
+            .width(ui.available_width().max(1.0))
+            .show_ui(ui, |ui| {
+                for strategy in crate::state::OwnedNetlistEditStrategy::ALL {
+                    ui.selectable_value(
+                        &mut dialog.strategy,
+                        strategy,
+                        owned_strategy_label(messages, strategy),
+                    );
+                }
+            });
+        ui.label(owned_strategy_description(messages, dialog.strategy));
+        if let Some(error) = &dialog.error {
+            ui.add_space(6.0);
+            ui.colored_label(Tokens::get(ctx).color.err, error);
+        }
+        Some(artifact_name.id)
+    });
     match choice {
         DialogChoice::Primary => {
             match create_owned_source(&mut app.state, &dialog.artifact_name, dialog.strategy) {
@@ -1170,45 +1716,147 @@ fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
     if !app.state.ui.netlist.comparison_dialog.open {
         return;
     }
-    let history_len = app.state.ui.netlist.generated_history.len();
-    if history_len == 0 || app.state.ui.netlist.generated_document.is_none() {
+    let owned = app.state.ui.netlist.active_document == ActiveNetlistDocument::OwnedSource
+        && app.state.ui.netlist.active_dependency_identity.is_none();
+    let history_len = if owned {
+        app.state
+            .workspace
+            .netlist_descriptor
+            .as_ref()
+            .map_or(0, |descriptor| descriptor.revision_history.len())
+    } else {
+        app.state.ui.netlist.generated_history.len()
+    };
+    let current_available = if owned {
+        app.state.ui.netlist.owned_document.is_some()
+    } else {
+        app.state.ui.netlist.generated_document.is_some()
+    };
+    if history_len == 0 || !current_available {
         app.state.ui.netlist.comparison_dialog.open = false;
         return;
     }
     let mut dialog = app.state.ui.netlist.comparison_dialog.clone();
+    let messages = app.state.ui.messages();
     dialog.selected_history_index = dialog.selected_history_index.min(history_len - 1);
-    let selected = &app.state.ui.netlist.generated_history[dialog.selected_history_index];
-    let selected_label = format!(
-        "Input revision {} · {}…",
-        selected.provenance().input().revision().get(),
-        selected
+    let selected_label = if owned {
+        let Some(selected) =
+            app.state
+                .workspace
+                .netlist_descriptor
+                .as_ref()
+                .and_then(|descriptor| {
+                    descriptor
+                        .revision_history
+                        .get(dialog.selected_history_index)
+                })
+        else {
+            app.state.ui.netlist.comparison_dialog.open = false;
+            return;
+        };
+        let revision = selected.document_revision.to_string();
+        let digest = selected
+            .content_digest
+            .to_string()
+            .chars()
+            .take(12)
+            .collect::<String>();
+        messages.format(
+            MessageId::NetlistOwnedRevisionChoice,
+            &[
+                ("revision", &revision),
+                ("digest", &digest),
+                ("message", &selected.message),
+            ],
+        )
+    } else {
+        let selected = &app.state.ui.netlist.generated_history[dialog.selected_history_index];
+        let revision = selected.provenance().input().revision().get().to_string();
+        let digest = selected
             .content_digest()
             .to_string()
             .chars()
             .take(12)
-            .collect::<String>()
-    );
-    let choice = Dialog::new(
-        "NETLIST · IMMUTABLE REVISION COMPARISON",
-        "Compare generated revisions",
-        "Compare revisions",
-    )
-        .description(
-            "Select an immutable generated predecessor and open an exact source comparison against the current primary artifact.",
+            .collect::<String>();
+        messages.format(
+            MessageId::NetlistGeneratedRevisionChoice,
+            &[("revision", &revision), ("digest", &digest)],
         )
-        .size(DialogSize::Transaction)
-        .initial_focus(DialogInitialFocus::BodyControl)
-        .ghost("Cancel")
-        .show_with_initial_body_focus(ctx, |ui| {
-            ui.label(
-                "Select an immutable generated predecessor to compare with the current primary artifact.",
-            );
-            ui.add_space(8.0);
-            ui.label("Prior revision");
-            let revision = egui::ComboBox::from_id_salt("rspice.code.compare-revision-select")
-                .selected_text(selected_label)
-                .width(ui.available_width().max(1.0))
-                .show_ui(ui, |ui| {
+    };
+    let restore_enabled = owned
+        && app
+            .state
+            .workspace
+            .netlist_descriptor
+            .as_ref()
+            .and_then(|descriptor| {
+                descriptor
+                    .revision_history
+                    .get(dialog.selected_history_index)
+            })
+            .zip(app.state.ui.netlist.owned_document.as_ref())
+            .is_some_and(|(snapshot, current)| {
+                snapshot.content_digest != current.content_digest()
+                    || snapshot.dependencies != current.dependencies()
+            });
+    let mut transaction = Dialog::new(
+        messages.text(MessageId::NetlistComparisonEyebrow),
+        if owned {
+            messages.text(MessageId::NetlistComparisonOwnedTitle)
+        } else {
+            messages.text(MessageId::NetlistComparisonGeneratedTitle)
+        },
+        messages.text(MessageId::NetlistCompareRevisions),
+    )
+    .description(if owned {
+        messages.text(MessageId::NetlistComparisonOwnedDescription)
+    } else {
+        messages.text(MessageId::NetlistComparisonGeneratedDescription)
+    })
+    .size(DialogSize::Transaction)
+    .initial_focus(DialogInitialFocus::BodyControl)
+    .ghost(messages.text(MessageId::CommonCancel));
+    if owned {
+        transaction = transaction
+            .secondary(messages.text(MessageId::NetlistRestoreAsNewRevision))
+            .secondary_enabled(restore_enabled);
+    }
+    let choice = transaction.show_with_initial_body_focus(ctx, |ui| {
+        ui.label(if owned {
+            messages.text(MessageId::NetlistComparisonOwnedPrompt)
+        } else {
+            messages.text(MessageId::NetlistComparisonGeneratedPrompt)
+        });
+        ui.add_space(8.0);
+        ui.label(messages.text(MessageId::NetlistPriorRevision));
+        let revision = egui::ComboBox::from_id_salt("rspice.code.compare-revision-select")
+            .selected_text(selected_label)
+            .width(ui.available_width().max(1.0))
+            .show_ui(ui, |ui| {
+                if owned {
+                    if let Some(descriptor) = app.state.workspace.netlist_descriptor.as_ref() {
+                        for (index, snapshot) in
+                            descriptor.revision_history.iter().enumerate().rev()
+                        {
+                            let revision = snapshot.document_revision.to_string();
+                            let digest = snapshot
+                                .content_digest
+                                .to_string()
+                                .chars()
+                                .take(12)
+                                .collect::<String>();
+                            let label = messages.format(
+                                MessageId::NetlistOwnedRevisionChoice,
+                                &[
+                                    ("revision", &revision),
+                                    ("digest", &digest),
+                                    ("message", &snapshot.message),
+                                ],
+                            );
+                            ui.selectable_value(&mut dialog.selected_history_index, index, label);
+                        }
+                    }
+                } else {
                     for (index, artifact) in app
                         .state
                         .ui
@@ -1218,24 +1866,43 @@ fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                         .enumerate()
                         .rev()
                     {
-                        let label = format!(
-                            "Input revision {} · {}…",
-                            artifact.provenance().input().revision().get(),
-                            artifact
-                                .content_digest()
-                                .to_string()
-                                .chars()
-                                .take(12)
-                                .collect::<String>()
+                        let revision = artifact.provenance().input().revision().get().to_string();
+                        let digest = artifact
+                            .content_digest()
+                            .to_string()
+                            .chars()
+                            .take(12)
+                            .collect::<String>();
+                        let label = messages.format(
+                            MessageId::NetlistGeneratedRevisionChoice,
+                            &[("revision", &revision), ("digest", &digest)],
                         );
                         ui.selectable_value(&mut dialog.selected_history_index, index, label);
                     }
-                });
-            Some(revision.response.id)
-        });
+                }
+            });
+        Some(revision.response.id)
+    });
     match choice {
         DialogChoice::Primary => {
-            match crate::workbench::documents::netlist_document::compare_generated_revision(
+            let result = if owned {
+                crate::workbench::documents::netlist_document::compare_owned_revision(
+                    &mut app.state,
+                    dialog.selected_history_index,
+                )
+            } else {
+                crate::workbench::documents::netlist_document::compare_generated_revision(
+                    &mut app.state,
+                    dialog.selected_history_index,
+                )
+            };
+            match result {
+                Ok(()) => dialog.open = false,
+                Err(error) => app.state.push_user_message(ConsoleMessage::warning(error)),
+            }
+        }
+        DialogChoice::Secondary => {
+            match crate::workbench::documents::netlist_document::restore_owned_revision(
                 &mut app.state,
                 dialog.selected_history_index,
             ) {
@@ -1244,13 +1911,15 @@ fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
             }
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => dialog.open = false,
-        DialogChoice::None | DialogChoice::Secondary => {}
+        DialogChoice::None => {}
     }
     app.state.ui.netlist.comparison_dialog = dialog;
 }
 
 fn owned_source_save_ready(app: &RSpiceApp) -> bool {
-    if app.state.ui.netlist.active_document != ActiveNetlistDocument::OwnedSource {
+    if app.state.ui.netlist.active_document != ActiveNetlistDocument::OwnedSource
+        || app.state.ui.netlist.active_dependency_identity.is_some()
+    {
         return false;
     }
     let digest = source_content_digest(&app.state.simulation.netlist_content);
@@ -1275,12 +1944,15 @@ fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
     if !app.state.ui.netlist.save_dialog.open {
         return;
     }
-    if app.state.ui.netlist.active_document != ActiveNetlistDocument::OwnedSource {
+    if app.state.ui.netlist.active_document != ActiveNetlistDocument::OwnedSource
+        || app.state.ui.netlist.active_dependency_identity.is_some()
+    {
         app.state.ui.netlist.save_dialog.open = false;
         return;
     }
 
     let mut dialog = app.state.ui.netlist.save_dialog.clone();
+    let messages = app.state.ui.messages();
     let current_digest = source_content_digest(&app.state.simulation.netlist_content);
     let validated = app
         .state
@@ -1304,78 +1976,79 @@ fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
     let needs_save = app.state.ui.netlist.externally_saved_content_digest != Some(current_digest);
     let primary_enabled = validated && message_valid && needs_save;
     let footer_hint = if validated {
-        "Exact source and execution snapshot validated"
+        messages.text(MessageId::NetlistExactSnapshotValidated)
     } else {
-        "Validation required"
+        messages.text(MessageId::NetlistValidationRequired)
     };
     let choice = Dialog::new(
-        "SOURCE · VALIDATED TRANSACTION",
-        "Save owned source revision",
-        "Save source",
+        messages.text(MessageId::NetlistSaveEyebrow),
+        messages.text(MessageId::NetlistSaveTitle),
+        messages.text(MessageId::NetlistSave),
     )
-        .description(
-            "Publish the exact validated owned source as a new durable revision without changing or rebasing the generated primary.",
-        )
-        .size(DialogSize::Transaction)
-        .initial_focus(DialogInitialFocus::BodyControl)
-        .primary_enabled(primary_enabled)
-        .ghost("Cancel")
-        .hint(footer_hint)
-        .show_with_initial_body_focus(ctx, |ui| {
-            let t = Tokens::get(ctx);
-            let descriptor = app.state.workspace.netlist_descriptor.as_ref();
-            ui.label(
-                egui::RichText::new(
-                    descriptor
-                        .map(|value| value.artifact_name.as_str())
-                        .unwrap_or("Owned SPICE source"),
-                )
-                .font(theme::mono(tokens::FS_1, FontWeight::Medium)),
-            );
-            egui::Frame::new()
-                .fill(t.color.bg_inset)
-                .stroke(egui::Stroke::new(1.0, t.color.border))
-                .corner_radius(t.radius)
-                .inner_margin(10)
-                .show(ui, |ui| {
-                    ui.label(if validated {
-                        "The exact authored bytes, materialized generated dependency, PVT contract, and execution target are validated."
-                    } else {
-                        "Validation is missing or stale. Close this transaction and validate the current source before saving."
-                    });
-                    if let Some(document) = app.state.ui.netlist.owned_document.as_ref() {
-                        ui.monospace(format!(
-                            "Generated base {}… · owned revision {}",
-                            document
-                                .generated_artifact()
-                                .content_digest()
-                                .to_string()
-                                .chars()
-                                .take(12)
-                                .collect::<String>(),
-                            document.revision().get()
-                        ));
-                    }
-                    ui.label("Saving publishes a new owned-source revision; it never mutates or rebases the generated primary.");
+    .description(messages.text(MessageId::NetlistSaveDescription))
+    .size(DialogSize::Transaction)
+    .initial_focus(DialogInitialFocus::BodyControl)
+    .primary_enabled(primary_enabled)
+    .ghost(messages.text(MessageId::CommonCancel))
+    .hint(footer_hint)
+    .show_with_initial_body_focus(ctx, |ui| {
+        let t = Tokens::get(ctx);
+        let descriptor = app.state.workspace.netlist_descriptor.as_ref();
+        let artifact_name = descriptor.map_or_else(
+            || messages.text(MessageId::NetlistOwnedSpiceSource),
+            |value| value.artifact_name.clone(),
+        );
+        ui.label(
+            egui::RichText::new(artifact_name).font(theme::mono(tokens::FS_1, FontWeight::Medium)),
+        );
+        egui::Frame::new()
+            .fill(t.color.bg_inset)
+            .stroke(egui::Stroke::new(1.0, t.color.border))
+            .corner_radius(t.radius)
+            .inner_margin(10)
+            .show(ui, |ui| {
+                ui.label(if validated {
+                    messages.text(MessageId::NetlistSaveValidatedNotice)
+                } else {
+                    messages.text(MessageId::NetlistSaveStaleNotice)
+                });
+                if let Some(document) = app.state.ui.netlist.owned_document.as_ref() {
+                    let digest = document
+                        .generated_artifact()
+                        .content_digest()
+                        .to_string()
+                        .chars()
+                        .take(12)
+                        .collect::<String>();
+                    let revision = document.revision().get().to_string();
+                    ui.monospace(messages.format(
+                        MessageId::NetlistGeneratedBaseRevision,
+                        &[("digest", &digest), ("revision", &revision)],
+                    ));
+                }
+                ui.label(messages.text(MessageId::NetlistSaveImmutableNotice));
             });
-            ui.add_space(8.0);
-            ui.label("Revision message");
-            let revision_message = ui.add(
-                egui::TextEdit::singleline(&mut dialog.message)
-                    .desired_width(f32::INFINITY)
-                    .char_limit(240),
+        ui.add_space(8.0);
+        ui.label(messages.text(MessageId::NetlistRevisionMessage));
+        let revision_message = ui.add(
+            egui::TextEdit::singleline(&mut dialog.message)
+                .desired_width(f32::INFINITY)
+                .char_limit(240),
+        );
+        if !message_valid {
+            ui.colored_label(
+                t.color.err,
+                messages.text(MessageId::NetlistRevisionMessageInvalid),
             );
-            if !message_valid {
-                ui.colored_label(t.color.err, "Enter a one-line message of 1–240 characters.");
-            }
-            if !needs_save {
-                ui.weak("These exact source bytes are already published.");
-            }
-            if let Some(error) = &dialog.error {
-                ui.colored_label(t.color.err, error);
-            }
-            Some(revision_message.id)
-        });
+        }
+        if !needs_save {
+            ui.weak(messages.text(MessageId::NetlistAlreadyPublished));
+        }
+        if let Some(error) = &dialog.error {
+            ui.colored_label(t.color.err, error);
+        }
+        Some(revision_message.id)
+    });
     match choice {
         DialogChoice::Primary => {
             if crate::workbench::workflows::netlist_workflow::save_owned_netlist_source(
@@ -1399,6 +2072,186 @@ fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
         DialogChoice::None | DialogChoice::Secondary => {}
     }
     app.state.ui.netlist.save_dialog = dialog;
+}
+
+fn external_resolution_label(
+    messages: MessageCatalog,
+    resolution: crate::workbench::documents::netlist_document::NetlistExternalChangeResolution,
+) -> String {
+    use crate::workbench::documents::netlist_document::NetlistExternalChangeResolution;
+
+    messages.text(match resolution {
+        NetlistExternalChangeResolution::Merge => MessageId::NetlistExternalMerge,
+        NetlistExternalChangeResolution::KeepLocal => MessageId::NetlistExternalKeepLocal,
+        NetlistExternalChangeResolution::ReloadExternal => MessageId::NetlistExternalReload,
+    })
+}
+
+fn external_change_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
+    use crate::workbench::documents::netlist_document::NetlistExternalChangeResolution;
+
+    let Some(mut review) = app.state.ui.netlist.external_change.clone() else {
+        return;
+    };
+    let messages = app.state.ui.messages();
+    let digest = |bytes: &[u8; 32]| {
+        bytes
+            .iter()
+            .take(6)
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    };
+    let hint = match review.resolution {
+        NetlistExternalChangeResolution::Merge if review.merge_conflict_count == 0 => {
+            messages.text(MessageId::NetlistExternalConflictFree)
+        }
+        NetlistExternalChangeResolution::Merge => {
+            messages.text(MessageId::NetlistExternalConflictResolutionRequired)
+        }
+        NetlistExternalChangeResolution::KeepLocal => {
+            messages.text(MessageId::NetlistExternalKeepLocalHint)
+        }
+        NetlistExternalChangeResolution::ReloadExternal => {
+            messages.text(MessageId::NetlistExternalReloadHint)
+        }
+    };
+    let choice = Dialog::new(
+        messages.text(MessageId::NetlistExternalEyebrow),
+        messages.text(MessageId::NetlistExternalTitle),
+        messages.text(MessageId::NetlistExternalApply),
+    )
+    .description(messages.text(MessageId::NetlistExternalDescription))
+    .size(DialogSize::Transaction)
+    .initial_focus(DialogInitialFocus::BodyControl)
+    .ghost(messages.text(MessageId::CommonCancel))
+    .hint(hint)
+    .show_with_initial_body_focus(ctx, |ui| {
+        let t = Tokens::get(ctx);
+        ui.monospace(review.path.display().to_string());
+        let expected = digest(&review.expected_sha256);
+        let observed = digest(&review.observed_sha256);
+        ui.weak(messages.format(
+            MessageId::NetlistExternalEvidenceSummary,
+            &[
+                ("expected", &expected),
+                ("observed", &observed),
+                ("encoding", review.external_encoding.label()),
+            ],
+        ));
+        ui.add_space(8.0);
+        ui.label(messages.text(MessageId::NetlistExternalResolution));
+        let resolution = egui::ComboBox::from_id_salt("rspice.netlist.external-resolution")
+            .selected_text(external_resolution_label(messages, review.resolution))
+            .width(ui.available_width().max(1.0))
+            .show_ui(ui, |ui| {
+                for resolution in NetlistExternalChangeResolution::ALL {
+                    ui.selectable_value(
+                        &mut review.resolution,
+                        resolution,
+                        external_resolution_label(messages, resolution),
+                    );
+                }
+            });
+        ui.add_space(8.0);
+        ui.label(egui::RichText::new(messages.text(MessageId::NetlistExternalEvidence)).strong());
+        ui.label(if review.base_source.is_some() {
+            let count = review.merge_conflict_count.to_string();
+            messages.format(
+                if review.merge_conflict_count == 1 {
+                    MessageId::NetlistExternalMergeConflictsSingular
+                } else {
+                    MessageId::NetlistExternalMergeConflicts
+                },
+                &[("count", &count)],
+            )
+        } else {
+            messages.text(MessageId::NetlistExternalNoBase)
+        });
+        let candidate = match review.resolution {
+            NetlistExternalChangeResolution::Merge => &review.merged_source,
+            NetlistExternalChangeResolution::KeepLocal => &review.local_source,
+            NetlistExternalChangeResolution::ReloadExternal => &review.external_source,
+        };
+        egui::Frame::new()
+            .fill(t.color.bg_inset)
+            .stroke(egui::Stroke::new(1.0, t.color.border))
+            .corner_radius(t.radius)
+            .inner_margin(8)
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("rspice.netlist.external-candidate")
+                    .max_height(150.0)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for (line, text) in candidate.lines().take(200).enumerate() {
+                            ui.monospace(format!("{:>5}  {text}", line + 1));
+                        }
+                        if candidate.lines().nth(200).is_some() {
+                            ui.weak(messages.text(MessageId::NetlistExternalPreviewLimited));
+                        }
+                    });
+            });
+        ui.add_space(8.0);
+        ui.label(egui::RichText::new(messages.text(MessageId::NetlistExternalComparison)).strong());
+        egui::ScrollArea::vertical()
+            .id_salt("rspice.netlist.external-diff")
+            .max_height(120.0)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for line in review.comparison.lines().take(200) {
+                    ui.monospace(line);
+                }
+            });
+        if let Some(error) = &review.error {
+            ui.add_space(6.0);
+            ui.colored_label(t.color.err, error);
+        }
+        Some(resolution.response.id)
+    });
+
+    app.state.ui.netlist.external_change = Some(review);
+    match choice {
+        DialogChoice::Primary => {
+            match crate::workbench::workflows::netlist_workflow::apply_staged_external_netlist_change(
+                &mut app.state,
+            ) {
+                Ok(()) => {
+                    app.state.push_user_message(ConsoleMessage::info(
+                        "External source resolution applied as a journaled project revision.",
+                    ));
+                }
+                Err(error) => {
+                    if let Some(current) = app.state.ui.netlist.external_change.as_mut() {
+                        current.error = Some(error);
+                    }
+                }
+            }
+        }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            app.state.ui.netlist.external_change = None;
+        }
+        DialogChoice::None | DialogChoice::Secondary => {}
+    }
+}
+
+fn dependency_status_label(
+    messages: MessageCatalog,
+    count: usize,
+    sealed: bool,
+    external: bool,
+) -> String {
+    let id = match (external, sealed, count == 1) {
+        (false, true, true) => MessageId::NetlistDependencySealedSingular,
+        (false, true, false) => MessageId::NetlistDependencySealed,
+        (false, false, true) => MessageId::NetlistDependencyResolutionSingular,
+        (false, false, false) => MessageId::NetlistDependencyResolution,
+        (true, true, true) => MessageId::NetlistExportExternalSealedSingular,
+        (true, true, false) => MessageId::NetlistExportExternalSealed,
+        (true, false, true) => MessageId::NetlistExportExternalResolutionSingular,
+        (true, false, false) => MessageId::NetlistExportExternalResolution,
+    };
+    let count = count.to_string();
+    messages.format(id, &[("count", &count)])
 }
 
 fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
@@ -1427,125 +2280,111 @@ fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
     if requires_bundle {
         dialog.bundle_dependencies = true;
     }
+    let messages = app.state.ui.messages();
     let bundle_ready = !dialog.bundle_dependencies || dependencies_sealed;
     let primary = if dialog.bundle_dependencies {
-        "Export bundle"
+        messages.text(MessageId::NetlistExportBundle)
     } else {
-        "Export generated deck"
+        messages.text(MessageId::NetlistExportDeck)
     };
-    let footer_hint = format!(
-        "{dependency_count} dependenc{} · {}",
-        if dependency_count == 1 { "y" } else { "ies" },
-        if dependencies_sealed {
-            "sealed"
-        } else {
-            "resolution required"
-        }
-    );
+    let footer_hint =
+        dependency_status_label(messages, dependency_count, dependencies_sealed, false);
     let choice = Dialog::new(
-        "NETLIST · IMMUTABLE SOURCE-MAPPED ARTIFACT",
-        "Export generated netlist",
+        messages.text(MessageId::NetlistExportEyebrow),
+        messages.text(MessageId::NetlistExportTitle),
         primary,
     )
-        .description(
-            "Export the exact current generated revision as a deck or integrity-bound dependency bundle without changing project source.",
-        )
-        .size(DialogSize::Transaction)
-        .initial_focus(DialogInitialFocus::BodyControl)
-        .primary_enabled(current && bundle_ready)
-        .ghost("Cancel")
-        .hint(&footer_hint)
-        .show_with_initial_body_focus(ctx, |ui| {
-            let t = Tokens::get(ctx);
-            egui::Frame::new()
-                .fill(t.color.bg_inset)
-                .stroke(egui::Stroke::new(1.0, t.color.border))
-                .corner_radius(t.radius)
-                .inner_margin(10)
-                .show(ui, |ui| {
-                    ui.label(
-                        "The exported deck is a snapshot of the current generated revision. Editing the export never changes the schematic or the project-owned source graph.",
-                    );
+    .description(messages.text(MessageId::NetlistExportDescription))
+    .size(DialogSize::Transaction)
+    .initial_focus(DialogInitialFocus::BodyControl)
+    .primary_enabled(current && bundle_ready)
+    .ghost(messages.text(MessageId::CommonCancel))
+    .hint(&footer_hint)
+    .show_with_initial_body_focus(ctx, |ui| {
+        let t = Tokens::get(ctx);
+        egui::Frame::new()
+            .fill(t.color.bg_inset)
+            .stroke(egui::Stroke::new(1.0, t.color.border))
+            .corner_radius(t.radius)
+            .inner_margin(10)
+            .show(ui, |ui| {
+                ui.label(messages.text(MessageId::NetlistExportSnapshotNotice));
+            });
+        ui.add_space(8.0);
+        ui.label(messages.text(MessageId::NetlistDialect));
+        let dialect = egui::ComboBox::from_id_salt("rspice.code.export-dialect")
+            .selected_text(match dialog.format {
+                crate::io::NetlistFormat::Spice => "SPICE",
+                crate::io::NetlistFormat::Spectre => "Spectre",
+                crate::io::NetlistFormat::Hspice => "HSPICE",
+                crate::io::NetlistFormat::Xyce => "Xyce",
+            })
+            .width(ui.available_width().max(1.0))
+            .show_ui(ui, |ui| {
+                for (format, label) in [
+                    (crate::io::NetlistFormat::Spice, "SPICE"),
+                    (crate::io::NetlistFormat::Spectre, "Spectre"),
+                    (crate::io::NetlistFormat::Hspice, "HSPICE"),
+                    (crate::io::NetlistFormat::Xyce, "Xyce"),
+                ] {
+                    ui.selectable_value(&mut dialog.format, format, label);
+                }
+            });
+        ui.add_space(6.0);
+        let bundle_response = ui.add_enabled(
+            !requires_bundle,
+            egui::Checkbox::new(
+                &mut dialog.bundle_dependencies,
+                messages.text(MessageId::NetlistExportDependencyBundle),
+            ),
+        );
+        if requires_bundle {
+            bundle_response
+                .clone()
+                .on_disabled_hover_text(messages.text(MessageId::NetlistExportBundleRequired));
+        }
+        if bundle_response.changed() && !dialog.bundle_dependencies {
+            dialog.include_source_map = false;
+        }
+        let source_map_supported = dialog.format == crate::io::NetlistFormat::Spice;
+        let source_map_response = ui.add_enabled(
+            source_map_supported,
+            egui::Checkbox::new(
+                &mut dialog.include_source_map,
+                messages.text(MessageId::NetlistExportSourceMap),
+            ),
+        );
+        if source_map_response.changed() && dialog.include_source_map {
+            dialog.bundle_dependencies = true;
+        }
+        if !source_map_supported {
+            dialog.include_source_map = false;
+            source_map_response
+                .on_disabled_hover_text(messages.text(MessageId::NetlistExportSourceMapSpiceOnly));
+        }
+        egui::Frame::new()
+            .fill(t.color.bg_inset)
+            .stroke(egui::Stroke::new(1.0, t.color.border))
+            .corner_radius(t.radius)
+            .inner_margin(10)
+            .show(ui, |ui| {
+                ui.label(dependency_status_label(
+                    messages,
+                    dependency_count,
+                    dependencies_sealed,
+                    true,
+                ));
+                ui.label(if dialog.bundle_dependencies {
+                    messages.text(MessageId::NetlistExportBundleBehavior)
+                } else {
+                    messages.text(MessageId::NetlistExportDeckBehavior)
                 });
-            ui.add_space(8.0);
-            ui.label("Dialect");
-            let dialect = egui::ComboBox::from_id_salt("rspice.code.export-dialect")
-                .selected_text(match dialog.format {
-                    crate::io::NetlistFormat::Spice => "SPICE",
-                    crate::io::NetlistFormat::Spectre => "Spectre",
-                    crate::io::NetlistFormat::Hspice => "HSPICE",
-                    crate::io::NetlistFormat::Xyce => "Xyce",
-                })
-                .width(ui.available_width().max(1.0))
-                .show_ui(ui, |ui| {
-                    for (format, label) in [
-                        (crate::io::NetlistFormat::Spice, "SPICE"),
-                        (crate::io::NetlistFormat::Spectre, "Spectre"),
-                        (crate::io::NetlistFormat::Hspice, "HSPICE"),
-                        (crate::io::NetlistFormat::Xyce, "Xyce"),
-                    ] {
-                        ui.selectable_value(&mut dialog.format, format, label);
-                    }
-                });
-            ui.add_space(6.0);
-            let bundle_response = ui.add_enabled(
-                !requires_bundle,
-                egui::Checkbox::new(
-                    &mut dialog.bundle_dependencies,
-                    "Create self-contained dependency bundle (.zip)",
-                ),
-            );
-            if requires_bundle {
-                bundle_response.clone().on_disabled_hover_text(
-                    "This generated deck references project-owned source bytes and must be exported as a reproducible bundle.",
-                );
-            }
-            if bundle_response.changed() && !dialog.bundle_dependencies {
-                dialog.include_source_map = false;
-            }
-            let source_map_supported = dialog.format == crate::io::NetlistFormat::Spice;
-            let source_map_response = ui.add_enabled(
-                source_map_supported,
-                egui::Checkbox::new(
-                    &mut dialog.include_source_map,
-                    "Include generated source map",
-                ),
-            );
-            if source_map_response.changed() && dialog.include_source_map {
-                dialog.bundle_dependencies = true;
-            }
-            if !source_map_supported {
-                dialog.include_source_map = false;
-                source_map_response.on_disabled_hover_text(
-                    "Source-map coordinates identify the exact SPICE artifact before dialect translation.",
-                );
-            }
-            egui::Frame::new()
-                .fill(t.color.bg_inset)
-                .stroke(egui::Stroke::new(1.0, t.color.border))
-                .corner_radius(t.radius)
-                .inner_margin(10)
-                .show(ui, |ui| {
-                    ui.label(format!(
-                        "{dependency_count} external dependenc{} · {}",
-                        if dependency_count == 1 { "y" } else { "ies" },
-                        if dependencies_sealed {
-                            "sealed"
-                        } else {
-                            "resolution required"
-                        }
-                    ));
-                    ui.label(if dialog.bundle_dependencies {
-                        "Bundle paths are rewritten to deterministic internal entries and accompanied by an integrity manifest."
-                    } else {
-                        "A single dialect deck will be exported without dependency members."
-                    });
-                });
-            if let Some(error) = &dialog.error {
-                ui.colored_label(t.color.err, error);
-            }
-            Some(dialect.response.id)
-        });
+            });
+        if let Some(error) = &dialog.error {
+            ui.colored_label(t.color.err, error);
+        }
+        Some(dialect.response.id)
+    });
     match choice {
         DialogChoice::Primary => {
             if crate::workbench::menu_bar::action_export_generated_netlist_with_options(
@@ -1566,6 +2405,280 @@ fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
         DialogChoice::None | DialogChoice::Secondary => {}
     }
     app.state.ui.netlist.export_dialog = dialog;
+}
+
+fn import_operation_text(
+    messages: MessageCatalog,
+    operation: crate::workbench::documents::netlist_document::NetlistImportOperation,
+) -> (String, String) {
+    use crate::workbench::documents::netlist_document::NetlistImportOperation;
+
+    match operation {
+        NetlistImportOperation::OpenProject => (
+            messages.text(MessageId::NetlistImportOpenTitle),
+            messages.text(MessageId::NetlistImportOpen),
+        ),
+        NetlistImportOperation::ImportIntoProject => (
+            messages.text(MessageId::NetlistImportDeckTitle),
+            messages.text(MessageId::NetlistImportDeck),
+        ),
+        NetlistImportOperation::RequalifyOwnedSource => (
+            messages.text(MessageId::NetlistImportReviewProfileTitle),
+            messages.text(MessageId::NetlistImportRecordProfile),
+        ),
+    }
+}
+
+fn import_review_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
+    use crate::workbench::documents::netlist_document::{
+        NetlistImportIssueSeverity, NetlistImportOperation,
+    };
+
+    let Some(mut review) = app.state.ui.netlist.import_review.clone() else {
+        return;
+    };
+    let messages = app.state.ui.messages();
+    let blocking = review.blocking_issue_count();
+    let dialect_qualification_error = review.dialect_qualification().err();
+    let qualified_execution_profile = dialect_qualification_error
+        .is_none()
+        .then(|| review.selected_dialect.execution_profile())
+        .flatten();
+    let compatibility_ready =
+        !review.selected_dialect.requires_compatibility_review() || review.compatibility_accepted;
+    let primary_enabled =
+        blocking == 0 && dialect_qualification_error.is_none() && compatibility_ready;
+    let digest = review
+        .original_sha256
+        .iter()
+        .take(6)
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let hint = if blocking > 0 {
+        let count = blocking.to_string();
+        messages.format(
+            if blocking == 1 {
+                MessageId::NetlistImportBlockingSingular
+            } else {
+                MessageId::NetlistImportBlocking
+            },
+            &[("count", &count)],
+        )
+    } else if let Some(error) = dialect_qualification_error.as_deref() {
+        error.to_owned()
+    } else if !compatibility_ready {
+        messages.text(MessageId::NetlistImportCompatibilityRequired)
+    } else {
+        messages.text(MessageId::NetlistImportReady)
+    };
+    let (title, primary) = import_operation_text(messages, review.operation);
+    let choice = Dialog::new(
+        messages.text(MessageId::NetlistImportEyebrow),
+        title,
+        primary,
+    )
+    .description(messages.text(MessageId::NetlistImportDescription))
+    .size(DialogSize::Transaction)
+    .initial_focus(DialogInitialFocus::BodyControl)
+    .primary_enabled(primary_enabled)
+    .ghost(messages.text(MessageId::CommonCancel))
+    .hint(&hint)
+    .show_with_initial_body_focus(ctx, |ui| {
+        let t = Tokens::get(ctx);
+        egui::Frame::new()
+            .fill(t.color.bg_inset)
+            .stroke(egui::Stroke::new(1.0, t.color.border))
+            .corner_radius(t.radius)
+            .inner_margin(10)
+            .show(ui, |ui| {
+                ui.label(
+                    egui::RichText::new(&review.display_name)
+                        .font(theme::mono(tokens::FS_1, FontWeight::Medium)),
+                );
+                let source_kind =
+                    if review.operation == NetlistImportOperation::RequalifyOwnedSource {
+                        messages.text(MessageId::NetlistImportProjectSourceSnapshot)
+                    } else if review.archive_import {
+                        let count = review.dependencies.len().to_string();
+                        messages.format(
+                            if review.dependencies.len() == 1 {
+                                MessageId::NetlistImportBundleSourceSingular
+                            } else {
+                                MessageId::NetlistImportBundleSource
+                            },
+                            &[("count", &count)],
+                        )
+                    } else {
+                        messages.text(MessageId::NetlistImportLosslessSource)
+                    };
+                ui.label(source_kind);
+                let byte_count = review.original_byte_count.to_string();
+                ui.monospace(messages.format(
+                    MessageId::NetlistImportSourceSummary,
+                    &[
+                        ("count", &byte_count),
+                        ("digest", &digest),
+                        ("encoding", review.encoding.label()),
+                        ("line_ending", review.line_ending.label()),
+                    ],
+                ));
+                let fallback_path = messages.text(MessageId::NetlistImportBrowserSnapshot);
+                let invalid_path = messages.text(MessageId::NetlistImportInvalidUnicodePath);
+                ui.weak(
+                    review
+                        .selected_file_path
+                        .as_deref()
+                        .map_or(fallback_path.as_str(), |path| {
+                            path.to_str().unwrap_or(invalid_path.as_str())
+                        }),
+                );
+            });
+
+        ui.add_space(8.0);
+        ui.label(messages.text(MessageId::NetlistSourceDialect));
+        let dialect = egui::ComboBox::from_id_salt("rspice.netlist.import-dialect")
+            .selected_text(review.selected_dialect.label())
+            .width(ui.available_width().max(1.0))
+            .show_ui(ui, |ui| {
+                for dialect in crate::state::NetlistSourceDialect::ALL {
+                    ui.selectable_value(&mut review.selected_dialect, dialect, dialect.label());
+                }
+            });
+        ui.weak(messages.format(
+            if review.detection_evidence.is_empty() {
+                MessageId::NetlistImportDetectedNoMarker
+            } else {
+                MessageId::NetlistImportDetectedEvidence
+            },
+            &[("dialect", review.detected_dialect.label())],
+        ));
+        for evidence in &review.detection_evidence {
+            ui.monospace(evidence);
+        }
+        if let Some(error) = dialect_qualification_error.as_deref() {
+            ui.add_space(6.0);
+            ui.colored_label(t.color.err, error);
+        }
+
+        ui.add_space(6.0);
+        egui::Frame::new()
+            .fill(t.color.bg_inset)
+            .stroke(egui::Stroke::new(1.0, t.color.border))
+            .corner_radius(t.radius)
+            .inner_margin(8)
+            .show(ui, |ui| {
+                ui.label(
+                    egui::RichText::new(messages.text(MessageId::NetlistImportExecutionProfile))
+                        .strong(),
+                );
+                if let Some(profile) = qualified_execution_profile {
+                    ui.monospace(messages.format(
+                        MessageId::NetlistImportExecutionProfileReceipt,
+                        &[("profile", profile.id())],
+                    ));
+                } else {
+                    ui.colored_label(
+                        t.color.err,
+                        messages.text(MessageId::NetlistImportNoExecutionProfile),
+                    );
+                }
+            });
+
+        if review.selected_dialect.requires_compatibility_review()
+            && let Some(profile) = qualified_execution_profile
+        {
+            ui.add_space(6.0);
+            ui.checkbox(
+                &mut review.compatibility_accepted,
+                messages.format(
+                    MessageId::NetlistImportAcceptProfile,
+                    &[
+                        ("dialect", review.selected_dialect.label()),
+                        ("profile", profile.id()),
+                    ],
+                ),
+            )
+            .on_hover_text(messages.text(MessageId::NetlistImportAcceptanceNotice));
+        } else {
+            review.compatibility_accepted = false;
+        }
+
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new(messages.text(MessageId::NetlistImportTransformations)).strong(),
+        );
+        for transformation in &review.transformations {
+            ui.label(format!("- {transformation}"));
+        }
+
+        ui.add_space(8.0);
+        ui.label(egui::RichText::new(messages.text(MessageId::NetlistImportValidation)).strong());
+        if review.issues.is_empty() {
+            ui.colored_label(
+                t.color.ok,
+                messages.text(MessageId::NetlistImportValidationPassed),
+            );
+        } else {
+            for issue in &review.issues {
+                let (prefix, color) = match issue.severity {
+                    NetlistImportIssueSeverity::Advisory => (
+                        messages.text(MessageId::NetlistImportAdvisory),
+                        t.color.warn,
+                    ),
+                    NetlistImportIssueSeverity::Blocking => {
+                        (messages.text(MessageId::NetlistImportBlocked), t.color.err)
+                    }
+                };
+                ui.colored_label(color, format!("{prefix}: {}", issue.message));
+            }
+        }
+
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new(messages.text(MessageId::NetlistImportSourcePreview)).strong(),
+        );
+        egui::Frame::new()
+            .fill(t.color.bg_inset)
+            .stroke(egui::Stroke::new(1.0, t.color.border))
+            .corner_radius(t.radius)
+            .inner_margin(8)
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("rspice.netlist.import-preview")
+                    .max_height(160.0)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for (line, text) in review.source.lines().take(200).enumerate() {
+                            ui.monospace(format!("{:>5}  {text}", line + 1));
+                        }
+                        if review.source.lines().nth(200).is_some() {
+                            ui.weak(messages.text(MessageId::NetlistImportPreviewLimited));
+                        }
+                    });
+            });
+        if let Some(error) = &review.error {
+            ui.add_space(6.0);
+            ui.colored_label(t.color.err, error);
+        }
+        Some(dialect.response.id)
+    });
+
+    // Persist review choices before a commit attempt revalidates the exact
+    // lifecycle transaction and candidate snapshot.
+    app.state.ui.netlist.import_review = Some(review);
+    match choice {
+        DialogChoice::Primary => {
+            crate::workbench::workflows::netlist_workflow::commit_staged_netlist_import(
+                &mut app.state,
+            );
+        }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            crate::workbench::workflows::netlist_workflow::cancel_staged_netlist_import(
+                &mut app.state,
+            );
+        }
+        DialogChoice::None | DialogChoice::Secondary => {}
+    }
 }
 
 fn create_owned_source(
@@ -1603,11 +2716,21 @@ fn create_owned_source(
     state.workspace.netlist_source_path = None;
     state.workspace.netlist_source_dirty = true;
     state.workspace.netlist_document = Some(owned.clone());
-    state.workspace.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
+    let mut descriptor = crate::state::OwnedNetlistDescriptor {
         artifact_name: name.to_owned(),
         strategy,
+        source_encoding: crate::state::NetlistTextEncoding::Utf8,
+        source_line_ending: crate::state::NetlistLineEnding::detect(&source),
+        imported_dialect: None,
+        compatibility_reviewed: false,
+        execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
+        external_file_sha256: None,
         save_history: Vec::new(),
-    });
+        revision_history: Vec::new(),
+        owned_includes: Vec::new(),
+    };
+    descriptor.retain_revision(&owned, "Created editable source baseline")?;
+    state.workspace.netlist_descriptor = Some(descriptor);
     state.ui.netlist.owned_document = Some(owned);
     state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
     state.ui.netlist.active_document_initialized = true;
@@ -1711,7 +2834,10 @@ fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
     };
     use crate::workbench::documents::netlist_document::NetlistFindScope;
 
-    let owned = app.state.ui.netlist.active_document == ActiveNetlistDocument::OwnedSource;
+    let owned = crate::workbench::documents::netlist_document::active_netlist_source_is_editable(
+        &app.state,
+    );
+    let messages = app.state.ui.messages();
     let mut find = app.state.ui.netlist.find.clone();
     let options = FindOptions {
         direction: FindDirection::Forward,
@@ -1750,168 +2876,194 @@ fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
     let has_matches = !matches.is_empty();
     let compact_fields = ctx.content_rect().width() < 360.0;
     let find_hint = if find.find.is_empty() {
-        "Enter text to search"
+        messages.text(MessageId::NetlistFindEnterTextHint)
     } else if find.error.is_some() {
-        "Correct the search expression"
+        messages.text(MessageId::NetlistFindCorrectExpressionHint)
     } else {
-        "Generated artifacts remain immutable"
+        messages.text(MessageId::NetlistFindGeneratedImmutableHint)
     };
     let choice = Dialog::new(
-        "SOURCE EDITOR · SCOPED SEARCH",
-        "Find and replace in source",
-        "Find next",
+        messages.text(MessageId::NetlistFindEyebrow),
+        messages.text(MessageId::NetlistFindTitle),
+        messages.text(MessageId::NetlistFindNext),
     )
-        .description(
-            "Search editable source and generated references; replacement remains limited to project-owned source artifacts.",
-        )
-        .size(DialogSize::Transaction)
-        .initial_focus(DialogInitialFocus::BodyControl)
-        .primary_enabled(has_matches && find.error.is_none())
-        .ghost("Close")
-        .hint(find_hint)
-        .show_with_initial_body_focus(ctx, |ui| {
-            let mut find_control_id = None;
-            if compact_fields {
-                ui.label("Find");
-                let response = ui.add(
-                    egui::TextEdit::singleline(&mut find.find)
-                        .desired_width(ui.available_width())
-                        .hint_text("Symbol, text, or expression"),
-                );
-                find_control_id = Some(response.id);
-                ui.label("Replace");
-                ui.add_enabled(
-                    (owned || find.scope == NetlistFindScope::AllOwnedSources)
-                        && find.scope != NetlistFindScope::ProjectReferences,
-                    egui::TextEdit::singleline(&mut find.replacement)
-                        .desired_width(ui.available_width()),
-                );
-                ui.label("Scope");
-                find_scope_combo(ui, &mut find, app.state.workspace.netlist_source.is_some());
-            } else {
-                egui::Grid::new("rspice.code.find-fields")
-                    .num_columns(2)
-                    .spacing([10.0, 8.0])
-                    .show(ui, |ui| {
-                        ui.label("Find");
-                        let response = ui.add(
-                            egui::TextEdit::singleline(&mut find.find)
-                                .desired_width(ui.available_width().max(180.0))
-                                .hint_text("Symbol, text, or expression"),
-                        );
-                        find_control_id = Some(response.id);
-                        ui.end_row();
-                        ui.label("Replace");
-                        ui.add_enabled(
-                            (owned || find.scope == NetlistFindScope::AllOwnedSources)
-                                && find.scope != NetlistFindScope::ProjectReferences,
-                            egui::TextEdit::singleline(&mut find.replacement)
-                                .desired_width(ui.available_width().max(180.0)),
-                        );
-                        ui.end_row();
-                        ui.label("Scope");
-                        find_scope_combo(
-                            ui,
-                            &mut find,
-                            app.state.workspace.netlist_source.is_some(),
-                        );
-                        ui.end_row();
-                    });
-            }
-
-            ui.horizontal_wrapped(|ui| {
-                ui.checkbox(&mut find.match_case, "Match case");
-                ui.checkbox(&mut find.whole_symbol, "Whole symbol");
-                ui.checkbox(&mut find.regular_expression, "Regular expression");
-            });
-            ui.separator();
-
-            if let Some(error) = &find.error {
-                ui.colored_label(Tokens::get(ctx).color.err, error);
-            } else if find.find.is_empty() {
-                ui.weak("Enter text to search the exact current artifact.");
-            } else {
-                ui.label(format!(
-                    "{} match{}",
-                    matches.len(),
-                    if matches.len() == 1 { "" } else { "es" }
-                ));
-            }
-
-            egui::ScrollArea::vertical()
-                .id_salt("rspice.code.find-results")
-                .max_height(168.0)
+    .description(messages.text(MessageId::NetlistFindDescription))
+    .size(DialogSize::Transaction)
+    .initial_focus(DialogInitialFocus::BodyControl)
+    .primary_enabled(has_matches && find.error.is_none())
+    .ghost(messages.text(MessageId::CommonClose))
+    .hint(find_hint)
+    .show_with_initial_body_focus(ctx, |ui| {
+        let mut find_control_id = None;
+        if compact_fields {
+            ui.label(messages.text(MessageId::CommonFind));
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut find.find)
+                    .desired_width(ui.available_width())
+                    .hint_text(messages.text(MessageId::NetlistFindExpressionHint)),
+            );
+            find_control_id = Some(response.id);
+            ui.label(messages.text(MessageId::CommonReplace));
+            ui.add_enabled(
+                (owned || find.scope == NetlistFindScope::AllOwnedSources)
+                    && find.scope != NetlistFindScope::ProjectReferences,
+                egui::TextEdit::singleline(&mut find.replacement)
+                    .desired_width(ui.available_width()),
+            );
+            ui.label(messages.text(MessageId::CommonScope));
+            find_scope_combo(
+                ui,
+                &mut find,
+                app.state.workspace.netlist_source.is_some(),
+                messages,
+            );
+        } else {
+            egui::Grid::new("rspice.code.find-fields")
+                .num_columns(2)
+                .spacing([10.0, 8.0])
                 .show(ui, |ui| {
-                    let show_document =
-                        documents.len() > 1 || find.scope != NetlistFindScope::CurrentDocument;
-                    for (index, result) in matches.iter().enumerate() {
-                        let line_text = result
-                            .document
-                            .source
-                            .lines()
-                            .nth(result.found.line().saturating_sub(1))
-                            .unwrap_or_default()
-                            .trim();
-                        let location = if show_document {
-                            format!(
-                                "{}  {}:{}",
-                                result.document.label,
-                                result.found.line(),
-                                result.found.column()
-                            )
-                        } else {
-                            format!("{}:{}", result.found.line(), result.found.column())
-                        };
-                        if ui
-                            .add_sized(
-                                [ui.available_width(), 24.0],
-                                egui::Button::selectable(
-                                    find.selected_match == index,
-                                    format!("{location}  {line_text}"),
-                                ),
-                            )
-                            .clicked()
-                        {
-                            action = Some(FindWindowAction::Select(index));
-                        }
-                    }
+                    ui.label(messages.text(MessageId::CommonFind));
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut find.find)
+                            .desired_width(ui.available_width().max(180.0))
+                            .hint_text(messages.text(MessageId::NetlistFindExpressionHint)),
+                    );
+                    find_control_id = Some(response.id);
+                    ui.end_row();
+                    ui.label(messages.text(MessageId::CommonReplace));
+                    ui.add_enabled(
+                        (owned || find.scope == NetlistFindScope::AllOwnedSources)
+                            && find.scope != NetlistFindScope::ProjectReferences,
+                        egui::TextEdit::singleline(&mut find.replacement)
+                            .desired_width(ui.available_width().max(180.0)),
+                    );
+                    ui.end_row();
+                    ui.label(messages.text(MessageId::CommonScope));
+                    find_scope_combo(
+                        ui,
+                        &mut find,
+                        app.state.workspace.netlist_source.is_some(),
+                        messages,
+                    );
+                    ui.end_row();
                 });
+        }
 
-            ui.separator();
-            ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(has_matches, egui::Button::new("Previous"))
-                    .clicked()
-                {
-                    let next = if find.selected_match == 0 {
-                        matches.len().saturating_sub(1)
+        ui.horizontal_wrapped(|ui| {
+            ui.checkbox(
+                &mut find.match_case,
+                messages.text(MessageId::NetlistFindMatchCase),
+            );
+            ui.checkbox(
+                &mut find.whole_symbol,
+                messages.text(MessageId::NetlistFindWholeSymbol),
+            );
+            ui.checkbox(
+                &mut find.regular_expression,
+                messages.text(MessageId::NetlistFindRegularExpression),
+            );
+        });
+        ui.separator();
+
+        if let Some(error) = &find.error {
+            ui.colored_label(Tokens::get(ctx).color.err, error);
+        } else if find.find.is_empty() {
+            ui.weak(messages.text(MessageId::NetlistFindEnterExactArtifact));
+        } else {
+            let count = matches.len().to_string();
+            ui.label(messages.format(
+                if matches.len() == 1 {
+                    MessageId::NetlistFindMatchSingular
+                } else {
+                    MessageId::NetlistFindMatches
+                },
+                &[("count", &count)],
+            ));
+        }
+
+        egui::ScrollArea::vertical()
+            .id_salt("rspice.code.find-results")
+            .max_height(168.0)
+            .show(ui, |ui| {
+                let show_document =
+                    documents.len() > 1 || find.scope != NetlistFindScope::CurrentDocument;
+                for (index, result) in matches.iter().enumerate() {
+                    let line_text = result
+                        .document
+                        .source
+                        .lines()
+                        .nth(result.found.line().saturating_sub(1))
+                        .unwrap_or_default()
+                        .trim();
+                    let location = if show_document {
+                        format!(
+                            "{}  {}:{}",
+                            result.document.label,
+                            result.found.line(),
+                            result.found.column()
+                        )
                     } else {
-                        find.selected_match - 1
+                        format!("{}:{}", result.found.line(), result.found.column())
                     };
-                    action = Some(FindWindowAction::Select(next));
-                }
-                let selected_owned = matches.get(find.selected_match).is_some_and(|result| {
-                    result.document.active_document == ActiveNetlistDocument::OwnedSource
-                });
-                let replace_enabled = find.scope != NetlistFindScope::ProjectReferences
-                    && has_matches
-                    && selected_owned
-                    && find.error.is_none();
-                if ui
-                    .add_enabled(replace_enabled, egui::Button::new("Replace"))
-                    .clicked()
-                {
-                    action = Some(FindWindowAction::ReplaceNext);
-                }
-                if ui
-                    .add_enabled(replace_enabled, egui::Button::new("Replace all"))
-                    .clicked()
-                {
-                    action = Some(FindWindowAction::ReplaceAll);
+                    if ui
+                        .add_sized(
+                            [ui.available_width(), 24.0],
+                            egui::Button::selectable(
+                                find.selected_match == index,
+                                format!("{location}  {line_text}"),
+                            ),
+                        )
+                        .clicked()
+                    {
+                        action = Some(FindWindowAction::Select(index));
+                    }
                 }
             });
-            find_control_id
+
+        ui.separator();
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    has_matches,
+                    egui::Button::new(messages.text(MessageId::NetlistFindPrevious)),
+                )
+                .clicked()
+            {
+                let next = if find.selected_match == 0 {
+                    matches.len().saturating_sub(1)
+                } else {
+                    find.selected_match - 1
+                };
+                action = Some(FindWindowAction::Select(next));
+            }
+            let selected_owned = matches
+                .get(find.selected_match)
+                .is_some_and(|result| result.document.editable);
+            let replace_enabled = find.scope != NetlistFindScope::ProjectReferences
+                && has_matches
+                && selected_owned
+                && find.error.is_none();
+            if ui
+                .add_enabled(
+                    replace_enabled,
+                    egui::Button::new(messages.text(MessageId::CommonReplace)),
+                )
+                .clicked()
+            {
+                action = Some(FindWindowAction::ReplaceNext);
+            }
+            if ui
+                .add_enabled(
+                    replace_enabled,
+                    egui::Button::new(messages.text(MessageId::NetlistFindReplaceAll)),
+                )
+                .clicked()
+            {
+                action = Some(FindWindowAction::ReplaceAll);
+            }
         });
+        find_control_id
+    });
     match choice {
         DialogChoice::Primary => {
             action = Some(FindWindowAction::Select(
@@ -1939,18 +3091,38 @@ fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                     }
                     ActiveNetlistDocument::GeneratedDiff => {}
                 }
+                if let Some(identity) = result.document.dependency_identity.as_deref()
+                    && let Err(error) =
+                        crate::workbench::documents::netlist_document::open_netlist_dependency(
+                            &mut app.state,
+                            identity,
+                        )
+                {
+                    app.state.push_user_message(ConsoleMessage::error(error));
+                    return;
+                }
                 app.state.ui.netlist.requested_line = Some(result.found.line());
             }
         }
         Some(FindWindowAction::ReplaceNext) | Some(FindWindowAction::ReplaceAll) => {
             let selected = matches.get(app.state.ui.netlist.find.selected_match);
-            let Some(selected) = selected.filter(|result| {
-                result.document.active_document == ActiveNetlistDocument::OwnedSource
-            }) else {
+            let Some(selected) = selected.filter(|result| result.document.editable) else {
                 return;
             };
-            if !owned {
+            if selected.document.active_document == ActiveNetlistDocument::OwnedSource
+                && app.state.ui.netlist.active_document != ActiveNetlistDocument::OwnedSource
+            {
                 let _ = open_owned_source(&mut app.state);
+            }
+            if let Some(identity) = selected.document.dependency_identity.as_deref()
+                && let Err(error) =
+                    crate::workbench::documents::netlist_document::open_netlist_dependency(
+                        &mut app.state,
+                        identity,
+                    )
+            {
+                app.state.push_user_message(ConsoleMessage::error(error));
+                return;
             }
             let scope = if matches!(action, Some(FindWindowAction::ReplaceAll)) {
                 ReplaceScope::All
@@ -1968,17 +3140,30 @@ fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
             ) {
                 Ok(outcome) => {
                     let count = outcome.replacement_count();
-                    if count > 0
-                        && crate::workbench::documents::netlist_document::replace_owned_source(
+                    let replacement = outcome.into_source();
+                    let replaced = if selected.document.dependency_identity.is_some() {
+                        crate::workbench::documents::netlist_document::replace_owned_dependency_source(
                             &mut app.state,
-                            outcome.into_source(),
+                            replacement,
                         )
-                    {
+                    } else {
+                        crate::workbench::documents::netlist_document::replace_owned_source(
+                            &mut app.state,
+                            replacement,
+                        )
+                    };
+                    if count > 0 && replaced {
                         app.state.ui.netlist.find.selected_match = 0;
-                        app.state.push_user_message(ConsoleMessage::info(format!(
-                            "Replaced {count} match{} in owned SPICE source.",
-                            if count == 1 { "" } else { "es" }
-                        )));
+                        let count_text = count.to_string();
+                        app.state
+                            .push_user_message(ConsoleMessage::info(messages.format(
+                                if count == 1 {
+                                    MessageId::NetlistFindReplacedSingular
+                                } else {
+                                    MessageId::NetlistFindReplaced
+                                },
+                                &[("count", &count_text)],
+                            )));
                     }
                 }
                 Err(error) => app.state.ui.netlist.find.error = Some(error.to_string()),
@@ -1992,33 +3177,40 @@ fn find_scope_combo(
     ui: &mut Ui,
     find: &mut crate::workbench::documents::netlist_document::NetlistFindState,
     has_owned_source: bool,
+    messages: MessageCatalog,
 ) {
     use crate::workbench::documents::netlist_document::NetlistFindScope;
 
     egui::ComboBox::from_id_salt("rspice.code.find-scope")
         .selected_text(match find.scope {
-            NetlistFindScope::CurrentDocument => "Current document",
-            NetlistFindScope::AllOwnedSources => "All owned source files",
-            NetlistFindScope::ProjectReferences => "Project references (find only)",
+            NetlistFindScope::CurrentDocument => {
+                messages.text(MessageId::NetlistFindCurrentDocument)
+            }
+            NetlistFindScope::AllOwnedSources => {
+                messages.text(MessageId::NetlistFindAllOwnedSources)
+            }
+            NetlistFindScope::ProjectReferences => {
+                messages.text(MessageId::NetlistFindProjectReferences)
+            }
         })
         .width(ui.available_width().max(180.0))
         .show_ui(ui, |ui| {
             ui.selectable_value(
                 &mut find.scope,
                 NetlistFindScope::CurrentDocument,
-                "Current document",
+                messages.text(MessageId::NetlistFindCurrentDocument),
             );
             if has_owned_source {
                 ui.selectable_value(
                     &mut find.scope,
                     NetlistFindScope::AllOwnedSources,
-                    "All owned source files",
+                    messages.text(MessageId::NetlistFindAllOwnedSources),
                 );
             }
             ui.selectable_value(
                 &mut find.scope,
                 NetlistFindScope::ProjectReferences,
-                "Project references (find only)",
+                messages.text(MessageId::NetlistFindProjectReferences),
             );
         });
 }
@@ -2031,8 +3223,12 @@ enum DocumentStatusTone {
 }
 
 fn document_syntax_status(state: &AppState) -> (String, DocumentStatusTone) {
+    let messages = state.ui.messages();
     if state.ui.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
-        return ("comparison ready".to_owned(), DocumentStatusTone::Valid);
+        return (
+            messages.text(MessageId::NetlistComparisonReady),
+            DocumentStatusTone::Valid,
+        );
     }
     if state.ui.netlist.active_document == ActiveNetlistDocument::Generated
         && (state.ui.netlist.generation_error.is_some()
@@ -2043,11 +3239,10 @@ fn document_syntax_status(state: &AppState) -> (String, DocumentStatusTone) {
         let retained_artifact = generated_primary_ready(state);
         return (
             if retained_artifact {
-                "stale · generation blocked"
+                messages.text(MessageId::NetlistGenerationStaleBlocked)
             } else {
-                "generation blocked"
-            }
-            .to_owned(),
+                messages.text(MessageId::NetlistGenerationBlocked)
+            },
             DocumentStatusTone::Warning,
         );
     }
@@ -2057,20 +3252,29 @@ fn document_syntax_status(state: &AppState) -> (String, DocumentStatusTone) {
         .diagnostics
         .iter()
         .filter(|diagnostic| {
-            diagnostic.severity
-                == crate::workbench::documents::netlist_document::DiagnosticSeverity::Error
+            diagnostic.is_current()
+                && diagnostic.severity
+                    == crate::workbench::documents::netlist_document::DiagnosticSeverity::Error
         })
         .count();
     if errors > 0 {
+        let count = errors.to_string();
         return (
-            format!(
-                "{errors} syntax error{}",
-                if errors == 1 { "" } else { "s" }
+            messages.format(
+                if errors == 1 {
+                    MessageId::NetlistSyntaxErrorSingular
+                } else {
+                    MessageId::NetlistSyntaxErrors
+                },
+                &[("count", &count)],
             ),
             DocumentStatusTone::Error,
         );
     }
-    ("syntax valid".to_owned(), DocumentStatusTone::Valid)
+    (
+        messages.text(MessageId::NetlistSyntaxValid),
+        DocumentStatusTone::Valid,
+    )
 }
 
 /// Open (or explicitly create) the project-owned source derived from the
@@ -2143,10 +3347,20 @@ fn open_owned_source(state: &mut AppState) -> bool {
         state.workspace.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
             artifact_name,
             strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,
+            source_encoding: crate::state::NetlistTextEncoding::Utf8,
+            source_line_ending: crate::state::NetlistLineEnding::detect(&source),
+            imported_dialect: None,
+            compatibility_reviewed: false,
+            execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
+            external_file_sha256: None,
             save_history: Vec::new(),
+            revision_history: Vec::new(),
+            owned_includes: Vec::new(),
         });
     }
     state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+    state.ui.netlist.active_dependency_identity = None;
+    state.ui.netlist.active_dependency_root = None;
     state.ui.netlist.active_document_initialized = true;
     state.simulation.netlist_content = source;
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
@@ -2161,6 +3375,18 @@ fn open_owned_source(state: &mut AppState) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deterministic_netlist_format_preserves_line_ending_policy() {
+        assert_eq!(
+            normalize_owned_netlist_whitespace("deck  \r\nR1 1 0 1k\t\r\n.end"),
+            "deck  \r\nR1 1 0 1k\r\n.end\r\n"
+        );
+        assert_eq!(
+            normalize_owned_netlist_whitespace("deck\n.end\n"),
+            "deck\n.end\n"
+        );
+    }
 
     fn configured_veriloga_state() -> (AppState, String) {
         let mut state = AppState::default();
@@ -2321,7 +3547,7 @@ mod tests {
         assert_eq!(CODE_TOOLBAR_COMPACT_BREAKPOINT, 720.0);
         assert_eq!(PHONE_BREAKPOINT, 560.0);
         assert_eq!(PHONE_PRIMARY_WIDTH, 154.0);
-        assert_eq!(PHONE_ACTION_WIDTH, 187.0);
+        assert_eq!(PHONE_ACTION_WIDTH, 250.0);
         assert!(code_toolbar_compact(607.0));
         assert!(!code_toolbar_compact(721.0));
         assert!(!toolbar_status_visible(true, DocumentStatusTone::Warning));

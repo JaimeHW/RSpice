@@ -117,6 +117,9 @@ fn append_diagnostic_span(
     let global_end = global_start + span.len();
     let mut split_points = vec![global_start, global_end];
     for diagnostic in style.diagnostics {
+        if !diagnostic.is_current() {
+            continue;
+        }
         let Some(range) = diagnostic.span.as_ref() else {
             continue;
         };
@@ -161,7 +164,11 @@ fn append_diagnostic_span(
 fn line_only_severity(diagnostics: &[Diagnostic], line_idx: usize) -> Option<DiagnosticSeverity> {
     diagnostics
         .iter()
-        .filter(|diagnostic| diagnostic.span.is_none() && diagnostic.line == Some(line_idx))
+        .filter(|diagnostic| {
+            diagnostic.is_current()
+                && diagnostic.span.is_none()
+                && diagnostic.line == Some(line_idx)
+        })
         .map(|diagnostic| diagnostic.severity)
         .max()
 }
@@ -173,6 +180,9 @@ fn span_severity(
     diagnostics
         .iter()
         .filter_map(|diagnostic| {
+            if !diagnostic.is_current() {
+                return None;
+            }
             let span = diagnostic.span.as_ref()?;
             ranges_overlap(span, &range).then_some(diagnostic.severity)
         })
@@ -185,6 +195,7 @@ fn ranges_overlap(a: &std::ops::Range<usize>, b: &std::ops::Range<usize>) -> boo
 
 fn severity_stroke(severity: DiagnosticSeverity, c: &Palette) -> Stroke {
     let color = match severity {
+        DiagnosticSeverity::Hint => c.text_dim,
         DiagnosticSeverity::Error => c.err,
         DiagnosticSeverity::Warning => c.warn,
         DiagnosticSeverity::Info => c.text_dim,
@@ -428,16 +439,17 @@ mod tests {
     }
 
     fn error_diagnostic(span: Option<Range<usize>>, line: Option<usize>) -> Diagnostic {
-        Diagnostic {
-            severity: DiagnosticSeverity::Error,
-            source_path: None,
-            source_line: line,
-            span,
-            line,
-            column: None,
-            message: "bad token".to_owned(),
-            fix: None,
-        }
+        let mut diagnostic = Diagnostic::current(
+            "rspice.test",
+            "TEST-BAD-TOKEN",
+            DiagnosticSeverity::Error,
+            "bad token",
+        );
+        diagnostic.source_line = line;
+        diagnostic.span = span;
+        diagnostic.line = line;
+        diagnostic.refresh_canonical_location();
+        diagnostic
     }
 
     #[test]

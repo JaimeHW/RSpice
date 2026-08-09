@@ -13,12 +13,16 @@ pub enum OutlineEntryKind {
     Include,
     Library,
     Parameter,
+    Global,
+    Function,
     Option,
     Model,
     Subcircuit,
     EndSubcircuit,
     Analysis,
     Measurement,
+    Output,
+    Conditional,
     Control,
     Device,
 }
@@ -30,11 +34,15 @@ pub enum OutlineSectionKind {
     Source,
     Dependencies,
     Parameters,
+    Globals,
+    Functions,
     Options,
     Models,
     Subcircuits,
     Analyses,
     Measurements,
+    Outputs,
+    Conditionals,
     Controls,
     Devices,
 }
@@ -45,11 +53,15 @@ impl OutlineEntryKind {
             Self::Title => OutlineSectionKind::Source,
             Self::Include | Self::Library => OutlineSectionKind::Dependencies,
             Self::Parameter => OutlineSectionKind::Parameters,
+            Self::Global => OutlineSectionKind::Globals,
+            Self::Function => OutlineSectionKind::Functions,
             Self::Option => OutlineSectionKind::Options,
             Self::Model => OutlineSectionKind::Models,
             Self::Subcircuit | Self::EndSubcircuit => OutlineSectionKind::Subcircuits,
             Self::Analysis => OutlineSectionKind::Analyses,
             Self::Measurement => OutlineSectionKind::Measurements,
+            Self::Output => OutlineSectionKind::Outputs,
+            Self::Conditional => OutlineSectionKind::Conditionals,
             Self::Control => OutlineSectionKind::Controls,
             Self::Device => OutlineSectionKind::Devices,
         }
@@ -174,11 +186,15 @@ impl NetlistOutline {
             OutlineSectionKind::Source,
             OutlineSectionKind::Dependencies,
             OutlineSectionKind::Parameters,
+            OutlineSectionKind::Globals,
+            OutlineSectionKind::Functions,
             OutlineSectionKind::Options,
             OutlineSectionKind::Models,
             OutlineSectionKind::Subcircuits,
             OutlineSectionKind::Analyses,
             OutlineSectionKind::Measurements,
+            OutlineSectionKind::Outputs,
+            OutlineSectionKind::Conditionals,
             OutlineSectionKind::Controls,
             OutlineSectionKind::Devices,
         ];
@@ -340,6 +356,8 @@ fn classify_card(tokens: &[CardToken], trimmed: &str) -> (OutlineEntryKind, Stri
         ".include" | ".inc" | ".veriloga" => (OutlineEntryKind::Include, directive_label()),
         ".lib" if tokens.len() >= 3 => (OutlineEntryKind::Library, directive_label()),
         ".param" => (OutlineEntryKind::Parameter, directive_label()),
+        ".global" | ".global_param" => (OutlineEntryKind::Global, directive_label()),
+        ".func" => (OutlineEntryKind::Function, directive_label()),
         ".option" | ".options" => (OutlineEntryKind::Option, directive_label()),
         ".model" => (OutlineEntryKind::Model, directive_label()),
         ".subckt" => (OutlineEntryKind::Subcircuit, directive_label()),
@@ -349,6 +367,10 @@ fn classify_card(tokens: &[CardToken], trimmed: &str) -> (OutlineEntryKind, Stri
             (OutlineEntryKind::Analysis, directive_label())
         }
         ".meas" | ".measure" => (OutlineEntryKind::Measurement, directive_label()),
+        ".save" | ".probe" | ".print" | ".plot" => (OutlineEntryKind::Output, directive_label()),
+        ".if" | ".elseif" | ".else" | ".endif" => {
+            (OutlineEntryKind::Conditional, directive_label())
+        }
         _ if head.starts_with('.') => (OutlineEntryKind::Control, directive_label()),
         _ => (
             OutlineEntryKind::Device,
@@ -479,5 +501,34 @@ mod tests {
             Some("Rμ")
         );
         assert_eq!(outline.entry_at_or_before_line(0), None);
+    }
+
+    #[test]
+    fn semantic_control_categories_are_not_collapsed_into_generic_directives() {
+        let outline = NetlistOutline::parse(
+            "deck\n.global vdd vss\n.global_param corner=1\n.func square(x) {x*x}\n.options reltol=1e-5\n.if corner\n.save v(out)\n.else\n.probe i(vdd)\n.endif\n.end\n",
+        );
+        let kinds = outline
+            .entries()
+            .iter()
+            .map(OutlineEntry::kind)
+            .collect::<Vec<_>>();
+        assert!(kinds.contains(&OutlineEntryKind::Global));
+        assert!(kinds.contains(&OutlineEntryKind::Function));
+        assert!(kinds.contains(&OutlineEntryKind::Option));
+        assert_eq!(
+            kinds
+                .iter()
+                .filter(|kind| **kind == OutlineEntryKind::Conditional)
+                .count(),
+            3
+        );
+        assert_eq!(
+            kinds
+                .iter()
+                .filter(|kind| **kind == OutlineEntryKind::Output)
+                .count(),
+            2
+        );
     }
 }

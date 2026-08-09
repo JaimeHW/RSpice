@@ -10,10 +10,14 @@
 //! agree on, which is why it sits with them rather than with the design
 //! system.
 
+pub(crate) mod canonical_diagnostics;
 pub(crate) mod code_workspace;
 pub(crate) mod model_correlation;
 pub(crate) mod model_editor;
 pub(crate) mod netlist_document;
 pub(crate) mod result_document;
+pub(crate) mod text_document_model;
+pub(crate) mod text_editor_commands;
+pub(crate) mod virtual_text_editor;
 pub(crate) mod visualization_family;
 pub(crate) mod visualization_studio;

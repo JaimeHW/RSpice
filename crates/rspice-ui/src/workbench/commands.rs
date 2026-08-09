@@ -13,6 +13,7 @@ use std::cell::RefCell;
 
 use super::state::{ProjectLauncherFilter, VerificationPage, WorkbenchState, Workspace};
 
+pub(crate) mod code_context;
 mod registry;
 pub(crate) mod vocabulary;
 
@@ -363,6 +364,7 @@ impl Command {
                 matches!(
                     app.cloud_account.availability(),
                     crate::services::cloud_account::CloudAccountAvailability::Native
+                        | crate::services::cloud_account::CloudAccountAvailability::Browser
                 ) && app.cloud_account.snapshot().cloud_feature_enabled(
                     crate::services::cloud_account::LIVE_COLLABORATION_FEATURE,
                 )

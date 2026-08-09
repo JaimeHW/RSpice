@@ -14,6 +14,10 @@ fn dependency(importer: &str, imported: &str) -> ProjectSourceDependency {
     ProjectSourceDependency::try_new(importer, imported).unwrap()
 }
 
+fn role(path: &str, source_role: ProjectSourceRole) -> ProjectSourceRoleBinding {
+    ProjectSourceRoleBinding::try_new(path, source_role).unwrap()
+}
+
 fn bundle_fixture() -> ProjectSourceBundle {
     ProjectSourceBundle::try_new_with_id(
         "6d3c50a8-dd02-46da-beca-160517eea8a9".parse().unwrap(),
@@ -131,6 +135,62 @@ fn edits_advance_bundle_revision_and_invalidate_root_and_closure_evidence() {
 }
 
 #[test]
+fn revision_history_round_trips_and_restores_as_a_new_monotonic_revision() {
+    let mut bundle = ProjectSourceBundle::try_new(
+        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
+        ProjectSourceLanguage::VerilogA,
+        "models/root.va",
+        "module root; endmodule\n",
+        [],
+        [],
+    )
+    .unwrap();
+    let initial_revision = bundle.revision();
+    let initial_digest = bundle.closure_digest();
+    bundle
+        .replace_file_content(
+            "models/root.va",
+            "module root; real changed; endmodule\n".to_owned(),
+        )
+        .unwrap();
+    bundle
+        .add_file(
+            "models/root.va",
+            dependency_file("models/helper.vams", "`define VALUE 1\n"),
+        )
+        .unwrap();
+    assert_eq!(bundle.revision().get(), 3);
+    assert_eq!(bundle.revision_history().len(), 2);
+    assert_eq!(
+        bundle
+            .revision_snapshot(initial_revision)
+            .unwrap()
+            .closure_digest(),
+        initial_digest
+    );
+
+    let encoded = serde_json::to_vec(&bundle).unwrap();
+    let mut restored: ProjectSourceBundle = serde_json::from_slice(&encoded).unwrap();
+    restored.validate().unwrap();
+    assert!(
+        restored
+            .restore_revision(restored.revision(), initial_revision)
+            .unwrap()
+    );
+    assert_eq!(restored.revision().get(), 4);
+    assert_eq!(restored.root().content(), "module root; endmodule\n");
+    assert!(!restored.contains_file("models/helper.vams"));
+    assert_eq!(restored.revision_history().len(), 3);
+    assert!(matches!(
+        restored.restore_revision(
+            crate::product::ObjectRevision::new(3).unwrap(),
+            initial_revision,
+        ),
+        Err(ProjectSourceError::StaleRevisionRestore { .. })
+    ));
+}
+
+#[test]
 fn authoring_add_rename_and_delete_keep_source_and_dependency_graph_atomic() {
     let mut bundle = ProjectSourceBundle::try_new(
         ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
@@ -164,6 +224,8 @@ fn authoring_add_rename_and_delete_keep_source_and_dependency_graph_atomic() {
         bundle.dependencies(),
         [dependency("models/root.va", "shared/constants.vams")]
     );
+    let dependency_id = bundle.document_id("shared/constants.vams").unwrap();
+    let dependency_revision = bundle.document_revision("shared/constants.vams").unwrap();
 
     assert!(
         bundle
@@ -172,6 +234,11 @@ fn authoring_add_rename_and_delete_keep_source_and_dependency_graph_atomic() {
     );
     assert!(bundle.contains_file("shared/physical.vams"));
     assert!(!bundle.contains_file("shared/constants.vams"));
+    assert_eq!(
+        bundle.document_id("shared/physical.vams"),
+        Some(dependency_id)
+    );
+    assert!(bundle.document_revision("shared/physical.vams").unwrap() > dependency_revision);
     assert!(
         bundle
             .root()
@@ -187,6 +254,73 @@ fn authoring_add_rename_and_delete_keep_source_and_dependency_graph_atomic() {
     assert_eq!(bundle.root().content(), "module root; endmodule\n");
     assert!(bundle.files().is_empty());
     assert!(bundle.dependencies().is_empty());
+    bundle.validate().unwrap();
+}
+
+#[test]
+fn automation_authoring_uses_persisted_roles_without_veriloga_include_injection() {
+    let mut bundle = ProjectSourceBundle::try_new(
+        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation),
+        ProjectSourceLanguage::RSpiceAutomation,
+        "flows/main.py",
+        "from helpers import label\nprint(label())\n",
+        [],
+        [],
+    )
+    .unwrap();
+    let entry_before = bundle.root().content().to_owned();
+
+    for (path, content) in [
+        ("flows/helpers.py", "def label():\n    return 'tt'\n"),
+        ("plans/signoff.data", "schema: rspice.run-plan/v1\n"),
+        (
+            "environment/pinned.toml",
+            "format = \"rspice-python-lock/v1\"\n",
+        ),
+        (
+            "security/project-policy.toml",
+            "project_files = \"read\"\nnetwork = \"deny\"\n",
+        ),
+    ] {
+        bundle
+            .add_file("flows/main.py", dependency_file(path, content))
+            .unwrap();
+    }
+    assert_eq!(bundle.root().content(), entry_before);
+    assert!(!bundle.root().content().contains("`include"));
+
+    bundle
+        .bind_role("plans/signoff.data", ProjectSourceRole::AutomationRunPlan)
+        .unwrap();
+    bundle
+        .bind_role(
+            "environment/pinned.toml",
+            ProjectSourceRole::AutomationEnvironmentLock,
+        )
+        .unwrap();
+    bundle
+        .bind_role(
+            "security/project-policy.toml",
+            ProjectSourceRole::AutomationPermissionManifest,
+        )
+        .unwrap();
+    let digest_before_rename = bundle.closure_digest();
+
+    bundle
+        .rename_file("plans/signoff.data", "plans/release.data")
+        .unwrap();
+    assert_eq!(
+        bundle.role_for_path("plans/release.data"),
+        Some(ProjectSourceRole::AutomationRunPlan)
+    );
+    assert_ne!(bundle.closure_digest(), digest_before_rename);
+    assert!(matches!(
+        bundle.remove_file("plans/release.data"),
+        Err(ProjectSourceError::RoleBoundFile { .. })
+    ));
+    assert!(bundle.unbind_role("plans/release.data").unwrap());
+    assert!(bundle.remove_file("plans/release.data").unwrap());
+    assert_eq!(bundle.root().content(), entry_before);
     bundle.validate().unwrap();
 }
 
@@ -221,6 +355,100 @@ fn authoring_rejects_invalid_or_cascading_edits_without_partial_mutation() {
         Err(ProjectSourceError::CannotRemoveBundleRoot { .. })
     ));
     assert_eq!(bundle, before);
+}
+
+#[test]
+fn multi_file_replacement_is_atomic_and_rejects_duplicate_paths() {
+    let bundle = ProjectSourceBundle::try_new(
+        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
+        ProjectSourceLanguage::VerilogA,
+        "root.va",
+        "`include \"defs.vams\"\nmodule root; endmodule\n",
+        [dependency_file("defs.vams", "// old definitions\n")],
+        [dependency("root.va", "defs.vams")],
+    )
+    .unwrap();
+    let bundle_id = bundle.id();
+    let original_revision = bundle.revision();
+    let original_root = bundle.root().content().to_owned();
+    let original_dependency = bundle.file_content("defs.vams").unwrap().to_owned();
+    let mut registry = ProjectSourceRegistry::default();
+    registry.insert_bundle(bundle).unwrap();
+
+    let changed = registry
+        .replace_bundle_files_transactionally(
+            bundle_id,
+            [
+                (
+                    "root.va".to_owned(),
+                    "`include \"defs.vams\"\nmodule updated; endmodule\n".to_owned(),
+                ),
+                ("defs.vams".to_owned(), "// new definitions\n".to_owned()),
+            ],
+        )
+        .unwrap();
+    assert_eq!(changed, 2);
+    let committed = registry.get_bundle(bundle_id).unwrap();
+    assert_eq!(committed.revision().get(), original_revision.get() + 1);
+    assert_eq!(committed.revision_history().len(), 1);
+    assert_eq!(
+        committed.revision_history()[0].revision(),
+        original_revision
+    );
+    assert!(committed.root().content().contains("module updated"));
+    assert_eq!(
+        committed.file_content("defs.vams"),
+        Some("// new definitions\n")
+    );
+
+    let edited_revision = committed.revision();
+    assert!(
+        registry
+            .restore_bundle_revision(bundle_id, edited_revision, original_revision)
+            .unwrap()
+    );
+    let restored = registry.get_bundle(bundle_id).unwrap();
+    assert_eq!(restored.root().content(), original_root);
+    assert_eq!(
+        restored.file_content("defs.vams"),
+        Some(original_dependency.as_str())
+    );
+    assert!(restored.revision().get() > edited_revision.get());
+
+    let before = registry.clone();
+    assert!(matches!(
+        registry.replace_bundle_files_transactionally(
+            bundle_id,
+            [
+                ("root.va".to_owned(), "module first; endmodule\n".to_owned()),
+                (
+                    "ROOT.VA".to_owned(),
+                    "module second; endmodule\n".to_owned()
+                ),
+            ],
+        ),
+        Err(ProjectSourceError::DuplicateLogicalPath { .. })
+    ));
+    assert_eq!(registry, before);
+
+    assert!(
+        registry
+            .replace_bundle_files_transactionally(
+                bundle_id,
+                [
+                    (
+                        "root.va".to_owned(),
+                        "module partial; endmodule\n".to_owned()
+                    ),
+                    (
+                        "missing.va".to_owned(),
+                        "module missing; endmodule\n".to_owned()
+                    ),
+                ],
+            )
+            .is_err()
+    );
+    assert_eq!(registry, before);
 }
 
 #[test]
@@ -348,6 +576,27 @@ fn closure_bounds_are_enforced() {
 }
 
 #[test]
+fn closure_accepts_the_exact_ten_thousand_file_contract_limit() {
+    let files = (0..MAX_PROJECT_SOURCE_FILES - 1)
+        .map(|index| dependency_file(&format!("deps/{index:04}.vams"), ""))
+        .collect::<Vec<_>>();
+    let dependencies = (0..MAX_PROJECT_SOURCE_FILES - 1)
+        .map(|index| dependency("root.va", &format!("deps/{index:04}.vams")))
+        .collect::<Vec<_>>();
+    let bundle = ProjectSourceBundle::try_new(
+        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
+        ProjectSourceLanguage::VerilogA,
+        "root.va",
+        "root",
+        files,
+        dependencies,
+    )
+    .unwrap();
+    assert_eq!(bundle.files().len() + 1, MAX_PROJECT_SOURCE_FILES);
+    bundle.validate().unwrap();
+}
+
+#[test]
 fn legacy_singletons_migrate_deterministically_and_keep_accessors() {
     let source = ProjectSourceDocument::try_new(
         "sensor.va",
@@ -379,6 +628,79 @@ fn legacy_singletons_migrate_deterministically_and_keep_accessors() {
 }
 
 #[test]
+fn schema_v1_automation_role_heuristics_are_one_time_and_persist_as_schema_v2() {
+    let bundle = ProjectSourceBundle::try_new_with_roles(
+        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation),
+        ProjectSourceLanguage::RSpiceAutomation,
+        "flows/main.py",
+        "print('ok')\n",
+        [
+            dependency_file("plans/release.yaml", "schema: rspice.run-plan/v1\n"),
+            dependency_file(
+                "environment/pinned.toml",
+                "format = \"rspice-python-lock/v1\"\n",
+            ),
+            dependency_file(
+                "security/policy.toml",
+                "project_files = \"read\"\nnetwork = \"deny\"\n",
+            ),
+        ],
+        [
+            dependency("flows/main.py", "plans/release.yaml"),
+            dependency("flows/main.py", "environment/pinned.toml"),
+            dependency("flows/main.py", "security/policy.toml"),
+        ],
+        [role("flows/main.py", ProjectSourceRole::AutomationEntry)],
+    )
+    .unwrap();
+    let registry = ProjectSourceRegistry::try_from_bundles([bundle]).unwrap();
+    let mut persisted = serde_json::to_value(registry).unwrap();
+    persisted["schema_version"] = serde_json::json!(1);
+    persisted["bundles"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("roles");
+    persisted["bundles"][0]["root"]
+        .as_object_mut()
+        .unwrap()
+        .remove("id");
+    for file in persisted["bundles"][0]["files"].as_array_mut().unwrap() {
+        file.as_object_mut().unwrap().remove("id");
+    }
+
+    let migrated: ProjectSourceRegistry = serde_json::from_value(persisted).unwrap();
+    let migrated = migrated
+        .bundle_for_owner(&ProjectSourceOwner::code_workspace(
+            ProjectSourceLanguage::RSpiceAutomation,
+        ))
+        .unwrap();
+    assert_eq!(
+        migrated.role_for_path("flows/main.py"),
+        Some(ProjectSourceRole::AutomationEntry)
+    );
+    assert_eq!(
+        migrated.role_for_path("plans/release.yaml"),
+        Some(ProjectSourceRole::AutomationRunPlan)
+    );
+    assert_eq!(
+        migrated.role_for_path("environment/pinned.toml"),
+        Some(ProjectSourceRole::AutomationEnvironmentLock)
+    );
+    assert_eq!(
+        migrated.role_for_path("security/policy.toml"),
+        Some(ProjectSourceRole::AutomationPermissionManifest)
+    );
+    let canonical =
+        serde_json::to_value(ProjectSourceRegistry::try_from_bundles([migrated.clone()]).unwrap())
+            .unwrap();
+    assert_eq!(
+        canonical["schema_version"],
+        PROJECT_SOURCE_REGISTRY_SCHEMA_VERSION
+    );
+    assert!(canonical["bundles"][0]["roles"].is_array());
+}
+
+#[test]
 fn persisted_corruption_fails_closed_during_deserialization() {
     let mut bundle = bundle_fixture();
     bundle.mark_validated().unwrap();
@@ -389,6 +711,10 @@ fn persisted_corruption_fails_closed_during_deserialization() {
 
     let mut value = serde_json::to_value(&registry).unwrap();
     value["bundles"][0]["id"] = serde_json::json!(Uuid::nil());
+    assert!(serde_json::from_value::<ProjectSourceRegistry>(value).is_err());
+
+    let mut value = serde_json::to_value(&registry).unwrap();
+    value["bundles"][0]["root"]["id"] = serde_json::json!(Uuid::nil());
     assert!(serde_json::from_value::<ProjectSourceRegistry>(value).is_err());
 }
 
@@ -412,6 +738,20 @@ fn cell_view_sources_follow_copy_rename_and_delete_without_stale_evidence() {
         copied_bundle.root().content(),
         bundle_fixture().root().content()
     );
+    assert_ne!(
+        copied_bundle.root().id(),
+        registry.get_bundle(original_id).unwrap().root().id()
+    );
+    for copied_file in copied_bundle.files() {
+        let original_file = registry
+            .get_bundle(original_id)
+            .unwrap()
+            .files()
+            .iter()
+            .find(|file| file.logical_path() == copied_file.logical_path())
+            .unwrap();
+        assert_ne!(copied_file.id(), original_file.id());
+    }
 
     let before_revision = registry.get_bundle(original_id).unwrap().revision();
     let renamed = registry

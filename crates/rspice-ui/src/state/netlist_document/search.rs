@@ -43,6 +43,26 @@ pub struct FindMatch {
     wrapped: bool,
 }
 
+/// A deliberately bounded search result. `truncated` is true when at least
+/// one additional match exists beyond the caller's limit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoundedFindMatches {
+    matches: Vec<FindMatch>,
+    truncated: bool,
+}
+
+impl BoundedFindMatches {
+    #[must_use]
+    pub fn matches(&self) -> &[FindMatch] {
+        &self.matches
+    }
+
+    #[must_use]
+    pub const fn truncated(&self) -> bool {
+        self.truncated
+    }
+}
+
 impl FindMatch {
     #[must_use]
     pub fn byte_range(&self) -> Range<usize> {
@@ -174,6 +194,36 @@ pub fn find_all_in_source(
         .collect())
 }
 
+/// Return at most `limit` non-overlapping matches and report whether more
+/// exist. The extra sentinel match is discarded, bounding result storage to
+/// `limit` even for dense literals and zero-width regular expressions.
+pub fn find_all_in_source_bounded(
+    source: &str,
+    query: &str,
+    options: FindOptions,
+    limit: usize,
+) -> Result<BoundedFindMatches, FindError> {
+    validate_request(source, query, 0)?;
+    let mut candidates = candidate_ranges_bounded(source, query, options, limit.saturating_add(1))?;
+    let truncated = candidates.len() > limit;
+    candidates.truncate(limit);
+    Ok(BoundedFindMatches {
+        matches: candidates
+            .into_iter()
+            .map(|byte_range| {
+                let (line, column) = line_column(source, byte_range.start);
+                FindMatch {
+                    byte_range,
+                    line,
+                    column,
+                    wrapped: false,
+                }
+            })
+            .collect(),
+        truncated,
+    })
+}
+
 /// Replace the next directional match or every source-order match. Literal
 /// replacements are inserted exactly. Regular-expression replacements use
 /// the regex crate's `$1`/`$name` capture expansion semantics.
@@ -203,6 +253,23 @@ pub fn replace_in_source(
             (vec![found.0], found.1)
         }
     };
+    replace_source_ranges(source, query, replacement, options, &selected, wrapped)
+}
+
+/// Replace an already selected, source-ordered set of exact matches. This is
+/// used by syntax-aware project search after comment-only candidates have
+/// been excluded. Every supplied range is reconstructed against the original
+/// source before any output is returned, so a stale or masked range fails
+/// atomically.
+pub fn replace_source_ranges(
+    source: &str,
+    query: &str,
+    replacement: &str,
+    options: FindOptions,
+    selected: &[Range<usize>],
+    wrapped: bool,
+) -> Result<ReplaceOutcome, FindError> {
+    validate_request(source, query, 0)?;
     if selected.is_empty() {
         return Ok(ReplaceOutcome {
             source: source.to_owned(),
@@ -218,7 +285,15 @@ pub fn replace_in_source(
     let mut output = String::with_capacity(source.len());
     let mut replaced_ranges = Vec::with_capacity(selected.len());
     let mut predecessor_end = 0;
-    for range in selected {
+    for range in selected.iter().cloned() {
+        if range.start < predecessor_end
+            || range.end > source.len()
+            || range.start > range.end
+            || !source.is_char_boundary(range.start)
+            || !source.is_char_boundary(range.end)
+        {
+            return Err(FindError::MatchReconstructionFailed);
+        }
         output.push_str(&source[predecessor_end..range.start]);
         let replacement_start = output.len();
         if let Some(expression) = &expression {
@@ -230,6 +305,16 @@ pub fn replace_in_source(
             };
             captures.expand(replacement, &mut output);
         } else {
+            let valid_literal = if options.match_case {
+                source.get(range.clone()) == Some(query)
+            } else {
+                source
+                    .get(range.clone())
+                    .is_some_and(|candidate| candidate.to_lowercase() == query.to_lowercase())
+            };
+            if !valid_literal {
+                return Err(FindError::MatchReconstructionFailed);
+            }
             output.push_str(replacement);
         }
         replaced_ranges.push(replacement_start..output.len());
@@ -283,6 +368,40 @@ fn candidate_ranges(
     Ok(candidates)
 }
 
+fn candidate_ranges_bounded(
+    source: &str,
+    query: &str,
+    options: FindOptions,
+    limit: usize,
+) -> Result<Vec<Range<usize>>, FindError> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+    let whole_word = |range: &Range<usize>| !options.whole_word || is_whole_word(source, range);
+    if options.regular_expression {
+        return Ok(build_regex(query, options.match_case)?
+            .find_iter(source)
+            .map(|found| found.range())
+            .filter(whole_word)
+            .take(limit)
+            .collect());
+    }
+    if options.match_case {
+        return Ok(source
+            .match_indices(query)
+            .map(|(start, value)| start..start + value.len())
+            .filter(whole_word)
+            .take(limit)
+            .collect());
+    }
+    Ok(case_insensitive_ranges_bounded(
+        source,
+        query,
+        limit,
+        options.whole_word,
+    ))
+}
+
 fn build_regex(query: &str, match_case: bool) -> Result<regex::Regex, FindError> {
     RegexBuilder::new(query)
         .case_insensitive(!match_case)
@@ -312,6 +431,15 @@ fn select_range(
 }
 
 fn case_insensitive_ranges(source: &str, query: &str) -> Vec<Range<usize>> {
+    case_insensitive_ranges_bounded(source, query, usize::MAX, false)
+}
+
+fn case_insensitive_ranges_bounded(
+    source: &str,
+    query: &str,
+    limit: usize,
+    whole_word: bool,
+) -> Vec<Range<usize>> {
     let (folded_source, boundaries) = lowercase_with_boundaries(source);
     let folded_query = query.to_lowercase();
     if folded_query.is_empty() {
@@ -332,6 +460,8 @@ fn case_insensitive_ranges(source: &str, query: &str) -> Vec<Range<usize>> {
                 .map(|index| boundaries[index].1)?;
             Some(original_start..original_end)
         })
+        .filter(|range| !whole_word || is_whole_word(source, range))
+        .take(limit)
         .collect()
 }
 
@@ -488,6 +618,17 @@ mod tests {
             ),
             Err(FindError::InvalidRegularExpression(_))
         ));
+    }
+
+    #[test]
+    fn bounded_search_reports_truncation_without_retaining_extra_matches() {
+        let found = find_all_in_source_bounded("x x x x", "x", FindOptions::default(), 2).unwrap();
+        assert_eq!(found.matches().len(), 2);
+        assert!(found.truncated());
+
+        let exact = find_all_in_source_bounded("x x", "x", FindOptions::default(), 2).unwrap();
+        assert_eq!(exact.matches().len(), 2);
+        assert!(!exact.truncated());
     }
 
     #[test]

@@ -904,8 +904,8 @@ impl Command {
                 crate::services::cloud_account::CloudAccountAvailability::UnconfiguredBuild => {
                     "this build has no cloud endpoints pinned"
                 }
-                crate::services::cloud_account::CloudAccountAvailability::BrowserPending => {
-                    "publishing arrives with the hosted browser deployment"
+                crate::services::cloud_account::CloudAccountAvailability::Browser => {
+                    "web publishing is currently available in the desktop application"
                 }
                 crate::services::cloud_account::CloudAccountAvailability::Native => {
                     if app.cloud_account.snapshot().signed_in() {
@@ -919,10 +919,8 @@ impl Command {
                 crate::services::cloud_account::CloudAccountAvailability::UnconfiguredBuild => {
                     "this build has no cloud endpoints pinned"
                 }
-                crate::services::cloud_account::CloudAccountAvailability::BrowserPending => {
-                    "live sessions arrive with the hosted browser deployment"
-                }
-                crate::services::cloud_account::CloudAccountAvailability::Native => {
+                crate::services::cloud_account::CloudAccountAvailability::Native
+                | crate::services::cloud_account::CloudAccountAvailability::Browser => {
                     if app.cloud_account.snapshot().signed_in() {
                         "the signed-in seat is not licensed for live collaboration"
                     } else {

@@ -104,7 +104,8 @@ pub fn format_params_string(params: &HashMap<String, String>) -> String {
         .map(|(k, v)| {
             // Quote values containing spaces or special characters
             if v.contains(' ') || v.contains(',') || v.contains('=') {
-                format!("{}=\"{}\"", k, v)
+                let escaped = v.replace('\\', "\\\\").replace('"', "\\\"");
+                format!("{}=\"{}\"", k, escaped)
             } else {
                 format!("{}={}", k, v)
             }
@@ -114,4 +115,23 @@ pub fn format_params_string(params: &HashMap<String, String>) -> String {
     // Sort for deterministic output (important for testing and diffs)
     pairs.sort();
     pairs.join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn formatter_escapes_nested_quotes_and_backslashes_losslessly() {
+        let parameters = HashMap::from([(
+            "argv".to_owned(),
+            r#"["first arg" "C:\Program Files\device"]"#.to_owned(),
+        )]);
+        let formatted = format_params_string(&parameters);
+
+        assert_eq!(
+            formatted,
+            r#"argv="[\"first arg\" \"C:\\Program Files\\device\"]""#
+        );
+    }
 }

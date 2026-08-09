@@ -133,6 +133,25 @@ impl SourceLocator {
         Ok(self)
     }
 
+    /// Preserve the logical include identity while replacing the user-granted
+    /// physical authority. Browser relinks deliberately pass `None` because
+    /// immutable picker bytes do not grant a reopenable native path.
+    pub fn with_relinked_origin(
+        mut self,
+        display_name: impl Into<String>,
+        native_origin: Option<String>,
+    ) -> Result<Self, DocumentError> {
+        let display_name = display_name.into();
+        validate_nonempty_text("source display name", &display_name)?;
+        if let Some(origin) = native_origin.as_deref() {
+            validate_nonempty_text("native source origin", origin)?;
+        }
+        self.display_name = display_name;
+        self.native_origin = native_origin;
+        self.validate()?;
+        Ok(self)
+    }
+
     fn exact(locator: &str) -> Self {
         Self {
             logical_identity: locator.to_owned(),
@@ -302,6 +321,30 @@ pub enum DependencyResolution {
     },
 }
 
+/// External authority that owns a retained dependency before an explicit
+/// copy-to-project transition. The authority is durable provenance and UI
+/// policy; execution always consumes the authenticated retained bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum DependencySourceAuthority {
+    #[default]
+    External,
+    Vendor,
+    TechnologyPackage,
+    StandardLibrary,
+}
+
+impl DependencySourceAuthority {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::External => "external reference",
+            Self::Vendor => "vendor source",
+            Self::TechnologyPackage => "technology package",
+            Self::StandardLibrary => "standard library",
+        }
+    }
+}
+
 impl DependencyResolution {
     #[must_use]
     pub const fn content_digest(&self) -> Option<ContentDigest> {
@@ -340,6 +383,8 @@ pub struct DependencyMetadata {
     direct_include_index: Option<usize>,
     parent: Option<SourceLocator>,
     parent_include_index: Option<usize>,
+    #[serde(default)]
+    authority: DependencySourceAuthority,
     resolution: DependencyResolution,
 }
 
@@ -427,6 +472,7 @@ impl DependencyMetadata {
             direct_include_index: Some(include_index),
             parent: None,
             parent_include_index: None,
+            authority: DependencySourceAuthority::External,
             resolution: DependencyResolution::Unresolved,
         }
     }
@@ -445,6 +491,7 @@ impl DependencyMetadata {
             direct_include_index: Some(include_index),
             parent: None,
             parent_include_index: None,
+            authority: DependencySourceAuthority::External,
             resolution: DependencyResolution::Unresolved,
         })
     }
@@ -462,6 +509,7 @@ impl DependencyMetadata {
             direct_include_index: None,
             parent: Some(parent),
             parent_include_index: Some(parent_include_index),
+            authority: DependencySourceAuthority::External,
             resolution: DependencyResolution::Unresolved,
         }
     }
@@ -481,6 +529,7 @@ impl DependencyMetadata {
             direct_include_index: None,
             parent: Some(parent),
             parent_include_index: Some(parent_include_index),
+            authority: DependencySourceAuthority::External,
             resolution: DependencyResolution::Unresolved,
         })
     }
@@ -501,6 +550,12 @@ impl DependencyMetadata {
         validate_resolution(&resolution)?;
         self.resolution = resolution;
         Ok(self)
+    }
+
+    #[must_use]
+    pub fn with_authority(mut self, authority: DependencySourceAuthority) -> Self {
+        self.authority = authority;
+        self
     }
 
     #[must_use]
@@ -531,6 +586,11 @@ impl DependencyMetadata {
     #[must_use]
     pub const fn resolution(&self) -> &DependencyResolution {
         &self.resolution
+    }
+
+    #[must_use]
+    pub const fn authority(&self) -> DependencySourceAuthority {
+        self.authority
     }
 
     #[must_use]
@@ -1192,6 +1252,70 @@ impl NetlistDocument {
         Ok(self.finish_receipt(before))
     }
 
+    /// Replace one dependency's retained bytes and physical grant without
+    /// changing the logical include edge. The expected document revision
+    /// closes picker races even though the root source digest itself does not
+    /// change when another dependency is edited or relinked.
+    pub fn relink_dependency_source(
+        &mut self,
+        expected_revision: ObjectRevision,
+        logical_identity: &str,
+        locator: SourceLocator,
+        source_bytes: Vec<u8>,
+    ) -> Result<TransitionReceipt, DocumentError> {
+        if self.revision != expected_revision {
+            return Err(DocumentError::DocumentRevisionConflict {
+                expected: expected_revision.get(),
+                found: self.revision.get(),
+            });
+        }
+        locator.validate()?;
+        if locator.logical_identity() != logical_identity {
+            return Err(DocumentError::InvalidDependency(
+                "a relink cannot change the canonical logical include identity".to_owned(),
+            ));
+        }
+        let Some(index) = self
+            .dependencies
+            .iter()
+            .position(|dependency| dependency.locator.logical_identity() == logical_identity)
+        else {
+            return Err(DocumentError::InvalidDependency(format!(
+                "dependency {logical_identity:?} is no longer in the canonical closure"
+            )));
+        };
+
+        let mut dependencies = self.dependencies.clone();
+        let source = decode_utf8(source_bytes)?;
+        dependencies[index].locator = locator.clone();
+        dependencies[index].resolution = DependencyResolution::Resolved {
+            content_digest: digest(source.as_bytes()),
+            source,
+        };
+        for dependency in &mut dependencies {
+            if dependency
+                .parent
+                .as_ref()
+                .is_some_and(|parent| parent.logical_identity() == logical_identity)
+            {
+                dependency.parent = Some(locator.clone());
+            }
+        }
+
+        if self.ownership == DocumentOwnership::Generated {
+            let backing = &self.generated_artifact;
+            let artifact = GeneratedArtifact::try_from_utf8(
+                backing.provenance().clone(),
+                backing.source_bytes().to_vec(),
+                dependencies,
+                backing.source_map().to_vec(),
+            )?;
+            self.update_generated_artifact(backing.content_digest(), artifact)
+        } else {
+            self.acknowledge_dependencies(self.content_digest(), dependencies)
+        }
+    }
+
     /// Apply diagnostics produced for the exact current content identity.
     pub fn acknowledge_validation(
         &mut self,
@@ -1462,6 +1586,10 @@ pub enum DocumentError {
         expected: ContentDigest,
         found: ContentDigest,
     },
+    #[error(
+        "document revision changed before the operation completed (expected {expected}, found {found})"
+    )]
+    DocumentRevisionConflict { expected: u64, found: u64 },
     #[error(
         "generated artifact changed before regeneration completed (expected {expected}, found {found})"
     )]
