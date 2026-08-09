@@ -25,6 +25,10 @@ use super::super::state::{ModelsPage, ProjectPage, VerificationPage, Workspace};
 
 const EXPRESSION_HEADER_HEIGHT: f32 = 28.0;
 const SIGNAL_ROW_HEIGHT: f32 = 30.0;
+// The results browser's two-register quantity row and its group head, from
+// the mockup's `.result-browser-quantity` / `.result-browser-analysis-head`.
+const RESULT_QUANTITY_ROW_HEIGHT: f32 = 36.0;
+const RESULT_ANALYSIS_HEAD_HEIGHT: f32 = 31.0;
 const TOUCH_TARGET_HEIGHT: f32 = 44.0;
 const PANEL_SEARCH_MARGIN_X: f32 = 8.0;
 const SCHEMATIC_NAV_ROW_HEIGHT: f32 = 24.0;
@@ -915,11 +919,17 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                     &waveform.name,
                                     analysis.analysis_type.axis_info().3,
                                 );
+                            let samples = waveform.y.len();
                             ResultSignal {
                                 waveform_index,
                                 name: waveform.name.clone(),
                                 color: waveform.color.clone(),
                                 visible: waveform.visible,
+                                meta: format!(
+                                    "{} · {samples} {}",
+                                    result_quantity_kind_label(&waveform.name, unit),
+                                    if samples == 1 { "value" } else { "samples" },
+                                ),
                                 value: waveform
                                     .y
                                     .iter()
@@ -957,14 +967,30 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             .to_lowercase()
                             .contains(&query)
                         || !signals.is_empty();
+                    // A deck that labelled its analysis with the same code the
+                    // kind glyph carries would print that code twice; the
+                    // canonical name is the useful title in that case.
+                    let label = if analysis
+                        .label
+                        .eq_ignore_ascii_case(analysis.analysis_type.short_label())
+                    {
+                        analysis.analysis_type.display_name().to_owned()
+                    } else {
+                        analysis.label.clone()
+                    };
                     matches_analysis.then(|| ResultAnalysis {
+                        domain: result_analysis_domain(
+                            analysis.analysis_type,
+                            analysis.waveforms.first(),
+                        ),
+                        total_signals: analysis.waveforms.len(),
                         analysis_index,
                         presentation_key:
                             crate::workbench::documents::result_document::AnalysisPresentationKey::new(
                                 run.dataset_id,
                                 analysis,
                             ),
-                        label: analysis.label.clone(),
+                        label,
                         short_label: analysis.analysis_type.short_label(),
                         success: analysis.success,
                         signals,
@@ -1129,19 +1155,33 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                     {
                         for analysis in run.analyses {
                             let analysis_active = active_analysis == Some(analysis.analysis_index);
-                            if nav_row_indented(
+                            let signal_count = analysis.signals.len();
+                            if result_browser_analysis_head(
                                 ui,
-                                if analysis.success {
-                                    WorkbenchIcon::Results
-                                } else {
-                                    WorkbenchIcon::Warning
-                                },
+                                analysis.short_label,
                                 &analysis.label,
+                                &analysis.domain,
+                                signal_count,
+                                analysis.total_signals,
                                 analysis_active,
-                                Some(analysis.short_label),
-                                0,
-                            ) {
+                                analysis.success,
+                            )
+                            .clicked()
+                            {
                                 select_result_analysis(app, run.run_index, analysis.analysis_index);
+                            }
+                            if signal_count == 0 {
+                                // The mockup's omission card: a group that
+                                // lists nothing must say why, or it reads as
+                                // a dataset that lost its quantities.
+                                result_browser_omission(
+                                    ui,
+                                    if analysis.total_signals == 0 {
+                                        "This analysis retained a scalar solution, not a sampled series. Its values are in the OP viewer."
+                                    } else {
+                                        "Every quantity of this analysis is filtered out by the current query, kind, or scope."
+                                    },
+                                );
                             }
                             for signal in analysis.signals {
                                 any = true;
@@ -1162,15 +1202,16 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                     analysis.analysis_index,
                                     signal.waveform_index,
                                 ));
-                                let responses = signal_row(
+                                let responses = result_quantity_row(
                                     ui,
                                     row_id,
                                     &signal.name,
+                                    &signal.meta,
                                     signal.value.as_deref(),
                                     color,
                                     signal_selected,
                                     signal.visible,
-                                    Some(app.state.ui.results.is_favorite_signal(&signal.name)),
+                                    app.state.ui.results.is_favorite_signal(&signal.name),
                                 );
                                 if responses.visibility.clicked() {
                                     crate::workbench::documents::result_document::toggle_visibility(
@@ -1306,7 +1347,6 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             t.color.traces[*expression_index % t.color.traces.len()],
                             false,
                             expression.visible,
-                            None,
                         );
                         if responses.visibility.clicked() {
                             toggled_expression = Some(*expression_index);
@@ -1711,6 +1751,12 @@ struct ResultAnalysis {
     presentation_key: crate::workbench::documents::result_document::AnalysisPresentationKey,
     label: String,
     short_label: &'static str,
+    /// Caption under the label: the domain this analysis swept. Repeating
+    /// the analysis name here would state the head's own title twice.
+    domain: String,
+    /// Quantities the analysis retained, before the browser's filters. The
+    /// head shows `shown / retained` whenever the two differ.
+    total_signals: usize,
     success: bool,
     signals: Vec<ResultSignal>,
 }
@@ -1721,6 +1767,239 @@ struct ResultSignal {
     color: String,
     visible: bool,
     value: Option<String>,
+    /// Typed metadata line: quantity kind and retained sample count.
+    meta: String,
+}
+
+/// The caption under an analysis head: what it swept, over what interval.
+///
+/// The interval comes from the retained abscissa rather than the requested
+/// setup, so a run that stopped early states the range it actually solved.
+fn result_analysis_domain(
+    analysis_type: crate::state::AnalysisType,
+    first_waveform: Option<&crate::state::WaveformData>,
+) -> String {
+    let (sweep, unit, ..) = analysis_type.axis_info();
+    if sweep.is_empty() {
+        return "scalar solution".to_owned();
+    }
+    let sweep = sweep.to_lowercase();
+    let span = first_waveform.and_then(|waveform| {
+        let start = *waveform.x.first()?;
+        let end = *waveform.x.last()?;
+        (start.is_finite() && end.is_finite()).then(|| {
+            format!(
+                "{} … {}",
+                sweep_endpoint(start, unit),
+                sweep_endpoint(end, unit)
+            )
+        })
+    });
+    match span {
+        Some(span) => format!("{sweep} · {span}"),
+        None if unit.is_empty() => sweep,
+        None => format!("{sweep} · {unit}"),
+    }
+}
+
+/// One end of a swept interval. Zero stays bare: "0.00 s" spends three
+/// characters restating that the sweep starts where sweeps start.
+fn sweep_endpoint(value: f64, unit: &str) -> String {
+    if value == 0.0 {
+        "0".to_owned()
+    } else {
+        crate::ui::plot::fmt_si_significant(value, unit, 3)
+    }
+}
+
+/// Human name for a retained quantity's kind, read from the same accessor
+/// authority the browser's units come from. The metadata line states it once
+/// per row so no row needs a repeated kind chip.
+fn result_quantity_kind_label(name: &str, unit: &'static str) -> &'static str {
+    if crate::workbench::documents::result_document::browser_signal_is_current(name) {
+        return if unit == "°" { "Current phase" } else { "Current" };
+    }
+    match unit {
+        "V" => "Voltage",
+        "°" => "Phase",
+        "W" => "Power",
+        "dB" => "Magnitude",
+        "A" => "Current",
+        "V^2/Hz" => "Noise PSD",
+        _ => "Quantity",
+    }
+}
+
+/// The mockup's `.result-browser-omission`: an inset card that accounts for
+/// quantities a group does not list, so absence is always explained.
+fn result_browser_omission(ui: &mut Ui, text: &str) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let width = (ui.available_width() - 16.0).max(0.0);
+    let galley = ui.fonts_mut(|fonts| {
+        fonts.layout(
+            text.to_owned(),
+            theme::sans(tokens::FS_0, FontWeight::Regular),
+            c.text_dim,
+            width - 30.0,
+        )
+    });
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), galley.size().y + 14.0 + 12.0),
+        egui::Sense::hover(),
+    );
+    let card = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + 8.0, rect.top() + 6.0),
+        egui::pos2(rect.right() - 8.0, rect.bottom() - 6.0),
+    );
+    ui.painter().rect_filled(card, 5.0, c.bg_panel_2);
+    ui.painter().rect_stroke(
+        card,
+        5.0,
+        egui::Stroke::new(1.0, c.border),
+        egui::StrokeKind::Inside,
+    );
+    WorkbenchIcon::Info.paint(
+        ui.painter(),
+        egui::Rect::from_center_size(
+            egui::pos2(card.left() + 8.0 + 6.0, card.top() + 7.0 + 6.0),
+            egui::vec2(12.0, 12.0),
+        ),
+        c.accent,
+    );
+    ui.painter().galley(
+        egui::pos2(card.left() + 27.0, card.top() + 7.0),
+        galley,
+        c.text_dim,
+    );
+}
+
+/// The mockup's `.result-browser-analysis-head`: a 31 px group head whose
+/// kind glyph, name, domain caption, and quantity count identify the retained
+/// analysis a quantity belongs to, so no row has to repeat any of it.
+fn result_browser_analysis_head(
+    ui: &mut Ui,
+    glyph: &str,
+    label: &str,
+    domain: &str,
+    count: usize,
+    retained: usize,
+    selected: bool,
+    ok: bool,
+) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let height = responsive_result_control_height(RESULT_ANALYSIS_HEAD_HEIGHT, t.metrics.ctl_h);
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), height),
+        egui::Sense::click(),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            format!("{label}, {domain}, {count} quantities"),
+        )
+    });
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    ui.painter().rect_filled(
+        rect,
+        0.0,
+        if response.hovered() {
+            c.bg_hover
+        } else {
+            c.bg_panel
+        },
+    );
+    // `box-shadow: 0 1px var(--border)` — the head keeps its own hairline so
+    // it reads as pinned chrome above the quantities it owns.
+    ui.painter()
+        .hline(rect.x_range(), rect.bottom() - 0.5, egui::Stroke::new(1.0, c.border));
+
+    // 18x18 kind glyph in accent ink over an accent wash.
+    let glyph_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 5.0 + 14.0 + 9.0, rect.center().y),
+        egui::vec2(18.0, 18.0),
+    );
+    let glyph_color = if ok { c.accent } else { c.warn };
+    ui.painter().rect_filled(glyph_rect, 4.0, c.accent_dim);
+    ui.painter().rect_stroke(
+        glyph_rect,
+        4.0,
+        egui::Stroke::new(1.0, glyph_color.gamma_multiply(0.55)),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().text(
+        glyph_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        glyph,
+        theme::mono(tokens::FS_MICRO, FontWeight::SemiBold),
+        glyph_color,
+    );
+
+    // `shown / retained` while a filter hides part of the group, so the head
+    // never implies the analysis solved fewer quantities than it did.
+    let count_text = if count == retained {
+        count.to_string()
+    } else {
+        format!("{count} / {retained}")
+    };
+    let count_width = ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(
+                count_text.clone(),
+                theme::mono(tokens::FS_MICRO, FontWeight::Regular),
+                c.text_faint,
+            )
+            .size()
+            .x
+    });
+    ui.painter().text(
+        egui::pos2(rect.right() - 8.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        &count_text,
+        theme::mono(tokens::FS_MICRO, FontWeight::Regular),
+        c.text_faint,
+    );
+
+    // Label and domain share one baseline; the domain elides first because the
+    // label is the identity the head exists to state.
+    let text_left = glyph_rect.right() + 5.0;
+    let text_right = rect.right() - 8.0 - count_width - 8.0;
+    let label_end = ui
+        .painter()
+        .text(
+            egui::pos2(text_left, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            label,
+            theme::mono(tokens::FS_0, FontWeight::SemiBold),
+            if selected { c.accent } else { c.text },
+        )
+        .right();
+    let domain_left = label_end + 6.0;
+    if domain_left < text_right {
+        let available = text_right - domain_left;
+        let galley = ui.fonts_mut(|fonts| {
+            fonts.layout(
+                domain.to_owned(),
+                theme::sans(tokens::FS_MICRO, FontWeight::Medium),
+                c.text_faint,
+                available,
+            )
+        });
+        if galley.rows.len() == 1 {
+            ui.painter().galley(
+                egui::pos2(domain_left, rect.center().y - galley.size().y / 2.0),
+                galley,
+                c.text_faint,
+            );
+        }
+    }
+    theme::paint_focus_ring(ui, &response, rect);
+    response
 }
 
 fn expression_header(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -1787,6 +2066,186 @@ struct SignalRowResponses {
     favorite: Option<egui::Response>,
 }
 
+/// One retained quantity, in the mockup's two-register anatomy: a plot
+/// checkbox column, the name with its persistent favorite flag and a
+/// right-aligned preview value, and the typed metadata line beneath.
+///
+/// The favorite flag and the favorite *action* are deliberately different
+/// marks. The flag states membership on an idle row; the action cluster
+/// appears on hover and takes the value column, so a resting list stays pure
+/// data instead of carrying a column of controls down the panel.
+fn result_quantity_row(
+    ui: &mut Ui,
+    id: egui::Id,
+    name: &str,
+    meta: &str,
+    value: Option<&str>,
+    color: egui::Color32,
+    selected: bool,
+    visible: bool,
+    favorite: bool,
+) -> SignalRowResponses {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let row_height = responsive_result_control_height(RESULT_QUANTITY_ROW_HEIGHT, t.metrics.ctl_h);
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), row_height),
+        egui::Sense::hover(),
+    );
+    let hovered = ui.rect_contains_pointer(rect);
+    let visibility_rect = egui::Rect::from_min_max(
+        rect.left_top(),
+        egui::pos2((rect.left() + 26.0).min(rect.right()), rect.bottom()),
+    );
+    let selection_rect =
+        egui::Rect::from_min_max(egui::pos2(visibility_rect.right(), rect.top()), rect.right_bottom());
+    let visibility = ui.interact(visibility_rect, id.with("visibility"), egui::Sense::click());
+    visibility.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Checkbox,
+            ui.is_enabled(),
+            visible,
+            format!("{name} plotted"),
+        )
+    });
+    let selection = ui.interact(selection_rect, id.with("selection"), egui::Sense::click());
+    selection.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            format!("{name}, {meta}"),
+        )
+    });
+    if !ui.is_rect_visible(rect) {
+        return SignalRowResponses {
+            selection,
+            visibility,
+            favorite: None,
+        };
+    }
+
+    if selected {
+        ui.painter().rect_filled(rect, 0.0, c.accent_dim);
+        ui.painter().rect_filled(
+            egui::Rect::from_min_max(rect.left_top(), egui::pos2(rect.left() + 2.0, rect.bottom())),
+            0.0,
+            c.accent,
+        );
+    } else if hovered {
+        ui.painter().rect_filled(rect, 0.0, c.bg_hover);
+    }
+
+    // Plot membership reads as a checkbox, filled in the trace's own colour
+    // so the row still answers "which curve is this" without a swatch column.
+    let box_rect = egui::Rect::from_center_size(visibility_rect.center(), egui::vec2(13.0, 13.0));
+    if visible {
+        ui.painter()
+            .rect_stroke(box_rect, 3.0, egui::Stroke::new(1.0, color), egui::StrokeKind::Inside);
+        ui.painter()
+            .rect_filled(box_rect.shrink(3.0), 1.0, color);
+    } else {
+        ui.painter().rect_filled(box_rect, 3.0, c.bg_panel);
+        ui.painter().rect_stroke(
+            box_rect,
+            3.0,
+            egui::Stroke::new(1.0, c.border_strong),
+            egui::StrokeKind::Inside,
+        );
+    }
+
+    // Two baselines inside the row: identity above, typed metadata below.
+    let name_y = rect.top() + 11.0;
+    let meta_y = rect.top() + 25.0;
+    let text_left = selection_rect.left();
+    let name_end = ui
+        .painter()
+        .text(
+            egui::pos2(text_left, name_y),
+            egui::Align2::LEFT_CENTER,
+            name,
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            if visible { c.text } else { c.text_dim },
+        )
+        .right();
+    if favorite {
+        ui.painter().text(
+            egui::pos2(name_end + 5.0, name_y),
+            egui::Align2::LEFT_CENTER,
+            "★",
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            c.warn.gamma_multiply(0.72),
+        );
+    }
+
+    // The action cluster and the preview value share the right column: on an
+    // idle row the value owns it, on intent the actions take it.
+    let favorite_response = if hovered {
+        let star_rect = egui::Rect::from_center_size(
+            egui::pos2(rect.right() - 3.0 - 11.0, rect.center().y),
+            egui::vec2(22.0, 24.0),
+        );
+        let response = ui.interact(star_rect, id.with("favorite"), egui::Sense::click());
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::Button,
+                ui.is_enabled(),
+                favorite,
+                format!("{name} favorite"),
+            )
+        });
+        if response.hovered() {
+            ui.painter().rect_filled(star_rect, 3.0, c.bg_active);
+        }
+        ui.painter().text(
+            star_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            if favorite { "★" } else { "☆" },
+            theme::mono(tokens::FS_1, FontWeight::Regular),
+            if favorite { c.warn } else { c.text_faint },
+        );
+        theme::paint_focus_ring(ui, &response, star_rect);
+        Some(response.on_hover_text(if favorite {
+            format!("Remove {name} from favorites")
+        } else {
+            format!("Add {name} to favorites")
+        }))
+    } else {
+        if let Some(value) = value {
+            ui.painter().text(
+                egui::pos2(rect.right() - 8.0, name_y),
+                egui::Align2::RIGHT_CENTER,
+                value,
+                theme::mono(tokens::FS_0, FontWeight::Regular),
+                c.text_dim,
+            );
+        }
+        None
+    };
+
+    ui.painter().text(
+        egui::pos2(text_left, meta_y),
+        egui::Align2::LEFT_CENTER,
+        meta,
+        theme::sans(tokens::FS_MICRO, FontWeight::Medium),
+        c.text_faint,
+    );
+
+    theme::paint_focus_ring(ui, &visibility, visibility_rect);
+    theme::paint_focus_ring(ui, &selection, selection_rect);
+    let visibility = visibility.on_hover_text(if visible {
+        format!("Hide {name}")
+    } else {
+        format!("Show {name}")
+    });
+    let selection = selection.on_hover_text(format!("Select {name}"));
+    SignalRowResponses {
+        selection,
+        visibility,
+        favorite: favorite_response,
+    }
+}
+
 fn signal_row(
     ui: &mut Ui,
     id: egui::Id,
@@ -1795,7 +2254,6 @@ fn signal_row(
     color: egui::Color32,
     selected: bool,
     visible: bool,
-    favorite: Option<bool>,
 ) -> SignalRowResponses {
     let t = Tokens::get(ui.ctx());
     let row_height = responsive_result_control_height(SIGNAL_ROW_HEIGHT, t.metrics.ctl_h);
@@ -1803,9 +2261,6 @@ fn signal_row(
         egui::vec2(ui.available_width(), row_height),
         egui::Sense::hover(),
     );
-    // `None` means this row kind has no Favorites membership (expressions).
-    let star_shown =
-        favorite == Some(true) || (favorite.is_some() && ui.rect_contains_pointer(rect));
     let visibility_rect = egui::Rect::from_center_size(
         egui::pos2(rect.left() + 19.0, rect.center().y),
         egui::vec2(26.0, row_height),
@@ -1874,57 +2329,15 @@ fn signal_row(
             t.color.text_dim
         },
     );
-    // The star is a row affordance, not a standing column: it surfaces on
-    // hover and stays put once the signal is a favorite, and the preview
-    // value cedes exactly its width in those states.
-    let value_right = if star_shown {
-        rect.right() - 26.0
-    } else {
-        rect.right() - 8.0
-    };
     if let Some(value) = value {
         ui.painter().text(
-            egui::pos2(value_right, rect.center().y),
+            egui::pos2(rect.right() - 8.0, rect.center().y),
             egui::Align2::RIGHT_CENTER,
             value,
             theme::mono(tokens::FS_0, FontWeight::Regular),
             t.color.text_faint,
         );
     }
-    let favorite_response = star_shown.then(|| {
-        let starred = favorite == Some(true);
-        let star_rect = egui::Rect::from_center_size(
-            egui::pos2(rect.right() - 14.0, rect.center().y),
-            egui::vec2(18.0, row_height),
-        )
-        .intersect(rect);
-        let response = ui.interact(star_rect, id.with("favorite"), egui::Sense::click());
-        response.widget_info(|| {
-            egui::WidgetInfo::selected(
-                egui::WidgetType::Button,
-                ui.is_enabled(),
-                starred,
-                format!("{name} favorite"),
-            )
-        });
-        ui.painter().text(
-            star_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            if starred { "★" } else { "☆" },
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            if starred {
-                t.color.accent
-            } else {
-                t.color.text_faint
-            },
-        );
-        theme::paint_focus_ring(ui, &response, star_rect);
-        response.on_hover_text(if starred {
-            format!("Unstar {name}")
-        } else {
-            format!("Star {name}")
-        })
-    });
     theme::paint_focus_ring(ui, &visibility, visibility_rect);
     theme::paint_focus_ring(ui, &selection, selection_rect);
     let visibility = visibility.on_hover_text(if visible {
@@ -1936,7 +2349,7 @@ fn signal_row(
     SignalRowResponses {
         selection,
         visibility,
-        favorite: favorite_response,
+        favorite: None,
     }
 }
 
@@ -3343,5 +3756,41 @@ mod tests {
         assert_eq!(super::SCHEMATIC_NAV_ROW_HEIGHT, 24.0);
         assert_eq!(super::SCHEMATIC_NAV_LABEL_SIZE, 12.0);
         assert_eq!(super::SCHEMATIC_NAV_META_SIZE, 10.0);
+    }
+
+    /// The metadata register names the kind through the same accessor
+    /// authority the unit column uses, so a derived projection never reports
+    /// the kind of the wrapper instead of the quantity underneath it.
+    #[test]
+    fn quantity_metadata_names_the_kind_under_derived_projections() {
+        for (name, unit, kind) in [
+            ("V(out)", "V", "Voltage"),
+            ("I(C1)", "A", "Current"),
+            ("|I(VIN)|", "A", "Current"),
+            ("phase(V(OUT))", "°", "Phase"),
+            ("phase(I(VIN))", "°", "Current phase"),
+            ("re(I(R1))", "A", "Current"),
+            ("onoise", "V^2/Hz", "Noise PSD"),
+        ] {
+            assert_eq!(
+                super::result_quantity_kind_label(name, unit),
+                kind,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn browser_rows_keep_the_mockup_two_register_metrics() {
+        assert_eq!(super::RESULT_QUANTITY_ROW_HEIGHT, 36.0);
+        assert_eq!(super::RESULT_ANALYSIS_HEAD_HEIGHT, 31.0);
+        // Touch stages still promote both to the full target height.
+        assert_eq!(
+            super::responsive_result_control_height(
+                super::RESULT_QUANTITY_ROW_HEIGHT,
+                super::TOUCH_TARGET_HEIGHT
+            ),
+            super::TOUCH_TARGET_HEIGHT
+        );
     }
 }
