@@ -4,6 +4,24 @@ use sha2::{Digest, Sha256};
 
 use super::*;
 
+#[test]
+fn workflow_parser_has_no_production_panic_shortcuts() {
+    let source = include_str!("parser.rs");
+    for forbidden in [
+        ".expect(",
+        ".unwrap(",
+        "panic!(",
+        "unreachable!(",
+        "todo!(",
+        "unimplemented!(",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "Automation workflow parser contains production panic shortcut {forbidden}"
+        );
+    }
+}
+
 const SOURCE: &str = "plan = project.plan(\"Lab characterization\")\n\
 run = plan.with_corners(\"all\").execute(target=\"local\")\n\
 run.require(specs=\"release\")\n\

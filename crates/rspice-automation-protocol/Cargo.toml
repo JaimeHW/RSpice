@@ -1,0 +1,20 @@
+[package]
+name = "rspice-automation-protocol"
+description = "Versioned platform-neutral worker protocol for governed RSpice Python automation"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+unicode-normalization.workspace = true
+uuid = { version = "1", features = ["serde", "v4"] }
+
+[lints]
+workspace = true

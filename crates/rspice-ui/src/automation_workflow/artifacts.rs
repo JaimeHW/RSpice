@@ -3,9 +3,10 @@
 //! What a workflow check produced, so an outcome can be re-examined rather
 //! than only re-run.
 
-use std::{error::Error, fmt};
+use std::{error::Error, fmt, sync::Arc};
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use super::parser::{ArtifactKind, AutomationPlan, SourceDigest};
 
@@ -392,24 +393,44 @@ impl Error for EvidenceError {}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RenderedArtifact {
     kind: ArtifactKind,
-    bytes: Vec<u8>,
+    digest: crate::product::ContentDigest,
+    bytes: Arc<[u8]>,
 }
 
 impl RenderedArtifact {
+    pub(crate) fn new(kind: ArtifactKind, bytes: impl Into<Arc<[u8]>>) -> Self {
+        let bytes = bytes.into();
+        Self {
+            kind,
+            digest: crate::product::ContentDigest::from_bytes(Sha256::digest(&bytes).into()),
+            bytes,
+        }
+    }
+
     pub const fn kind(&self) -> ArtifactKind {
         self.kind
     }
 
+    pub const fn digest(&self) -> crate::product::ContentDigest {
+        self.digest
+    }
+
+    #[cfg(test)]
     pub const fn file_name(&self) -> &'static str {
         self.kind.file_name()
     }
 
+    #[cfg(test)]
     pub const fn media_type(&self) -> &'static str {
         self.kind.media_type()
     }
 
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
+    }
+
+    pub(crate) fn shared_bytes(&self) -> Arc<[u8]> {
+        Arc::clone(&self.bytes)
     }
 }
 
@@ -420,7 +441,7 @@ pub enum ArtifactRenderError {
         actual: SourceDigest,
     },
     BaselineMismatch {
-        expected: &'static str,
+        expected: String,
         actual: String,
     },
     Json(String),
@@ -463,7 +484,7 @@ pub fn render_requested_artifacts(
     }
     if evidence.comparison.baseline != plan.baseline() {
         return Err(ArtifactRenderError::BaselineMismatch {
-            expected: plan.baseline(),
+            expected: plan.baseline().to_owned(),
             actual: evidence.comparison.baseline.clone(),
         });
     }
@@ -475,7 +496,7 @@ pub fn render_requested_artifacts(
                 ArtifactKind::SummaryJson => render_summary_json(plan, evidence)?,
                 ArtifactKind::VerificationPdf => render_verification_pdf(plan, evidence)?,
             };
-            Ok(RenderedArtifact { kind, bytes })
+            Ok(RenderedArtifact::new(kind, bytes))
         })
         .collect()
 }
@@ -618,7 +639,7 @@ fn escape_xml(value: &str, attribute: bool) -> String {
 struct Summary<'evidence> {
     schema_version: &'static str,
     plan_digest: String,
-    project: &'evidence str,
+    project: String,
     project_revision: &'evidence str,
     run_id: &'evidence str,
     outcome: &'static str,
@@ -630,9 +651,9 @@ struct Summary<'evidence> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SummaryWorkflow {
-    corners: &'static str,
-    target: &'static str,
-    required_specs: &'static str,
+    corners: String,
+    target: String,
+    required_specs: String,
     compare_waveforms: bool,
     requested_artifacts: Vec<&'static str>,
 }
@@ -680,7 +701,7 @@ fn render_summary_json(
     let summary = Summary {
         schema_version: "rspice.automation.summary/1",
         plan_digest: plan.source_digest().to_hex(),
-        project: plan.project_name(),
+        project: plan.project_name().to_owned(),
         project_revision: &evidence.project_revision,
         run_id: &evidence.run_id,
         outcome: if evidence.passed() {
@@ -689,9 +710,9 @@ fn render_summary_json(
             "failed"
         },
         workflow: SummaryWorkflow {
-            corners: plan.corners(),
-            target: plan.target(),
-            required_specs: plan.required_specs(),
+            corners: plan.corners().to_owned(),
+            target: plan.target().to_owned(),
+            required_specs: plan.required_specs().to_owned(),
             compare_waveforms: plan.compare_waveforms(),
             requested_artifacts: plan.artifacts().map(ArtifactKind::file_name).collect(),
         },

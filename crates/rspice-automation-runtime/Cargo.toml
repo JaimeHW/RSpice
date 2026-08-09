@@ -1,0 +1,36 @@
+[package]
+name = "rspice-automation-runtime"
+description = "Verified managed Python runtime discovery and native worker transport for RSpice Automation"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "fast", "zeroize"] }
+rspice-automation-protocol = { path = "../rspice-automation-protocol", version = "0.1.0" }
+semver.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2 = "0.10"
+thiserror.workspace = true
+uuid.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
+tempfile = "3"
+
+[lints]
+workspace = true

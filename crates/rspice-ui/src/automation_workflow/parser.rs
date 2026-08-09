@@ -56,6 +56,7 @@ pub enum DiagnosticCode {
     UnsupportedValue,
     DuplicateArtifact,
     EmptyArtifactSet,
+    InternalInvariant,
 }
 
 impl DiagnosticCode {
@@ -78,6 +79,7 @@ impl DiagnosticCode {
             Self::UnsupportedValue => "AUT015",
             Self::DuplicateArtifact => "AUT016",
             Self::EmptyArtifactSet => "AUT017",
+            Self::InternalInvariant => "AUT018",
         }
     }
 }
@@ -239,6 +241,10 @@ impl SourceDigest {
         }
         output
     }
+
+    pub(super) const fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
 }
 
 impl fmt::Display for SourceDigest {
@@ -254,6 +260,22 @@ pub struct AutomationPlan {
     source_digest: SourceDigest,
     project_name: String,
     artifacts: BTreeSet<ArtifactKind>,
+    corners: String,
+    target: String,
+    required_specs: String,
+    baseline: String,
+    compare_waveforms: bool,
+}
+
+pub(super) struct AutomationPlanComponents {
+    pub source_digest: [u8; 32],
+    pub project_name: String,
+    pub artifacts: BTreeSet<ArtifactKind>,
+    pub corners: String,
+    pub target: String,
+    pub required_specs: String,
+    pub baseline: String,
+    pub compare_waveforms: bool,
 }
 
 impl AutomationPlan {
@@ -269,24 +291,47 @@ impl AutomationPlan {
         self.artifacts.iter().copied()
     }
 
-    pub const fn corners(&self) -> &'static str {
-        "all"
+    pub fn corners(&self) -> &str {
+        &self.corners
     }
 
-    pub const fn target(&self) -> &'static str {
-        "local"
+    pub fn target(&self) -> &str {
+        &self.target
     }
 
-    pub const fn required_specs(&self) -> &'static str {
-        "release"
+    pub fn required_specs(&self) -> &str {
+        &self.required_specs
     }
 
-    pub const fn baseline(&self) -> &'static str {
-        "main"
+    pub fn baseline(&self) -> &str {
+        &self.baseline
     }
 
     pub const fn compare_waveforms(&self) -> bool {
-        true
+        self.compare_waveforms
+    }
+
+    pub(super) fn from_workspace(components: AutomationPlanComponents) -> Self {
+        let AutomationPlanComponents {
+            source_digest,
+            project_name,
+            artifacts,
+            corners,
+            target,
+            required_specs,
+            baseline,
+            compare_waveforms,
+        } = components;
+        Self {
+            source_digest: SourceDigest::from_bytes(source_digest),
+            project_name,
+            artifacts,
+            corners,
+            target,
+            required_specs,
+            baseline,
+            compare_waveforms,
+        }
     }
 }
 
@@ -395,6 +440,11 @@ pub fn compile_workflow(source: &str) -> Result<AutomationPlan, DiagnosticSet> {
         source_digest: SourceDigest(digest),
         project_name: ast.plan.name.value,
         artifacts,
+        corners: ast.execute.corners.value,
+        target: ast.execute.target.value,
+        required_specs: ast.require.specs.value,
+        baseline: ast.compare.baseline.value,
+        compare_waveforms: ast.compare.waveforms,
     })
 }
 
@@ -457,7 +507,10 @@ fn lex(source: &str) -> Result<Vec<Token>, Vec<DiagnosticPart>> {
     let mut cursor = 0;
 
     while cursor < source.len() {
-        let character = source[cursor..].chars().next().expect("cursor is in range");
+        let Some(character) = source.get(cursor..).and_then(|tail| tail.chars().next()) else {
+            diagnostics.push(cursor_invariant(source.len(), cursor));
+            break;
+        };
         let width = character.len_utf8();
         match character {
             ' ' | '\t' | '\u{000C}' => cursor += width,
@@ -483,7 +536,11 @@ fn lex(source: &str) -> Result<Vec<Token>, Vec<DiagnosticPart>> {
             '#' => {
                 cursor += 1;
                 while cursor < source.len() {
-                    let next = source[cursor..].chars().next().expect("cursor is in range");
+                    let Some(next) = source.get(cursor..).and_then(|tail| tail.chars().next())
+                    else {
+                        diagnostics.push(cursor_invariant(source.len(), cursor));
+                        break;
+                    };
                     if matches!(next, '\r' | '\n') {
                         break;
                     }
@@ -526,7 +583,11 @@ fn lex(source: &str) -> Result<Vec<Token>, Vec<DiagnosticPart>> {
                 let start = cursor;
                 cursor += width;
                 while cursor < source.len() {
-                    let next = source[cursor..].chars().next().expect("cursor is in range");
+                    let Some(next) = source.get(cursor..).and_then(|tail| tail.chars().next())
+                    else {
+                        diagnostics.push(cursor_invariant(source.len(), cursor));
+                        break;
+                    };
                     if next == '_' || next.is_alphanumeric() {
                         cursor += next.len_utf8();
                     } else {
@@ -595,10 +656,10 @@ fn lex_string(
     let mut terminated = false;
 
     while *cursor < source.len() {
-        let character = source[*cursor..]
-            .chars()
-            .next()
-            .expect("cursor is in range");
+        let Some(character) = source.get(*cursor..).and_then(|tail| tail.chars().next()) else {
+            diagnostics.push(cursor_invariant(source.len(), *cursor));
+            break;
+        };
         match character {
             '"' => {
                 *cursor += 1;
@@ -612,10 +673,11 @@ fn lex_string(
                 if *cursor >= source.len() {
                     break;
                 }
-                let escaped = source[*cursor..]
-                    .chars()
-                    .next()
-                    .expect("cursor is in range");
+                let Some(escaped) = source.get(*cursor..).and_then(|tail| tail.chars().next())
+                else {
+                    diagnostics.push(cursor_invariant(source.len(), *cursor));
+                    break;
+                };
                 *cursor += escaped.len_utf8();
                 match escaped {
                     '"' => value.push('"'),
@@ -643,10 +705,10 @@ fn lex_string(
                 SourceSpan::new(start, *cursor),
             ));
             while *cursor < source.len() {
-                let next = source[*cursor..]
-                    .chars()
-                    .next()
-                    .expect("cursor is in range");
+                let Some(next) = source.get(*cursor..).and_then(|tail| tail.chars().next()) else {
+                    diagnostics.push(cursor_invariant(source.len(), *cursor));
+                    break;
+                };
                 if matches!(next, '"' | '\r' | '\n') {
                     if next == '"' {
                         *cursor += 1;
@@ -779,11 +841,19 @@ impl<'source> Parser<'source> {
             return Err(self.diagnostics);
         }
 
-        let plan = self.plan.expect("validated plan stage");
-        let execute = self.execute.expect("validated execute stage");
-        let require = self.require.expect("validated require stage");
-        let compare = self.compare.expect("validated compare stage");
-        let export = self.export.expect("validated export stage");
+        let (Some(plan), Some(execute), Some(require), Some(compare), Some(export)) = (
+            self.plan,
+            self.execute,
+            self.require,
+            self.compare,
+            self.export,
+        ) else {
+            return Err(vec![DiagnosticPart::new(
+                DiagnosticCode::InternalInvariant,
+                "workflow stage validation did not produce a complete immutable plan",
+                SourceSpan::new(0, self.source.len().min(1)),
+            )]);
+        };
         let span = plan.span.cover(export.span);
         Ok(WorkflowAst {
             plan,
@@ -1262,12 +1332,17 @@ enum NamedValue {
 }
 
 fn source_location(source: &str, byte_offset: usize) -> SourceLocation {
-    let limit = byte_offset.min(source.len());
+    let mut limit = byte_offset.min(source.len());
+    while limit > 0 && !source.is_char_boundary(limit) {
+        limit -= 1;
+    }
     let mut line = 1;
     let mut column = 1;
     let mut cursor = 0;
     while cursor < limit {
-        let character = source[cursor..].chars().next().expect("cursor is in range");
+        let Some(character) = source.get(cursor..).and_then(|tail| tail.chars().next()) else {
+            break;
+        };
         match character {
             '\r' => {
                 line += 1;
@@ -1289,4 +1364,13 @@ fn source_location(source: &str, byte_offset: usize) -> SourceLocation {
         }
     }
     SourceLocation { line, column }
+}
+
+fn cursor_invariant(source_len: usize, cursor: usize) -> DiagnosticPart {
+    let start = cursor.min(source_len);
+    DiagnosticPart::new(
+        DiagnosticCode::InternalInvariant,
+        "workflow source cursor lost a UTF-8 boundary; parsing stopped safely",
+        SourceSpan::new(start, start),
+    )
 }

@@ -1,0 +1,72 @@
+{
+  "format": "rspice-browser-python-runtime/v2",
+  "runtime": "pyodide-314.0.2",
+  "python": "3.14.2",
+  "python_abi": "cp314-emscripten_5_0_3-wasm32",
+  "runtime_digest_sha256": "f7eb926d7da72f7a2a62b2e17dfb6dc8bca436446cfa0329c895c45deaa2a360",
+  "runtime_digest_algorithm": "SHA-256 over rspice.browser-python-runtime/v1 followed by path/content frames for the sorted execution asset set",
+  "upstream_release": {
+    "url": "https://github.com/pyodide/pyodide/releases/download/314.0.2/pyodide-core-314.0.2.tar.bz2",
+    "bytes": 6767493,
+    "sha256": "86e3d5e0cbd39b1def1e424b3f1abdcc9edc66ae200fa5280ae8825bf71799ec",
+    "source": "https://github.com/pyodide/pyodide/tree/314.0.2"
+  },
+  "execution_policy": {
+    "wasm_memory_minimum_pages": 480,
+    "upstream_wasm_memory_maximum_pages": 65536,
+    "rspice_wasm_memory_maximum_pages": 32768,
+    "rspice_wasm_memory_maximum_bytes": 2147483648,
+    "application": "after SHA-256 verification, before WebAssembly instantiation"
+  },
+  "files": [
+    {
+      "path": "pyodide.mjs",
+      "bytes": 17880,
+      "sha256": "955d2088bbb7fc79a73c4802aca2370c1d95bfdfaffa4121e0faebda2b0ea3f9",
+      "execution_asset": true
+    },
+    {
+      "path": "pyodide.asm.mjs",
+      "bytes": 1250259,
+      "sha256": "c7eccdfeb7a8419d61f910f0685b45cd5610b7ff5bbe844c3c1050ee6623b641",
+      "execution_asset": true
+    },
+    {
+      "path": "pyodide.asm.wasm",
+      "bytes": 9609998,
+      "sha256": "f7a8a169e513791e18fa0790fb69d6f2656b779e9012ba57e03e973f0df0b39f",
+      "execution_asset": true
+    },
+    {
+      "path": "python_stdlib.zip",
+      "bytes": 2552456,
+      "sha256": "101a9c94ca6304c1478c89b7b595136b9a51b4289bdc5b467d86db553efee9b3",
+      "execution_asset": true
+    },
+    {
+      "path": "pyodide-lock.json",
+      "bytes": 113804,
+      "sha256": "c963d22858f6bcb8f41586a2142f03905ab370c88ea22a86a2736e95fac2a8f3",
+      "execution_asset": true
+    },
+    {
+      "path": "package.json",
+      "bytes": 2999,
+      "sha256": "3364fa3f11b85fa4dda78d984e6493ecb2affcec93a809c7bc678dd669e9734e",
+      "execution_asset": false
+    },
+    {
+      "path": "LICENSE.pyodide.txt",
+      "bytes": 16725,
+      "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
+      "execution_asset": false
+    },
+    {
+      "path": "LICENSE.cpython.txt",
+      "bytes": 13804,
+      "sha256": "b0e25a78cffb43f4d92de8b61ccfa1f1f98ecbc22330b54b5251e7b6ba010231",
+      "execution_asset": false
+    }
+  ],
+  "external_network_required_at_runtime": false
+}

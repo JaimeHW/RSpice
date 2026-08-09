@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>RSpice browser Automation debugger qualification</title>
+<body>
+<pre id="result">running</pre>
+<script type="module">
+const result = document.querySelector("#result");
+const protocol = { major: 1, minor: 3 };
+const bytes = (hex) => Array.from(hex.match(/../g), pair => Number.parseInt(pair, 16));
+const environmentDigest = bytes("d445b1443965be4e6b1b191ee023176dbd35430ac3cd00603458384ea03b8518");
+const ids = {
+  project: "11111111-1111-4111-8111-111111111111",
+  workspace: "22222222-2222-4222-8222-222222222222",
+  entry: "33333333-3333-4333-8333-333333333333",
+  lock: "44444444-4444-4444-8444-444444444444",
+  permissions: "55555555-5555-4555-8555-555555555555",
+  breakpoint: "66666666-6666-4666-8666-666666666666",
+};
+const snapshot = {
+  project_id: ids.project,
+  workspace_id: ids.workspace,
+  workspace_revision: 7,
+  closure_digest: Array(32).fill(1),
+  environment_digest: environmentDigest,
+  permission_digest: Array(32).fill(3),
+  entry_document_id: ids.entry,
+  selected_run_plan_document_id: null,
+  python_requirement: ">=3.14.0,<3.15.0",
+  api_requirement: ">=1.0.0,<2.0.0",
+  browser_runtime_requirement: "=314.0.2",
+  documents: [
+    {
+      document_id: ids.entry,
+      logical_path: "flows/debug_qualification.py",
+      revision: 7,
+      role: "python-entry",
+      read_only: false,
+      source: "value = 40\nresult = value + 2\nfinished = result\n",
+    },
+    {
+      document_id: ids.lock,
+      logical_path: "environment/requirements.lock",
+      revision: 1,
+      role: "environment-lock",
+      read_only: true,
+      source: `format = "rspice-python-lock/v3"
+python = ">=3.14.0,<3.15.0"
+rspice-api = ">=1.0.0,<2.0.0"
+browser-runtime = "=314.0.2"
+environment_digest = "sha256:d445b1443965be4e6b1b191ee023176dbd35430ac3cd00603458384ea03b8518"
+`,
+    },
+    {
+      document_id: ids.permissions,
+      logical_path: "security/permissions.toml",
+      revision: 1,
+      role: "permission-manifest",
+      read_only: false,
+      source: `project_files = "read"
+artifact_directory = "write"
+network = "deny"
+process_spawn = "deny"
+environment = []
+secret_logging = "redact"
+`,
+    },
+  ],
+  capabilities: [],
+};
+const breakpoint = {
+  breakpoint_id: ids.breakpoint,
+  document_id: ids.entry,
+  line: 2,
+  column: 1,
+  enabled: true,
+  kind: { kind: "stop" },
+};
+const worker = new Worker("/crates/rspice-ui/web/automation-worker.js", { type: "module" });
+const events = [];
+let sessionId = null;
+let phase = "await-entry";
+let entryFrame = null;
+let breakpointFrame = null;
+let sawValue = false;
+let evaluated42 = false;
+let sawStep = false;
+let finished = false;
+const send = (requestId, request) => worker.postMessage({
+  type: "automation-request",
+  envelope: { protocol, request_id: requestId, request },
+});
+const finish = (status, detail) => {
+  if (finished) return;
+  finished = true;
+  clearTimeout(timer);
+  const qualification = { status, ...detail, event_count: events.length };
+  window.RSPICE_AUTOMATION_DEBUGGER_QUALIFICATION = qualification;
+  result.textContent = JSON.stringify(qualification, null, 2);
+  worker.terminate();
+};
+const fail = (error) => finish("failed", { error });
+const timer = setTimeout(() => fail(`debugger qualification timed out in ${phase}`), 120000);
+worker.onerror = (event) => fail(event.message || "worker error");
+worker.onmessage = (message) => {
+  const envelope = message.data?.envelope;
+  if (!envelope || finished) return;
+  events.push(envelope);
+  const event = envelope.event;
+  if (event?.event === "worker-failed") {
+    fail(`${event.code}: ${event.message}`);
+    return;
+  }
+  if (envelope.request_id !== 1 && envelope.request_id != null) {
+    if (envelope.session_id !== sessionId) {
+      fail("debugger response changed session identity");
+      return;
+    }
+  }
+  if (event?.event === "stopped") {
+    sessionId ??= envelope.session_id;
+    if (!sessionId) {
+      fail("debugger stopped without a session identity");
+      return;
+    }
+    if (phase === "await-entry" && event.reason === "entry") {
+      phase = "entry-stack";
+      send(2, { operation: "stack-trace", session_id: sessionId, start: 0, count: 32 });
+    } else if (phase === "await-breakpoint" && event.reason === "breakpoint") {
+      phase = "breakpoint-stack";
+      send(4, { operation: "stack-trace", session_id: sessionId, start: 0, count: 32 });
+    } else if (phase === "await-step" && event.reason === "step") {
+      sawStep = true;
+      phase = "await-complete";
+      send(8, { operation: "debug-control", session_id: sessionId, control: "continue" });
+    } else {
+      fail(`unexpected stop ${event.reason} in ${phase}`);
+    }
+    return;
+  }
+  if (event?.event === "stack" && envelope.request_id === 2 && phase === "entry-stack") {
+    entryFrame = event.frames?.[0];
+    if (!entryFrame || entryFrame.document_id !== ids.entry) {
+      fail("entry stack did not resolve the exact source document");
+      return;
+    }
+    phase = "await-breakpoint";
+    send(3, { operation: "debug-control", session_id: sessionId, control: "continue" });
+    return;
+  }
+  if (event?.event === "stack" && envelope.request_id === 4 && phase === "breakpoint-stack") {
+    breakpointFrame = event.frames?.[0];
+    if (!breakpointFrame || breakpointFrame.range?.start?.line !== 2) {
+      fail("breakpoint stack is not bound to line 2");
+      return;
+    }
+    phase = "breakpoint-locals";
+    send(5, {
+      operation: "variables",
+      session_id: sessionId,
+      reference: breakpointFrame.locals_reference,
+      start: 0,
+      count: 100,
+    });
+    return;
+  }
+  if (event?.event === "variables" && envelope.request_id === 5 && phase === "breakpoint-locals") {
+    sawValue = event.values?.some(item => item.name === "value" && item.display_value === "40") === true;
+    if (!sawValue) {
+      fail("paused locals did not contain value = 40");
+      return;
+    }
+    phase = "breakpoint-evaluate";
+    send(6, {
+      operation: "evaluate",
+      session_id: sessionId,
+      frame_id: breakpointFrame.frame_id,
+      expression: "value + 2",
+    });
+    return;
+  }
+  if (event?.event === "evaluated" && envelope.request_id === 6 && phase === "breakpoint-evaluate") {
+    evaluated42 = event.expression === "value + 2" && event.result?.display_value === "42";
+    if (!evaluated42) {
+      fail("watch evaluation did not return 42");
+      return;
+    }
+    phase = "await-step";
+    send(7, { operation: "debug-control", session_id: sessionId, control: "step-over" });
+    return;
+  }
+  if (event?.event === "state" && envelope.request_id === 1) {
+    if (event.state === "failed" || event.state === "cancelled") {
+      fail(`debug launch ended as ${event.state}: ${event.detail}`);
+    } else if (event.state === "completed") {
+      if (phase !== "await-complete" || !sawValue || !evaluated42 || !sawStep) {
+        fail(`debug launch completed before all assertions in ${phase}`);
+      } else {
+        finish("complete", {
+          session_id: sessionId,
+          entry_line: entryFrame.range.start.line,
+          breakpoint_line: breakpointFrame.range.start.line,
+          local_value: 40,
+          evaluated_value: 42,
+          step_completed: true,
+        });
+      }
+    }
+  }
+};
+send(1, {
+  operation: "launch",
+  mode: "debug",
+  snapshot,
+  limits: {
+    wall_time_ms: 60000,
+    cpu_time_ms: 30000,
+    memory_bytes: 268435456,
+    output_bytes: 1048576,
+    artifact_bytes: 1048576,
+    max_tasks: 16,
+    max_stack_depth: 256,
+  },
+  breakpoints: [breakpoint],
+  exception_policy: "uncaught",
+});
+</script>
+</body>
+</html>
