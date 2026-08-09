@@ -2415,17 +2415,7 @@ fn show_unit_pane_header(
                         // The instrument idiom: a trace states its own value
                         // at cursor A right where its name is, so reading one
                         // curve never costs a trip to the readout register.
-                        // A hidden trace keeps its chip so it can be brought
-                        // back, but must not read as a curve on the canvas:
-                        // the mockup strikes its name through.
-                        let name = if trace.visible {
-                            elide(&trace.name, 20)
-                        } else {
-                            elide(&trace.name, 20)
-                                .chars()
-                                .flat_map(|glyph| [glyph, '\u{0336}'])
-                                .collect()
-                        };
+                        let name = elide(&trace.name, 20);
                         let label = match &cursor_a_value {
                             Some((x, presentation, quantity_policy)) if trace.visible => {
                                 let value = sample_at_with(
@@ -2448,6 +2438,15 @@ fn show_unit_pane_header(
                                 )
                             }
                             _ => name,
+                        };
+                        // A hidden trace keeps its chip so it can be brought
+                        // back, but must not read as a curve on the canvas.
+                        let label = if trace.visible {
+                            egui::RichText::new(label)
+                        } else {
+                            egui::RichText::new(label)
+                                .strikethrough()
+                                .color(c.text_faint)
                         };
                         if ui
                             .selectable_label(selected, label)
