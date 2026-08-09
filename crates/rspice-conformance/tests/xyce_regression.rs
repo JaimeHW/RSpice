@@ -2002,21 +2002,34 @@ fn test_xyce_vbic_named_noise_mechanisms_follow_generated_device_availability() 
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
-    for relative in [
-        "Netlists/VANOISE/commonEmitterBjt_vbic13.cir",
-        "Netlists/VANOISE/commonEmitterBjt_vbic13_3T.cir",
+    for (relative, generated_noise_available) in [
+        (
+            "Netlists/VANOISE/commonEmitterBjt_vbic13.cir",
+            cfg!(all(
+                feature = "veriloga-model-vbic13-4t",
+                feature = "veriloga-builtins-noise"
+            )),
+        ),
+        (
+            "Netlists/VANOISE/commonEmitterBjt_vbic13_3T.cir",
+            cfg!(all(
+                feature = "veriloga-model-vbic13",
+                feature = "veriloga-builtins-noise"
+            )),
+        ),
     ] {
         let result = runner.run_test(root.join(relative));
-        #[cfg(feature = "veriloga-builtins")]
-        assert!(
-            result.passed && !result.expected_unsupported && result.mismatches.is_empty(),
-            "{relative} should use the canonical generated VBIC noise mechanisms, got {result:?}"
-        );
-        #[cfg(not(feature = "veriloga-builtins"))]
-        assert!(
-            result.expected_unsupported && result.passed,
-            "{relative} must fail closed when canonical generated VBIC mechanisms are unavailable, got {result:?}"
-        );
+        if generated_noise_available {
+            assert!(
+                result.passed && !result.expected_unsupported && result.mismatches.is_empty(),
+                "{relative} should use the canonical generated VBIC noise mechanisms, got {result:?}"
+            );
+        } else {
+            assert!(
+                result.expected_unsupported && result.passed,
+                "{relative} must fail closed when canonical generated VBIC mechanisms are unavailable, got {result:?}"
+            );
+        }
     }
 }
 

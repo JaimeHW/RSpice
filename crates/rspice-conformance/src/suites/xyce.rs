@@ -6190,8 +6190,11 @@ impl XyceLeadCurrentTerminal {
     fn op_parameter(self) -> Option<&'static str> {
         match self {
             Self::Drain => Some("id"),
+            Self::Gate => Some("ig"),
             Self::Source => Some("is"),
-            Self::Gate | Self::Bulk | Self::Collector | Self::Emitter => None,
+            Self::Bulk => Some("ib"),
+            Self::Collector => Some("ic"),
+            Self::Emitter => Some("ie"),
         }
     }
 

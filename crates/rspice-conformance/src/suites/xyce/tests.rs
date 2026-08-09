@@ -5,6 +5,7 @@
 //! measurement parsing — not the vendored deck corpus, which is driven by
 //! `tests/xyce_regression.rs`.
 
+use super::output::XyceGeneratedVbicNoiseIssue;
 use super::*;
 
 fn upstream_exclusion_manifest(rows: &[&str]) -> String {
@@ -529,6 +530,51 @@ fn xdm_replaceground_unit_table(axis_offset: Value, dependent: Value) -> XycePrn
             .map(|index| vec![index as Value, index as Value + axis_offset, dependent])
             .collect(),
     }
+}
+
+#[test]
+fn dc_prn_comparison_prefers_exact_device_observable_over_voltage_like_name() {
+    let source = "device-owned DC observable collision\n\
+VSWEEP sweep 0 0\n\
+VNODE M1_t 0 7\n\
+.DC VSWEEP 0 0 1\n\
+.PRINT DC N(M1_t)\n\
+.END\n";
+    let netlist = Netlist::parse(source).expect("collision fixture parses");
+    let dc = XyceDcSweep {
+        source: "VSWEEP".to_string(),
+        start: 0.0,
+        stop: 0.0,
+        step: 1.0,
+        mode: rspice_core::netlist::DcSweepMode::Linear,
+        sweep2: None,
+    };
+    let print = XycePrintRequest {
+        probes: vec!["N(M1_t)".to_string()],
+    };
+    let mut result = rspice_core::SimulationResult::new(2, 2);
+    result.node_names = vec!["0".to_string(), "sweep".to_string(), "M1_t".to_string()];
+    result.node_voltages = vec![0.0, 0.0, 7.0];
+    result.dc_observables.push(("N(M1_t)".to_string(), 0.125));
+    let results = [DcSweepPointResult {
+        sweep_value: 0.0,
+        result,
+        device_op_report: rspice_core::circuit::DeviceOpReport::default(),
+    }];
+    let reference = XycePrnTable {
+        columns: vec!["Index".to_string(), "N(M1_t)".to_string()],
+        rows: vec![vec![0.0, 0.125]],
+    };
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+
+    let mismatches = runner
+        .compare_dc_prn_reference(&reference, &print, &netlist, source, &dc, &results)
+        .expect("optimized DC comparison resolves the exact device-owned observable");
+
+    assert!(
+        mismatches.is_empty(),
+        "unexpected mismatches: {mismatches:?}"
+    );
 }
 
 #[test]
@@ -1975,6 +2021,82 @@ fn named_vbic_noise_mechanisms_require_the_generated_device_route() {
         XyceTestRunner::noise_print_requires_generated_vbic_mechanisms(&aggregate, &netlist),
         Ok(false)
     );
+}
+
+#[test]
+fn named_vbic_noise_admission_uses_the_linked_model_and_noise_descriptors() {
+    let cases = [
+        (
+            "Q1 c b e model\n.MODEL model NPN LEVEL=11\n",
+            "VBIC13",
+            cfg!(feature = "veriloga-model-vbic13"),
+        ),
+        (
+            "Q1 c b e t model\n.MODEL model NPN LEVEL=11\n",
+            "VBIC13_3T_ET",
+            cfg!(feature = "veriloga-model-vbic13-3t-et"),
+        ),
+        (
+            "Q1 c b e s model\n.MODEL model NPN LEVEL=12\n",
+            "VBIC13_4T",
+            cfg!(feature = "veriloga-model-vbic13-4t"),
+        ),
+    ];
+    let mechanism = "WHITE_BI_EI_IBEI_SHOT_NOISE";
+
+    for (device_and_model, expected_target, model_linked) in cases {
+        let netlist = Netlist::parse(&format!(
+            "linked VBIC noise capability\n\
+             {device_and_model}\
+             .NOISE V(c) VIN LIN 1 1 1\n\
+             VIN b 0 AC 1\n\
+             .END\n"
+        ))
+        .expect("VBIC feature-matrix fixture parses");
+        let print = XycePrintRequest {
+            probes: vec![format!("DNO(Q1,{mechanism})")],
+        };
+        let issue = XyceTestRunner::generated_vbic_noise_issue(&print, &netlist)
+            .expect("linked generated registry is internally consistent");
+        if !model_linked {
+            assert_eq!(
+                issue,
+                Some(XyceGeneratedVbicNoiseIssue::ModelUnavailable {
+                    model_name: expected_target,
+                    mechanism: mechanism.to_string(),
+                }),
+                "admission must identify an unlinked {expected_target} model"
+            );
+        } else if !cfg!(feature = "veriloga-builtins-noise") {
+            assert_eq!(
+                issue,
+                Some(XyceGeneratedVbicNoiseIssue::NoiseDescriptorsUnavailable {
+                    model_name: expected_target,
+                    mechanism: mechanism.to_string(),
+                }),
+                "admission must identify missing {expected_target} noise descriptors"
+            );
+        } else {
+            assert_eq!(
+                issue, None,
+                "{expected_target} and its generated noise schedule are linked"
+            );
+
+            let bogus = "WHITE_BI_EI_NOT_A_REAL_VBIC_MECHANISM";
+            let bogus_print = XycePrintRequest {
+                probes: vec![format!("DNO(Q1,{bogus})")],
+            };
+            assert_eq!(
+                XyceTestRunner::generated_vbic_noise_issue(&bogus_print, &netlist)
+                    .expect("linked generated registry is internally consistent"),
+                Some(XyceGeneratedVbicNoiseIssue::UnknownMechanism {
+                    model_name: expected_target,
+                    mechanism: bogus.to_string(),
+                }),
+                "a linked descriptor table must reject unknown mechanism names exactly"
+            );
+        }
+    }
 }
 
 #[test]
@@ -15931,6 +16053,96 @@ R1 out 0 1MEG
     }
 }
 
+fn generated_bsimsoi461_family_source() -> &'static str {
+    "\
+generated BSIM-SOI 4.6.1 single-device transient
+VD d 0 1.2
+VG g 0 PULSE(0 1.2 10p 5p 5p 20p 50p)
+M1 d g 0 0 NM W=2u L=.18u
+R1 d 0 10k
+.MODEL NM NMOS LEVEL=70 VERSION=4.6 TYPE=1 CAPMOD=3 SOIMOD=0 SHMOD=0
+.TRAN 1p 100p
+.OPTIONS DEVICE TEMP=25
+.PRINT TRAN V(g) V(d)
+.END
+"
+}
+
+#[test]
+fn generated_bsimsoi461_transient_contract_is_model_family_based_and_fail_closed() {
+    let source = generated_bsimsoi461_family_source();
+    let netlist = Netlist::parse(source).expect("generated BSIM-SOI fixture parses");
+    let mosfet = netlist
+        .elements
+        .iter()
+        .find(|element| matches!(element.kind, ElementKind::Mosfet { .. }))
+        .expect("fixture contains one MOSFET");
+    assert!(
+        XyceTestRunner::netlist_element_is_generated_bsimsoi461(&netlist, mosfet),
+        "the LEVEL=70/VERSION=4.6 generated family must be recognized"
+    );
+    XyceTestRunner::validate_native_transient_contract(&netlist)
+        .expect("the generated model family is eligible for an absolute oracle");
+
+    let expanded = Netlist::parse(&source.replace("R1 d 0 10k", "R1 d 0 10k\nC1 d 0 1f"))
+        .expect("expanded generated BSIM-SOI fixture parses");
+    XyceTestRunner::validate_native_transient_contract(&expanded)
+        .expect("qualification must not depend on one exact circuit topology");
+
+    for (label, mutation) in [
+        (
+            "wrong generated level",
+            source.replace("LEVEL=70", "LEVEL=70470"),
+        ),
+        (
+            "wrong model version",
+            source.replace("VERSION=4.6", "VERSION=4.7"),
+        ),
+        ("inconsistent polarity", source.replace("TYPE=1", "TYPE=-1")),
+        ("deferred geometry", source.replace("W=2u", "W={WIDTH}")),
+    ] {
+        let mutated = Netlist::parse(&mutation).expect("negative BSIM-SOI fixture parses");
+        let mosfet = mutated
+            .elements
+            .iter()
+            .find(|element| matches!(element.kind, ElementKind::Mosfet { .. }))
+            .expect("negative fixture contains one MOSFET");
+        assert!(
+            !XyceTestRunner::netlist_element_is_generated_bsimsoi461(&mutated, mosfet),
+            "{label} must remain outside the generated BSIM-SOI 4.6.1 family"
+        );
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&mutated).is_err(),
+            "{label} must fail the complete transient contract"
+        );
+    }
+}
+
+#[test]
+fn checked_in_bsimsoi461_inverter_uses_only_qualified_generated_devices() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("tests/xyce");
+    let path = root.join("Netlists/B4SOI_461/inverter_tr.cir");
+    let source = fs::read_to_string(&path).expect("read checked-in BSIM-SOI inverter");
+    let netlist = XyceTestRunner::parse_xyce_netlist(&source, &path)
+        .expect("checked-in BSIM-SOI inverter parses with included model cards");
+
+    let mosfets = netlist
+        .elements
+        .iter()
+        .filter(|element| matches!(element.kind, ElementKind::Mosfet { .. }))
+        .collect::<Vec<_>>();
+    assert_eq!(mosfets.len(), 2);
+    assert!(mosfets.iter().all(|element| {
+        XyceTestRunner::netlist_element_is_generated_bsimsoi461(&netlist, element)
+    }));
+    XyceTestRunner::validate_native_transient_contract(&netlist)
+        .expect("checked-in inverter uses the qualified generated model family");
+}
+
 #[test]
 fn absolute_level1_npn_transient_contract_rejects_all_explicit_startup_forms() {
     for deck in [
@@ -17622,7 +17834,84 @@ fn lead_current_probe_parses_xyce_terminal_accessors() {
     assert!(XyceTestRunner::parse_lead_current_probe("I(V1)").is_none());
     assert_eq!(XyceLeadCurrentTerminal::Drain.op_parameter(), Some("id"));
     assert_eq!(XyceLeadCurrentTerminal::Source.op_parameter(), Some("is"));
-    assert_eq!(XyceLeadCurrentTerminal::Gate.op_parameter(), None);
+    assert_eq!(XyceLeadCurrentTerminal::Gate.op_parameter(), Some("ig"));
+    assert_eq!(XyceLeadCurrentTerminal::Bulk.op_parameter(), Some("ib"));
+    assert_eq!(
+        XyceLeadCurrentTerminal::Collector.op_parameter(),
+        Some("ic")
+    );
+    assert_eq!(XyceLeadCurrentTerminal::Emitter.op_parameter(), Some("ie"));
+}
+
+#[cfg(feature = "veriloga-model-vbic13")]
+#[test]
+fn generated_vbic_lead_currents_flow_through_dc_prn_comparison() {
+    let source = r#"generated VBIC lead-current comparison
+VC c 0 dc 1
+VB b 0 dc 0.7
+Q1 c b 0 QB
+.MODEL QB NPN LEVEL=11
+.DC VC 1 1 1
+.PRINT DC IC(Q1) IB(Q1) IE(Q1)
+.OP
+.END
+"#;
+    let netlist = Netlist::parse(source).expect("generated VBIC probe fixture parses");
+    let engine = rspice_core::engine::Engine::default();
+    let (result, report) = engine
+        .run_dc_op_with_report(&netlist)
+        .expect("generated VBIC operating point converges");
+    let q1 = report
+        .entries
+        .iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case("q1"))
+        .expect("generated VBIC report exists");
+    assert_ne!(
+        q1.device_kind, "BJT",
+        "regression must exercise generated-model capability lookup"
+    );
+    let current = |name: &str| {
+        q1.params
+            .iter()
+            .find_map(|(parameter, value)| parameter.eq_ignore_ascii_case(name).then_some(*value))
+            .unwrap_or_else(|| panic!("generated VBIC reports {name}"))
+    };
+    let reference = XycePrnTable {
+        columns: ["Index", "IC(Q1)", "IB(Q1)", "IE(Q1)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        rows: vec![vec![0.0, current("ic"), current("ib"), current("ie")]],
+    };
+    let print = XycePrintRequest {
+        probes: ["IC(Q1)", "IB(Q1)", "IE(Q1)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    };
+    let dc = XyceDcSweep {
+        source: "VC".to_string(),
+        start: 1.0,
+        stop: 1.0,
+        step: 1.0,
+        mode: rspice_core::netlist::DcSweepMode::Linear,
+        sweep2: None,
+    };
+    let results = [DcSweepPointResult {
+        sweep_value: 1.0,
+        result,
+        device_op_report: report,
+    }];
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+
+    let mismatches = runner
+        .compare_dc_prn_reference(&reference, &print, &netlist, source, &dc, &results)
+        .expect("generated VBIC lead-current probes are report capabilities");
+
+    assert!(
+        mismatches.is_empty(),
+        "unexpected mismatches: {mismatches:?}"
+    );
 }
 
 #[test]

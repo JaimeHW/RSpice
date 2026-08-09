@@ -23,7 +23,17 @@ rust-version.workspace = true
 # false` so it can reuse only the generated-model oracle and benchmark harness
 # without compiling unrelated ngspice/Xyce runners or their corpora.
 default = ["circuit-suites"]
-circuit-suites = []
+# Keep the authoritative default census honest by linking every generated
+# capability required by an admitted deck. Select only the canonical VBIC
+# 3-terminal and 4-terminal artifacts plus their shared noise runtime: the
+# 3T-ET variant and the remaining compact-model catalog are not required by
+# these decks, so omitting them keeps the default compile cost bounded.
+circuit-suites = [
+    "veriloga-model-bsimsoi-va",
+    "veriloga-builtins-noise",
+    "veriloga-model-vbic13",
+    "veriloga-model-vbic13-4t",
+]
 
 # Forwarded, not local. The ngspice suite marks decks that instantiate a
 # generated Verilog-A built-in as unsupported when those models are not
@@ -33,17 +43,50 @@ circuit-suites = []
 # false here and the suite would skip decks it should be running. A
 # conformance suite that quietly skips cases is worse than one that fails.
 veriloga-builtins-base = ["rspice-core/veriloga-builtins-base"]
+veriloga-builtins-noise = [
+    "veriloga-builtins-base",
+    "rspice-core/veriloga-builtins-noise",
+]
+# Forward the canonical BSIM-SOI 4.6.1 artifact independently so the Xyce
+# suite can exercise LEVEL=70 without compiling the complete compact-model
+# catalog.
+veriloga-model-bsimsoi-va = [
+    "veriloga-builtins-base",
+    "rspice-core/veriloga-model-bsimsoi-va",
+]
+veriloga-model-vbic13 = [
+    "veriloga-builtins-base",
+    "rspice-core/veriloga-model-vbic13",
+]
+veriloga-model-vbic13-3t-et = [
+    "veriloga-builtins-base",
+    "rspice-core/veriloga-model-vbic13-3t-et",
+]
+veriloga-model-vbic13-4t = [
+    "veriloga-builtins-base",
+    "rspice-core/veriloga-model-vbic13-4t",
+]
 veriloga-builtins-models = [
     "veriloga-builtins-base",
     "rspice-core/veriloga-builtins-models",
+    "veriloga-model-bsimsoi-va",
+    "veriloga-model-vbic13",
+    "veriloga-model-vbic13-3t-et",
+    "veriloga-model-vbic13-4t",
 ]
-# Same reasoning, one level up. The Xyce VANOISE decks assert the *opposite*
-# outcome depending on this feature: with the generated VBIC noise mechanisms
-# compiled in the deck must pass, without them it must fail closed as
-# `expected_unsupported`. An unforwarded feature reads false here, so the
-# suite would take the "unsupported" branch and pass vacuously even when the
-# models were built.
-veriloga-builtins = ["rspice-core/veriloga-builtins", "veriloga-builtins-models"]
+# Preserve the compatibility umbrella while exposing the individual VBIC and
+# noise capabilities above for feature-shard builds. Production admission asks
+# the linked runtime registry for exact mechanism descriptors; these local
+# feature names exist so the matrix tests can independently select and verify
+# each dependency feature combination.
+veriloga-builtins = [
+    "rspice-core/veriloga-builtins",
+    "veriloga-builtins-models",
+    "veriloga-builtins-noise",
+    "veriloga-model-vbic13",
+    "veriloga-model-vbic13-3t-et",
+    "veriloga-model-vbic13-4t",
+]
 
 [lib]
 doctest = false

@@ -11,6 +11,22 @@ use super::*;
 /// declares no schedule at all.
 type OutputIntervalSchedule = Result<Option<(Value, Vec<(Value, Value)>)>, String>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum XyceGeneratedVbicNoiseIssue {
+    ModelUnavailable {
+        model_name: &'static str,
+        mechanism: String,
+    },
+    NoiseDescriptorsUnavailable {
+        model_name: &'static str,
+        mechanism: String,
+    },
+    UnknownMechanism {
+        model_name: &'static str,
+        mechanism: String,
+    },
+}
+
 impl XyceTestRunner {
     pub fn print_summary(results: &[XyceTestResult]) {
         let stats = Self::statistics(results);
@@ -377,23 +393,41 @@ impl XyceTestRunner {
         ))
     }
 
-    #[cfg_attr(feature = "veriloga-builtins-base", allow(dead_code))]
-    pub(super) fn noise_print_requires_generated_vbic_mechanisms(
+    fn noise_print_generated_vbic_mechanism_requirements(
         print: &XycePrintRequest,
         netlist: &Netlist,
-    ) -> Result<bool, String> {
-        let device_uses_vbic = |device: &str| {
-            netlist.elements.iter().any(|element| {
+    ) -> Result<Vec<(&'static str, String)>, String> {
+        let generated_target = |device: &str| {
+            netlist.elements.iter().find_map(|element| {
                 if !element.name.eq_ignore_ascii_case(device) {
-                    return false;
+                    return None;
                 }
                 let ElementKind::Bjt { model, .. } = &element.kind else {
-                    return false;
+                    return None;
                 };
-                Self::find_model(&netlist.models, model).is_some_and(Self::model_is_native_vbic_bjt)
+                let model = Self::find_model(&netlist.models, model)?;
+                if !Self::model_is_native_vbic_bjt(model) {
+                    return None;
+                }
+                let level = Self::numeric_param_value(&model.params, "LEVEL")?;
+                if (level - 11.0).abs() <= 1.0e-9 {
+                    Some(if element.nodes.len() >= 4 {
+                        "VBIC13_3T_ET"
+                    } else {
+                        "VBIC13"
+                    })
+                } else if [4.0, 9.0, 12.0, 13.0]
+                    .iter()
+                    .any(|candidate| (level - candidate).abs() <= 1.0e-9)
+                {
+                    Some("VBIC13_4T")
+                } else {
+                    None
+                }
             })
         };
 
+        let mut requirements = Vec::new();
         for printed_probe in &print.probes {
             let mut contribution_calls = Vec::new();
             if rspice_core::analysis::NoiseContributionProbe::parse(printed_probe).is_ok() {
@@ -428,12 +462,105 @@ impl XyceTestRunner {
             for call in contribution_calls {
                 let contribution = rspice_core::analysis::NoiseContributionProbe::parse(&call)
                     .map_err(|err| err.to_string())?;
-                if contribution.mechanism.is_some() && device_uses_vbic(&contribution.device) {
-                    return Ok(true);
+                if let Some(mechanism) = contribution.mechanism
+                    && let Some(target) = generated_target(&contribution.device)
+                {
+                    requirements.push((target, mechanism));
                 }
             }
         }
-        Ok(false)
+        Ok(requirements)
+    }
+
+    #[cfg(test)]
+    pub(super) fn noise_print_requires_generated_vbic_mechanisms(
+        print: &XycePrintRequest,
+        netlist: &Netlist,
+    ) -> Result<bool, String> {
+        Ok(!Self::noise_print_generated_vbic_mechanism_requirements(print, netlist)?.is_empty())
+    }
+
+    /// Ask the linked generated-model registry for the actual noise descriptor
+    /// table. The registry currently exposes descriptors on an instance, so a
+    /// default instance and its node/branch index vectors are allocated for
+    /// this admission-time query. This is intentionally a cold-path probe run
+    /// once per candidate deck, never part of frequency-point evaluation.
+    fn linked_builtin_noise_descriptors(
+        model_name: &str,
+    ) -> Result<
+        Option<&'static [rspice_core::device::veriloga_builtins::GeneratedNoiseDescriptor]>,
+        String,
+    > {
+        use rspice_core::device::veriloga_builtins::builtins;
+
+        let Some(canonical_name) = builtins::builtin_names()
+            .iter()
+            .copied()
+            .find(|name| name.eq_ignore_ascii_case(model_name))
+        else {
+            return Ok(None);
+        };
+        let node_count = builtins::total_node_count(canonical_name).ok_or_else(|| {
+            format!("generated registry omitted node metadata for '{canonical_name}'")
+        })?;
+        let branch_count = builtins::branch_count(canonical_name).ok_or_else(|| {
+            format!("generated registry omitted branch metadata for '{canonical_name}'")
+        })?;
+        let nodes = vec![0; node_count];
+        let branches = vec![0; branch_count];
+        let device = builtins::instantiate_scoped(canonical_name, &nodes, &branches, &[])
+            .map_err(|error| {
+                format!(
+                    "generated registry could not instantiate '{canonical_name}' for noise capability inspection: {error}"
+                )
+            })?
+            .ok_or_else(|| {
+                format!(
+                    "generated registry advertised '{canonical_name}' but could not instantiate it"
+                )
+            })?;
+        Ok(Some(device.noise_descriptors()))
+    }
+
+    pub(super) fn generated_vbic_noise_issue(
+        print: &XycePrintRequest,
+        netlist: &Netlist,
+    ) -> Result<Option<XyceGeneratedVbicNoiseIssue>, String> {
+        let mut descriptor_cache = std::collections::HashMap::new();
+        for (model_name, mechanism) in
+            Self::noise_print_generated_vbic_mechanism_requirements(print, netlist)?
+        {
+            let descriptors = match descriptor_cache.entry(model_name) {
+                std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    *entry.insert(Self::linked_builtin_noise_descriptors(model_name)?)
+                }
+            };
+            let Some(descriptors) = descriptors else {
+                return Ok(Some(XyceGeneratedVbicNoiseIssue::ModelUnavailable {
+                    model_name,
+                    mechanism,
+                }));
+            };
+            if descriptors.is_empty() {
+                return Ok(Some(
+                    XyceGeneratedVbicNoiseIssue::NoiseDescriptorsUnavailable {
+                        model_name,
+                        mechanism,
+                    },
+                ));
+            }
+            if !descriptors
+                .iter()
+                .any(|descriptor| descriptor.mechanism.eq_ignore_ascii_case(&mechanism))
+            {
+                return Ok(Some(XyceGeneratedVbicNoiseIssue::UnknownMechanism {
+                    model_name,
+                    mechanism,
+                }));
+            }
+        }
+        Ok(None)
     }
 
     pub(super) fn dc_sensitivity_output_schema(

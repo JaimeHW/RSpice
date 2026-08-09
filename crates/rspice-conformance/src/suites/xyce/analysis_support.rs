@@ -1936,6 +1936,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     ) -> Result<Value, String> {
         let atomic_probe = Self::print_expression_inner(probe).unwrap_or(probe);
         let normalized = Self::normalize_probe(atomic_probe);
+        // Engine-owned observables must win before the optimized authored-node
+        // lookup, just as they do in `evaluate_atomic_dc_probe`.  In
+        // particular, Xyce's N(instance_internal) spelling is syntactically
+        // voltage-like even though it names a device-owned state vector.
+        if let Some(value) = result.try_dc_observable_named(&normalized) {
+            return Ok(value);
+        }
         if let Some(voltage_probe) = Self::parse_voltage_probe(&normalized)
             && Self::probe_call_covers_entire_expression(&normalized)
         {
@@ -1962,6 +1969,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         result: &rspice_core::SimulationResult,
         op_report: &rspice_core::circuit::DeviceOpReport,
     ) -> Result<f64, String> {
+        // Engine-owned observables already carry the exact canonical probe
+        // spelling and converged point value. Consult them before interpreting
+        // accessor syntax so device-owned vectors such as N(M1_t) do not get
+        // mistaken for authored node-voltage or device-parameter probes.
+        if let Some(value) = result.try_dc_observable_named(normalized) {
+            return Ok(value);
+        }
+
         if let Some(voltage_probe) = Self::parse_voltage_probe(normalized) {
             let pos = Self::result_voltage_named(result, netlist, &voltage_probe.node_pos)
                 .ok_or_else(|| {
@@ -3194,28 +3209,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             if !Self::device_instance_names_match(&entry.name, &probe.element_name) {
                 continue;
             }
+            // Lead support is a report capability, not a hard-coded native
+            // family label. Generated devices identify their compiled model
+            // (for example VBIC13) as `device_kind`, while their canonical
+            // terminal metadata still reports IC/IB/IE.
             let parameter = probe
                 .terminal
                 .op_parameter()
-                .or_else(|| {
-                    if entry.device_kind == "BJT" {
-                        match probe.terminal {
-                            XyceLeadCurrentTerminal::Bulk => Some("ib"),
-                            XyceLeadCurrentTerminal::Collector => Some("ic"),
-                            XyceLeadCurrentTerminal::Emitter => Some("ie"),
-                            _ => None,
-                        }
-                    } else {
-                        None
-                    }
-                })
-                .ok_or_else(|| {
-                    format!(
-                        "lead-current probe '{}({})' targets unsupported terminal current",
-                        probe.terminal.function_name(),
-                        probe.element_name
-                    )
-                })?;
+                .expect("every parsed lead-current terminal has a canonical parameter");
             if let Some(value) = Self::xyce_device_operating_point_value(entry, parameter) {
                 return Ok(value);
             }

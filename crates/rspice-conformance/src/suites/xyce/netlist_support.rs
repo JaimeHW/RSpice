@@ -2196,7 +2196,7 @@ impl XyceTestRunner {
             return false;
         };
         element.nodes.len() == 4
-            && !compact_syntax
+            && !*compact_syntax
             && deferred_params.is_empty()
             && Self::native_absolute_transient_w_l_instance_params(instance_params)
             && Self::find_unique_model_in(&netlist.models, model)
@@ -3684,6 +3684,75 @@ impl XyceTestRunner {
         Self::model_is_native_dc_analysis_expression_mos1(model)
             && Self::numeric_param_value(&model.params, "LEVEL")
                 .is_some_and(|level| level.to_bits() == 1.0f64.to_bits())
+    }
+
+    /// Return true for the canonical generated BSIM-SOI 4.6.1 LEVEL=70
+    /// four-terminal surface. Circuit topology is intentionally unrestricted:
+    /// the generated artifact, rather than a deck-specific conformance rule,
+    /// owns the compact-model equations and parameter validation.
+    pub(super) fn netlist_element_is_generated_bsimsoi461(
+        netlist: &Netlist,
+        element: &rspice_core::netlist::Element,
+    ) -> bool {
+        if !cfg!(feature = "veriloga-model-bsimsoi-va") || netlist.options.gmin.is_some() {
+            return false;
+        }
+        let ElementKind::Mosfet {
+            model,
+            compact_syntax,
+            instance_params,
+            deferred_params,
+            ..
+        } = &element.kind
+        else {
+            return false;
+        };
+        element.nodes.len() == 4
+            && !compact_syntax
+            && deferred_params.is_empty()
+            && instance_params
+                .iter()
+                .all(|(name, value)| !name.trim().is_empty() && value.is_finite())
+            && Self::find_unique_model_in(&netlist.models, model)
+                .is_some_and(Self::model_is_generated_bsimsoi461)
+    }
+
+    pub(super) fn model_is_generated_bsimsoi461(model: &rspice_core::netlist::ModelDef) -> bool {
+        let expected_type: Value = if model.model_type.eq_ignore_ascii_case("NMOS") {
+            1.0
+        } else if model.model_type.eq_ignore_ascii_case("PMOS") {
+            -1.0
+        } else {
+            return false;
+        };
+        if !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return false;
+        }
+
+        let mut values = HashMap::with_capacity(model.params.len());
+        for (name, value) in &model.params {
+            if name.trim().is_empty()
+                || !value.is_finite()
+                || values.insert(name.to_ascii_uppercase(), *value).is_some()
+            {
+                return false;
+            }
+        }
+        values
+            .get("LEVEL")
+            .is_some_and(|level| level.to_bits() == 70.0f64.to_bits())
+            && values
+                .get("VERSION")
+                .is_none_or(|version| version.to_bits() == 4.6f64.to_bits())
+            && values
+                .get("TYPE")
+                .is_none_or(|model_type| model_type.to_bits() == expected_type.to_bits())
     }
 
     /// Return true only for an element that is validated by the native EKV

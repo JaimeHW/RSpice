@@ -4,6 +4,7 @@
 //! 96,731-line file. Methods keep `impl XyceTestRunner` so call sites are
 //! unchanged; private ones are `pub(super)` so siblings can reach them.
 
+use super::output::XyceGeneratedVbicNoiseIssue;
 use super::*;
 
 impl XyceTestRunner {
@@ -793,14 +794,29 @@ impl XyceTestRunner {
 
         let netlist = Self::parse_xyce_netlist(&source, &deck.path)
             .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
-        #[cfg(not(feature = "veriloga-builtins-base"))]
         if let Some(print) = print.as_ref()
-            && Self::noise_print_requires_generated_vbic_mechanisms(print, &netlist)?
+            && let Some(issue) = Self::generated_vbic_noise_issue(print, &netlist)?
         {
-            return Err(
-                    "NOISE output requests a named VBIC mechanism supplied by the canonical generated Verilog-A device; rebuild with the 'veriloga-builtins' feature"
-                        .to_string(),
-                );
+            return Err(match issue {
+                XyceGeneratedVbicNoiseIssue::ModelUnavailable {
+                    model_name,
+                    mechanism,
+                } => format!(
+                    "NOISE output requests named VBIC mechanism '{mechanism}', but generated model '{model_name}' is not linked into this build"
+                ),
+                XyceGeneratedVbicNoiseIssue::NoiseDescriptorsUnavailable {
+                    model_name,
+                    mechanism,
+                } => format!(
+                    "NOISE output requests named VBIC mechanism '{mechanism}', but generated-noise descriptors are not linked for model '{model_name}'"
+                ),
+                XyceGeneratedVbicNoiseIssue::UnknownMechanism {
+                    model_name,
+                    mechanism,
+                } => format!(
+                    "NOISE output requests unknown named VBIC mechanism '{mechanism}'; linked generated model '{model_name}' does not export that descriptor"
+                ),
+            });
         }
         let noise_analysis = Self::noise_analysis_for_netlist(&netlist)?;
         let output_node = noise_analysis.output_node.clone();

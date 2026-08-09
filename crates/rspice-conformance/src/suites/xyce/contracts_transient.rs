@@ -251,6 +251,11 @@ impl XyceTestRunner {
                 netlist.diagnostics
             ));
         }
+        if netlist.options.measure_use_lttm.is_some() {
+            return Err(format!(
+                "{LABEL} does not admit parser recovery or ignored directives, including unsupported global option MEASURE.USE_LTTM"
+            ));
+        }
         if netlist.measurements.is_empty()
             || netlist.measurements.iter().any(|measurement| {
                 !measurement.analysis.eq_ignore_ascii_case("TRAN")
@@ -2833,6 +2838,10 @@ impl XyceTestRunner {
             && Self::netlist_is_native_transient_level1_cmos_chain(netlist);
         let has_qualified_ekv26 = purpose.validates_absolute_device_contract()
             && Self::netlist_is_native_transient_ekv26_pair(netlist);
+        let has_qualified_generated_bsimsoi461 = purpose.validates_absolute_device_contract()
+            && elements
+                .iter()
+                .any(|element| Self::netlist_element_is_generated_bsimsoi461(netlist, element));
         let has_qualified_diode = purpose.validates_absolute_device_contract()
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_absolute_transient_exact_is_diode(netlist, element)
@@ -2875,6 +2884,7 @@ impl XyceTestRunner {
             || has_qualified_level3_mos
             || has_qualified_level1_cmos_chain
             || has_qualified_ekv26
+            || has_qualified_generated_bsimsoi461
             || has_qualified_diode
             || has_qualified_tbv_diode
             || has_qualified_vdmos
@@ -2887,6 +2897,7 @@ impl XyceTestRunner {
             || has_qualified_bsim3_capacitor)
             && !has_qualified_bsim4_capacitor
             && !has_qualified_bsim3_capacitor
+            && !has_qualified_generated_bsimsoi461
             && !Self::native_transient_uses_standard_startup(netlist)
         {
             return Err(
@@ -3068,6 +3079,9 @@ impl XyceTestRunner {
                         && Self::netlist_element_is_native_transient_ekv26(netlist, element) => {}
                 ElementKind::Mosfet { .. }
                     if purpose.validates_absolute_device_contract()
+                        && Self::netlist_element_is_generated_bsimsoi461(netlist, element) => {}
+                ElementKind::Mosfet { .. }
+                    if purpose.validates_absolute_device_contract()
                         && Self::netlist_is_native_absolute_transient_vdmos_level18(netlist)
                         && Self::netlist_element_is_native_absolute_transient_vdmos_level18(
                             netlist, element,
@@ -3175,7 +3189,7 @@ impl XyceTestRunner {
                     return Err(match purpose {
                         XyceStaticTranPlanPurpose::AbsoluteOracle
                         | XyceStaticTranPlanPurpose::AnalyticOracle => format!(
-                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN and extended Level-1 NPN IRB/RBM, EKV26, validated native VDMOS LEVEL=18 integrated-RMS, bounded native classic MOSFET LEVEL=1/2/3 models, exact IS-only, validated legacy, Level=2 TBV, and validated MINRES/MINCAP legacy-diode models, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
+                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN and extended Level-1 NPN IRB/RBM, EKV26, generated BSIM-SOI 4.6.1 LEVEL=70, validated native VDMOS LEVEL=18 integrated-RMS, bounded native classic MOSFET LEVEL=1/2/3 models, exact IS-only, validated legacy, Level=2 TBV, and validated MINRES/MINCAP legacy-diode models, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
                             element.name
                         ),
                         XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle => format!(
