@@ -1130,11 +1130,11 @@ fn incompatible_result_viewer_command_is_disabled_and_cannot_navigate() {
     let command = Command::ResultViewer(crate::workbench::ResultViewer::Bode);
 
     assert!(!command.is_enabled(&app));
+    // Bode reads AC responses only: ordinary-noise spectra moved to the
+    // Noise viewer that owns them, so the reason names AC alone.
     assert_eq!(
         command.availability(&app),
-        CommandAvailability::Disabled(
-            "Requires a usable AC response or ordinary noise spectrum in the active dataset"
-        )
+        CommandAvailability::Disabled("Requires a usable AC response in the active dataset")
     );
     command.execute(&mut app);
 
