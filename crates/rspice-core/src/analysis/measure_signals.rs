@@ -21,7 +21,7 @@ use super::measure::{
 };
 use crate::Value;
 use crate::analysis::{AcResult, NoiseContributionKind, NoiseContributionProbe};
-use crate::engine::TransientResult;
+use crate::engine::{TransientDeviceOpTrace, TransientResult};
 use crate::netlist::expr::{ComplexValue, Expr as NetExpr, PreparedExpression};
 use crate::netlist::{
     InterfaceNodeAliases, Netlist, OutputAnalysisKind, canonical_symbol,
@@ -338,6 +338,20 @@ fn insert_interface_alias_spellings<'a>(
     }
 }
 
+fn insert_device_op_trace_spellings<'a>(
+    signals: &mut HashMap<String, &'a [Value]>,
+    trace: &'a TransientDeviceOpTrace,
+) {
+    let operator = trace.parameter.to_ascii_uppercase();
+    if is_device_lead_current_accessor(&operator) {
+        insert_case_variants(
+            signals,
+            &format!("{operator}({})", trace.device_name),
+            trace.values.as_slice(),
+        );
+    }
+}
+
 /// Build the measurement signal table for a transient result.
 pub fn transient_signal_map(result: &TransientResult) -> HashMap<String, &[Value]> {
     let mut signals: HashMap<String, &[Value]> = HashMap::new();
@@ -380,14 +394,7 @@ pub fn transient_signal_map(result: &TransientResult) -> HashMap<String, &[Value
     // records those canonical device outputs in the typed operating-point
     // trace namespace rather than pretending that every lead is an MNA branch.
     for trace in &result.device_op_traces {
-        let operator = trace.parameter.to_ascii_uppercase();
-        if is_device_lead_current_accessor(&operator) {
-            insert_case_variants(
-                &mut signals,
-                &format!("{operator}({})", trace.device_name),
-                trace.values.as_slice(),
-            );
-        }
+        insert_device_op_trace_spellings(&mut signals, trace);
     }
 
     signals
@@ -6993,12 +7000,12 @@ mod tests {
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: vec![
-                crate::engine::TransientDeviceOpTrace {
+                TransientDeviceOpTrace {
                     device_name: "Q1".to_string(),
                     parameter: "ic".to_string(),
                     values: vec![4.0, 5.0, 6.0],
                 },
-                crate::engine::TransientDeviceOpTrace {
+                TransientDeviceOpTrace {
                     device_name: "X1:Q1".to_string(),
                     parameter: "IC".to_string(),
                     values: vec![7.0, 8.0, 9.0],

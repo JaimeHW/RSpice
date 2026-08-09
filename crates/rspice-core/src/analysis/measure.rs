@@ -19,6 +19,7 @@
 #![allow(clippy::too_many_arguments)]
 use crate::Value;
 use crate::netlist::canonical_symbol;
+use crate::netlist::measure::XYCE_DEFAULT_MEASURE_MINVAL;
 use std::collections::HashMap;
 
 // The statement types describe a parsed `.MEAS` card, so they live with the
@@ -27,8 +28,8 @@ use std::collections::HashMap;
 // below is the only thing that gives them meaning.
 pub use crate::netlist::measure::{
     EdgeType, ErrorFunctionNorm, EventOccurrence, ExtremaOutput, FileErrorNorm, MeasureExpression,
-    MeasureExpressionKind, MeasureOperand, MeasurePrintPolicy, MeasureStatement, MeasureType,
-    TrigSpec, TriggerEvent, WhenCondition, XYCE_DEFAULT_MEASURE_MINVAL,
+    MeasureOperand, MeasurePrintPolicy, MeasureStatement, MeasureType, TrigSpec, TriggerEvent,
+    WhenCondition,
 };
 
 //=============================================================================
