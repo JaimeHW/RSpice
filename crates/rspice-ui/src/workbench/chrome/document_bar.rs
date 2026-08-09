@@ -574,12 +574,21 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
             state.workbench.active_analysis = position;
             true
         }
+        // Re-activating the dataset that is already active must not re-select
+        // its run. `select_run` resynchronizes the displayed waveforms, which
+        // advances the simulation data version, and every version change
+        // retires cursors, the selected trace, the active pane, and pinned
+        // readouts. This path runs on every frame the document bar draws, so
+        // an unguarded re-selection made those states impossible to hold.
         WorkspaceDocumentId::ResultDataset(dataset_id) => state
             .simulation
             .runs
             .iter()
             .position(|run| run.dataset_id == *dataset_id)
-            .is_some_and(|index| state.simulation.select_run(index)),
+            .is_some_and(|index| {
+                state.simulation.active_run_idx == Some(index)
+                    || state.simulation.select_run(index)
+            }),
         WorkspaceDocumentId::Project
         | WorkspaceDocumentId::SimulationPlan
         | WorkspaceDocumentId::Verification
@@ -1035,6 +1044,50 @@ mod tests {
         ));
         assert_eq!(state.workbench.workspace, Workspace::Results);
         assert_eq!(state.simulation.active_run_idx, Some(0));
+    }
+
+    /// The document bar re-activates the open document every frame. Doing so
+    /// must be inert for the dataset that is already active: re-selecting its
+    /// run resynchronizes waveforms, and the resulting data-version change
+    /// retires cursors, the selected trace, the active pane, and pinned
+    /// readouts — which would make those states impossible to hold at all.
+    #[test]
+    fn reactivating_the_active_dataset_disturbs_no_result_state() {
+        let mut state = AppState::default();
+        state.workbench.workspace = Workspace::Results;
+        let mut first = SimulationRun::new(1);
+        first.add_analysis(crate::state::AnalysisResult::new(
+            1,
+            crate::state::AnalysisType::Transient,
+            "TRAN",
+        ));
+        first.add_analysis(crate::state::AnalysisResult::new(
+            2,
+            crate::state::AnalysisType::Ac,
+            "AC",
+        ));
+        let dataset = first.dataset_id;
+        state.simulation.runs = vec![first];
+        assert!(state.simulation.select_run(0));
+        assert!(state.simulation.select_analysis(1));
+        let version = state.simulation.data_version;
+
+        for _ in 0..3 {
+            assert!(activate_document_by_id(
+                &mut state,
+                &WorkspaceDocumentId::ResultDataset(dataset)
+            ));
+        }
+
+        assert_eq!(
+            state.simulation.data_version, version,
+            "re-activating the active dataset must not advance the data version"
+        );
+        assert_eq!(
+            state.simulation.active_analysis_idx,
+            Some(1),
+            "re-activation must not snap the analysis selection back to the first"
+        );
     }
 
     #[test]
