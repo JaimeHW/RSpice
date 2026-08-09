@@ -27,11 +27,48 @@ pub fn validate_startup_directives_with_abort(
     abort: &dyn AbortSignal,
 ) -> Result<(), ParseWithAbortError> {
     ensure_parse_not_aborted(abort)?;
+    if netlist.startup_directives.is_empty() && !has_effective_startup_state(netlist, abort)? {
+        // Parsed decks without .IC/.NODESET records have no startup semantics
+        // to elaborate. Avoid cloning and recursively flattening the entire
+        // hierarchy merely to remove diagnostics projected by an earlier
+        // validation pass. Build the replacement transactionally so an abort
+        // still leaves the caller's Netlist unchanged.
+        let mut diagnostics = Vec::with_capacity(netlist.diagnostics.len());
+        for (index, diagnostic) in netlist.diagnostics.iter().enumerate() {
+            poll_parse_abort(abort, index)?;
+            if !is_projected_startup_diagnostic(diagnostic) {
+                diagnostics.push(diagnostic.clone());
+            }
+        }
+        ensure_parse_not_aborted(abort)?;
+        netlist.diagnostics = diagnostics;
+        return Ok(());
+    }
     let mut candidate = netlist.clone();
     validate_candidate(&mut candidate, abort)?;
     ensure_parse_not_aborted(abort)?;
     *netlist = candidate;
     Ok(())
+}
+
+fn has_effective_startup_state(
+    netlist: &Netlist,
+    abort: &dyn AbortSignal,
+) -> Result<bool, ParseWithAbortError> {
+    if !netlist.initial_conditions.is_empty() || !netlist.node_sets.is_empty() {
+        return Ok(true);
+    }
+    let mut pending = netlist.subcircuits.iter().collect::<Vec<_>>();
+    let mut visited = 0usize;
+    while let Some(subcircuit) = pending.pop() {
+        poll_parse_abort(abort, visited)?;
+        visited = visited.saturating_add(1);
+        if !subcircuit.initial_conditions.is_empty() || !subcircuit.node_sets.is_empty() {
+            return Ok(true);
+        }
+        pending.extend(subcircuit.nested_subcircuits.iter());
+    }
+    Ok(false)
 }
 
 fn validate_candidate(
@@ -572,12 +609,16 @@ fn sort_dedup_case_insensitive(values: &mut Vec<String>) {
 }
 
 fn remove_projected_diagnostics(netlist: &mut Netlist) {
-    netlist.diagnostics.retain(|diagnostic| {
-        !matches!(
-            diagnostic.code.as_str(),
-            "startup-empty-directive" | "startup-undefined-node" | "startup-scoped-global-node"
-        )
-    });
+    netlist
+        .diagnostics
+        .retain(|diagnostic| !is_projected_startup_diagnostic(diagnostic));
+}
+
+fn is_projected_startup_diagnostic(diagnostic: &ParseDiagnostic) -> bool {
+    matches!(
+        diagnostic.code.as_str(),
+        "startup-empty-directive" | "startup-undefined-node" | "startup-scoped-global-node"
+    )
 }
 
 fn project_typed_diagnostics(netlist: &mut Netlist) {
@@ -973,6 +1014,37 @@ mod tests {
         assert_eq!(netlist.initial_conditions[0].voltage, 0.75);
         assert_eq!(netlist.node_sets.len(), 1);
         assert_eq!(netlist.node_sets[0].voltage, 0.25);
+    }
+
+    #[test]
+    fn nested_programmatic_startup_prevents_the_empty_payload_fast_path() {
+        let mut netlist = Netlist::parse(
+            "nested programmatic startup\n\
+             .SUBCKT OUTER A\n\
+             R1 A 0 1\n\
+             .ENDS\n\
+             .SUBCKT INNER P\n\
+             R2 P 0 1\n\
+             .ENDS\n\
+             .END\n",
+        )
+        .expect("nested startup fixture parses");
+        let inner = netlist.subcircuits.remove(1);
+        netlist.subcircuits[0].nested_subcircuits.push(inner);
+        assert!(
+            !has_effective_startup_state(&netlist, &NoAbort).expect("empty startup scan succeeds")
+        );
+
+        netlist.subcircuits[0].nested_subcircuits[0]
+            .node_sets
+            .push(NodeSet {
+                node: "P".to_string(),
+                voltage: 0.25,
+                voltage_expr: Some("0.5/2".to_string()),
+            });
+        assert!(
+            has_effective_startup_state(&netlist, &NoAbort).expect("nested startup scan succeeds")
+        );
     }
 
     #[test]
