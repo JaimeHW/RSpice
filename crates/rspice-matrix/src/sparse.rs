@@ -3451,6 +3451,91 @@ impl ComplexMatrix {
         Ok(product)
     }
 
+    /// Certify a caller-adjusted complex solution against this matrix and RHS.
+    ///
+    /// This uses the same compensated, componentwise backward-error criterion
+    /// as the production solve. It is intended for exact-constraint
+    /// canonicalization performed after factorization (for example, restoring
+    /// an ideal voltage-source equation after equilibration/unscaling) and
+    /// reuses the existing LU residual workspace without steady-state
+    /// allocation.
+    pub fn certify_solution(
+        &mut self,
+        solution: &[Complex64],
+        rhs: &[Complex64],
+    ) -> Result<(), SolverError> {
+        self.check_stamping_error()?;
+        if self.nrows != rhs.len() || self.ncols != solution.len() {
+            return Err(SolverError::InvalidCircuit(format!(
+                "Complex certification dimension mismatch: matrix is {}x{}, solution has {}, RHS has {}",
+                self.nrows,
+                self.ncols,
+                solution.len(),
+                rhs.len()
+            )));
+        }
+
+        if !self.factorization_valid {
+            return Err(SolverError::InvalidCircuit(
+                "Complex solution certification requires a successful solve of the current matrix"
+                    .to_string(),
+            ));
+        }
+        let workspace = self.lu.as_mut().ok_or_else(|| {
+            SolverError::InvalidCircuit(
+                "Complex solution certification is missing its solve workspace".to_string(),
+            )
+        })?;
+        let ComplexLuWorkspace {
+            rhs: candidate_workspace,
+            scaled_values,
+            scaled_rhs,
+            row_scale,
+            col_scale,
+            residual,
+            denominator,
+            compensation,
+            row_nnz,
+            ..
+        } = workspace;
+        if col_scale.len() != solution.len() || candidate_workspace.nrows() != solution.len() {
+            return Err(SolverError::InvalidCircuit(
+                "Complex solution certification scale dimension mismatch".to_string(),
+            ));
+        }
+        scale_complex_rhs(rhs, row_scale, scaled_rhs)?;
+        let scaled_candidate = candidate_workspace.col_as_slice_mut(0);
+        for ((scaled, &value), &scale) in scaled_candidate
+            .iter_mut()
+            .zip(solution)
+            .zip(col_scale.iter())
+        {
+            if !complex_is_finite(value) || !scale.is_finite() || scale <= 0.0 {
+                return Err(SolverError::Overflow);
+            }
+            *scaled = value / scale;
+            if !complex_is_finite(*scaled) {
+                return Err(SolverError::Overflow);
+            }
+        }
+        let error = complex_componentwise_backward_error(
+            &self.csc,
+            scaled_values,
+            scaled_candidate,
+            scaled_rhs,
+            residual,
+            denominator,
+            compensation,
+            row_nnz,
+            ComplexSolveOp::Normal,
+        )?;
+        if error.accepted() {
+            Ok(())
+        } else {
+            Err(SolverError::InaccurateSolution(error.componentwise))
+        }
+    }
+
     /// Solve Ax = b for complex values.
     ///
     /// The symbolic analysis is computed once per structure (or inherited
@@ -5296,6 +5381,15 @@ mod tests {
                 a[1][0] * expected[0] + a[1][1] * expected[1],
             ];
             matrix.solve_into(&rhs, &mut actual).unwrap();
+            matrix
+                .certify_solution(&actual, &rhs)
+                .expect("the solved complex system remains certified");
+            let mut perturbed = actual.clone();
+            perturbed[0] += Complex64::new(1.0e-6, 0.0);
+            assert!(matches!(
+                matrix.certify_solution(&perturbed, &rhs),
+                Err(SolverError::InaccurateSolution(_))
+            ));
             if let Some(previous) = allocation {
                 assert_eq!(actual.as_ptr(), previous);
             } else {
