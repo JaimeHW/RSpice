@@ -1756,8 +1756,12 @@ fn active_result_pane(
 
     // The unit names the pane in a unit-scoped stack; the viewer name is
     // already on the sheet tab above.
-    let facts =
-        crate::workbench::documents::result_document::active_pane_facts(ui.ctx(), &app.state);
+    let tokens = Tokens::get(ui.ctx());
+    let facts = crate::workbench::documents::result_document::active_pane_facts(
+        ui.ctx(),
+        &tokens,
+        &mut app.state,
+    );
     section_header(
         ui,
         "Active pane",
@@ -1766,6 +1770,12 @@ fn active_result_pane(
     property_row(ui, "Pane", &pane_label);
     property_row(ui, "Traces", &format!("{visible} visible · {bound} bound"));
     property_row(ui, "View", view_label);
+    if let Some(x_viewport) = facts.x_viewport.as_deref() {
+        property_row(ui, "X viewport", x_viewport);
+    }
+    if let Some(y_viewport) = facts.y_viewport.as_deref() {
+        property_row(ui, "Y viewport", y_viewport);
+    }
     if let Some(scale) = facts.scale {
         property_row(ui, "Scale", scale);
     }

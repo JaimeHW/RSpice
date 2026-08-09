@@ -2233,9 +2233,19 @@ pub(crate) struct ActivePaneFacts {
     pub unit: Option<String>,
     pub scale: Option<&'static str>,
     pub limit_mask: &'static str,
+    pub x_viewport: Option<String>,
+    pub y_viewport: Option<String>,
 }
 
-pub(crate) fn active_pane_facts(ctx: &egui::Context, state: &AppState) -> ActivePaneFacts {
+pub(crate) fn active_pane_facts(
+    ctx: &egui::Context,
+    tokens: &Tokens,
+    state: &mut AppState,
+) -> ActivePaneFacts {
+    // The viewport the pane is actually showing, whether the user pinned it
+    // or it is fitting the retained data. The mockup states the interval
+    // either way: "automatic" alone does not tell a reader what they see.
+    let (x_viewport, y_viewport) = active_pane_viewports(tokens, state);
     let key = state.ui.results.active_wave_pane.as_ref();
     let scale = key.map(|key| {
         let log = ctx
@@ -2257,7 +2267,67 @@ pub(crate) fn active_pane_facts(ctx: &egui::Context, state: &AppState) -> Active
         } else {
             "none bound"
         },
+        x_viewport,
+        y_viewport,
     }
+}
+
+/// The active pane's X and Y intervals, formatted through the strip's own
+/// formatter so they read like every other number on the sheet.
+fn active_pane_viewports(
+    tokens: &Tokens,
+    state: &mut AppState,
+) -> (Option<String>, Option<String>) {
+    let Some(key) = state.ui.results.active_wave_pane.clone() else {
+        return (None, None);
+    };
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let digits = usize::from(presentation.displayed_significant_digits().get());
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        tokens,
+    );
+    let Some(model) = models
+        .iter()
+        .find(|model| model.analysis_key == key.analysis)
+    else {
+        return (None, None);
+    };
+    let panes = model.unit_panes();
+    let Some((ordinal, pane)) = panes
+        .iter()
+        .enumerate()
+        .find(|(_, pane)| pane.unit == key.unit)
+    else {
+        return (None, None);
+    };
+    let x = x_range(model).map(|full| {
+        let (x0, x1) =
+            shared_x_view(&state.ui.results, key.analysis, panes.len()).unwrap_or(full);
+        format!(
+            "{} … {}",
+            model.format_x(x0, digits, quantity_policy),
+            model.format_x(x1, digits, quantity_policy)
+        )
+    });
+    let pinned = state
+        .ui
+        .results
+        .analysis_plot_view_pane(super::ResultViewer::Waves, key.analysis, ordinal)
+        .y;
+    let y = pinned
+        .or_else(|| pane_y_range(&mut state.ui.results.derived, model, &pane.traces))
+        .map(|(y0, y1)| {
+            format!(
+                "{} … {}",
+                fmt_si_significant(y0, pane.unit, digits),
+                fmt_si_significant(y1, pane.unit, digits)
+            )
+        });
+    (x, y)
 }
 
 fn pane_log_y_id(model: &StripModel, pane: &UnitPane) -> egui::Id {
@@ -2453,6 +2523,18 @@ fn show_unit_pane_header(
                         // The instrument idiom: a trace states its own value
                         // at cursor A right where its name is, so reading one
                         // curve never costs a trip to the readout register.
+                        // A corner family draws one chip for the whole group,
+                        // so the chip states how many traces it stands for.
+                        let family = trace.family_group_ordinal.map(|_| {
+                            model
+                                .traces
+                                .iter()
+                                .filter(|candidate| {
+                                    candidate.presentation_key == trace.presentation_key
+                                        && candidate.family_group_ordinal.is_some()
+                                })
+                                .count()
+                        });
                         let name = elide(&trace.name, 20);
                         let label = match &cursor_a_value {
                             Some((x, presentation, quantity_policy)) if trace.visible => {
@@ -2476,6 +2558,10 @@ fn show_unit_pane_header(
                                 )
                             }
                             _ => name,
+                        };
+                        let label = match family {
+                            Some(count) if count > 1 => format!("{label}  ×{count}"),
+                            _ => label,
                         };
                         // A hidden trace keeps its chip so it can be brought
                         // back, but must not read as a curve on the canvas.
