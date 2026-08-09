@@ -18,6 +18,7 @@
 
 #![allow(clippy::too_many_arguments)]
 use crate::Value;
+use crate::netlist::canonical_symbol;
 use std::collections::HashMap;
 
 // The statement types describe a parsed `.MEAS` card, so they live with the
@@ -60,8 +61,8 @@ pub struct MeasureResult {
 
 impl MeasureResult {
     pub fn success(name: &str, value: Value) -> Self {
-        if !value.is_finite() {
-            return Self::failed(name, &format!("measurement value is non-finite ({value})"));
+        if value.is_nan() {
+            return Self::failed(name, "measurement value is NaN");
         }
         Self {
             name: name.to_string(),
@@ -122,9 +123,9 @@ impl MeasureResult {
             return self;
         }
         if let Some(value) = self.value {
-            if !value.is_finite() {
+            if value.is_nan() {
                 self.passed = false;
-                self.error = Some(format!("measurement value is non-finite ({value})"));
+                self.error = Some("measurement value is NaN".to_string());
             } else if (value - goal).abs() > tolerance {
                 self.passed = false;
                 self.error = Some(format!(
@@ -191,11 +192,15 @@ pub struct ContinuousMeasureFailureMetadata {
 
 impl ContinuousMeasureResult {
     fn success(name: &str, records: Vec<ContinuousMeasureRecord>) -> Self {
-        Self {
+        let result = Self {
             name: name.to_string(),
             records,
             failure: None,
             failure_metadata: None,
+        };
+        match result.validate_invariants() {
+            Ok(()) => result,
+            Err(error) => Self::failed(name, error),
         }
     }
 
@@ -226,7 +231,9 @@ impl ContinuousMeasureResult {
     }
 
     /// Validate the mutually exclusive success/failure representation and
-    /// the finiteness of all published numeric metadata.
+    /// the validity of all published numeric metadata. Infinite result values
+    /// are legitimate extended-real SPICE results (for example `VDB(0)`), but
+    /// event-axis metadata must remain finite and values must never be NaN.
     pub fn validate_invariants(&self) -> Result<(), &'static str> {
         if self.name.trim().is_empty() {
             return Err("continuous measurement name is empty");
@@ -250,12 +257,12 @@ impl ContinuousMeasureResult {
             }
         }
         if self.records.iter().any(|record| {
-            !record.value.is_finite()
+            record.value.is_nan()
                 || record.event_axis.is_some_and(|value| !value.is_finite())
                 || record.trigger_axis.is_some_and(|value| !value.is_finite())
                 || record.target_axis.is_some_and(|value| !value.is_finite())
         }) {
-            return Err("continuous measurement record contains a non-finite value");
+            return Err("continuous measurement record contains NaN or a non-finite event axis");
         }
         if self.failure_metadata.is_some_and(|metadata| {
             metadata
@@ -273,16 +280,71 @@ impl ContinuousMeasureResult {
 // Measurement Engine
 //=============================================================================
 
-/// Resolve a signal by name, falling back to a case-insensitive scan.
-/// SPICE netlists are case-insensitive, so `.MEAS ... V(OUT)` must find a
-/// waveform stored under `V(out)`.
+pub(super) fn canonical_measure_signal_name(name: &str) -> String {
+    canonical_symbol(
+        &name
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .collect::<String>(),
+    )
+}
+
+/// Resolve a signal under SPICE's case-insensitive hierarchy namespace.
+/// Distinct columns that collapse under case/separator/whitespace
+/// normalization fail closed instead of depending on `HashMap` iteration.
 fn lookup_signal<'a>(signals: &HashMap<String, &'a [Value]>, name: &str) -> Option<&'a [Value]> {
+    // An exact key represents the execution adapter's authoritative physical
+    // spelling and preserves the long-standing solution-node-first contract.
+    // Alias projection performs its own ambiguity check before this layer.
     if let Some(signal) = signals.get(name) {
-        return Some(signal);
+        return Some(*signal);
     }
     signals
-        .iter()
-        .find_map(|(key, signal)| key.eq_ignore_ascii_case(name).then_some(*signal))
+        .get(&canonical_measure_signal_index_key(name))
+        .copied()
+}
+
+const CANONICAL_MEASURE_SIGNAL_INDEX_PREFIX: &str = "\0RSPICE_MEASURE_CANONICAL\0";
+
+fn canonical_measure_signal_index_key(name: &str) -> String {
+    format!(
+        "{CANONICAL_MEASURE_SIGNAL_INDEX_PREFIX}{}",
+        canonical_measure_signal_name(name)
+    )
+}
+
+/// Clone one adapter-owned signal view and add an internal O(1) canonical
+/// lookup namespace. Exact authored keys remain authoritative; ambiguous
+/// normalized spellings deliberately receive no index entry.
+fn index_measure_signals<'a>(
+    signals: &HashMap<String, &'a [Value]>,
+) -> HashMap<String, &'a [Value]> {
+    let mut indexed = signals.clone();
+    let mut canonical = HashMap::<String, (&'a [Value], bool)>::with_capacity(signals.len());
+    for (name, waveform) in signals {
+        if name.starts_with(CANONICAL_MEASURE_SIGNAL_INDEX_PREFIX) {
+            continue;
+        }
+        canonical
+            .entry(canonical_measure_signal_name(name))
+            .and_modify(|(existing, ambiguous)| {
+                if existing.len() != waveform.len()
+                    || !std::ptr::eq(existing.as_ptr(), waveform.as_ptr())
+                {
+                    *ambiguous = true;
+                }
+            })
+            .or_insert((*waveform, false));
+    }
+    for (name, (waveform, ambiguous)) in canonical {
+        if !ambiguous {
+            indexed.insert(
+                format!("{CANONICAL_MEASURE_SIGNAL_INDEX_PREFIX}{name}"),
+                waveform,
+            );
+        }
+    }
+    indexed
 }
 
 fn strictly_monotonic_direction(axis: &[Value]) -> Result<bool, String> {
@@ -431,7 +493,22 @@ impl MeasureEngine {
         signals: &HashMap<String, &[Value]>,
         segment_starts: &[usize],
     ) -> Vec<MeasureResult> {
-        self.evaluate_with_signal_maps(time, &[signals], segment_starts)
+        self.evaluate_with_segment_starts_and_context(
+            time,
+            signals,
+            segment_starts,
+            &crate::netlist::ParamContext::new(),
+        )
+    }
+
+    pub(crate) fn evaluate_with_segment_starts_and_context(
+        &self,
+        time: &[Value],
+        signals: &HashMap<String, &[Value]>,
+        segment_starts: &[usize],
+        params: &crate::netlist::ParamContext,
+    ) -> Vec<MeasureResult> {
+        self.evaluate_with_signal_maps(time, &[signals], segment_starts, params)
     }
 
     /// Evaluate vector-valued Xyce continuous point-event measurements.
@@ -487,12 +564,12 @@ impl MeasureEngine {
                 })
                 .collect();
         }
-        if let Some((name, index, value)) = signals.iter().find_map(|(name, signal)| {
+        if let Some((name, index)) = signals.iter().find_map(|(name, signal)| {
             signal
                 .iter()
                 .enumerate()
-                .find(|(_, value)| !value.is_finite())
-                .map(|(index, value)| (name, index, *value))
+                .find(|(_, value)| value.is_nan())
+                .map(|(index, _)| (name, index))
         }) {
             return self
                 .measurements
@@ -500,9 +577,7 @@ impl MeasureEngine {
                 .map(|statement| {
                     ContinuousMeasureResult::failed(
                         &statement.name,
-                        format!(
-                            "signal '{name}' contains non-finite sample at index {index}: {value}"
-                        ),
+                        format!("signal '{name}' contains NaN at index {index}"),
                     )
                 })
                 .collect();
@@ -521,6 +596,7 @@ impl MeasureEngine {
                 })
                 .collect();
         }
+        let indexed_signals = index_measure_signals(signals);
 
         self.measurements
             .iter()
@@ -537,7 +613,7 @@ impl MeasureEngine {
                         ),
                     );
                 }
-                self.evaluate_continuous_one(statement, axis, signals, segment_starts)
+                self.evaluate_continuous_one(statement, axis, &indexed_signals, segment_starts)
             })
             .collect()
     }
@@ -632,14 +708,15 @@ impl MeasureEngine {
     /// equation measures update in netlist order, so a point-event statement
     /// can legitimately observe a different equation trace depending on its
     /// position relative to the equation statement.
-    pub(crate) fn evaluate_with_segment_starts_and_signal_maps(
+    pub(crate) fn evaluate_with_segment_starts_and_signal_maps_and_context(
         &self,
         time: &[Value],
         signal_maps: &[HashMap<String, &[Value]>],
         segment_starts: &[usize],
+        params: &crate::netlist::ParamContext,
     ) -> Vec<MeasureResult> {
         let signal_map_refs = signal_maps.iter().collect::<Vec<_>>();
-        self.evaluate_with_signal_maps(time, &signal_map_refs, segment_starts)
+        self.evaluate_with_signal_maps(time, &signal_map_refs, segment_starts, params)
     }
 
     fn evaluate_with_signal_maps(
@@ -647,6 +724,7 @@ impl MeasureEngine {
         time: &[Value],
         signal_maps: &[&HashMap<String, &[Value]>],
         segment_starts: &[usize],
+        params: &crate::netlist::ParamContext,
     ) -> Vec<MeasureResult> {
         if self.measurements.is_empty() {
             return Vec::new();
@@ -673,26 +751,29 @@ impl MeasureEngine {
                 time.len()
             ));
         }
-        if let Some((name, index, value)) = signal_maps
+        if let Some((name, index)) = signal_maps
             .iter()
             .flat_map(|signals| signals.iter())
             .find_map(|(name, signal)| {
                 signal
                     .iter()
                     .enumerate()
-                    .find(|(_, value)| !value.is_finite())
-                    .map(|(index, value)| (name, index, *value))
+                    .find(|(_, value)| value.is_nan())
+                    .map(|(index, _)| (name, index))
             })
         {
-            return self.fail_all(&format!(
-                "signal '{name}' contains non-finite sample at index {index}: {value}"
-            ));
+            return self.fail_all(&format!("signal '{name}' contains NaN at index {index}"));
         }
         if segment_starts.iter().enumerate().any(|(index, start)| {
             *start == 0 || *start >= time.len() || index > 0 && *start <= segment_starts[index - 1]
         }) {
             return self.fail_all("measurement segment starts are invalid or unordered");
         }
+        let indexed_signal_maps = signal_maps
+            .iter()
+            .map(|signals| index_measure_signals(signals))
+            .collect::<Vec<_>>();
+        let signal_maps = indexed_signal_maps.iter().collect::<Vec<_>>();
 
         // Expression measures (PARAM='...') read other results by name, so
         // they evaluate in a second pass over the directly computed set —
@@ -717,7 +798,9 @@ impl MeasureEngine {
             .collect();
         for (idx, m) in self.measurements.iter().enumerate() {
             if let MeasureType::Param { expression } = &m.measure_type {
-                results[idx] = self.eval_param(&m.name, expression, &results).check_goal(m);
+                results[idx] = self
+                    .eval_param(&m.name, expression, &results, params)
+                    .check_goal(m);
             }
         }
         results
@@ -1612,8 +1695,14 @@ impl MeasureEngine {
     }
 
     /// Evaluate a PARAM expression against the named results computed so far.
-    fn eval_param(&self, name: &str, expression: &str, prior: &[MeasureResult]) -> MeasureResult {
-        let mut ctx = crate::netlist::ParamContext::new();
+    fn eval_param(
+        &self,
+        name: &str,
+        expression: &str,
+        prior: &[MeasureResult],
+        params: &crate::netlist::ParamContext,
+    ) -> MeasureResult {
+        let mut ctx = params.clone();
         for result in prior {
             if let Some(value) = result.value {
                 ctx.set(&result.name, value);
@@ -1621,16 +1710,20 @@ impl MeasureEngine {
         }
         match crate::netlist::expr::eval_expression_complex(expression, &ctx) {
             Ok(value) => {
-                if !value.re.is_finite() || !value.im.is_finite() {
+                if value.re.is_nan() || value.im.is_nan() {
                     return MeasureResult::failed(
                         name,
                         &format!(
-                            "PARAM expression produced non-finite value ({} {:+}j)",
+                            "PARAM expression produced NaN ({} {:+}j)",
                             value.re, value.im
                         ),
                     );
                 }
-                let imag_tolerance = 1.0e-15 * value.re.abs().max(1.0);
+                let imag_tolerance = if value.re.is_finite() {
+                    1.0e-15 * value.re.abs().max(1.0)
+                } else {
+                    0.0
+                };
                 if value.im.abs() > imag_tolerance {
                     return MeasureResult::failed(
                         name,
@@ -1694,7 +1787,7 @@ impl MeasureEngine {
             ) {
                 Ok(Some((segment, fraction, _))) => {
                     let value =
-                        signal[segment] + fraction * (signal[segment + 1] - signal[segment]);
+                        interpolate_extended_real(signal[segment], signal[segment + 1], fraction);
                     return MeasureResult::success(name, value);
                 }
                 Err(error) => return MeasureResult::failed(name, &error),
@@ -2116,7 +2209,7 @@ fn continuous_find(
                 .into_iter()
                 .map(|(segment, fraction, event_axis)| {
                     let value =
-                        signal[segment] + fraction * (signal[segment + 1] - signal[segment]);
+                        interpolate_extended_real(signal[segment], signal[segment + 1], fraction);
                     ContinuousMeasureRecord::point(value, event_axis)
                 })
                 .collect(),
@@ -2151,13 +2244,13 @@ fn continuous_derivative(
     let make_record = |segment: usize, event_axis: Value| {
         let width = axis[segment + 1] - axis[segment];
         if width == 0.0 || !width.is_finite() {
-            None
-        } else {
-            let value = (signal[segment + 1] - signal[segment]) / width;
-            value
-                .is_finite()
-                .then_some(ContinuousMeasureRecord::point(value, event_axis))
+            return Err("Derivative interval has zero or non-finite width");
         }
+        let value = (signal[segment + 1] - signal[segment]) / width;
+        if value.is_nan() {
+            return Err("Derivative slope is undefined");
+        }
+        Ok(ContinuousMeasureRecord::point(value, event_axis))
     };
     if let Some(target) = at {
         if !MeasureEngine::axis_in_measurement_window_with_minval(target, lower, upper, minval) {
@@ -2169,14 +2262,10 @@ fn continuous_derivative(
         let Some(segment) = measurement_segment_containing(axis, target, segment_starts) else {
             return ContinuousMeasureResult::failed(name, "Time point not in simulation range");
         };
-        return make_record(segment, target)
-            .map(|record| ContinuousMeasureResult::success(name, vec![record]))
-            .unwrap_or_else(|| {
-                ContinuousMeasureResult::failed(
-                    name,
-                    "Derivative interval has zero or non-finite width",
-                )
-            });
+        return match make_record(segment, target) {
+            Ok(record) => ContinuousMeasureResult::success(name, vec![record]),
+            Err(error) => ContinuousMeasureResult::failed(name, error),
+        };
     }
     let Some(condition) = when else {
         return ContinuousMeasureResult::failed(
@@ -2196,15 +2285,11 @@ fn continuous_derivative(
         Ok(events) if !events.is_empty() => {
             let records = events
                 .into_iter()
-                .filter_map(|(segment, _, event_axis)| make_record(segment, event_axis))
-                .collect::<Vec<_>>();
-            if records.is_empty() {
-                ContinuousMeasureResult::failed(
-                    name,
-                    "Derivative interval has zero or non-finite width",
-                )
-            } else {
-                ContinuousMeasureResult::success(name, records)
+                .map(|(segment, _, event_axis)| make_record(segment, event_axis))
+                .collect::<Result<Vec<_>, _>>();
+            match records {
+                Ok(records) => ContinuousMeasureResult::success(name, records),
+                Err(error) => ContinuousMeasureResult::failed(name, error),
             }
         }
         Ok(_) => ContinuousMeasureResult::failed(
@@ -2472,8 +2557,43 @@ fn interpolate_measure_signal_segmented(
             return None;
         }
         let fraction = (target - left) / (right - left);
-        Some(signal[index] + fraction * (signal[index + 1] - signal[index]))
+        Some(interpolate_extended_real(
+            signal[index],
+            signal[index + 1],
+            fraction,
+        ))
     })
+}
+
+/// Interpolate values in the extended-real domain used by direct measurement
+/// operands. Finite endpoints retain the conventional linear formula. At an
+/// interior point, a single infinite endpoint dominates and equal signed
+/// infinities remain constant; opposite infinities are undefined and yield
+/// NaN, which the measurement result invariant rejects.
+fn interpolate_extended_real(left: Value, right: Value, fraction: Value) -> Value {
+    if fraction == 0.0 {
+        return left;
+    }
+    if fraction == 1.0 {
+        return right;
+    }
+    if left == right {
+        return left;
+    }
+    if !(0.0..1.0).contains(&fraction) {
+        // MINVAL endpoint handling can intentionally extrapolate a crossing.
+        // Preserve the canonical affine arithmetic there; the extended-real
+        // dominance rules below apply only to true interpolation.
+        return left + fraction * (right - left);
+    }
+    if left.is_finite() && right.is_finite() {
+        return left + fraction * (right - left);
+    }
+    match (left.is_infinite(), right.is_infinite()) {
+        (true, false) => left,
+        (false, true) => right,
+        _ => Value::NAN,
+    }
 }
 
 impl Default for MeasureEngine {
@@ -2508,6 +2628,15 @@ mod tests {
             Some(4.0)
         );
         assert_eq!(interpolate_measure_signal(&[1.0], &[2.5], 2.0), None);
+        assert_eq!(
+            interpolate_measure_signal(
+                &[0.0, 1.0],
+                &[Value::NEG_INFINITY, Value::NEG_INFINITY],
+                0.5,
+            ),
+            Some(Value::NEG_INFINITY)
+        );
+        assert!(interpolate_extended_real(Value::INFINITY, 0.0, 1.5).is_nan());
     }
 
     #[test]
@@ -2803,9 +2932,9 @@ mod tests {
     }
 
     #[test]
-    fn non_finite_signal_reports_failed_measurement_without_passing_specs() {
+    fn nan_signal_reports_failed_measurement_without_passing_specs() {
         let time = [0.0, 1.0, 2.0];
-        let data = [0.0, f64::INFINITY, 2.0];
+        let data = [0.0, f64::NAN, 2.0];
         let mut signals: HashMap<String, &[Value]> = HashMap::new();
         signals.insert("V(out)".to_string(), &data);
 
@@ -2818,8 +2947,24 @@ mod tests {
                 .error
                 .as_deref()
                 .unwrap_or("")
-                .contains("signal 'V(out)' contains non-finite")
+                .contains("signal 'V(out)' contains NaN")
         );
+    }
+
+    #[test]
+    fn infinite_extended_real_measurement_result_is_valid() {
+        let time = [0.0, 1.0, 2.0];
+        let data = [Value::NEG_INFINITY; 3];
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("VDB(0)".to_string(), &data);
+
+        let result = engine_with(max_statement("VDB(0)"))
+            .evaluate(&time, &signals)
+            .remove(0);
+
+        assert!(result.passed, "{result:?}");
+        assert_eq!(result.value, Some(Value::NEG_INFINITY));
+        assert_eq!(result.event_axis, Some(0.0));
     }
 
     #[test]
@@ -2850,6 +2995,35 @@ mod tests {
                 .unwrap_or("")
                 .contains("complex value")
         );
+    }
+
+    #[test]
+    fn param_measure_inherits_xyce_expression_boundary_semantics() {
+        let mut engine = MeasureEngine::new();
+        engine.add(max_statement("VDB(0)"));
+        engine.add(MeasureStatement {
+            goal: None,
+            tolerance: None,
+            default_value: None,
+            print_policy: MeasurePrintPolicy::All,
+            name: "derived".to_string(),
+            measure_type: MeasureType::Param {
+                expression: "peak".to_string(),
+            },
+            analysis: "TRAN".to_string(),
+        });
+        let axis = [0.0, 1.0];
+        let ground_db = [Value::NEG_INFINITY; 2];
+        let signals = HashMap::from([("VDB(0)".to_string(), ground_db.as_slice())]);
+        let mut params = crate::netlist::ParamContext::new();
+        params.set_expression_dialect(crate::config::ExpressionDialect::Xyce);
+
+        let results =
+            engine.evaluate_with_segment_starts_and_context(&axis, &signals, &[], &params);
+
+        assert_eq!(results[0].value, Some(Value::NEG_INFINITY));
+        assert_eq!(results[1].value, Some(-1.0e50));
+        assert!(results.iter().all(|result| result.passed), "{results:?}");
     }
 
     fn derivative_statement(
@@ -3606,6 +3780,119 @@ mod tests {
                 .map(|record| record.value)
                 .collect::<Vec<_>>(),
             vec![10.0, 30.0, 50.0]
+        );
+    }
+
+    #[test]
+    fn continuous_find_and_derivative_preserve_extended_real_values() {
+        let axis = [0.0, 1.0];
+        let crossing = [-1.0, 1.0];
+        let constant_infinite = [Value::NEG_INFINITY, Value::NEG_INFINITY];
+        let infinite_slope = [0.0, Value::INFINITY];
+        let mut signals = HashMap::new();
+        signals.insert("CROSSING".to_string(), crossing.as_slice());
+        signals.insert(
+            "CONSTANT_INFINITY".to_string(),
+            constant_infinite.as_slice(),
+        );
+        signals.insert("INFINITE_SLOPE".to_string(), infinite_slope.as_slice());
+        let when = || WhenCondition {
+            left: "CROSSING".to_string(),
+            right: MeasureOperand::Constant(0.0),
+            occurrence: EventOccurrence::default(),
+        };
+        let mut engine = MeasureEngine::new();
+        engine.add(continuous_statement(
+            "find",
+            MeasureType::Find {
+                signal: "CONSTANT_INFINITY".to_string(),
+                at: None,
+                when: Some(when()),
+                from: None,
+                to: None,
+                td: None,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
+            },
+        ));
+        engine.add(continuous_statement(
+            "derivative",
+            MeasureType::Derivative {
+                signal: "INFINITE_SLOPE".to_string(),
+                at: None,
+                when: Some(when()),
+                from: None,
+                to: None,
+                td: None,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
+            },
+        ));
+
+        let results = engine.evaluate_continuous(&axis, &signals, &[]);
+        assert_eq!(results[0].records[0].value, Value::NEG_INFINITY);
+        assert_eq!(results[1].records[0].value, Value::INFINITY);
+        assert!(results.iter().all(|result| result.failure.is_none()));
+    }
+
+    #[test]
+    fn continuous_extended_real_undefined_results_fail_closed() {
+        let axis = [0.0, 1.0, 2.0];
+        let crossing = [-1.0, 1.0, -1.0];
+        let opposite_infinities = [Value::INFINITY, Value::NEG_INFINITY, Value::NEG_INFINITY];
+        let mixed_derivative = [Value::INFINITY, Value::INFINITY, 0.0];
+        let mut signals = HashMap::new();
+        signals.insert("CROSSING".to_string(), crossing.as_slice());
+        signals.insert("OPPOSITE".to_string(), opposite_infinities.as_slice());
+        signals.insert("MIXED_DERIVATIVE".to_string(), mixed_derivative.as_slice());
+        let when = || WhenCondition {
+            left: "CROSSING".to_string(),
+            right: MeasureOperand::Constant(0.0),
+            occurrence: EventOccurrence::default(),
+        };
+        let mut engine = MeasureEngine::new();
+        engine.add(continuous_statement(
+            "find_at",
+            MeasureType::Find {
+                signal: "OPPOSITE".to_string(),
+                at: Some(0.5),
+                when: None,
+                from: None,
+                to: None,
+                td: None,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
+            },
+        ));
+        engine.add(continuous_statement(
+            "find_when",
+            MeasureType::Find {
+                signal: "OPPOSITE".to_string(),
+                at: None,
+                when: Some(when()),
+                from: None,
+                to: None,
+                td: None,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
+            },
+        ));
+        engine.add(continuous_statement(
+            "derivative",
+            MeasureType::Derivative {
+                signal: "MIXED_DERIVATIVE".to_string(),
+                at: None,
+                when: Some(when()),
+                from: None,
+                to: None,
+                td: None,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
+            },
+        ));
+
+        let results = engine.evaluate_continuous(&axis, &signals, &[]);
+        assert!(results.iter().all(|result| result.failure.is_some()));
+        assert!(results.iter().all(|result| result.records.is_empty()));
+        assert!(
+            results
+                .iter()
+                .all(|result| result.validate_invariants().is_ok())
         );
     }
 

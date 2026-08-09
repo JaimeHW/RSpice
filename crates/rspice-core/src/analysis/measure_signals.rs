@@ -14,13 +14,16 @@ use std::collections::{HashMap, HashSet};
 
 use super::measure::{
     ContinuousMeasureResult, MeasureEngine, MeasureOperand, MeasureResult, MeasureStatement,
-    MeasureType, TriggerEvent,
+    MeasureType, TriggerEvent, canonical_measure_signal_name,
 };
 use crate::Value;
 use crate::analysis::{AcResult, NoiseContributionKind, NoiseContributionProbe};
 use crate::engine::TransientResult;
-use crate::netlist::Netlist;
 use crate::netlist::expr::Expr as NetExpr;
+use crate::netlist::{
+    InterfaceNodeAliases, Netlist, OutputAnalysisKind, canonical_symbol,
+    collect_requested_interface_node_aliases,
+};
 use crate::solver::SimulationResult;
 
 /// Insert `key` plus its lower/upper-case spellings.
@@ -64,6 +67,262 @@ fn insert_wrapped_variants<'a>(
         format!("{lower_prefix}({})", raw.to_ascii_uppercase()),
     ] {
         signals.insert(key, waveform);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MeasurementSignalDomain {
+    Real,
+    Complex,
+}
+
+impl MeasurementSignalDomain {
+    fn for_analysis(analysis: OutputAnalysisKind) -> Result<Self, String> {
+        match analysis {
+            OutputAnalysisKind::Tran | OutputAnalysisKind::Dc => Ok(Self::Real),
+            OutputAnalysisKind::Ac | OutputAnalysisKind::Noise => Ok(Self::Complex),
+            other => Err(format!(
+                "interface-node measurement projection does not support {other:?} analysis"
+            )),
+        }
+    }
+
+    fn supports_voltage_accessor(self, accessor: &str) -> bool {
+        match self {
+            Self::Real => accessor == "V",
+            Self::Complex => matches!(accessor, "V" | "VM" | "VR" | "VI" | "VP" | "VDB"),
+        }
+    }
+}
+
+/// Measurement-referenced subcircuit aliases plus accessor-specific ground
+/// storage. Xyce materializes only requested aliases; retaining that policy
+/// avoids multiplying every result table by every unused interface port.
+struct InterfaceNodeAliasProjection {
+    aliases: InterfaceNodeAliases,
+    requested_accessors: HashMap<String, HashMap<String, HashSet<String>>>,
+    domain: MeasurementSignalDomain,
+    ground_zero: Option<Vec<Value>>,
+    ground_decibels: Option<Vec<Value>>,
+}
+
+impl InterfaceNodeAliasProjection {
+    fn new(
+        netlist: &Netlist,
+        analysis: OutputAnalysisKind,
+        point_count: usize,
+    ) -> Result<Self, String> {
+        let domain = MeasurementSignalDomain::for_analysis(analysis)?;
+        let mut requested_accessors = HashMap::<String, HashMap<String, HashSet<String>>>::new();
+        for request in netlist.output_requests.iter().filter(|request| {
+            request.directive == crate::netlist::OutputDirectiveKind::Measure
+                && request.analysis == Some(analysis)
+        }) {
+            for dependency in &request.dependencies {
+                let accessor = dependency.operator.to_ascii_uppercase();
+                if dependency.kind == crate::netlist::OutputSymbolKind::Node
+                    && domain.supports_voltage_accessor(&accessor)
+                {
+                    requested_accessors
+                        .entry(canonical_symbol(
+                            netlist.ground_policy().canonical_node(&dependency.symbol),
+                        ))
+                        .or_default()
+                        .entry(accessor)
+                        .or_default()
+                        .insert(dependency.symbol.clone());
+                }
+            }
+        }
+        let requested_aliases = requested_accessors
+            .keys()
+            .filter(|alias| alias.as_str() != "0")
+            .cloned()
+            .collect::<HashSet<_>>();
+        let aliases = collect_requested_interface_node_aliases(netlist, &requested_aliases)
+            .map_err(|error| format!("failed to collect interface-node aliases: {error}"))?;
+        let direct_ground_accessors = requested_accessors.get("0");
+        let mut needs_ground_zero = direct_ground_accessors
+            .is_some_and(|accessors| accessors.keys().any(|accessor| accessor != "VDB"));
+        let mut needs_ground_decibels =
+            direct_ground_accessors.is_some_and(|accessors| accessors.contains_key("VDB"));
+        for (alias, _) in aliases.iter().filter(|(_, target)| *target == "0") {
+            let Some(accessors) = requested_accessors.get(alias) else {
+                continue;
+            };
+            needs_ground_zero |= accessors.keys().any(|accessor| accessor != "VDB");
+            needs_ground_decibels |= accessors.contains_key("VDB");
+        }
+        Ok(Self {
+            aliases,
+            requested_accessors,
+            domain,
+            ground_zero: needs_ground_zero.then(|| vec![0.0; point_count]),
+            ground_decibels: needs_ground_decibels.then(|| vec![Value::NEG_INFINITY; point_count]),
+        })
+    }
+
+    fn ground_waveform(&self, accessor: &str) -> Option<&[Value]> {
+        if !self.domain.supports_voltage_accessor(accessor) {
+            return None;
+        }
+        if accessor == "VDB" {
+            self.ground_decibels.as_deref()
+        } else {
+            self.ground_zero.as_deref()
+        }
+    }
+
+    /// Add only referenced voltage spellings supported by the active analysis.
+    /// Existing physical signals win over aliases, matching Xyce's
+    /// solution-node-first lookup. Both hierarchy separators are emitted so
+    /// authored Xyce `:` paths address RSpice's canonical `.` flattening.
+    fn augment<'a>(&'a self, signals: &mut HashMap<String, &'a [Value]>) -> Result<(), String> {
+        let physical_signals = CanonicalMeasureSignalIndex::new(signals);
+
+        if let Some(accessors) = self.requested_accessors.get("0") {
+            for (accessor, authored_nodes) in accessors {
+                if let Some(waveform) = self.ground_waveform(accessor) {
+                    insert_interface_alias_spellings(
+                        signals,
+                        "0",
+                        Some(accessor.as_str()),
+                        authored_nodes,
+                        waveform,
+                    );
+                    if accessor == "V" && self.domain == MeasurementSignalDomain::Real {
+                        insert_interface_alias_spellings(
+                            signals,
+                            "0",
+                            None,
+                            authored_nodes,
+                            waveform,
+                        );
+                    }
+                }
+            }
+        }
+
+        for (alias, target) in self.aliases.iter() {
+            let Some(accessors) = self.requested_accessors.get(alias) else {
+                continue;
+            };
+            for (accessor, authored_aliases) in accessors {
+                let alias_probe = format!("{accessor}({alias})");
+                let target_waveform = if target == "0" {
+                    self.ground_waveform(accessor)
+                } else {
+                    let target_probe = format!("{accessor}({target})");
+                    physical_signals.get(&target_probe)?
+                };
+                let waveform = physical_signals.get(&alias_probe)?.or(target_waveform);
+                if let Some(waveform) = waveform {
+                    insert_interface_alias_spellings(
+                        signals,
+                        alias,
+                        Some(accessor.as_str()),
+                        authored_aliases,
+                        waveform,
+                    );
+                }
+
+                // Real-domain TRAN/DC differential voltages resolve their
+                // nodes from bare names. AC/NOISE maps deliberately omit those
+                // names because their scalar V() accessor is a projection.
+                if accessor == "V" && self.domain == MeasurementSignalDomain::Real {
+                    let target_waveform = if target == "0" {
+                        self.ground_zero.as_deref()
+                    } else {
+                        physical_signals.get(target)?
+                    };
+                    let waveform = physical_signals.get(alias)?.or(target_waveform);
+                    if let Some(waveform) = waveform {
+                        insert_interface_alias_spellings(
+                            signals,
+                            alias,
+                            None,
+                            authored_aliases,
+                            waveform,
+                        );
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+struct IndexedMeasureSignal<'a> {
+    waveform: &'a [Value],
+    first_name: String,
+    conflicting_name: Option<String>,
+}
+
+/// Canonical, ambiguity-aware snapshot of a measurement signal table.
+///
+/// Case, hierarchy separators, and insignificant whitespace normalize once.
+/// Distinct physical columns that collapse to one key are retained as a typed
+/// lookup failure instead of depending on `HashMap` iteration order.
+struct CanonicalMeasureSignalIndex<'a> {
+    signals: HashMap<String, IndexedMeasureSignal<'a>>,
+}
+
+impl<'a> CanonicalMeasureSignalIndex<'a> {
+    fn new(signals: &HashMap<String, &'a [Value]>) -> Self {
+        let mut index = HashMap::<String, IndexedMeasureSignal<'a>>::with_capacity(signals.len());
+        for (name, waveform) in signals {
+            let canonical = canonical_measure_signal_name(name);
+            index
+                .entry(canonical)
+                .and_modify(|existing| {
+                    if existing.waveform.len() != waveform.len()
+                        || !std::ptr::eq(existing.waveform.as_ptr(), waveform.as_ptr())
+                    {
+                        existing
+                            .conflicting_name
+                            .get_or_insert_with(|| name.to_string());
+                    }
+                })
+                .or_insert_with(|| IndexedMeasureSignal {
+                    waveform: *waveform,
+                    first_name: name.to_string(),
+                    conflicting_name: None,
+                });
+        }
+        Self { signals: index }
+    }
+
+    fn get(&self, requested: &str) -> Result<Option<&'a [Value]>, String> {
+        let canonical = canonical_measure_signal_name(requested);
+        let Some(indexed) = self.signals.get(&canonical) else {
+            return Ok(None);
+        };
+        if let Some(conflicting_name) = &indexed.conflicting_name {
+            return Err(format!(
+                "measurement signal '{requested}' is ambiguous: '{}' and '{}' normalize to '{canonical}'",
+                indexed.first_name, conflicting_name
+            ));
+        }
+        Ok(Some(indexed.waveform))
+    }
+}
+
+fn insert_interface_alias_spellings<'a>(
+    signals: &mut HashMap<String, &'a [Value]>,
+    canonical_alias: &str,
+    accessor: Option<&str>,
+    authored_aliases: &HashSet<String>,
+    waveform: &'a [Value],
+) {
+    let colon_alias = canonical_alias.replace('.', ":");
+    for alias in std::iter::once(canonical_alias)
+        .chain(std::iter::once(colon_alias.as_str()))
+        .chain(authored_aliases.iter().map(String::as_str))
+    {
+        let key = accessor
+            .map(|accessor| format!("{accessor}({alias})"))
+            .unwrap_or_else(|| alias.to_string());
+        insert_case_variants(signals, &key, waveform);
     }
 }
 
@@ -137,7 +396,10 @@ pub fn evaluate_tran_equation_measurements(
     netlist: &Netlist,
     result: &TransientResult,
 ) -> Result<Vec<EquationMeasureTrace>, String> {
-    let signals = transient_signal_map(result);
+    let alias_projection =
+        InterfaceNodeAliasProjection::new(netlist, OutputAnalysisKind::Tran, result.time.len())?;
+    let mut signals = transient_signal_map(result);
+    alias_projection.augment(&mut signals)?;
     evaluate_equation_measurements(netlist, "TRAN", &result.time, &signals, -1.0, None)
 }
 
@@ -154,7 +416,10 @@ pub fn evaluate_dc_equation_measurements(
     let Some(series) = DcSweepSeries::from_sweep(sweep) else {
         return Ok(Vec::new());
     };
-    let signals = series.signal_map();
+    let alias_projection =
+        InterfaceNodeAliasProjection::new(netlist, OutputAnalysisKind::Dc, series.axis().len())?;
+    let mut signals = series.signal_map();
+    alias_projection.augment(&mut signals)?;
     evaluate_equation_measurements(
         netlist,
         "DC",
@@ -179,7 +444,10 @@ pub fn evaluate_ac_equation_measurements(
     let Some(series) = AcSweepSeries::from_sweep(sweep) else {
         return Ok(Vec::new());
     };
-    let signals = series.equation_signal_map();
+    let alias_projection =
+        InterfaceNodeAliasProjection::new(netlist, OutputAnalysisKind::Ac, series.axis().len())?;
+    let mut signals = series.equation_signal_map();
+    alias_projection.augment(&mut signals)?;
     evaluate_equation_measurements(netlist, "AC", series.axis(), &signals, -1.0, None)
 }
 
@@ -197,7 +465,10 @@ pub fn evaluate_noise_equation_measurements(
     let Some(series) = NoiseSweepSeries::from_sweep(sweep)? else {
         return Ok(Vec::new());
     };
-    let signals = series.equation_signal_map();
+    let alias_projection =
+        InterfaceNodeAliasProjection::new(netlist, OutputAnalysisKind::Noise, series.axis().len())?;
+    let mut signals = series.equation_signal_map();
+    alias_projection.augment(&mut signals)?;
     evaluate_equation_measurements(netlist, "NOISE", series.axis(), &signals, -1.0, None)
 }
 
@@ -299,6 +570,7 @@ fn evaluate_equation_measurements(
         .iter()
         .map(|program| (program.statement.name.to_ascii_uppercase(), program.current))
         .collect::<HashMap<_, _>>();
+    let signal_index = CanonicalMeasureSignalIndex::new(signals);
 
     for (row, &axis_value) in axis.iter().enumerate() {
         for program in &mut programs {
@@ -309,8 +581,12 @@ fn evaluate_equation_measurements(
                 program.td,
                 dc_sweep_ascending,
             ) {
-                let bound =
-                    bind_equation_expression(&program.expression, row, signals, &current_values)?;
+                let bound = bind_equation_expression(
+                    &program.expression,
+                    row,
+                    &signal_index,
+                    &current_values,
+                )?;
                 let value = crate::netlist::expr::evaluate_complex(&bound, &netlist.params)
                     .map_err(|err| {
                         format!(
@@ -318,9 +594,9 @@ fn evaluate_equation_measurements(
                             program.statement.name
                         )
                     })?;
-                if !value.is_real() || !value.re.is_finite() {
+                if !value.is_real() || value.re.is_nan() {
                     return Err(format!(
-                        "continuous measure '{}' produced non-real or non-finite value at row {row}",
+                        "continuous measure '{}' produced a non-real or NaN value at row {row}",
                         program.statement.name
                     ));
                 }
@@ -372,7 +648,7 @@ fn equation_axis_is_in_window(
 fn bind_equation_expression(
     expression: &NetExpr,
     row: usize,
-    signals: &HashMap<String, &[Value]>,
+    signals: &CanonicalMeasureSignalIndex<'_>,
     measures: &HashMap<String, Value>,
 ) -> Result<NetExpr, String> {
     Ok(match expression {
@@ -381,13 +657,17 @@ fn bind_equation_expression(
                 name.to_ascii_uppercase().as_str(),
                 "TIME" | "FREQ" | "FREQUENCY" | "HERTZ"
             );
-            if is_axis_symbol
-                && let Some(value) = lookup_equation_signal_optional(signals, name, row)
-            {
-                NetExpr::Number(value)
+            if is_axis_symbol {
+                if let Some(value) = lookup_equation_signal_optional(signals, name, row)? {
+                    NetExpr::Number(value)
+                } else if let Some(value) = measures.get(&name.to_ascii_uppercase()).copied() {
+                    NetExpr::Number(value)
+                } else {
+                    expression.clone()
+                }
             } else if let Some(value) = measures.get(&name.to_ascii_uppercase()).copied() {
                 NetExpr::Number(value)
-            } else if let Some(value) = lookup_equation_signal_optional(signals, name, row) {
+            } else if let Some(value) = lookup_equation_signal_optional(signals, name, row)? {
                 NetExpr::Number(value)
             } else {
                 expression.clone()
@@ -475,23 +755,22 @@ fn equation_probe_argument(argument: Option<&NetExpr>) -> Option<String> {
 }
 
 fn lookup_equation_signal(
-    signals: &HashMap<String, &[Value]>,
+    signals: &CanonicalMeasureSignalIndex<'_>,
     name: &str,
     row: usize,
 ) -> Result<Value, String> {
-    lookup_equation_signal_optional(signals, name, row)
+    lookup_equation_signal_optional(signals, name, row)?
         .ok_or_else(|| format!("continuous measure signal '{name}' is unavailable at row {row}"))
 }
 
 fn lookup_equation_signal_optional(
-    signals: &HashMap<String, &[Value]>,
+    signals: &CanonicalMeasureSignalIndex<'_>,
     name: &str,
     row: usize,
-) -> Option<Value> {
-    signals
-        .iter()
-        .find_map(|(candidate, values)| candidate.eq_ignore_ascii_case(name).then_some(*values))
-        .and_then(|values| values.get(row).copied())
+) -> Result<Option<Value>, String> {
+    Ok(signals
+        .get(name)?
+        .and_then(|values| values.get(row).copied()))
 }
 
 /// Owned per-signal series extracted from a DC sweep, from which a
@@ -612,10 +891,7 @@ struct ComplexProjectionSeries {
 impl ComplexProjectionSeries {
     fn push(&mut self, prefix: char, raw: &str, values: Vec<crate::Complex64>) {
         let magnitude: Vec<Value> = values.iter().map(|c| c.norm()).collect();
-        let db: Vec<Value> = magnitude
-            .iter()
-            .map(|m| if *m > 1e-30 { 20.0 * m.log10() } else { -600.0 })
-            .collect();
+        let db: Vec<Value> = magnitude.iter().map(|m| 20.0 * m.log10()).collect();
         let phase_deg: Vec<Value> = values.iter().map(|c| c.arg().to_degrees()).collect();
         let real: Vec<Value> = values.iter().map(|c| c.re).collect();
         let imag: Vec<Value> = values.iter().map(|c| c.im).collect();
@@ -941,11 +1217,23 @@ pub fn evaluate_noise_measurements(
                 .collect();
         }
     };
-    let signals = series.equation_signal_map();
+    let alias_projection = match InterfaceNodeAliasProjection::new(
+        netlist,
+        OutputAnalysisKind::Noise,
+        series.axis().len(),
+    ) {
+        Ok(projection) => projection,
+        Err(error) => return failed_measurements(&statements, &error),
+    };
+    let mut signals = series.equation_signal_map();
+    if let Err(error) = alias_projection.augment(&mut signals) {
+        return failed_measurements(&statements, &error);
+    }
     // NOISE equations participate in the accepted-point stream just like AC
     // equations. A later WHEN/FIND-WHEN statement must see the equation's
     // current value as a waveform, rather than only its final scalar result.
-    let equation_traces = evaluate_noise_equation_measurements(netlist, sweep);
+    let equation_traces =
+        evaluate_equation_measurements(netlist, "NOISE", series.axis(), &signals, -1.0, None);
     let mut results = match &equation_traces {
         Ok(traces) => evaluate_statements_with_equation_traces(
             &statements,
@@ -1000,7 +1288,18 @@ pub fn evaluate_noise_continuous_measurements(
                 .collect();
         }
     };
-    let signals = series.equation_signal_map();
+    let alias_projection = match InterfaceNodeAliasProjection::new(
+        netlist,
+        OutputAnalysisKind::Noise,
+        series.axis().len(),
+    ) {
+        Ok(projection) => projection,
+        Err(error) => return failed_continuous_measurements(&statements, &error),
+    };
+    let mut signals = series.equation_signal_map();
+    if let Err(error) = alias_projection.augment(&mut signals) {
+        return failed_continuous_measurements(&statements, &error);
+    }
     evaluate_continuous_statements(&statements, series.axis(), signals, &netlist.params, &[])
 }
 
@@ -1036,6 +1335,28 @@ pub fn measurements_for_analysis<'a>(
         .collect()
 }
 
+fn failed_measurements(statements: &[&MeasureStatement], reason: &str) -> Vec<MeasureResult> {
+    statements
+        .iter()
+        .map(|statement| MeasureResult::failed(&statement.name, reason))
+        .collect()
+}
+
+fn failed_continuous_measurements(
+    statements: &[&MeasureStatement],
+    reason: &str,
+) -> Vec<ContinuousMeasureResult> {
+    statements
+        .iter()
+        .map(|statement| ContinuousMeasureResult {
+            name: statement.name.clone(),
+            records: Vec::new(),
+            failure: Some(reason.to_string()),
+            failure_metadata: None,
+        })
+        .collect()
+}
+
 fn evaluate_statements(
     statements: &[&MeasureStatement],
     axis: &[Value],
@@ -1061,7 +1382,12 @@ fn evaluate_statements_with_segment_starts(
     for statement in statements {
         engine.add((*statement).clone());
     }
-    engine.evaluate_with_segment_starts(axis, &augmented_signals, segment_starts)
+    engine.evaluate_with_segment_starts_and_context(
+        axis,
+        &augmented_signals,
+        segment_starts,
+        params,
+    )
 }
 
 fn evaluate_statements_with_equation_traces(
@@ -1140,7 +1466,12 @@ fn evaluate_statements_with_equation_traces(
     for statement in statements {
         engine.add((*statement).clone());
     }
-    engine.evaluate_with_segment_starts_and_signal_maps(axis, &signal_maps, segment_starts)
+    engine.evaluate_with_segment_starts_and_signal_maps_and_context(
+        axis,
+        &signal_maps,
+        segment_starts,
+        params,
+    )
 }
 
 fn overlay_continuous_equation_results(
@@ -1263,6 +1594,7 @@ fn materialize_measure_expression_signals(
         }
     }
 
+    let signal_index = CanonicalMeasureSignalIndex::new(signals);
     names
         .into_iter()
         .filter_map(|name| {
@@ -1271,9 +1603,10 @@ fn materialize_measure_expression_signals(
             let mut waveform = Vec::with_capacity(axis.len());
             let measures = HashMap::new();
             for row in 0..axis.len() {
-                let bound = bind_equation_expression(&expression, row, signals, &measures).ok()?;
+                let bound =
+                    bind_equation_expression(&expression, row, &signal_index, &measures).ok()?;
                 let value = crate::netlist::expr::evaluate_complex(&bound, params).ok()?;
-                if !value.is_real() || !value.re.is_finite() {
+                if !value.is_real() || value.re.is_nan() {
                     return None;
                 }
                 waveform.push(value.re);
@@ -1287,14 +1620,13 @@ fn materialize_differential_voltage_signals(
     statements: &[&MeasureStatement],
     point_count: usize,
     signals: &HashMap<String, &[Value]>,
-) -> Vec<(String, Vec<Value>)> {
+) -> Result<Vec<(String, Vec<Value>)>, String> {
     let mut names = Vec::new();
+    let mut seen_names = HashSet::new();
     let mut add = |name: &str| {
         let trimmed = name.trim();
         if differential_voltage_nodes(trimmed).is_some()
-            && !names
-                .iter()
-                .any(|candidate: &String| candidate.eq_ignore_ascii_case(trimmed))
+            && seen_names.insert(canonical_measure_signal_name(trimmed))
         {
             names.push(trimmed.to_string());
         }
@@ -1348,20 +1680,28 @@ fn materialize_differential_voltage_signals(
         }
     }
 
-    names
-        .into_iter()
-        .filter_map(|name| {
-            let (positive, negative) = differential_voltage_nodes(&name)?;
-            let positive = measurement_node_waveform(positive, point_count, signals)?;
-            let negative = measurement_node_waveform(negative, point_count, signals)?;
-            let waveform = positive
-                .iter()
-                .zip(negative)
-                .map(|(positive, negative)| positive - negative)
-                .collect();
-            Some((name, waveform))
-        })
-        .collect()
+    let signal_index = CanonicalMeasureSignalIndex::new(signals);
+    let mut materialized = Vec::with_capacity(names.len());
+    for name in names {
+        let Some((positive, negative)) = differential_voltage_nodes(&name) else {
+            continue;
+        };
+        let Some(positive) = measurement_node_waveform(positive, point_count, &signal_index)?
+        else {
+            continue;
+        };
+        let Some(negative) = measurement_node_waveform(negative, point_count, &signal_index)?
+        else {
+            continue;
+        };
+        let waveform = positive
+            .iter()
+            .zip(negative)
+            .map(|(positive, negative)| positive - negative)
+            .collect();
+        materialized.push((name, waveform));
+    }
+    Ok(materialized)
 }
 
 fn differential_voltage_nodes(signal: &str) -> Option<(&str, &str)> {
@@ -1376,18 +1716,24 @@ fn differential_voltage_nodes(signal: &str) -> Option<(&str, &str)> {
     (!positive.is_empty() && !negative.is_empty()).then_some((positive, negative))
 }
 
-fn measurement_node_waveform(
+fn measurement_node_waveform<'a>(
     node: &str,
     point_count: usize,
-    signals: &HashMap<String, &[Value]>,
-) -> Option<Vec<Value>> {
+    signals: &CanonicalMeasureSignalIndex<'a>,
+) -> Result<Option<Vec<Value>>, String> {
     if node == "0" {
-        return Some(vec![0.0; point_count]);
+        return Ok(Some(vec![0.0; point_count]));
     }
-    signals
-        .iter()
-        .find_map(|(candidate, waveform)| candidate.eq_ignore_ascii_case(node).then_some(*waveform))
-        .map(ToOwned::to_owned)
+    let Some(waveform) = signals.get(node)? else {
+        return Ok(None);
+    };
+    if waveform.len() != point_count {
+        return Err(format!(
+            "measurement node '{node}' has {} points, expected {point_count}",
+            waveform.len()
+        ));
+    }
+    Ok(Some(waveform.to_owned()))
 }
 
 /// Evaluate the netlist's transient .MEAS statements against a result.
@@ -1401,9 +1747,23 @@ pub fn evaluate_tran_measurements(
     if statements.is_empty() {
         return Vec::new();
     }
+    let alias_projection = match InterfaceNodeAliasProjection::new(
+        netlist,
+        OutputAnalysisKind::Tran,
+        result.time.len(),
+    ) {
+        Ok(projection) => projection,
+        Err(error) => return failed_measurements(&statements, &error),
+    };
     let mut signals = transient_signal_map(result);
+    if let Err(error) = alias_projection.augment(&mut signals) {
+        return failed_measurements(&statements, &error);
+    }
     let differential_signals =
-        materialize_differential_voltage_signals(&statements, result.time.len(), &signals);
+        match materialize_differential_voltage_signals(&statements, result.time.len(), &signals) {
+            Ok(signals) => signals,
+            Err(error) => return failed_measurements(&statements, &error),
+        };
     for (name, waveform) in &differential_signals {
         insert_case_variants(&mut signals, name, waveform);
     }
@@ -1411,7 +1771,7 @@ pub fn evaluate_tran_measurements(
     overlay_continuous_equation_results(
         &statements,
         &mut results,
-        evaluate_tran_equation_measurements(netlist, result),
+        evaluate_equation_measurements(netlist, "TRAN", &result.time, &signals, -1.0, None),
         "TRAN",
     );
     results
@@ -1441,9 +1801,23 @@ pub fn evaluate_tran_continuous_measurements(
             })
             .collect();
     }
+    let alias_projection = match InterfaceNodeAliasProjection::new(
+        netlist,
+        OutputAnalysisKind::Tran,
+        result.time.len(),
+    ) {
+        Ok(projection) => projection,
+        Err(error) => return failed_continuous_measurements(&statements, &error),
+    };
     let mut signals = transient_signal_map(result);
+    if let Err(error) = alias_projection.augment(&mut signals) {
+        return failed_continuous_measurements(&statements, &error);
+    }
     let differential_signals =
-        materialize_differential_voltage_signals(&statements, result.time.len(), &signals);
+        match materialize_differential_voltage_signals(&statements, result.time.len(), &signals) {
+            Ok(signals) => signals,
+            Err(error) => return failed_continuous_measurements(&statements, &error),
+        };
     for (name, waveform) in &differential_signals {
         insert_case_variants(&mut signals, name, waveform);
     }
@@ -1493,7 +1867,18 @@ pub fn evaluate_dc_continuous_measurements_with_parameter_contexts(
             })
             .collect();
     };
+    let alias_projection = match InterfaceNodeAliasProjection::new(
+        netlist,
+        OutputAnalysisKind::Dc,
+        series.axis().len(),
+    ) {
+        Ok(projection) => projection,
+        Err(error) => return failed_continuous_measurements(&statements, &error),
+    };
     let mut signals = series.signal_map();
+    if let Err(error) = alias_projection.augment(&mut signals) {
+        return failed_continuous_measurements(&statements, &error);
+    }
     let parameter_series = if point_params.is_empty() {
         Vec::new()
     } else if point_params.len() != series.axis().len() {
@@ -1514,8 +1899,14 @@ pub fn evaluate_dc_continuous_measurements_with_parameter_contexts(
     for (name, waveform) in &parameter_series {
         insert_case_variants(&mut signals, name, waveform);
     }
-    let differential_signals =
-        materialize_differential_voltage_signals(&statements, series.axis().len(), &signals);
+    let differential_signals = match materialize_differential_voltage_signals(
+        &statements,
+        series.axis().len(),
+        &signals,
+    ) {
+        Ok(signals) => signals,
+        Err(error) => return failed_continuous_measurements(&statements, &error),
+    };
     for (name, waveform) in &differential_signals {
         insert_case_variants(&mut signals, name, waveform);
     }
@@ -1564,7 +1955,18 @@ pub fn evaluate_dc_measurements_with_parameter_contexts(
             .map(|m| MeasureResult::failed(&m.name, "DC sweep produced no points"))
             .collect();
     };
+    let alias_projection = match InterfaceNodeAliasProjection::new(
+        netlist,
+        OutputAnalysisKind::Dc,
+        series.axis().len(),
+    ) {
+        Ok(projection) => projection,
+        Err(error) => return failed_measurements(&statements, &error),
+    };
     let mut signals = series.signal_map();
+    if let Err(error) = alias_projection.augment(&mut signals) {
+        return failed_measurements(&statements, &error);
+    }
     let parameter_series = if point_params.is_empty() {
         Vec::new()
     } else if point_params.len() != series.axis().len() {
@@ -1583,8 +1985,14 @@ pub fn evaluate_dc_measurements_with_parameter_contexts(
     for (name, waveform) in &parameter_series {
         insert_case_variants(&mut signals, name, waveform);
     }
-    let differential_signals =
-        materialize_differential_voltage_signals(&statements, series.axis().len(), &signals);
+    let differential_signals = match materialize_differential_voltage_signals(
+        &statements,
+        series.axis().len(),
+        &signals,
+    ) {
+        Ok(signals) => signals,
+        Err(error) => return failed_measurements(&statements, &error),
+    };
     for (name, waveform) in &differential_signals {
         insert_case_variants(&mut signals, name, waveform);
     }
@@ -1736,13 +2144,19 @@ pub fn evaluate_ac_continuous_measurements(
             })
             .collect();
     };
-    evaluate_continuous_statements(
-        &statements,
-        series.axis(),
-        series.equation_signal_map(),
-        &netlist.params,
-        &[],
-    )
+    let alias_projection = match InterfaceNodeAliasProjection::new(
+        netlist,
+        OutputAnalysisKind::Ac,
+        series.axis().len(),
+    ) {
+        Ok(projection) => projection,
+        Err(error) => return failed_continuous_measurements(&statements, &error),
+    };
+    let mut signals = series.equation_signal_map();
+    if let Err(error) = alias_projection.augment(&mut signals) {
+        return failed_continuous_measurements(&statements, &error);
+    }
+    evaluate_continuous_statements(&statements, series.axis(), signals, &netlist.params, &[])
 }
 
 /// Evaluate the netlist's AC .MEAS statements against a sweep.
@@ -1764,11 +2178,23 @@ pub fn evaluate_ac_measurements(netlist: &Netlist, sweep: &[AcResult]) -> Vec<Me
             .map(|m| MeasureResult::failed(&m.name, "AC sweep produced no points"))
             .collect();
     };
-    let signals = series.equation_signal_map();
+    let alias_projection = match InterfaceNodeAliasProjection::new(
+        netlist,
+        OutputAnalysisKind::Ac,
+        series.axis().len(),
+    ) {
+        Ok(projection) => projection,
+        Err(error) => return failed_measurements(&statements, &error),
+    };
+    let mut signals = series.equation_signal_map();
+    if let Err(error) = alias_projection.augment(&mut signals) {
+        return failed_measurements(&statements, &error);
+    }
     // Continuous equation measures participate in the accepted-point stream.
     // A later WHEN/FIND-WHEN statement therefore observes the equation's
     // current value as a waveform, not only its final scalar result.
-    let equation_traces = evaluate_ac_equation_measurements(netlist, sweep);
+    let equation_traces =
+        evaluate_equation_measurements(netlist, "AC", series.axis(), &signals, -1.0, None);
     let mut results = match &equation_traces {
         Ok(traces) => evaluate_statements_with_equation_traces(
             &statements,
@@ -1910,6 +2336,277 @@ mod tests {
     }
 
     #[test]
+    fn transient_measurements_resolve_direct_expression_and_nested_interface_aliases() {
+        let netlist = Netlist::parse(
+            "BUG 1962 interface measurements\n\
+             V1 1 0 0\n\
+             X1 1 2 CELL1\n\
+             X2 1 4 CELL2\n\
+             X3 1 5 OUTER\n\
+             .SUBCKT CELL1 A C\n\
+             R1 A B 1\n\
+             R2 B C 1\n\
+             .ENDS\n\
+             .SUBCKT CELL2 D F\n\
+             R1 D E 1\n\
+             R2 E F 1\n\
+             .ENDS\n\
+             .SUBCKT OUTER G J\n\
+             R1 G H 1\n\
+             X1 H I CELL1\n\
+             R2 I J 1\n\
+             .ENDS\n\
+             .TRAN 1 1\n\
+             .MEASURE TRAN maxExp MAX {V(X1:a)*V(X1:c)}\n\
+             .MEASURE TRAN maxNonExp MAX V(X2:d)\n\
+             .MEASURE TRAN maxRecursive MAX {V(X3:X1.a)}\n\
+             .MEASURE TRAN liveAlias EQN {V(X3.X1:a)+1}\n\
+             .MEASURE TRAN_CONT aliasCrossing WHEN V(X3:X1.a)=0.4\n\
+             .END\n",
+        )
+        .expect("hierarchical measurement deck parses");
+        let result = TransientResult {
+            time: vec![0.0, 1.0],
+            step_sizes: vec![0.0; 2],
+            voltages: vec![vec![0.0, 1.0], vec![0.0, 1.0 / 3.0], vec![0.0, 0.8]],
+            branch_currents: Vec::new(),
+            num_nodes: 3,
+            node_names: vec!["1".to_string(), "2".to_string(), "X3.H".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+
+        let measurements = evaluate_tran_measurements(&netlist, &result);
+        assert_eq!(measurements.len(), 4);
+        assert!(
+            measurements.iter().all(|measurement| measurement.passed),
+            "{measurements:?}"
+        );
+        assert_eq!(measurements[0].value, Some(1.0 / 3.0));
+        assert_eq!(measurements[1].value, Some(1.0));
+        assert_eq!(measurements[2].value, Some(0.8));
+        assert_eq!(measurements[3].value, Some(1.8));
+
+        let continuous = evaluate_tran_continuous_measurements(&netlist, &result);
+        assert_eq!(continuous.len(), 1);
+        assert_eq!(continuous[0].failure, None);
+        assert_eq!(continuous[0].records[0].event_axis, Some(0.5));
+    }
+
+    #[test]
+    fn ground_wired_interface_aliases_support_real_voltage_operands() {
+        let netlist = Netlist::parse(
+            "ground interface aliases\n\
+             X1 1 0 CELL\n\
+             .SUBCKT CELL A B\n\
+             R1 A B 1\n\
+             .ENDS\n\
+             .TRAN 1 1\n\
+             .MEASURE TRAN literalGround MAX V(0)\n\
+             .MEASURE TRAN direct MAX V(X1:B)\n\
+             .MEASURE TRAN expression MAX {V(X1:B)+1}\n\
+             .MEASURE TRAN differential MAX V(X1:A,X1:B)\n\
+             .END\n",
+        )
+        .expect("ground alias deck parses");
+        let mut result = tran_result();
+        result.time = vec![0.0, 1.0];
+        result.step_sizes = vec![0.0; 2];
+        result.voltages = vec![vec![0.0, 2.0]];
+        result.node_names = vec!["1".to_string()];
+        result.num_nodes = 1;
+        result.branch_currents.clear();
+        result.branch_names.clear();
+
+        let measurements = evaluate_tran_measurements(&netlist, &result);
+        assert_eq!(
+            measurements
+                .iter()
+                .map(|measurement| measurement.value)
+                .collect::<Vec<_>>(),
+            vec![Some(0.0), Some(0.0), Some(1.0), Some(2.0)]
+        );
+        assert!(
+            measurements.iter().all(|measurement| measurement.passed),
+            "{measurements:?}"
+        );
+    }
+
+    #[test]
+    fn physical_node_wins_interface_alias_collision() {
+        let netlist = Netlist::parse(
+            "physical node precedence\n\
+             VREAL X1.A 0 0\n\
+             X1 1 0 CELL\n\
+             X2 X1.A 0 CELL\n\
+             .SUBCKT CELL A B\n\
+             R1 A B 1\n\
+             .ENDS\n\
+             .TRAN 1 1\n\
+             .MEASURE TRAN directCollision MAX V(X1:A)\n\
+             .MEASURE TRAN targetCollision MAX V(X2:A)\n\
+             .END\n",
+        )
+        .expect("collision deck parses");
+        let mut result = tran_result();
+        result.time = vec![0.0, 1.0];
+        result.step_sizes = vec![0.0; 2];
+        result.voltages = vec![vec![0.0, 1.0], vec![0.0, 9.0]];
+        result.node_names = vec!["1".to_string(), "X1.A".to_string()];
+        result.num_nodes = 2;
+        result.branch_currents.clear();
+        result.branch_names.clear();
+
+        let measurements = evaluate_tran_measurements(&netlist, &result);
+        assert_eq!(measurements.len(), 2);
+        assert_eq!(measurements[0].value, Some(9.0));
+        assert_eq!(measurements[1].value, Some(9.0));
+        assert!(
+            measurements.iter().all(|measurement| measurement.passed),
+            "{measurements:?}"
+        );
+    }
+
+    #[test]
+    fn canonical_signal_index_reports_hierarchy_spelling_ambiguity() {
+        let first = [1.0, 2.0];
+        let second = [3.0, 4.0];
+        let signals = HashMap::from([
+            ("V(X1.A)".to_string(), first.as_slice()),
+            ("v(x1:a)".to_string(), second.as_slice()),
+        ]);
+
+        let error = CanonicalMeasureSignalIndex::new(&signals)
+            .get("V(X1:A)")
+            .expect_err("distinct canonical columns are ambiguous");
+
+        assert!(error.contains("ambiguous"), "{error}");
+        assert!(error.contains("V(X1.A)"), "{error}");
+        assert!(error.contains("v(x1:a)"), "{error}");
+    }
+
+    #[test]
+    fn interface_projection_is_requested_and_analysis_scoped() {
+        let netlist = Netlist::parse(
+            "scoped interface projection\n\
+             X1 1 0 CELL\n\
+             X2 2 0 CELL\n\
+             .SUBCKT CELL A B\n\
+             R1 A B 1\n\
+             .ENDS\n\
+             .TRAN 1 1\n\
+             .AC LIN 2 1 2\n\
+             .MEASURE TRAN used MAX V(X1:A)\n\
+             .MEASURE AC other MAX V(X2:A)\n\
+             .END\n",
+        )
+        .expect("multi-analysis projection deck parses");
+        let first = [1.0, 2.0];
+        let second = [3.0, 4.0];
+        let mut signals = HashMap::from([
+            ("V(1)".to_string(), first.as_slice()),
+            ("1".to_string(), first.as_slice()),
+            ("V(2)".to_string(), second.as_slice()),
+            ("2".to_string(), second.as_slice()),
+        ]);
+        let projection =
+            InterfaceNodeAliasProjection::new(&netlist, OutputAnalysisKind::Tran, first.len())
+                .expect("TRAN projection builds");
+
+        projection
+            .augment(&mut signals)
+            .expect("selected TRAN alias projects");
+
+        assert_eq!(signals["V(X1:A)"], first);
+        assert!(!signals.contains_key("V(X1:B)"));
+        assert!(!signals.contains_key("V(X2:A)"));
+    }
+
+    #[test]
+    fn transient_measurement_alias_collection_fails_recursive_hierarchy_without_recursing() {
+        let netlist = Netlist::parse(
+            "recursive measurement aliases\n\
+             X1 1 0 LOOP\n\
+             .SUBCKT LOOP A B\n\
+             XSELF A B LOOP\n\
+             .ENDS\n\
+             .TRAN 1 1\n\
+             .MEASURE TRAN maximum MAX V(X1:XSELF:A)\n\
+             .END\n",
+        )
+        .expect("syntactic parser retains recursive hierarchy");
+        let result = TransientResult {
+            time: vec![0.0, 1.0],
+            step_sizes: vec![0.0; 2],
+            voltages: vec![vec![0.0, 1.0]],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["1".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+
+        let measurements = evaluate_tran_measurements(&netlist, &result);
+        assert_eq!(measurements.len(), 1);
+        assert!(!measurements[0].passed);
+        assert!(
+            measurements[0]
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("Recursive subcircuit instantiation")),
+            "{measurements:?}"
+        );
+    }
+
+    #[test]
+    fn dc_interface_aliases_reach_direct_expression_equation_and_continuous_paths() {
+        let netlist = Netlist::parse(
+            "DC interface measurement paths\n\
+             V1 1 0 0\n\
+             X1 1 0 CELL\n\
+             .SUBCKT CELL A B\n\
+             R1 A B 1\n\
+             .ENDS\n\
+             .DC V1 0 1 1\n\
+             .MEASURE DC direct MAX V(X1:A)\n\
+             .MEASURE DC expression MAX {V(X1:A)*2}\n\
+             .MEASURE DC equation EQN {V(X1:A)+1}\n\
+             .MEASURE DC ground MAX V(0)\n\
+             .MEASURE DC_CONT crossing WHEN V(X1:A)=1.5\n\
+             .END\n",
+        )
+        .expect("DC interface deck parses");
+        let sweep = [1.0, 2.0]
+            .into_iter()
+            .enumerate()
+            .map(|(axis, voltage)| {
+                let mut point = SimulationResult::new(1, 0);
+                point.node_voltages = vec![0.0, voltage];
+                point.node_names = vec!["0".to_string(), "1".to_string()];
+                (axis as Value, point)
+            })
+            .collect::<Vec<_>>();
+
+        let scalar = evaluate_dc_measurements(&netlist, &sweep);
+        assert_eq!(
+            scalar.iter().map(|result| result.value).collect::<Vec<_>>(),
+            vec![Some(2.0), Some(4.0), Some(3.0), Some(0.0)]
+        );
+        assert!(scalar.iter().all(|result| result.passed), "{scalar:?}");
+
+        let continuous = evaluate_dc_continuous_measurements(&netlist, &sweep);
+        assert_eq!(continuous.len(), 1);
+        assert_eq!(continuous[0].failure, None);
+        assert_eq!(continuous[0].records[0].event_axis, Some(0.5));
+    }
+
+    #[test]
     fn transient_equation_scalar_results_match_final_trace_values() {
         let netlist = Netlist::parse(
             "* continuous transient equations\n\
@@ -1955,15 +2652,16 @@ mod tests {
     fn transient_measurements_materialize_direct_differential_voltage_operands() {
         let netlist = Netlist::parse(
             "* differential transient measurements\n\
-             V1 out 0 0\n\
+             V1 X1.INTERNAL 0 0\n\
              V2 reference 0 0\n\
              .tran 1 3\n\
-             .meas tran scalar WHEN V(out,reference)=1.5\n\
-             .meas tran_cont continuous FIND V(out,0) WHEN V(out,reference)=1.5\n\
+             .meas tran scalar WHEN V(X1:internal,reference)=1.5\n\
+             .meas tran_cont continuous FIND V(X1:internal,0) WHEN V(X1:internal,reference)=1.5\n\
              .end\n",
         )
         .expect("differential transient measures parse");
         let mut result = tran_result();
+        result.node_names[0] = "X1.INTERNAL".to_string();
         result.voltages.push(vec![0.0, 0.0, 0.0, 0.0]);
         result.node_names.push("reference".to_string());
         result.num_nodes = 2;
@@ -2007,6 +2705,36 @@ mod tests {
     }
 
     #[test]
+    fn ac_equations_resolve_hierarchical_derived_current_spellings() {
+        let netlist = Netlist::parse(
+            "hierarchical AC current equation\n\
+             .AC LIN 2 1 2\n\
+             .MEASURE AC currentEquation EQN {IR(X1:V1)+IM(X1:V1)}\n\
+             .END\n",
+        )
+        .expect("hierarchical current equation parses");
+        let point = |frequency, current| AcResult {
+            frequency,
+            node_names: Vec::new(),
+            branch_names: vec!["X1.V1".to_string()],
+            voltages: Vec::new(),
+            currents: vec![current],
+        };
+        let sweep = vec![
+            point(1.0, crate::Complex64::new(3.0, 4.0)),
+            point(2.0, crate::Complex64::new(5.0, 12.0)),
+        ];
+
+        let traces = evaluate_ac_equation_measurements(&netlist, &sweep)
+            .expect("hierarchical current equation evaluates");
+        assert_eq!(traces[0].values, vec![8.0, 18.0]);
+
+        let scalar = evaluate_ac_measurements(&netlist, &sweep);
+        assert_eq!(scalar[0].value, Some(18.0));
+        assert!(scalar[0].passed, "{scalar:?}");
+    }
+
+    #[test]
     fn ac_continuous_measurements_use_canonical_complex_projections() {
         let netlist = Netlist::parse(
             "AC continuous projections\n\
@@ -2041,6 +2769,115 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![(Some(1.5), 5.0), (Some(2.5), 25.0)]
         );
+    }
+
+    #[test]
+    fn ac_interface_aliases_cover_complex_equation_and_continuous_projections() {
+        let netlist = Netlist::parse(
+            "AC interface measurement paths\n\
+             V1 1 0 AC 1\n\
+             X1 1 0 CELL\n\
+             .SUBCKT CELL A B\n\
+             R1 A B 1\n\
+             .ENDS\n\
+             .AC LIN 2 1 2\n\
+             .MEASURE AC real MAX V(X1:A)\n\
+             .MEASURE AC magnitude MAX VM(X1:A)\n\
+             .MEASURE AC imaginary MAX VI(X1:A)\n\
+             .MEASURE AC phase MAX VP(X1:A)\n\
+             .MEASURE AC decibels MAX VDB(X1:A)\n\
+             .MEASURE AC groundVoltage MAX V(X1:B)\n\
+             .MEASURE AC groundDecibels MAX VDB(X1:B)\n\
+             .MEASURE AC equation EQN {V(X1:A)+VM(X1:A)}\n\
+             .MEASURE AC spacedEquation EQN {VM( X1 : A )}\n\
+             .MEASURE AC groundDbEquation EQN {VDB(X1:B)}\n\
+             .MEASURE AC_CONT crossing WHEN VR(X1:A)=2\n\
+             .END\n",
+        )
+        .expect("AC interface deck parses");
+        let point = |frequency, real, imaginary| AcResult {
+            frequency,
+            node_names: vec!["1".to_string()],
+            branch_names: Vec::new(),
+            voltages: vec![crate::Complex64::new(real, imaginary)],
+            currents: Vec::new(),
+        };
+        let sweep = vec![point(1.0, 1.0, 0.0), point(2.0, 3.0, 4.0)];
+
+        let traces = evaluate_ac_equation_measurements(&netlist, &sweep)
+            .expect("AC interface equation evaluates");
+        assert_eq!(traces[0].values, vec![2.0, 8.0]);
+        assert_eq!(traces[1].values, vec![1.0, 5.0]);
+        assert_eq!(
+            traces[2].values,
+            vec![Value::NEG_INFINITY, Value::NEG_INFINITY]
+        );
+
+        let scalar = evaluate_ac_measurements(&netlist, &sweep);
+        let result = |name: &str| {
+            scalar
+                .iter()
+                .find(|result| result.name.eq_ignore_ascii_case(name))
+                .expect("named AC interface measurement")
+        };
+        assert_eq!(result("real").value, Some(3.0));
+        assert_eq!(result("magnitude").value, Some(5.0));
+        assert_eq!(result("imaginary").value, Some(4.0));
+        assert_eq!(result("phase").value, Some(4.0_f64.atan2(3.0).to_degrees()));
+        assert_eq!(result("decibels").value, Some(20.0 * 5.0_f64.log10()));
+        assert_eq!(result("groundVoltage").value, Some(0.0));
+        assert_eq!(result("groundDecibels").value, Some(Value::NEG_INFINITY));
+        assert!(result("groundDecibels").passed);
+        assert_eq!(result("equation").value, Some(8.0));
+        assert_eq!(result("spacedEquation").value, Some(5.0));
+        assert_eq!(result("groundDbEquation").value, Some(Value::NEG_INFINITY));
+        assert!(scalar.iter().all(|result| result.passed), "{scalar:?}");
+
+        let continuous = evaluate_ac_continuous_measurements(&netlist, &sweep);
+        assert_eq!(continuous.len(), 1);
+        assert_eq!(continuous[0].failure, None);
+        assert_eq!(continuous[0].records[0].event_axis, Some(1.5));
+    }
+
+    #[test]
+    fn xyce_ac_ground_db_preserves_raw_infinity_and_saturates_equations() {
+        let netlist = Netlist::parse_with_options(
+            "Xyce ground decibel semantics\n\
+             V1 1 0 AC 1\n\
+             X1 1 0 CELL\n\
+             .SUBCKT CELL A B\n\
+             R1 A B 1\n\
+             .ENDS\n\
+             .AC LIN 2 1 2\n\
+             .MEASURE AC raw MAX VDB(0)\n\
+             .MEASURE AC equation EQN {VDB(0)}\n\
+             .MEASURE AC param PARAM='VDB(0)'\n\
+             .END\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("Xyce AC ground-decibel deck parses");
+        let point = |frequency| AcResult {
+            frequency,
+            node_names: vec!["1".to_string()],
+            branch_names: Vec::new(),
+            voltages: vec![crate::Complex64::new(1.0, 0.0)],
+            currents: Vec::new(),
+        };
+        let results = evaluate_ac_measurements(&netlist, &[point(1.0), point(2.0)]);
+        let result = |name: &str| {
+            results
+                .iter()
+                .find(|result| result.name.eq_ignore_ascii_case(name))
+                .expect("named Xyce AC measurement")
+        };
+
+        assert_eq!(result("raw").value, Some(Value::NEG_INFINITY));
+        assert_eq!(result("equation").value, Some(-1.0e50), "{results:?}");
+        assert_eq!(result("param").value, Some(-1.0e50), "{results:?}");
+        assert!(results.iter().all(|result| result.passed), "{results:?}");
     }
 
     #[test]
@@ -2271,6 +3108,53 @@ mod tests {
     }
 
     #[test]
+    fn noise_interface_aliases_cover_scalar_equation_and_continuous_paths() {
+        let netlist = Netlist::parse(
+            "NOISE interface measurement paths\n\
+             X1 1 0 CELL\n\
+             .SUBCKT CELL A B\n\
+             R1 A B 1\n\
+             .ENDS\n\
+             .MEASURE NOISE real MAX V(X1:A)\n\
+             .MEASURE NOISE magnitude MAX VM(X1:A)\n\
+             .MEASURE NOISE equation EQN {V(X1:A)+VM(X1:A)}\n\
+             .MEASURE NOISE groundDb MAX VDB(0)\n\
+             .MEASURE NOISE_CONT crossing WHEN VR(X1:A)=2\n\
+             .END\n",
+        )
+        .expect("NOISE interface deck parses");
+        let mut first = noise_point(
+            10.0,
+            crate::Complex64::new(1.0, 0.0),
+            crate::Complex64::new(0.0, 0.0),
+        );
+        first.node_names = vec!["1".to_string()];
+        let mut second = noise_point(
+            20.0,
+            crate::Complex64::new(3.0, 4.0),
+            crate::Complex64::new(0.0, 0.0),
+        );
+        second.node_names = vec!["1".to_string()];
+        let sweep = vec![first, second];
+
+        let traces = evaluate_noise_equation_measurements(&netlist, &sweep)
+            .expect("NOISE interface equation evaluates");
+        assert_eq!(traces[0].values, vec![2.0, 8.0]);
+
+        let scalar = evaluate_noise_measurements(&netlist, &sweep);
+        assert_eq!(
+            scalar.iter().map(|result| result.value).collect::<Vec<_>>(),
+            vec![Some(3.0), Some(5.0), Some(8.0), Some(Value::NEG_INFINITY)]
+        );
+        assert!(scalar.iter().all(|result| result.passed), "{scalar:?}");
+
+        let continuous = evaluate_noise_continuous_measurements(&netlist, &sweep);
+        assert_eq!(continuous.len(), 1);
+        assert_eq!(continuous[0].failure, None);
+        assert_eq!(continuous[0].records[0].event_axis, Some(15.0));
+    }
+
+    #[test]
     fn noise_series_exposes_complex_projections_and_noise_aliases() {
         let sweep = vec![
             noise_point(
@@ -2361,6 +3245,35 @@ mod tests {
         assert_eq!(result("braced").value, Some(1.5));
         assert_eq!(result("mechanism").value, Some(7.5));
         assert_eq!(result("equation").value, Some(12.5));
+        assert!(results.iter().all(|result| result.passed), "{results:#?}");
+    }
+
+    #[test]
+    fn noise_measurements_resolve_hierarchical_contribution_spellings() {
+        let netlist = Netlist::parse(
+            "hierarchical noise contribution measures\n\
+             .MEASURE NOISE direct AVG DNO(X1:R4)\n\
+             .MEASURE NOISE equation EQN {DNO(X1:R4)+DNI(X1:R4)}\n\
+             .END\n",
+        )
+        .expect("hierarchical noise measurement deck parses");
+        let mut sweep = vec![
+            noise_point_with_contributions(10.0, 1.0),
+            noise_point_with_contributions(20.0, 2.0),
+        ];
+        for point in &mut sweep {
+            for identity in &mut point.contribution_catalog {
+                identity.device = format!("X1.{}", identity.device);
+            }
+            for contribution in &mut point.contributions {
+                contribution.identity.device = format!("X1.{}", contribution.identity.device);
+            }
+        }
+
+        let results = evaluate_noise_measurements(&netlist, &sweep);
+
+        assert_eq!(results[0].value, Some(6.0));
+        assert_eq!(results[1].value, Some(10.0));
         assert!(results.iter().all(|result| result.passed), "{results:#?}");
     }
 
