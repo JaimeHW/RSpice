@@ -603,15 +603,10 @@ impl Engine {
             .signals
             .iter()
             .any(|signal| matches!(signal, SaveSignal::Current(_)))
-            || netlist.output_requests.iter().any(|request| {
-                request
-                    .analysis
-                    .is_none_or(|analysis| analysis == OutputAnalysisKind::Tran)
-                    && request.dependencies.iter().any(|dependency| {
-                        dependency.kind == OutputSymbolKind::Device
-                            && matches!(dependency.operator.as_str(), "I" | "P" | "W")
-                    })
-            });
+            || netlist
+                .output_requests
+                .iter()
+                .any(|request| request.requires_transient_device_current_operand());
         if !retain_all && !requests_derived_current {
             return Vec::new();
         }
@@ -2273,15 +2268,10 @@ impl Engine {
                 .map(|&branch| Self::derived_transient_branch_name(&circuit, branch)),
         );
         let retain_xyce_voltage_source_currents = self.config.spice_dialect == SpiceDialect::Xyce
-            && netlist.output_requests.iter().any(|request| {
-                request
-                    .analysis
-                    .is_none_or(|analysis| analysis == OutputAnalysisKind::Tran)
-                    && request.dependencies.iter().any(|dependency| {
-                        dependency.kind == OutputSymbolKind::Device
-                            && matches!(dependency.operator.as_str(), "I" | "P" | "W")
-                    })
-            });
+            && netlist
+                .output_requests
+                .iter()
+                .any(|request| request.requires_transient_device_current_operand());
         let capture_plan = TransientCapturePlan::compile(
             netlist,
             &node_names,
@@ -8088,6 +8078,44 @@ mod tests {
             (final_v - 2.0).abs() <= 1.0e-9,
             "behavioral TABLE source held {final_v:.12e} instead of tracking time"
         );
+    }
+
+    #[test]
+    fn derived_current_accessors_retain_transient_device_waveforms() {
+        for accessor in ["IR", "II", "IM", "IP", "IDB"] {
+            let deck = format!(
+                "selective derived-current capture\n\
+                 V1 1 0 1\n\
+                 R1 1 0 1k\n\
+                 .TRAN 1n 2n\n\
+                 .PRINT TRAN {accessor}(R1)\n\
+                 .END\n"
+            );
+            let netlist = crate::Netlist::parse(&deck).expect("derived-current deck parses");
+            assert!(!netlist.saves.keeps_everything());
+            assert!(
+                netlist
+                    .output_requests
+                    .iter()
+                    .any(|request| request.selects_transient_device_current("R1"))
+            );
+
+            let result = Engine::default()
+                .run_tran(&netlist, 2.0e-9, 1.0e-9)
+                .expect("derived-current transient runs");
+            let branch = result
+                .branch_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("R1"))
+                .expect("R1 raw branch current retained");
+            let waveform = &result.branch_currents[branch];
+            assert_eq!(waveform.len(), result.time.len());
+            let current = waveform.last().copied().expect("R1 has accepted samples");
+            assert!(
+                (current - 1.0e-3).abs() <= 1.0e-12,
+                "{accessor} retained nonphysical R1 current {current:.12e}"
+            );
+        }
     }
 
     /// An explicitly configured `max_timestep` must cap the accepted step
