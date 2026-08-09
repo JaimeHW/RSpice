@@ -926,8 +926,9 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                 color: waveform.color.clone(),
                                 visible: waveform.visible,
                                 meta: format!(
-                                    "{} · {samples} {}",
+                                    "{} · vector · {} {}",
                                     result_quantity_kind_label(&waveform.name, unit),
+                                    grouped_count(samples),
                                     if samples == 1 { "value" } else { "samples" },
                                 ),
                                 value: waveform
@@ -1156,6 +1157,14 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         for analysis in run.analyses {
                             let analysis_active = active_analysis == Some(analysis.analysis_index);
                             let signal_count = analysis.signals.len();
+                            // A query is a request to see matches wherever
+                            // they live, so it opens every group it hit.
+                            let expanded = !query.is_empty()
+                                || result_browser_group_expanded(
+                                    ui.ctx(),
+                                    analysis.analysis_index,
+                                    analysis_active,
+                                );
                             if result_browser_analysis_head(
                                 ui,
                                 analysis.short_label,
@@ -1165,10 +1174,24 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                 analysis.total_signals,
                                 analysis_active,
                                 analysis.success,
+                                expanded,
                             )
                             .clicked()
                             {
+                                // The head owns disclosure; a quantity row
+                                // owns selection. Selecting the analysis too
+                                // would make every open cost a selection.
+                                if query.is_empty() {
+                                    set_result_browser_group_expanded(
+                                        ui.ctx(),
+                                        analysis.analysis_index,
+                                        !expanded,
+                                    );
+                                }
                                 select_result_analysis(app, run.run_index, analysis.analysis_index);
+                            }
+                            if !expanded {
+                                continue;
                             }
                             if signal_count == 0 {
                                 // The mockup's omission card: a group that
@@ -1467,6 +1490,32 @@ fn results_browser_sort_id() -> egui::Id {
 
 fn results_browser_scope_id() -> egui::Id {
     egui::Id::new("workbench.results.browser-scope")
+}
+
+/// Disclosure state for one analysis group, defaulting to open for the
+/// active analysis and closed for the rest: a run with a hundred retained
+/// quantities should open as an index of its analyses, not one long list.
+fn result_browser_group_expanded(ctx: &egui::Context, analysis_index: usize, active: bool) -> bool {
+    ctx.data(|data| {
+        data.get_temp::<bool>(egui::Id::new((
+            "workbench.results.browser-group",
+            analysis_index,
+        )))
+    })
+    .unwrap_or(active)
+}
+
+fn set_result_browser_group_expanded(
+    ctx: &egui::Context,
+    analysis_index: usize,
+    expanded: bool,
+) {
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            egui::Id::new(("workbench.results.browser-group", analysis_index)),
+            expanded,
+        );
+    });
 }
 
 /// The mockup's data-browser tab band: three equal columns on one 30 px
@@ -1812,6 +1861,20 @@ fn sweep_endpoint(value: f64, unit: &str) -> String {
     }
 }
 
+/// Thousands-grouped sample count. A six-figure retained length is read as a
+/// magnitude, not parsed digit by digit.
+fn grouped_count(value: usize) -> String {
+    let digits = value.to_string();
+    let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index) % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    grouped
+}
+
 /// Human name for a retained quantity's kind, read from the same accessor
 /// authority the browser's units come from. The metadata line states it once
 /// per row so no row needs a repeated kind chip.
@@ -1886,6 +1949,7 @@ fn result_browser_analysis_head(
     retained: usize,
     selected: bool,
     ok: bool,
+    expanded: bool,
 ) -> Response {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -1899,7 +1963,10 @@ fn result_browser_analysis_head(
             egui::WidgetType::SelectableLabel,
             ui.is_enabled(),
             selected,
-            format!("{label}, {domain}, {count} quantities"),
+            format!(
+                "{label}, {domain}, {count} quantities, {}",
+                if expanded { "expanded" } else { "collapsed" }
+            ),
         )
     });
     if !ui.is_rect_visible(rect) {
@@ -1918,6 +1985,16 @@ fn result_browser_analysis_head(
     // it reads as pinned chrome above the quantities it owns.
     ui.painter()
         .hline(rect.x_range(), rect.bottom() - 0.5, egui::Stroke::new(1.0, c.border));
+
+    // The disclosure caret: a group with many quantities is closed by
+    // default, so the panel opens as an index of the run's analyses.
+    ui.painter().text(
+        egui::pos2(rect.left() + 5.0 + 7.0, rect.center().y),
+        egui::Align2::CENTER_CENTER,
+        if expanded { "⌄" } else { "›" },
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        c.text_faint,
+    );
 
     // 18x18 kind glyph in accent ink over an accent wash.
     let glyph_rect = egui::Rect::from_center_size(
@@ -3778,6 +3855,33 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    /// A run's quantities open as an index of its analyses: the active
+    /// analysis is disclosed, the rest stay closed until asked for, and an
+    /// explicit toggle survives as the session's answer either way.
+    #[test]
+    fn analysis_groups_default_to_disclosing_only_the_active_analysis() {
+        let ctx = egui::Context::default();
+        assert!(super::result_browser_group_expanded(&ctx, 0, true));
+        assert!(!super::result_browser_group_expanded(&ctx, 1, false));
+
+        super::set_result_browser_group_expanded(&ctx, 1, true);
+        super::set_result_browser_group_expanded(&ctx, 0, false);
+        assert!(super::result_browser_group_expanded(&ctx, 1, false));
+        assert!(
+            !super::result_browser_group_expanded(&ctx, 0, true),
+            "closing the active analysis must outrank the default"
+        );
+    }
+
+    #[test]
+    fn sample_counts_group_thousands_for_reading_as_magnitudes() {
+        assert_eq!(super::grouped_count(0), "0");
+        assert_eq!(super::grouped_count(151), "151");
+        assert_eq!(super::grouped_count(15_001), "15,001");
+        assert_eq!(super::grouped_count(100_008), "100,008");
+        assert_eq!(super::grouped_count(1_000_000), "1,000,000");
     }
 
     #[test]
