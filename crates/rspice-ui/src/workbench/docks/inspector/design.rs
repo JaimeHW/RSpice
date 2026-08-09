@@ -590,13 +590,16 @@ fn field_rejection(
     field: &InlineEditField,
     candidate: &str,
 ) -> Option<String> {
-    if let InlineEditField::Parameter(key) = field
-        && let Some(definition) = state
-            .property_registry
-            .get(component.kind)
-            .and_then(|sheet| sheet.get(key))
-    {
-        return parameter_source_rejection(state, definition, candidate);
+    if let InlineEditField::Parameter(key) = field {
+        match crate::workbench::app::authoritative_component_property_sheet(state, component) {
+            Ok(Some(sheet)) => {
+                if let Some(definition) = sheet.get(key) {
+                    return parameter_source_rejection(state, definition, candidate);
+                }
+            }
+            Ok(None) => {}
+            Err(error) => return Some(error),
+        }
     }
     let InlineEditField::Instance = field else {
         return None;
@@ -632,7 +635,9 @@ fn parameter_source_rejection(
     // An empty secondary parameter means "inherit the model/property-sheet
     // default"; it is not the same transaction as authoring an empty value.
     if candidate.is_empty() {
-        return None;
+        return definition
+            .required
+            .then(|| format!("{} is required.", definition.display_name));
     }
     let value = match definition.prop_type {
         PropertyType::Number | PropertyType::Expression => {

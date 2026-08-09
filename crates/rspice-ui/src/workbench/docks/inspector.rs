@@ -11,7 +11,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app_state::DesignCheckStatus;
 use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
-use crate::workbench::{AppState, RSpiceApp, ResultViewer};
+use crate::workbench::{AppState, MessageId, RSpiceApp, ResultViewer};
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
@@ -338,7 +338,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     Workspace::Results => results(ui, app),
                     Workspace::Verify => verify(ui, app),
                     Workspace::Models => models(ui, app),
-                    Workspace::Netlist => netlist(ui, app),
+                    Workspace::Netlist => code_workspace_inspector(ui, app),
                 }
             }
             finish_inspector_sections(ui);
@@ -384,32 +384,44 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         rect.bottom(),
         egui::Stroke::new(1.0, t.color.border),
     );
+    let messages = app.state.ui.messages();
     let title = if split_selected_trace_is_inspected(app) {
-        "Result details"
+        "Result details".to_owned()
     } else {
         match app.state.workbench.workspace {
             Workspace::Project => match app.state.workbench.project_page {
-                ProjectPage::Overview => "Project overview",
-                ProjectPage::Library => "Cell view",
-                ProjectPage::Configuration => "Configuration",
-                ProjectPage::Dependencies => "Dependency",
-                ProjectPage::Recovery => "Checkpoint",
+                ProjectPage::Overview => "Project overview".to_owned(),
+                ProjectPage::Library => "Cell view".to_owned(),
+                ProjectPage::Configuration => "Configuration".to_owned(),
+                ProjectPage::Dependencies => "Dependency".to_owned(),
+                ProjectPage::Recovery => "Checkpoint".to_owned(),
             },
             Workspace::Verify
                 if app.state.workbench.verification_page == VerificationPage::Yield =>
             {
-                "Yield details"
+                "Yield details".to_owned()
             }
-            Workspace::Verify => app.state.workbench.verification_page.label(),
-            Workspace::Netlist => "Diagnostics & tuner",
-            _ => app.state.workbench.workspace.inspector_title(),
+            Workspace::Verify => app.state.workbench.verification_page.label().to_owned(),
+            Workspace::Netlist => match app.state.ui.code_workspace.page {
+                crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist => {
+                    messages.text(MessageId::CodeInspectorNetlistTitle)
+                }
+                crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA => {
+                    messages.text(MessageId::CodeInspectorVerilogATitle)
+                }
+                crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation => {
+                    messages.text(MessageId::CodeInspectorAutomationTitle)
+                }
+            },
+            _ => app.state.workbench.workspace.inspector_title().to_owned(),
         }
     };
-    response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &title)
+    });
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Heading);
-        node.set_label(title);
+        node.set_label(title.as_str());
         node.set_level(2);
     });
     if app.state.workbench.workspace == Workspace::Design {
@@ -990,6 +1002,42 @@ struct ComponentModelEvidence {
 
 fn component_model_evidence(state: &AppState, component: &Component) -> ComponentModelEvidence {
     if let Some(binding) = component.library_cell.as_ref() {
+        if binding.is_builtin_xspice() {
+            return match crate::state::validate_builtin_xspice_binding(binding) {
+                Ok(descriptor) => ComponentModelEvidence {
+                    status: "compiled XSPICE contract verified".to_owned(),
+                    model: descriptor.model_type.to_owned(),
+                    source: descriptor.stable_id.to_owned(),
+                    section: "Not applicable".to_owned(),
+                    tone: ModelEvidenceTone::Info,
+                },
+                Err(error) => ComponentModelEvidence {
+                    status: "compiled XSPICE contract invalid".to_owned(),
+                    model: binding.cell.clone(),
+                    source: error,
+                    section: "Unavailable".to_owned(),
+                    tone: ModelEvidenceTone::Error,
+                },
+            };
+        }
+        if binding.is_generated_veriloga() {
+            return match crate::state::validate_generated_veriloga_binding(binding) {
+                Ok(descriptor) => ComponentModelEvidence {
+                    status: "compiled Verilog-A contract verified".to_owned(),
+                    model: descriptor.model_name.to_owned(),
+                    source: format!("source {}", descriptor.source_digest),
+                    section: "Not applicable".to_owned(),
+                    tone: ModelEvidenceTone::Info,
+                },
+                Err(error) => ComponentModelEvidence {
+                    status: "compiled Verilog-A contract invalid".to_owned(),
+                    model: binding.cell.clone(),
+                    source: error,
+                    section: "Unavailable".to_owned(),
+                    tone: ModelEvidenceTone::Error,
+                },
+            };
+        }
         if let Some(library) = state.model_library_manager.get_library(&binding.library) {
             let candidates = [
                 binding.module_name.as_deref(),
@@ -1140,7 +1188,9 @@ fn explicit_component_model(component: &Component) -> Option<String> {
             .map(str::to_owned),
         // The saturable inductor's value field is the inductance, so only
         // an explicit model= parameter names a library core model.
-        ComponentType::SaturableInductor => param_model.map(str::to_owned),
+        ComponentType::SaturableInductor | ComponentType::GenericSwitch => {
+            param_model.map(str::to_owned)
+        }
         _ => None,
     }
 }
@@ -1161,6 +1211,7 @@ fn generated_inline_model(component: &Component) -> Option<String> {
         ComponentType::Pmesfet => "pmf",
         ComponentType::VSwitch => "sw",
         ComponentType::ISwitch => "isw",
+        ComponentType::GenericSwitch => "sw",
         ComponentType::Diode => "d",
         ComponentType::SaturableInductor => "core",
         ComponentType::Memristor => "mem",
@@ -2406,18 +2457,136 @@ fn models(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
+fn code_workspace_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
+    if app.state.ui.code_workspace.page
+        == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
+    {
+        netlist(ui, app);
+        return;
+    }
+
+    let messages = app.state.ui.messages();
+    design_section_header(
+        ui,
+        &messages.text(MessageId::CodeInspectorExactContext),
+        None,
+    );
+    let Some(context) = crate::workbench::commands::code_context::resolve(app) else {
+        muted_inspector_copy(
+            ui,
+            &messages.text(MessageId::CodeInspectorContextUnavailable),
+        );
+        return;
+    };
+    let page = messages.text(match context.page {
+        crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist => {
+            MessageId::CodePageNetlist
+        }
+        crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA => {
+            MessageId::CodePageVerilogA
+        }
+        crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation => {
+            MessageId::CodePageAutomation
+        }
+    });
+    let ownership = messages.text(match context.ownership {
+        crate::workbench::commands::code_context::CodeDocumentOwnership::GeneratedReadOnly => {
+            MessageId::CodeInspectorGeneratedReadOnly
+        }
+        crate::workbench::commands::code_context::CodeDocumentOwnership::ProjectOwned => {
+            MessageId::CodeInspectorProjectOwned
+        }
+        crate::workbench::commands::code_context::CodeDocumentOwnership::ExternalReadOnly => {
+            MessageId::CodeInspectorExternalReadOnly
+        }
+        crate::workbench::commands::code_context::CodeDocumentOwnership::ComparisonReadOnly => {
+            MessageId::CodeInspectorComparisonReadOnly
+        }
+        crate::workbench::commands::code_context::CodeDocumentOwnership::GovernedReadOnly => {
+            MessageId::CodeInspectorGovernedReadOnly
+        }
+    });
+    property_row(ui, &messages.text(MessageId::CodeInspectorPage), &page);
+    property_row(
+        ui,
+        &messages.text(MessageId::CodeInspectorLogicalPath),
+        &context.logical_path,
+    );
+    property_row(
+        ui,
+        &messages.text(MessageId::CodeInspectorDocumentIdentity),
+        &context.document_identity,
+    );
+    property_row(
+        ui,
+        &messages.text(MessageId::CodeInspectorRevision),
+        &context.revision.to_string(),
+    );
+    property_row(
+        ui,
+        &messages.text(MessageId::CodeInspectorContentDigest),
+        &context.content_digest.to_string(),
+    );
+    property_row(
+        ui,
+        &messages.text(MessageId::CodeInspectorOwnership),
+        &ownership,
+    );
+
+    design_section_header(
+        ui,
+        &messages.text(MessageId::CodeInspectorCommandAvailability),
+        None,
+    );
+    for (label, available) in [
+        (
+            messages.text(MessageId::CodeInspectorFind),
+            context.capabilities.find,
+        ),
+        (
+            messages.text(MessageId::CodeInspectorValidate),
+            context.capabilities.validate,
+        ),
+        (
+            messages.text(MessageId::CodeInspectorExecute),
+            context.capabilities.execute,
+        ),
+        (
+            messages.text(MessageId::CodeInspectorSave),
+            context.capabilities.save,
+        ),
+        (
+            messages.text(MessageId::CodeInspectorCompare),
+            context.capabilities.compare_revisions,
+        ),
+    ] {
+        property_row(
+            ui,
+            &label,
+            &messages.text(if available {
+                MessageId::CodeInspectorAvailable
+            } else {
+                MessageId::CodeInspectorUnavailable
+            }),
+        );
+    }
+}
+
 fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     use crate::workbench::documents::netlist_document::{
         ActiveNetlistDocument, DiagnosticSeverity,
     };
 
+    let messages = app.state.ui.messages();
     let errors = app
         .state
         .ui
         .netlist
         .diagnostics
         .iter()
-        .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+        .filter(|diagnostic| {
+            diagnostic.is_current() && diagnostic.severity == DiagnosticSeverity::Error
+        })
         .collect::<Vec<_>>();
     let advisories = app
         .state
@@ -2425,11 +2594,18 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
         .netlist
         .diagnostics
         .iter()
-        .filter(|diagnostic| diagnostic.severity != DiagnosticSeverity::Error)
+        .filter(|diagnostic| {
+            diagnostic.is_current() && diagnostic.severity != DiagnosticSeverity::Error
+        })
         .collect::<Vec<_>>();
 
     if !errors.is_empty() {
-        diagnostic_section_header(ui, "Errors", errors.len(), DiagnosticSeverity::Error);
+        diagnostic_section_header(
+            ui,
+            &messages.text(crate::workbench::MessageId::NetlistErrors),
+            errors.len(),
+            DiagnosticSeverity::Error,
+        );
         for diagnostic in errors {
             diagnostic_row(ui, diagnostic);
         }
@@ -2437,28 +2613,39 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
 
     diagnostic_section_header(
         ui,
-        "Advisories",
+        &messages.text(crate::workbench::MessageId::NetlistAdvisories),
         advisories.len(),
         DiagnosticSeverity::Warning,
     );
     if advisories.is_empty() {
-        empty_diagnostic_row(ui, "No advisories for the current document.");
+        empty_diagnostic_row(
+            ui,
+            &messages.text(crate::workbench::MessageId::NetlistNoAdvisories),
+        );
     } else {
         for diagnostic in advisories {
             diagnostic_row(ui, diagnostic);
         }
     }
 
-    design_section_header(ui, "Parameter exploration", Some("dedicated workspace"));
+    design_section_header(
+        ui,
+        &messages.text(crate::workbench::MessageId::NetlistParameterExploration),
+        Some(&messages.text(crate::workbench::MessageId::NetlistDedicatedWorkspace)),
+    );
     muted_inspector_copy(
         ui,
-        "Use the non-destructive tuning sandbox for live plots, measurement deltas, limit checks and explicit commit or revert.",
+        &messages.text(crate::workbench::MessageId::NetlistParameterExplorationHint),
     );
 
-    match app.state.ui.netlist.active_document {
-        ActiveNetlistDocument::Generated => generated_provenance(ui, &app.state),
-        ActiveNetlistDocument::OwnedSource => owned_source_provenance(ui, &app.state),
-        ActiveNetlistDocument::GeneratedDiff => generated_provenance(ui, &app.state),
+    if crate::workbench::documents::netlist_document::active_dependency(&app.state).is_some() {
+        dependency_provenance(ui, &app.state);
+    } else {
+        match app.state.ui.netlist.active_document {
+            ActiveNetlistDocument::Generated => generated_provenance(ui, &app.state),
+            ActiveNetlistDocument::OwnedSource => owned_source_provenance(ui, &app.state),
+            ActiveNetlistDocument::GeneratedDiff => generated_provenance(ui, &app.state),
+        }
     }
 }
 
@@ -2568,7 +2755,8 @@ fn diagnostic_row(
     );
 
     let icon = match diagnostic.severity {
-        crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => {
+        crate::workbench::documents::netlist_document::DiagnosticSeverity::Hint
+        | crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => {
             WorkbenchIcon::Info
         }
         crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning
@@ -2723,6 +2911,112 @@ fn owned_source_provenance(ui: &mut Ui, state: &AppState) {
     );
 }
 
+fn dependency_provenance(ui: &mut Ui, state: &AppState) {
+    let Some(dependency) = crate::workbench::documents::netlist_document::active_dependency(state)
+    else {
+        return;
+    };
+    let messages = state.ui.messages();
+    design_section_header(
+        ui,
+        &messages.text(crate::workbench::MessageId::NetlistIncludeProvenance),
+        None,
+    );
+    property_row(
+        ui,
+        &messages.text(crate::workbench::MessageId::NetlistDisplayName),
+        dependency.locator().display_name(),
+    );
+    property_row(
+        ui,
+        &messages.text(crate::workbench::MessageId::NetlistLogicalIdentity),
+        dependency.locator().logical_identity(),
+    );
+    property_row(
+        ui,
+        &messages.text(crate::workbench::MessageId::NetlistRequestedAs),
+        dependency.requested_locator(),
+    );
+    property_row(
+        ui,
+        &messages.text(crate::workbench::MessageId::NetlistOrigin),
+        dependency
+            .locator()
+            .native_origin()
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                messages.text(crate::workbench::MessageId::NetlistRetainedAuthenticatedSource)
+            })
+            .as_str(),
+    );
+    let relationship = messages.text(if dependency.direct_include_index().is_some() {
+        crate::workbench::MessageId::NetlistDirectInclude
+    } else {
+        crate::workbench::MessageId::NetlistTransitiveInclude
+    });
+    property_row(
+        ui,
+        &messages.text(crate::workbench::MessageId::NetlistRelationship),
+        &relationship,
+    );
+    if let Some(parent) = dependency.parent() {
+        property_row(
+            ui,
+            &messages.text(crate::workbench::MessageId::NetlistParent),
+            parent.display_name(),
+        );
+    }
+    let owned = state
+        .workspace
+        .netlist_descriptor
+        .as_ref()
+        .and_then(|descriptor| descriptor.owned_include(dependency.locator().logical_identity()));
+    property_row(
+        ui,
+        &messages.text(crate::workbench::MessageId::NetlistOwnership),
+        &owned.map_or_else(
+            || {
+                messages.text(match dependency.authority() {
+                    crate::state::DependencySourceAuthority::External => {
+                        crate::workbench::MessageId::NetlistExternalReferenceReadOnly
+                    }
+                    crate::state::DependencySourceAuthority::Vendor => {
+                        crate::workbench::MessageId::NetlistVendorSourceReadOnly
+                    }
+                    crate::state::DependencySourceAuthority::TechnologyPackage => {
+                        crate::workbench::MessageId::NetlistTechnologyPackageReadOnly
+                    }
+                    crate::state::DependencySourceAuthority::StandardLibrary => {
+                        crate::workbench::MessageId::NetlistStandardLibraryReadOnly
+                    }
+                })
+            },
+            |_| messages.text(crate::workbench::MessageId::NetlistProjectOwnedEditable),
+        ),
+    );
+    if let Some(owned) = owned {
+        property_row(
+            ui,
+            &messages.text(crate::workbench::MessageId::NetlistDocumentId),
+            &owned.document_id.to_string(),
+        );
+        property_row(
+            ui,
+            &messages.text(crate::workbench::MessageId::NetlistDocumentRevision),
+            &owned.revision.to_string(),
+        );
+    }
+    property_row(
+        ui,
+        &messages.text(crate::workbench::MessageId::NetlistContentDigest),
+        &dependency
+            .resolution()
+            .content_digest()
+            .map(short_digest)
+            .unwrap_or_else(|| messages.text(crate::workbench::MessageId::NetlistUnresolved)),
+    );
+}
+
 fn generated_state(state: &AppState) -> &'static str {
     let netlist = &state.ui.netlist;
     if netlist.generated_source.is_empty() {
@@ -2813,6 +3107,9 @@ fn diagnostic_tone(
     severity: crate::workbench::documents::netlist_document::DiagnosticSeverity,
 ) -> Color32 {
     match severity {
+        crate::workbench::documents::netlist_document::DiagnosticSeverity::Hint => {
+            tokens.color.text_dim
+        }
         crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => {
             tokens.color.info
         }
@@ -2829,6 +3126,7 @@ fn diagnostic_severity_name(
     severity: crate::workbench::documents::netlist_document::DiagnosticSeverity,
 ) -> &'static str {
     match severity {
+        crate::workbench::documents::netlist_document::DiagnosticSeverity::Hint => "Hint",
         crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => "Information",
         crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning => "Warning",
         crate::workbench::documents::netlist_document::DiagnosticSeverity::Error => "Error",
@@ -3166,16 +3464,15 @@ mod tests {
 
     #[test]
     fn netlist_diagnostic_locations_are_one_based_and_exact() {
-        let diagnostic = crate::workbench::documents::netlist_document::Diagnostic {
-            severity: crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning,
-            source_path: None,
-            source_line: Some(127),
-            span: None,
-            line: Some(127),
-            column: Some(8),
-            message: "Maximum transient step is implicit".to_owned(),
-            fix: None,
-        };
+        let mut diagnostic = crate::workbench::documents::netlist_document::Diagnostic::current(
+            "rspice.test",
+            "TEST-ADVISORY",
+            crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning,
+            "Maximum transient step is implicit",
+        );
+        diagnostic.source_line = Some(127);
+        diagnostic.line = Some(127);
+        diagnostic.column = Some(8);
 
         assert_eq!(diagnostic_location(&diagnostic), "line 128 · column 9");
     }

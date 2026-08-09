@@ -830,6 +830,17 @@ fn nav_property(ui: &mut Ui, label: &str, value: &str) {
 
 fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     let query = app.state.workbench.navigator_query.trim().to_lowercase();
+    // Kind/sort read the values the toolbar stored last frame — the row
+    // renders below the tab band while filtering happens here, the same
+    // one-frame contract the viewer-tab chevrons use.
+    let kind = ui
+        .ctx()
+        .data(|data| data.get_temp::<ResultsBrowserKind>(results_browser_kind_id()))
+        .unwrap_or_default();
+    let sort = ui
+        .ctx()
+        .data(|data| data.get_temp::<ResultsBrowserSort>(results_browser_sort_id()))
+        .unwrap_or_default();
     let active_run = app.state.simulation.active_run_idx;
     let active_analysis = app.state.simulation.active_analysis_idx;
     let selected_trace = app
@@ -864,12 +875,20 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                 .iter()
                 .enumerate()
                 .filter_map(|(analysis_index, analysis)| {
-                    let signals = analysis
+                    let mut signals = analysis
                         .waveforms
                         .iter()
                         .enumerate()
                         .filter(|(_, waveform)| {
                             query.is_empty() || waveform.name.to_lowercase().contains(&query)
+                        })
+                        .filter(|(_, waveform)| {
+                            let current = waveform.name.trim_start().starts_with("I(");
+                            match kind {
+                                ResultsBrowserKind::All => true,
+                                ResultsBrowserKind::Current => current,
+                                ResultsBrowserKind::Voltage => !current,
+                            }
                         })
                         .map(|(waveform_index, waveform)| {
                             let unit = if waveform.name.trim_start().starts_with("I(") {
@@ -892,6 +911,9 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             }
                         })
                         .collect::<Vec<_>>();
+                    if sort == ResultsBrowserSort::Name {
+                        signals.sort_by(|left, right| left.name.cmp(&right.name));
+                    }
                     let matches_analysis = query.is_empty()
                         || analysis.label.to_lowercase().contains(&query)
                         || analysis
@@ -929,154 +951,460 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .collect::<Vec<_>>();
 
-    section_header(
+    let signal_count = runs
+        .iter()
+        .filter(|run| active_run == Some(run.run_index))
+        .flat_map(|run| run.analyses.iter())
+        .map(|analysis| analysis.signals.len())
+        .sum::<usize>();
+    let tab = results_browser_tab_band(
         ui,
-        "Datasets",
-        Some(&format!("{} runs", app.state.simulation.runs.len())),
+        [signal_count, runs.len(), expressions.len()],
     );
+    // The mockup's browser toolbar: kind and sort facets, present only on
+    // the quantity-bearing tabs — the dataset manifest has no kinds.
+    if tab != ResultsBrowserTab::Datasets {
+        ui.horizontal(|ui| {
+            ui.add_space(8.0);
+            let mut kind_now = kind;
+            egui::ComboBox::from_id_salt("workbench.results.browser-kind")
+                .width(96.0)
+                .selected_text(match kind_now {
+                    ResultsBrowserKind::All => "All kinds",
+                    ResultsBrowserKind::Voltage => "Voltage",
+                    ResultsBrowserKind::Current => "Current",
+                })
+                .show_ui(ui, |ui| {
+                    for (value, label) in [
+                        (ResultsBrowserKind::All, "All kinds"),
+                        (ResultsBrowserKind::Voltage, "Voltage"),
+                        (ResultsBrowserKind::Current, "Current"),
+                    ] {
+                        ui.selectable_value(&mut kind_now, value, label);
+                    }
+                });
+            if kind_now != kind {
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(results_browser_kind_id(), kind_now));
+            }
+            let mut sort_now = sort;
+            egui::ComboBox::from_id_salt("workbench.results.browser-sort")
+                .width(120.0)
+                .selected_text(match sort_now {
+                    ResultsBrowserSort::Hierarchy => "Hierarchy order",
+                    ResultsBrowserSort::Name => "Name",
+                })
+                .show_ui(ui, |ui| {
+                    for (value, label) in [
+                        (ResultsBrowserSort::Hierarchy, "Hierarchy order"),
+                        (ResultsBrowserSort::Name, "Name"),
+                    ] {
+                        ui.selectable_value(&mut sort_now, value, label);
+                    }
+                });
+            if sort_now != sort {
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(results_browser_sort_id(), sort_now));
+            }
+        });
+    }
+    // The mockup's status band: one line owns the live inventory count —
+    // "matching / total" while a query filters, a plain total at rest —
+    // with the provenance sentence riding its tooltip.
+    {
+        let t = Tokens::get(ui.ctx());
+        let filtering = !query.is_empty();
+        let (shown, noun) = match tab {
+            ResultsBrowserTab::Signals => (signal_count, "signals"),
+            ResultsBrowserTab::Datasets => (runs.len(), "immutable datasets"),
+            ResultsBrowserTab::Expressions => (expressions.len(), "expressions"),
+        };
+        let count_copy = if filtering {
+            format!("{shown} matching")
+        } else {
+            format!("{shown} {noun}")
+        };
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), 22.0),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new(count_copy)
+                        .font(theme::mono(tokens::FS_MICRO, FontWeight::Medium))
+                        .color(t.color.text_faint),
+                )
+                .on_hover_text(
+                    "Live inventory of the retained evidence behind this tab · exact metadata · stable IDs",
+                );
+            },
+        );
+    }
     ScrollArea::vertical()
         .id_salt("workbench.results.navigator")
         .show(ui, |ui| {
-            if runs.is_empty() {
-                muted(
-                    ui,
-                    if app.state.simulation.runs.is_empty() {
-                        "Run a simulation to create an immutable result dataset."
-                    } else {
-                        "No dataset, analysis, or signal matches this filter."
-                    },
-                );
-            }
-            for run in runs {
-                let run_active = active_run == Some(run.run_index);
-                let run_meta = format!("{} analyses", run.analysis_count);
-                let overlaid = app.state.simulation.is_dataset_overlaid(run.dataset_id);
-                let responses = result_dataset_row(
-                    ui,
-                    if run.success {
-                        WorkbenchIcon::Success
-                    } else {
-                        WorkbenchIcon::Warning
-                    },
-                    &run.label,
-                    run_active,
-                    &run_meta,
-                    overlaid,
-                );
-                if responses.selection.clicked() {
-                    select_result_dataset(app, run.run_index);
-                }
-                if responses.overlay.is_some_and(|response| response.clicked()) {
-                    let enabled = app.state.simulation.toggle_dataset_overlay(run.dataset_id);
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::info(if enabled {
-                            format!("Overlaying {} on the active result sheet.", run.label)
-                        } else {
-                            format!("Removed {} from the active result sheet.", run.label)
-                        }));
-                }
-                if !run_active && query.is_empty() {
-                    continue;
-                }
-                for analysis in run.analyses {
-                    let analysis_active =
-                        run_active && active_analysis == Some(analysis.analysis_index);
-                    if nav_row_indented(
-                        ui,
-                        if analysis.success {
-                            WorkbenchIcon::Results
-                        } else {
-                            WorkbenchIcon::Warning
-                        },
-                        &analysis.label,
-                        analysis_active,
-                        Some(analysis.short_label),
-                        1,
-                    ) {
-                        select_result_analysis(app, run.run_index, analysis.analysis_index);
-                    }
-                    if analysis_active {
-                        for signal in analysis.signals {
-                            let t = Tokens::get(ui.ctx());
-                            let color = crate::workbench::documents::result_document::trace_color(
-                                &signal.color,
-                                t.color.traces[signal.waveform_index % t.color.traces.len()],
-                            );
-                            let signal_selected = selected_trace.as_ref().is_some_and(|selected| {
-                                selected.analysis_key() == analysis.presentation_key
-                                    && selected.source_name() == signal.name
-                            });
-                            let row_id = ui.id().with((
-                                "result-signal",
-                                analysis.analysis_index,
-                                signal.waveform_index,
-                            ));
-                            let responses = signal_row(
+            match tab {
+                ResultsBrowserTab::Signals => {
+                    let mut any = false;
+                    for run in runs
+                        .into_iter()
+                        .filter(|run| active_run == Some(run.run_index))
+                    {
+                        for analysis in run.analyses {
+                            let analysis_active = active_analysis == Some(analysis.analysis_index);
+                            if nav_row_indented(
                                 ui,
-                                row_id,
-                                &signal.name,
-                                signal.value.as_deref(),
-                                color,
-                                signal_selected,
-                                signal.visible,
+                                if analysis.success {
+                                    WorkbenchIcon::Results
+                                } else {
+                                    WorkbenchIcon::Warning
+                                },
+                                &analysis.label,
+                                analysis_active,
+                                Some(analysis.short_label),
+                                0,
+                            ) {
+                                select_result_analysis(app, run.run_index, analysis.analysis_index);
+                            }
+                            for signal in analysis.signals {
+                                any = true;
+                                let t = Tokens::get(ui.ctx());
+                                let color =
+                                    crate::workbench::documents::result_document::trace_color(
+                                        &signal.color,
+                                        t.color.traces
+                                            [signal.waveform_index % t.color.traces.len()],
+                                    );
+                                let signal_selected =
+                                    selected_trace.as_ref().is_some_and(|selected| {
+                                        selected.analysis_key() == analysis.presentation_key
+                                            && selected.source_name() == signal.name
+                                    });
+                                let row_id = ui.id().with((
+                                    "result-signal",
+                                    analysis.analysis_index,
+                                    signal.waveform_index,
+                                ));
+                                let responses = signal_row(
+                                    ui,
+                                    row_id,
+                                    &signal.name,
+                                    signal.value.as_deref(),
+                                    color,
+                                    signal_selected,
+                                    signal.visible,
+                                );
+                                if responses.visibility.clicked() {
+                                    crate::workbench::documents::result_document::toggle_visibility(
+                                        &mut app.state,
+                                        analysis.analysis_index,
+                                        signal.waveform_index,
+                                    );
+                                }
+                                if responses.selection.clicked() {
+                                    select_result_signal(
+                                        app,
+                                        run.run_index,
+                                        analysis.analysis_index,
+                                        signal.waveform_index,
+                                    );
+                                }
+                                locate_on_schematic_menu(&responses.selection, app, &signal.name);
+                            }
+                        }
+                    }
+                    if !any {
+                        muted(
+                            ui,
+                            if app.state.simulation.runs.is_empty() {
+                                "Run a simulation to create an immutable result dataset."
+                            } else {
+                                "No signal of the active dataset matches this filter."
+                            },
+                        );
+                    }
+                }
+                ResultsBrowserTab::Datasets => {
+                    if runs.is_empty() {
+                        muted(
+                            ui,
+                            if app.state.simulation.runs.is_empty() {
+                                "Run a simulation to create an immutable result dataset."
+                            } else {
+                                "No dataset or analysis matches this filter."
+                            },
+                        );
+                    }
+                    for run in runs {
+                        let run_active = active_run == Some(run.run_index);
+                        let run_meta = format!("{} analyses", run.analysis_count);
+                        let overlaid = app.state.simulation.is_dataset_overlaid(run.dataset_id);
+                        let responses = result_dataset_row(
+                            ui,
+                            if run.success {
+                                WorkbenchIcon::Success
+                            } else {
+                                WorkbenchIcon::Warning
+                            },
+                            &run.label,
+                            run_active,
+                            &run_meta,
+                            overlaid,
+                        );
+                        if responses.selection.clicked() {
+                            select_result_dataset(app, run.run_index);
+                        }
+                        if responses.overlay.is_some_and(|response| response.clicked()) {
+                            let enabled =
+                                app.state.simulation.toggle_dataset_overlay(run.dataset_id);
+                            app.state.push_user_message(
+                                crate::diagnostics::ConsoleMessage::info(if enabled {
+                                    format!("Overlaying {} on the active result sheet.", run.label)
+                                } else {
+                                    format!("Removed {} from the active result sheet.", run.label)
+                                }),
                             );
-                            if responses.visibility.clicked() {
-                                crate::workbench::documents::result_document::toggle_visibility(
-                                    &mut app.state,
-                                    analysis.analysis_index,
-                                    signal.waveform_index,
-                                );
+                        }
+                        if !run_active && query.is_empty() {
+                            continue;
+                        }
+                        for analysis in run.analyses {
+                            let analysis_active =
+                                run_active && active_analysis == Some(analysis.analysis_index);
+                            if nav_row_indented(
+                                ui,
+                                if analysis.success {
+                                    WorkbenchIcon::Results
+                                } else {
+                                    WorkbenchIcon::Warning
+                                },
+                                &analysis.label,
+                                analysis_active,
+                                Some(analysis.short_label),
+                                1,
+                            ) {
+                                select_result_analysis(app, run.run_index, analysis.analysis_index);
                             }
-                            if responses.selection.clicked() {
-                                select_result_signal(
-                                    app,
-                                    run.run_index,
-                                    analysis.analysis_index,
-                                    signal.waveform_index,
-                                );
-                            }
-                            locate_on_schematic_menu(&responses.selection, app, &signal.name);
                         }
                     }
                 }
-            }
-
-            let Some(analysis_index) = app.state.simulation.active_analysis_idx else {
-                return;
-            };
-            expression_header(ui, app);
-            let mut toggled_expression = None;
-            for (expression_index, expression) in &expressions {
-                let t = Tokens::get(ui.ctx());
-                let row_id = ui
-                    .id()
-                    .with(("result-expression", analysis_index, *expression_index));
-                let responses = signal_row(
-                    ui,
-                    row_id,
-                    &expression.text,
-                    Some("expression"),
-                    t.color.traces[*expression_index % t.color.traces.len()],
-                    false,
-                    expression.visible,
-                );
-                if responses.visibility.clicked() {
-                    toggled_expression = Some(*expression_index);
+                ResultsBrowserTab::Expressions => {
+                    let Some(analysis_index) = app.state.simulation.active_analysis_idx else {
+                        muted(ui, "Select a retained result analysis to own expressions.");
+                        return;
+                    };
+                    expression_header(ui, app);
+                    let mut toggled_expression = None;
+                    for (expression_index, expression) in &expressions {
+                        let t = Tokens::get(ui.ctx());
+                        let row_id = ui
+                            .id()
+                            .with(("result-expression", analysis_index, *expression_index));
+                        let responses = signal_row(
+                            ui,
+                            row_id,
+                            &expression.text,
+                            Some("expression"),
+                            t.color.traces[*expression_index % t.color.traces.len()],
+                            false,
+                            expression.visible,
+                        );
+                        if responses.visibility.clicked() {
+                            toggled_expression = Some(*expression_index);
+                        }
+                        locate_on_schematic_menu(&responses.selection, app, &expression.text);
+                    }
+                    if let Some(expression_index) = toggled_expression
+                        && let Some(expression) = app
+                            .state
+                            .ui
+                            .results
+                            .exprs
+                            .get_mut(&analysis_index)
+                            .and_then(|expressions| expressions.get_mut(expression_index))
+                    {
+                        expression.visible = !expression.visible;
+                    }
                 }
-                locate_on_schematic_menu(&responses.selection, app, &expression.text);
             }
-            if let Some(expression_index) = toggled_expression
-                && let Some(expression) = app
-                    .state
-                    .ui
-                    .results
-                    .exprs
-                    .get_mut(&analysis_index)
-                    .and_then(|expressions| expressions.get_mut(expression_index))
+            // The mockup's browser inspector: the selected quantity's exact
+            // retained identity, present only while a selection exists.
+            if let Some(selected) = &selected_trace
+                && let Some(run) = app.state.simulation.active_run()
+                && let Some((analysis, waveform)) = run.analyses.iter().find_map(|analysis| {
+                    analysis
+                        .waveforms
+                        .iter()
+                        .find(|waveform| waveform.name == selected.source_name())
+                        .map(|waveform| (analysis, waveform))
+                })
             {
-                expression.visible = !expression.visible;
+                ui.add_space(6.0);
+                section_header(ui, "Selection", None);
+                let t = Tokens::get(ui.ctx());
+                for (label, value) in [
+                    ("Quantity", waveform.name.clone()),
+                    ("Analysis", analysis.label.clone()),
+                    ("Samples", waveform.y.len().to_string()),
+                    ("Dataset", format!("Run {}", run.id)),
+                ] {
+                    ui.horizontal(|ui| {
+                        ui.add_space(8.0);
+                        ui.label(
+                            egui::RichText::new(label)
+                                .font(theme::sans(tokens::FS_MICRO, FontWeight::Regular))
+                                .color(t.color.text_faint),
+                        );
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                ui.add_space(8.0);
+                                ui.label(
+                                    egui::RichText::new(value)
+                                        .font(theme::mono(tokens::FS_MICRO, FontWeight::Medium))
+                                        .color(t.color.text_dim),
+                                );
+                            },
+                        );
+                    });
+                }
             }
+            // The mockup's metadata footnote: preview values are formatted
+            // display metadata; exact operations resolve stored values.
+            ui.add_space(6.0);
+            muted(
+                ui,
+                "Preview values are formatted display metadata. Copy, measurement, comparison, and export resolve stored values from the immutable dataset.",
+            );
         });
+}
+
+/// Which content the results data browser shows. Stored in egui memory like
+/// the pane log toggles: browser focus is a session gesture, not document
+/// state.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum ResultsBrowserTab {
+    #[default]
+    Signals,
+    Datasets,
+    Expressions,
+}
+
+/// Quantity-kind facet of the browser toolbar, derived from accessor names.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum ResultsBrowserKind {
+    #[default]
+    All,
+    Voltage,
+    Current,
+}
+
+/// Row ordering facet: retained hierarchy order, or name.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum ResultsBrowserSort {
+    #[default]
+    Hierarchy,
+    Name,
+}
+
+fn results_browser_kind_id() -> egui::Id {
+    egui::Id::new("workbench.results.browser-kind-facet")
+}
+
+fn results_browser_sort_id() -> egui::Id {
+    egui::Id::new("workbench.results.browser-sort-facet")
+}
+
+/// The mockup's data-browser tab band: three equal columns on one 30 px
+/// row, label and mono count sharing the cell, a 2 px accent baseline on
+/// the active tab. Returns the tab to render this frame.
+fn results_browser_tab_band(ui: &mut Ui, counts: [usize; 3]) -> ResultsBrowserTab {
+    let t = Tokens::get(ui.ctx());
+    let band_id = egui::Id::new("workbench.results.browser-tab");
+    let mut tab = ui
+        .ctx()
+        .data(|data| data.get_temp::<ResultsBrowserTab>(band_id))
+        .unwrap_or_default();
+    let tabs = [
+        (ResultsBrowserTab::Signals, "Signals", counts[0]),
+        (ResultsBrowserTab::Datasets, "Datasets", counts[1]),
+        (ResultsBrowserTab::Expressions, "Expressions", counts[2]),
+    ];
+    let (band, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), 30.0),
+        egui::Sense::hover(),
+    );
+    let painter = ui.painter_at(band);
+    let column_width = band.width() / tabs.len() as f32;
+    for (index, (candidate, label, count)) in tabs.into_iter().enumerate() {
+        let cell = egui::Rect::from_min_max(
+            egui::pos2(band.left() + column_width * index as f32, band.top()),
+            egui::pos2(
+                band.left() + column_width * (index + 1) as f32,
+                band.bottom(),
+            ),
+        );
+        let response = ui
+            .interact(
+                cell,
+                ui.id().with(("results-browser-tab", index)),
+                egui::Sense::click(),
+            )
+            .on_hover_text(format!("Show {label}"));
+        let selected = tab == candidate;
+        if response.clicked() {
+            tab = candidate;
+            ui.ctx().data_mut(|data| data.insert_temp(band_id, tab));
+        }
+        if response.hovered() && !selected {
+            painter.rect_filled(cell, 0.0, t.color.bg_hover);
+        }
+        let label_color = if selected || response.hovered() {
+            t.color.text
+        } else {
+            t.color.text_dim
+        };
+        let count_color = if selected {
+            t.color.accent
+        } else {
+            t.color.text_faint
+        };
+        let label_galley = painter.layout_no_wrap(
+            label.to_owned(),
+            theme::sans(tokens::FS_MICRO, FontWeight::SemiBold),
+            label_color,
+        );
+        let count_galley = painter.layout_no_wrap(
+            count.to_string(),
+            theme::mono(tokens::FS_MICRO, FontWeight::Medium),
+            count_color,
+        );
+        let total = label_galley.rect.width() + 5.0 + count_galley.rect.width();
+        let start_x = cell.center().x - total / 2.0;
+        let label_pos = egui::pos2(start_x, cell.center().y - label_galley.rect.height() / 2.0);
+        let count_pos = egui::pos2(
+            start_x + label_galley.rect.width() + 5.0,
+            cell.center().y - count_galley.rect.height() / 2.0,
+        );
+        painter.galley(label_pos, label_galley, label_color);
+        painter.galley(count_pos, count_galley, count_color);
+        if selected {
+            painter.rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(cell.left(), cell.bottom() - 2.0),
+                    cell.max,
+                ),
+                0.0,
+                t.color.accent,
+            );
+        }
+    }
+    painter.hline(
+        band.x_range(),
+        band.bottom() - 0.5,
+        egui::Stroke::new(1.0, t.color.border),
+    );
+    tab
 }
 
 struct ResultRun {

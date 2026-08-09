@@ -298,6 +298,23 @@ impl<'a> HierarchyResolver<'a> {
             return;
         }
 
+        // Compiled code models are executable leaves, not project library
+        // masters.  Resolve their frozen catalog contract directly so an
+        // active configuration cannot turn a valid placement into an
+        // unresolved L/C/V reference or silently substitute another view.
+        if let Some(binding) = binding
+            && binding.is_builtin_xspice()
+        {
+            self.resolve_builtin_xspice(requested, binding, instance_path, depth, is_root);
+            return;
+        }
+        if let Some(binding) = binding
+            && binding.is_generated_veriloga()
+        {
+            self.resolve_generated_veriloga(requested, binding, instance_path, depth, is_root);
+            return;
+        }
+
         let search_order = self.view_search_order(&requested.view, is_root, instance_path);
         let (master, resolution_error) =
             match self.resolve_master(&requested, binding, &search_order) {
@@ -538,6 +555,135 @@ impl<'a> HierarchyResolver<'a> {
             );
         }
         ancestors.pop();
+    }
+
+    fn resolve_builtin_xspice(
+        &mut self,
+        requested: CellViewRef,
+        binding: &LibraryCellInstance,
+        instance_path: &str,
+        depth: usize,
+        is_root: bool,
+    ) {
+        let mut status = HierarchyBindingStatus::Resolved;
+        let mut diagnostic = validate_builtin_xspice_binding(binding).err();
+        if diagnostic.is_some() {
+            status = HierarchyBindingStatus::Unresolved;
+        }
+
+        let current_platform = crate::state::ConfigurationPlatform::current();
+        if status.is_resolved()
+            && !self.configured_platform_eligible(instance_path, current_platform)
+        {
+            status = HierarchyBindingStatus::Unresolved;
+            diagnostic = Some(format!(
+                "binding at {instance_path} is not supported by this execution target ({})",
+                current_platform.label()
+            ));
+        }
+        if status.is_resolved()
+            && let Some(section) = self.configured_model_section(instance_path)
+        {
+            status = HierarchyBindingStatus::Unresolved;
+            diagnostic = Some(format!(
+                "model section '{section}' at {instance_path} cannot be applied to a compiled built-in XSPICE device"
+            ));
+        }
+
+        if status.is_resolved() && self.workspace.configuration_sets.active().is_some() {
+            self.execution_bindings.insert(
+                instance_path.to_ascii_lowercase(),
+                ConfigurationExecutionBinding {
+                    instance_path: instance_path.to_owned(),
+                    resolved_reference: requested.clone(),
+                    resolved_view_type: ViewType::Custom,
+                    materialized_binding: Some(binding.clone()),
+                    model_section: None,
+                    stop_boundary: true,
+                    project_veriloga: None,
+                },
+            );
+        }
+
+        let mut row = self.binding_row(
+            requested,
+            Some(binding),
+            instance_path,
+            depth,
+            is_root,
+            (status, diagnostic),
+        );
+        row.purpose = "built-in XSPICE code model".to_owned();
+        row.view_search_order = vec!["xspice".to_owned()];
+        row.stop_view = Some("xspice".to_owned());
+        row.model_section.clear();
+        self.upsert(row);
+        if status.is_resolved() {
+            self.resolved_instances += 1;
+        }
+    }
+
+    fn resolve_generated_veriloga(
+        &mut self,
+        requested: CellViewRef,
+        binding: &LibraryCellInstance,
+        instance_path: &str,
+        depth: usize,
+        is_root: bool,
+    ) {
+        let mut status = HierarchyBindingStatus::Resolved;
+        let mut diagnostic = validate_generated_veriloga_binding(binding).err();
+        if diagnostic.is_some() {
+            status = HierarchyBindingStatus::Unresolved;
+        }
+        let current_platform = crate::state::ConfigurationPlatform::current();
+        if status.is_resolved()
+            && !self.configured_platform_eligible(instance_path, current_platform)
+        {
+            status = HierarchyBindingStatus::Unresolved;
+            diagnostic = Some(format!(
+                "binding at {instance_path} is not supported by this execution target ({})",
+                current_platform.label()
+            ));
+        }
+        if status.is_resolved()
+            && let Some(section) = self.configured_model_section(instance_path)
+        {
+            status = HierarchyBindingStatus::Unresolved;
+            diagnostic = Some(format!(
+                "model section '{section}' at {instance_path} cannot be applied to a compiled generated Verilog-A device"
+            ));
+        }
+        if status.is_resolved() && self.workspace.configuration_sets.active().is_some() {
+            self.execution_bindings.insert(
+                instance_path.to_ascii_lowercase(),
+                ConfigurationExecutionBinding {
+                    instance_path: instance_path.to_owned(),
+                    resolved_reference: requested.clone(),
+                    resolved_view_type: ViewType::VerilogA,
+                    materialized_binding: Some(binding.clone()),
+                    model_section: None,
+                    stop_boundary: true,
+                    project_veriloga: None,
+                },
+            );
+        }
+        let mut row = self.binding_row(
+            requested,
+            Some(binding),
+            instance_path,
+            depth,
+            is_root,
+            (status, diagnostic),
+        );
+        row.purpose = "compiled generated Verilog-A model".to_owned();
+        row.view_search_order = vec!["veriloga-generated".to_owned()];
+        row.stop_view = Some("veriloga-generated".to_owned());
+        row.model_section.clear();
+        self.upsert(row);
+        if status.is_resolved() {
+            self.resolved_instances += 1;
+        }
     }
 
     fn binding_row(

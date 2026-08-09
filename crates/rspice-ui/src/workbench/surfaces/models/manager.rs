@@ -2723,7 +2723,9 @@ fn explicit_component_model(component: &Component) -> Option<String> {
         | ComponentType::CoupledTransmissionLine => parameter
             .or((!value.is_empty()).then_some(value))
             .map(str::to_owned),
-        ComponentType::SaturableInductor => parameter.map(str::to_owned),
+        ComponentType::SaturableInductor | ComponentType::GenericSwitch => {
+            parameter.map(str::to_owned)
+        }
         _ => None,
     }
 }

@@ -13,6 +13,87 @@ impl PropertyRegistry {
         self.register_behavioral_source();
         self.register_vswitch();
         self.register_iswitch();
+        self.register_generic_switch();
+    }
+
+    /// Register the two-terminal expression-controlled switch.
+    pub(in super::super) fn register_generic_switch(&mut self) {
+        let mut sheet = PropertySheet::new();
+        sheet.add(
+            PropertyDefinition::new("name")
+                .with_display_name("Instance Name")
+                .with_type(PropertyType::String)
+                .with_default(PropertyValue::string("S1"))
+                .with_order(0)
+                .with_category("Instance")
+                .required(),
+        );
+        sheet.add(
+            PropertyDefinition::new("control")
+                .with_display_name("Control Expression")
+                .with_description("Expression whose value selects the on/off state")
+                .with_type(PropertyType::String)
+                .with_default(PropertyValue::string("0"))
+                .with_order(10)
+                .with_category("Electrical")
+                .required(),
+        );
+        sheet.add(
+            PropertyDefinition::new("vt")
+                .with_display_name("Threshold")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(0.0))
+                .with_order(11)
+                .with_category("Electrical"),
+        );
+        sheet.add(
+            PropertyDefinition::new("vh")
+                .with_display_name("Hysteresis")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(0.0))
+                .with_order(12)
+                .with_category("Electrical"),
+        );
+        sheet.add(
+            PropertyDefinition::new("ron")
+                .with_display_name("On Resistance")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(1.0))
+                .with_unit("Ω")
+                .with_order(13)
+                .with_category("Electrical"),
+        );
+        sheet.add(
+            PropertyDefinition::new("roff")
+                .with_display_name("Off Resistance")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression("1e12"))
+                .with_unit("Ω")
+                .with_order(14)
+                .with_category("Electrical"),
+        );
+        sheet.add(
+            PropertyDefinition::new("state")
+                .with_display_name("Initial State")
+                .with_type(PropertyType::Enum)
+                .with_default(PropertyValue::enumeration(
+                    "auto",
+                    vec!["auto".to_owned(), "on".to_owned(), "off".to_owned()],
+                ))
+                .with_order(20)
+                .with_category("Initial Conditions"),
+        );
+        sheet.add(
+            PropertyDefinition::new("model")
+                .with_display_name("Model")
+                .with_description("Optional bound SW model; blank uses the generated parameters")
+                .with_type(PropertyType::String)
+                .with_default(PropertyValue::string(""))
+                .with_order(30)
+                .with_category("Model")
+                .advanced(),
+        );
+        self.sheets.insert(ComponentType::GenericSwitch, sheet);
     }
 
     /// Register the current-controlled switch (W element + CSW model card).

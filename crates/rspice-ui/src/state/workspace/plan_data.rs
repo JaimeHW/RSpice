@@ -111,6 +111,27 @@ impl ProjectWorkspace {
         Ok(())
     }
 
+    /// Add an imported set of design variables as one transaction.
+    ///
+    /// Per-variable field and case-insensitive name checks reuse the ordinary
+    /// add path. A complete configuration validation then catches stable-ID
+    /// collisions (including collisions with another plan) before assignment.
+    /// No prefix of the import is observable if any record is rejected.
+    pub fn add_design_variables(
+        &mut self,
+        plan_id: SimulationPlanId,
+        variables: Vec<DesignVariable>,
+    ) -> Result<(), SimulationConfigurationError> {
+        let mut candidate = self.clone();
+        for variable in variables {
+            candidate.add_design_variable(plan_id, variable)?;
+        }
+        candidate.validate_simulation_configuration()?;
+
+        *self = candidate;
+        Ok(())
+    }
+
     /// Replace the expression of one plan-owned design variable as a single
     /// validated workspace transaction.
     ///
@@ -184,6 +205,141 @@ impl ProjectWorkspace {
 
         *self = candidate;
         Ok(revisions)
+    }
+
+    /// Replace every user-editable field of one plan-owned design variable as
+    /// a single validated workspace transaction.
+    ///
+    /// The replacement's identity and revision are intentionally ignored:
+    /// persisted identity belongs to the existing record. A semantic no-op
+    /// returns the current revision without publishing a transaction; an
+    /// actual replacement advances exactly once. Validation runs against a cloned
+    /// workspace, so invalid fields, a name conflict, revision exhaustion, or
+    /// any project-level invariant failure leaves the source workspace intact.
+    pub fn replace_design_variable(
+        &mut self,
+        plan_id: SimulationPlanId,
+        variable_id: DesignVariableId,
+        mut replacement: DesignVariable,
+    ) -> Result<ObjectRevision, SimulationConfigurationError> {
+        let mut candidate = self.clone();
+        let payload = candidate
+            .active_plan_data_mut(plan_id)
+            .ok_or(SimulationConfigurationError::PlanPayloadMissing { plan_id })?;
+        let index = payload
+            .design_variables
+            .iter()
+            .position(|variable| variable.id == variable_id)
+            .ok_or(SimulationConfigurationError::DesignVariableNotFound {
+                plan_id,
+                variable_id,
+            })?;
+        if payload
+            .design_variables
+            .iter()
+            .enumerate()
+            .any(|(other_index, variable)| {
+                other_index != index && variable.name.eq_ignore_ascii_case(&replacement.name)
+            })
+        {
+            return Err(SimulationConfigurationError::DesignVariableNameConflict {
+                plan_id,
+                name: replacement.name,
+            });
+        }
+
+        let current_revision = payload.design_variables[index].revision;
+        replacement.id = variable_id;
+        replacement.revision = current_revision;
+        replacement.validate().map_err(|message| {
+            SimulationConfigurationError::InvalidDesignVariable {
+                plan_id,
+                index,
+                message,
+            }
+        })?;
+        if replacement == payload.design_variables[index] {
+            return Ok(current_revision);
+        }
+
+        let next_revision = current_revision.next().map_err(|source| {
+            SimulationConfigurationError::DesignVariableRevision {
+                plan_id,
+                variable_id,
+                source,
+            }
+        })?;
+        replacement.revision = next_revision;
+        payload.design_variables[index] = replacement;
+        candidate.validate_simulation_configuration()?;
+
+        *self = candidate;
+        Ok(next_revision)
+    }
+
+    /// Remove one plan-owned design variable atomically.
+    ///
+    /// The removed value is returned so command layers can build an exact undo
+    /// or recovery receipt without reconstructing engineering metadata.
+    pub fn remove_design_variable(
+        &mut self,
+        plan_id: SimulationPlanId,
+        variable_id: DesignVariableId,
+    ) -> Result<DesignVariable, SimulationConfigurationError> {
+        let mut candidate = self.clone();
+        let payload = candidate
+            .active_plan_data_mut(plan_id)
+            .ok_or(SimulationConfigurationError::PlanPayloadMissing { plan_id })?;
+        let index = payload
+            .design_variables
+            .iter()
+            .position(|variable| variable.id == variable_id)
+            .ok_or(SimulationConfigurationError::DesignVariableNotFound {
+                plan_id,
+                variable_id,
+            })?;
+        let removed = payload.design_variables.remove(index);
+        candidate.validate_simulation_configuration()?;
+
+        *self = candidate;
+        Ok(removed)
+    }
+
+    /// Duplicate one plan-owned variable under a caller-supplied unique name.
+    ///
+    /// The copy receives a fresh stable identity and starts at the initial
+    /// revision. All engineering metadata is retained and the existing add
+    /// path supplies field and case-insensitive name validation. The returned
+    /// identity allows callers to select the committed copy immediately.
+    pub fn duplicate_design_variable(
+        &mut self,
+        plan_id: SimulationPlanId,
+        variable_id: DesignVariableId,
+        name: impl Into<String>,
+    ) -> Result<DesignVariableId, SimulationConfigurationError> {
+        let source = self
+            .active_plan_data(plan_id)
+            .ok_or(SimulationConfigurationError::PlanPayloadMissing { plan_id })?
+            .design_variables
+            .iter()
+            .find(|variable| variable.id == variable_id)
+            .cloned()
+            .ok_or(SimulationConfigurationError::DesignVariableNotFound {
+                plan_id,
+                variable_id,
+            })?;
+        let mut duplicate = source;
+        duplicate.id = DesignVariableId::new();
+        duplicate.revision = ObjectRevision::INITIAL;
+        duplicate.name = name.into();
+        let duplicate_id = duplicate.id;
+
+        let mut candidate = self.clone();
+        candidate.add_design_variable(plan_id, duplicate)?;
+        candidate.validate_simulation_configuration()?;
+
+        *self = candidate;
+        Ok(duplicate_id)
     }
 
     pub fn add_saved_output(
