@@ -284,6 +284,30 @@ impl CircuitData {
         !self.generated_veriloga_devices.is_empty()
     }
 
+    /// Whether every Verilog-A instance can participate in Xyce OneStep's
+    /// order-two F/Q split without changing its model equations.
+    ///
+    /// Runtime-loaded models currently expose a combined transient stamp, so
+    /// they conservatively remain at order one. Generated models carry a
+    /// compiler-proven capability bit that excludes `idt`, nonlinear `ddt`,
+    /// and `ddt`-dependent control flow.
+    pub(crate) fn veriloga_one_step_dae_split_safe(&self) -> bool {
+        #[cfg(feature = "veriloga")]
+        if !self.veriloga_devices.is_empty() {
+            return false;
+        }
+
+        #[cfg(feature = "veriloga-builtins-base")]
+        if !self
+            .generated_veriloga_devices
+            .all_one_step_dae_split_safe()
+        {
+            return false;
+        }
+
+        true
+    }
+
     #[cfg(feature = "veriloga-builtins-base")]
     pub fn add_generated_veriloga_device(
         &mut self,
@@ -1777,6 +1801,7 @@ impl CircuitData {
         time: Value,
         dt: Value,
         coefficients: &crate::numerics::integration::CompanionCoefficients,
+        dynamic_residual_scale: Value,
         initial_step: bool,
         final_step: bool,
     ) {
@@ -1788,7 +1813,8 @@ impl CircuitData {
                 coefficients.needs_two_history,
                 coefficients.needs_current_history,
                 dt,
-            );
+            )
+            .scaled(dynamic_residual_scale);
         self.generated_veriloga_devices
             .set_timepoint(time, dt, ddt_coefficients);
         self.generated_veriloga_devices

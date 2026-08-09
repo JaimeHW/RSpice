@@ -1,8 +1,11 @@
 #![cfg(feature = "veriloga-builtins")]
 
+use rspice_core::SpiceDialect;
 use rspice_core::device::veriloga_builtins::builtins;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
+use rspice_core::numerics::integration::IntegrationMethod;
+use std::sync::Arc;
 
 fn transient_node_series<'a>(
     result: &'a rspice_core::engine::TransientResult,
@@ -82,6 +85,52 @@ Xc out 0 generated_cap c=1e-6
         (0.90..1.02).contains(&final_value),
         "generated capacitor RC output should charge near 1 V, got {final_value}"
     );
+}
+
+#[test]
+fn generated_capacitor_matches_native_one_step_on_a_nonuniform_grid() {
+    if !fixture_builtins_available() {
+        return;
+    }
+
+    let grid = Arc::new(vec![0.0, 100.0e-6, 250.0e-6, 550.0e-6, 1.0e-3]);
+    let run = |capacitor: &str| {
+        let deck = format!(
+            "v1 in 0 sin(0.5 0.4 100)\n\
+             r1 in out 1000\n\
+             {capacitor}\n\
+             .options timeint reltol=1 abstol=1 newlte=0\n\
+             .tran 1m 1m\n\
+             .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("nonuniform OneStep deck parses");
+        Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            integration_method: IntegrationMethod::Trapezoidal,
+            locked_time_grid: Some(Arc::clone(&grid)),
+            ..SimulationConfig::default()
+        })
+        .run_tran(&netlist, 1.0e-3, 1.0e-3)
+        .expect("nonuniform OneStep transient completes")
+    };
+
+    let native = run("c1 out 0 1u");
+    let generated = run("Xc out 0 generated_cap c=1e-6");
+    assert_eq!(native.time, generated.time);
+    assert_eq!(native.time, grid.as_ref().clone());
+
+    let native_out = transient_node_series(&native, "out");
+    let generated_out = transient_node_series(&generated, "out");
+    for (index, (&native_value, &generated_value)) in
+        native_out.iter().zip(generated_out).enumerate()
+    {
+        let error = (generated_value - native_value).abs();
+        assert!(
+            error <= 1.0e-12,
+            "point {index} at {} s differs: native={native_value:.17e}, generated={generated_value:.17e}, error={error:.3e}",
+            native.time[index]
+        );
+    }
 }
 
 #[test]

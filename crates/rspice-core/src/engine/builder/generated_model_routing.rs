@@ -1,6 +1,10 @@
+use super::version_metadata::parse_dotted_version_metadata;
 use super::*;
-use crate::device::veriloga_builtins::{builtins, instantiate_builtin};
+use crate::device::veriloga_builtins::{
+    BuiltinParameterAssignment, GeneratedTerminalCurrentAlias, builtins, instantiate_builtin_scoped,
+};
 use crate::netlist::{Element, ModelDef, ParametricValue};
+use rspice_veriloga_runtime::{GeneratedParameterOrigin, GeneratedVerilogAParameterScope};
 
 #[derive(Clone, Copy)]
 struct GeneratedTarget {
@@ -46,6 +50,7 @@ pub(super) fn try_route_generated_resistor_model(
     model_name: &str,
     instance_params: &[(String, f64)],
     deferred_params: &[(String, String)],
+    spice_dialect: crate::config::SpiceDialect,
     temperature: f64,
 ) -> Result<bool, SimulationError> {
     let model_def = find_model_def(netlist, model_name);
@@ -83,6 +88,7 @@ pub(super) fn try_route_generated_resistor_model(
         model_def,
         instance_params,
         deferred_params,
+        spice_dialect,
         temperature,
     )?;
     Ok(true)
@@ -95,6 +101,7 @@ pub(super) fn try_route_generated_diode_model(
     model_name: &str,
     instance_params: &[(String, f64)],
     deferred_params: &[(String, String)],
+    spice_dialect: crate::config::SpiceDialect,
     temperature: f64,
 ) -> Result<bool, SimulationError> {
     let model_def = find_model_def(netlist, model_name);
@@ -113,6 +120,7 @@ pub(super) fn try_route_generated_diode_model(
         model_def,
         instance_params,
         deferred_params,
+        spice_dialect,
         temperature,
     )?;
     Ok(true)
@@ -126,6 +134,7 @@ pub(super) fn try_route_generated_bjt_model(
     model_def: Option<&ModelDef>,
     instance_params: &[(String, f64)],
     deferred_params: &[(String, String)],
+    spice_dialect: crate::config::SpiceDialect,
     temperature: f64,
 ) -> Result<bool, SimulationError> {
     let target = generated_bjt_target(model_name, model_def, element.nodes.len())?;
@@ -145,6 +154,7 @@ pub(super) fn try_route_generated_bjt_model(
         model_def,
         instance_params,
         deferred_params,
+        spice_dialect,
         temperature,
     )?;
     Ok(true)
@@ -159,6 +169,7 @@ pub(super) fn try_route_generated_mos_model(
     compact_syntax: bool,
     instance_params: &[(String, f64)],
     deferred_params: &[(String, String)],
+    spice_dialect: crate::config::SpiceDialect,
     temperature: f64,
 ) -> Result<bool, SimulationError> {
     let target = generated_mos_target(model_name, model_def)?;
@@ -181,6 +192,7 @@ pub(super) fn try_route_generated_mos_model(
         model_def,
         instance_params,
         deferred_params,
+        spice_dialect,
         temperature,
     )?;
     Ok(true)
@@ -372,7 +384,12 @@ fn generated_mos_target(
     }
     Ok(match checked_model_level("MOSFET", model_name, model)? {
         Some(104) => Some(GeneratedTarget::with_level_parameter("PSP104VA")),
-        Some(10 | 55 | 56 | 57) => Some(GeneratedTarget::new("bsimsoi_va")),
+        // Xyce registers the canonical BSIM-SOI 4.6.1 ADMS device as MOS
+        // LEVEL=70. LEVEL=10/57 select Xyce's native BSIM3-SOI front, while
+        // 55/56/57 are RSpice's native per-family compatibility selectors;
+        // they must not be shadowed merely because this generated artifact is
+        // compiled into the same binary.
+        Some(70) => Some(GeneratedTarget::new("bsimsoi_va")),
         Some(107 | 108 | 110 | 111) => Some(GeneratedTarget::consuming_geometry_bin_metadata(
             "bsimcmg_va",
         )),
@@ -480,10 +497,17 @@ fn add_generated_instance(
     model_def: Option<&ModelDef>,
     instance_params: &[(String, f64)],
     deferred_params: &[(String, String)],
+    spice_dialect: crate::config::SpiceDialect,
     temperature: f64,
 ) -> Result<(), SimulationError> {
-    let params = generated_params(target, model_def, instance_params, deferred_params)?;
-    let Some(mut device) = instantiate_builtin(
+    let params = generated_params(
+        target,
+        model_def,
+        instance_params,
+        deferred_params,
+        spice_dialect,
+    )?;
+    let Some(mut device) = instantiate_builtin_scoped(
         target.model_name,
         &element.name,
         nodes,
@@ -494,9 +518,60 @@ fn add_generated_instance(
     else {
         return Ok(());
     };
+    device
+        .set_terminal_current_aliases(generated_card_current_aliases(target, element))
+        .map_err(SimulationError::Circuit)?;
     device.set_temperature(temperature);
     circuit.add_generated_veriloga_device(device);
     Ok(())
+}
+
+const DIODE_CURRENT_ALIASES: &[GeneratedTerminalCurrentAlias] = &[GeneratedTerminalCurrentAlias {
+    parameter: "id",
+    terminal: "a",
+}];
+const EXTERNAL_E_BULK_CURRENT_ALIASES: &[GeneratedTerminalCurrentAlias] =
+    &[GeneratedTerminalCurrentAlias {
+        parameter: "ib",
+        terminal: "e",
+    }];
+const BSIMIMG_CURRENT_ALIASES: &[GeneratedTerminalCurrentAlias] = &[
+    GeneratedTerminalCurrentAlias {
+        parameter: "ig",
+        terminal: "fg",
+    },
+    GeneratedTerminalCurrentAlias {
+        parameter: "ib",
+        terminal: "bg",
+    },
+];
+
+fn generated_card_current_aliases(
+    target: GeneratedTarget,
+    element: &Element,
+) -> &'static [GeneratedTerminalCurrentAlias] {
+    match element.kind {
+        ElementKind::Diode { .. } => DIODE_CURRENT_ALIASES,
+        ElementKind::Mosfet { .. } if match_normalized(target.model_name, &["BSIMIMG"]) => {
+            BSIMIMG_CURRENT_ALIASES
+        }
+        ElementKind::Mosfet { .. }
+            if match_normalized(
+                target.model_name,
+                &[
+                    "BSIMCMG_VA",
+                    "BSIMSOI_VA",
+                    "HISIMSOI_VA__5BE18005",
+                    "HISIMSOI_VA__242BC21D",
+                    "HISIMSOI_VA__38074D06",
+                    "HISIMSOTB_VA",
+                ],
+            ) =>
+        {
+            EXTERNAL_E_BULK_CURRENT_ALIASES
+        }
+        _ => &[],
+    }
 }
 
 fn generated_params(
@@ -504,7 +579,8 @@ fn generated_params(
     model_def: Option<&ModelDef>,
     instance_params: &[(String, f64)],
     deferred_params: &[(String, String)],
-) -> Result<Vec<(String, ParametricValue)>, SimulationError> {
+    spice_dialect: crate::config::SpiceDialect,
+) -> Result<Vec<BuiltinParameterAssignment>, SimulationError> {
     let model_count = model_def
         .map(|model| model.params.len() + model.expr_params.len() + model.string_params.len())
         .unwrap_or(0);
@@ -513,16 +589,41 @@ fn generated_params(
     if let Some(model) = model_def {
         for (name, value) in &model.params {
             if should_pass_model_param(target, name) {
-                params.push((name.clone(), ParametricValue::Resolved(*value)));
+                params.push(generated_model_card_assignment(
+                    target,
+                    name,
+                    ParametricValue::Resolved(*value),
+                    spice_dialect,
+                )?);
             }
         }
         for (name, expr) in &model.expr_params {
             if should_pass_model_param(target, name) {
-                params.push((name.clone(), ParametricValue::Expression(expr.clone())));
+                params.push(generated_model_card_assignment(
+                    target,
+                    name,
+                    ParametricValue::Expression(expr.clone()),
+                    spice_dialect,
+                )?);
             }
         }
         for (name, value) in &model.string_params {
             if should_pass_model_param(target, name) {
+                if name.eq_ignore_ascii_case("VERSION") {
+                    let version = parse_dotted_version_metadata(value).ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "Generated Verilog-A model '{}' cannot route invalid VERSION=\"{}\" from .model '{}'; VERSION metadata must be a finite dotted numeric version such as 4.6.1",
+                            target.model_name, value, model.name
+                        ))
+                    })?;
+                    params.push(generated_model_card_assignment(
+                        target,
+                        name,
+                        ParametricValue::Resolved(version),
+                        spice_dialect,
+                    )?);
+                    continue;
+                }
                 return Err(SimulationError::Circuit(format!(
                     "Generated Verilog-A model '{}' cannot route non-numeric model parameter {}=\"{}\" from .model '{}'",
                     target.model_name, name, value, model.name
@@ -534,6 +635,41 @@ fn generated_params(
     append_generated_bjt_polarity_param(target, model_def, &mut params);
     append_generated_instance_params(target, &mut params, instance_params, deferred_params)?;
     Ok(params)
+}
+
+fn generated_model_card_assignment(
+    target: GeneratedTarget,
+    name: &str,
+    value: ParametricValue,
+    spice_dialect: crate::config::SpiceDialect,
+) -> Result<BuiltinParameterAssignment, SimulationError> {
+    let scope = builtins::parameter_scope(target.model_name, name).ok_or_else(|| {
+        SimulationError::Circuit(format!(
+            "Generated Verilog-A model '{}' has no unambiguous declaration-scope metadata for model-card parameter '{}'",
+            target.model_name, name
+        ))
+    })?;
+    let origin = match scope {
+        GeneratedVerilogAParameterScope::Model | GeneratedVerilogAParameterScope::Dual => {
+            GeneratedParameterOrigin::ModelCard
+        }
+        GeneratedVerilogAParameterScope::Instance
+            if spice_dialect == crate::config::SpiceDialect::Xyce =>
+        {
+            // Xyce accepts canonical instance parameters on a .MODEL card as
+            // per-instance defaults. These assignments precede explicit
+            // instance-card assignments below, so the explicit value retains
+            // normal SPICE override precedence.
+            GeneratedParameterOrigin::Instance
+        }
+        GeneratedVerilogAParameterScope::Instance => {
+            return Err(SimulationError::Circuit(format!(
+                "Generated Verilog-A model '{}' parameter '{}' is declared instance-only; model-card defaults for instance parameters require the Xyce compatibility dialect",
+                target.model_name, name
+            )));
+        }
+    };
+    Ok(BuiltinParameterAssignment::new(name, value, origin))
 }
 
 fn should_pass_model_param(target: GeneratedTarget, name: &str) -> bool {
@@ -550,14 +686,14 @@ fn is_model_binning_metadata(name: &str) -> bool {
 fn append_generated_mos_polarity_param(
     target: GeneratedTarget,
     model_def: Option<&ModelDef>,
-    params: &mut Vec<(String, ParametricValue)>,
+    params: &mut Vec<BuiltinParameterAssignment>,
 ) {
     if !needs_inferred_generated_mos_type(target.model_name) {
         return;
     }
     if params
         .iter()
-        .any(|(name, _)| name.eq_ignore_ascii_case("TYPE"))
+        .any(|assignment| assignment.name.eq_ignore_ascii_case("TYPE"))
     {
         return;
     }
@@ -571,7 +707,10 @@ fn append_generated_mos_polarity_param(
         crate::netlist::MosType::Nmos => 1.0,
         crate::netlist::MosType::Pmos => -1.0,
     };
-    params.push(("TYPE".to_string(), ParametricValue::Resolved(type_value)));
+    params.push(BuiltinParameterAssignment::model_card(
+        "TYPE",
+        ParametricValue::Resolved(type_value),
+    ));
 }
 
 fn needs_inferred_generated_mos_type(model_name: &str) -> bool {
@@ -581,14 +720,14 @@ fn needs_inferred_generated_mos_type(model_name: &str) -> bool {
 fn append_generated_bjt_polarity_param(
     target: GeneratedTarget,
     model_def: Option<&ModelDef>,
-    params: &mut Vec<(String, ParametricValue)>,
+    params: &mut Vec<BuiltinParameterAssignment>,
 ) {
     if !needs_inferred_generated_bjt_type(target.model_name) {
         return;
     }
     if params
         .iter()
-        .any(|(name, _)| matches_model_type(name, &["TYPE", "NPN", "PNP"]))
+        .any(|assignment| matches_model_type(&assignment.name, &["TYPE", "NPN", "PNP"]))
     {
         return;
     }
@@ -602,7 +741,10 @@ fn append_generated_bjt_polarity_param(
         crate::netlist::BjtType::Npn => 1.0,
         crate::netlist::BjtType::Pnp => -1.0,
     };
-    params.push(("type".to_string(), ParametricValue::Resolved(type_value)));
+    params.push(BuiltinParameterAssignment::model_card(
+        "type",
+        ParametricValue::Resolved(type_value),
+    ));
 }
 
 fn needs_inferred_generated_bjt_type(model_name: &str) -> bool {
@@ -614,7 +756,7 @@ fn needs_inferred_generated_bjt_type(model_name: &str) -> bool {
 
 fn append_generated_instance_params(
     target: GeneratedTarget,
-    params: &mut Vec<(String, ParametricValue)>,
+    params: &mut Vec<BuiltinParameterAssignment>,
     instance_params: &[(String, f64)],
     deferred_params: &[(String, String)],
 ) -> Result<(), SimulationError> {
@@ -623,10 +765,16 @@ fn append_generated_instance_params(
             if is_internal_routing_param(name) {
                 continue;
             }
-            params.push((name.clone(), ParametricValue::Resolved(*value)));
+            params.push(BuiltinParameterAssignment::instance(
+                name,
+                ParametricValue::Resolved(*value),
+            ));
         }
         for (name, expr) in deferred_params {
-            params.push((name.clone(), ParametricValue::Expression(expr.clone())));
+            params.push(BuiltinParameterAssignment::instance(
+                name,
+                ParametricValue::Expression(expr.clone()),
+            ));
         }
         return Ok(());
     }
@@ -647,7 +795,10 @@ fn append_generated_instance_params(
             multiplier *= *value;
             multiplier_given = true;
         } else {
-            params.push((name.clone(), ParametricValue::Resolved(*value)));
+            params.push(BuiltinParameterAssignment::instance(
+                name,
+                ParametricValue::Resolved(*value),
+            ));
         }
     }
     for (name, expr) in deferred_params {
@@ -655,13 +806,19 @@ fn append_generated_instance_params(
             multiplier_exprs.push(expr.clone());
             multiplier_given = true;
         } else {
-            params.push((name.clone(), ParametricValue::Expression(expr.clone())));
+            params.push(BuiltinParameterAssignment::instance(
+                name,
+                ParametricValue::Expression(expr.clone()),
+            ));
         }
     }
 
     if multiplier_given {
         if multiplier_exprs.is_empty() {
-            params.push(("m".to_string(), ParametricValue::Resolved(multiplier)));
+            params.push(BuiltinParameterAssignment::instance(
+                "m",
+                ParametricValue::Resolved(multiplier),
+            ));
         } else {
             let expr = if multiplier == 1.0 {
                 multiplier_exprs
@@ -679,7 +836,10 @@ fn append_generated_instance_params(
                         .join("*")
                 )
             };
-            params.push(("m".to_string(), ParametricValue::Expression(expr)));
+            params.push(BuiltinParameterAssignment::instance(
+                "m",
+                ParametricValue::Expression(expr),
+            ));
         }
     }
     Ok(())
@@ -821,4 +981,86 @@ fn normalize_generated_key(value: &str) -> String {
         .filter(|ch| ch.is_ascii_alphanumeric())
         .flat_map(char::to_uppercase)
         .collect()
+}
+
+#[cfg(all(test, feature = "veriloga-model-vbic13"))]
+mod tests {
+    use super::*;
+
+    fn vbic_scope_fixture() -> (Netlist, Vec<(String, f64)>, Vec<(String, String)>) {
+        let netlist = Netlist::parse(
+            "generated VBIC parameter-scope lowering\n\
+             Q1 c b e model sw_noise=1\n\
+             .MODEL model NPN LEVEL=11 sw_noise=0\n\
+             .END\n",
+        )
+        .expect("VBIC scope fixture parses");
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("Q1"))
+            .expect("fixture contains Q1");
+        let ElementKind::Bjt {
+            instance_params,
+            deferred_params,
+            ..
+        } = &element.kind
+        else {
+            panic!("Q1 is a BJT");
+        };
+        (
+            netlist.clone(),
+            instance_params.clone(),
+            deferred_params.clone(),
+        )
+    }
+
+    #[test]
+    fn xyce_model_instance_defaults_keep_explicit_instance_precedence() {
+        let (netlist, instance_params, deferred_params) = vbic_scope_fixture();
+        let model = find_model_def(&netlist, "model").expect("fixture model exists");
+        let assignments = generated_params(
+            GeneratedTarget::new("VBIC13"),
+            Some(model),
+            &instance_params,
+            &deferred_params,
+            crate::config::SpiceDialect::Xyce,
+        )
+        .expect("Xyce lowers model-card instance defaults");
+        let sw_noise = assignments
+            .iter()
+            .filter(|assignment| assignment.name.eq_ignore_ascii_case("SW_NOISE"))
+            .collect::<Vec<_>>();
+        assert_eq!(sw_noise.len(), 2);
+        assert_eq!(sw_noise[0].origin, GeneratedParameterOrigin::Instance);
+        assert_eq!(sw_noise[1].origin, GeneratedParameterOrigin::Instance);
+        assert!(matches!(sw_noise[0].value, ParametricValue::Resolved(0.0)));
+        assert!(matches!(sw_noise[1].value, ParametricValue::Resolved(1.0)));
+    }
+
+    #[test]
+    fn non_xyce_model_instance_defaults_fail_closed() {
+        let (netlist, instance_params, deferred_params) = vbic_scope_fixture();
+        let model = find_model_def(&netlist, "model").expect("fixture model exists");
+        for dialect in [
+            crate::config::SpiceDialect::BestAvailable,
+            crate::config::SpiceDialect::Ngspice,
+        ] {
+            let error = generated_params(
+                GeneratedTarget::new("VBIC13"),
+                Some(model),
+                &instance_params,
+                &deferred_params,
+                dialect,
+            )
+            .expect_err("non-Xyce model-card instance defaults must fail closed");
+            let message = error.to_string();
+            assert!(
+                message.contains("SW_NOISE")
+                    && message.contains("instance-only")
+                    && message.contains("Xyce"),
+                "unexpected scope error: {message}"
+            );
+        }
+    }
 }

@@ -1458,6 +1458,26 @@ impl CircuitData {
         )
     }
 
+    /// Stamp the transient model's physical static DAE contribution while
+    /// suppressing generated dynamic operators and preserving their history.
+    pub(crate) fn stamp_behavioral_static_dae_probe(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+        time: Value,
+        analysis: crate::xspice::AnalysisType,
+    ) -> Result<(), String> {
+        self.stamp_behavioral_with_generated_mode(
+            matrix,
+            rhs,
+            solution,
+            time,
+            analysis,
+            crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticDaeProbe,
+        )
+    }
+
     pub(crate) fn stamp_behavioral_with_generated_mode(
         &mut self,
         matrix: &mut StaticMatrix,

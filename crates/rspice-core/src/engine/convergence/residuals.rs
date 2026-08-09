@@ -68,14 +68,7 @@ impl Engine {
         });
         circuit.restore_nonlinear_state(snapshot);
 
-        if accepted {
-            if let Some(ref polished) = polished_solution {
-                self.update_device_states_for_dc(circuit, polished);
-            }
-            polished_solution
-        } else {
-            None
-        }
+        if accepted { polished_solution } else { None }
     }
 
     pub(in crate::engine::convergence) fn residual_probe_fixed_point_converged(
@@ -477,5 +470,140 @@ impl Engine {
             Self::stamp_matrix_conditioning_diagonal(circuit, matrix, rhs.len(), gmin_floor);
             circuit.stamp_dc_direct(matrix, rhs);
         })
+    }
+}
+
+#[cfg(all(test, feature = "veriloga-model-diode-cmc"))]
+mod tests {
+    use super::*;
+    use crate::netlist::Netlist;
+
+    fn generated_diode_current(circuit: &CircuitData) -> Value {
+        circuit
+            .device_op_report()
+            .entries
+            .iter()
+            .find(|entry| entry.name.eq_ignore_ascii_case("d1"))
+            .and_then(|entry| {
+                entry
+                    .params
+                    .iter()
+                    .find_map(|(name, value)| (*name == "id").then_some(*value))
+            })
+            .expect("generated diode reports its anode current")
+    }
+
+    #[test]
+    fn accepted_dc_polish_refreshes_generated_terminal_current_at_returned_solution() {
+        let netlist = Netlist::parse(
+            r#"
+v1 a 0 dc 0.6
+d1 a 0 dcmc
+.model dcmc d level=2002
+.op
+.end
+"#,
+        )
+        .expect("generated nonlinear diode fixture parses");
+        let mut engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine
+            .build_circuit(&netlist)
+            .expect("generated nonlinear diode circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let solution = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("generated nonlinear diode operating point converges");
+
+        // Give the static proof a deliberately nearby candidate. The voltage
+        // source returns the node to its accepted value, while the nonlinear
+        // generated current differs at the candidate and polished points.
+        engine.config.convergence_config.voltage_abstol = 1.0e-5;
+        let anode = circuit
+            .node_names_sorted()
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("a"))
+            .expect("anode node exists");
+        let mut candidate = solution.clone();
+        candidate[anode] += 1.0e-7;
+        matrix.with_probe_values(|probe, rhs| {
+            engine
+                .try_stamp_static_probe_nonlinear_devices_for_dc(
+                    &mut circuit,
+                    probe,
+                    rhs,
+                    &candidate,
+                )
+                .expect("candidate observation succeeds");
+        });
+        let candidate_current = generated_diode_current(&circuit);
+
+        let polished = engine
+            .dc_static_probe_polished_solution(&mut circuit, &mut matrix, &candidate)
+            .expect("nearby nonlinear candidate is polished");
+        engine
+            .try_observe_dc_operating_point(&mut circuit, &mut matrix, &polished)
+            .expect("accepted polished point is observed");
+        let polished_current = generated_diode_current(&circuit);
+
+        assert!(
+            (polished[anode] - candidate[anode]).abs() > 0.0,
+            "polish must move the nonlinear candidate"
+        );
+        assert!(
+            (polished_current - candidate_current).abs() > f64::EPSILON,
+            "accepted OP current must be observed at the returned solution, not retained from the proof candidate"
+        );
+    }
+
+    #[test]
+    fn rejected_dc_polish_fallback_refreshes_generated_terminal_current() {
+        let netlist = Netlist::parse(
+            r#"
+v1 a 0 dc 0.6
+d1 a 0 dcmc
+.model dcmc d level=2002
+.op
+.end
+"#,
+        )
+        .expect("generated nonlinear diode fixture parses");
+        let mut engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine
+            .build_circuit(&netlist)
+            .expect("generated nonlinear diode circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let solution = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("generated nonlinear diode operating point converges");
+
+        let anode = circuit
+            .node_names_sorted()
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("a"))
+            .expect("anode node exists");
+        let current_at_solution = generated_diode_current(&circuit);
+        let mut fallback = solution;
+        fallback[anode] += 1.0e-7;
+
+        // An exact-zero polish tolerance rejects the nearby vector, so the
+        // caller will retain it as the fallback result.
+        engine.config.convergence_config.voltage_abstol = 1.0e-15;
+        assert!(
+            engine
+                .dc_static_probe_polished_solution(&mut circuit, &mut matrix, &fallback)
+                .is_none(),
+            "nearby fallback must be rejected by exact fixed-point polish"
+        );
+        engine
+            .try_observe_dc_operating_point(&mut circuit, &mut matrix, &fallback)
+            .expect("fallback point is observed");
+        let fallback_current = generated_diode_current(&circuit);
+
+        assert!(
+            (fallback_current - current_at_solution).abs() > f64::EPSILON,
+            "fallback OP current must be refreshed at the returned vector"
+        );
     }
 }

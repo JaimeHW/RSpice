@@ -488,6 +488,46 @@ impl CircuitData {
             });
         }
 
+        // Generated compact models expose every external lead current from
+        // the exact Verilog-A flow contributions captured during stamping.
+        // Canonical parameter names come from module-port metadata, never the
+        // instance designator or a presumed D/G/S/B position. A compatible
+        // SPICE card route may add a small set of explicit conventional
+        // aliases (for example diode ID -> current entering terminal `a`).
+        #[cfg(feature = "veriloga-builtins-base")]
+        for device in self.generated_veriloga_devices.iter() {
+            let currents = device.terminal_currents();
+            let terminals = device.external_terminals();
+            debug_assert_eq!(terminals.len(), currents.len());
+            let mut params = terminals
+                .iter()
+                .zip(currents.iter().copied())
+                .map(|(terminal, current)| (terminal.current_parameter, current))
+                .collect::<Vec<_>>();
+            for alias in device.terminal_current_aliases() {
+                if params
+                    .iter()
+                    .any(|(parameter, _)| parameter.eq_ignore_ascii_case(alias.parameter))
+                {
+                    continue;
+                }
+                if let Some((index, _)) = terminals
+                    .iter()
+                    .enumerate()
+                    .find(|(_, terminal)| terminal.name.eq_ignore_ascii_case(alias.terminal))
+                    && let Some(current) = currents.get(index).copied()
+                {
+                    params.push((alias.parameter, current));
+                }
+            }
+            entries.push(DeviceOpEntry {
+                name: device.instance_name.clone(),
+                device_kind: device.model_name,
+                region: None,
+                params,
+            });
+        }
+
         DeviceOpReport { entries }
     }
 

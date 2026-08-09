@@ -259,6 +259,20 @@ impl Engine {
             }
         }
 
+        // Generated Verilog-A internal nodes are device-owned vectors in
+        // Xyce's `N(<instance>_<internal>)` namespace. Publish them as exact
+        // observables rather than node aliases: an authored node with the
+        // same spelling remains independently accessible through `V(...)`.
+        #[cfg(feature = "veriloga-builtins-base")]
+        for device in circuit.generated_veriloga_devices.iter() {
+            for (internal_name, node) in device.internal_nodes() {
+                result.push_dc_observable(
+                    format!("N({}_{internal_name})", device.instance_name),
+                    node_voltage(node),
+                );
+            }
+        }
+
         // A nodal resistor has no MNA branch unknown, so evaluate its lead
         // current directly from the converged terminal voltages and the
         // conductance actually installed in this circuit instance.
@@ -553,15 +567,18 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        let solution = if !force_initial_conditions
-            && (circuit.has_nonlinear_devices() || !circuit.generic_switches.is_empty())
-        {
+        let requires_nonlinear_observation =
+            circuit.has_nonlinear_devices() || !circuit.generic_switches.is_empty();
+        let solution = if !force_initial_conditions && requires_nonlinear_observation {
             engine
                 .dc_static_probe_polished_solution(&mut circuit, &mut matrix, &solution)
                 .unwrap_or(solution)
         } else {
             solution
         };
+        if requires_nonlinear_observation {
+            engine.try_observe_dc_operating_point(&mut circuit, &mut matrix, &solution)?;
+        }
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -1058,6 +1075,9 @@ impl Engine {
                     } else {
                         solution
                     };
+                if circuit.has_nonlinear_devices() || !circuit.generic_switches.is_empty() {
+                    engine.try_observe_dc_operating_point(&mut circuit, &mut matrix, &solution)?;
+                }
 
                 if let Some(message) = circuit.take_xspice_evaluation_error() {
                     return Err(SimulationError::Circuit(format!(

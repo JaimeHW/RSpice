@@ -1655,6 +1655,7 @@ impl Engine {
                     time,
                     dt,
                     &companion_coeff,
+                    if ctx.xyce_one_step_order2 { 2.0 } else { 1.0 },
                     ctx.analysis_initial_step,
                     ctx.analysis_final_step,
                 );
@@ -2308,7 +2309,7 @@ impl Engine {
                     .try_stamp_static_probe_nonlinear(probe, probe_rhs, solution)
                     .map_err(SimulationError::Circuit)?;
                 circuit
-                    .stamp_behavioral_static_probe(
+                    .stamp_behavioral_static_dae_probe(
                         probe,
                         probe_rhs,
                         solution,

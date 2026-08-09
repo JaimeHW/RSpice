@@ -71,6 +71,31 @@ impl Engine {
         )
     }
 
+    /// Refresh nonlinear operating-point state at the exact DC solution that
+    /// will be returned to the caller.
+    ///
+    /// Newton convergence and the optional fixed-point polish can accept
+    /// different vectors. Device reports must therefore be observed only
+    /// after the final vector has been selected. The observation is
+    /// transactional so a generated-model or behavioral evaluation failure
+    /// cannot leave a partially refreshed operating-point cache behind.
+    pub(in crate::engine) fn try_observe_dc_operating_point(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+    ) -> Result<(), SimulationError> {
+        let snapshot = circuit.nonlinear_state_snapshot();
+        let result = matrix.with_probe_values(|probe, rhs| {
+            self.try_stamp_static_probe_nonlinear_devices_for_dc(circuit, probe, rhs, solution)
+        });
+        if let Err(error) = result {
+            circuit.restore_nonlinear_state(snapshot);
+            return Err(error);
+        }
+        Ok(())
+    }
+
     #[inline]
     pub(in crate::engine::convergence) fn try_stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
         &self,

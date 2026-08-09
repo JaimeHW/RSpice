@@ -135,7 +135,7 @@ fn capture_direct_xyce_histories(
 enum TransientMeritRollback {
     ClassicMosOnly(Vec<crate::device::mosfet::MosfetNonlinearState>),
     Full {
-        state: crate::circuit::NonlinearDeviceStateSnapshot,
+        state: Box<crate::circuit::NonlinearDeviceStateSnapshot>,
         cached_vbic: Vec<Option<BjtChargeSnapshot>>,
     },
 }
@@ -158,9 +158,11 @@ fn restore_transient_merit_rollback(
                 // search backs up. Preserve that carry across RSpice's merit rollback
                 // as well, so the globalization path has the same device lifecycle as
                 // the canonical Xyce solve.
-                circuit.restore_nonlinear_state_preserving_xyce_core_level2_carry(state.clone());
+                circuit.restore_nonlinear_state_preserving_xyce_core_level2_carry(
+                    state.as_ref().clone(),
+                );
             } else {
-                circuit.restore_nonlinear_state(state.clone());
+                circuit.restore_nonlinear_state(state.as_ref().clone());
             }
             vbic_snapshot_cache.clone_from_slice(cached_vbic);
         }
@@ -189,7 +191,7 @@ fn capture_transient_merit_rollback(
         cached_vbic.extend_from_slice(vbic_snapshot_cache);
     } else {
         *rollback = Some(TransientMeritRollback::Full {
-            state: circuit.transient_trial_state_snapshot(),
+            state: Box::new(circuit.transient_trial_state_snapshot()),
             cached_vbic: vbic_snapshot_cache.to_vec(),
         });
     }
@@ -590,6 +592,7 @@ impl Engine {
             || !circuit.vswitches.is_empty()
             || !circuit.iswitches.is_empty()
             || !circuit.generic_switches.is_empty()
+            || !circuit.veriloga_one_step_dae_split_safe()
     }
 
     fn derived_transient_branch_currents(
@@ -7466,7 +7469,7 @@ mod tests {
         let mut charge_snapshot = BjtChargeSnapshot::default();
         charge_snapshot.branches[0].charge = 3.25;
         let rollback = TransientMeritRollback::Full {
-            state: circuit.nonlinear_state_snapshot(),
+            state: Box::new(circuit.nonlinear_state_snapshot()),
             cached_vbic: vec![Some(charge_snapshot)],
         };
 

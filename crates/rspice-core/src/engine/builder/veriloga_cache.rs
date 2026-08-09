@@ -2,8 +2,8 @@ use super::*;
 
 #[cfg(feature = "veriloga")]
 // Bump whenever a persisted runtime artifact or its integrity contract changes.
-// Version 15 removes the obsolete scalar value graph from runtime artifacts.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 15;
+// Version 16 adds model/instance/dual parameter-storage semantics to canonical IR.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 16;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -2143,6 +2143,38 @@ endmodule
         assert!(
             !cache_path.exists(),
             "stale cache record must be removed to prevent repeated failures"
+        );
+
+        std::fs::remove_dir_all(root).expect("remove temporary cache root");
+    }
+
+    #[test]
+    fn disk_cache_discards_pre_parameter_scope_records() {
+        let root = unique_test_root("stale-parameter-scope-version");
+        let source_path = root.join("model.va");
+        std::fs::create_dir_all(&root).expect("create temporary cache root");
+        let entry = compiled_entry(&source_path);
+        let cache_root = root.join("cache");
+        let cache_path = cache_record_path_with_root(&source_path, &cache_root);
+
+        persist_model_to_disk_locked(&source_path, &entry, &cache_root)
+            .expect("persist current cache record");
+        let file = std::fs::File::open(&cache_path).expect("open current cache record");
+        let mut record: serde_json::Value =
+            serde_json::from_reader(file).expect("decode current cache record");
+        record["version"] = serde_json::Value::from(15_u32);
+        let file = std::fs::File::create(&cache_path).expect("replace cache record version");
+        serde_json::to_writer(file, &record).expect("encode stale cache record");
+
+        assert!(
+            load_model_from_disk_locked(&source_path, &cache_root)
+                .expect("stale-version cache load is recoverable")
+                .is_none(),
+            "pre-parameter-scope cache records must force a miss"
+        );
+        assert!(
+            !cache_path.exists(),
+            "stale-version cache record must be removed"
         );
 
         std::fs::remove_dir_all(root).expect("remove temporary cache root");

@@ -67,6 +67,7 @@ use veriloga_cache::{
 mod model_policy;
 use model_policy::*;
 mod advanced_mos;
+mod version_metadata;
 use advanced_mos::{Bsim3v3SharedModel, Bsim3v3SharedModelKey, Bsim4v8SharedModel};
 #[cfg(feature = "veriloga-builtins-base")]
 mod generated_model_routing;
@@ -4905,6 +4906,7 @@ impl Engine {
                             model_name,
                             instance_params,
                             deferred_params,
+                            self.config.spice_dialect,
                             self.config.temperature,
                         )?
                     {
@@ -5340,6 +5342,7 @@ impl Engine {
                         model,
                         instance_params,
                         deferred_params,
+                        self.config.spice_dialect,
                         self.config.temperature,
                     )? {
                         continue;
@@ -5611,6 +5614,7 @@ impl Engine {
                         model_def,
                         instance_params,
                         deferred_params,
+                        self.config.spice_dialect,
                         self.config.temperature,
                     )? {
                         continue;
@@ -5823,6 +5827,7 @@ impl Engine {
                         *compact_syntax,
                         instance_params,
                         deferred_params,
+                        self.config.spice_dialect,
                         self.config.temperature,
                     )? {
                         continue;

@@ -47,6 +47,57 @@ d1 a 0 dcmc area=2
 }
 
 #[test]
+fn generated_non_dgsb_ports_keep_canonical_current_names_without_truncation() {
+    if !has_builtin("bsimsoi__18c250bc") || !has_builtin("mosvar") {
+        eprintln!("BSIM-SOI/MOSVAR builtins not present; skipping terminal metadata test");
+        return;
+    }
+
+    let bsimsoi = build(
+        r#"
+m1 d g s e p b t nsoi
+.model nsoi bsimsoi
+.op
+.end
+"#,
+    );
+    let m1 = bsimsoi
+        .device_op_report()
+        .entries
+        .into_iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case("m1"))
+        .expect("generated seven-terminal BSIM-SOI report exists");
+    assert_eq!(
+        m1.params.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
+        ["id", "ig", "is", "ie", "ip", "ib", "it"],
+        "all canonical d/g/s/e/p/b/t terminal currents must be retained"
+    );
+
+    let mosvar = build(
+        r#"
+mvar g bi b vm
+.model vm nmos level=1000
+.op
+.end
+"#,
+    );
+    let mvar = mosvar
+        .device_op_report()
+        .entries
+        .into_iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case("mvar"))
+        .expect("generated MOSVAR report exists");
+    assert_eq!(
+        mvar.params
+            .iter()
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>(),
+        ["ig", "ibi", "ib"],
+        "MOSVAR g/bi/b ports must not be relabeled as positional d/g/s"
+    );
+}
+
+#[test]
 fn bjt_hicum_level_230_routes_to_generated_hicum_l0() {
     if !has_builtin("hicumL0va") {
         eprintln!("HICUM/L0 builtin not present; skipping generated model routing test");

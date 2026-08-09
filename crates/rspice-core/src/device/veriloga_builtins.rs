@@ -37,14 +37,64 @@ pub use rspice_veriloga_runtime::{
     GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation,
     GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseInjection,
     GeneratedNoiseKind, GeneratedNoiseTopologyError, GeneratedReactiveStamper,
-    GeneratedSimulationParameters, GeneratedStampLane, GeneratedStamper,
-    GeneratedStaticStampCache, GeneratedVerilogAEvaluationError,
-    GeneratedVerilogAInstanceCheckpoint, GeneratedVerilogAModelDescriptor,
-    GeneratedVerilogAParameterBound, GeneratedVerilogAParameterDescriptor,
-    GeneratedVerilogAParameterScope, GeneratedVerilogAPersistentState,
-    GeneratedVerilogARollbackState, GeneratedVerilogATerminalDescriptor,
-    GeneratedVerilogATerminalDirection, Value,
+    GeneratedSimulationParameters, GeneratedStampLane, GeneratedStamper, GeneratedStaticStampCache,
+    GeneratedVerilogAEvaluationError, GeneratedVerilogAInstanceCheckpoint,
+    GeneratedVerilogAModelDescriptor, GeneratedVerilogAParameterBound,
+    GeneratedVerilogAParameterDescriptor, GeneratedVerilogAParameterScope,
+    GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState,
+    GeneratedVerilogATerminalDescriptor, GeneratedVerilogATerminalDirection, Value,
 };
+#[cfg(feature = "veriloga-builtins-base")]
+use rspice_veriloga_runtime::{GeneratedParameterAssignment, GeneratedParameterOrigin};
+
+#[cfg(feature = "veriloga-builtins-base")]
+#[derive(Debug, Clone)]
+pub(crate) struct BuiltinParameterAssignment {
+    pub(crate) name: String,
+    pub(crate) value: crate::netlist::ParametricValue,
+    pub(crate) origin: GeneratedParameterOrigin,
+}
+
+#[cfg(feature = "veriloga-builtins-base")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct GeneratedTerminalCurrentAlias {
+    /// Conventional SPICE lead-current parameter (for example `id`).
+    pub(crate) parameter: &'static str,
+    /// Canonical Verilog-A terminal that owns the aliased current.
+    pub(crate) terminal: &'static str,
+}
+
+#[cfg(feature = "veriloga-builtins-base")]
+impl BuiltinParameterAssignment {
+    #[inline]
+    pub(crate) fn new(
+        name: impl Into<String>,
+        value: crate::netlist::ParametricValue,
+        origin: GeneratedParameterOrigin,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            value,
+            origin,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn model_card(
+        name: impl Into<String>,
+        value: crate::netlist::ParametricValue,
+    ) -> Self {
+        Self::new(name, value, GeneratedParameterOrigin::ModelCard)
+    }
+
+    #[inline]
+    pub(crate) fn instance(
+        name: impl Into<String>,
+        value: crate::netlist::ParametricValue,
+    ) -> Self {
+        Self::new(name, value, GeneratedParameterOrigin::Instance)
+    }
+}
 
 /// Exact catalog contracts compiled into this build.
 ///
@@ -85,6 +135,13 @@ pub struct BuiltinVerilogAInstance {
     analysis_initial_step: bool,
     analysis_final_step: bool,
     static_stamp_cache: Arc<GeneratedStaticStampCache>,
+    /// Exact current entering each external terminal during the most recent
+    /// static evaluation, in canonical module-port order.
+    terminal_currents: Vec<Value>,
+    /// Canonical external terminal metadata, in the same module-port order.
+    external_terminals: &'static [GeneratedVerilogATerminalDescriptor],
+    /// Card-semantics aliases installed only by a compatible SPICE route.
+    terminal_current_aliases: &'static [GeneratedTerminalCurrentAlias],
     kind: builtins::GeneratedBuiltinKind,
 }
 
@@ -169,6 +226,7 @@ pub(crate) struct BuiltinVerilogADevices {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct BuiltinVerilogADevicesRollback {
     states: Vec<GeneratedVerilogARollbackState>,
+    terminal_currents: Vec<Value>,
 }
 
 #[cfg(feature = "veriloga-builtins-base")]
@@ -193,6 +251,15 @@ impl BuiltinVerilogADevices {
     #[inline]
     pub(crate) fn len(&self) -> usize {
         self.devices.len()
+    }
+
+    /// Whether every instantiated generated model admits Xyce OneStep's
+    /// order-two split between dynamic charge and static residual history.
+    #[inline]
+    pub(crate) fn all_one_step_dae_split_safe(&self) -> bool {
+        self.devices
+            .iter()
+            .all(|device| device.kind.one_step_dae_split_safe())
     }
 
     #[inline]
@@ -251,6 +318,11 @@ impl BuiltinVerilogADevices {
                 .iter()
                 .map(|device| device.kind.capture_rollback_state())
                 .collect(),
+            terminal_currents: self
+                .devices
+                .iter()
+                .flat_map(|device| device.terminal_currents.iter().copied())
+                .collect(),
         }
     }
 
@@ -265,20 +337,14 @@ impl BuiltinVerilogADevices {
         &self,
         rollback: &mut BuiltinVerilogADevicesRollback,
     ) {
-        rollback.states.clear();
-        rollback.states.extend(
-            self.devices
-                .iter()
-                .map(|device| device.kind.capture_rollback_state()),
-        );
-    }
-
-    #[inline]
-    pub(crate) fn capture_rollback_state_into(
-        &self,
-        rollback: &mut BuiltinVerilogADevicesRollback,
-    ) {
-        if rollback.states.len() != self.devices.len() {
+        let expected_terminal_currents = self
+            .devices
+            .iter()
+            .map(|device| device.terminal_currents.len())
+            .sum::<usize>();
+        if rollback.states.len() != self.devices.len()
+            || rollback.terminal_currents.len() != expected_terminal_currents
+        {
             *rollback = self.capture_rollback_state();
             return;
         }
@@ -288,40 +354,38 @@ impl BuiltinVerilogADevices {
             state.values.clone_from(&captured.values);
             state.flags.clone_from(&captured.flags);
         }
+        let mut offset = 0;
+        for device in &self.devices {
+            let end = offset + device.terminal_currents.len();
+            rollback.terminal_currents[offset..end].copy_from_slice(&device.terminal_currents);
+            offset = end;
+        }
+        debug_assert_eq!(offset, rollback.terminal_currents.len());
     }
 
     #[inline]
     pub(crate) fn restore_rollback_state(&mut self, rollback: BuiltinVerilogADevicesRollback) {
         debug_assert_eq!(self.devices.len(), rollback.states.len());
+        let expected_terminal_currents: usize = self
+            .devices
+            .iter()
+            .map(|device| device.terminal_currents.len())
+            .sum();
+        debug_assert_eq!(expected_terminal_currents, rollback.terminal_currents.len());
+        let mut terminal_currents = rollback.terminal_currents.as_slice();
         for (device, state) in self.devices.iter_mut().zip(&rollback.states) {
             device.kind.restore_rollback_state(state);
+            let (restored, remaining) = terminal_currents.split_at(device.terminal_currents.len());
+            device.terminal_currents.copy_from_slice(restored);
+            terminal_currents = remaining;
         }
+        debug_assert!(terminal_currents.is_empty());
     }
 
     pub(crate) fn link_static_stamps(&mut self, matrix: &StaticMatrix, num_nodes: usize) {
         for device in &mut self.devices {
             device.link_static_stamps(matrix, num_nodes);
         }
-    }
-
-    pub(crate) fn stamp_all(
-        &mut self,
-        matrix: &mut StaticMatrix,
-        rhs: &mut [Value],
-        voltages: &[Value],
-        num_nodes: usize,
-        analysis: GeneratedAnalysisKind,
-        simparams: GeneratedSimulationParameters,
-    ) -> Result<(), GeneratedVerilogAEvaluationError> {
-        self.stamp_all_with_mode(
-            matrix,
-            rhs,
-            voltages,
-            num_nodes,
-            analysis,
-            simparams,
-            GeneratedEvaluationMode::default_for_analysis(analysis),
-        )
     }
 
     pub(crate) fn stamp_all_with_mode(
@@ -359,13 +423,6 @@ impl BuiltinVerilogADevices {
         self.devices
             .iter()
             .all(BuiltinVerilogAInstance::is_converged)
-    }
-
-    #[inline]
-    pub(crate) fn set_temperature(&mut self, temperature: Value) {
-        for device in &mut self.devices {
-            device.set_temperature(temperature);
-        }
     }
 
     #[inline]
@@ -512,6 +569,16 @@ impl BuiltinVerilogAInstance {
             .ok_or_else(|| format!("'{model_name}' is not a compiled-in generated built-in"))?;
         let kind = builtins::instantiate(model_name, &nodes, &branches, overrides)?
             .ok_or_else(|| format!("'{model_name}' is not compiled into this binary"))?;
+        let descriptor = builtins::descriptor(model_name)
+            .ok_or_else(|| format!("'{model_name}' has no canonical model descriptor"))?;
+        let external_terminals = descriptor.terminals;
+        if external_terminals.len() != nodes.len() {
+            return Err(format!(
+                "'{model_name}' canonical terminal metadata has {} ports, instance has {}",
+                external_terminals.len(),
+                nodes.len()
+            ));
+        }
         Ok(Self {
             model_name,
             instance_name: instance_name.into(),
@@ -521,6 +588,9 @@ impl BuiltinVerilogAInstance {
             analysis_initial_step: false,
             analysis_final_step: false,
             static_stamp_cache: Arc::new(GeneratedStaticStampCache::default()),
+            terminal_currents: vec![0.0; external_terminals.len()],
+            external_terminals,
+            terminal_current_aliases: &[],
             kind,
         })
     }
@@ -535,6 +605,58 @@ impl BuiltinVerilogAInstance {
     #[inline]
     pub fn linked_slot_count(&self) -> usize {
         self.static_stamp_cache.linked_slot_count()
+    }
+
+    /// Exact currents entering the external terminals, in canonical module
+    /// port order, from the most recent static device evaluation.
+    #[inline]
+    pub(crate) fn terminal_currents(&self) -> &[Value] {
+        &self.terminal_currents
+    }
+
+    /// Canonical external terminals in Verilog-A module declaration order.
+    #[inline]
+    pub(crate) fn external_terminals(&self) -> &'static [GeneratedVerilogATerminalDescriptor] {
+        self.external_terminals
+    }
+
+    /// Conventional SPICE lead aliases admitted by the card route that
+    /// created this instance. Direct X-device instantiation has no aliases.
+    #[inline]
+    pub(crate) fn terminal_current_aliases(&self) -> &'static [GeneratedTerminalCurrentAlias] {
+        self.terminal_current_aliases
+    }
+
+    pub(crate) fn set_terminal_current_aliases(
+        &mut self,
+        aliases: &'static [GeneratedTerminalCurrentAlias],
+    ) -> Result<(), String> {
+        for alias in aliases {
+            if !self
+                .external_terminals
+                .iter()
+                .any(|terminal| terminal.name.eq_ignore_ascii_case(alias.terminal))
+            {
+                return Err(format!(
+                    "generated Verilog-A model '{}' cannot map conventional current '{}' to absent terminal '{}'",
+                    self.model_name, alias.parameter, alias.terminal
+                ));
+            }
+        }
+        self.terminal_current_aliases = aliases;
+        Ok(())
+    }
+
+    /// Canonical generated internal-node names paired with their circuit node
+    /// IDs. External terminals occupy the prefix of `nodes`; the registry's
+    /// internal names describe the remaining entries in the same order.
+    pub(crate) fn internal_nodes(&self) -> impl Iterator<Item = (&'static str, usize)> + '_ {
+        let external_count = self.terminal_currents.len();
+        builtins::descriptor(self.model_name)
+            .map_or(&[][..], |descriptor| descriptor.internal_node_names)
+            .iter()
+            .copied()
+            .zip(self.nodes.iter().copied().skip(external_count))
     }
 
     #[inline]
@@ -735,14 +857,31 @@ impl BuiltinVerilogAInstance {
             simparams,
             evaluation_mode,
         );
-        let mut stamper = GeneratedStamper::new_with_static_cache(
-            matrix,
-            rhs,
-            voltages,
-            num_nodes,
-            self.static_stamp_cache.as_ref(),
-        );
-        self.kind.stamp(&ctx, &mut stamper);
+        if evaluation_mode == GeneratedEvaluationMode::StaticDaeProbe {
+            // OneStep history capture evaluates only F(x)-B(t), with dynamic
+            // operators intentionally suppressed. It is not a physical
+            // device operating point and must not replace the complete lead
+            // currents retained by the preceding accepted transient stamp.
+            let mut stamper = GeneratedStamper::new_with_static_cache(
+                matrix,
+                rhs,
+                voltages,
+                num_nodes,
+                self.static_stamp_cache.as_ref(),
+            );
+            self.kind.stamp(&ctx, &mut stamper);
+        } else {
+            self.terminal_currents.fill(0.0);
+            let mut stamper = GeneratedStamper::new_with_static_cache_and_terminal_currents(
+                matrix,
+                rhs,
+                voltages,
+                num_nodes,
+                self.static_stamp_cache.as_ref(),
+                &mut self.terminal_currents,
+            );
+            self.kind.stamp(&ctx, &mut stamper);
+        }
         match ctx.take_evaluation_error() {
             Some(error) => Err(error),
             None => Ok(()),
@@ -892,6 +1031,29 @@ pub fn instantiate_builtin(
     param_ctx: &crate::netlist::ParamContext,
     circuit: &mut crate::CircuitData,
 ) -> Result<Option<BuiltinVerilogAInstance>, BuiltinInstantiationError> {
+    let scoped = params
+        .iter()
+        .map(|(name, value)| BuiltinParameterAssignment::instance(name, value.clone()))
+        .collect::<Vec<_>>();
+    instantiate_builtin_scoped(
+        model_name,
+        instance_name,
+        node_names,
+        &scoped,
+        param_ctx,
+        circuit,
+    )
+}
+
+#[cfg(feature = "veriloga-builtins-base")]
+pub(crate) fn instantiate_builtin_scoped(
+    model_name: &str,
+    instance_name: &str,
+    node_names: &[String],
+    params: &[BuiltinParameterAssignment],
+    param_ctx: &crate::netlist::ParamContext,
+    circuit: &mut crate::CircuitData,
+) -> Result<Option<BuiltinVerilogAInstance>, BuiltinInstantiationError> {
     let Some(descriptor_name) = builtins::builtin_names()
         .iter()
         .find(|name| name.eq_ignore_ascii_case(model_name))
@@ -900,7 +1062,14 @@ pub fn instantiate_builtin(
         return Ok(None);
     };
 
-    let expected_nodes = builtins::node_count(descriptor_name).unwrap_or(0);
+    let descriptor = builtins::descriptor(descriptor_name).ok_or_else(|| {
+        BuiltinInstantiationError(format!(
+            "Generated Verilog-A model '{}' has no canonical model descriptor",
+            descriptor_name
+        ))
+    })?;
+    let external_terminals = descriptor.terminals;
+    let expected_nodes = external_terminals.len();
     if node_names.len() != expected_nodes {
         return Err(BuiltinInstantiationError(format!(
             "Generated Verilog-A instance '{}' expects {} terminals for model '{}', found {}",
@@ -910,10 +1079,17 @@ pub fn instantiate_builtin(
             node_names.len()
         )));
     }
-
-    let internal_node_names = builtins::internal_node_names(descriptor_name).unwrap_or(&[]);
-    let total_nodes = builtins::total_node_count(descriptor_name)
-        .unwrap_or(expected_nodes + internal_node_names.len());
+    let internal_node_names = descriptor.internal_node_names;
+    let total_nodes = descriptor.total_node_count;
+    if total_nodes != expected_nodes + internal_node_names.len() {
+        return Err(BuiltinInstantiationError(format!(
+            "Generated Verilog-A model '{}' descriptor has {} total nodes but declares {} external and {} internal nodes",
+            descriptor_name,
+            total_nodes,
+            expected_nodes,
+            internal_node_names.len()
+        )));
+    }
 
     let mut nodes = Vec::with_capacity(total_nodes);
     for node_name in node_names {
@@ -934,35 +1110,40 @@ pub fn instantiate_builtin(
     );
 
     let mut resolved = Vec::with_capacity(params.len());
-    for (name, value) in params {
-        let value = match value {
+    for assignment in params {
+        let value = match &assignment.value {
             crate::netlist::ParametricValue::Resolved(value) => *value,
             crate::netlist::ParametricValue::Expression(expr) => {
                 crate::netlist::expr::eval_expression(expr, param_ctx).map_err(|error| {
                     BuiltinInstantiationError(format!(
                         "Failed to resolve generated Verilog-A parameter '{}': {}",
-                        name, error
+                        assignment.name, error
                     ))
                 })?
             }
             crate::netlist::ParametricValue::String(_)
             | crate::netlist::ParametricValue::StringExpression(_) => {
                 return Err(BuiltinInstantiationError(format!(
-                    "Generated Verilog-A parameter '{name}' requires a numeric value"
+                    "Generated Verilog-A parameter '{}' requires a numeric value",
+                    assignment.name
                 )));
             }
         };
-        resolved.push((name.clone(), value));
+        resolved.push(GeneratedParameterAssignment::new(
+            assignment.name.as_str(),
+            value,
+            assignment.origin,
+        ));
     }
 
-    let branch_count = builtins::branch_count(descriptor_name).unwrap_or(0);
+    let branch_count = descriptor.branch_count;
     let mut branches = Vec::with_capacity(branch_count);
     for _ in 0..branch_count {
         branches.push(circuit.allocate_branch());
     }
 
-    let Some(kind) =
-        builtins::instantiate(descriptor_name, &nodes, &branches, &resolved).map_err(|error| {
+    let Some(kind) = builtins::instantiate_scoped(descriptor_name, &nodes, &branches, &resolved)
+        .map_err(|error| {
             BuiltinInstantiationError(format!(
                 "Failed to instantiate generated Verilog-A instance '{}': {}",
                 instance_name, error
@@ -981,6 +1162,9 @@ pub fn instantiate_builtin(
         analysis_initial_step: false,
         analysis_final_step: false,
         static_stamp_cache: Arc::new(GeneratedStaticStampCache::default()),
+        terminal_currents: vec![0.0; expected_nodes],
+        external_terminals,
+        terminal_current_aliases: &[],
         kind,
     }))
 }
@@ -996,6 +1180,31 @@ mod tests {
 
     #[cfg(feature = "veriloga-builtins-base")]
     use super::{BuiltinVerilogADevices, instantiate_builtin};
+
+    #[cfg(feature = "veriloga-builtins-base")]
+    #[test]
+    fn generated_catalog_has_complete_canonical_external_terminal_metadata() {
+        for model_name in super::builtins::builtin_names() {
+            let descriptor = super::builtins::descriptor(model_name)
+                .unwrap_or_else(|| panic!("{model_name} has a canonical model descriptor"));
+            let terminals = descriptor.terminals;
+            assert_eq!(
+                terminals.len(),
+                super::builtins::node_count(model_name).expect("catalog node count"),
+                "{model_name} terminal metadata must match the compiled module"
+            );
+            assert_eq!(
+                descriptor.total_node_count,
+                terminals.len() + descriptor.internal_node_names.len(),
+                "{model_name} descriptor node partition must be complete"
+            );
+            let mut current_names = std::collections::HashSet::new();
+            for terminal in terminals {
+                assert!(!terminal.name.is_empty());
+                assert!(current_names.insert(terminal.current_parameter));
+            }
+        }
+    }
 
     #[cfg(feature = "veriloga-builtins-base")]
     fn checkpoint_test_devices() -> BuiltinVerilogADevices {
@@ -1179,17 +1388,39 @@ mod tests {
     #[cfg(feature = "veriloga-builtins-base")]
     #[test]
     fn generated_rollback_refresh_reuses_the_instance_vector() {
-        let devices = checkpoint_test_devices();
+        let mut devices = checkpoint_test_devices();
+        devices.devices[0]
+            .terminal_currents
+            .copy_from_slice(&[1.25, -1.25]);
+        devices.devices[1]
+            .terminal_currents
+            .copy_from_slice(&[-0.5, 0.5]);
         let expected = devices.capture_rollback_state();
         let mut reusable = expected.clone();
         let original_capacity = reusable.states.capacity();
         let original_storage = reusable.states.as_ptr();
+        let original_current_capacity = reusable.terminal_currents.capacity();
+        let original_current_storage = reusable.terminal_currents.as_ptr();
 
         devices.capture_rollback_state_into(&mut reusable);
 
         assert_eq!(reusable, expected);
         assert_eq!(reusable.states.capacity(), original_capacity);
         assert_eq!(reusable.states.as_ptr(), original_storage);
+        assert_eq!(
+            reusable.terminal_currents.capacity(),
+            original_current_capacity
+        );
+        assert_eq!(
+            reusable.terminal_currents.as_ptr(),
+            original_current_storage
+        );
+
+        devices.devices[0].terminal_currents.fill(0.0);
+        devices.devices[1].terminal_currents.fill(0.0);
+        devices.restore_rollback_state(expected);
+        assert_eq!(devices.devices[0].terminal_currents, [1.25, -1.25]);
+        assert_eq!(devices.devices[1].terminal_currents, [-0.5, 0.5]);
     }
 
     fn noise_descriptor(

@@ -1,5 +1,6 @@
 //! Model-policy and native-device selection helpers for circuit construction.
 
+use super::version_metadata::parse_dotted_version_metadata;
 use super::*;
 
 /// Construct a Jiles-Atherton (magnetic-core) inductor instance and add it,
@@ -1098,14 +1099,14 @@ pub(super) fn checked_integer_model_level(
     for (name, expr) in expr_params {
         if name.eq_ignore_ascii_case("LEVEL") {
             return Err(SimulationError::Circuit(format!(
-                "{device_kind} '{element_name}': model '{model}' has unresolved LEVEL={expr}; LEVEL selectors must be finite integers"
+                "{device_kind} '{element_name}': model '{model}' has unresolved LEVEL={expr}; LEVEL selectors must be finite numeric literals representing finite integers"
             )));
         }
     }
     for (name, value) in string_params {
         if name.eq_ignore_ascii_case("LEVEL") {
             return Err(SimulationError::Circuit(format!(
-                "{device_kind} '{element_name}': model '{model}' has non-numeric LEVEL=\"{value}\"; LEVEL selectors must be finite integers"
+                "{device_kind} '{element_name}': model '{model}' has non-numeric LEVEL=\"{value}\"; LEVEL selectors must be finite numeric literals representing finite integers"
             )));
         }
     }
@@ -1117,7 +1118,7 @@ pub(super) fn checked_integer_model_level(
     let rounded = level.round();
     if !level.is_finite() || (level - rounded).abs() > 1e-9 {
         return Err(SimulationError::Circuit(format!(
-            "{device_kind} '{element_name}': model '{model}' has invalid LEVEL={level}; LEVEL selectors must be finite integers"
+            "{device_kind} '{element_name}': model '{model}' has invalid LEVEL={level}; LEVEL selectors must be finite numeric literals representing finite integers"
         )));
     }
 
@@ -1255,39 +1256,6 @@ pub(super) fn native_bsim4_model_params_upper_map(
     }
 
     Ok(resolved)
-}
-
-fn parse_dotted_version_metadata(value: &str) -> Option<f64> {
-    let normalized = value.trim().trim_matches('"').trim_matches('\'').trim();
-    if normalized.is_empty() {
-        return None;
-    }
-    if let Ok(version) = normalized.parse::<f64>() {
-        return version.is_finite().then_some(version);
-    }
-
-    let mut parts = normalized.split('.');
-    let major = parts.next()?;
-    let minor = parts.next()?;
-    let patch_parts = parts.collect::<Vec<_>>();
-    if patch_parts.is_empty()
-        || major.is_empty()
-        || minor.is_empty()
-        || patch_parts.iter().any(|part| part.is_empty())
-        || !major.chars().all(|ch| ch.is_ascii_digit())
-        || !minor.chars().all(|ch| ch.is_ascii_digit())
-        || !patch_parts
-            .iter()
-            .all(|part| part.chars().all(|ch| ch.is_ascii_digit()))
-    {
-        return None;
-    }
-
-    let compact = format!("{major}.{minor}{}", patch_parts.join(""));
-    compact
-        .parse::<f64>()
-        .ok()
-        .filter(|version| version.is_finite())
 }
 
 /// Warn about nodes with no conductive path to ground: the unconditional
