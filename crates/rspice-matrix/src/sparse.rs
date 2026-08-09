@@ -2743,6 +2743,7 @@ struct ComplexLuWorkspace {
     rhs: Mat<Complex64>,
     scaled_values: Vec<Complex64>,
     scaled_rhs: Vec<Complex64>,
+    scaled_denominator_floor: Vec<Value>,
     row_scale: Vec<Value>,
     col_scale: Vec<Value>,
     residual: Vec<Complex64>,
@@ -2862,6 +2863,31 @@ fn scale_complex_rhs(
     Ok(())
 }
 
+fn scale_complex_denominator_floor(
+    floor: &[Value],
+    row_scale: &[Value],
+    scaled_floor: &mut Vec<Value>,
+) -> Result<(), SolverError> {
+    if floor.len() != row_scale.len() {
+        return Err(SolverError::InvalidCircuit(
+            "Complex denominator-floor scaling dimension mismatch".to_string(),
+        ));
+    }
+    scaled_floor.resize(floor.len(), 0.0);
+    for ((scaled, &value), &scale) in scaled_floor.iter_mut().zip(floor).zip(row_scale) {
+        if !value.is_finite() || value < 0.0 || !scale.is_finite() || scale <= 0.0 {
+            return Err(SolverError::InvalidCircuit(
+                "Complex solve denominator floors must be finite and non-negative".to_string(),
+            ));
+        }
+        *scaled = value * scale;
+        if !scaled.is_finite() {
+            return Err(SolverError::Overflow);
+        }
+    }
+    Ok(())
+}
+
 #[inline]
 fn dd_add(hi: &mut Value, lo: &mut Value, add_hi: Value, add_lo: Value) {
     let sum = *hi + add_hi;
@@ -2920,17 +2946,28 @@ fn complex_componentwise_backward_error(
     values: &[Complex64],
     solution: &[Complex64],
     rhs: &[Complex64],
+    denominator_floor: Option<&[Value]>,
     residual: &mut Vec<Complex64>,
     denominator: &mut Vec<Value>,
     compensation: &mut Vec<Complex64>,
     row_nnz: &mut Vec<usize>,
     operation: ComplexSolveOp,
 ) -> Result<BackwardError, SolverError> {
+    if let Some(floor) = denominator_floor
+        && (floor.len() != rhs.len()
+            || floor.iter().any(|value| !value.is_finite() || *value < 0.0))
+    {
+        return Err(SolverError::InvalidCircuit(
+            "Complex backward-error denominator floors must match the RHS and be finite and non-negative"
+                .to_string(),
+        ));
+    }
     let fast = fast_complex_componentwise_backward_error(
         csc,
         values,
         solution,
         rhs,
+        denominator_floor,
         residual,
         denominator,
         row_nnz,
@@ -2944,6 +2981,7 @@ fn complex_componentwise_backward_error(
         values,
         solution,
         rhs,
+        denominator_floor,
         residual,
         denominator,
         compensation,
@@ -2958,6 +2996,7 @@ fn fast_complex_componentwise_backward_error(
     values: &[Complex64],
     solution: &[Complex64],
     rhs: &[Complex64],
+    denominator_floor: Option<&[Value]>,
     residual: &mut Vec<Complex64>,
     denominator: &mut Vec<Value>,
     row_nnz: &mut Vec<usize>,
@@ -3011,7 +3050,7 @@ fn fast_complex_componentwise_backward_error(
     for row in 0..nrows {
         let safe1 = (row_nnz[row].saturating_add(1) as Value) * Value::MIN_POSITIVE;
         let residual_abs = complex_abs1(residual[row]);
-        let scale = denominator[row];
+        let scale = denominator[row].max(denominator_floor.map_or(0.0, |floor| floor[row]));
         if !residual_abs.is_finite() || !scale.is_finite() {
             return Err(SolverError::Overflow);
         }
@@ -3036,6 +3075,7 @@ fn compensated_complex_componentwise_backward_error(
     values: &[Complex64],
     solution: &[Complex64],
     rhs: &[Complex64],
+    denominator_floor: Option<&[Value]>,
     residual: &mut Vec<Complex64>,
     denominator: &mut Vec<Value>,
     compensation: &mut Vec<Complex64>,
@@ -3098,7 +3138,7 @@ fn compensated_complex_componentwise_backward_error(
         residual[row] += compensation[row];
         let safe1 = (row_nnz[row].saturating_add(1) as Value) * Value::MIN_POSITIVE;
         let residual_abs = complex_abs1(residual[row]);
-        let scale = denominator[row];
+        let scale = denominator[row].max(denominator_floor.map_or(0.0, |floor| floor[row]));
         if !residual_abs.is_finite() || !scale.is_finite() {
             return Err(SolverError::Overflow);
         }
@@ -3186,6 +3226,7 @@ impl ComplexMatrix {
             rhs: Mat::zeros(nrows, 1),
             scaled_values: Vec::new(),
             scaled_rhs: Vec::new(),
+            scaled_denominator_floor: Vec::new(),
             row_scale: Vec::new(),
             col_scale: Vec::new(),
             residual: Vec::new(),
@@ -3523,6 +3564,7 @@ impl ComplexMatrix {
             scaled_values,
             scaled_candidate,
             scaled_rhs,
+            None,
             residual,
             denominator,
             compensation,
@@ -3554,7 +3596,30 @@ impl ComplexMatrix {
         rhs: &[Complex64],
         solution: &mut Vec<Complex64>,
     ) -> Result<(), SolverError> {
-        self.solve_operation_into(rhs, solution, ComplexSolveOp::Normal)
+        self.solve_operation_into(rhs, solution, ComplexSolveOp::Normal, None)
+    }
+
+    /// Solve `A*x=b` while applying caller-supplied physical denominator
+    /// floors to selected rows of the backward-error check.
+    ///
+    /// A nonzero floor is appropriate only when the caller knows the physical
+    /// coordinate scale of a homogeneous equation. The floor is transformed
+    /// by the matrix row equilibration and affects solve acceptance only; it
+    /// does not modify the matrix, RHS, factorization, or returned solution.
+    /// [`Self::certify_solution`] intentionally remains strict and floor-free.
+    pub fn solve_with_row_denominator_floors(
+        &mut self,
+        rhs: &[Complex64],
+        denominator_floor: &[Value],
+    ) -> Result<Vec<Complex64>, SolverError> {
+        let mut solution = Vec::with_capacity(rhs.len());
+        self.solve_operation_into(
+            rhs,
+            &mut solution,
+            ComplexSolveOp::Normal,
+            Some(denominator_floor),
+        )?;
+        Ok(solution)
     }
 
     /// Solve multiple complex systems with one cached factorization and one
@@ -3732,6 +3797,7 @@ impl ComplexMatrix {
                     values,
                     &solution[rhs_index * n..(rhs_index + 1) * n],
                     &rhs[rhs_index * n..(rhs_index + 1) * n],
+                    None,
                     &mut ws.residual,
                     &mut ws.denominator,
                     &mut ws.compensation,
@@ -3756,6 +3822,7 @@ impl ComplexMatrix {
                 &rhs[rhs_index * n..(rhs_index + 1) * n],
                 &mut one,
                 operation,
+                None,
             )?;
             refined.extend_from_slice(&one);
         }
@@ -3769,7 +3836,7 @@ impl ComplexMatrix {
         rhs: &[Complex64],
         solution: &mut Vec<Complex64>,
     ) -> Result<(), SolverError> {
-        self.solve_operation_into(rhs, solution, ComplexSolveOp::Transpose)
+        self.solve_operation_into(rhs, solution, ComplexSolveOp::Transpose, None)
     }
 
     /// Solve `A^H x = b` without rebuilding or refactorizing the matrix.
@@ -3778,7 +3845,7 @@ impl ComplexMatrix {
         rhs: &[Complex64],
         solution: &mut Vec<Complex64>,
     ) -> Result<(), SolverError> {
-        self.solve_operation_into(rhs, solution, ComplexSolveOp::Adjoint)
+        self.solve_operation_into(rhs, solution, ComplexSolveOp::Adjoint, None)
     }
 
     fn solve_operation_into(
@@ -3786,6 +3853,7 @@ impl ComplexMatrix {
         rhs: &[Complex64],
         solution: &mut Vec<Complex64>,
         operation: ComplexSolveOp,
+        denominator_floor: Option<&[Value]>,
     ) -> Result<(), SolverError> {
         let n = self.nrows;
         self.check_stamping_error()?;
@@ -3797,6 +3865,11 @@ impl ComplexMatrix {
                 self.ncols,
                 rhs.len()
             )));
+        }
+        if denominator_floor.is_some() && operation != ComplexSolveOp::Normal {
+            return Err(SolverError::InvalidCircuit(
+                "Complex row denominator floors are supported only for A*x=b solves".to_string(),
+            ));
         }
 
         if self.lu.is_none() {
@@ -3845,6 +3918,15 @@ impl ComplexMatrix {
             ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => &ws.col_scale,
         };
         scale_complex_rhs(rhs, rhs_scale, &mut ws.scaled_rhs)?;
+        if let Some(floor) = denominator_floor {
+            scale_complex_denominator_floor(
+                floor,
+                &ws.row_scale,
+                &mut ws.scaled_denominator_floor,
+            )?;
+        }
+        let scaled_denominator_floor =
+            denominator_floor.map(|_| ws.scaled_denominator_floor.as_slice());
 
         // SAFETY: `ws.numeric` was produced by `ws.symbolic.factorize_numeric_lu`
         // on this matrix's pattern, and `factorization_valid` guarantees the
@@ -3888,6 +3970,7 @@ impl ComplexMatrix {
             &ws.scaled_values,
             solution,
             &ws.scaled_rhs,
+            scaled_denominator_floor,
             &mut ws.residual,
             &mut ws.denominator,
             &mut ws.compensation,
@@ -3945,6 +4028,7 @@ impl ComplexMatrix {
                 &ws.scaled_values,
                 solution,
                 &ws.scaled_rhs,
+                scaled_denominator_floor,
                 &mut ws.residual,
                 &mut ws.denominator,
                 &mut ws.compensation,
@@ -5403,6 +5487,108 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn complex_row_floors_rescue_only_physically_negligible_homogeneous_leakage() {
+        let real = StaticMatrix::from_triplets(2, 2, &[(0, 0, 0.0), (1, 1, 0.0)]).unwrap();
+        let mut matrix = ComplexMatrix::from_real_structure(&real);
+        matrix.add_real(0, 0, 1.0);
+        matrix.add_real(1, 1, 1.0);
+        let rhs = [Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)];
+        let mut residual = Vec::new();
+        let mut denominator = Vec::new();
+        let mut compensation = Vec::new();
+        let mut row_nnz = Vec::new();
+        let evaluate = |solution: &[Complex64],
+                        floor: Option<&[Value]>,
+                        residual: &mut Vec<Complex64>,
+                        denominator: &mut Vec<Value>,
+                        compensation: &mut Vec<Complex64>,
+                        row_nnz: &mut Vec<usize>| {
+            complex_componentwise_backward_error(
+                &matrix.csc,
+                &matrix.values,
+                solution,
+                &rhs,
+                floor,
+                residual,
+                denominator,
+                compensation,
+                row_nnz,
+                ComplexSolveOp::Normal,
+            )
+            .unwrap()
+        };
+
+        let negligible = [Complex64::new(1.0, 0.0), Complex64::new(1.0e-51, 0.0)];
+        let strict = evaluate(
+            &negligible,
+            None,
+            &mut residual,
+            &mut denominator,
+            &mut compensation,
+            &mut row_nnz,
+        );
+        assert_eq!(strict.componentwise, 1.0);
+        assert!(!strict.accepted());
+        let source_floor = [0.0, 1.0];
+        assert!(
+            evaluate(
+                &negligible,
+                Some(&source_floor),
+                &mut residual,
+                &mut denominator,
+                &mut compensation,
+                &mut row_nnz,
+            )
+            .accepted()
+        );
+
+        let material_source_error = [Complex64::new(1.0, 0.0), Complex64::new(1.0e-8, 0.0)];
+        assert!(
+            !evaluate(
+                &material_source_error,
+                Some(&source_floor),
+                &mut residual,
+                &mut denominator,
+                &mut compensation,
+                &mut row_nnz,
+            )
+            .accepted()
+        );
+        let material_non_source_error = [
+            Complex64::new(1.0 + 1.0e-8, 0.0),
+            Complex64::new(1.0e-51, 0.0),
+        ];
+        assert!(
+            !evaluate(
+                &material_non_source_error,
+                Some(&source_floor),
+                &mut residual,
+                &mut denominator,
+                &mut compensation,
+                &mut row_nnz,
+            )
+            .accepted()
+        );
+
+        matrix.solve(&rhs).expect("identity system factors");
+        assert!(matches!(
+            matrix.certify_solution(&negligible, &rhs),
+            Err(SolverError::InaccurateSolution(_))
+        ));
+    }
+
+    #[test]
+    fn complex_row_floors_follow_row_equilibration() {
+        let mut scaled = Vec::new();
+        scale_complex_denominator_floor(&[0.0, 1.0, 4.0], &[2.0, 0.25, 8.0], &mut scaled).unwrap();
+        assert_eq!(scaled, [0.0, 0.25, 32.0]);
+        assert!(matches!(
+            scale_complex_denominator_floor(&[1.0], &[1.0, 1.0], &mut scaled),
+            Err(SolverError::InvalidCircuit(_))
+        ));
     }
 
     #[test]

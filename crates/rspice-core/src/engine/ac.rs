@@ -2592,6 +2592,33 @@ impl Engine {
         engine.ensure_result_shape(frequencies.len(), size.saturating_mul(2).saturating_add(1))?;
         let node_names = circuit.node_names_sorted();
         let branch_names = circuit.branch_names_sorted();
+        let ac_solve_denominator_floor = if ac_voltage_projection.is_empty() {
+            None
+        } else {
+            let mut floors = vec![0.0; size];
+            for &branch_ordinal in &circuit.voltage_sources.branch_indices {
+                let branch = circuit.get_branch_matrix_index(branch_ordinal);
+                let row = branch.checked_sub(1).ok_or_else(|| {
+                    SolverError::InvalidCircuit(
+                        "independent voltage source has no AC equation row".to_string(),
+                    )
+                })?;
+                let Some(floor) = floors.get_mut(row) else {
+                    return Err(SolverError::InvalidCircuit(
+                        "independent voltage-source AC equation lies outside the solved system"
+                            .to_string(),
+                    )
+                    .into());
+                };
+                // Homogeneous ideal-source rows can carry only roundoff-scale
+                // leakage before their exact post-solve projection. Give
+                // those known voltage equations the same one-volt coordinate
+                // floor as the projection validator; every other MNA row
+                // remains under the strict componentwise solve certificate.
+                *floor = 1.0;
+            }
+            Some(floors)
+        };
 
         // Closure to solve at a single frequency. Takes the circuit as a
         // parameter so the parallel path below can hand each worker its own
@@ -2625,7 +2652,11 @@ impl Engine {
                 }
             }
             let rhs = Self::build_ac_excitation_rhs(circuit);
-            let mut solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+            let mut solution = match ac_solve_denominator_floor.as_deref() {
+                Some(floor) => ac_matrix.solve_with_row_denominator_floors(&rhs, floor),
+                None => ac_matrix.solve(&rhs),
+            }
+            .map_err(SimulationError::Solver)?;
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
